@@ -414,6 +414,19 @@ pub struct Conversation {
     /// too — the sandbox it is worked in, the prompt its sessions are given,
     /// and the summary of what it was set up with.
     pub companions: Vec<super::Companion>,
+
+    /// And the MCP servers its sessions are launched with, by the name the
+    /// settings declare one under — see [`super::mcp_servers`].
+    ///
+    /// Names and nothing else: what each refers to is read out of the settings
+    /// at the moment it is wanted, so a URL corrected there reaches the next
+    /// session and a name nothing declares any more is skipped. In the order
+    /// they were attached in, which is the order the chips are drawn in.
+    ///
+    /// Carried on the Conversation for the companions' reason: what acts on a
+    /// Conversation acts on these too — the root its sessions are given and the
+    /// prompt they are started on.
+    pub mcp_servers: Vec<String>,
 }
 
 /// Where a sidebar row's state word got to: the state it names, or the word
@@ -2135,6 +2148,7 @@ pub async fn load_conversation(pool: &SqlitePool, id: i64) -> Result<Option<Conv
         adopting: adopting(pool, id).await?,
         target: target(pool, id).await?,
         companions: super::companions(pool, id).await?,
+        mcp_servers: super::mcp_servers(pool, id).await?,
     }))
 }
 

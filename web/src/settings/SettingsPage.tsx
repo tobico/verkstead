@@ -10,10 +10,10 @@
 //! fresh install needs them: everything git is told first, because without the
 //! token and the author nothing a session does with a Repo can be pushed, then
 //! the languages a session gets build support for, then the one text every
-//! session is given, then what becomes of a Conversation once it is archived,
-//! then whether this machine can be reached from a phone, then the Agent
-//! Profiles and the Repos a Conversation is settled against, and last the extra
-//! directories a sandbox is given.
+//! session is given, then the MCP servers a Conversation may attach, then what
+//! becomes of a Conversation once it is archived, then whether this machine can
+//! be reached from a phone, then the Agent Profiles and the Repos a Conversation
+//! is settled against, and last the extra directories a sandbox is given.
 //!
 //! **And one section above all of those that is not the server's at all**: what
 //! the desktop app does about its own window, drawn only where the page is being
@@ -65,6 +65,7 @@ import { DesktopCard, DesktopPane } from "./Desktop";
 import { GitCard, GitPane } from "./Git";
 import { InstructionsCard, InstructionsPane } from "./Instructions";
 import { LanguagesCard, LanguagesPane } from "./Languages";
+import { McpServersCard, McpServersPane } from "./McpServers";
 import { RemoteCard, RemotePane } from "./Remote";
 import { SandboxBindsCard, SandboxBindsPane } from "./SandboxBinds";
 import { bridge } from "./bridge";
@@ -279,6 +280,16 @@ function Settings(props: {
           open={props.opening === "instructions"}
           press={() => props.select("instructions")}
         />
+        {/* And what a session is handed beyond that, where its Conversation
+            asked for it: the MCP servers declared for this installation. It
+            reads under the instructions because both are about what a session
+            starts with rather than about what a Conversation is settled
+            against — and because what is declared here is what the Attach
+            button on a Brief offers. */}
+        <McpServersCard
+          open={props.opening === "mcp-servers"}
+          press={() => props.select("mcp-servers")}
+        />
         {/* And what becomes of a Conversation once the human has archived it:
             the trim that takes its bulk, and the delete that takes the whole of
             it. Under the two above because it is the setting nobody has to read
@@ -368,6 +379,9 @@ function Details(props: {
       </Match>
       <Match when={props.opening === "instructions"}>
         <InstructionsPane back={props.back} />
+      </Match>
+      <Match when={props.opening === "mcp-servers"}>
+        <McpServersPane back={props.back} />
       </Match>
       <Match when={props.opening === "sandbox-binds"}>
         <SandboxBindsPane back={props.back} />

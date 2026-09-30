@@ -73,8 +73,16 @@ async function openComposer(at: ConversationView = OPEN): Promise<HTMLElement> {
 }
 
 /// Every pill the row is drawing, in the order it has them.
+///
+/// The chips beside them are left out: an MCP server is drawn in this same row
+/// and in this same shape — see `.server` in `Attaching.module.css` — and what
+/// these read is the files.
 function pills(pane: ParentNode): HTMLElement[] {
-  return [...pane.querySelectorAll<HTMLElement>(`.${pill.attachment}`)];
+  return [
+    ...pane.querySelectorAll<HTMLElement>(
+      `.${pill.attachment}:not(.${pill.server})`,
+    ),
+  ];
 }
 
 /// The names on them.
@@ -136,7 +144,9 @@ describe("the files on a draft", () => {
 
     await openComposer();
 
-    expect(screen.getByRole("list", { name: "Attached files" })).toBeTruthy();
+    expect(
+      screen.getByRole("list", { name: "Attached files and MCP servers" }),
+    ).toBeTruthy();
     for (const attachment of ATTACHED) {
       expect(
         screen.getByRole("button", { name: `Remove ${attachment.name}` }),
@@ -164,14 +174,17 @@ describe("the files on a draft", () => {
   /// The paperclip is a button over the browser's own picker, and pressing it
   /// is what opens one: an `<input type="file">` in the row would be a control
   /// of the platform's choosing with a word beside it.
-  it("opens the browser's picker from the paperclip", async () => {
+  it("opens the browser's picker from the menu's first row", async () => {
     theWorkbench();
 
     const pane = await openComposer();
     const picker = pane.querySelector<HTMLInputElement>('input[type="file"]')!;
     const opened = vi.spyOn(picker, "click");
 
-    fireEvent.click(screen.getByRole("button", { name: "Attach a file" }));
+    // Two presses rather than one: the paperclip on this pane opens a menu, and
+    // the press that reaches the picker is that menu's first row.
+    fireEvent.click(screen.getByRole("button", { name: "Attach" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Attach file" }));
 
     expect(opened).toHaveBeenCalled();
   });
@@ -184,9 +197,9 @@ describe("the files on a draft", () => {
     const pane = await openComposer();
     const row = pane.querySelector(`.${composer.presses}`)!;
 
-    expect(row.firstElementChild!.getAttribute("aria-label")).toBe(
-      "Attach a file",
-    );
+    expect(
+      row.firstElementChild!.querySelector("button")!.getAttribute("aria-label"),
+    ).toBe("Attach");
     expect(row.lastElementChild!.textContent).toContain("Start work");
   });
 
@@ -703,7 +716,9 @@ describe("the files on a frozen brief", () => {
     ).toEqual(FROZEN.attachments.map((attachment) => sized(attachment.bytes)));
 
     // Named for whoever is not looking at it, the way the composer's row is.
-    expect(screen.getByRole("list", { name: "Attached files" })).toBeTruthy();
+    expect(
+      screen.getByRole("list", { name: "Attached files and MCP servers" }),
+    ).toBeTruthy();
   });
 
   /// Nothing to press on it, on a pane that has no control anywhere: the files
@@ -714,7 +729,7 @@ describe("the files on a frozen brief", () => {
     const row = await drawn(pane, `.${pill.attachments}`);
 
     expect(row.querySelector("button")).toBeNull();
-    expect(screen.queryByRole("button", { name: "Attach a file" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Attach" })).toBeNull();
   });
 
   /// Under the Brief and above the Configuration: the files are part of what
@@ -741,11 +756,19 @@ describe("the files on a frozen brief", () => {
   /// most of them: an empty row under the Brief would read as something having
   /// gone missing.
   it("draws no row at all where nothing was attached", async () => {
-    const pane = await openBrief({ ...FROZEN, attachments: [] });
+    // Neither files nor servers, because the row holds both: a Conversation
+    // carrying a chip and no file has a row to draw.
+    const pane = await openBrief({
+      ...FROZEN,
+      attachments: [],
+      mcp_servers: [],
+    });
     await drawn(pane, `.${briefPane.configuration}`);
 
     expect(pane.querySelector(`.${pill.attachments}`)).toBeNull();
-    expect(screen.queryByRole("list", { name: "Attached files" })).toBeNull();
+    expect(
+      screen.queryByRole("list", { name: "Attached files and MCP servers" }),
+    ).toBeNull();
   });
 
   /// A size is said in whichever unit keeps it to a few digits, in the words
@@ -838,7 +861,16 @@ describe("the files on an answer", () => {
     const { page } = await answering(withHeading(WAITING));
 
     for (const label of ["Q1", "Q2a", "Q2b", "Q3"]) {
-      expect(clipOn(label), `${label} has one`).toBeTruthy();
+      const clip = clipOn(label);
+      expect(clip, `${label} has one`).toBeTruthy();
+
+      // And a plain button rather than the menu the draft's composer opens:
+      // the MCP servers are offered where a Conversation is set up, and an
+      // Answer attaches files and nothing else.
+      expect(
+        clip.getAttribute("aria-haspopup"),
+        `${label}'s is the plain button`,
+      ).toBeNull();
     }
 
     expect(

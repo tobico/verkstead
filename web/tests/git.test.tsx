@@ -292,6 +292,7 @@ describe("what Next saves", () => {
       // down over a pattern somebody hand-edited into the file weeks ago would
       // be a wizard nobody could finish.
       ignored_comments: "Keep",
+      mcp_servers: "Keep",
       rust_build_cache: { enabled: true, size: "50G" },
       cleanup: {
         trim: { enabled: true, days: "5" },

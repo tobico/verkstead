@@ -78,6 +78,8 @@ import type {
   Screen,
   ServeEdit,
   ServePress,
+  ServerAttached,
+  ServerRemoved,
   SetReading,
   SettingsEdit,
   SettingsSaved,
@@ -852,6 +854,34 @@ export function removeAttachment(
 ): Promise<AttachmentRemoved> {
   return post<AttachmentRemoved>(
     `/api/ui/conversations/${id}/attachments/${attachment}/remove`,
+  );
+}
+
+/// Give a Conversation a declared MCP server for its sessions to be launched
+/// with.
+///
+/// The name in the path and no body at all: what a Conversation holds is a
+/// reference to a declaration by name, so the name is the whole of the request.
+/// Encoded on the way out for `attachFile`'s reason — a name that is not a name
+/// reaches the server to be refused rather than turning the request into a path
+/// that matches no route.
+export function attachServer(
+  id: number,
+  name: string,
+): Promise<ServerAttached> {
+  return post<ServerAttached>(
+    `/api/ui/conversations/${id}/mcp-servers/${encodeURIComponent(name)}`,
+  );
+}
+
+/// And take one off again, by that same name: the name is what the Conversation
+/// holds, and there is no row of the record for it to be by.
+export function removeServer(
+  id: number,
+  name: string,
+): Promise<ServerRemoved> {
+  return post<ServerRemoved>(
+    `/api/ui/conversations/${id}/mcp-servers/${encodeURIComponent(name)}/remove`,
   );
 }
 

@@ -8,6 +8,14 @@
 //! to read — a harness is handed the words — so what those tests ask is whether
 //! it survives the round trip as it was typed, blank lines and indents and all.
 //!
+//! The declared MCP servers are the other list a save can be turned down over,
+//! and what those tests ask is the two things the refusal is for: a name that is
+//! not lowercase letters, digits and hyphens, and one another declaration
+//! already has. Neither writes a byte — a refusal is the whole request refused —
+//! and a save from any other section carries the declarations along untouched,
+//! which is what keeps a corrected email address from being refused over a name
+//! somebody hand-edited into the file weeks ago.
+//!
 //! The paths are the one thing here said in two places at once — the
 //! installation's flags and the file this page writes — so what those tests ask
 //! is about the labelling as much as the values: which of the two said an entry,
@@ -38,8 +46,8 @@ use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
 use tower::ServiceExt;
 use verkstead_render::{
-    CompileCaching, ConflictResolution, IgnoreRule, PathResolution, PathSource, RuleField,
-    SettingsSaved, SettingsView, Verified,
+    CompileCaching, ConflictResolution, IgnoreRule, McpHeader, McpServer, PathResolution,
+    PathSource, RuleField, ServerField, SettingsSaved, SettingsView, Verified,
 };
 use verkstead_server::sandbox::SandboxConfig;
 use verkstead_server::{Gh, open_database, router_asking_github, router_installed};
@@ -128,6 +136,7 @@ async fn save_author(app: &Router, name: &str, email: &str) -> SettingsSaved {
             "share_on_done": false,
             "sandbox_binds": [],
             "ignored_comments": "Keep",
+            "mcp_servers": "Keep",
             "instructions": "",
         }),
     )
@@ -148,6 +157,7 @@ async fn save_token(app: &Router, token: &str) -> SettingsSaved {
             "share_on_done": false,
             "sandbox_binds": [],
             "ignored_comments": "Keep",
+            "mcp_servers": "Keep",
             "instructions": "",
         }),
     )
@@ -166,6 +176,7 @@ async fn clear_token(app: &Router) -> SettingsSaved {
             "share_on_done": false,
             "sandbox_binds": [],
             "ignored_comments": "Keep",
+            "mcp_servers": "Keep",
             "instructions": "",
         }),
     )
@@ -204,6 +215,7 @@ async fn save_cleanup(app: &Router, trim: (bool, &str), delete: (bool, &str)) ->
             "share_on_done": false,
             "sandbox_binds": [],
             "ignored_comments": "Keep",
+            "mcp_servers": "Keep",
             "instructions": "",
         }),
     )
@@ -326,6 +338,7 @@ async fn the_token_appears_in_no_answer_this_endpoint_gives() {
             "share_on_done": false,
             "sandbox_binds": [],
             "ignored_comments": "Keep",
+            "mcp_servers": "Keep",
             "instructions": "",
         }),
     )
@@ -553,6 +566,7 @@ async fn a_save_carrying_the_binds_as_they_stand_leaves_them() {
             "share_on_done": false,
             "sandbox_binds": ["/var/cache/verkstead-node"],
             "ignored_comments": "Keep",
+            "mcp_servers": "Keep",
             "instructions": "",
         }),
     )
@@ -628,6 +642,7 @@ async fn the_build_cache_switch_and_size_go_in_and_come_back() {
             "share_on_done": false,
             "sandbox_binds": [],
             "ignored_comments": "Keep",
+            "mcp_servers": "Keep",
             "instructions": "",
         }),
     )
@@ -770,6 +785,7 @@ async fn a_save_carrying_the_cleanup_as_it_stands_leaves_it() {
             "share_on_done": false,
             "sandbox_binds": [],
             "ignored_comments": "Keep",
+            "mcp_servers": "Keep",
             "instructions": "",
         }),
     )
@@ -813,6 +829,7 @@ async fn how_a_conflict_is_resolved_goes_in_and_comes_back() {
             "share_on_done": false,
             "sandbox_binds": [],
             "ignored_comments": "Keep",
+            "mcp_servers": "Keep",
             "instructions": "",
         }),
     )
@@ -849,6 +866,7 @@ async fn how_a_conflict_is_resolved_goes_in_and_comes_back() {
             "share_on_done": false,
             "sandbox_binds": [],
             "ignored_comments": "Keep",
+            "mcp_servers": "Keep",
             "instructions": "",
         }),
     )
@@ -891,6 +909,7 @@ async fn sharing_on_done_goes_in_and_comes_back() {
             "share_on_done": true,
             "sandbox_binds": [],
             "ignored_comments": "Keep",
+            "mcp_servers": "Keep",
             "instructions": "",
         }),
     )
@@ -932,6 +951,7 @@ async fn a_save_carrying_the_switch_as_it_stands_leaves_it() {
             "share_on_done": true,
             "sandbox_binds": [],
             "ignored_comments": "Keep",
+            "mcp_servers": "Keep",
             "instructions": "",
         }),
     )
@@ -950,6 +970,7 @@ async fn a_save_carrying_the_switch_as_it_stands_leaves_it() {
             "share_on_done": true,
             "sandbox_binds": [],
             "ignored_comments": "Keep",
+            "mcp_servers": "Keep",
             "instructions": "",
         }),
     )
@@ -1049,6 +1070,7 @@ async fn a_save_carrying_the_instructions_as_they_stand_leaves_them() {
             "share_on_done": false,
             "sandbox_binds": [],
             "ignored_comments": "Keep",
+            "mcp_servers": "Keep",
             "instructions": "Prefer the smallest change.",
         }),
     )
@@ -1081,6 +1103,7 @@ async fn save_instructions(app: &Router, instructions: &str) -> SettingsSaved {
             "share_on_done": false,
             "sandbox_binds": [],
             "ignored_comments": "Keep",
+            "mcp_servers": "Keep",
             "instructions": instructions,
         }),
     )
@@ -1122,6 +1145,7 @@ async fn a_size_cleared_is_the_default_again_and_not_a_size_of_nothing() {
             "share_on_done": false,
             "sandbox_binds": [],
             "ignored_comments": "Keep",
+            "mcp_servers": "Keep",
             "instructions": "",
         }),
     )
@@ -1138,6 +1162,7 @@ async fn a_size_cleared_is_the_default_again_and_not_a_size_of_nothing() {
             "share_on_done": false,
             "sandbox_binds": [],
             "ignored_comments": "Keep",
+            "mcp_servers": "Keep",
             "instructions": "",
         }),
     )
@@ -1189,6 +1214,7 @@ async fn save_paths(app: &Router, binds: &[&str]) -> SettingsSaved {
             "share_on_done": false,
             "sandbox_binds": binds,
             "ignored_comments": "Keep",
+            "mcp_servers": "Keep",
             "instructions": "",
         }),
     )
@@ -1418,6 +1444,7 @@ async fn save_rules(app: &Router, rules: serde_json::Value) -> SettingsSaved {
             "share_on_done": false,
             "sandbox_binds": [],
             "ignored_comments": { "Set": { "rules": rules } },
+            "mcp_servers": "Keep",
             "instructions": "",
         }),
     )
@@ -1581,6 +1608,7 @@ async fn a_refused_save_writes_nothing_at_all() {
             "share_on_done": false,
             "sandbox_binds": [],
             "ignored_comments": { "Set": { "rules": [rule("", "[oh")] } },
+            "mcp_servers": "Keep",
             "instructions": "",
         }),
     )
@@ -1681,4 +1709,1358 @@ async fn sending_no_rules_takes_the_ones_that_were_there_away() {
 
     assert!(saved.settings.ignored_comments.is_empty());
     assert!(settings(&app).await.ignored_comments.is_empty());
+}
+
+/// Save a list of MCP server declarations and leave the rest of both files
+/// alone, which is what the section's own press sends.
+async fn save_servers(app: &Router, servers: serde_json::Value) -> SettingsSaved {
+    save(
+        app,
+        &serde_json::json!({
+            "git_author": { "name": "", "email": "" },
+            "github_token": "Keep",
+            "rust_build_cache": { "enabled": true, "size": "" },
+            "cleanup": cleanup_unset(),
+            "conflict_resolution": "Merge",
+            "share_on_done": false,
+            "sandbox_binds": [],
+            "ignored_comments": "Keep",
+            "mcp_servers": { "Set": { "servers": servers } },
+            "instructions": "",
+        }),
+    )
+    .await
+}
+
+fn server(name: &str, url: &str) -> serde_json::Value {
+    with_headers(name, url, serde_json::json!([]))
+}
+
+/// And one with headers on it, each of them a name and what is to become of the
+/// value sent in it — see [`set`], [`keep`] and [`clear`].
+fn with_headers(name: &str, url: &str, headers: serde_json::Value) -> serde_json::Value {
+    serde_json::json!({ "name": name, "url": url, "headers": headers })
+}
+
+/// A header given a value, which is the only way one is ever typed.
+fn set(name: &str, value: &str) -> serde_json::Value {
+    serde_json::json!({ "name": name, "value": { "Set": { "value": value } } })
+}
+
+/// And one whose value box was left alone, which is what every header of a
+/// server somebody only corrected the URL of sends.
+fn keep(name: &str) -> serde_json::Value {
+    serde_json::json!({ "name": name, "value": "Keep" })
+}
+
+/// And one whose value is being taken away, the header staying declared with
+/// nothing to send in it.
+fn clear(name: &str) -> serde_json::Value {
+    serde_json::json!({ "name": name, "value": "Clear" })
+}
+
+/// And the declaration as it comes back, for comparing against: a name, a URL
+/// and the names of its headers.
+fn declared(name: &str, url: &str) -> McpServer {
+    declaring(name, url, &[])
+}
+
+/// And one with headers on it, each its name and whether a value is kept to
+/// send in it.
+fn declaring(name: &str, url: &str, headers: &[(&str, bool)]) -> McpServer {
+    McpServer {
+        name: name.to_owned(),
+        url: url.to_owned(),
+        headers: headers
+            .iter()
+            .map(|(header, set)| McpHeader {
+                name: (*header).to_owned(),
+                set: *set,
+            })
+            .collect(),
+    }
+}
+
+/// What `secrets.yaml` holds now, as text — which is where a header value is
+/// and the one place it can be read back from.
+fn secrets(dir: &tempfile::TempDir) -> String {
+    std::fs::read_to_string(dir.path().join("secrets.yaml")).unwrap_or_default()
+}
+
+#[tokio::test]
+async fn a_verkstead_nobody_has_declared_a_server_on_has_none() {
+    let (_dir, app) = app().await;
+
+    assert!(settings(&app).await.mcp_servers.is_empty());
+}
+
+#[tokio::test]
+async fn the_declared_servers_go_in_and_come_back() {
+    let (_dir, app) = app().await;
+
+    let saved = save_servers(
+        &app,
+        serde_json::json!([
+            server("docs", "https://mcp.example.com/docs"),
+            server("tickets", "https://mcp.example.com/tickets"),
+        ]),
+    )
+    .await;
+
+    assert!(
+        saved.refused_servers.is_empty(),
+        "{:?}",
+        saved.refused_servers
+    );
+    assert_eq!(
+        saved.settings.mcp_servers,
+        vec![
+            declared("docs", "https://mcp.example.com/docs"),
+            declared("tickets", "https://mcp.example.com/tickets"),
+        ]
+    );
+
+    // And a read of its own says the same, which is the half that survives a
+    // reload: the file is where the declarations are.
+    assert_eq!(settings(&app).await.mcp_servers, saved.settings.mcp_servers);
+}
+
+/// The file rather than the process: a second server over the same Data
+/// Directory reads what the first one wrote.
+#[tokio::test]
+async fn the_declarations_are_in_the_config_file_and_outlive_the_server() {
+    let (dir, app) = app().await;
+
+    save_servers(
+        &app,
+        serde_json::json!([server("docs", "https://mcp.example.com/docs")]),
+    )
+    .await;
+
+    let written = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
+
+    assert!(written.contains("mcp_servers"), "{written}");
+    assert!(
+        written.contains("https://mcp.example.com/docs"),
+        "{written}"
+    );
+
+    let restarted = app_over(dir.path()).await;
+
+    assert_eq!(
+        settings(&restarted).await.mcp_servers,
+        vec![declared("docs", "https://mcp.example.com/docs")]
+    );
+}
+
+/// A URL rewritten is the whole list sent again with that one changed, which is
+/// the only editing this section does: the name it stands under is untouched.
+#[tokio::test]
+async fn a_declarations_url_can_be_changed() {
+    let (_dir, app) = app().await;
+
+    save_servers(
+        &app,
+        serde_json::json!([server("docs", "https://mcp.example.com/docs")]),
+    )
+    .await;
+
+    let saved = save_servers(
+        &app,
+        serde_json::json!([server("docs", "https://docs.example.com/mcp")]),
+    )
+    .await;
+
+    assert_eq!(
+        saved.settings.mcp_servers,
+        vec![declared("docs", "https://docs.example.com/mcp")]
+    );
+}
+
+/// The last declaration taken off the page is the list emptied, which is a save
+/// that sends none rather than one that says nothing.
+#[tokio::test]
+async fn sending_no_servers_takes_the_ones_that_were_there_away() {
+    let (_dir, app) = app().await;
+
+    save_servers(
+        &app,
+        serde_json::json!([server("docs", "https://mcp.example.com/docs")]),
+    )
+    .await;
+
+    let saved = save_servers(&app, serde_json::json!([])).await;
+
+    assert!(saved.settings.mcp_servers.is_empty());
+    assert!(settings(&app).await.mcp_servers.is_empty());
+}
+
+/// The name is what a chip refers to a server by and what the agent sees in
+/// front of its tool names, so anything but lowercase letters, digits and
+/// hyphens is refused at the box it was typed in.
+#[tokio::test]
+async fn a_name_that_is_not_a_name_is_refused_at_its_own_field() {
+    let (_dir, app) = app().await;
+
+    for name in ["Docs", "docs server", "docs_server", "docs.example", ""] {
+        let saved = save_servers(
+            &app,
+            serde_json::json!([server(name, "https://mcp.example.com/docs")]),
+        )
+        .await;
+
+        assert_eq!(saved.refused_servers.len(), 1, "{name:?}");
+        assert_eq!(saved.refused_servers[0].server, 0, "{name:?}");
+        assert_eq!(
+            saved.refused_servers[0].field,
+            ServerField::Name,
+            "{name:?}"
+        );
+        assert!(!saved.refused_servers[0].why.is_empty(), "{name:?}");
+
+        assert!(
+            settings(&app).await.mcp_servers.is_empty(),
+            "nothing should have been written for {name:?}"
+        );
+    }
+}
+
+/// And a name another declaration already has, which is the row the human just
+/// typed rather than the one that was there before them.
+#[tokio::test]
+async fn a_name_already_taken_is_refused_at_the_row_that_took_it() {
+    let (_dir, app) = app().await;
+
+    let saved = save_servers(
+        &app,
+        serde_json::json!([
+            server("docs", "https://mcp.example.com/one"),
+            server("docs", "https://mcp.example.com/two"),
+        ]),
+    )
+    .await;
+
+    assert_eq!(saved.refused_servers.len(), 1);
+    assert_eq!(saved.refused_servers[0].server, 1);
+    assert_eq!(saved.refused_servers[0].field, ServerField::Name);
+
+    assert!(settings(&app).await.mcp_servers.is_empty());
+}
+
+/// And a declaration with nowhere to be reached, which is the other box.
+#[tokio::test]
+async fn a_declaration_with_no_url_is_refused_at_the_url() {
+    let (_dir, app) = app().await;
+
+    let saved = save_servers(&app, serde_json::json!([server("docs", "")])).await;
+
+    assert_eq!(saved.refused_servers.len(), 1);
+    assert_eq!(saved.refused_servers[0].field, ServerField::Url);
+    assert!(settings(&app).await.mcp_servers.is_empty());
+}
+
+/// A refusal is the whole request refused, and not the author written while the
+/// declarations were turned away.
+#[tokio::test]
+async fn a_save_refused_over_a_name_writes_nothing_at_all() {
+    let (_dir, app) = app().await;
+
+    save_author(&app, "Ada Lovelace", "ada@example.com").await;
+
+    let saved = save(
+        &app,
+        &serde_json::json!({
+            "git_author": { "name": "Tobias Cohen", "email": "tobi@tobico.net" },
+            "github_token": { "Set": { "token": "ghp_thetoken" } },
+            "rust_build_cache": { "enabled": true, "size": "" },
+            "cleanup": cleanup_unset(),
+            "conflict_resolution": "Merge",
+            "share_on_done": false,
+            "sandbox_binds": [],
+            "ignored_comments": "Keep",
+            "mcp_servers": { "Set": { "servers": [server("Docs", "https://example.com")] } },
+            "instructions": "",
+        }),
+    )
+    .await;
+
+    assert_eq!(saved.refused_servers.len(), 1);
+    assert!(saved.refused.is_empty());
+    assert!(saved.verified.is_none(), "no token was tried");
+    assert_eq!(saved.settings.git_author.name, "Ada Lovelace");
+    assert!(saved.settings.github_token.is_none());
+    assert_eq!(settings(&app).await.git_author.name, "Ada Lovelace");
+}
+
+/// What every section but this one sends, and what makes those saves ones that
+/// cannot be refused over a declaration — asked of each of the sections in turn,
+/// because every one of them writes the whole of `config.yaml` and a section
+/// that left the declarations out would be a section that took them away.
+#[tokio::test]
+async fn a_save_from_another_section_leaves_the_declarations_where_they_are() {
+    let (_dir, app) = app().await;
+
+    save_servers(
+        &app,
+        serde_json::json!([server("docs", "https://mcp.example.com/docs")]),
+    )
+    .await;
+
+    let declarations = vec![declared("docs", "https://mcp.example.com/docs")];
+
+    for saved in [
+        save_author(&app, "Ada Lovelace", "ada@example.com").await,
+        save_instructions(&app, "Prefer the smallest change.\n").await,
+        save_paths(&app, &["/var/cache/verkstead-node"]).await,
+        save_cleanup(&app, (true, "5"), (true, "90")).await,
+        save_rules(&app, serde_json::json!([rule("coderabbitai", "billing")])).await,
+        save_token(&app, "ghp_thetoken").await,
+    ] {
+        assert!(
+            saved.refused_servers.is_empty(),
+            "{:?}",
+            saved.refused_servers
+        );
+        assert_eq!(saved.settings.mcp_servers, declarations);
+    }
+
+    assert_eq!(settings(&app).await.mcp_servers, declarations);
+}
+
+/// And the other way about: this section's own save leaves what it was not told
+/// about exactly where it was.
+///
+/// The ignore rules are what that comes to here. Everything else in
+/// `config.yaml` travels as a value, so the page rides it along as the server
+/// gave it and the sending is the section's business rather than the endpoint's;
+/// the rules are the one other thing that travels as an action, and a save that
+/// carried them away would be one that could.
+#[tokio::test]
+async fn saving_a_declaration_leaves_the_rules_where_they_are() {
+    let (_dir, app) = app().await;
+
+    save_rules(&app, serde_json::json!([rule("coderabbitai", "billing")])).await;
+
+    let saved = save_servers(
+        &app,
+        serde_json::json!([server("docs", "https://mcp.example.com/docs")]),
+    )
+    .await;
+
+    assert_eq!(
+        saved.settings.ignored_comments,
+        vec![IgnoreRule {
+            author: "coderabbitai".to_owned(),
+            body: "billing".to_owned(),
+        }]
+    );
+    assert_eq!(
+        saved.settings.mcp_servers,
+        vec![declared("docs", "https://mcp.example.com/docs")]
+    );
+}
+
+/// A declaration somebody hand-edited badly is the case this arrangement is for:
+/// it comes back on the read so the human can correct it, and it refuses nothing
+/// until they save the section it is on.
+#[tokio::test]
+async fn a_hand_edited_bad_name_reads_back_and_refuses_no_other_save() {
+    let (dir, app) = app().await;
+
+    std::fs::write(
+        dir.path().join("config.yaml"),
+        "mcp_servers:\n  - name: Docs Server\n    url: https://example.com\n",
+    )
+    .unwrap();
+
+    assert_eq!(
+        settings(&app).await.mcp_servers,
+        vec![declared("Docs Server", "https://example.com")]
+    );
+
+    let saved = save_author(&app, "Ada Lovelace", "ada@example.com").await;
+
+    assert!(saved.refused_servers.is_empty());
+    assert_eq!(saved.settings.git_author.name, "Ada Lovelace");
+    assert_eq!(
+        saved.settings.mcp_servers,
+        vec![declared("Docs Server", "https://example.com")]
+    );
+}
+
+/// And the hand-edit the reading half does drop, because a declaration missing
+/// either half is no declaration: one with no name is nothing a chip could refer
+/// to, and one with no URL reaches nothing.
+#[tokio::test]
+async fn a_hand_edited_half_declaration_is_not_read_back() {
+    let (dir, app) = app().await;
+
+    std::fs::write(
+        dir.path().join("config.yaml"),
+        "mcp_servers:\n  - name: docs\n  - url: https://example.com\n  - name: tickets\n    url: https://mcp.example.com/tickets\n",
+    )
+    .unwrap();
+
+    assert_eq!(
+        settings(&app).await.mcp_servers,
+        vec![declared("tickets", "https://mcp.example.com/tickets")]
+    );
+}
+
+/// And a file nothing can parse is no servers rather than a read that fails,
+/// which is the rule the whole of this file is read under.
+#[tokio::test]
+async fn a_config_file_nothing_can_parse_reads_as_no_servers() {
+    let (dir, app) = app().await;
+
+    std::fs::write(dir.path().join("config.yaml"), "mcp_servers: [oh\n").unwrap();
+
+    assert!(settings(&app).await.mcp_servers.is_empty());
+}
+
+/// A header is added to a declaration by name and value, and what comes back is
+/// the name alone: the value is a secret, and the page is never shown one again.
+#[tokio::test]
+async fn a_headers_name_comes_back_and_its_value_never_does() {
+    let (dir, app) = app().await;
+
+    let saved = save_servers(
+        &app,
+        serde_json::json!([with_headers(
+            "docs",
+            "https://mcp.example.com/docs",
+            serde_json::json!([
+                set("Authorization", "Bearer sk-averysecretkey"),
+                set("X-Tenant", "verkstead"),
+            ]),
+        )]),
+    )
+    .await;
+
+    assert!(
+        saved.refused_servers.is_empty(),
+        "{:?}",
+        saved.refused_servers
+    );
+    assert_eq!(
+        saved.settings.mcp_servers,
+        vec![declaring(
+            "docs",
+            "https://mcp.example.com/docs",
+            &[("Authorization", true), ("X-Tenant", true)],
+        )],
+        "the names, in the order they were declared in"
+    );
+
+    // And a read of its own says the same, which is the half that survives a
+    // reload.
+    assert_eq!(settings(&app).await.mcp_servers, saved.settings.mcp_servers,);
+
+    // The values went where a secret goes, rather than nowhere at all: what the
+    // page cannot read back is still what a session will be handed.
+    let written = secrets(&dir);
+
+    assert!(written.contains("Bearer sk-averysecretkey"), "{written}");
+    assert!(written.contains("verkstead"), "{written}");
+
+    // And `config.yaml` holds the names and no part of either value, the two
+    // files being split by what is secret rather than by what it configures.
+    let config = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
+
+    assert!(config.contains("Authorization"), "{config}");
+    assert!(!config.contains("sk-averysecretkey"), "{config}");
+}
+
+/// The promise the token's own test makes, made again for a header: a value that
+/// has gone in is never in a response body again, whichever body it is.
+#[tokio::test]
+async fn a_header_value_appears_in_no_answer_this_endpoint_gives() {
+    let (_dir, app) = app_asking(SAYS_AN_ACCOUNT).await;
+
+    let saving = save_body(
+        &app,
+        &serde_json::json!({
+            "git_author": { "name": "", "email": "" },
+            "github_token": "Keep",
+            "rust_build_cache": { "enabled": true, "size": "" },
+            "cleanup": cleanup_unset(),
+            "conflict_resolution": "Merge",
+            "share_on_done": false,
+            "sandbox_binds": [],
+            "ignored_comments": "Keep",
+            "mcp_servers": { "Set": { "servers": [with_headers(
+                "docs",
+                "https://mcp.example.com/docs",
+                serde_json::json!([set("Authorization", "Bearer sk-averysecretkey")]),
+            )] } },
+            "instructions": "",
+        }),
+    )
+    .await;
+
+    assert!(
+        !saving.contains("sk-averysecretkey"),
+        "the save answered with the header value: {saving}"
+    );
+
+    let reading = settings_body(&app).await;
+
+    assert!(
+        !reading.contains("sk-averysecretkey"),
+        "the read answered with the header value: {reading}"
+    );
+
+    // Not even a tail of it, which is the one thing the token does give back:
+    // there is nothing a human does with part of an API key, and the name is
+    // what tells one header from another.
+    assert!(!reading.contains("secretkey"), "{reading}");
+}
+
+/// A value box left blank keeps what is there, so correcting a URL does not take
+/// a key away — the token's rule, said once per header.
+#[tokio::test]
+async fn a_blank_value_box_keeps_the_value_that_was_there() {
+    let (dir, app) = app().await;
+
+    save_servers(
+        &app,
+        serde_json::json!([with_headers(
+            "docs",
+            "https://mcp.example.com/docs",
+            serde_json::json!([set("Authorization", "Bearer sk-averysecretkey")]),
+        )]),
+    )
+    .await;
+
+    let saved = save_servers(
+        &app,
+        serde_json::json!([with_headers(
+            "docs",
+            "https://docs.internal/mcp",
+            serde_json::json!([keep("Authorization")]),
+        )]),
+    )
+    .await;
+
+    assert_eq!(
+        saved.settings.mcp_servers,
+        vec![declaring(
+            "docs",
+            "https://docs.internal/mcp",
+            &[("Authorization", true)]
+        )]
+    );
+    assert!(
+        secrets(&dir).contains("Bearer sk-averysecretkey"),
+        "the URL was corrected and the key stayed: {}",
+        secrets(&dir)
+    );
+}
+
+/// And each header is its own: one set, one kept and one cleared in the one
+/// save, each of them doing what it was told and nothing to the others.
+#[tokio::test]
+async fn a_header_is_kept_set_or_cleared_on_its_own() {
+    let (dir, app) = app().await;
+
+    save_servers(
+        &app,
+        serde_json::json!([with_headers(
+            "docs",
+            "https://mcp.example.com/docs",
+            serde_json::json!([
+                set("Authorization", "Bearer sk-thefirstkey"),
+                set("X-Tenant", "verkstead"),
+                set("X-Spent", "gone-by-the-next-save"),
+            ]),
+        )]),
+    )
+    .await;
+
+    let saved = save_servers(
+        &app,
+        serde_json::json!([with_headers(
+            "docs",
+            "https://mcp.example.com/docs",
+            serde_json::json!([
+                set("Authorization", "Bearer sk-thesecondkey"),
+                keep("X-Tenant"),
+                clear("X-Spent"),
+            ]),
+        )]),
+    )
+    .await;
+
+    // Every one of them is still declared: clearing a value is not taking the
+    // header off, and the page draws all three.
+    assert_eq!(
+        saved.settings.mcp_servers,
+        vec![declaring(
+            "docs",
+            "https://mcp.example.com/docs",
+            &[
+                ("Authorization", true),
+                ("X-Tenant", true),
+                ("X-Spent", false)
+            ],
+        )]
+    );
+
+    let written = secrets(&dir);
+
+    assert!(written.contains("Bearer sk-thesecondkey"), "{written}");
+    assert!(!written.contains("sk-thefirstkey"), "{written}");
+    assert!(written.contains("verkstead"), "{written}");
+    assert!(!written.contains("gone-by-the-next-save"), "{written}");
+}
+
+/// And a header taken off the row is one the declaration no longer names, its
+/// value gone with it.
+#[tokio::test]
+async fn a_header_taken_off_the_declaration_takes_its_value_with_it() {
+    let (dir, app) = app().await;
+
+    save_servers(
+        &app,
+        serde_json::json!([with_headers(
+            "docs",
+            "https://mcp.example.com/docs",
+            serde_json::json!([set("Authorization", "Bearer sk-averysecretkey")]),
+        )]),
+    )
+    .await;
+
+    let saved = save_servers(
+        &app,
+        serde_json::json!([server("docs", "https://mcp.example.com/docs")]),
+    )
+    .await;
+
+    assert_eq!(
+        saved.settings.mcp_servers,
+        vec![declared("docs", "https://mcp.example.com/docs")]
+    );
+    assert!(
+        !secrets(&dir).contains("sk-averysecretkey"),
+        "{}",
+        secrets(&dir)
+    );
+}
+
+/// Deleting a declaration takes its headers with it, so declaring that name
+/// again starts with none — the secrets are held under the name that declared
+/// them, and a name nobody declares holds nothing.
+#[tokio::test]
+async fn deleting_a_server_takes_its_header_values_with_it() {
+    let (dir, app) = app().await;
+
+    save_servers(
+        &app,
+        serde_json::json!([with_headers(
+            "docs",
+            "https://mcp.example.com/docs",
+            serde_json::json!([set("Authorization", "Bearer sk-averysecretkey")]),
+        )]),
+    )
+    .await;
+
+    save_servers(&app, serde_json::json!([])).await;
+
+    assert!(
+        !secrets(&dir).contains("sk-averysecretkey"),
+        "{}",
+        secrets(&dir)
+    );
+
+    // And the name declared again is a server with nothing kept for it: a header
+    // named now is one with no value until somebody types one.
+    let saved = save_servers(
+        &app,
+        serde_json::json!([with_headers(
+            "docs",
+            "https://mcp.example.com/docs",
+            serde_json::json!([keep("Authorization")]),
+        )]),
+    )
+    .await;
+
+    assert_eq!(
+        saved.settings.mcp_servers,
+        vec![declaring(
+            "docs",
+            "https://mcp.example.com/docs",
+            &[("Authorization", false)]
+        )],
+        "the header is declared with nothing kept for it"
+    );
+    assert!(
+        !secrets(&dir).contains("Authorization"),
+        "and nothing is kept for it: {}",
+        secrets(&dir)
+    );
+}
+
+/// `secrets.yaml` is written whole, so the two hands that write it may not take
+/// each other's work away: saving a server leaves the token where it was, and
+/// saving the token leaves every server's headers where they were.
+#[tokio::test]
+async fn a_server_and_the_token_are_saved_without_taking_each_other_away() {
+    let (dir, app) = app().await;
+
+    save_token(&app, "ghp_thetoken").await;
+
+    save_servers(
+        &app,
+        serde_json::json!([with_headers(
+            "docs",
+            "https://mcp.example.com/docs",
+            serde_json::json!([set("Authorization", "Bearer sk-averysecretkey")]),
+        )]),
+    )
+    .await;
+
+    assert_eq!(
+        settings(&app)
+            .await
+            .github_token
+            .expect("the token survived the server's save")
+            .last_four,
+        "oken"
+    );
+
+    // And the other way about, which is the save this endpoint makes most often.
+    let saved = save_token(&app, "ghp_anothertoken").await;
+
+    assert_eq!(
+        saved.settings.mcp_servers,
+        vec![declaring(
+            "docs",
+            "https://mcp.example.com/docs",
+            &[("Authorization", true)]
+        )]
+    );
+
+    let written = secrets(&dir);
+
+    assert!(written.contains("Bearer sk-averysecretkey"), "{written}");
+    assert!(written.contains("ghp_anothertoken"), "{written}");
+
+    // And a save from a section that is about neither leaves both.
+    save_author(&app, "Ada Lovelace", "ada@example.com").await;
+
+    let written = secrets(&dir);
+
+    assert!(written.contains("Bearer sk-averysecretkey"), "{written}");
+    assert!(written.contains("ghp_anothertoken"), "{written}");
+}
+
+/// A header value cleared where it was the only secret leaves the file saying
+/// what an unwritten one says — which is what the token's own clearing does, and
+/// what keeps a Verkstead that has been to the page and back looking like one
+/// that never went.
+#[tokio::test]
+async fn clearing_the_last_header_leaves_nothing_configured() {
+    let (dir, app) = app().await;
+
+    save_servers(
+        &app,
+        serde_json::json!([with_headers(
+            "docs",
+            "https://mcp.example.com/docs",
+            serde_json::json!([set("Authorization", "Bearer sk-averysecretkey")]),
+        )]),
+    )
+    .await;
+
+    save_servers(
+        &app,
+        serde_json::json!([with_headers(
+            "docs",
+            "https://mcp.example.com/docs",
+            serde_json::json!([clear("Authorization")]),
+        )]),
+    )
+    .await;
+
+    assert!(secrets(&dir).trim().is_empty(), "{}", secrets(&dir));
+}
+
+/// A blank header name is no header, the way an emptied bind row is no bind: the
+/// rows are the page's and an empty one is a row somebody added and left.
+#[tokio::test]
+async fn a_blank_header_name_is_not_a_header() {
+    let (dir, app) = app().await;
+
+    let saved = save_servers(
+        &app,
+        serde_json::json!([with_headers(
+            "docs",
+            "https://mcp.example.com/docs",
+            serde_json::json!([
+                set("   ", "Bearer sk-averysecretkey"),
+                set("X-Tenant", "verkstead")
+            ]),
+        )]),
+    )
+    .await;
+
+    assert_eq!(
+        saved.settings.mcp_servers,
+        vec![declaring(
+            "docs",
+            "https://mcp.example.com/docs",
+            &[("X-Tenant", true)]
+        )]
+    );
+    assert!(
+        !secrets(&dir).contains("sk-averysecretkey"),
+        "and nothing was written under a name nothing declares: {}",
+        secrets(&dir)
+    );
+}
+
+/// The file rather than the process, for the headers as for the declarations: a
+/// second server over the same Data Directory reads back the names the first one
+/// wrote, and is handed the values it wrote beside them.
+#[tokio::test]
+async fn the_headers_outlive_the_server() {
+    let (dir, app) = app().await;
+
+    save_servers(
+        &app,
+        serde_json::json!([with_headers(
+            "docs",
+            "https://mcp.example.com/docs",
+            serde_json::json!([set("Authorization", "Bearer sk-averysecretkey")]),
+        )]),
+    )
+    .await;
+
+    let restarted = app_over(dir.path()).await;
+
+    assert_eq!(
+        settings(&restarted).await.mcp_servers,
+        vec![declaring(
+            "docs",
+            "https://mcp.example.com/docs",
+            &[("Authorization", true)]
+        )]
+    );
+
+    // And a save made by *that* server keeps what it never saw, which is the
+    // whole of why a value box left blank is a keeping.
+    save_servers(
+        &restarted,
+        serde_json::json!([with_headers(
+            "docs",
+            "https://docs.internal/mcp",
+            serde_json::json!([keep("Authorization")]),
+        )]),
+    )
+    .await;
+
+    assert!(
+        secrets(&dir).contains("Bearer sk-averysecretkey"),
+        "{}",
+        secrets(&dir)
+    );
+}
+
+/// A declaration is tried as it is saved, and what came of it rides back with
+/// the save — the token's own arrangement, said about a server.
+///
+/// Against servers stood up in-process on a loopback port rather than against a
+/// mock, the way the update check's tests are: what is worth proving is that a
+/// request goes out at all, that it carries the headers the declaration was
+/// given, and that each of the three ways a server can fail to be one is told
+/// apart. An `initialize` is a request and an answer, so a fake that gives both
+/// is the whole of the contract.
+///
+/// Every one of them saves either way. That is the decision this is built on —
+/// a server that cannot be reached from here may be reachable from inside a
+/// session's network — so each of these asks what the file holds afterwards as
+/// well as what the page was told.
+mod trying {
+    use std::sync::{Arc, Mutex};
+    use std::time::{Duration, Instant};
+
+    use axum::Router;
+    use axum::extract::State;
+    use axum::http::{HeaderMap, StatusCode};
+    use axum::response::IntoResponse;
+    use axum::routing::post;
+    use verkstead_render::{ServerTried, Tried};
+
+    use super::{app, declared, save_servers, server, settings, with_headers};
+
+    /// Every request one of these fake servers has taken, with the headers it
+    /// arrived under — which is what says the declaration's own were sent.
+    type Asked = Arc<Mutex<Vec<HeaderMap>>>;
+
+    /// An MCP server on a loopback port, answering differently by path: one of
+    /// them stands in for every case a declaration can turn out to be.
+    struct Standing {
+        address: String,
+        asked: Asked,
+    }
+
+    impl Standing {
+        /// Where a server that answers `initialize`, naming itself, is reached.
+        fn answering(&self) -> String {
+            format!("{}/mcp", self.address)
+        }
+
+        /// And one that answers it without naming itself, which is reachable
+        /// said in fewer words.
+        fn nameless(&self) -> String {
+            format!("{}/nameless", self.address)
+        }
+
+        /// And one that answers it down an event stream, which is the other
+        /// shape streamable HTTP answers in.
+        fn streaming(&self) -> String {
+            format!("{}/streaming", self.address)
+        }
+
+        /// And one that will not take the headers it was sent.
+        fn locked(&self) -> String {
+            format!("{}/locked", self.address)
+        }
+
+        /// And one that answers, but with a page rather than with JSON-RPC —
+        /// which is what a URL pointing at somebody's website looks like.
+        fn a_page(&self) -> String {
+            format!("{}/page", self.address)
+        }
+
+        /// And nothing at all at that path, which is the ordinary typo.
+        fn nothing_there(&self) -> String {
+            format!("{}/missing", self.address)
+        }
+
+        /// And one that takes the request and never answers it, which is what
+        /// the deadline is for.
+        fn silent(&self) -> String {
+            format!("{}/silent", self.address)
+        }
+
+        /// The headers the last request arrived under.
+        fn headers(&self) -> HeaderMap {
+            self.asked
+                .lock()
+                .unwrap()
+                .last()
+                .cloned()
+                .unwrap_or_default()
+        }
+
+        fn times_asked(&self) -> usize {
+            self.asked.lock().unwrap().len()
+        }
+    }
+
+    async fn standing() -> Standing {
+        let asked: Asked = Arc::new(Mutex::new(Vec::new()));
+
+        let app = Router::new()
+            .route("/mcp", post(initialized))
+            .route("/nameless", post(nameless))
+            .route("/streaming", post(streamed))
+            .route("/locked", post(locked))
+            .route("/page", post(a_page))
+            .route("/silent", post(silent))
+            .with_state(asked.clone());
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        Standing {
+            address: format!("http://{address}"),
+            asked,
+        }
+    }
+
+    /// An address nothing is listening on, which is a server that is down or a
+    /// hostname with a typo in it — the connection is refused rather than
+    /// answered.
+    async fn nothing_listening() -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+
+        drop(listener);
+
+        format!("http://{address}/mcp")
+    }
+
+    /// What an MCP server answers `initialize` with, naming itself.
+    async fn initialized(State(asked): State<Asked>, headers: HeaderMap) -> impl IntoResponse {
+        asked.lock().unwrap().push(headers);
+
+        axum::Json(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "serverInfo": { "name": "Docs MCP", "version": "1.2.0" },
+            },
+        }))
+    }
+
+    /// And one that answers it without a `serverInfo` at all.
+    async fn nameless(State(asked): State<Asked>, headers: HeaderMap) -> impl IntoResponse {
+        asked.lock().unwrap().push(headers);
+
+        axum::Json(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": { "protocolVersion": "2025-06-18", "capabilities": {} },
+        }))
+    }
+
+    /// And the same answer down an event stream, which is what a server with
+    /// anything to stream answers with.
+    async fn streamed(State(asked): State<Asked>, headers: HeaderMap) -> impl IntoResponse {
+        asked.lock().unwrap().push(headers);
+
+        (
+            [(axum::http::header::CONTENT_TYPE, "text/event-stream")],
+            concat!(
+                "event: message\n",
+                r#"data: {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18","#,
+                r#""capabilities":{},"serverInfo":{"name":"Docs MCP"}}}"#,
+                "\n\n",
+            ),
+        )
+    }
+
+    /// And one that will not take what it was sent, which is what a wrong or
+    /// missing key looks like from outside.
+    async fn locked(State(asked): State<Asked>, headers: HeaderMap) -> impl IntoResponse {
+        asked.lock().unwrap().push(headers);
+
+        (StatusCode::UNAUTHORIZED, "no")
+    }
+
+    /// And something that is not an MCP server at all, answering perfectly.
+    async fn a_page(State(asked): State<Asked>, headers: HeaderMap) -> impl IntoResponse {
+        asked.lock().unwrap().push(headers);
+
+        axum::response::Html("<!doctype html><title>Hello</title>")
+    }
+
+    /// And one that takes the request and never answers it.
+    async fn silent(State(asked): State<Asked>, headers: HeaderMap) -> impl IntoResponse {
+        asked.lock().unwrap().push(headers);
+
+        // Longer than any deadline this save could have: what is being proved is
+        // that the save comes back without it.
+        tokio::time::sleep(Duration::from_secs(600)).await;
+
+        StatusCode::NO_CONTENT
+    }
+
+    /// What the save said about the one declaration it carried.
+    fn about(tried: &[ServerTried], name: &str) -> Tried {
+        tried
+            .iter()
+            .find(|was| was.server == name)
+            .unwrap_or_else(|| panic!("nothing was said about {name}: {tried:?}"))
+            .outcome
+            .clone()
+    }
+
+    /// And the words a refusal was put in, for the tests that are about which of
+    /// the three ways it went wrong.
+    fn refused(tried: &[ServerTried], name: &str) -> String {
+        match about(tried, name) {
+            Tried::Refused { why } => why,
+            reached => panic!("{name} was not refused: {reached:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_server_that_answers_initialize_is_reached_by_the_name_it_gives() {
+        let (_dir, app) = app().await;
+        let mcp = standing().await;
+
+        let saved = save_servers(&app, serde_json::json!([server("docs", &mcp.answering())])).await;
+
+        assert_eq!(
+            about(&saved.tried, "docs"),
+            Tried::Reached {
+                named: Some("Docs MCP".to_owned()),
+            },
+        );
+
+        // Once, and by this server rather than by the browser: what went out is
+        // one `initialize`.
+        assert_eq!(mcp.times_asked(), 1);
+    }
+
+    /// A server that names itself nothing is reachable all the same — the name
+    /// is what it says about itself, not what says it answered.
+    #[tokio::test]
+    async fn one_that_names_itself_nothing_is_reached_without_a_name() {
+        let (_dir, app) = app().await;
+        let mcp = standing().await;
+
+        let saved = save_servers(&app, serde_json::json!([server("docs", &mcp.nameless())])).await;
+
+        assert_eq!(about(&saved.tried, "docs"), Tried::Reached { named: None });
+    }
+
+    /// And one that answers down an event stream is the same answer, read out of
+    /// the other shape streamable HTTP comes in.
+    #[tokio::test]
+    async fn one_that_answers_down_an_event_stream_is_reached_too() {
+        let (_dir, app) = app().await;
+        let mcp = standing().await;
+
+        let saved = save_servers(&app, serde_json::json!([server("docs", &mcp.streaming())])).await;
+
+        assert_eq!(
+            about(&saved.tried, "docs"),
+            Tried::Reached {
+                named: Some("Docs MCP".to_owned()),
+            },
+        );
+    }
+
+    /// Nothing answering is a refusal in those words — and the declaration is
+    /// written down all the same, which is the decision this whole check is
+    /// built on.
+    #[tokio::test]
+    async fn one_that_does_not_answer_is_refused_and_declared_anyway() {
+        let (_dir, app) = app().await;
+        let nowhere = nothing_listening().await;
+
+        let saved = save_servers(&app, serde_json::json!([server("docs", &nowhere)])).await;
+
+        assert!(
+            refused(&saved.tried, "docs").starts_with("It did not answer"),
+            "{}",
+            refused(&saved.tried, "docs"),
+        );
+
+        assert_eq!(saved.settings.mcp_servers, vec![declared("docs", &nowhere)]);
+        assert_eq!(
+            settings(&app).await.mcp_servers,
+            vec![declared("docs", &nowhere)]
+        );
+    }
+
+    /// And one that will not take the headers says which of the three it was,
+    /// because what the human does about it is go and look at the value.
+    #[tokio::test]
+    async fn one_that_rejects_the_headers_says_so_and_is_declared_anyway() {
+        let (_dir, app) = app().await;
+        let mcp = standing().await;
+
+        let saved = save_servers(&app, serde_json::json!([server("docs", &mcp.locked())])).await;
+
+        let why = refused(&saved.tried, "docs");
+
+        assert!(why.contains("401"), "{why}");
+        assert!(why.contains("headers"), "{why}");
+
+        assert_eq!(
+            settings(&app).await.mcp_servers,
+            vec![declared("docs", &mcp.locked())]
+        );
+    }
+
+    /// And something that answers without being an MCP server is the third,
+    /// whether it answered a page or answered nothing at that path.
+    #[tokio::test]
+    async fn what_is_not_an_mcp_server_says_so_and_is_declared_anyway() {
+        let (_dir, app) = app().await;
+        let mcp = standing().await;
+
+        let saved = save_servers(
+            &app,
+            serde_json::json!([
+                server("page", &mcp.a_page()),
+                server("missing", &mcp.nothing_there()),
+            ]),
+        )
+        .await;
+
+        let page = refused(&saved.tried, "page");
+        assert!(page.contains("not an MCP server"), "{page}");
+        assert!(page.contains("initialize"), "{page}");
+
+        let missing = refused(&saved.tried, "missing");
+        assert!(missing.contains("not an MCP server"), "{missing}");
+        assert!(missing.contains("404"), "{missing}");
+
+        assert_eq!(settings(&app).await.mcp_servers.len(), 2);
+    }
+
+    /// The request carries the declaration's own headers — which is what makes
+    /// the answer worth anything: a server tried without its key would be tried
+    /// as nobody.
+    #[tokio::test]
+    async fn the_request_carries_the_declarations_headers() {
+        let (_dir, app) = app().await;
+        let mcp = standing().await;
+
+        save_servers(
+            &app,
+            serde_json::json!([with_headers(
+                "docs",
+                &mcp.answering(),
+                serde_json::json!([super::set("Authorization", "Bearer sk-averysecretkey")]),
+            )]),
+        )
+        .await;
+
+        assert_eq!(
+            mcp.headers().get("authorization").unwrap(),
+            "Bearer sk-averysecretkey",
+        );
+    }
+
+    /// And no value of one appears in what the page is told, whatever the server
+    /// made of being sent it — a refusal is Verkstead's own words rather than
+    /// anything the server said back.
+    #[tokio::test]
+    async fn no_header_value_appears_in_what_the_page_is_told() {
+        let (_dir, app) = app().await;
+        let mcp = standing().await;
+        let nowhere = nothing_listening().await;
+
+        let saving = super::save_body(
+            &app,
+            &serde_json::json!({
+                "git_author": { "name": "", "email": "" },
+                "github_token": "Keep",
+                "rust_build_cache": { "enabled": true, "size": "" },
+                "cleanup": super::cleanup_unset(),
+                "conflict_resolution": "Merge",
+                "share_on_done": false,
+                "sandbox_binds": [],
+                "ignored_comments": "Keep",
+                "mcp_servers": { "Set": { "servers": [
+                    with_headers(
+                        "docs",
+                        &mcp.answering(),
+                        serde_json::json!([super::set("Authorization", "Bearer sk-averysecretkey")]),
+                    ),
+                    with_headers(
+                        "locked",
+                        &mcp.locked(),
+                        serde_json::json!([super::set("X-Api-Key", "sk-anothersecret")]),
+                    ),
+                    with_headers(
+                        "down",
+                        &nowhere,
+                        serde_json::json!([super::set("X-Api-Key", "sk-athirdsecret")]),
+                    ),
+                ] } },
+                "instructions": "",
+            }),
+        )
+        .await;
+
+        for value in ["sk-averysecretkey", "sk-anothersecret", "sk-athirdsecret"] {
+            assert!(
+                !saving.contains(value),
+                "the save answered with a header value: {saving}"
+            );
+        }
+    }
+
+    /// A server that never answers is reported within the deadline rather than
+    /// holding the save open behind it.
+    #[tokio::test]
+    async fn one_that_never_answers_comes_back_within_the_deadline() {
+        let (_dir, app) = app().await;
+        let mcp = standing().await;
+
+        let began = Instant::now();
+        let saved = save_servers(&app, serde_json::json!([server("docs", &mcp.silent())])).await;
+        let took = began.elapsed();
+
+        assert!(
+            refused(&saved.tried, "docs").starts_with("It did not answer"),
+            "{}",
+            refused(&saved.tried, "docs"),
+        );
+
+        // Generous against the deadline itself, which is the server's to choose:
+        // what this is about is that the save came back at all rather than
+        // waiting on a server that never speaks.
+        assert!(took < Duration::from_secs(60), "the save took {took:?}");
+
+        assert_eq!(
+            settings(&app).await.mcp_servers,
+            vec![declared("docs", &mcp.silent())]
+        );
+    }
+
+    /// Every declaration the save wrote down is tried, not the one that changed
+    /// — the section saves as one list, and what the human pressed Save on is
+    /// all of it.
+    #[tokio::test]
+    async fn every_declaration_the_save_wrote_down_is_tried() {
+        let (_dir, app) = app().await;
+        let mcp = standing().await;
+
+        let saved = save_servers(
+            &app,
+            serde_json::json!([
+                server("docs", &mcp.answering()),
+                server("tickets", &mcp.locked()),
+            ]),
+        )
+        .await;
+
+        assert_eq!(
+            saved
+                .tried
+                .iter()
+                .map(|was| was.server.as_str())
+                .collect::<Vec<_>>(),
+            vec!["docs", "tickets"],
+        );
+    }
+
+    /// And a save from another section tries nothing at all: this is a check at
+    /// save, and a save about an email address is not one.
+    #[tokio::test]
+    async fn a_save_from_another_section_tries_nothing() {
+        let (_dir, app) = app().await;
+        let mcp = standing().await;
+
+        save_servers(&app, serde_json::json!([server("docs", &mcp.answering())])).await;
+        assert_eq!(mcp.times_asked(), 1);
+
+        let saved = super::save_author(&app, "Tobico", "tobi@tobico.net").await;
+
+        assert!(saved.tried.is_empty(), "{:?}", saved.tried);
+        assert_eq!(mcp.times_asked(), 1);
+    }
+
+    /// And a save that was turned down tries nothing either: nothing was
+    /// written, so there is no declaration to speak to.
+    #[tokio::test]
+    async fn a_refused_save_tries_nothing() {
+        let (_dir, app) = app().await;
+        let mcp = standing().await;
+
+        let saved = save_servers(
+            &app,
+            serde_json::json!([
+                server("docs", &mcp.answering()),
+                server("Docs Server", &mcp.answering()),
+            ]),
+        )
+        .await;
+
+        assert_eq!(saved.refused_servers.len(), 1);
+        assert!(saved.tried.is_empty(), "{:?}", saved.tried);
+        assert_eq!(mcp.times_asked(), 0);
+    }
 }

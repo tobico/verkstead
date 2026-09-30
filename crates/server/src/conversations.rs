@@ -40,11 +40,12 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use sqlx::SqlitePool;
 use verkstead_render::{
-    Adopted, Attached, AttachmentRemoved, AttachmentView, BaseRecorded, BranchRenamed, BriefSaved,
-    CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed, CompanionMode,
-    CompanionModeChosen, CompanionRefusal, CompanionRemoved, ConversationClosed, GrillingStarted,
-    PairingView, PickedView, Process, ProcessPicked, RepoPairingsView, RepoSwitched, Started,
-    TakenUp, TargetRecorded, Uncommitted, Worktree,
+    Adopted, Attached, AttachedServerView, AttachmentRemoved, AttachmentView, BaseRecorded,
+    BranchRenamed, BriefSaved, CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed,
+    CompanionMode, CompanionModeChosen, CompanionRefusal, CompanionRemoved, ConversationClosed,
+    GrillingStarted, PairingView, PickedView, Process, ProcessPicked, RepoPairingsView,
+    RepoSwitched, ServerAttached, ServerRemoved, Started, TakenUp, TargetRecorded, Uncommitted,
+    Worktree,
 };
 use verkstead_schema::{Direction, Nudge};
 
@@ -862,6 +863,100 @@ pub(crate) async fn attached(pool: &SqlitePool, id: i64) -> Result<Vec<Attachmen
         .filter(|attachment| attachment.origin == store::Origin::Brief)
         .map(attachments::view)
         .collect())
+}
+
+/// Put a declared MCP server on a Conversation, for every session of it to be
+/// launched with.
+///
+/// **The name and nothing else.** What is written down is a reference to a
+/// declaration on the settings page, read afresh wherever the URL and the
+/// headers are actually wanted — so a URL corrected there fixes every
+/// Conversation that attached that server, and this never has to be written
+/// again.
+///
+/// Refused off the state a file is refused off, which is the same freeze: a
+/// Conversation's servers are attached and taken off while the round drafts,
+/// and fixed once the work starts.
+///
+/// And refused where nothing of that name is declared. The menu is drawn from
+/// what the settings held a moment ago, so a declaration deleted between the
+/// drawing and the press would otherwise make a chip that was born pointing at
+/// nothing — which is not the same thing as the chip whose declaration went
+/// afterwards, that one being a reference the human made while it meant
+/// something.
+pub(crate) async fn attach_server(state: &AppState, id: i64, name: &str) -> Result<ServerAttached> {
+    if let Some(refusal) = not_drafting(&state.pool, id).await? {
+        return Ok(match refusal {
+            Frozen::NoSuchConversation => ServerAttached::NoSuchConversation,
+            Frozen::NotDrafting => ServerAttached::NotDrafting,
+        });
+    }
+
+    if !declared_servers(state).iter().any(|held| held == name) {
+        return Ok(ServerAttached::NoSuchServer);
+    }
+
+    // Whether there was one to put on is nothing to report: a name the
+    // Conversation holds already is the state the press asked for — see
+    // [`store::attach_mcp_server`].
+    store::attach_mcp_server(&state.pool, id, name).await?;
+
+    Ok(ServerAttached::Attached)
+}
+
+/// And take one off again, which is the × on its chip.
+///
+/// Nothing is asked about the declarations here, and deliberately: the chip the
+/// human is most likely to be taking off is the one whose declaration has gone,
+/// and a removal that needed the server to still exist would be the one press
+/// that could not undo the state it is complaining about.
+pub(crate) async fn detach_server(state: &AppState, id: i64, name: &str) -> Result<ServerRemoved> {
+    if let Some(refusal) = not_drafting(&state.pool, id).await? {
+        return Ok(match refusal {
+            Frozen::NoSuchConversation => ServerRemoved::NoSuchConversation,
+            Frozen::NotDrafting => ServerRemoved::NotDrafting,
+        });
+    }
+
+    store::detach_mcp_server(&state.pool, id, name).await?;
+
+    Ok(ServerRemoved::Removed)
+}
+
+/// The Conversation's MCP servers, in the shape the workbench draws them: each
+/// name, and whether the settings still declare one by it.
+///
+/// The settings are read here rather than sent to the page beside the record,
+/// because what the page has to draw is one chip per name and the fact it needs
+/// about each is this one — the URL is no business of a viewer's and the headers
+/// beside it are secrets.
+pub(crate) async fn attached_servers(state: &AppState, id: i64) -> Result<Vec<AttachedServerView>> {
+    let declared = declared_servers(state);
+
+    Ok(store::mcp_servers(&state.pool, id)
+        .await?
+        .into_iter()
+        .map(|name| AttachedServerView {
+            declared: declared.contains(&name),
+            name,
+        })
+        .collect())
+}
+
+/// What the settings declare, by name, as of this moment.
+///
+/// Read rather than remembered, which is `config.yaml`'s own contract: a
+/// declaration added, corrected or deleted takes effect on the next thing that
+/// asks. A half-written entry is no declaration and never reaches here — see
+/// `servers_kept` in [`crate::settings`].
+fn declared_servers(state: &AppState) -> Vec<String> {
+    state
+        .settings
+        .config()
+        .mcp_servers()
+        .iter()
+        .filter_map(|server| server.name().map(str::to_owned))
+        .collect()
 }
 
 /// Why a Conversation's files are not the human's to change, or `None` where

@@ -39,6 +39,22 @@
 //! hold of, and one of them being a directory is not a mistake to report: the
 //! files in it are attached, and it is not. A picker cannot offer one at all.
 //!
+//! **And the paperclip grows into a menu where the caller has more to offer at
+//! it.** The draft's composer offers the MCP servers declared in the settings,
+//! so its control is a menu whose first row is *Attach file* — the press this
+//! button always was — and whose others are the caller's. Where a caller offers
+//! nothing, which is the compose page and every answer sheet, it is the plain
+//! button it has always been. What the rows *are* is the caller's whole
+//! business: this knows there is a menu and not what is in it.
+//!
+//! **What a menu's row attaches is drawn in this same row, as a chip.** An MCP
+//! server is not a file — it is a reference by name to something declared
+//! elsewhere, rather than bytes handed over — so it is drawn beside the pills
+//! and told apart from one at a glance, with the same × on it while there is
+//! still something to press. See [`Chip`]. A chip whose declaration has gone is
+//! drawn saying so rather than vanishing: the human attached it on purpose, and
+//! it is still theirs to take off.
+//!
 //! And the same row once nothing can be put on it any more — [`Attachments`],
 //! which is what a frozen Brief is read under. The pills are these pills,
 //! because they are the same files; what is different is that there is no ×
@@ -47,10 +63,12 @@
 
 import { For, Show, createSignal, type JSX } from "solid-js";
 
-import { faPaperclip } from "@fortawesome/free-solid-svg-icons";
+import { faPaperclip, faPlug } from "@fortawesome/free-solid-svg-icons";
 
 import styles from "./Attaching.module.css";
+import { Icon } from "./Icon";
 import { IconButton } from "./IconButton";
+import { Menu } from "./Menu";
 import { Truncated } from "./Truncated";
 
 /// One file to draw in the row.
@@ -85,6 +103,35 @@ export type Shown = {
 
   /// And whether the removal is already in flight, which is the one thing a
   /// press on the × can be truly disabled for.
+  removing?: boolean;
+};
+
+/// One thing in the row that is not a file: an MCP server the Conversation has
+/// attached, as the composer and the frozen Brief pane both draw it.
+///
+/// A chip rather than a pill, and told apart from one at a glance, because it is
+/// a different kind of thing: a file is bytes handed over and sitting in the
+/// Conversation's own directory, and this is a *reference by name* to something
+/// declared on the settings page. What the row is, taken together, is everything
+/// the human put on the work at this one control.
+///
+/// [`Self::gone`] is the reference with nothing on the other end of it. It is
+/// drawn saying so rather than left out: the human attached it on purpose, the
+/// declaration is theirs to put back, and a chip that vanished on its own would
+/// be the one change to the Conversation nobody was told about.
+export type Chip = {
+  /// What it is called, which is the whole of what the Conversation holds.
+  name: string;
+
+  /// Whether nothing is declared by that name any more, which is what the chip
+  /// says under it.
+  gone?: boolean;
+
+  /// Taking it off, where that is something that can be done at all — nothing
+  /// past a freeze, exactly as a pill's.
+  remove?: () => void;
+
+  /// And whether that press is already in flight.
   removing?: boolean;
 };
 
@@ -137,6 +184,27 @@ export function attaching(what: {
   /// see which question they are under. A composer draws one of each and says
   /// nothing, so both are named for what they are.
   onto?: string;
+
+  /// What else is attached here, drawn as chips after the pills — see [`Chip`].
+  ///
+  /// Absent on every caller that has none, which is all of them but the draft's
+  /// composer. A caller that offers a menu passes this as well: what a row of
+  /// that menu attaches has to be drawn somewhere, and where it is drawn is
+  /// here.
+  chips?: () => Array<Chip>;
+
+  /// The rows the menu holds under *Attach file*, where this control is a menu
+  /// at all.
+  ///
+  /// Absent is the plain paperclip, which is what it has always been and what
+  /// every caller but the draft's composer still wants. A function rather than
+  /// a node, because the menu builds its rows when it opens and throws them
+  /// away when it closes — see `Menu.tsx`.
+  ///
+  /// Handed the way to shut the menu, which a row that has done its work calls:
+  /// which of them has is the caller's to know, and a card left hanging under
+  /// the trigger after a press is a list the human has finished with.
+  offering?: (shut: () => void) => JSX.Element;
 }): Attaching {
   const offered = () => what.offered?.() ?? true;
 
@@ -187,18 +255,26 @@ export function attaching(what: {
   const Pills = (props: { class?: string }) => (
     <Row
       files={what.shown()}
+      chips={what.chips?.() ?? []}
       class={props.class}
-      label={what.onto ? `Files attached to ${what.onto}` : undefined}
+      label={rowNamed(what.onto, what.chips !== undefined)}
     />
   );
 
-  const Clip = (props: { class?: string }) => (
-    <Attach
-      add={what.add}
-      class={props.class}
-      label={what.onto ? `Attach a file to ${what.onto}` : undefined}
-    />
-  );
+  const Clip = (props: { class?: string }) =>
+    what.offering === undefined ? (
+      <Attach
+        add={what.add}
+        class={props.class}
+        label={what.onto ? `Attach a file to ${what.onto}` : undefined}
+      />
+    ) : (
+      <AttachMenu
+        add={what.add}
+        class={props.class}
+        offering={what.offering}
+      />
+    );
 
   return {
     Pills,
@@ -233,6 +309,13 @@ export function Attachments(props: {
   /// gives them, because it is the same row read after the fact. A Brief's row
   /// is the one on its pane and says nothing.
   onto?: string;
+
+  /// And what else was attached, as chips after the pills — see [`Chip`].
+  ///
+  /// Read off the record like the files beside them, so nothing here is
+  /// pressable: what a frozen Brief draws is the account of what the sessions
+  /// were given. Absent on the sheet's rows, an Answer having none.
+  chips?: Array<Chip>;
 }): JSX.Element {
   return (
     <Row
@@ -240,10 +323,25 @@ export function Attachments(props: {
         name: file.name,
         size: sized(file.bytes),
       }))}
+      chips={props.chips ?? []}
       class={props.class}
-      label={props.onto ? `Files attached to ${props.onto}` : undefined}
+      label={rowNamed(props.onto, props.chips !== undefined)}
     />
   );
+}
+
+/// What the row is called, for whoever cannot see what is in it.
+///
+/// Three answers, because the row holds three different things across the pages
+/// that draw one: one of several rows on a page is named for what it is under,
+/// a row that may hold chips as well as pills says so, and a row of files alone
+/// is what it always was. Said once here rather than at each of the three places
+/// a `<Row>` is built, so the two halves of the composer's row — the live one
+/// and the frozen one — cannot come to be called different things.
+function rowNamed(onto: string | undefined, chips: boolean): string {
+  if (onto !== undefined) return `Files attached to ${onto}`;
+
+  return chips ? "Attached files and MCP servers" : "Attached files";
 }
 
 /// The row itself, which both of them are.
@@ -255,15 +353,19 @@ export function Attachments(props: {
 /// pills in it, which is what this is.
 function Row(props: {
   files: Array<Shown>;
+
+  /// And what is attached here that is not a file, drawn after them — see
+  /// [`Chip`]. Empty on every row but the composer's and the Brief pane's.
+  chips: Array<Chip>;
+
   class?: string;
 
-  /// What to call the row, where one name for every row on the page would not
-  /// tell them apart — see `onto` in [`attaching`]. *Attached files* otherwise,
-  /// which is what one row on a page is.
+  /// What to call the row — see [`rowNamed`], which is where the three answers
+  /// are decided.
   label?: string;
 }): JSX.Element {
   return (
-    <Show when={props.files.length}>
+    <Show when={props.files.length + props.chips.length}>
       <ul
         class={
           props.class === undefined
@@ -273,6 +375,11 @@ function Row(props: {
         aria-label={props.label ?? "Attached files"}
       >
         <For each={props.files}>{(one) => <Pill file={one} />}</For>
+
+        {/* And the chips after them, wherever there are any: the files are what
+            the control was always for, and a reference to something declared
+            elsewhere reads as the addition it is. */}
+        <For each={props.chips}>{(one) => <ServerChip chip={one} />}</For>
       </ul>
     </Show>
   );
@@ -352,19 +459,138 @@ function Attach(props: {
         press={() => picker.click()}
         class={props.class}
       />
-      <input
-        ref={picker}
-        class={styles.picker}
-        type="file"
-        multiple
-        onChange={(ev) => {
-          props.add(Array.from(ev.currentTarget.files ?? []));
-          // Emptied on the way out, so that choosing the same file again is a
-          // change: an input still holding what was chosen last fires nothing.
-          ev.currentTarget.value = "";
-        }}
-      />
+      <Picker ref={(input) => (picker = input)} add={props.add} />
     </>
+  );
+}
+
+/// The same control where the caller has more to offer at it: a menu whose
+/// first row is *Attach file* and whose others are the caller's — see
+/// `offering` in [`attaching`].
+///
+/// The picker is the same hidden input, reached by the same click: what changes
+/// is that the press that reaches it is a row of a menu rather than the button
+/// itself. So a caller with nothing else to offer keeps the plain button, and
+/// nothing about attaching a file is written twice.
+///
+/// The trigger is the same paperclip and is named *Attach* rather than *Attach a
+/// file*: what it opens is a list of things to attach, and one of them is a
+/// file.
+///
+/// The shut goes to the file row and to the caller's rows alike: every row here
+/// is a press that has done its work by the time it returns, and which of the
+/// caller's has is the caller's to know.
+function AttachMenu(props: {
+  add: (files: Array<File>) => void;
+  offering: (shut: () => void) => JSX.Element;
+  class?: string;
+}): JSX.Element {
+  let picker!: HTMLInputElement;
+
+  // Handed over as the menu is built, so a row that has done its work can take
+  // the card back and give the focus to the trigger it came from.
+  let shut = (): void => {};
+
+  return (
+    <>
+      <Menu
+        class={[styles.clip, props.class].filter(Boolean).join(" ")}
+        label="Attach"
+        name="Attach"
+        closer={(close) => (shut = close)}
+        trigger={<Icon of={faPaperclip} />}
+      >
+        {() => (
+          <>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                // The menu first: the picker is the platform's own window and
+                // what opens it is a press that has done its work, so the card
+                // it was pressed in has no business still hanging under the
+                // trigger behind it.
+                shut();
+                picker.click();
+              }}
+            >
+              Attach file
+            </button>
+
+            {props.offering(shut)}
+          </>
+        )}
+      </Menu>
+
+      <Picker ref={(input) => (picker = input)} add={props.add} />
+    </>
+  );
+}
+
+/// One chip: the name of what is attached, whether anything still answers to
+/// it, and the × that takes it off where there is one to draw.
+///
+/// The pill's shape in the pill's row, painted apart from one — see
+/// [`Chip`], and `.server` in this module's stylesheet. The name is not cut the
+/// way a file's is: a declaration's name is a handful of lowercase letters by
+/// the rules the settings page enforces, and there is nothing in it to lose.
+function ServerChip(props: { chip: Chip }): JSX.Element {
+  return (
+    <li
+      class={`${styles.attachment} ${styles.server}`}
+      classList={{ [styles.missing!]: props.chip.gone }}
+    >
+      {/* What kind of thing it is, said as a shape rather than as a word: the
+          row is read across, and a chip that spelled out what it was would be
+          longer than the name it is about. */}
+      <Icon of={faPlug} class={styles.plug} label="MCP server" />
+
+      <span class={styles.serverName}>{props.chip.name}</span>
+
+      {/* And the reference with nothing on the end of it, said in words: a
+          chip drawn differently and left to be noticed would be a difference
+          nobody could look up. */}
+      <Show when={props.chip.gone}>
+        <span class={styles.attachmentSize}>no longer declared</span>
+      </Show>
+
+      <Show when={props.chip.remove !== undefined}>
+        <button
+          type="button"
+          class={styles.forget}
+          aria-label={`Remove ${props.chip.name}`}
+          disabled={props.chip.removing}
+          onClick={() => props.chip.remove?.()}
+        >
+          ×
+        </button>
+      </Show>
+    </li>
+  );
+}
+
+/// The browser's own picker, hidden, which both shapes of the control reach.
+///
+/// One of these rather than one per shape, because it is the same input with
+/// the same handling behind either: what differs is only what is pressed to
+/// open it.
+function Picker(props: {
+  ref: (input: HTMLInputElement) => void;
+  add: (files: Array<File>) => void;
+}): JSX.Element {
+  return (
+    <input
+      ref={props.ref}
+      class={styles.picker}
+      type="file"
+      multiple
+      onChange={(ev) => {
+        props.add(Array.from(ev.currentTarget.files ?? []));
+        // Emptied on the way out, so that choosing the same file again is a
+        // change: an input still holding what was chosen last fires nothing.
+        ev.currentTarget.value = "";
+      }}
+    />
   );
 }
 

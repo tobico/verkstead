@@ -166,6 +166,10 @@ const CONVERSATION_KEYED: &[&str] = &[
     // The other repositories it was worked in.
     "companions",
     "companion_worktrees",
+    // And the MCP servers it asked its sessions to be launched with, which are
+    // names rather than anything of the installation's: what they referred to
+    // stays declared in `config.yaml` after the Conversation is gone.
+    "conversation_mcp_servers",
     // What was shared of it, which is the record of a share rather than the
     // share: the file itself was put somewhere on purpose and stays there.
     "shares",

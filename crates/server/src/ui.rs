@@ -39,16 +39,18 @@ use verkstead_render::{
     ConversationSteered, ConversationStopped, ConversationUnarchived, ConversationView, Creation,
     Cursor, FileDeleted, FileDeleting, FileListsView, FileMade, FileMaking, FileReading,
     FileRenamed, FileRenaming, FileRootsView, FileStatusView, FileWrite, FileWritten,
-    FolderListing, GrillingStarted, IgnoreRule, IgnoredCommentsEdit, InstallPress, Lifecycle,
-    Locked, Merging, MissedOut, NewAdoption, NewCompanion, NewConversation, NewOrder, PairingView,
-    Parked, PendingSteerView, Process, ProcessChoice, ProcessPicked, ProfileChoice, ProfileEdit,
-    ProfileEntry, PushKey, Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry,
-    RepoSwitched, Resolved, Resumed, RoleChoice, RuleField, RuleRefused, ServeEdit, ServePress,
-    SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished,
-    SharedCommit, SharedConversation, ShowArchived, ShowingArchived, Standing, SteerCancelled,
-    SteerForm, SteerOpened, SteerPairingView, SteerSaved, SteerSubmission, Submitted, Subscribed,
-    Subscription, TakenUp, TargetNamed, TargetRecorded, TerminalOpened, TimelineEvent, TokenEdit,
-    TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
+    FolderListing, GrillingStarted, HeaderEdit, IgnoreRule, IgnoredCommentsEdit, InstallPress,
+    Lifecycle, Locked, McpHeader, McpServer, McpServerEdit, McpServersEdit, Merging, MissedOut,
+    NewAdoption, NewCompanion, NewConversation, NewOrder, PairingView, Parked, PendingSteerView,
+    Process, ProcessChoice, ProcessPicked, ProfileChoice, ProfileEdit, ProfileEntry, PushKey,
+    Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed,
+    RoleChoice, RuleField, RuleRefused, ServeEdit, ServePress, ServerAttached, ServerField,
+    ServerRefused, ServerRemoved, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView,
+    ShareCommented, SharePublished, SharedCommit, SharedConversation, ShowArchived,
+    ShowingArchived, Standing, SteerCancelled, SteerForm, SteerOpened, SteerPairingView,
+    SteerSaved, SteerSubmission, Submitted, Subscribed, Subscription, TakenUp, TargetNamed,
+    TargetRecorded, TerminalOpened, TimelineEvent, TokenEdit, TokenSaved, UnreadableSet,
+    Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -355,6 +357,24 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         .route(
             "/api/ui/conversations/{id}/attachments/{attachment}/remove",
             post(detach),
+        )
+        // And the MCP servers the human asked the work's sessions to be given,
+        // which are the Brief's companions in the same way and freeze with it in
+        // the same breath — the other half of the one Attach control.
+        //
+        // The name in the path rather than an id, because the name is what a
+        // Conversation holds: a chip is a reference to a declaration in
+        // `config.yaml`, and there is no row of the record for one to be by.
+        .route(
+            "/api/ui/conversations/{id}/mcp-servers/{name}",
+            post(attach_server),
+        )
+        // And taking one off, by that same name and for that same reason. Named
+        // in the path rather than in the verb, as an attachment's removal and a
+        // companion's are.
+        .route(
+            "/api/ui/conversations/{id}/mcp-servers/{name}/remove",
+            post(detach_server),
         )
         // And which Repo the work is in at all, which is the first thing the
         // Repo panel asks and the one the branch and the base below it are
@@ -1748,6 +1768,22 @@ pub(crate) async fn conversation_view(
         }
     };
 
+    // And the MCP servers it asked its sessions to be given, which the composer
+    // draws as chips in that same row. Read beside the files because it is the
+    // same act at the same control — and read with the settings, because what
+    // the chip has to say is whether anything is still declared by that name.
+    //
+    // A read that fails reads as *none attached*, for the reason the files' does:
+    // the rows are untouched, and the next read of the Conversation draws them
+    // again.
+    let servers = match crate::conversations::attached_servers(state, id).await {
+        Ok(servers) => servers,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading the MCP servers attached to a Conversation failed");
+            Vec::new()
+        }
+    };
+
     // And the steer somebody has started on it and not yet decided, which the
     // Timeline draws as its last item and the details pane draws the form of.
     // Read the way the archive mark is: a row beside the Conversation rather
@@ -1846,6 +1882,7 @@ pub(crate) async fn conversation_view(
         trimmed,
         shared,
         attachments: attached,
+        mcp_servers: servers,
         pending_steer,
         // The same reading the Events above are drawn against, said as a fact
         // about the Conversation: the Timeline offers Force stop exactly where
@@ -3688,6 +3725,47 @@ async fn detach(
     }
 }
 
+/// `POST /api/ui/conversations/{id}/mcp-servers/{name}` — give a Conversation a
+/// declared MCP server for its sessions to be launched with.
+///
+/// The name in the path and no body at all: what a Conversation holds is a
+/// reference to a declaration by name, so the name is the whole of the request.
+async fn attach_server(
+    State(state): State<AppState>,
+    Path((id, name)): Path<(String, String)>,
+) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(ServerAttached::NoSuchConversation).into_response();
+    };
+
+    match crate::conversations::attach_server(&state, id, &name).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, name = %name, "attaching an MCP server failed");
+            unavailable("the MCP server could not be attached")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/mcp-servers/{name}/remove` — and take one
+/// off again.
+async fn detach_server(
+    State(state): State<AppState>,
+    Path((id, name)): Path<(String, String)>,
+) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(ServerRemoved::NoSuchConversation).into_response();
+    };
+
+    match crate::conversations::detach_server(&state, id, &name).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, name = %name, "removing an MCP server failed");
+            unavailable("the MCP server could not be removed")
+        }
+    }
+}
+
 /// `POST /api/ui/sets/{id}/answers/{label}/attachments/{name}` — put a file on
 /// one of a Set's Answers.
 ///
@@ -4877,6 +4955,15 @@ async fn settings(State(state): State<AppState>) -> HttpResponse {
 /// pasted once, out of a page that will not show it again, and a verification
 /// that failed on the network is no reason to make the human go back for
 /// another one.
+///
+/// And the declarations a save wrote down are tried the same way and for the
+/// same reason — one MCP `initialize` apiece, with that declaration's own
+/// headers — see [`crate::mcp`]. It is the one thing this handler does that is
+/// neither a file nor a process, so it happens on the runtime rather than on the
+/// blocking hop, after the hop has said what there is to speak to. A save from
+/// another section speaks to nothing, that one saying nothing about the
+/// declarations; a save that was refused speaks to nothing either, nothing
+/// having been written down to speak to.
 async fn save_settings(
     State(state): State<AppState>,
     Json(edit): Json<SettingsEdit>,
@@ -4918,15 +5005,52 @@ async fn save_settings(
             }
         };
 
-        if !refused.is_empty() {
-            return Ok(SettingsSaved {
-                // How things stand, which is how they stood: nothing was
-                // written, and the page draws the errors over what the human
-                // still has in front of them.
-                settings: as_told(&settings, caches_compiles, &installed),
-                verified: None,
-                refused,
-            });
+        // And the declared MCP servers, the same way and for the same reason:
+        // both lists are decided, and both are checked, before either file is
+        // touched. A save turned down over a name is the whole request refused,
+        // like one turned down over a pattern.
+        //
+        // And what is to become of the header values with them, which is the
+        // one thing this section writes into the *other* file: a declaration is
+        // a name, a URL and the names of its headers, and every value is a
+        // secret kept where the token is kept — see [`header_actions`].
+        let (servers, headers, refused_servers) = match &edit.mcp_servers {
+            // Whatever is declared, carried through untouched — a name this page
+            // would have refused included. The reading half keeps one of those
+            // and this half is not entitled to drop it: a save about the build
+            // cache has no business rewriting a declaration, and no business
+            // being refused over one either.
+            //
+            // And nothing at all about the headers, which is what leaves every
+            // key where it is: a section that says nothing about the
+            // declarations says nothing about their secrets either.
+            McpServersEdit::Keep => (settings.config().mcp_servers().to_vec(), None, Vec::new()),
+
+            McpServersEdit::Set { servers: sent } => {
+                let servers: Vec<_> = sent.iter().map(as_declared).collect();
+                let refused = server_refusals(&servers);
+                let headers = header_actions(&servers, sent);
+
+                (servers, Some(headers), refused)
+            }
+        };
+
+        if !refused.is_empty() || !refused_servers.is_empty() {
+            return Ok((
+                SettingsSaved {
+                    // How things stand, which is how they stood: nothing was
+                    // written, and the page draws the errors over what the human
+                    // still has in front of them.
+                    settings: as_told(&settings, caches_compiles, &installed),
+                    verified: None,
+                    refused,
+                    refused_servers,
+                    // And nothing was spoken to. A refusal is the whole request
+                    // refused, so there is no declaration written down to try.
+                    tried: Vec::new(),
+                },
+                Vec::new(),
+            ));
         }
 
         settings.save_config(
@@ -4964,6 +5088,9 @@ async fn save_settings(
                 // And the rules, decided above: either what was already written down
                 // or the whole list the page sent, in the order it sent it.
                 rules,
+                // And the declared servers, decided the same way and above the
+                // same refusal.
+                servers,
                 // And the text every session is given, as it was typed: a value
                 // like the binds above it, so what the page sent is what the
                 // file holds afterwards and a box cleared is a key taken away.
@@ -4978,27 +5105,51 @@ async fn save_settings(
         )?;
 
         // On what the file already holds rather than on nothing: a save writes
-        // the whole of `secrets.yaml`, and the session account's password is in
-        // there beside the token on a Windows machine — see
+        // the whole of `secrets.yaml`, and there are two other secrets in there
+        // beside the token — the session account's password on a Windows
+        // machine, and the MCP servers' header values — see
         // [`crate::settings::Settings::save_secrets`]. A page that has been
-        // told about one secret has no business rewriting the other.
+        // told about one secret has no business rewriting another, which is why
+        // each of these is a `with_` on the secrets that are already there.
+        //
+        // Once for both of them rather than a write apiece: what the file holds
+        // afterwards is one thing, and two writes would be a window in which it
+        // held half of it.
+        let mut secrets = settings.secrets();
+        let mut writing = false;
+
+        // The headers first, where this save was about the declarations: the
+        // servers the section did not send are the ones whose keys go, which is
+        // how deleting a declaration takes its secrets with it.
+        if let Some(headers) = &headers {
+            secrets = secrets.with_mcp_headers(headers);
+            writing = true;
+        }
+
         let verifying = match &edit.github_token {
             TokenEdit::Keep => None,
             TokenEdit::Set { token } => {
-                settings.save_secrets(&settings.secrets().with_token(Some(token.clone())))?;
+                secrets = secrets.with_token(Some(token.clone()));
+                writing = true;
 
-                // Read back rather than taken from the request: a token that was
-                // only whitespace is nothing configured, and verifying what was
-                // typed would announce an account for a token no session will
-                // ever be given.
-                settings.secrets().github_token().map(str::to_owned)
+                // Read back off the secrets that are to be written rather than
+                // taken from the request: a token that was only whitespace is
+                // nothing configured, and verifying what was typed would
+                // announce an account for a token no session will ever be
+                // given.
+                secrets.github_token().map(str::to_owned)
             }
             TokenEdit::Clear => {
-                settings.save_secrets(&settings.secrets().with_token(None))?;
+                secrets = secrets.with_token(None);
+                writing = true;
 
                 None
             }
         };
+
+        if writing {
+            settings.save_secrets(&secrets)?;
+        }
 
         // What GitHub made of it: whose it is, and what it may do. The second
         // half is here because a token that authenticates perfectly and cannot
@@ -5013,18 +5164,58 @@ async fn save_settings(
             Err(trouble) => Verified::Refused { why: trouble.why() },
         });
 
-        Ok::<_, std::io::Error>(SettingsSaved {
-            settings: as_told(&settings, caches_compiles, &installed),
-            verified,
-            // Nothing turned down: a save that got this far was one there was
-            // nothing wrong with.
-            refused: Vec::new(),
-        })
+        // And the declarations this save wrote down, each with the header values
+        // just written beside it — which is what is spoken to below. Read back
+        // off the two files rather than built out of what came in, the way the
+        // view that rides back is: the files are the source of truth, and what a
+        // session would be handed is what is worth trying.
+        //
+        // Empty where the save said nothing about the declarations, which is
+        // every save from another section: this is a check at save, and a save
+        // about an email address is not one.
+        let config = settings.config();
+        let trying = match &edit.mcp_servers {
+            McpServersEdit::Keep => Vec::new(),
+            McpServersEdit::Set { .. } => {
+                let declared: Vec<_> = config
+                    .mcp_servers()
+                    .iter()
+                    .filter_map(|server| Some(server.name()?.to_owned()))
+                    .collect();
+
+                config.attached_among(&declared, &settings.secrets())
+            }
+        };
+
+        Ok::<_, std::io::Error>((
+            SettingsSaved {
+                settings: as_told(&settings, caches_compiles, &installed),
+                verified,
+                // Nothing turned down: a save that got this far was one there was
+                // nothing wrong with — of either list.
+                refused: Vec::new(),
+                refused_servers: Vec::new(),
+                // Filled in below, off the runtime rather than off this thread:
+                // trying a server is a request over the network, which is the one
+                // thing in this handler that is neither a file nor a process.
+                tried: Vec::new(),
+            },
+            trying,
+        ))
     })
     .await;
 
     match saved {
-        Ok(Ok(saved)) => Json(saved).into_response(),
+        Ok(Ok((mut saved, trying))) => {
+            // After the writing and never before it — see [`crate::mcp`]: a URL
+            // is typed once beside a token that will not be shown again, and a
+            // server that could not be reached this minute is still a
+            // declaration worth keeping. So this says what happened when each
+            // was spoken to, and changes nothing about what was saved.
+            saved.tried = crate::mcp::tried(&trying).await;
+
+            Json(saved).into_response()
+        }
         // The one way this fails: a file that would not be written. Something to
         // try again rather than something to read, so it is a status code and
         // not a named outcome — and worth saying loudly, because a settings page
@@ -5166,6 +5357,16 @@ fn as_told(
         // could not correct.
         ignored_comments: config.ignored_comments().iter().map(as_written).collect(),
 
+        // And the declared MCP servers exactly as the file holds them, a name
+        // this page would have refused included: this is what the section draws
+        // back into its rows, and a declaration left out of the read would be
+        // one the human could neither use nor correct.
+        mcp_servers: config
+            .mcp_servers()
+            .iter()
+            .map(|server| as_declared_row(server, &secrets))
+            .collect(),
+
         // And the text every session is given, empty where nobody has typed
         // one: the box on the page holds a string either way, and there is no
         // third state between an unwritten key and a text of nothing.
@@ -5194,6 +5395,126 @@ fn as_written(rule: &crate::settings::IgnoreRule) -> IgnoreRule {
         author: rule.author().unwrap_or_default().to_owned(),
         body: rule.body().unwrap_or_default().to_owned(),
     }
+}
+
+/// One MCP server as `config.yaml` holds it, out of what the page sent: a name,
+/// a URL and the names of its headers, each blank one nothing at all.
+///
+/// The header *values* are not here. They are secrets and they are in
+/// `secrets.yaml` — see [`header_actions`], which is the other half of one of
+/// these.
+fn as_declared(server: &McpServerEdit) -> crate::settings::McpServer {
+    crate::settings::McpServer::of(
+        Some(server.name.clone()),
+        Some(server.url.clone()),
+        server
+            .headers
+            .iter()
+            .map(|header| header.name.clone())
+            .collect(),
+    )
+}
+
+/// And what is to become of each of their values, by the name the declaration
+/// ended up with: what [`crate::settings::Secrets::with_mcp_headers`] writes.
+///
+/// Read off `declared` rather than off `sent`, so that the two halves of a
+/// declaration cannot come apart: a header whose name was blank, or one written
+/// twice, is one header or none by the time the file holds it — see
+/// [`crate::settings::McpServer::of`] — and a secret written under a name no
+/// declaration carries would be one nothing could ever send or take away.
+///
+/// A declared header the page said nothing about is kept. That is only ever a
+/// hand-edited `config.yaml`, this being built out of what the page sent; and
+/// keeping is what every other untouched value does.
+fn header_actions(
+    declared: &[crate::settings::McpServer],
+    sent: &[McpServerEdit],
+) -> Vec<(String, Vec<(String, crate::settings::HeaderValue)>)> {
+    declared
+        .iter()
+        .zip(sent)
+        .filter_map(|(declared, sent)| {
+            let headers = declared
+                .headers()
+                .iter()
+                .map(|header| {
+                    let wanted = sent
+                        .headers
+                        .iter()
+                        .find(|edit| edit.name.trim() == header)
+                        .map(|edit| match &edit.value {
+                            HeaderEdit::Keep => crate::settings::HeaderValue::Keep,
+                            HeaderEdit::Set { value } => {
+                                crate::settings::HeaderValue::Set(value.clone())
+                            }
+                            HeaderEdit::Clear => crate::settings::HeaderValue::Clear,
+                        })
+                        .unwrap_or(crate::settings::HeaderValue::Keep);
+
+                    (header.clone(), wanted)
+                })
+                .collect();
+
+            Some((declared.name()?.to_owned(), headers))
+        })
+        .collect()
+}
+
+/// And the other way round, for the read: a half the file does not hold is an
+/// empty box on the page, which is the same thing said in the shape a form
+/// holds.
+///
+/// Which is only ever a hand-edit. A declaration missing either half is dropped
+/// as the file is read — see `settings::servers_kept` — so what reaches here has
+/// both, and the fallbacks are what keeps this honest rather than what it is
+/// for.
+fn as_declared_row(
+    server: &crate::settings::McpServer,
+    secrets: &crate::settings::Secrets,
+) -> McpServer {
+    let name = server.name().unwrap_or_default();
+
+    McpServer {
+        name: name.to_owned(),
+        url: server.url().unwrap_or_default().to_owned(),
+        // The names of its headers, each saying whether anything is kept to
+        // send in it, and no part of a value: that is what the token's own view
+        // gives of the token, and the whole of why the two directions of this
+        // section are different shapes.
+        headers: server
+            .headers()
+            .iter()
+            .map(|header| McpHeader {
+                name: header.clone(),
+                set: secrets.mcp_header(name, header).is_some(),
+            })
+            .collect(),
+    }
+}
+
+/// What is wrong with the declarations a save is asking for, one entry per row
+/// at fault, and empty where there is nothing wrong with any of them.
+///
+/// Over the whole list rather than one at a time, because one of the two things
+/// that can be wrong with a name is that another declaration has it — see
+/// `settings::trouble_among`, which is where that is decided.
+fn server_refusals(servers: &[crate::settings::McpServer]) -> Vec<ServerRefused> {
+    crate::settings::trouble_among(servers)
+        .into_iter()
+        .map(|(at, trouble)| {
+            let (field, why) = match trouble {
+                crate::settings::ServerTrouble::Name(why) => (ServerField::Name, why),
+                crate::settings::ServerTrouble::Url(why) => (ServerField::Url, why),
+            };
+
+            ServerRefused {
+                server: at as u32,
+                field,
+                why,
+            }
+        })
+        .collect()
 }
 
 /// What is wrong with the rules a save is asking for, one entry per row at

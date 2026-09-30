@@ -39,7 +39,8 @@ use verkstead_schema::{
 use verkstead_server::key::WorkbenchKey;
 use verkstead_server::remote::Tailscale;
 use verkstead_server::{
-    Gh, open_database, router, router_asking_github, router_reading_tailscale, store,
+    Gh, open_database, router, router_asking_github, router_keeping, router_reading_tailscale,
+    store,
 };
 
 /// The Conversation every Set in this file is asked from.
@@ -63,6 +64,38 @@ async fn empty_app() -> (tempfile::TempDir, SqlitePool, Router) {
         .unwrap();
 
     (dir, pool.clone(), router(pool))
+}
+
+/// The same, keeping its settings in that directory and with two MCP servers
+/// declared in them.
+///
+/// What the workbench fixtures are written over. A Conversation's chips are
+/// references *by name* to what the settings declare, and each comes back
+/// saying whether anything still answers to it — so a router with no settings
+/// file behind it would write a fixture where every chip says the server is
+/// gone, which is the rarer of the two shapes and not the one the composer is
+/// drawn against.
+///
+/// Two declarations, because the menu the chips come out of has to read as a
+/// list: one the fixture's Conversation attaches, and one it leaves for the
+/// menu to offer.
+async fn declaring_app() -> (tempfile::TempDir, SqlitePool, Router) {
+    let dir = tempfile::tempdir().unwrap();
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    std::fs::write(
+        dir.path().join("config.yaml"),
+        "mcp_servers:\n  \
+         - name: docs\n    url: https://mcp.example.com/docs\n  \
+         - name: tickets\n    url: https://mcp.example.com/tickets\n",
+    )
+    .unwrap();
+
+    let app = router_keeping(pool.clone(), dir.path().to_owned());
+
+    (dir, pool, app)
 }
 
 /// The same, with somewhere for a Set to be asked from — see [`ASKING_FROM`].
@@ -1972,7 +2005,14 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // a drafting Conversation carries. Put in through the store for the reason
     // the Repos are: going in the front way means a git repository on disk,
     // which is `conversations.rs`'s subject and not this one's.
-    let (_dir, pool, app) = empty_app().await;
+    //
+    // Over a settings file rather than over nowhere, which is the one thing
+    // these fixtures need that the Sets above do not: a Conversation's chips
+    // are references by name to the MCP servers declared there, and each one
+    // comes back saying whether it still points at anything. So the
+    // declarations are written first, and a Conversation is then given one that
+    // is there and one that is not.
+    let (_dir, pool, app) = declaring_app().await;
     let mut repos = Vec::new();
     for (path, name, branch) in [
         ("/srv/repos/verkstead", "verkstead", "main"),
@@ -2070,6 +2110,20 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             .unwrap();
     }
 
+    // And two MCP servers on it, which is what the chips beside those pills are
+    // drawn from — one of each shape a chip has. `docs` is declared in the
+    // settings above and points at something; `archive` is not, which is the
+    // reference whose declaration has since been deleted, and the one thing a
+    // chip says about itself. Which leaves `tickets` declared and unattached,
+    // so the menu the chips come out of has a row to offer.
+    for name in ["docs", "archive"] {
+        assert!(
+            store::attach_mcp_server(&pool, drafting, name)
+                .await
+                .unwrap()
+        );
+    }
+
     // And the other Repo added to work alongside it, which is what a companion
     // row on the setup card is drawn from — with the defaults an added one
     // carries, because that is the shape every companion starts in.
@@ -2125,6 +2179,13 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     )
     .await
     .unwrap();
+
+    // And a server attached before it started, for the same reason: the frozen
+    // Brief pane draws the chips the composer drew, with nothing left to press
+    // on one.
+    store::attach_mcp_server(&pool, grilling, "docs")
+        .await
+        .unwrap();
 
     store::start_grilling(
         &pool,
@@ -3150,6 +3211,41 @@ async fn the_viewers_own_tests_are_fed_from_here() {
                 "Set": { "rules": [{ "author": "coderabbitai", "body": "billing" }] }
             },
 
+            // And two MCP servers declared, for that reason again: the
+            // declarations are the other setting sent as an action rather than a
+            // value, and this is the section that owns them.
+            //
+            // The same two the workbench fixtures are written over — see
+            // [`declaring_app`] — because the viewer reads both at once: the
+            // composer's Attach menu offers what is declared here minus what the
+            // Conversation there already has, and two fixtures that disagreed
+            // would be a menu with nothing in it.
+            // The first of them carries headers and the second carries none,
+            // because both are shapes the pane draws. And of its two, one has a
+            // value kept for it and one is a name with nothing behind it yet:
+            // that is the whole of what comes back about a header, the value
+            // itself going where the token goes and never coming back.
+            "mcp_servers": {
+                "Set": { "servers": [
+                    {
+                        "name": "docs",
+                        "url": "https://mcp.example.com/docs",
+                        "headers": [
+                            {
+                                "name": "Authorization",
+                                "value": { "Set": { "value": "Bearer sk-averysecretkey" } },
+                            },
+                            { "name": "X-Tenant", "value": "Keep" },
+                        ],
+                    },
+                    {
+                        "name": "tickets",
+                        "url": "https://mcp.example.com/tickets",
+                        "headers": [],
+                    },
+                ] }
+            },
+
             // And a text for every session, for the reason the size above is
             // typed. Two paragraphs rather than a line, because what the pane
             // has to draw is prose with its line breaks in it, and a fixture
@@ -3161,7 +3257,10 @@ async fn the_viewers_own_tests_are_fed_from_here() {
 
     // The answer to the save, which is the other shape this page reads: the
     // settings as they now stand, and the account GitHub said the token is.
-    write("settings-saved.json", &pin_written_at(&saved, "settings"));
+    write(
+        "settings-saved.json",
+        &pin_tried(&pin_written_at(&saved, "settings")),
+    );
     write(
         "settings.json",
         &pin_written_at(&get(&app, "/api/ui/settings").await, ""),
@@ -3653,6 +3752,42 @@ fn pin_written_at(json: &str, under: &str) -> String {
         "no saved token here to pin:\n{settings}"
     );
     settings["github_token"]["at"] = "2026-08-03T09:07:11.000Z".into();
+
+    serde_json::to_string(&payload).unwrap()
+}
+
+/// Pin what came of trying the two declarations, which is what the *network*
+/// would otherwise decide — `pin_health` below, said about a socket.
+///
+/// The fixture declares `mcp.example.com`, which is a name reserved so that it
+/// is nobody's: what happens when this server speaks to it is a resolver's
+/// answer and a machine's connectivity, so the real outcome is a different
+/// sentence on every machine and a diff on every run. What is pinned is the
+/// pair the page has the most to draw — one reached and naming itself, one
+/// refused — because both are shapes it has to say something about, and a
+/// fixture where both said the same would prove only one of them. That the
+/// server really tries them, and what it makes of each way one can fail, is
+/// `tests/settings.rs`'s subject.
+fn pin_tried(json: &str) -> String {
+    let mut payload: serde_json::Value = serde_json::from_str(json).unwrap();
+
+    assert_eq!(
+        payload["tried"].as_array().map(Vec::len),
+        Some(2),
+        "no pair of declarations was tried here to pin:\n{payload}"
+    );
+
+    payload["tried"] = serde_json::json!([
+        { "server": "docs", "outcome": { "Reached": { "named": "Docs MCP" } } },
+        {
+            "server": "tickets",
+            "outcome": {
+                "Refused": {
+                    "why": "It did not answer: failed to lookup address information.",
+                },
+            },
+        },
+    ]);
 
     serde_json::to_string(&payload).unwrap()
 }

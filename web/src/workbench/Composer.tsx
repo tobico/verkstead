@@ -49,6 +49,35 @@
 //! the compose page alike (see [`Attaching`](../Attaching.tsx)), with only what
 //! becomes of a chosen file different between them.
 //!
+//! **And the paperclip is a menu**, here and on the compose page alike, an
+//! answer sheet's being the one that stays a plain button: *Attach file* first,
+//! and under it the MCP servers declared on the settings page. Picking one puts
+//! it on the Conversation and draws a chip for it in that same row, and the
+//! chip's × takes it off again and puts it back in the menu. With none declared
+//! it is still a menu — *Attach file*, and the way to the settings section where
+//! one is declared — because a control that changed shape with the settings
+//! would be a control the human had to find twice. The rows are [`ServerRows`],
+//! which both pages draw.
+//!
+//! What is this pane's alone is that a pick lands on the server as it is made:
+//! there is a Conversation under this composer, so the chip comes back off the
+//! record. The compose page holds its picks until a press, having nothing yet
+//! to put them on.
+//!
+//! **What is attached is a name.** The Conversation records which servers it
+//! has, and the declaration is looked up by that name whenever it is needed, so
+//! a URL corrected in the settings is the one every Conversation then uses and a
+//! declaration deleted there leaves a chip that says the server is gone rather
+//! than one that quietly went. Which is why the chip is still removable: the
+//! reference is the human's, and so is taking it back.
+//!
+//! **The servers are the Conversation's rather than the round's**, and they
+//! freeze as the files do: attached and taken off while the Conversation
+//! drafts, fixed once the work starts, and drawn read-only on the frozen
+//! Brief's own pane. Which is what a later drafting round is drawn from too —
+//! this pane serves whichever Brief is open, and the chips it draws are the ones
+//! the Conversation already had, attached and the human's to take off.
+//!
 //! Nothing on this pane has a Save. The Brief keeps itself on a pause in the
 //! typing and on the way out of the field, every setup field sends its own
 //! change as it is made, and what a save cannot do is said in words where it
@@ -56,12 +85,23 @@
 //!
 //! [`Brief`]: ./Brief.tsx
 
+import { A } from "@solidjs/router";
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
-import { For, Show, createSignal, type JSX } from "solid-js";
+import {
+  For,
+  Match,
+  Show,
+  Switch as Choose,
+  createSignal,
+  type JSX,
+} from "solid-js";
 
 import {
   attachFile,
+  attachServer,
+  loadSettings,
   removeAttachment,
+  removeServer,
   saveBrief,
   startGrilling,
   takeUpPullRequest,
@@ -74,13 +114,17 @@ import type {
   BriefSaved,
   ConversationView,
   GrillingStarted,
+  McpServer,
   Process,
+  ServerAttached,
+  ServerRemoved,
   TakenUp,
 } from "../api/types";
 import app from "../App.module.css";
-import { attaching, type Attaching, type Shown } from "../Attaching";
+import { attaching, type Attaching, type Chip, type Shown } from "../Attaching";
 import { PaneSticky } from "../Panes";
 import shell from "../Panes.module.css";
+import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
 import { Adoption } from "./Adoption";
 import styles from "./Composer.module.css";
@@ -139,13 +183,41 @@ export function Composer(props: {
     frozen: () => props.brief.frozen,
   });
 
+  // And the MCP servers it has, which are the other half of the one control:
+  // the chips in that same row, and the rows the menu offers under *Attach
+  // file*. Frozen with the Brief exactly as the files are.
+  const servers = serversOn({
+    conversation: () => props.conversation,
+    frozen: () => props.brief.frozen,
+  });
+
   // And the one piece the whole of the attaching UI is drawn through, here and
   // on the compose page alike — the pills inside the box, the paperclip in the
   // row of presses, and the drop the box itself takes. See `Attaching.tsx`.
   const files = attaching({
     shown: sending.shown,
+    chips: servers.chips,
     add: sending.send,
     offered: () => !props.brief.frozen,
+    // Which is what makes this control a menu rather than a button — as it is
+    // on the compose page, the other place a Brief is written; the answer
+    // sheets offer nothing at theirs and keep the plain paperclip. Passed
+    // whatever the Brief's freeze, because a frozen one draws no paperclip to
+    // open it — the adopting draft's press is the Adoption, and a round that
+    // has started has this whole pane replaced by the Brief's own.
+    offering: (shut) => (
+      <ServerRows
+        attached={props.conversation.mcp_servers.map((one) => one.name)}
+        attach={(name) => {
+          // The menu first, because the press has done its work: the row that
+          // was pressed is about to go — the server it named has a chip now —
+          // and a card still hanging under the trigger would be a list
+          // rearranging itself under the hand that had finished with it.
+          shut();
+          servers.attach(name);
+        }}
+      />
+    ),
   });
 
   return (
@@ -186,6 +258,14 @@ export function Composer(props: {
               line for the whole of it rather than one per pill, a pill being a
               name on a line with nowhere in it to say a sentence. */}
           <Show when={sending.refusedRemoval()}>
+            {(said) => <ErrorLine class={styles.failure}>{said()}</ErrorLine>}
+          </Show>
+
+          {/* And the same for a chip, said in the same place and for the same
+              reason: a chip has nowhere in it to say a sentence either, and
+              what went wrong with attaching one and with taking one off is the
+              same sentence about the same row. */}
+          <Show when={servers.refused()}>
             {(said) => <ErrorLine class={styles.failure}>{said()}</ErrorLine>}
           </Show>
 
@@ -617,6 +697,200 @@ export const ATTACHMENT_REMOVAL_REFUSAL: Record<AttachmentRemoved, string> = {
   NoSuchConversation: "This conversation is gone.",
   NotDrafting: "The work has started, so its files are settled.",
 };
+
+/// What could not be done about an MCP server, one sentence per way of being
+/// refused.
+///
+/// One table for both presses, unlike the files' two: attaching a server and
+/// taking one off are refused for the same reasons, said in the same words, and
+/// the one refusal only a press *on* can meet reads as a sentence about the
+/// declaration rather than about the press.
+export const SERVER_REFUSAL: Record<
+  Exclude<ServerAttached | ServerRemoved, "Attached" | "Removed">,
+  string
+> = {
+  NoSuchConversation: "This conversation is gone.",
+  NotDrafting: "The work has started, so its servers are settled.",
+  NoSuchServer: "That server is no longer declared in the settings.",
+};
+
+/// What a draft's composer does about its MCP servers, held once for the pane:
+/// the chips it hands the attaching piece, the two presses, and whatever came
+/// back refused from either of them.
+type Servers = {
+  /// The row of chips: what the Conversation holds, each with its × where there
+  /// is still one to press.
+  chips: () => Array<Chip>;
+
+  /// Put one on, by name.
+  attach: (name: string) => void;
+
+  /// And what could not be done, one line for the whole row — a chip is a name
+  /// on a line with nowhere in it to say a sentence, exactly as a pill is.
+  refused: () => string | null;
+};
+
+/// The whole of that, made once by the composer.
+///
+/// Not a mutation, for the reason the files' sending is not one: the row is a
+/// list and each press is its own request with its own answer, so what is in
+/// flight is per server rather than one `isPending` for the row. The query it
+/// invalidates is the one every press on this pane invalidates — the chip is
+/// drawn from the Conversation, so the read is both how it arrives and how it
+/// goes.
+function serversOn(what: {
+  conversation: () => ConversationView;
+
+  /// Whether the round's Brief has frozen, which is what takes the × off every
+  /// chip: the servers freeze with it, and a control that could only be refused
+  /// is not drawn.
+  frozen: () => boolean;
+}): Servers {
+  const queries = useQueryClient();
+
+  const [refused, setRefused] = createSignal<string | null>(null);
+
+  // Which names have a press in flight, either way: the one thing a row of the
+  // menu and a × on a chip can be truly disabled for is a press already made.
+  const [working, setWorking] = createSignal<Array<string>>([]);
+
+  /// One press, whichever of the two it is.
+  ///
+  /// The same shape both ways down to the sentence it says, which is what
+  /// [`SERVER_REFUSAL`] is one table for: what the human did is put a name on
+  /// this Conversation or take it off, and what can be wrong with either is the
+  /// state of the Conversation.
+  const press = (
+    name: string,
+    made: Promise<ServerAttached | ServerRemoved>,
+    said: string,
+  ) => {
+    setWorking((was) => [...was, name]);
+
+    void made
+      .then((outcome: ServerAttached | ServerRemoved) => {
+        setRefused(
+          outcome === "Attached" || outcome === "Removed"
+            ? null
+            : SERVER_REFUSAL[outcome],
+        );
+
+        // Either way: what came back is about a Conversation this pane read a
+        // moment ago, so reading it again is both the correction and — where
+        // the chip is simply there, or simply gone — the whole of what there
+        // was to do.
+        void queries.invalidateQueries({ queryKey: ["conversation"] });
+      })
+      .catch((error: unknown) =>
+        setRefused(
+          `${name} ${said}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        ),
+      )
+      .finally(() => setWorking((was) => was.filter((one) => one !== name)));
+  };
+
+  const attach = (name: string) => {
+    setRefused(null);
+    press(name, attachServer(what.conversation().id, name), "could not be attached");
+  };
+
+  const forget = (name: string) =>
+    press(name, removeServer(what.conversation().id, name), "could not be removed");
+
+  const chips = (): Array<Chip> =>
+    what.conversation().mcp_servers.map((server) => ({
+      name: server.name,
+      gone: !server.declared,
+      remove: what.frozen() ? undefined : () => forget(server.name),
+      removing: working().includes(server.name),
+    }));
+
+  return { chips, attach, refused };
+}
+
+/// The rows an Attach menu holds under *Attach file*: one per declared MCP
+/// server that is not on already.
+///
+/// **Both pages that write a Brief draw these**, which is why what is already
+/// on arrives as a list of names rather than as the Conversation: the composer
+/// reads them off the record and the compose page off what it is holding, and
+/// the menu is the same menu either way — see [`Compose`](./Compose.tsx).
+///
+/// The declarations are read here rather than beside the Conversation, and read
+/// when the menu opens rather than when the pane does — the rows of a menu are
+/// built on the way open and thrown away on the way closed (see `Menu.tsx`), so
+/// a composer nobody pressed Attach on reads no settings at all, and one that is
+/// pressed reads them as they stand at that moment.
+///
+/// **A server already attached is not here**, having a chip of its own in the
+/// row: the menu is what can still be put on, and the × on the chip is what puts
+/// one back.
+///
+/// **And with nothing declared it is still a menu**, with the way to the
+/// settings section where a declaration is made. A control that fell back to a
+/// plain button would be one the human had to learn twice — and the answer to
+/// an empty menu is to go and declare one, which is a thing the menu can say.
+export function ServerRows(props: {
+  /// The names that are on already, in whatever the page holds them in.
+  attached: Array<string>;
+  attach: (name: string) => void;
+}): JSX.Element {
+  const settings = useReading(() => ({
+    queryKey: ["settings"],
+    queryFn: loadSettings,
+    freshness: { reconcile: "id" } as const,
+  }));
+
+  const attached = () => new Set(props.attached);
+
+  /// The declarations this Conversation could still be given.
+  const offerable = (): Array<McpServer> =>
+    (settings.data?.mcp_servers ?? []).filter(
+      (server) => !attached().has(server.name),
+    );
+
+  return (
+    <Choose>
+      {/* The two nothing can be picked out of yet, each a row that says which
+          it is and cannot be pressed — a menu that came down empty would say
+          neither. */}
+      <Match when={settings.isPending}>
+        <button type="button" role="menuitem" disabled>
+          Reading the settings…
+        </button>
+      </Match>
+      <Match when={settings.isError}>
+        <button type="button" role="menuitem" disabled>
+          The settings could not be read.
+        </button>
+      </Match>
+      <Match when={settings.data}>
+        <Show
+          when={(settings.data?.mcp_servers.length ?? 0) > 0}
+          fallback={
+            <A href="/settings/mcp-servers" role="menuitem">
+              Declare an MCP server…
+            </A>
+          }
+        >
+          <For each={offerable()}>
+            {(server) => (
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => props.attach(server.name)}
+              >
+                {server.name}
+              </button>
+            )}
+          </For>
+        </Show>
+      </Match>
+    </Choose>
+  );
+}
 
 /// One file this device is still sending.
 ///

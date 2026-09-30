@@ -72,10 +72,10 @@ use verkstead_render::{
     CommitEvent, CommitPane, CompanionAdded, CompanionMode, CompanionModeChosen, CompanionView,
     ConversationClosed, ConversationSteered, ConversationStopped, ConversationView,
     GrillingStarted, Lifecycle, NoticeEvent, PickedView, PinnedEvent, Process, ProcessPicked,
-    ProfileSaved, PullRequestEvent, Registered, Resolved, Resumed, SetReading, SetView, Shown,
-    Size, StageListReached, Started, SteerOpened, Submitted, TargetRecorded, TaskListEvent,
-    TaskListReached, TerminalClosed, TerminalOpened, TerminalView, TerminalsView, TimelineEvent,
-    TranscriptView, Turn, Watching,
+    ProfileSaved, PullRequestEvent, Registered, Resolved, Resumed, ServerAttached, SetReading,
+    SetView, Shown, Size, StageListReached, Started, SteerOpened, Submitted, TargetRecorded,
+    TaskListEvent, TaskListReached, TerminalClosed, TerminalOpened, TerminalView, TerminalsView,
+    TimelineEvent, TranscriptView, Turn, Watching,
 };
 use verkstead_schema::{Direction, Nudge};
 use verkstead_server::attachments::Attachments;
@@ -2187,6 +2187,25 @@ async fn grilling_with_a_file_attached(stub: &str, name: &str, contents: &str) -
     .await
 }
 
+/// And the same with an MCP server declared for the installation and attached
+/// to the Conversation off the composer's Attach menu.
+async fn grilling_with_a_server_attached(stub: &str, name: &str, url: &str) -> Grilling {
+    grilling_however_started_serving(
+        tempfile::tempdir().unwrap(),
+        stub,
+        PULL_REQUEST,
+        *BRISKLY,
+        &[],
+        &[],
+        Pickers::UnderEveryPairing,
+        Origin::None,
+        Seeded::Nothing,
+        None,
+        &[(name, url)],
+    )
+    .await
+}
+
 /// And the same with that companion in the other mode: a branch of its own, a
 /// sandbox that may write to it, and a sweep of that branch beside the
 /// Conversation's own.
@@ -2828,6 +2847,44 @@ async fn grilling_however_started(
     seeded: Seeded,
     signature: Option<&str>,
 ) -> Grilling {
+    grilling_however_started_serving(
+        spill,
+        stub,
+        gh,
+        pace,
+        companions,
+        attaching,
+        pickers,
+        origin,
+        seeded,
+        signature,
+        &[],
+    )
+    .await
+}
+
+/// And the same with MCP servers declared for the installation and attached to
+/// the Conversation, each as the name the settings declare it under and the URL
+/// it is reached at.
+///
+/// Declared before they are attached, because the composer's menu is drawn from
+/// the declarations and a name nothing declares is a press the server refuses.
+/// Attached while it is still drafting, for the attachments' reason: servers
+/// freeze with the Brief.
+#[allow(clippy::too_many_arguments)]
+async fn grilling_however_started_serving(
+    spill: tempfile::TempDir,
+    stub: &str,
+    gh: &str,
+    pace: Pace,
+    companions: &[(&str, CompanionMode)],
+    attaching: &[(&str, &str)],
+    pickers: Pickers,
+    origin: Origin,
+    seeded: Seeded,
+    signature: Option<&str>,
+    serving: &[(&str, &str)],
+) -> Grilling {
     let bench = bench_at_pace(spill, stub, gh, pace, signature).await;
     let app = &bench.app;
 
@@ -2913,6 +2970,34 @@ async fn grilling_however_started(
     )
     .await;
     assert_eq!(saved, BriefSaved::Saved);
+
+    // And whatever they declared on the settings page and then picked off the
+    // Attach menu. The declarations are written into `config.yaml` rather than
+    // posted, this being the settings section's own file — see
+    // [`configure`], which is what a test writes it with once the work has
+    // started — and the picks go through the route the menu presses.
+    if !serving.is_empty() {
+        let declared: String = serving
+            .iter()
+            .map(|(name, url)| format!("  - name: {name}\n    url: {url}\n"))
+            .collect();
+
+        std::fs::write(
+            bench.state.path().join("config.yaml"),
+            format!("{THE_AUTHOR}mcp_servers:\n{declared}"),
+        )
+        .unwrap();
+
+        for (name, _) in serving {
+            let attached: ServerAttached = post(
+                app,
+                &format!("/api/ui/conversations/{id}/mcp-servers/{name}"),
+                &serde_json::json!({}),
+            )
+            .await;
+            assert_eq!(attached, ServerAttached::Attached);
+        }
+    }
 
     // And whatever the human attached alongside it, off the same route the
     // paperclip presses: the raw bytes as the body and the name in the path.
@@ -3833,6 +3918,47 @@ async fn a_grilling_session_is_told_about_the_attached_files_too() {
     assert!(
         said.contains("- `/verkstead/attachments/rates.csv`, 8 bytes."),
         "at the path the sandbox puts it at, with its size: {said:?}"
+    );
+}
+
+/// And what a Conversation with an MCP server attached tells its grilling
+/// session: the same prompt, with the server named under it and how its tools
+/// are named beside it.
+///
+/// The grilling session for the companions listing's reason — it is the one
+/// whose prompt is built nowhere near the rest, so a section that reaches this
+/// one reaches every other session kind by the same line.
+#[tokio::test]
+async fn a_grilling_session_is_told_about_the_attached_mcp_servers_too() {
+    let fixture = grilling_with_a_server_attached(
+        r#"printf 'prompt=%s' "$2""#,
+        "docs",
+        "https://mcp.example.com/docs",
+    )
+    .await;
+
+    let event = fixture
+        .until(|view| output(view).filter(|output| !output.running).map(|o| o.id))
+        .await;
+
+    let said = fixture.capture(event).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains(BRIEF),
+        "the Brief is still what the grilling starts from: {said:?}"
+    );
+    assert!(
+        said.contains("# MCP servers"),
+        "and the server is named under it: {said:?}"
+    );
+    assert!(
+        said.contains("- `docs`"),
+        "by the name the settings declare it under: {said:?}"
+    );
+    assert!(
+        said.contains("`mcp__<server>__<tool>`"),
+        "with how this harness names its tools, which is the one thing a session \
+         cannot work out for itself: {said:?}"
     );
 }
 

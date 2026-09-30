@@ -40,6 +40,7 @@ mod deferrals;
 mod deliveries;
 mod endings;
 mod escalations;
+mod mcp_servers;
 mod migrations;
 mod pairings;
 mod pauses;
@@ -103,6 +104,7 @@ pub use deferrals::{Ask, Unfolded, asked_as, record_folded, stored_on_timeline, 
 pub use deliveries::{delivered, record_delivery};
 pub use endings::{ended_on, nothing_else};
 pub use escalations::{escalate, escalated, settle_escalation};
+pub use mcp_servers::{attach_mcp_server, detach_mcp_server, mcp_servers};
 pub use pairings::{RepoPairings, last_started_pairings, remembered_pairings};
 pub use pauses::Pause;
 pub use pending_steers::{
@@ -826,6 +828,13 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // several of, a Conversation taking as many files as the human has to hand.
     // See [`attachments`].
     attachments::apply_schema(pool).await?;
+
+    // And the MCP servers each of them asks its sessions to be launched with,
+    // which hang off the Conversations beside those files and freeze with the
+    // same Brief. Names rather than rows of their own: what a name refers to is
+    // declared in `config.yaml`, which this crate has never heard of — see
+    // [`mcp_servers`].
+    mcp_servers::apply_schema(pool).await?;
 
     // And the one flag on this database that is about nothing on it: whether the
     // human is done with the banner pointing at Remote access. It hangs off

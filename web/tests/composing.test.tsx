@@ -13,7 +13,12 @@
 //! that piece as well, holds what it is given until a press, and sends it up with
 //! the replay when one is made, is this page's own doing and is asked about here.
 
-import { fireEvent, screen, waitFor } from "@solidjs/testing-library";
+import {
+  fireEvent,
+  screen,
+  waitFor,
+  within,
+} from "@solidjs/testing-library";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import type {
@@ -36,7 +41,10 @@ import composer from "../src/workbench/Composer.module.css";
 import sidebar from "../src/workbench/Conversations.module.css";
 import setup from "../src/workbench/Setup.module.css";
 import { ADOPT_REFUSAL } from "../src/workbench/Adoption";
-import { ATTACH_REFUSAL } from "../src/workbench/Composer";
+import {
+  ATTACH_REFUSAL,
+  SERVER_REFUSAL,
+} from "../src/workbench/Composer";
 import { BRANCH_REFUSAL, TARGET, TARGET_REFUSAL } from "../src/workbench/Setup";
 // The Processes the picker offers and the words they are said in, read rather
 // than spelled out again: what the row offers is that list and nothing else.
@@ -59,6 +67,7 @@ import {
   OPEN,
   PROFILES,
   REPOS,
+  SETTINGS,
   drawn,
   mount,
   openAgent,
@@ -141,6 +150,47 @@ function pills(container: ParentNode): string[] {
   return [...container.querySelectorAll(`.${pill.attachmentName}`)].map(
     (name) => name.textContent!.trim(),
   );
+}
+
+/// And the names on the chips beside them, which is the same row read for the
+/// MCP servers rather than for the files.
+function chips(container: ParentNode): string[] {
+  return [...container.querySelectorAll(`.${pill.serverName}`)].map((name) =>
+    name.textContent!.trim(),
+  );
+}
+
+/// The Attach menu, opened.
+///
+/// Waited out rather than read straight away: the declarations are read when
+/// the menu opens rather than when the page does — see `ServerRows` in
+/// `Composer.tsx` — so the card comes down saying it is reading them and fills
+/// in after.
+async function attachMenu(): Promise<HTMLElement> {
+  fireEvent.click(
+    await waitFor(() => screen.getByRole("button", { name: "Attach" })),
+  );
+
+  const card = screen.getByRole("menu", { name: "Attach" });
+  await waitFor(() =>
+    expect(within(card).queryByText("Reading the settings…")).toBeNull(),
+  );
+
+  return card;
+}
+
+/// What it is offering, in the order it offers it.
+function offering(card: ParentNode): string[] {
+  return [...card.querySelectorAll('[role="menuitem"]')].map((row) =>
+    row.textContent!.trim(),
+  );
+}
+
+/// And taken back again, which is what a test that only wanted to read the rows
+/// does with it: the trigger toggles, so a card left hanging is a card the next
+/// press shuts instead of opening.
+function shutMenu(): void {
+  fireEvent.keyDown(document, { key: "Escape" });
 }
 
 /// What one Repo remembers, as the endpoint writes it: a pairing per role, off
@@ -2547,20 +2597,18 @@ describe("continuing a roadmap from the compose page", () => {
   /// written is lost by taking one up.
   /// The box is locked to a card while a roadmap is loaded, so there is nothing
   /// being written for a file to be handed over with — and a control that has
-  /// nothing to do is not drawn. The drop goes with it: the paperclip and the
+  /// nothing to do is not drawn. The drop goes with it: the Attach menu and the
   /// box are two ways into the one piece, and neither is offered here.
-  it("offers no paperclip and takes no drop while a roadmap is loaded", async () => {
+  it("offers no attach control and takes no drop while a roadmap is loaded", async () => {
     adopting();
     const { container } = mount("/compose");
 
     await composing(container);
-    expect(screen.getByRole("button", { name: "Attach a file" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Attach" })).toBeTruthy();
 
     await loadRoadmap(container, 0);
 
-    expect(
-      screen.queryByRole("button", { name: "Attach a file" }),
-    ).toBeNull();
+    expect(screen.queryByRole("button", { name: "Attach" })).toBeNull();
 
     const box = container.querySelector(`.${composer.box}`)!;
     dropOn(box, carrying({ files: [new File(["note"], "notes.md")] }));
@@ -2863,7 +2911,7 @@ describe("the files a compose page holds", () => {
     await composing(container);
 
     const row = container.querySelector(`.${composer.presses}`)!;
-    const clip = screen.getByRole("button", { name: "Attach a file" });
+    const clip = screen.getByRole("button", { name: "Attach" });
     const draft = screen.getByRole("button", { name: "Save as draft" });
 
     expect(row.contains(clip)).toBe(true);
@@ -3052,6 +3100,326 @@ describe("the files a compose page holds", () => {
     );
 
     expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/brief`)).toBe(1);
+    expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/grill`)).toBe(0);
+  });
+});
+
+/// The MCP servers handed over with what is being composed: picked out of the
+/// same Attach menu the draft's composer grew, held in the page beside the
+/// files until a press, and put on the Conversation by name once the press has
+/// made one.
+///
+/// The menu itself is `Composer.tsx`'s and is asked about in
+/// `attaching-servers.test.tsx`. What is asked here is this page's own half:
+/// that it draws that menu too, that a pick is a chip and nothing else while
+/// there is nothing to attach it to, and that the replay carries what it is
+/// holding.
+describe("the MCP servers a compose page holds", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    leaveRefusals(0, [], null);
+  });
+
+  /// Where one goes on, the name in the path exactly as the composer sends it.
+  const attach = (name: string) =>
+    `/api/ui/conversations/${OPEN.id}/mcp-servers/${name}`;
+
+  /// The settings with another list of declarations in them — the fixture's
+  /// own two otherwise.
+  const declaring = (...names: string[]): SettingsView => ({
+    ...SETTINGS,
+    mcp_servers: names.map((name) => ({
+      name,
+      url: `https://mcp.example.com/${name}`,
+      headers: [],
+    })),
+  });
+
+  /// Pick one out of the menu, which is what a press on its row does.
+  async function pickServer(name: string): Promise<void> {
+    fireEvent.click(
+      within(await attachMenu()).getByRole("menuitem", { name }),
+    );
+  }
+
+  /// The same menu the composer's Attach opens, drawn from the same
+  /// declarations: *Attach file* first, and the servers under it.
+  it("opens the menu the composer's Attach opens", async () => {
+    creating();
+    const { container } = mount("/compose");
+
+    await composing(container);
+
+    expect(offering(await attachMenu())).toEqual([
+      "Attach file",
+      ...SETTINGS.mcp_servers.map((one) => one.name),
+    ]);
+  });
+
+  /// And with nothing declared it is still a menu, with the way to the section
+  /// where a declaration is made — this page falling back to a plain button
+  /// would be the control the human had to learn twice, drawn twice.
+  it("holds Attach file and the way to the settings where none is declared", async () => {
+    creating(whenever("/api/ui/settings", json(declaring())));
+    const { container } = mount("/compose");
+
+    await composing(container);
+
+    expect(offering(await attachMenu())).toEqual([
+      "Attach file",
+      "Declare an MCP server…",
+    ]);
+    expect(
+      screen
+        .getByRole("menuitem", { name: "Declare an MCP server…" })
+        .getAttribute("href"),
+    ).toBe("/settings/mcp-servers");
+  });
+
+  /// A pick draws its chip at once and nothing reaches the server: there is no
+  /// Conversation to attach anything to, and the press is still the first thing
+  /// that goes on the wire.
+  it("draws a chip per picked server, and sends nothing until a press", async () => {
+    const fetching = creating();
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await pickServer("docs");
+
+    await waitFor(() => expect(chips(container)).toEqual(["docs"]));
+    expect(writes(fetching, "/api/ui/conversations")).toBe(0);
+    expect(writes(fetching, attach("docs"))).toBe(0);
+
+    // And the menu is gone with the press, as it is on the composer: the row
+    // that was pressed is about to go.
+    expect(screen.queryByRole("menu", { name: "Attach" })).toBeNull();
+  });
+
+  /// Taken out of the menu by the pick, and put back by the ×, which is the
+  /// whole of what the two controls are to each other.
+  it("takes the row out of the menu, and the × puts it back", async () => {
+    creating();
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await pickServer("docs");
+    await waitFor(() => expect(chips(container)).toEqual(["docs"]));
+
+    expect(offering(await attachMenu())).toEqual(["Attach file", "tickets"]);
+    shutMenu();
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove docs" }));
+
+    await waitFor(() => expect(chips(container)).toEqual([]));
+    expect(offering(await attachMenu())).toEqual([
+      "Attach file",
+      ...SETTINGS.mcp_servers.map((one) => one.name),
+    ]);
+  });
+
+  /// Nothing at all is asked of the server on the way to either: a chip is
+  /// drawn and taken away in the page, there being nothing on the server for
+  /// them to be about.
+  it("asks nothing of the server for a pick or a ×", async () => {
+    const fetching = creating();
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await pickServer("docs");
+    await waitFor(() => expect(chips(container)).toEqual(["docs"]));
+    fireEvent.click(screen.getByRole("button", { name: "Remove docs" }));
+    await waitFor(() => expect(chips(container)).toEqual([]));
+
+    expect(
+      fetching.mock.calls.filter(([, init]) => init?.method === "POST"),
+    ).toHaveLength(0);
+  });
+
+  /// The press is what attaches them: one request per name, through the route
+  /// the composer's own menu attaches through.
+  it("attaches what it holds when the draft is saved, and lands in the draft", async () => {
+    const fetching = creating(
+      whenever(attach("docs"), json("Attached"), "POST"),
+      whenever(attach("tickets"), json("Attached"), "POST"),
+    );
+    const { container, history } = mount("/compose");
+
+    fireEvent.input(await composing(container), {
+      target: { value: "Make the widget" },
+    });
+    await pickRepo(container, REPOS[1]!.id);
+    await pickServer("docs");
+    await pickServer("tickets");
+    await waitFor(() => expect(chips(container)).toEqual(["docs", "tickets"]));
+
+    fireEvent.click(screen.getByRole("button", { name: "Save as draft" }));
+
+    await waitFor(() => expect(writes(fetching, attach("docs"))).toBe(1));
+    expect(writes(fetching, attach("tickets"))).toBe(1);
+
+    await waitFor(() =>
+      expect(history.get().startsWith(`/conversations/${OPEN.id}`)).toBe(true),
+    );
+  });
+
+  /// And every one of them on before the work starts, for the reason the files
+  /// go up before it: the servers freeze when the Brief does, and one arriving
+  /// after the grilling started would be refused for being late.
+  it("finishes attaching before it starts the work", async () => {
+    const fetching = creating(
+      whenever(attach("docs"), json("Attached"), "POST"),
+    );
+    const { container } = mount("/compose");
+
+    fireEvent.input(await composing(container), {
+      target: { value: "Make the widget" },
+    });
+    await pickRepo(container, REPOS[1]!.id);
+    await rolesAnswered();
+    await pickServer("docs");
+    await waitFor(() => expect(chips(container)).toEqual(["docs"]));
+
+    fireEvent.click(screen.getByRole("button", { name: "Start work" }));
+
+    await waitFor(() =>
+      expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/grill`)).toBe(1),
+    );
+    expect(order(fetching, attach("docs"))).toBeGreaterThan(-1);
+    expect(order(fetching, attach("docs"))).toBeLessThan(
+      order(fetching, `/api/ui/conversations/${OPEN.id}/grill`),
+    );
+  });
+
+  /// Whichever Process the page is composing under: a server is the
+  /// Conversation's whatever its sessions are sent to do, so nothing about the
+  /// picker decides whether one goes on — and the kickoff it goes in front of
+  /// is whichever kickoff that Process has.
+  it("attaches them under a process whose kickoff is a take-up", async () => {
+    localStorage.setItem(
+      COMPOSING,
+      JSON.stringify({
+        ...blank(),
+        repo: REPOS[1]!.id,
+        brief: "The limiter will not merge.",
+        process: "FixMergeIssues" satisfies Process,
+        target: "#41",
+      }),
+    );
+
+    const fetching = creating(
+      whenever(attach("docs"), json("Attached"), "POST"),
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/process`,
+        json("Picked"),
+        "POST",
+      ),
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/target`,
+        json("Recorded"),
+        "POST",
+      ),
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/take-up`,
+        json("TakenUp" satisfies TakenUp),
+        "POST",
+      ),
+    );
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await pickServer("docs");
+    await waitFor(() => expect(chips(container)).toEqual(["docs"]));
+
+    // Waited on the press rather than on the Agent control: this Process uses
+    // one role, which stands in the row as the picker itself with no panel
+    // anywhere over it — see the agent dropdown's own tests.
+    const start = screen.getByRole("button", { name: "Start work" });
+    await waitFor(() =>
+      expect(start.getAttribute("aria-disabled")).toBe("false"),
+    );
+
+    fireEvent.click(start);
+
+    await waitFor(() =>
+      expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/take-up`)).toBe(
+        1,
+      ),
+    );
+    expect(order(fetching, attach("docs"))).toBeGreaterThan(-1);
+    expect(order(fetching, attach("docs"))).toBeLessThan(
+      order(fetching, `/api/ui/conversations/${OPEN.id}/take-up`),
+    );
+  });
+
+  /// A name is text a device could write down, and this one is not written
+  /// down: what it refers to is a declaration on the settings page, and one
+  /// picked out of a menu a moment ago is one the settings still hold. So the
+  /// chips go the way the pills go, and the brief stays.
+  it("keeps the brief through a reload and holds no server", async () => {
+    creating();
+    const first = mount("/compose");
+
+    fireEvent.input(await composing(first.container), {
+      target: { value: "Make the widget" },
+    });
+    await pickServer("docs");
+    await waitFor(() => expect(chips(first.container)).toEqual(["docs"]));
+
+    await waitFor(() => expect(localStorage.getItem(COMPOSING)).toBeTruthy());
+    first.unmount();
+
+    const again = mount("/compose");
+    const box = await composing(again.container);
+
+    await waitFor(() => expect(box.value).toBe("Make the widget"));
+    expect(chips(again.container)).toEqual([]);
+  });
+
+  /// And a page left without a press has attached nothing to anything: what was
+  /// picked never reached the server, and there is no Conversation it could
+  /// have reached it about.
+  it("attaches nothing where the page is left without a press", async () => {
+    const fetching = creating();
+    const { container, unmount } = mount("/compose");
+
+    await composing(container);
+    await pickServer("docs");
+    await waitFor(() => expect(chips(container)).toEqual(["docs"]));
+
+    unmount();
+
+    expect(
+      fetching.mock.calls.filter(([, init]) => init?.method === "POST"),
+    ).toHaveLength(0);
+  });
+
+  /// A name the server will not take is one more refusal for the draft the page
+  /// lands on, worded where the rest of a replay's refusals are — and it stops
+  /// the kickoff, exactly as a refused file does.
+  it("says on the new draft what could not be attached", async () => {
+    const fetching = creating(
+      whenever(attach("docs"), json("NoSuchServer"), "POST"),
+    );
+    const { container } = mount("/compose");
+
+    fireEvent.input(await composing(container), {
+      target: { value: "Make the widget" },
+    });
+    await pickRepo(container, REPOS[1]!.id);
+    await rolesAnswered();
+    await pickServer("docs");
+    await waitFor(() => expect(chips(container)).toEqual(["docs"]));
+
+    fireEvent.click(screen.getByRole("button", { name: "Start work" }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          `docs could not be attached: ${SERVER_REFUSAL.NoSuchServer}`,
+        ),
+      ).toBeTruthy(),
+    );
+
     expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/grill`)).toBe(0);
   });
 });
