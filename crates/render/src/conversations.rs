@@ -1683,7 +1683,9 @@ pub struct StageEntry {
 /// wire rather than a box: with stages worked side by side, each branch carries a
 /// `ROADMAP.md` of its own and the boxes stop being one fact, while Verkstead's
 /// record of the stage Conversations is one — so the viewer is told where a stage
-/// is and never works it out. See the server's `stages` module for the rule, and
+/// is and never works it out. One of these comes off the running server rather
+/// than off the record alone, and is what it is at the moment the page was drawn.
+/// See the server's `stages` module for the rule, and
 /// [ADR-0021](../../../docs/adr/0021-parallel-stages.md).
 ///
 /// A roadmap the record holds no rows for — one worked by hand or by the old
@@ -1706,6 +1708,28 @@ pub enum StageState {
     /// The record has it in flight and nothing else is true of it: somebody — or
     /// some unattended run — is on it now.
     InProgress,
+
+    /// Every task of it is done, and its finish is held until the stages already
+    /// in its roadmap's chain have settled — see the server's `joins` module, which
+    /// is the hold, and ADR-0021's *The chain*.
+    ///
+    /// The record has such a stage in flight, and this is the more particular thing
+    /// to say about it, so it wins over [`InProgress`](StageState::InProgress). It
+    /// loses to [`Halted`](StageState::Halted): a Conversation that has stopped is
+    /// being held by nothing.
+    ///
+    /// **Which stage it is waiting on is not said here.** The word says that the
+    /// finish is waiting; the Notice on that stage's own Timeline says which stage
+    /// of the roadmap it is behind and why, and a card's row has no room for the
+    /// second.
+    ///
+    /// Read off the running server's own register rather than off anything stored,
+    /// exactly as the sidebar's *Waiting to join* label is — see
+    /// [`ConversationEntry::waiting_to_join`] — so the two cannot disagree about one
+    /// stage. Which means a server that has just come back is holding nothing, and
+    /// such a stage reads *in progress* again until the resume takes it up and finds
+    /// it held a second time.
+    WaitingToJoin,
 
     /// Its Conversation has stopped, or the record says it was abandoned: closed
     /// without ever having wrapped up.

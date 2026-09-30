@@ -23697,6 +23697,11 @@ async fn a_settle_on_a_badly_declaring_roadmap_starts_nothing_and_says_why() {
 /// the window it opens unmistakable: while the session sits there the stage has
 /// a box left to tick, so nothing about the chain has been asked yet, and the
 /// test has as long as it likes to put a stage below into the record.
+///
+/// It annotates the roadmap on its way through the planning, as
+/// [`ANNOTATES_THE_STAGE`] is what `/next-stage` writes there — so the branch has
+/// written to `docs/roadmaps/` and the stage card is pinned on this Conversation's
+/// Timeline, which is where the word this hold puts on a stage is read.
 fn a_stage_worked_to_its_finish(worked: &Path, gate: &Path) -> String {
     format!(
         r#"
@@ -23706,6 +23711,9 @@ case "$2" in
     mkdir -p .tasks
     printf '# The stage\n\n## Tasks\n\n- [ ] 01: do the work — [details](01-do-the-work.md)\n' > .tasks/TODO.md
     printf '# 01. do the work\n' > .tasks/01-do-the-work.md
+    branch=$(git rev-parse --abbrev-ref HEAD)
+    stage=$(basename "$branch")
+{annotating}
     git add -A
     git commit --quiet -m 'chore: plan the stage'
     : > /tmp/verkstead/done
@@ -23740,6 +23748,7 @@ case "$2" in
     ;;
 esac
 "#,
+        annotating = ANNOTATES_THE_STAGE,
         worked = quoted(worked),
         gate = quoted(gate),
     )
@@ -23922,6 +23931,31 @@ async fn a_stage_waits_to_join_while_a_stage_in_its_chain_has_not_settled() {
     assert!(
         fixture.row().await.waiting_to_join,
         "and the sidebar row says the same, from the same register",
+    );
+
+    // And so does the roadmap's own card, off that register read at the moment this
+    // page was drawn: the label over there and the word on the stage's row here are
+    // one reading of one hold, so they cannot come apart. The record has this stage
+    // in flight — its tasks are done and what waits is the join — and *waiting to
+    // join* is the more particular thing to say about it.
+    let stages = view
+        .pinned
+        .iter()
+        .find_map(|pinned| match pinned {
+            PinnedEvent::StageList(list) => Some(list),
+            _ => None,
+        })
+        .expect("the roadmap this stage's branch wrote to is pinned");
+
+    assert_eq!(
+        stages
+            .stages
+            .iter()
+            .find(|stage| stage.number == "01")
+            .map(|stage| stage.state.clone()),
+        Some(StageState::WaitingToJoin),
+        "this stage is the one being held, and its row says so in the word its \
+         Conversation wears as a label",
     );
 
     // And nothing reads it as standing still. The sweep is running at this

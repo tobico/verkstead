@@ -806,13 +806,15 @@ mod tests {
     /// What the record says became of each stage of the roadmap.
     ///
     /// None of them stopped, for the reason the carry-on's own helper says none
-    /// did: a stop is nothing the hold in front of a finish asks about.
+    /// did: a stop is nothing the hold in front of a finish asks about. And no row
+    /// names a Conversation either — this reading is handed the ones it weighs, by
+    /// the chain and the queue — so every one of them says `0`, which is nobody's.
     fn standings<'a>(
         rows: impl IntoIterator<Item = (&'a str, store::StageStanding)>,
     ) -> store::StageStandings {
         store::StageStandings::from_rows(
             rows.into_iter()
-                .map(|(label, standing)| (ROADMAP, label, standing, false)),
+                .map(|(label, standing)| (ROADMAP, label, standing, false, 0)),
         )
     }
 

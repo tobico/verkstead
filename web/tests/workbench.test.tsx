@@ -15256,6 +15256,20 @@ const BEHIND: StageEntry[] = stated([
 /// three of them.
 const BEHIND_STANDS_ON: string[][] = [[], [], ["02"], ["01", "02", "03"]];
 
+/// And the same four with the stage in flight **held** before its finish: every task
+/// of stage 02 is done and its join waits on the chain below it settling, which is
+/// the word that stands where *in progress* would.
+///
+/// A word and nothing else, unlike the one above it: which stage the join is waiting
+/// on is on that Conversation's own Timeline, where the hold wrote it, and a card's
+/// row has no room for it.
+const HELD: StageEntry[] = stated([
+  { state: "Done" },
+  { state: "WaitingToJoin" },
+  { state: "Halted" },
+  { state: "ToDo" },
+]);
+
 /// The fixture's stages with one state each, in the roadmap's own order.
 function stated(states: StageState[]): StageEntry[] {
   return ROADMAP.stages.map((stage, at) => ({ ...stage, state: states[at]! }));
@@ -15386,6 +15400,48 @@ describe("the pinned stage list", () => {
       false,
       false,
       false,
+    ]);
+  });
+
+  /// And a stage whose finish is held until the chain below it settles reads
+  /// *waiting to join*, where the record alone would have said *in progress*.
+  ///
+  /// The same register the sidebar row's own label is read off, at the same moment:
+  /// a stage cannot read one thing on its row over there and another on the
+  /// roadmap's card here.
+  it("says a stage whose finish is waiting is waiting to join", async () => {
+    theStaged({
+      pinned: [
+        {
+          StageList: {
+            ...ROADMAP,
+            stages: HELD,
+          },
+        },
+      ],
+    });
+    const { container } = mount(`/conversations/${STAGED.id}`);
+
+    const list = await drawn(container, `.${timeline.pinned} .${timeline.stageList}`);
+    const rows = [...list.querySelectorAll(`.${timeline.stages} li`)];
+
+    expect(
+      rows.map((row) => row.querySelector(`.${timeline.state}`)!.textContent),
+    ).toEqual(["done", "waiting to join", "halted", "to do"]);
+
+    // And its work is not over: what is waiting is the join, so the row is neither
+    // struck through nor ticked.
+    expect(rows.map((row) => row.classList.contains(timeline.done!))).toEqual([
+      true,
+      false,
+      false,
+      false,
+    ]);
+    expect(rows.map((row) => row.querySelector(`.${timeline.box}`)!.textContent)).toEqual([
+      "☑",
+      "☐",
+      "☐",
+      "☐",
     ]);
   });
 
@@ -15780,6 +15836,17 @@ const STATED_PANE: RoadmapPane = {
   })),
 };
 
+/// And the same pane with stage 02 **held** before its finish, as [`HELD`] is the
+/// card of: the pane and the card are one Conversation's two views of one roadmap,
+/// read off the one register.
+const HELD_PANE: RoadmapPane = {
+  ...ROADMAP_PANE,
+  stages: ROADMAP_PANE.stages.map((stage, at) => ({
+    ...stage,
+    state: HELD[at]!.state,
+  })),
+};
+
 /// And the same roadmap with every line declaring, which is what one written
 /// since ADR-0021 looks like: a root, two stages standing on others, and a
 /// platform on the last of them. The empty list is `no dependencies` on the
@@ -15910,6 +15977,33 @@ describe("the stage list opened", () => {
 
     expect(said.closest(`.${contents.link}`)).toBeNull();
     expect(said.previousElementSibling!.classList).toContain(contents.link!);
+  });
+
+  /// And a stage whose finish is held says *waiting to join* in both of the places
+  /// the pane says where a stage is, which is where the card says it too.
+  it("says a stage whose finish is waiting is waiting to join, in both places", async () => {
+    theStaged({}, whenever(THE_ROADMAP, json(HELD_PANE)));
+    const { container } = mount(`/conversations/${STAGED.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.pinned} .${timeline.stageList}`),
+    );
+
+    const nav = await drawn(container, `.${shell.detailsPane} .${contents.contents}`);
+
+    const said = ["done", "waiting to join", "halted", "to do"];
+
+    expect(
+      [...nav.querySelectorAll(`.${contents.sections} > li`)].map(
+        (line) => line.querySelector(`.${contents.mark}`)?.textContent,
+      ),
+    ).toEqual(said);
+
+    expect(
+      [...container.querySelectorAll(`.${shell.detailsPane} .${documents.section}`)].map(
+        (section) => section.querySelector(`.${documents.mark}`)!.textContent,
+      ),
+    ).toEqual(said);
   });
 
   /// And a declaring roadmap's stages that have not started say which stages they

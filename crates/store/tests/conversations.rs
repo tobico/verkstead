@@ -2123,6 +2123,67 @@ async fn the_stop_reported_is_the_one_on_the_attempt_the_record_believes() {
     );
 }
 
+/// And which **Conversation** each standing came from comes back with it, that being
+/// what a register of the running server is asked about a stage by: the registers
+/// keep Conversations where a roadmap keeps labels.
+#[tokio::test]
+async fn the_reading_names_the_conversation_each_stage_is() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo_id = repo(&pool, "verkstead").await;
+
+    let first = stage(&pool, repo_id, "mvp", "01").await;
+    let second = stage(&pool, repo_id, "mvp", "02").await;
+
+    let standings = stage_standings(&pool, repo_id).await.unwrap();
+
+    assert_eq!(standings.conversation("mvp", "01"), Some(first));
+    assert_eq!(standings.conversation("mvp", "02"), Some(second));
+    assert_eq!(
+        standings.conversation("mvp", "03"),
+        None,
+        "a stage the record holds no row for is a stage with no Conversation to \
+         name — worked by hand, or by the old tools",
+    );
+}
+
+/// And it is the Conversation of the attempt the record **believes**, exactly as the
+/// stop is: a stage attempted twice is two Conversations answering to one label, and
+/// what is said about the stage and which Conversation it is said about have to be
+/// the one attempt's.
+#[tokio::test]
+async fn the_conversation_named_is_the_one_the_record_believes() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo_id = repo(&pool, "verkstead").await;
+
+    // Abandoned part-way through, and then started again — so the second attempt
+    // is the one in flight and the one to name.
+    let abandoned = stage(&pool, repo_id, "mvp", "01").await;
+    close_conversation(&pool, abandoned).await.unwrap();
+
+    let second = stage(&pool, repo_id, "mvp", "01").await;
+
+    let standings = stage_standings(&pool, repo_id).await.unwrap();
+
+    assert_eq!(standings.of("mvp", "01"), Some(StageStanding::InFlight));
+    assert_eq!(
+        standings.conversation("mvp", "01"),
+        Some(second),
+        "the live attempt is the one being read, so it is the one named",
+    );
+
+    // And where the two stand the same way, it is the later of them: rows arrive in
+    // the order the Conversations were started, and the second attempt is the one
+    // somebody is on now.
+    let third = stage(&pool, repo_id, "mvp", "02").await;
+    let fourth = stage(&pool, repo_id, "mvp", "02").await;
+
+    let standings = stage_standings(&pool, repo_id).await.unwrap();
+
+    assert_eq!(standings.of("mvp", "02"), Some(StageStanding::InFlight));
+    assert!(third < fourth);
+    assert_eq!(standings.conversation("mvp", "02"), Some(fourth));
+}
+
 /// The reading is one Repo's. A Conversation belongs to one Repo and two Repos may
 /// hold roadmaps of the same name, so a stage of `mvp` over there answers for
 /// nothing here.

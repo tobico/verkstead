@@ -74,7 +74,7 @@
 //! has merged is unticked at the default branch's tip, and what the boxes alone
 //! say there is *start stage 01 again*.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use sqlx::SqlitePool;
@@ -181,11 +181,17 @@ pub(crate) const CONVERSATIONS_AT_ONCE: usize = 4;
 /// landed draw the same cards.
 ///
 /// `record` is what Verkstead's own record says about this Repo's stages, which is
-/// where each stage's state comes from — see [`state`]. Read by the handler above
+/// where each stage's state comes from — see [`states`]. Read by the handler above
 /// this, which holds the pool, and handed in as a value, so that this stays a
 /// reading: the card and the pane are one Conversation's two views of one
 /// roadmap, and a card that asked the database for itself could disagree with the
 /// pane beside it.
+///
+/// `held` is the other half of that, and the register rather than the record:
+/// which Conversations are stages this server is holding before their finish — see
+/// [`crate::joins`]. Read by the same handler at the same moment, for the reason
+/// the sidebar's own label is read there: the hold is a task of this process, and
+/// the label and the card's word are the one register read the one way.
 ///
 /// Blocking work, so it happens off the runtime's threads — this is a git read
 /// and a file read per Conversation the human opens.
@@ -193,12 +199,13 @@ pub(crate) async fn showing(
     worktree: Option<PathBuf>,
     base: Option<String>,
     record: store::StageStandings,
+    held: HashSet<i64>,
 ) -> Vec<StageListEvent> {
     let (Some(worktree), Some(base)) = (worktree, base) else {
         return Vec::new();
     };
 
-    match tokio::task::spawn_blocking(move || roadmaps(&worktree, &base, &record)).await {
+    match tokio::task::spawn_blocking(move || roadmaps(&worktree, &base, &record, &held)).await {
         Ok(pinned) => pinned,
         Err(error) => {
             tracing::error!(error = ?error, "reading a Worktree's roadmaps failed");
@@ -215,10 +222,15 @@ pub(crate) async fn showing(
 /// a branch that touched two roadmaps has two worth showing — and sorted rather
 /// than taken as the filesystem hands them over, so a page that drew them twice
 /// cannot draw them in two orders.
-fn roadmaps(worktree: &Path, base: &str, record: &store::StageStandings) -> Vec<StageListEvent> {
+fn roadmaps(
+    worktree: &Path,
+    base: &str,
+    record: &store::StageStandings,
+    held: &HashSet<i64>,
+) -> Vec<StageListEvent> {
     touched(worktree, base)
         .iter()
-        .filter_map(|name| roadmap(&worktree.join(ROADMAPS).join(name), record))
+        .filter_map(|name| roadmap(&worktree.join(ROADMAPS).join(name), record, held))
         .collect()
 }
 
@@ -1115,6 +1127,12 @@ fn done(entry: &checklist::Entry<'_>, standing: Option<store::StageStanding>) ->
 ///   reading, so nothing here has to be careful the way that one does: what the
 ///   box says about a stage somebody walked away from is worth less to a reader
 ///   than the walking away.
+/// - **In flight and held** before its finish is
+///   [`StageState::WaitingToJoin`]: every task of it is done and the join waits on
+///   the chain below it settling — see [`crate::joins`]. It beats *in progress*,
+///   the hold being the more particular thing to say about a stage the record has
+///   in flight, and loses to *halted*, a stopped Conversation being held by
+///   nothing.
 /// - **No row at all** leaves the box to speak. A ticked box is
 ///   [`StageState::Done`], and an unticked one is [`StageState::WaitingOn`] the
 ///   stages its own line stands on that have not settled, or
@@ -1138,7 +1156,23 @@ fn done(entry: &checklist::Entry<'_>, standing: Option<store::StageStanding>) ->
 /// lines are what they have to go and look at. Which is why the file is asked
 /// whether it declares rather than what it declared — see [`declarations::judge`],
 /// which answers the second question for a good roadmap only.
-fn states(roadmap: &str, list: &str, record: &store::StageStandings) -> Vec<StageState> {
+///
+/// `held` is the joins register as it stands at the moment the page is drawn —
+/// which Conversations are stages this server is holding — and it is asked by the
+/// Conversation the record names for the label, that being the one thing joining a
+/// register keyed by Conversation to a roadmap that keeps labels. Read here rather
+/// than stored, for the reason the sidebar's own label is: the hold is a task of
+/// this process, so a server that has just come back is holding nothing and such a
+/// stage reads *in progress* again until the resume finds it held a second time.
+/// The label and this word being the one register read the one way is the point of
+/// it — a stage cannot read one thing on its own row and another on the roadmap's
+/// card.
+fn states(
+    roadmap: &str,
+    list: &str,
+    record: &store::StageStandings,
+    held: &HashSet<i64>,
+) -> Vec<StageState> {
     let entries: Vec<checklist::Entry<'_>> = list.lines().filter_map(checklist::entry).collect();
 
     // Whether this roadmap declares at all, which is a fact about the whole file
@@ -1165,6 +1199,8 @@ fn states(roadmap: &str, list: &str, record: &store::StageStandings) -> Vec<Stag
             Some(store::StageStanding::InFlight) => {
                 if record.stopped(roadmap, entry.label) {
                     StageState::Halted
+                } else if holding(roadmap, entry.label, record, held) {
+                    StageState::WaitingToJoin
                 } else {
                     StageState::InProgress
                 }
@@ -1219,6 +1255,29 @@ fn waiting_on(
         .collect()
 }
 
+/// Whether this server is **holding** stage `label`'s Conversation before its
+/// finish: every task of it is done and the join waits on the chain below it
+/// settling.
+///
+/// The record says which Conversation the stage is and the register says which
+/// Conversations are held, so the two are asked in that order. A stage the record
+/// holds no row for is held by nothing — there is no Conversation to hold — which
+/// is every stage worked by hand or by the old tools.
+///
+/// The same register the sidebar's *Waiting to join* label and the status button's
+/// words are read off, read at the same moment a page is drawn — see
+/// [`crate::joins`], where what that buys and what it costs are written down.
+fn holding(
+    roadmap: &str,
+    label: &str,
+    record: &store::StageStandings,
+    held: &HashSet<i64>,
+) -> bool {
+    record
+        .conversation(roadmap, label)
+        .is_some_and(|conversation_id| held.contains(&conversation_id))
+}
+
 /// Whether what a roadmap wrote after a stage's link says the stage is in
 /// flight on `branch`.
 ///
@@ -1248,7 +1307,11 @@ fn named(path: &str) -> Option<&str> {
 /// A `ROADMAP.md` with no stages in it comes back as `None` rather than as an
 /// empty list, exactly as an empty backlog does: what would be pinned is a
 /// heading over nothing.
-fn roadmap(directory: &Path, record: &store::StageStandings) -> Option<StageListEvent> {
+fn roadmap(
+    directory: &Path,
+    record: &store::StageStandings,
+    held: &HashSet<i64>,
+) -> Option<StageListEvent> {
     let index = directory.join(INDEX);
 
     let list = match std::fs::read_to_string(&index) {
@@ -1280,7 +1343,7 @@ fn roadmap(directory: &Path, record: &store::StageStandings) -> Option<StageList
     let stages: Vec<StageEntry> = list
         .lines()
         .filter_map(checklist::entry)
-        .zip(states(&name, &list, record))
+        .zip(states(&name, &list, record, held))
         .map(|(entry, state)| StageEntry {
             number: entry.label.to_owned(),
             title: entry.title.to_owned(),
@@ -1332,8 +1395,9 @@ fn name(directory: &Path) -> String {
 /// is what the roadmap turns on, and a link is a string out of a file in a
 /// repository.
 ///
-/// `record` is the same record the card was drawn against and reaches this the
-/// same way — see [`showing`], which is where why is written down.
+/// `record` and `held` are the same record and the same register the card was
+/// drawn against, and reach this the same way — see [`showing`], which is where
+/// why is written down.
 ///
 /// Blocking work, so it happens off the runtime's threads — this is a git read,
 /// a directory read and a file read per stage.
@@ -1342,12 +1406,14 @@ pub(crate) async fn documents(
     base: Option<String>,
     name: String,
     record: store::StageStandings,
+    held: HashSet<i64>,
 ) -> Option<RoadmapPane> {
     let (Some(worktree), Some(base)) = (worktree, base) else {
         return None;
     };
 
-    match tokio::task::spawn_blocking(move || opened(&worktree, &base, &name, &record)).await {
+    match tokio::task::spawn_blocking(move || opened(&worktree, &base, &name, &record, &held)).await
+    {
         Ok(pane) => pane,
         Err(error) => {
             tracing::error!(error = ?error, "reading a Worktree's stage briefs failed");
@@ -1364,6 +1430,7 @@ fn opened(
     base: &str,
     name: &str,
     record: &store::StageStandings,
+    held: &HashSet<i64>,
 ) -> Option<RoadmapPane> {
     if !touched(worktree, base).contains(name) {
         return None;
@@ -1391,7 +1458,7 @@ fn opened(
     let stages: Vec<StageSource> = list
         .lines()
         .filter_map(checklist::entry)
-        .zip(states(name, &list, record))
+        .zip(states(name, &list, record, held))
         .map(|(entry, state)| {
             // What its line declares, read off the same tail the in-flight
             // annotation lives in: the two share it in either order and neither
@@ -2747,9 +2814,20 @@ Turns this askance clone into Verkstead.
         }
 
         /// And with a record behind them, which is where a stage's state comes
-        /// from wherever it has a row.
+        /// from wherever it has a row — this server holding no stage, which is
+        /// what a server that has just come back is.
         fn lists_with(&self, record: &store::StageStandings) -> Vec<StageListEvent> {
-            roadmaps(self.path(), &self.base, record)
+            self.lists_holding(record, &HashSet::new())
+        }
+
+        /// And with the joins register beside it: the Conversations this server is
+        /// holding before their finish, which is where *waiting to join* comes from.
+        fn lists_holding(
+            &self,
+            record: &store::StageStandings,
+            held: &HashSet<i64>,
+        ) -> Vec<StageListEvent> {
+            roadmaps(self.path(), &self.base, record, held)
         }
 
         /// One of them opened, which is the same reading a level deeper: the
@@ -2760,7 +2838,18 @@ Turns this askance clone into Verkstead.
 
         /// And that pane against a record, as the card above is.
         fn opened_with(&self, name: &str, record: &store::StageStandings) -> Option<RoadmapPane> {
-            opened(self.path(), &self.base, name, record)
+            self.opened_holding(name, record, &HashSet::new())
+        }
+
+        /// And against the register too, which the pane reads exactly as the card
+        /// does.
+        fn opened_holding(
+            &self,
+            name: &str,
+            record: &store::StageStandings,
+            held: &HashSet<i64>,
+        ) -> Option<RoadmapPane> {
+            opened(self.path(), &self.base, name, record, held)
         }
     }
 
@@ -2908,6 +2997,134 @@ Turns this askance clone into Verkstead.
             StageState::Halted,
             "and a run that has stopped is not in progress, whatever else it is",
         );
+    }
+
+    /// Stages of `mvp` the record has **in flight**, as the Conversations named.
+    ///
+    /// Which Conversation a stage is, is what the joins register is asked by — it
+    /// keeps Conversations where a roadmap keeps labels — so the tests about the
+    /// hold name one where [`record`] has no need to.
+    fn on_it<'a>(rows: impl IntoIterator<Item = (&'a str, i64)>) -> store::StageStandings {
+        store::StageStandings::from_rows(rows.into_iter().map(|(label, conversation_id)| {
+            (
+                "mvp",
+                label,
+                store::StageStanding::InFlight,
+                false,
+                conversation_id,
+            )
+        }))
+    }
+
+    /// And the same with those Conversations **stopped**, which is the one thing a
+    /// hold loses to.
+    fn halted_on_it<'a>(rows: impl IntoIterator<Item = (&'a str, i64)>) -> store::StageStandings {
+        store::StageStandings::from_rows(rows.into_iter().map(|(label, conversation_id)| {
+            (
+                "mvp",
+                label,
+                store::StageStanding::InFlight,
+                true,
+                conversation_id,
+            )
+        }))
+    }
+
+    /// A stage this server is **holding** before its finish reads *waiting to join*
+    /// where the record alone would have said *in progress*.
+    ///
+    /// Every task of it is done and what waits is the join, so the record has it in
+    /// flight and the hold is the more particular thing to say about it — see
+    /// [`holding`], and [`crate::joins`], which is the hold itself.
+    ///
+    /// And only that stage: the register is asked by the Conversation the record
+    /// names for the label, so a second stage in flight under a Conversation nothing
+    /// is holding goes on reading *in progress*.
+    #[test]
+    fn a_stage_held_before_its_finish_reads_waiting_to_join() {
+        let repo = Repo::with(&[]);
+        repo.write("mvp", FOUR);
+
+        let record = on_it([("01", 7), ("02", 9)]);
+
+        assert_eq!(
+            states(&repo.lists_holding(&record, &HashSet::from([9]))),
+            [
+                StageState::InProgress,
+                StageState::WaitingToJoin,
+                StageState::ToDo,
+                StageState::Done,
+            ],
+            "Conversation 9 is the one being held, and stage 02 is the stage it is: the \
+             stage in flight beside it is nobody's hold",
+        );
+    }
+
+    /// And a server **holding nothing** reads *in progress* for the same stage, which
+    /// is exactly what the sidebar's own label does.
+    ///
+    /// The register is a task of this process rather than anything stored, so a
+    /// server that has just come back is holding nothing at all: such a stage reads
+    /// *in progress* again until the resume takes it up and finds it held a second
+    /// time. The two agreeing is the point of them being one register.
+    #[test]
+    fn a_server_holding_nothing_reads_the_same_stage_in_progress() {
+        let repo = Repo::with(&[]);
+        repo.write("mvp", FOUR);
+
+        let record = on_it([("02", 9)]);
+
+        assert_eq!(
+            states(&repo.lists_holding(&record, &HashSet::new()))[1],
+            StageState::InProgress,
+            "nothing is held, so nothing is waiting to join",
+        );
+        assert_eq!(
+            states(&repo.lists_with(&record))[1],
+            StageState::InProgress,
+            "which is what a reading handed no register at all says too",
+        );
+    }
+
+    /// And a held stage whose Conversation has **stopped** reads *halted*: a
+    /// Conversation that has stopped is being held by nothing, whatever a register
+    /// this process has not swept says.
+    #[test]
+    fn a_held_stage_whose_conversation_has_stopped_reads_halted() {
+        let repo = Repo::with(&[]);
+        repo.write("mvp", FOUR);
+
+        assert_eq!(
+            states(&repo.lists_holding(&halted_on_it([("02", 9)]), &HashSet::from([9])))[1],
+            StageState::Halted,
+            "halted wins: what a reader does about it is go and look at that \
+             Conversation",
+        );
+    }
+
+    /// And the pane says *waiting to join* exactly where the card does, off the one
+    /// register: a pane saying a stage was in progress while the card that opened it
+    /// said the stage was waiting to join would be two readings of one hold.
+    #[test]
+    fn the_pane_says_a_stage_is_waiting_to_join_exactly_as_the_card_does() {
+        let repo = Repo::with(&[]);
+        repo.write("mvp", FOUR);
+
+        let record = on_it([("01", 7), ("02", 9)]);
+        let held = HashSet::from([9]);
+
+        let pane = repo
+            .opened_holding("mvp", &record, &held)
+            .expect("there is a roadmap to open");
+
+        assert_eq!(
+            pane.stages
+                .iter()
+                .map(|stage| stage.state.clone())
+                .collect::<Vec<_>>(),
+            states(&repo.lists_holding(&record, &held)),
+        );
+        assert_eq!(pane.stages[1].state, StageState::WaitingToJoin);
     }
 
     /// The pane says the same thing about a stage as the card does, off the same
@@ -3422,8 +3639,12 @@ Turns this askance clone into Verkstead.
             .join(ROADMAPS);
 
         for name in ["mvp", "public-release"] {
-            let list = roadmap(&roadmaps.join(name), &store::StageStandings::default())
-                .unwrap_or_else(|| panic!("{name} should read back as a stage list"));
+            let list = roadmap(
+                &roadmaps.join(name),
+                &store::StageStandings::default(),
+                &HashSet::new(),
+            )
+            .unwrap_or_else(|| panic!("{name} should read back as a stage list"));
 
             assert_eq!(list.name, name);
             assert!(
@@ -3589,12 +3810,16 @@ Turns this askance clone into Verkstead.
     /// Nothing stopped, which is what the readings this feeds care about: whether
     /// a stage halted is the card's question rather than theirs — see
     /// [`halted`], which is where a record with a stop in it is built.
+    ///
+    /// And every row says Conversation `0`, which is nobody's: what the
+    /// Conversation is asked about is whether this server is holding it, and
+    /// nothing is held anywhere these are used — see [`on_it`], which names them.
     fn record<'a>(
         rows: impl IntoIterator<Item = (&'a str, &'a str, store::StageStanding)>,
     ) -> store::StageStandings {
         store::StageStandings::from_rows(
             rows.into_iter()
-                .map(|(roadmap, label, standing)| (roadmap, label, standing, false)),
+                .map(|(roadmap, label, standing)| (roadmap, label, standing, false, 0)),
         )
     }
 
@@ -3606,7 +3831,7 @@ Turns this askance clone into Verkstead.
     ) -> store::StageStandings {
         store::StageStandings::from_rows(
             rows.into_iter()
-                .map(|(roadmap, label, standing)| (roadmap, label, standing, true)),
+                .map(|(roadmap, label, standing)| (roadmap, label, standing, true, 0)),
         )
     }
 

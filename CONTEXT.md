@@ -2339,13 +2339,20 @@ ADR-0021.
 
 **And where it is, is a word the viewer is told.** The pinned stage card's row
 and the roadmap's details pane both say where each Stage of the roadmap has got
-to — *done*, *in progress*, *halted*, *waiting on* a named Stage or *to do* — in
-place of the *done* and *to do* the card used to work out from the box. The words
-come off Verkstead's own reading, the same one above: *done* is a Stage that
-settled, or one the record holds nothing about whose box is ticked; *in progress*
-is one the record has in flight; *halted* is one whose Conversation has stopped
-or that was closed before it ever wrapped up, one word for the two because what a
-reader does about either is go and look at that Conversation; *waiting on* is a
+to — *done*, *in progress*, *waiting to join*, *halted*, *waiting on* a named
+Stage or *to do* — in place of the *done* and *to do* the card used to work out
+from the box. The words come off Verkstead's own reading, the same one above:
+*done* is a Stage that settled, or one the record holds nothing about whose box
+is ticked; *in progress* is one the record has in flight; *waiting to join* is one
+of those the server is **holding** before its finish, read off that register at
+the moment the page is drawn rather than off anything stored — the same register
+the sidebar's own label comes off, so a Stage cannot read one thing on its row
+there and another on the roadmap's card here, and a server that has just come
+back is holding nothing and says *in progress* again until its resume finds the
+Stage held a second time; *halted* is one whose Conversation has stopped or that
+was closed before it ever wrapped up, one word for the two because what a reader
+does about either is go and look at that Conversation — and it wins over the hold,
+a stopped Conversation being held by nothing; *waiting on* is a
 Stage of a declaring roadmap that nothing has started yet, naming the Stages its
 own line stands on that have not settled — only those, so what it says moves as
 the roadmap runs where what it *stands on* does not; and *to do* is everything
@@ -2367,8 +2374,9 @@ finish pushes its branch and opens its pull request — so the pull request
 recorded against a Stage is what says it has joined, and the Timeline Event that
 row hangs off is what says when. A Stage whose every box is ticked and that has
 a Stage in the chain which has not *settled* is **held before its finish**: no
-session is launched, the Timeline says which Stage it is waiting on, and it is
-released the moment that one settles. Nothing rebases onto a branch that is
+session is launched, the Timeline says which Stage it is waiting on, the
+Conversation wears the label for it and its row on the roadmap's card reads
+*waiting to join*, and it is released the moment that one settles. Nothing rebases onto a branch that is
 still moving, which is what buys the rest of it — a Stage is rebased once,
 before it has a pull request anybody has started reading. Two Stages finishing
 close together are let in **one at a time, in the order their tasks finished**,
@@ -3136,9 +3144,10 @@ _Avoid_: blocked on you (that is about the human, this is about GitHub), CI
 What a **Stage** whose every task is done is doing while it is not yet its turn
 to join its roadmap's chain. No finish session is launched: a **Notice** says so
 on the Timeline and names the Stage or Stages it is waiting on and why, the
-status button reads the words where its status word goes, and the sidebar row
-reads them in place of the state word, Implementing being what has come down to
-this.
+status button reads the words where its status word goes, the sidebar row reads
+them in place of the state word — Implementing being what has come down to this —
+and the Stage's row on its roadmap's card reads them where a Stage's state goes,
+off the same register at the same moment.
 
 Two things are waited on, and the second is what makes a queue of Stages read as
 a queue rather than as two stalls. A Stage **already in the chain that has not

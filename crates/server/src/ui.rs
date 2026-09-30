@@ -1373,10 +1373,19 @@ pub(crate) async fn conversation_view(
         }
     };
 
+    // And the register beside it, which is the other half of where a stage is:
+    // which Conversations are stages this server is holding before their finish —
+    // see [`crate::joins`]. Read here for the reason the sidebar's own *Waiting to
+    // join* label is read where the rows are drawn: the hold is a task of this
+    // process rather than anything stored, so the card's word and the label are the
+    // one register read at the one moment and cannot disagree about a stage.
+    let held = state.joins.all_waiting();
+
     let roadmaps = crate::stages::showing(
         conversation.worktree.clone(),
         conversation.base_commit.clone(),
         record,
+        held,
     )
     .await;
 
@@ -3586,7 +3595,10 @@ async fn roadmap(
     // The same record the card was drawn against, read here for the reason it is
     // read there: where a stage is comes off Verkstead's own rows rather than off
     // the boxes in this branch's `ROADMAP.md`. One that would not read leaves the
-    // pane to its boxes, as the card's does.
+    // pane to its boxes, as the card's does. The joins register goes with it, and
+    // is read at this moment for the same reason it is read at that one — a pane
+    // saying a stage was in progress while the card that opened it said the stage
+    // was waiting to join would be two readings of one hold.
     let record = match store::stage_standings(&state.pool, repo_id).await {
         Ok(record) => record,
         Err(error) => {
@@ -3595,7 +3607,7 @@ async fn roadmap(
         }
     };
 
-    match crate::stages::documents(worktree, base, name, record).await {
+    match crate::stages::documents(worktree, base, name, record, state.joins.all_waiting()).await {
         Some(pane) => Json(pane).into_response(),
         None => no_such_roadmap(),
     }
