@@ -1480,11 +1480,12 @@ fn chained(stack: &[store::PullRequest]) -> Option<Vec<&str>> {
 /// ago by the take-up, so there may be nothing in it: the session is told to
 /// adopt the chain where `gh stack view` finds none. The branches are named in
 /// order from the bottom, which is the order a chain is adopted in and the
-/// order a human checks it against — but which command adopts them is left to
-/// the session. `docs/agents/git-workflow.md` documents `gh stack init` taking
-/// a predecessor and one new branch rather than a chain of any depth, and a
-/// prompt spelling out an argument list the extension may not take would be a
-/// session sent to run something that cannot work.
+/// order a human checks it against, and the command is named with them: one
+/// `gh stack init` takes a chain of any depth, bottom first, which
+/// `docs/agents/git-workflow.md` now documents from what the extension was
+/// measured doing rather than from what its own documentation says. A prompt
+/// that left the argument list to the session would be a session working out
+/// again what the repository has already written down.
 ///
 /// **And what this checkout holds is what an adoption adopts.** The take-up cut
 /// its Worktree on the Conversation's own branch, and the rest of the chain may
@@ -1532,10 +1533,10 @@ fn syncing(watched: &Watched, stack: &[store::PullRequest], branches: &[&str]) -
          you adopt anything: adopting a branch this checkout has not got creates it empty \
          rather than refusing, and the sync below force-pushes whatever was adopted, so a \
          branch invented here is the real one on origin overwritten — and these branches \
-         are other people's work. Then adopt them in that order, the way \
-         `gh {extension} --help` says a chain that already exists is adopted, and read it \
-         back with `gh {extension} view` before you sync anything: a chain that came back \
-         wrong is one to stop at rather than to force-push.\n\n\
+         are other people's work. Then adopt the whole chain with one command, bottom \
+         first — `gh {extension} init {adopting}` — and read it back with \
+         `gh {extension} view` before you sync anything: a chain that came back wrong is \
+         one to stop at rather than to force-push.\n\n\
          Then `gh stack sync`. Where it reports a conflict it backs out rather than leaving \
          a branch half-rebased, and `gh stack rebase` is what walks the chain again and \
          stops in the conflict for you to resolve. Resolving it is the job: a conflict is \
@@ -1554,6 +1555,7 @@ fn syncing(watched: &Watched, stack: &[store::PullRequest], branches: &[&str]) -
             .map(|branch| format!("`{branch}`"))
             .collect::<Vec<_>>()
             .join(", "),
+        adopting = branches.join(" "),
     )
 }
 
@@ -1930,9 +1932,9 @@ mod tests {
              {told}",
         );
         assert!(
-            !told.contains("gh stack init stage-01"),
-            "and no argument list is spelled out for a form of the command \
-             nothing here has checked the extension takes: {told}",
+            told.contains("gh stack init stage-01 stage-02 rate-limiting"),
+            "and the one command that adopts a chain of that depth, with the \
+             whole of it as its argument list: {told}",
         );
         assert!(
             told.contains("gh stack rebase"),

@@ -28,6 +28,13 @@
 //! with the rest of the work in it — and the refusals travel to that draft
 //! rather than dying with the page that made it, see [`refusedOnCreate`].
 //!
+//! **And the one outcome that is not a refusal travels whole**, which is a take-up
+//! stopped to ask what closing another conversation would discard: what answers it
+//! is a press, and the press is on the draft this made. So the draft's own take-up
+//! picks up the outcome and its press is the confirming one — see
+//! [`stoppedOnCreate`]. A sentence would have said *press start again to go ahead*
+//! about a press that had no way of knowing what had been asked.
+//!
 //! **The files are not held the same way**, because a `File` is a handle the
 //! browser gave this page rather than text a device can write down: they are
 //! held in the page (`src/holding.ts`), a reload loses them, and the replay
@@ -86,11 +93,13 @@ import {
   takeUpPullRequest,
 } from "../api/client";
 import type {
+  AdoptedStage,
   AttachmentView,
   CompanionMode,
   ConversationView,
   Process,
   Started,
+  TakenUp,
 } from "../api/types";
 import type { Holding } from "../holding";
 import * as pairing from "../pairing";
@@ -156,6 +165,14 @@ export type Adopting = {
   /// The next stage as the roadmap writes it, and what it is called.
   stage: string;
   stage_title: string;
+  /// And the stages the press would start beside it, where the roadmap declares
+  /// and has more than one ready — the first is the conversation this page is
+  /// about, and these are started as conversations of their own.
+  ///
+  /// Optional because a body this device wrote down before there were any has
+  /// none, which is no roadmap ready beside the one it named rather than a card
+  /// with a gap in it — see [`loaded`].
+  beside?: AdoptedStage[];
   /// The branch the roadmap was read off, empty being the repo's default branch
   /// — which is the base the adopting Conversation is started fixed to, a
   /// roadmap on an unmerged branch being only on that branch.
@@ -408,8 +425,13 @@ export function clear(): void {
 
 /// What became of a press: the Conversation it made and whatever the replay
 /// could not do to it, or the one refusal that leaves nothing at all.
+///
+/// `stopped` is the one outcome of the replay that is not a refusal — a take-up
+/// that stopped to ask what closing another conversation would discard. It travels
+/// whole because what answers it is a press rather than anything to go and fix,
+/// and the press is on the draft this made.
 export type Created =
-  | { conversation: number; refused: string[] }
+  | { conversation: number; refused: string[]; stopped: TakenUp | null }
   | "NoSuchRepo";
 
 /// Create the Conversation this page describes, and put every touched field on
@@ -475,6 +497,13 @@ export async function create(
 
   const id = started.Started.id;
   const refused: string[] = [];
+
+  /// The take-up outcome that stopped to ask rather than refusing, where the
+  /// kickoff was a take-up and that is what it came back with.
+  ///
+  /// Carried whole rather than as a sentence, because what answers it is the press
+  /// on the draft this made — see the take-up below.
+  let stopped: TakenUp | null = null;
 
   /// One field's answer, read the way the composer reads it: nothing where it
   /// landed, and the sentence the pane would have said where it did not.
@@ -628,10 +657,22 @@ export async function create(
       // somewhere else, and both reach it by this one endpoint. Nothing picked
       // is the Develop every draft defaults to, which is pointed at nothing.
       const outcome = await takeUpPullRequest(to, id);
-      said(
-        outcome === "TakenUp",
-        `The pull request could not be taken up: ${takeUpRefusal(outcome)}`,
-      );
+
+      // And the one outcome that is not a refusal: the press stopped to ask what
+      // closing another conversation would discard, and the answer is a press. So
+      // it travels as the outcome rather than as a sentence about it — the draft's
+      // own composer takes it up, draws it with a link per conversation, and the
+      // first press there is the confirming one. Left as a sentence it would have
+      // read *press start again to go ahead* over a press that could only ask the
+      // same question over again.
+      if (typeof outcome === "object" && "WouldDiscard" in outcome) {
+        stopped = outcome;
+      } else {
+        said(
+          outcome === "TakenUp",
+          `The pull request could not be taken up: ${takeUpRefusal(outcome)}`,
+        );
+      }
     } else {
       const outcome = await startGrilling(to, id);
       said(
@@ -641,7 +682,7 @@ export async function create(
     }
   }
 
-  return { conversation: id, refused };
+  return { conversation: id, refused, stopped };
 }
 
 /// The Conversation this page's press makes, which is one of two starts.
@@ -877,7 +918,8 @@ export async function moveTo(
     }
   }
 
-  return { conversation: id, refused };
+  // A move takes nothing up, so there is never a take-up stopped to ask.
+  return { conversation: id, refused, stopped: null };
 }
 
 /// One file carried from the draft to the Conversation it is becoming.
@@ -935,9 +977,15 @@ async function carry(
 /// every Verkstead issuing a Conversation 1, so refusals left against a bare
 /// number would be drawn on the composer of an unrelated draft the moment two
 /// devices are in play. See `rowKey` in `src/reaching.ts`.
+///
+/// And the take-up that stopped to ask beside them, for the same reason and for
+/// one more: it is answered by a press rather than by anything to go and fix, so
+/// the draft's own take-up picks it up as the outcome it is and the press there is
+/// the confirming one. See [`stoppedOnCreate`].
 const [replayed, setReplayed] = createSignal<{
   row: string;
   refused: string[];
+  stopped: TakenUp | null;
 } | null>(null);
 
 /// What the create that made this Conversation could not do, in the words its
@@ -948,17 +996,29 @@ export function refusedOnCreate(device: Device, id: number): string[] {
   return left !== null && left.row === rowKey(device, id) ? left.refused : [];
 }
 
+/// And the take-up the create stopped over, for this Conversation's own press to
+/// go on from — `null` for every other Conversation and for every create that was
+/// not stopped.
+///
+/// Read once, when the composer's take-up starts: what it becomes is that press's
+/// own state, and everything after it is the press answering itself.
+export function stoppedOnCreate(device: Device, id: number): TakenUp | null {
+  const left = replayed();
+  return left !== null && left.row === rowKey(device, id) ? left.stopped : null;
+}
+
 /// Leave them for that Conversation's composer, or take away what was left for
 /// the one before it.
 export function leaveRefusals(
   device: Device,
   conversation: number,
   refused: string[],
+  stopped: TakenUp | null,
 ): void {
   setReplayed(
-    refused.length === 0
+    refused.length === 0 && stopped === null
       ? null
-      : { row: rowKey(device, conversation), refused },
+      : { row: rowKey(device, conversation), refused, stopped },
   );
 }
 
@@ -1067,6 +1127,11 @@ function loaded(value: unknown): value is Adopting | null | undefined {
     typeof roadmap.title === "string" &&
     typeof roadmap.stage === "string" &&
     typeof roadmap.stage_title === "string" &&
+    // A body from before the press started more than one stage has none, which
+    // is the same absence `adopting` itself is: it reads as nothing ready
+    // beside the stage the card names, and the press reads the roadmap again
+    // anyway.
+    (roadmap.beside === undefined || Array.isArray(roadmap.beside)) &&
     typeof roadmap.base === "string"
   );
 }

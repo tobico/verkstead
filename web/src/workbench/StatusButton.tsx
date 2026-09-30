@@ -48,7 +48,7 @@ import { Icon } from "../Icon";
 import type { ConversationView } from "../api/types";
 import { useDevice } from "../reaching";
 import { Actions } from "./Actions";
-import { WAITING_ON_CHECKS, parked } from "./conditions";
+import { WAITING_ON_CHECKS, WAITING_TO_JOIN, parked } from "./conditions";
 import { pressed } from "./eager";
 import { ENDED, STATE } from "./states";
 import styles from "./StatusButton.module.css";
@@ -113,6 +113,14 @@ export function status(conversation: ConversationView): Status {
   // waiting on GitHub, and there is nothing for anybody to do.
   if (conversation.waiting_on_checks) {
     return { word: WAITING_ON_CHECKS, state, attention: false };
+  }
+
+  // And a stage whose tasks are all done, waiting for the chain below it to
+  // settle before its finish joins it. The same shape one state earlier: not
+  // stopped, nothing running, and nothing for anybody here to do — what it is
+  // waiting on is another stage, and the Timeline says which.
+  if (conversation.waiting_to_join) {
+    return { word: WAITING_TO_JOIN, state, attention: false };
   }
 
   // A session in the worktree. A session between two lines of its own output

@@ -126,7 +126,7 @@ import { SPOKEN } from "./Mark";
 // so a ring means the same thing in the list that it means on the row it
 // opens.
 import marks from "./Mark.module.css";
-import { WAITING_ON_CHECKS, parked } from "./conditions";
+import { WAITING_ON_CHECKS, WAITING_TO_JOIN, parked } from "./conditions";
 import { titled } from "./naming";
 import { STATE } from "./states";
 import { Wordmark } from "./Wordmark";
@@ -720,6 +720,10 @@ const UNREACHABLE = "unreachable";
 /// saying both would be saying it twice. The words are [`WAITING_ON_CHECKS`],
 /// which the Timeline's own header draws from the same constant.
 ///
+/// And a stage waiting to join is said the same way one state earlier, for the
+/// same reason: what Implementing has come down to is the chain below it, and the
+/// words are [`WAITING_TO_JOIN`].
+///
 /// And a session the Rescue is watching sit there is said *beside* that word
 /// rather than in place of it: *idle 4 min, spoken to once* is something true
 /// of a run that is still Implementing. The words are [`parked`], which the
@@ -743,7 +747,11 @@ const UNREACHABLE = "unreachable";
 /// what opens this label, which is the whole of what agreeing means here.
 function spoken(entry: ConversationEntry): string {
   const which = mark(entry);
-  const where = entry.waiting_on_checks ? WAITING_ON_CHECKS : STATE[entry.state];
+  const where = entry.waiting_on_checks
+    ? WAITING_ON_CHECKS
+    : entry.waiting_to_join
+      ? WAITING_TO_JOIN
+      : STATE[entry.state];
   const name = titled(entry);
   const marked =
     which === "waiting"

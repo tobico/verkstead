@@ -135,16 +135,25 @@ stage's entry, change its `- [ ]` to `- [x]`, and drop the
 `*(in progress: `<branch>`)*` annotation after its link — the stage is done
 rather than in flight, and the annotation was only ever saying whose it was.
 
-    - [ ] 03: Grant filters — [brief](03-grant-filters.md) *(in progress: `missing-roles/03-grant-filters`)*
+    - [ ] 03: Grant filters — [brief](03-grant-filters.md) — after 02 *(in progress: `missing-roles/03-grant-filters`)*
 
 becomes
 
-    - [x] 03: Grant filters — [brief](03-grant-filters.md)
+    - [x] 03: Grant filters — [brief](03-grant-filters.md) — after 02
+
+**The annotation is all that goes.** What the line declares the stage stands on
+and the platform it wants — `after 02` there, `no dependencies` or `on windows`
+on another line — is written after the same link, and Verkstead reads it off
+the line: it stays exactly as it was. A roadmap that has lost one line's
+declaration declares on some lines and not others, which is refused. A line
+that declares nothing had none to keep.
 
 Nothing else in the file changes: no renumbering, no reordering, no rewording,
-and no touching another stage's box. Verkstead reads those boxes to decide what
-to start next, and a stage ticked here is what lets the stage after it begin
-without anybody being asked.
+and no touching another stage's box — every stage ticks its own here, at its own
+finish, and another stage's may be a sibling somebody is still working. This box
+is the score a person reading `ROADMAP.md` goes by, and what Verkstead itself
+goes by is its own record of a stage settling, with the boxes behind it where it
+has no record of one.
 
 Where there is no `Roadmap stage:` line, this backlog was an ordinary feature's
 and there is no roadmap to tick. Skip it.
@@ -162,16 +171,23 @@ choice:
 - an **unstacked** branch — the ordinary case — is pushed, and then opened as a
   **draft** pull request titled for the feature, with a summary of the completed
   tasks as its body;
-- a **stacked** branch, one made with `gh stack init` / `gh stack add`, goes
-  through `gh stack submit --auto` instead, after which this branch's own pull
-  request has its title and body corrected. Leave the stack's other pull
-  requests alone: they belong to finished work.
+- a **stacked** branch, one with a chain under it, goes through
+  `gh stack submit --auto` instead, after which this branch's own pull request
+  has its title and body corrected. Leave the stack's other pull requests
+  alone: they belong to finished work.
 
 Work out which of the two this branch is before running either, and follow what
-the repository's own sequence says about it — `gh stack view` naming this branch
-is what says it is in a stack, and an error or a stack without it says it is not. A repository whose file says
-nothing about finishing, or has no such file: push the branch and open a draft
-pull request titled for the feature —
+the repository's own sequence says about it. **A prompt carrying a *The chain
+this stage joins* section is what settles it**: that branch is a stacked one,
+whatever this checkout says. `gh stack` keeps its registry per worktree and
+every stage is worked in a worktree of its own, so `gh stack view` erroring
+here is an empty registry rather than proof of anything — adopt the chain and
+join it the way the repository's block says, and come back to the sequence
+above. Where no chain was carried, `gh stack view` naming this branch is what
+says it is in a stack, and an error or a stack without it says it is not.
+
+A repository whose file says nothing about finishing, or has no such file: push
+the branch and open a draft pull request titled for the feature —
 
     git push -u origin HEAD
     gh pr create --draft --title '<feature name>' --body '<the tasks this delivered>'
@@ -181,6 +197,49 @@ at this terminal: the pull request opens unasked, and it opens as a *draft*
 because merging is the human's act and nothing here is allowed to look like it
 was theirs. Then run `verkstead done`, once every companion below is finished
 too.
+
+### A conflict on the way in
+
+The step above is where a roadmap stage **joins its roadmap's chain**: where the
+prompt carried a *The chain this stage joins* section, this branch is rebased
+onto the top of that chain before anything is pushed, and its pull request opens
+against it. That rebase may stop in a conflict, and the conflict is **this
+session's to resolve** — a stage is rebased once, before it has a pull request
+anybody has started reading, and this session is the one holding it.
+
+**A conflict is two changes to reconcile**, and resolving it means keeping both.
+Taking one side's hunk wholesale — `--ours`, `--theirs`, or the same thing done
+by hand — is not a resolution: it throws away work somebody did, and it throws
+it away silently, because the rebase then looks exactly like one that went
+cleanly. Write what the two changes together were meant to do. And do not undo
+it to escape it: an aborted rebase leaves this branch exactly as unjoined as it
+was, with the finish still to do.
+
+**Then run the repository's checks again, before anything is pushed.** A rebase
+that conflicted produced a tree neither branch ever had, so nothing has been
+over this work: a rebase that compiles is not a rebase that reconciled
+anything. Run the tests the way the tasks before this one ran them, fix what the
+reconciliation broke, and push once they are green rather than before.
+
+**Nothing below this branch is touched.** What conflicted is this branch's own
+commits arriving on top of the chain, so the resolution goes in this branch and
+nowhere else: no branch below it is rebased, none of them is pushed, and no pull
+request of one changes base. Where the repository's own block names the command
+that carries a rebase on through a conflict, that command moves this branch
+alone.
+
+**Ask only where you cannot tell which side is meant.** Two changes that are two
+intentions — each side having settled the same question a different way — are a
+decision rather than a reconciliation, and one guessed at is work the human
+never chose. That is one Question Set through the ordinary ask — see *When you
+need the human* below — saying what conflicted, what each side was doing, and
+the options you can see. One Set, rather than a guess committed and rather than
+a session that stopped with nothing said.
+
+**And say the join met a conflict, whichever way it went.** As the last thing
+you print, in a sentence: what conflicted, and whether you reconciled it or
+asked. That line is what the human reads on the Timeline, where a join that took
+an hour and a rebase that moved nothing should not read alike.
 
 ### And every companion repository you committed in
 

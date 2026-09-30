@@ -722,6 +722,7 @@ export function Workbench(): JSX.Element {
                   select={select}
                   pane={setPane}
                   list={() => navigate("/")}
+                  go={(conversation) => navigate(pathOf(conversation))}
                 />
               </Reaching.Provider>
             </Show>
@@ -770,6 +771,11 @@ function TimelinePane(props: {
   /// change of level: what is being let go of is the selection, and the URL is
   /// where the selection is kept.
   list: () => void;
+
+  /// And the way to another Conversation, which the roadmap's card leads to: a
+  /// stage in flight on it is a Conversation of its own. A navigation for the
+  /// same reason — which Conversation is open is the URL's to say.
+  go: (conversation: number) => void;
 }): JSX.Element {
   return (
     <Switch>
@@ -797,6 +803,7 @@ function TimelinePane(props: {
           <Timeline
             conversation={conversation()}
             back={props.list}
+            go={props.go}
             details={() => props.pane("details")}
             selected={props.event}
             select={props.select}

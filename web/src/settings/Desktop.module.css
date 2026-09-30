@@ -63,6 +63,11 @@
   font-size: 0.95rem;
   color: var(--ink);
   cursor: pointer;
+
+  /* And no selection, the row being a press — see `rowPress` in `src/rows.ts`
+     for what a press that slid over the words used to do instead, which was
+     nothing. */
+  user-select: none;
 }
 
 .position input {

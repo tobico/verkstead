@@ -62,6 +62,7 @@ import {
 } from "../src/settings/SettingsPage";
 import { pathTo } from "../src/settings/openings";
 import { json, serving, whenever } from "./serving";
+import { slidPress } from "./sliding";
 import conversations from "./fixtures/conversations.json" with { type: "json" };
 import profiles from "./fixtures/profiles.json" with { type: "json" };
 import repos from "./fixtures/repos.json" with { type: "json" };
@@ -298,6 +299,43 @@ describe("the close policy", () => {
 
     await waitFor(() => expect(asked.set).toHaveBeenCalledWith({ whenClosed: "quit" }));
     await waitFor(() => expect(chosen(container)).toBe("quit"));
+  });
+
+  /// And the words beside a radio are as much the press as the radio is, which
+  /// is what the row is a row for — see `rowPress` in `src/rows.ts`, and
+  /// `tests/sliding.ts` for the press a browser stops forwarding.
+  it("sends the position a press that slid over its words picked", async () => {
+    const asked = standingIn();
+    const { container } = mountPane();
+
+    await waitFor(() => expect(positions(container)).toHaveLength(3));
+    slidPress(screen.getByText("Quit Verkstead"));
+
+    await waitFor(() => expect(asked.set).toHaveBeenCalledWith({ whenClosed: "quit" }));
+  });
+
+  /// The refusal the browser makes of a disabled radio, which a row answering
+  /// for itself would otherwise be the way round.
+  it("sends nothing for a press on the position the tray has taken away", async () => {
+    const asked = standingIn({ whenClosed: "quit", trayIcon: false });
+    const { container } = mountPane();
+
+    await waitFor(() => expect(positions(container)).toHaveLength(3));
+    slidPress(screen.getByText("Keep running in the tray"));
+
+    expect(asked.set).not.toHaveBeenCalled();
+  });
+
+  /// And a press on the position already saved asks for nothing, which is what a
+  /// `change` the browser never fired said for itself.
+  it("sends nothing for a press on the position already chosen", async () => {
+    const asked = standingIn({ whenClosed: "quit", trayIcon: true });
+    const { container } = mountPane();
+
+    await waitFor(() => expect(positions(container)).toHaveLength(3));
+    slidPress(screen.getByText("Quit Verkstead"));
+
+    expect(asked.set).not.toHaveBeenCalled();
   });
 
   /// The rule the page's checkbox holds, and the reason a press is handed up as

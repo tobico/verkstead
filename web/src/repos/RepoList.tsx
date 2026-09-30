@@ -109,6 +109,7 @@ import { repoParent, setRepoParent } from "../remembered";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine, Note } from "../notices";
 import { keyOf, useDevice } from "../reaching";
+import { rowPress } from "../rows";
 import { useSettings } from "../settings/PathEditor";
 import { PaneHead } from "../workbench/PaneHead";
 import styles from "./RepoList.module.css";
@@ -903,7 +904,12 @@ export function CreateRepo(props: {
             is what the card is about to do about GitHub, and it does not know
             yet. */}
           <Show when={tokened() === true}>
-            <label class={styles.github}>
+            {/* Pressed as a row — see `rowPress`, and the press a label stops
+                forwarding once a hand has slid. */}
+            <label
+              class={styles.github}
+              onClick={rowPress(() => setOnGithub(!onGithub()))}
+            >
               <input
                 type="checkbox"
                 checked={onGithub()}

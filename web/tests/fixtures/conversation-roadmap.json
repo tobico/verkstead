@@ -60,23 +60,35 @@
         "name": "mvp",
         "stages": [
           {
-            "done": true,
+            "conversation": null,
             "number": "01",
+            "state": {
+              "state": "Done"
+            },
             "title": "Workbench"
           },
           {
-            "done": true,
+            "conversation": null,
             "number": "02",
+            "state": {
+              "state": "Done"
+            },
             "title": "Grilling"
           },
           {
-            "done": false,
+            "conversation": null,
             "number": "03",
+            "state": {
+              "state": "ToDo"
+            },
             "title": "Implementation"
           },
           {
-            "done": false,
+            "conversation": null,
             "number": "04",
+            "state": {
+              "state": "ToDo"
+            },
             "title": "Wrap-up"
           }
         ],
@@ -148,23 +160,35 @@
             "name": "mvp",
             "stages": [
               {
-                "done": true,
+                "conversation": null,
                 "number": "01",
+                "state": {
+                  "state": "Done"
+                },
                 "title": "Workbench"
               },
               {
-                "done": true,
+                "conversation": null,
                 "number": "02",
+                "state": {
+                  "state": "Done"
+                },
                 "title": "Grilling"
               },
               {
-                "done": false,
+                "conversation": null,
                 "number": "03",
+                "state": {
+                  "state": "ToDo"
+                },
                 "title": "Implementation"
               },
               {
-                "done": false,
+                "conversation": null,
                 "number": "04",
+                "state": {
+                  "state": "ToDo"
+                },
                 "title": "Wrap-up"
               }
             ],
@@ -184,6 +208,7 @@
   "trimmed": false,
   "waiting": false,
   "waiting_on_checks": false,
+  "waiting_to_join": false,
   "working": false,
   "worktree": {
     "missing": false,
