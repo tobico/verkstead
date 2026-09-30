@@ -47,9 +47,9 @@
 //! **Placeholders are what only the server knows** — see [`Machine`], and the
 //! embedded file, which is where each of the four is spelled out. A
 //! placeholder's directory is granted to a session only where a loaded
-//! descriptor names it: the one beside the Worktrees is where pnpm's, deno's
-//! and bun's stores are, and an installation with every language that names it
-//! switched off is opened onto none.
+//! descriptor names it: the one beside the Worktrees is where pnpm's, deno's,
+//! bun's and uv's stores are, and an installation with every language that
+//! names it switched off is opened onto none.
 //!
 //! **And an entry that will not load falls back to the built-in of that name.**
 //! Two ways one fails and one answer to both: an entry naming a variable the
@@ -97,10 +97,16 @@ pub const RUST: &str = "rust";
 pub const GO: &str = "go";
 
 /// And Node, which is one entry for every tool that installs out of the npm
-/// registry — six of them — and the only built-in to name the directory beside
+/// registry — six of them — and the first built-in to name the directory beside
 /// the Worktrees: pnpm, deno and bun all hardlink out of their store into the
 /// project.
 pub const NODE: &str = "node";
+
+/// And Python, which is one entry for pip and uv — and for poetry and pipenv
+/// after them, an ecosystem being one box on the settings page. uv is the
+/// fourth store beside the Worktrees, and the second tool to say out loud that
+/// it could not link out of one.
+pub const PYTHON: &str = "python";
 
 /// The one capability this server has: the **Compile Server**, which is one
 /// sccache server for the machine in a sandbox of its own — see
@@ -1295,11 +1301,28 @@ mod tests {
             "nothing in the npm ecosystem compiles through a server, so there \
              is nothing here to name either",
         );
+
+        let python = built_in().get(PYTHON).expect("and Python is the fourth");
+
+        assert_eq!(python.label(), Some("Python"));
+        assert_eq!(
+            python.detect,
+            vec![
+                String::from("pyproject.toml"),
+                String::from("requirements.txt")
+            ],
+            "two manifests, because Python has two ordinary shapes and a \
+             descriptor may name as many as the language has",
+        );
+        assert!(
+            !python.names(SCCACHE),
+            "and nothing in this ecosystem compiles through a server either",
+        );
     }
 
     /// A session of a machine with an sccache: Rust's four variables, in the
-    /// order it has always had them, then Go's two and Node's seven, and the
-    /// two directories they name open underneath.
+    /// order it has always had them, then Go's two, Node's seven and Python's
+    /// two, and the two directories they name open underneath.
     ///
     /// Rust's four lead and are unchanged, which is the promise the descriptors
     /// landed on: a language added to the file is variables after the ones a
@@ -1330,6 +1353,8 @@ mod tests {
                 (String::from("YARN_GLOBAL_FOLDER"), cached("yarn/global")),
                 (String::from("DENO_DIR"), stored("deno")),
                 (String::from("BUN_INSTALL_CACHE_DIR"), stored("bun")),
+                (String::from("PIP_CACHE_DIR"), cached("pip")),
+                (String::from("UV_CACHE_DIR"), stored("uv")),
             ],
         );
 
@@ -1340,8 +1365,8 @@ mod tests {
                 PathBuf::from("/var/lib/verkstead/stores"),
             ],
             "the Build Cache once however many descriptors name it, and the \
-             directory beside the Worktrees because pnpm's store is there: a \
-             bind per store would be several holes saying the same thing"
+             directory beside the Worktrees because pnpm's store and uv's are \
+             there: a bind per store would be several holes saying the same thing"
         );
         assert!(given.sccache(), "and the sccache to reach it through");
     }
@@ -1368,9 +1393,11 @@ mod tests {
                 (String::from("YARN_GLOBAL_FOLDER"), cached("yarn/global")),
                 (String::from("DENO_DIR"), stored("deno")),
                 (String::from("BUN_INSTALL_CACHE_DIR"), stored("bun")),
+                (String::from("PIP_CACHE_DIR"), cached("pip")),
+                (String::from("UV_CACHE_DIR"), stored("uv")),
             ],
-            "Go's two and Node's seven are in no capability, so a machine with \
-             no sccache gets the whole of what those descriptors say",
+            "Go's two, Node's seven and Python's two are in no capability, so a \
+             machine with no sccache gets the whole of what those descriptors say",
         );
         assert_eq!(
             given.dirs(),
@@ -1397,8 +1424,8 @@ mod tests {
         );
         assert_eq!(
             given.env().len(),
-            9,
-            "which is Go's two and Node's seven and nothing else"
+            11,
+            "which is Go's two, Node's seven and Python's two and nothing else"
         );
         assert!(!given.sccache());
         assert!(
@@ -1406,22 +1433,36 @@ mod tests {
             "and nothing wants a Compile Server up"
         );
 
-        // And the language that names the second directory switched off on its
-        // own: the Build Cache is still open, because two languages still point
-        // into it, and the directory beside the Worktrees is not.
+        // And **both** languages that name the second directory switched off:
+        // the Build Cache is still open, because the languages still on point
+        // into it, and the directory beside the Worktrees is not. Both of them,
+        // because either one on its own leaves it named — Node's three stores
+        // and uv's are four reasons for the one bind.
         let without_node = off.merged(&written("languages:\n  node:\n    enabled: false\n"));
-        let given = without_node.given(&machine(true));
+
+        assert_eq!(
+            without_node.given(&machine(true)).dirs(),
+            [
+                PathBuf::from("/var/cache/verkstead"),
+                PathBuf::from("/var/lib/verkstead/stores"),
+            ],
+            "uv's store is still beside the Worktrees with Node switched off",
+        );
+
+        let without_either =
+            without_node.merged(&written("languages:\n  python:\n    enabled: false\n"));
+        let given = without_either.given(&machine(true));
 
         assert_eq!(
             given.dirs(),
             [PathBuf::from("/var/cache/verkstead")],
-            "the one placeholder the language still on names, and not the one \
-             only the language switched off did"
+            "the one placeholder a language still on names, and not the one \
+             only the languages switched off did"
         );
 
         // And with every one of them off there is nothing to open at all,
         // which is what an installation that wants none of this looks like.
-        let none = without_node.merged(&written("languages:\n  go:\n    enabled: false\n"));
+        let none = without_either.merged(&written("languages:\n  go:\n    enabled: false\n"));
         let given = none.given(&machine(true));
 
         assert!(given.is_empty());
@@ -1448,20 +1489,21 @@ mod tests {
     }
 
     /// The second placeholder is granted only where a loaded descriptor names
-    /// it, and among the built-ins three do: pnpm's store, deno's cache and
-    /// bun's, because a hardlink out of a store does not cross a filesystem.
+    /// it, and among the built-ins four do: pnpm's store, deno's cache, bun's
+    /// and uv's, because a hardlink out of a store does not cross a filesystem.
     #[test]
     fn the_directory_beside_the_worktrees_is_granted_only_where_it_is_named() {
         assert!(
             built_in().names_stores(),
-            "pnpm's, deno's and bun's stores are beside the Worktrees"
+            "pnpm's, deno's, bun's and uv's stores are beside the Worktrees"
         );
 
         // Rust and Go on their own name none of it: Rust's store is under the
         // Build Cache and so are both of Go's, so an installation of only
         // those two is opened onto no second directory at all.
-        let only_compiled =
-            built_in().merged(&written("languages:\n  node:\n    enabled: false\n"));
+        let only_compiled = built_in().merged(&written(
+            "languages:\n  node:\n    enabled: false\n  python:\n    enabled: false\n",
+        ));
 
         assert_eq!(
             only_compiled.given(&machine(true)).dirs(),
@@ -1543,6 +1585,8 @@ mod tests {
         joined("PNPM_CONFIG_STORE_DIR", &beside, "pnpm");
         joined("DENO_DIR", &beside, "deno");
         joined("BUN_INSTALL_CACHE_DIR", &beside, "bun");
+        joined("PIP_CACHE_DIR", cache, "pip");
+        joined("UV_CACHE_DIR", &beside, "uv");
     }
 
     /// And a value naming none of them is left exactly as the file wrote it,

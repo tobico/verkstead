@@ -1898,3 +1898,596 @@ async fn a_session_is_given_the_six_javascript_tools_stores() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// Python: pip and uv.
+// ---------------------------------------------------------------------------
+
+/// The distribution every Python proof installs, the module it imports and the
+/// version of it. Two names because Python has two: a distribution is named
+/// with hyphens on an index and imported with underscores.
+const PYPI_PACKAGE: &str = "greet-from-the-store";
+const PYPI_MODULE: &str = "greet_from_the_store";
+const PYPI_VERSION: &str = "1.0.0";
+
+/// What the wheel is called, which is the one filename in this ecosystem that
+/// has to be spelled exactly: `<distribution>-<version>-<tags>.whl`, with the
+/// distribution's underscores rather than its hyphens.
+const PYPI_WHEEL: &str = "greet_from_the_store-1.0.0-py3-none-any.whl";
+
+/// One Python index, on a loopback port, serving [`PYPI_PACKAGE`] as a wheel.
+///
+/// The shape is PEP 503's — the *simple* repository API, which is the whole of
+/// what an install of one pinned distribution reads: a page per project at
+/// `/simple/<name>/` holding an anchor per file, and the files themselves. No
+/// sdist and no build backend, because a wheel is installed by unpacking it and
+/// an sdist would have this proof fetching setuptools.
+///
+/// **Every response says `Cache-Control: max-age`**, and pip is the reason. pip's
+/// store is an HTTP cache, and `cachecontrol` keeps a response only where the
+/// response said it could be kept — no `ETag`, no `max-age` and nothing is
+/// written, so a registry that did not say this would be a registry pip
+/// downloaded from twice and cached nothing of. A real index says it; the point
+/// of saying it here is that the proof below is not resting on a header a
+/// registry made up.
+///
+/// The wheel is a zip with two members and no compiled anything: the module,
+/// and the `.dist-info` directory that says what it is. Built with the suite's
+/// own `zip`, exactly as the Go proof builds its module archive.
+fn pypi_registry(at: &Path, zip: &Path) -> Registry {
+    let inside = at.join("what-goes-in-the-wheel");
+    let module = inside.join(PYPI_MODULE);
+    let metadata = inside.join(format!("{PYPI_MODULE}-{PYPI_VERSION}.dist-info"));
+
+    std::fs::create_dir_all(&module).unwrap();
+    std::fs::create_dir_all(&metadata).unwrap();
+
+    std::fs::write(
+        module.join("__init__.py"),
+        format!("GREETING = \"{OUT_OF_THE_STORE}\"\n"),
+    )
+    .unwrap();
+
+    // The three files a wheel has to carry. `RECORD` names its own members with
+    // the hash and the size left empty, which the spec allows and both tools
+    // accept: what is being proved here is where the file came from rather than
+    // that this suite can compute a sha256 the way a build backend does.
+    std::fs::write(
+        metadata.join("METADATA"),
+        format!(
+            "Metadata-Version: 2.1\nName: {PYPI_PACKAGE}\nVersion: {PYPI_VERSION}\n\
+             Summary: what a shared store held\n\n"
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        metadata.join("WHEEL"),
+        "Wheel-Version: 1.0\nGenerator: verkstead-tests\nRoot-Is-Purelib: true\n\
+         Tag: py3-none-any\n",
+    )
+    .unwrap();
+    std::fs::write(
+        metadata.join("RECORD"),
+        format!(
+            "{PYPI_MODULE}/__init__.py,,\n\
+             {PYPI_MODULE}-{PYPI_VERSION}.dist-info/METADATA,,\n\
+             {PYPI_MODULE}-{PYPI_VERSION}.dist-info/WHEEL,,\n\
+             {PYPI_MODULE}-{PYPI_VERSION}.dist-info/RECORD,,\n"
+        ),
+    )
+    .unwrap();
+
+    let archive = at.join(PYPI_WHEEL);
+    let made = Command::new(zip)
+        .args(["-q", "-r", "-X", "-D"])
+        .arg(&archive)
+        .arg(PYPI_MODULE)
+        .arg(format!("{PYPI_MODULE}-{PYPI_VERSION}.dist-info"))
+        .current_dir(&inside)
+        .stdin(Stdio::null())
+        .status()
+        .expect("the suite's own `zip`");
+
+    assert!(made.success(), "the wheel was not built");
+
+    // Bound before anything is served, for [`npm_registry`]'s reason: the port
+    // goes in the page, so it has to be known first.
+    let listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .expect("a loopback port for the index");
+    let url = format!("http://{}", listener.local_addr().expect("the port it got"));
+
+    listener
+        .set_nonblocking(true)
+        .expect("what tokio takes a standard listener over");
+
+    let published = Published {
+        packument: format!(
+            "<!DOCTYPE html><html><body><a href=\"{url}/files/{PYPI_WHEEL}\">{PYPI_WHEEL}</a>\
+             </body></html>"
+        ),
+        tarball: std::fs::read(&archive).unwrap(),
+    };
+
+    let page = |State(served): State<Published>| async move {
+        (
+            [
+                (header::CONTENT_TYPE, "text/html"),
+                (header::CACHE_CONTROL, "max-age=3600"),
+            ],
+            served.packument,
+        )
+    };
+
+    let app = Router::new()
+        // Both spellings of the project's page. A tool asks for the one with the
+        // trailing slash — both of these do — and the other is here so that a
+        // release which stopped doing that is a proof that fails on an
+        // assertion rather than on a 404 nobody can read.
+        .route(&format!("/simple/{PYPI_PACKAGE}/"), get(page))
+        .route(&format!("/simple/{PYPI_PACKAGE}"), get(page))
+        .route(
+            &format!("/files/{{{PYPI_MODULE}}}"),
+            get(|State(served): State<Published>| async move {
+                (
+                    [
+                        (header::CONTENT_TYPE, "application/octet-stream"),
+                        (header::CACHE_CONTROL, "max-age=3600"),
+                    ],
+                    served.tarball,
+                )
+            }),
+        )
+        .with_state(published);
+
+    let (stop, stopping) = tokio::sync::oneshot::channel();
+
+    let serving = std::thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("a runtime for the index's own thread");
+
+        runtime.block_on(async move {
+            let listener = tokio::net::TcpListener::from_std(listener)
+                .expect("the listener this thread was handed");
+
+            tokio::select! {
+                served = axum::serve(listener, app) => { let _ = served; }
+                _ = stopping => {}
+            }
+        });
+    });
+
+    Registry {
+        url,
+        stop: Some(stop),
+        serving: Some(serving),
+    }
+}
+
+/// What one Python tool's install proof needs saying about it. Everything else
+/// is the four Sandboxes below, which are the same for both.
+struct Python {
+    /// What the skip line names and the assertions call it.
+    tool: &'static str,
+
+    /// The programs it takes, each standing in the scripts below as
+    /// `{its-own-name}` — and `zip`, which builds the wheel.
+    ///
+    /// **`python3` rather than `pip`**, for pip: pip is a module of the
+    /// interpreter that carries it, `python -m pip` is how pip's own
+    /// documentation says to run it, and a machine may have the module without
+    /// a program of that name on its `PATH`. So the tool this proof is *about*
+    /// and the program it is *found* by are two different things, which is why
+    /// the skip line names the program.
+    wants: &'static [&'static str],
+
+    /// What every install of this tool is told, beside the cache variable the
+    /// descriptor sets — which is the one this is here to prove. Each of these
+    /// takes something out of the way rather than moving a store.
+    settings: &'static str,
+
+    /// The install that fills the store, with `{registry}` for the index's base
+    /// URL and `{wheel}` for the wheel's own.
+    filling: &'static str,
+
+    /// And the same install with the tool **denied its registry**: the offline
+    /// switch it documents, run against an index that has been taken off the
+    /// air.
+    offline: &'static str,
+
+    /// What runs what was installed.
+    running: &'static str,
+
+    /// And what the control's failure has to say, so that what it failed over
+    /// was the denial rather than anything else.
+    denied: &'static str,
+}
+
+/// One Python tool's proof: two installs at once against one store, a third out
+/// of what they left with the index gone, and the control that says the third
+/// proved something.
+///
+/// The same four Sandboxes as [`one_javascript_tools_store`], and the same
+/// reasoning throughout. Two things are its own. The registry is PEP 503's
+/// rather than npm's — see [`pypi_registry`]. And there is no lockfile to carry
+/// from the first install to the ones that follow: neither of these two writes
+/// one, and what a Python Repo pins is a file it committed rather than a file an
+/// install left behind.
+async fn one_python_tools_store(proof: Python) {
+    let Some(found_them) = tools(proof.tool, proof.wants) else {
+        return;
+    };
+
+    let named = |script: &str, registry: &str| {
+        let mut said = script
+            .replace("{registry}", registry)
+            .replace("{wheel}", &format!("{registry}/files/{PYPI_WHEEL}"));
+
+        for (program, path) in proof.wants.iter().zip(&found_them) {
+            said = said.replace(&format!("{{{program}}}"), &path.display().to_string());
+        }
+
+        said
+    };
+
+    // Four: the two that race, the one denied its index, and the control.
+    let machine = machine(4).await;
+    let cache = machine.cache();
+
+    let registry = pypi_registry(
+        &machine.registries.join(proof.tool),
+        &found_them[proof
+            .wants
+            .iter()
+            .position(|program| *program == "zip")
+            .expect("every Python proof builds its wheel with `zip`")],
+    );
+
+    // Held rather than read off the registry, so that the scripts outlive
+    // taking it off the air.
+    let url = registry.url.clone();
+
+    let script = |install: &str| {
+        named(
+            &format!(
+                "set -e\n{settings}\n{install}\n{running}\n",
+                settings = proof.settings,
+                running = proof.running,
+            ),
+            &url,
+        )
+    };
+
+    let filling = script(proof.filling);
+
+    // Started together and waited on together, which is the only way the two
+    // are ever really writing the store at the same moment.
+    let first = starting(&machine.sandbox(0, &cache, vec![]), &filling);
+    let second = starting(&machine.sandbox(1, &cache, vec![]), &filling);
+
+    finished(first).worked(&format!(
+        "the first session's {} install fills the store",
+        proof.tool
+    ));
+    finished(second).worked("and the second one racing it finishes just as well");
+
+    // And the proof. The index stops answering and the tool is told not to look
+    // for one: what is left to install out of is the store the two above
+    // filled.
+    registry.shut();
+
+    let offline = script(proof.offline);
+    let third = installing(&machine.sandbox(2, &cache, vec![]), &offline);
+
+    third.worked(&format!(
+        "a third session installs the same distribution with {}'s index denied, \
+         which it can only do out of the shared store",
+        proof.tool,
+    ));
+    assert!(
+        third.said.contains(OUT_OF_THE_STORE),
+        "and what it installed really imports, so the store held the \
+         distribution rather than something shaped like it. It said:\n{}",
+        third.said,
+    );
+
+    // The control. Everything the same but the Build Cache and the directory
+    // beside its Worktrees, neither of which anything has filled — so a pass
+    // here would mean the install above needed no store at all.
+    let control = installing(
+        &machine.sandbox(3, &machine.empty_cache(), vec![]),
+        &offline,
+    );
+
+    assert!(
+        !control.worked,
+        "an empty store and no index has to fail, or the install above proved \
+         nothing about either. It said:\n{}",
+        control.said,
+    );
+    assert!(
+        control.said.contains(proof.denied),
+        "and it fails for want of the index rather than for some other reason: \
+         `{}` is what {} says about that. It said:\n{}",
+        proof.denied,
+        proof.tool,
+        control.said,
+    );
+}
+
+/// pip: `PIP_CACHE_DIR`, and `--no-index`, which pip documents as "ignore
+/// package index (only looking at `--find-links` URLs instead)".
+///
+/// **pip's store is an HTTP cache rather than an index an install can be
+/// resolved against**, and this proof is shaped by that. Two consequences, both
+/// measured here rather than read out of the documentation.
+///
+/// The first is that the third install cannot be the second word for word. pip
+/// asks for an index page with `Cache-Control: max-age=0` on the *request*, so
+/// it revalidates that page on every install however full the cache is — and
+/// with the index unreachable, a requirement named by *name* cannot be resolved
+/// at all. What the cache can serve with nothing on the air is a distribution
+/// already asked for by **URL**, which is what a pinned requirements file holds.
+/// So the two that fill the store install from the index the ordinary way, and
+/// the third installs the wheel they left in the cache by the URL they fetched
+/// it from. `--no-index` rides along saying no index may be consulted, and what
+/// is left for pip to read is the store.
+///
+/// The second is `--trusted-host`. pip mounts a **non-caching** adapter for
+/// plain `http://` and the caching one only for a host that was named trusted —
+/// so without this flag a proof against a loopback registry would download
+/// twice and cache nothing, and the third install would fail for a reason
+/// nothing to do with the variable. The same shape as Berry's
+/// `YARN_UNSAFE_HTTP_WHITELIST` above, and for the same reason: a registry on
+/// this machine is not one with a certificate. A real index is HTTPS and needs
+/// none of it.
+///
+/// The control fails on `Connection refused`, which is pip having had to fetch.
+#[tokio::test]
+async fn pip_fills_one_cache_and_a_third_install_reads_it() {
+    one_python_tools_store(Python {
+        tool: "pip",
+        wants: &["python3", "zip"],
+        // `PIP_DISABLE_PIP_VERSION_CHECK` so that nothing here asks pypi.org
+        // whether there is a newer pip — the one thing in this proof that would
+        // otherwise reach the internet — and `PIP_RETRIES=1` so that the
+        // control's failure is a failure rather than half a minute of backoff.
+        settings: "export PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_RETRIES=1",
+        // `--target`, for two reasons that are both about the machine rather
+        // than the cache. `python3 -m venv` wants `ensurepip`, which plenty of
+        // distributions package separately; and a distribution's own Python is
+        // usually **externally managed** (PEP 668), which pip refuses to
+        // install into at all — `--root`, `--target` and `--prefix` are the
+        // three flags that turn that check off, because none of them is the
+        // environment the distribution manages. So this is what makes the proof
+        // run on the CI runner's `/usr/bin/python3`. uv's proof below is the one
+        // with an environment in it.
+        filling: "{python3} -m pip install --index-url {registry}/simple/ \
+                  --trusted-host 127.0.0.1 --target ./installed greet-from-the-store",
+        offline: "{python3} -m pip install --no-index \
+                  --trusted-host 127.0.0.1 --target ./installed {wheel}",
+        running: "PYTHONPATH=./installed {python3} -c \
+                  \"import greet_from_the_store as it; print(it.GREETING)\"",
+        denied: "Connection refused",
+    })
+    .await;
+}
+
+/// uv: `UV_CACHE_DIR`, and `--offline`, which uv documents as "disable network
+/// access, relying only on locally cached data and locally available files".
+///
+/// Word for word the same install as the two that filled the store, plus that
+/// one flag — which is the shape pip could not have. uv caches the index
+/// response as well as the wheel and is content to resolve out of it offline, so
+/// nothing here has to be pinned by URL.
+///
+/// `--python` names the interpreter absolutely, for [`found`]'s reason: a
+/// sandbox's `PATH` is the machine's system profile, so the `python3` this suite
+/// found is one it has to name in full. `UV_PYTHON_DOWNLOADS=never` beside it so
+/// that a session short of an interpreter fails rather than fetching one from
+/// astral.sh.
+///
+/// The control fails `was not found in the cache`, which is uv's own account of
+/// a distribution it was told to find there and could not.
+#[tokio::test]
+async fn uv_fills_one_store_and_a_third_install_reads_it() {
+    one_python_tools_store(Python {
+        tool: "uv",
+        wants: &["uv", "python3", "zip"],
+        settings: "export UV_PYTHON_DOWNLOADS=never UV_NO_PROGRESS=1",
+        filling: "{uv} venv --python {python3}\n\
+                  {uv} pip install --index-url {registry}/simple/ greet-from-the-store",
+        offline: "{uv} venv --python {python3}\n\
+                  {uv} pip install --offline --index-url {registry}/simple/ \
+                  greet-from-the-store",
+        running: "./.venv/bin/python -c \
+                  \"import greet_from_the_store as it; print(it.GREETING)\"",
+        denied: "was not found in the cache",
+    })
+    .await;
+}
+
+/// uv's cache is the one beside the Worktrees — **and a session gets a copy out
+/// of it rather than a hardlink, which uv says out loud.**
+///
+/// The same finding as
+/// [`pnpms_store_is_beside_the_worktrees_and_a_session_copies_out_of_it`] and
+/// [`deno_and_bun_link_out_of_their_stores_too_and_so_copy_in_a_sandbox`], for
+/// the fourth and last tool that links out of a store: a Worktree and this
+/// directory are two **bind mounts**, `link(2)` answers `EXDEV` across two
+/// mounts even where both are the same filesystem, and no placement a descriptor
+/// can name changes it. The store still works — a copy out of it fetches
+/// nothing, which is what the install proof above turns on — and what is gone is
+/// the disk space the link would have saved.
+///
+/// **uv is the second of the four to say so**, and it says it better than pnpm
+/// does: *Failed to hardlink files; falling back to full copy*, with the
+/// filesystem named as the likely reason and `UV_LINK_MODE=copy` offered as the
+/// way to silence it. That variable is deliberately not set — see
+/// `crates/server/languages.yaml` — because this warning is the truest account
+/// of the thing this stage found, and the day one mount holds both the Worktree
+/// and the store it stops being printed by itself.
+///
+/// The task this landed under expected the other answer: a link count above one
+/// and uv saying it had linked. Asserted as measured instead, both halves, which
+/// is what the next release has to be held against.
+///
+/// **And the virtual environment stayed in the Worktree**, which is the other
+/// half of what Python's entry promises. A venv holds absolute paths, so one
+/// built in another Worktree is broken in this one — nothing of it belongs in a
+/// shared store, and what is asserted is that the `site-packages` uv installed
+/// into is under this Conversation's checkout while the cache it installed out
+/// of is beside it.
+#[tokio::test]
+async fn uvs_cache_is_beside_the_worktrees_and_it_says_it_could_not_hardlink() {
+    let Some(tools) = tools("uv", &["uv", "python3", "zip"]) else {
+        return;
+    };
+    let (uv, python3, zip) = (&tools[0], &tools[1], &tools[2]);
+
+    let machine = machine(1).await;
+    let cache = machine.cache();
+
+    let registry = pypi_registry(&machine.registries.join("uv-links"), zip);
+
+    let installed = installing(
+        &machine.sandbox(0, &cache, vec![]),
+        &format!(
+            "set -e\n\
+             export UV_PYTHON_DOWNLOADS=never UV_NO_PROGRESS=1\n\
+             printf 'store=%s\\n' \"${{UV_CACHE_DIR-unset}}\"\n\
+             {uv} venv --python {python3}\n\
+             {uv} pip install --index-url {registry}/simple/ {package}\n\
+             printf 'installed=%s\\n' \
+               \"$(./.venv/bin/python -c \
+                  'import {module}; print({module}.__file__)')\"\n",
+            uv = uv.display(),
+            python3 = python3.display(),
+            registry = registry.url,
+            package = PYPI_PACKAGE,
+            module = PYPI_MODULE,
+        ),
+    );
+
+    registry.shut();
+
+    installed.worked("a session installs the distribution the index is serving");
+
+    assert_eq!(
+        line(&installed, "store"),
+        machine
+            .stores_beside("shared")
+            .join("uv")
+            .display()
+            .to_string(),
+        "uv's cache is under the directory beside the Worktrees rather than \
+         under the Build Cache, which is what {{stores}} means. The session \
+         said:\n{}",
+        installed.said,
+    );
+
+    // Read off the interpreter rather than composed here: the directory under
+    // `.venv/lib` is named for the Python that made it, and which Python that
+    // is is the machine's business.
+    let inside = PathBuf::from(line(&installed, "installed"));
+    let worktree = machine.worktree(0);
+
+    assert!(
+        inside.starts_with(worktree),
+        "the environment uv installed into is inside this Conversation's \
+         Worktree, which is where a venv has to stay: {} is not under {}",
+        inside.display(),
+        worktree.display(),
+    );
+
+    let count = std::fs::metadata(&inside)
+        .unwrap_or_else(|error| {
+            panic!(
+                "{} should be there after a uv install ({error}), and it said:\n{}",
+                inside.display(),
+                installed.said,
+            )
+        })
+        .nlink();
+
+    assert_eq!(
+        count,
+        1,
+        "the file in the Worktree is a copy of what was in uv's cache rather \
+         than a link to it — which is what the two of them being two bind \
+         mounts comes to, and what would have to change for this to read above \
+         one is the sandbox rather than this descriptor. {} said:\n{}",
+        inside.display(),
+        installed.said,
+    );
+
+    assert!(
+        installed
+            .said
+            .contains("Failed to hardlink files; falling back to full copy"),
+        "and uv says so itself, which is the half of this evidence that does \
+         not depend on how the two directories happen to be laid out — and the \
+         half deno and bun do not give. It said:\n{}",
+        installed.said,
+    );
+}
+
+/// And the environment those installs ran in was the descriptor's: pip's cache
+/// under the one Build Cache and uv's beside the Worktrees, and a session can
+/// write in both.
+///
+/// Beside the proofs rather than inside them, for the reason Go's and Node's
+/// are: what a session is *told* is asserted on all three platforms in the
+/// sandbox suites, and what a tool *does* with it is what an install is for.
+/// This is here so that a run with neither tool installed still leaves
+/// something of Python's in this file that ran.
+#[tokio::test]
+async fn a_session_is_given_pips_cache_and_uvs_store() {
+    let machine = machine(1).await;
+    let cache = machine.cache();
+    let sandbox = machine.sandbox(0, &cache, vec![]);
+
+    let dir = cache.dir().expect("the fixture's cache has a directory");
+    let beside = machine.stores_beside("shared");
+
+    let reported = installing(
+        &sandbox,
+        "set -e\n\
+         for named in PIP_CACHE_DIR UV_CACHE_DIR; do\n\
+           eval \"value=\\${$named-unset}\"\n\
+           printf '%s=%s\\n' \"$named\" \"$value\"\n\
+           mkdir -p \"$value\"\n\
+           : > \"$value/written-from-inside\"\n\
+         done\n",
+    );
+
+    reported.worked("a session can make and write both of the directories it is pointed at");
+
+    assert_eq!(
+        line(&reported, "PIP_CACHE_DIR"),
+        dir.join("pip").display().to_string(),
+        "pip's is inside the one Build Cache, because pip unpacks a wheel into \
+         `site-packages` and has nothing to link out of it. The session \
+         said:\n{}",
+        reported.said,
+    );
+    assert!(
+        dir.join("pip/written-from-inside").is_file(),
+        "and what the session wrote is on the host, in the directory the next \
+         Conversation's session will be given",
+    );
+
+    assert_eq!(
+        line(&reported, "UV_CACHE_DIR"),
+        beside.join("uv").display().to_string(),
+        "and uv's is beside the Worktrees rather than in the cache, because uv \
+         links out of it. The session said:\n{}",
+        reported.said,
+    );
+    assert!(
+        beside.join("uv/written-from-inside").is_file(),
+        "which is the second bind a session gets, and it is writable under uv's \
+         name too",
+    );
+}

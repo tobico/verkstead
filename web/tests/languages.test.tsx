@@ -49,6 +49,7 @@ const UNSET = unset as SettingsView;
 const RUST = "rust";
 const GO = "go";
 const NODE = "node";
+const PYTHON = "python";
 const GLEAM = "gleam";
 
 /// The binds the fixture holds, as a save puts them back on the wire: the
@@ -216,7 +217,7 @@ describe("the card", () => {
 
     await waitFor(() =>
       expect(container.querySelector(`.${styles.standing}`)?.textContent).toBe(
-        "Rust, Go, Node, Gleam",
+        "Rust, Go, Node, Python, Gleam",
       ),
     );
   });
@@ -229,7 +230,7 @@ describe("the card", () => {
 
     await waitFor(() =>
       expect(container.querySelector(`.${styles.standing}`)?.textContent).toBe(
-        "Rust, Go, Node",
+        "Rust, Go, Node, Python",
       ),
     );
   });
@@ -237,7 +238,7 @@ describe("the card", () => {
   /// And nothing at all under the heading where none are: a card saying a
   /// machine builds nothing would be a line nobody needs.
   it("says nothing under the heading while they are all off", async () => {
-    theSettings(off(off(off(off(TOLD), GO), NODE), GLEAM));
+    theSettings(off(off(off(off(off(TOLD), GO), NODE), PYTHON), GLEAM));
     const { container } = mountCard();
 
     const face = await theCard(container);
@@ -272,7 +273,7 @@ describe("the card", () => {
     theSettings(compiling(UNSET));
     mountCard();
 
-    await waitFor(() => screen.getByText("Rust, Go, Node"));
+    await waitFor(() => screen.getByText("Rust, Go, Node, Python"));
     expect(screen.queryByText(/No sccache is installed/)).toBeNull();
   });
 
@@ -332,8 +333,9 @@ describe("the languages as the pane draws them", () => {
     await waitFor(() => expect(theCheck("Rust").checked).toBe(true));
     expect(theCheck("Go").checked).toBe(true);
     expect(theCheck("Node").checked).toBe(true);
+    expect(theCheck("Python").checked).toBe(true);
     expect(theCheck("Gleam").checked).toBe(true);
-    expect(screen.getAllByRole("checkbox")).toHaveLength(4);
+    expect(screen.getAllByRole("checkbox")).toHaveLength(5);
   });
 
   /// The box says where its language stands rather than whether anybody has
@@ -522,6 +524,7 @@ describe("changing the languages", () => {
           { name: RUST, enabled: false, size: "50G" },
           { name: GO, enabled: true, size: "" },
           { name: NODE, enabled: true, size: "" },
+          { name: PYTHON, enabled: true, size: "" },
           { name: GLEAM, enabled: true, size: "8G" },
         ],
         // Untouched by this form, and sent back as it stands: one request
@@ -554,6 +557,7 @@ describe("changing the languages", () => {
         { name: RUST, enabled: true, size: "50G" },
         { name: GO, enabled: true, size: "" },
         { name: NODE, enabled: true, size: "" },
+        { name: PYTHON, enabled: true, size: "" },
         { name: GLEAM, enabled: false, size: "8G" },
       ]),
     );
@@ -614,6 +618,7 @@ describe("changing the languages", () => {
           { name: RUST, enabled: true, size: "80G" },
           { name: GO, enabled: true, size: "" },
           { name: NODE, enabled: true, size: "" },
+          { name: PYTHON, enabled: true, size: "" },
           { name: GLEAM, enabled: true, size: "8G" },
         ],
         // Untouched by this form, and sent back as it stands: one request
@@ -669,6 +674,7 @@ describe("changing the languages", () => {
         { name: RUST, enabled: false, size: "50G" },
         { name: GO, enabled: true, size: "" },
         { name: NODE, enabled: true, size: "" },
+        { name: PYTHON, enabled: true, size: "" },
         { name: GLEAM, enabled: true, size: "8G" },
       ]),
     );
@@ -687,14 +693,14 @@ describe("changing the languages", () => {
 
     await waitFor(() => expect(theCheck().checked).toBe(true));
     expect(container.querySelector(`.${styles.standing}`)?.textContent).toBe(
-      "Rust, Go, Node, Gleam",
+      "Rust, Go, Node, Python, Gleam",
     );
 
     fireEvent.click(theCheck());
 
     await waitFor(() =>
       expect(container.querySelector(`.${styles.standing}`)?.textContent).toBe(
-        "Go, Node, Gleam",
+        "Go, Node, Python, Gleam",
       ),
     );
   });

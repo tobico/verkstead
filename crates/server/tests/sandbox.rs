@@ -5573,15 +5573,15 @@ async fn the_settings_held_binds_compose_the_way_the_installations_do() {
 /// The directory is writable at the same path inside, and the built-in
 /// languages' stores point into it: `CARGO_HOME`, which is the half of Rust's
 /// cache that works with no sccache anywhere, Go's two — the downloads and the
-/// compiled objects, which for Go is a directory and nothing more — and four of
-/// Node's seven.
+/// compiled objects, which for Go is a directory and nothing more — four of
+/// Node's seven, and pip's.
 ///
 /// That is what stops two Conversations downloading one crate, one module or
 /// one package twice.
 ///
-/// **Node's other three are somewhere else**, and they are the reason a session
-/// now gets a second bind: pnpm's, deno's and bun's stores are under the
-/// directory beside the Worktrees. See
+/// **Node's other three and uv's are somewhere else**, and they are the reason a
+/// session now gets a second bind: pnpm's store, deno's cache, bun's and uv's
+/// are under the directory beside the Worktrees. See
 /// [`a_session_is_opened_onto_the_store_beside_the_worktrees_as_well`], which is
 /// those on their own.
 #[tokio::test]
@@ -5603,6 +5603,7 @@ async fn the_build_cache_is_writable_inside_and_the_stores_are_in_it() {
             say pnpm-metadata "${{PNPM_CONFIG_CACHE_DIR-unset}}"
             say yarn-cache "${{YARN_CACHE_FOLDER-unset}}"
             say yarn-global "${{YARN_GLOBAL_FOLDER-unset}}"
+            say pip-cache "${{PIP_CACHE_DIR-unset}}"
             "#,
             dir = quoted(&fixture.cache_dir()),
         ),
@@ -5638,12 +5639,15 @@ async fn the_build_cache_is_writable_inside_and_the_stores_are_in_it() {
 
     // And Node's four, which are four tools rather than one: npm's packages,
     // pnpm's registry metadata, and a directory per yarn, the two of them
-    // reading two different variables.
+    // reading two different variables. And pip's, which is here rather than
+    // beside the Worktrees because pip unpacks a wheel into `site-packages` and
+    // has nothing to link out of its cache.
     for (said, under) in [
         ("npm-cache", "npm"),
         ("pnpm-metadata", "pnpm/metadata"),
         ("yarn-cache", "yarn/cache"),
         ("yarn-global", "yarn/global"),
+        ("pip-cache", "pip"),
     ] {
         assert_eq!(
             reported[said],
@@ -5657,10 +5661,10 @@ async fn the_build_cache_is_writable_inside_and_the_stores_are_in_it() {
 /// And the stores beside the Worktrees, which are the second bind a session
 /// gets now that a built-in descriptor names one.
 ///
-/// Three of Node's seven are there — pnpm's, deno's and bun's — and the reason
-/// is what those three do with their store rather than what is in it: each
-/// links a package out into the project instead of copying, and a link does not
-/// cross a filesystem. See `crates/server/languages.yaml`, and
+/// Three of Node's seven are there — pnpm's, deno's and bun's — and uv's with
+/// them, and the reason is what those four do with their store rather than what
+/// is in it: each links a package out into the project instead of copying, and a
+/// link does not cross a filesystem. See `crates/server/languages.yaml`, and
 /// `tests/package_stores.rs`, where what really comes of that on this platform
 /// is proved.
 ///
@@ -5681,6 +5685,7 @@ async fn a_session_is_opened_onto_the_store_beside_the_worktrees_as_well() {
             say pnpm-store "${{PNPM_CONFIG_STORE_DIR-unset}}"
             say deno-dir "${{DENO_DIR-unset}}"
             say bun-cache "${{BUN_INSTALL_CACHE_DIR-unset}}"
+            say uv-cache "${{UV_CACHE_DIR-unset}}"
             "#,
             beside = quoted(&beside),
         ),
@@ -5695,6 +5700,7 @@ async fn a_session_is_opened_onto_the_store_beside_the_worktrees_as_well() {
         ("pnpm-store", "pnpm"),
         ("deno-dir", "deno"),
         ("bun-cache", "bun"),
+        ("uv-cache", "uv"),
     ] {
         assert_eq!(
             reported[said],
@@ -5768,7 +5774,7 @@ async fn a_build_cache_switched_off_is_no_bind_and_no_variables() {
     let fixture = grilling().await;
     fixture.configure(
         "rust_build_cache:\n  enabled: false\nlanguages:\n  go:\n    enabled: false\n  \
-         node:\n    enabled: false\n",
+         node:\n    enabled: false\n  python:\n    enabled: false\n",
     );
 
     // The server still resolved one, sccache and all: what is being shown is
@@ -5790,6 +5796,8 @@ async fn a_build_cache_switched_off_is_no_bind_and_no_variables() {
             say pnpm-store "${{PNPM_CONFIG_STORE_DIR-unset}}"
             say deno-dir "${{DENO_DIR-unset}}"
             say bun-cache "${{BUN_INSTALL_CACHE_DIR-unset}}"
+            say pip-cache "${{PIP_CACHE_DIR-unset}}"
+            say uv-cache "${{UV_CACHE_DIR-unset}}"
             dir {beside} stores
             file /verkstead/bin/sccache binary
             "#,
@@ -5812,10 +5820,12 @@ async fn a_build_cache_switched_off_is_no_bind_and_no_variables() {
     assert_eq!(reported["pnpm-store"], "unset");
     assert_eq!(reported["deno-dir"], "unset");
     assert_eq!(reported["bun-cache"], "unset");
+    assert_eq!(reported["pip-cache"], "unset");
+    assert_eq!(reported["uv-cache"], "unset");
     assert_eq!(
         reported["stores"], "absent",
-        "and the directory beside the Worktrees closes with it, the only \
-         language that named it being off",
+        "and the directory beside the Worktrees closes with it, both of the \
+         languages that named it being off",
     );
     assert_eq!(
         reported["binary"], "absent",

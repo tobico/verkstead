@@ -413,9 +413,10 @@ impl BuildCache {
 
         // And the directory beside it, **only where a loaded descriptor names
         // it** — see [`crate::languages`], and the `{stores}` placeholder in
-        // the descriptors. Node's pnpm, deno and bun stores are what name it
-        // among the languages Verkstead ships; an installation with every one
-        // of those switched off makes nothing here and is opened onto nothing.
+        // the descriptors. Node's pnpm, deno and bun stores and Python's uv one
+        // are what name it among the languages Verkstead ships; an installation
+        // with every one of those switched off makes nothing here and is opened
+        // onto nothing.
         //
         // Asked of every descriptor rather than of the enabled ones, because
         // this is startup and the switch is a session's: a language turned off
@@ -1211,7 +1212,8 @@ mod tests {
                 &cache,
                 &configured(
                     "rust_build_cache:\n  enabled: false\nlanguages:\n  go:\n    \
-                     enabled: false\n  node:\n    enabled: false\n"
+                     enabled: false\n  node:\n    enabled: false\n  python:\n    \
+                     enabled: false\n"
                 )
             )
             .is_none(),
@@ -1245,8 +1247,8 @@ mod tests {
                 PathBuf::from("/var/lib/verkstead/stores"),
             ],
             "one bind of the cache, because both of Rust's halves are inside \
-             it — and the directory beside the Worktrees, which pnpm's, deno's \
-             and bun's stores are in"
+             it — and the directory beside the Worktrees, which pnpm's, deno's, \
+             bun's and uv's stores are in"
         );
         assert_eq!(
             variable(&shared, "CARGO_HOME"),
@@ -1383,8 +1385,8 @@ mod tests {
     /// language that goes without.
     ///
     /// **Started on a Verkstead whose descriptors name none of it**, which is
-    /// what Node's entry having three `{stores}` stores in it costs this test:
-    /// taking those three variables out with a `null` each is the whole of the
+    /// what Node's three `{stores}` stores and Python's one cost this test:
+    /// taking those four variables out with a `null` each is the whole of the
     /// difference between the two halves below, and it is what an installer who
     /// wants none of that directory writes.
     #[test]
@@ -1394,7 +1396,8 @@ mod tests {
 
         let naming_none_of_it = languages::configured(&configured(
             "languages:\n  node:\n    env:\n      PNPM_CONFIG_STORE_DIR: null\n      \
-             DENO_DIR: null\n      BUN_INSTALL_CACHE_DIR: null\n",
+             DENO_DIR: null\n      BUN_INSTALL_CACHE_DIR: null\n  python:\n    env:\n      \
+             UV_CACHE_DIR: null\n",
         ));
 
         let resolved = BuildCache::resolve(Some(&cache), &data_dir, &naming_none_of_it)
@@ -1500,9 +1503,9 @@ mod tests {
         );
         assert!(
             languages::stores(dir.path()).is_dir(),
-            "and the directory beside it, which pnpm's, deno's and bun's stores \
-             are under: a descriptor built in names that placeholder, so there \
-             is a bind for a session to be opened onto"
+            "and the directory beside it, which pnpm's, deno's, bun's and uv's \
+             stores are under: a descriptor built in names that placeholder, so \
+             there is a bind for a session to be opened onto"
         );
     }
 

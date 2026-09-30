@@ -58,10 +58,10 @@
 #              says there is one at all.
 #
 # A placeholder's directory is made, and granted writable to a session, only
-# where a loaded descriptor names it. Three of Node's stores below name
-# `{stores}`, so every session with Node switched on is opened onto it; an
-# installation with every language that names it switched off is opened onto
-# none.
+# where a loaded descriptor names it. Four of the stores below name `{stores}` —
+# three of Node's and uv's — so every session with either of those languages
+# switched on is opened onto it; an installation with every language that names
+# it switched off is opened onto none.
 #
 # **Write `/` between the placeholder and what is under it, on every platform.**
 # A descriptor is one file read on three, so the grammar has one separator: what
@@ -306,3 +306,87 @@ languages:
       YARN_GLOBAL_FOLDER: "{cache}/yarn/global"
       DENO_DIR: "{stores}/deno"
       BUN_INSTALL_CACHE_DIR: "{stores}/bun"
+
+  python:
+    # Python, and the third of the package stores. One entry for the whole
+    # ecosystem rather than one per tool, exactly as Node is: pip and uv here,
+    # poetry and pipenv joining them, so switching Python off switches every
+    # one of them off and the settings page draws one box for the language
+    # (ADR-0021).
+    label: Python
+
+    # What says a Repo builds it, at the root of a checkout — for the setup
+    # card's warning and nothing else, as Rust's and Go's and Node's are. Two
+    # manifests because Python has two ordinary shapes: `pyproject.toml` is
+    # what uv and every modern build backend read, and `requirements.txt` is
+    # what pip has always read and what plenty of Repos still hold on their
+    # own.
+    detect:
+      - pyproject.toml
+      - requirements.txt
+
+    # Two tools and two variables, each read out of the tool that reads it as
+    # this entry was written — `pip config`, `uv cache dir`, against the
+    # releases the dev shell and the CI job pin:
+    #
+    #   PIP_CACHE_DIR   pip's `cache-dir`, which is `--cache-dir` under pip's
+    #                   own documented `PIP_` prefix: every command-line option
+    #                   of pip's is settable as `PIP_<THE OPTION>`, and this is
+    #                   the one that moves the cache. What is under it is
+    #                   `http-v2`, the responses pip has downloaded, and
+    #                   `wheels`, the ones it built out of an sdist — the two
+    #                   halves of what stops two Conversations fetching one
+    #                   distribution twice.
+    #
+    #   UV_CACHE_DIR    uv's, which `uv cache dir` prints and `uv --help` lists
+    #                   as "path to the cache directory". One variable for the
+    #                   lot, the way `DENO_DIR` is: the index responses
+    #                   (`simple-v21`), the wheels and sdists it downloaded, and
+    #                   `archive-v0`, the unpacked wheels it installs *out of*.
+    #
+    # **uv's is under `{stores}` and pip's is not**, which is the one placement
+    # decision here. uv links a package out of `archive-v0` into the
+    # environment — `--link-mode` defaults to `hardlink` on Linux and Windows —
+    # and falls back to copying where the two are on different filesystems. pip
+    # unpacks a wheel into `site-packages` and has nothing to link, so its
+    # cache is as free as Rust's registry to be a disk of its own.
+    #
+    # **And on Linux uv copies anyway, and says so**, which is the same finding
+    # pnpm, deno and bun landed: a Worktree and this directory are two bind
+    # mounts, and `link(2)` answers `EXDEV` across two mounts whatever disk is
+    # underneath them. uv is the second of the four to *print* it — "Failed to
+    # hardlink files; falling back to full copy" — where deno and bun fall back
+    # without a word. `UV_LINK_MODE=copy` would silence that warning and is
+    # deliberately not set: the warning is true, it is the clearest account of
+    # the thing this stage found, and it goes away when one mount holds both.
+    # See `tests/package_stores.rs`.
+    #
+    # Both are safe for two installs at once, which is the other half of what a
+    # shared store has to be: pip writes a cached response to a temporary name
+    # beside it and renames it into place, and uv is documented as safe for
+    # concurrent use and does the same. Two Sandboxes installing at the same
+    # moment is what says so here.
+    #
+    # And neither holds anything that is a session's own. A registry login is
+    # `~/.netrc`, a keyring, or `UV_INDEX_*_PASSWORD` in the environment — none
+    # of them under either directory. What uv keeps beside the downloads is
+    # `interpreter-v4`, which is what it learned about the Pythons on this
+    # machine: a fact about the machine rather than about a session.
+    #
+    # **A virtual environment is not shared and there is nothing here to make
+    # it one.** A venv holds absolute paths, so one built in another Worktree is
+    # broken in this one; both tools put it where the session asked and neither
+    # reads a variable set here to decide. So what is shared is downloads, and
+    # every `.venv` stays in the Worktree that made it.
+    #
+    # **pip's cache is an HTTP cache rather than a store an install can be
+    # resolved against**, which is worth knowing before trusting `--no-index`:
+    # pip revalidates an index page on every install, so a requirement named by
+    # *name* cannot be resolved with the index unreachable however full the
+    # cache is. What the cache serves offline is a distribution already asked
+    # for by URL — which is what a pinned requirements file holds, and what
+    # `tests/package_stores.rs` installs. uv has no such limit: it resolves out
+    # of `simple-v21` under `--offline`.
+    env:
+      PIP_CACHE_DIR: "{cache}/pip"
+      UV_CACHE_DIR: "{stores}/uv"

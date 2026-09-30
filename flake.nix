@@ -189,6 +189,16 @@
               # variable nor the link count is ever measured.
               deno
               bun
+              # And Python's two, which are the `python` descriptor's. pip is a
+              # module of the interpreter that carries it rather than a package
+              # of its own, so what the proof runs is `python3 -m pip` and what
+              # this has to give it is a Python that has the module — which is
+              # what `withPackages` is for. uv is one binary and reads
+              # `UV_CACHE_DIR`; it is also the second built-in tool that
+              # *prints* it could not hardlink out of its store, so a shell
+              # without it is a shell where that sentence is never read.
+              (python3.withPackages (ps: [ ps.pip ]))
+              uv
               # What a ticked `gh` row unpacks on an Intel Mac, which has no
               # Homebrew to install one with — see
               # `crates/server/src/onboarding/install.rs`'s `GH_RELEASE`. Both

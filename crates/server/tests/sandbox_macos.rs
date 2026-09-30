@@ -3243,17 +3243,17 @@ async fn the_configured_binds_beside_a_read_only_companion_are_still_writable() 
 /// The directory is writable at the same path inside, and the built-in
 /// languages' stores point into it: `CARGO_HOME`, which is the half of Rust's
 /// cache that works with no sccache anywhere, Go's two — the downloads and the
-/// compiled objects, which for Go is a directory and nothing more — and four of
-/// Node's seven.
+/// compiled objects, which for Go is a directory and nothing more — four of
+/// Node's seven, and pip's.
 ///
 /// That is what stops two Conversations downloading one crate, one module or
 /// one package twice.
 ///
-/// **Node's other three are somewhere else**, and they are the reason a session
-/// now gets a second grant: pnpm's, deno's and bun's stores are under the
-/// directory beside the Worktrees, which is asserted here too — this platform's
-/// policy is one description of what a session may reach, so both directories
-/// belong in the one probe.
+/// **Node's other three and uv's are somewhere else**, and they are the reason a
+/// session now gets a second grant: pnpm's store, deno's cache, bun's and uv's
+/// are under the directory beside the Worktrees, which is asserted here too —
+/// this platform's policy is one description of what a session may reach, so
+/// both directories belong in the one probe.
 #[tokio::test]
 #[cfg_attr(
     not(target_os = "macos"),
@@ -3280,6 +3280,8 @@ async fn the_build_cache_is_writable_inside_and_the_stores_are_in_it() {
             say yarn-global "${{YARN_GLOBAL_FOLDER-unset}}"
             say deno-dir "${{DENO_DIR-unset}}"
             say bun-cache "${{BUN_INSTALL_CACHE_DIR-unset}}"
+            say pip-cache "${{PIP_CACHE_DIR-unset}}"
+            say uv-cache "${{UV_CACHE_DIR-unset}}"
             dir {beside} stores
             "#,
             dir = quoted(&fixture.cache_dir()),
@@ -3317,12 +3319,15 @@ async fn the_build_cache_is_writable_inside_and_the_stores_are_in_it() {
 
     // And Node's four under the cache, which are four tools rather than one:
     // npm's packages, pnpm's registry metadata, and a directory per yarn, the
-    // two of them reading two different variables.
+    // two of them reading two different variables. And pip's, which is here
+    // because pip unpacks a wheel into `site-packages` and has nothing to link
+    // out of its cache.
     for (said, under) in [
         ("npm-cache", "npm"),
         ("pnpm-metadata", "pnpm/metadata"),
         ("yarn-cache", "yarn/cache"),
         ("yarn-global", "yarn/global"),
+        ("pip-cache", "pip"),
     ] {
         assert_eq!(
             reported[said],
@@ -3332,10 +3337,10 @@ async fn the_build_cache_is_writable_inside_and_the_stores_are_in_it() {
         );
     }
 
-    // And the other three, beside the Worktrees, which this platform has to
-    // grant as well — pnpm, deno and bun each link a package out of their store
-    // into the project rather than copying it, and a link does not cross a
-    // filesystem.
+    // And the other four, beside the Worktrees, which this platform has to
+    // grant as well — pnpm, deno, bun and uv each link a package out of their
+    // store into the project rather than copying it, and a link does not cross
+    // a filesystem.
     assert_eq!(
         reported["stores"], "write",
         "a store a session cannot write to is no store"
@@ -3345,6 +3350,7 @@ async fn the_build_cache_is_writable_inside_and_the_stores_are_in_it() {
         ("pnpm-store", "pnpm"),
         ("deno-dir", "deno"),
         ("bun-cache", "bun"),
+        ("uv-cache", "uv"),
     ] {
         assert_eq!(
             reported[said],

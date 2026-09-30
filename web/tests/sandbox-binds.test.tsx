@@ -79,6 +79,7 @@ const LANGUAGES = {
     { name: "rust", enabled: true, size: "50G" },
     { name: "go", enabled: true, size: "" },
     { name: "node", enabled: true, size: "" },
+    { name: "python", enabled: true, size: "" },
     { name: "gleam", enabled: true, size: "8G" },
   ],
 };

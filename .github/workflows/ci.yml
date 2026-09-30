@@ -262,6 +262,23 @@ jobs:
           unzip -q -o "$RUNNER_TEMP/bun.zip" -d "$RUNNER_TEMP/bun"
           sudo install -m 0755 "$RUNNER_TEMP/bun/bun-linux-x64/bun" /usr/local/bin/bun
 
+      # **uv, which is the one Python tool this runner has not got.** The image
+      # carries a `python3` under `/usr/bin` with pip in it, which is what the
+      # pip proof runs (`python3 -m pip`, pip being a module of its interpreter
+      # rather than a program of its own) — so nothing here installs a Python.
+      # uv is one binary from its project's own release, into `/usr/local/bin`
+      # for the reason deno and bun are: the tool cache is outside every bind a
+      # session gets.
+      #
+      # The same release the dev shell's nixpkgs carries, so that a proof that
+      # passes here is a proof of the version a developer ran it against.
+      - name: Install uv 0.11.21
+        run: |
+          curl -sSfL -o "$RUNNER_TEMP/uv.tar.gz" \
+            https://github.com/astral-sh/uv/releases/download/0.11.21/uv-x86_64-unknown-linux-gnu.tar.gz
+          tar -C "$RUNNER_TEMP" -xzf "$RUNNER_TEMP/uv.tar.gz"
+          sudo install -m 0755 "$RUNNER_TEMP/uv-x86_64-unknown-linux-gnu/uv" /usr/local/bin/uv
+
       # And the same question asked of every tool on the list, in a line naming
       # the one that fails it rather than as a test failure about a shell that
       # could not find a program — the reason the sandbox-surface step in the
@@ -275,7 +292,7 @@ jobs:
         run: |
           status=0
 
-          for tool in go zip node npm pnpm yarn yarn-berry deno bun tar sha1sum; do
+          for tool in go zip node npm pnpm yarn yarn-berry deno bun python3 uv tar sha1sum; do
             found=$(command -v "$tool" || true)
 
             if [ -z "$found" ]; then
@@ -296,6 +313,14 @@ jobs:
                 ;;
             esac
           done
+
+          # And pip, which is the one tool on the list that is not a program:
+          # the pip proof runs `python3 -m pip`, so what has to be there is the
+          # module inside the interpreter above rather than a name on the PATH.
+          if ! python3 -m pip --version; then
+            echo "::error::this runner's python3 has no pip module, which the pip package-store proof installs with"
+            status=1
+          fi
 
           exit $status
 
