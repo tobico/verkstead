@@ -343,12 +343,13 @@ async function run(): Promise<void> {
   // **Middle-Click Autoscroll**, which Chromium has and enables on Windows
   // alone — so the same workbench scrolled under a held middle button there and
   // did nothing anywhere else. A Blink runtime feature is read by the renderer
-  // as it starts rather than asked for per window, so this is a command-line
-  // switch and there is nothing on `webPreferences` behind it. Said on every
-  // platform and with no branch above it, for the reason
-  // [`autoscroll.ts`](./autoscroll.js) gives: a gesture is the same gesture
-  // wherever there is a button to hold, and Windows is being told what is
-  // already true there.
+  // as it starts rather than asked for per window, so this is the command line
+  // rather than the per-window `webPreferences.enableBlinkFeatures` — said once
+  // here, before there is a renderer to read it, for every window this app will
+  // ever open. Said on every platform and with no branch above it, for the
+  // reason [`autoscroll.ts`](./autoscroll.js) gives: a gesture is the same
+  // gesture wherever there is a button to hold, and Windows is being told what
+  // is already true there.
   app.commandLine.appendSwitch(AUTOSCROLLING.name, AUTOSCROLLING.value);
   say(`a held middle button autoscrolls the window — --${AUTOSCROLLING.name}=${AUTOSCROLLING.value}`);
 

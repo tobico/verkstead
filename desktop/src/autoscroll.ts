@@ -10,12 +10,17 @@
 //! not, over the same document, for no reason either of them was aware of.
 //!
 //! **`--enable-blink-features` is the whole of asking for it**, and it is asked
-//! for at the command line rather than per window: a Blink runtime feature is
-//! read by the renderer as it starts, so there is nothing on `webPreferences`
-//! and nothing the page can be told. Measured on the pinned Electron under a
-//! nested X session: with the switch, a middle press and a 180px drag carries
-//! the settings page's middle pane to the bottom of itself; without it,
-//! `scrollTop` never leaves nought.
+//! for at the command line rather than per window. There is a per-window way to
+//! say the same thing — `webPreferences.enableBlinkFeatures` takes a
+//! comma-joined list of the same names — and the command line is taken over it
+//! for two reasons. A Blink runtime feature is read by the renderer as it
+//! starts, so the switch has to be in place before there is a renderer at all;
+//! and said once here it is said for every window this app will ever open,
+//! rather than an option each new one has to repeat. Neither way is anything the
+//! page itself can be told. Measured on the pinned Electron under a nested X
+//! session: with the switch, a middle press and a 180px drag carries the
+//! settings page's middle pane to the bottom of itself; without it, `scrollTop`
+//! never leaves nought.
 //!
 //! **And it is asked for on every platform, rather than on the one that needed
 //! it.** A gesture is the same gesture wherever there is a middle button to hold
