@@ -4377,3 +4377,697 @@ async fn java_maven_and_gradle_each_answer_inside_a_sandbox() {
         );
     }
 }
+
+/// The two artifacts every Maven proof resolves, both under this group and at
+/// this version: a plugin, and a jar the plugin calls into.
+const MAVEN_GROUP: &str = "example.test";
+const MAVEN_VERSION: &str = "1.0.0";
+
+/// Where the plugin's own dependency is published, and the class in it.
+const MAVEN_GREET: &str = "greet";
+
+/// And the plugin, which the consumer below binds to `validate`.
+const MAVEN_PLUGIN: &str = "say-maven-plugin";
+
+/// What every `mvn` in this suite is told, beside the variable the descriptor
+/// sets, which is the one this is here to prove. `--batch-mode` so that nothing
+/// asks a terminal anything, and `--no-transfer-progress` so that what a
+/// failure has to be read out of is not a download counter.
+const MVN_FLAGS: &str = "--batch-mode --no-transfer-progress";
+
+/// Where the Maven installation `mvn` runs is: the `Maven home:` line of its
+/// own `mvn -v`.
+///
+/// Asked rather than worked out from where `mvn` is, because nixpkgs' `mvn`
+/// is a wrapper script in a `bin` beside no `lib`, and the runner image's is a
+/// link into `/usr/local/maven`. The plugin below is compiled against the
+/// `maven-plugin-api` jar in that installation's `lib`.
+fn maven_home(mvn: &Path) -> PathBuf {
+    let said = Command::new(mvn)
+        .args(["--batch-mode", "-v"])
+        .stdin(Stdio::null())
+        .output()
+        .expect("the `mvn` this machine was found to have");
+
+    assert!(
+        said.status.success(),
+        "`mvn -v` should answer: {}",
+        String::from_utf8_lossy(&said.stderr),
+    );
+
+    let said = String::from_utf8_lossy(&said.stdout).into_owned();
+
+    said.lines()
+        .find_map(|line| line.strip_prefix("Maven home: "))
+        .map(|home| PathBuf::from(home.trim()))
+        .unwrap_or_else(|| panic!("`mvn -v` names no Maven home. It said:\n{said}"))
+}
+
+/// Lay a Maven repository out under `at`, holding the plugin and the jar it
+/// calls into, and serve it over the loopback.
+///
+/// **A plugin, because nothing else a Maven build resolves can be served from
+/// here.** Even `validate` on a `jar` project reaches for the default
+/// lifecycle's plugins, which live on Maven Central. So the consumer is a
+/// `pom` project, whose `validate` binds nothing, with one plugin of this
+/// suite's own bound to it. Maven resolves that plugin, the jar it depends
+/// on, and the project's own dependency on the same jar through the local
+/// repository, which is the store this is about.
+///
+/// **And what it prints is code out of the store.** The mojo calls
+/// `Greet.hello()` from the other jar, so a build that says
+/// [`OUT_OF_THE_STORE`] ran both jars as they came out of the repository.
+///
+/// Compiled with the host's `javac` against the `maven-plugin-api` jar in the
+/// installation `mvn` runs, and zipped with the suite's own `zip`: a jar is a
+/// zip. The plugin descriptor is written by hand, as `maven-plugin-plugin`
+/// would have written it, with the parts Maven 3.9 reads to run a mojo.
+///
+/// **Served rather than laid out on disk.** Maven reads a `file://` repository
+/// perfectly well, but a download over the network is the case two sessions
+/// racing each other is about. Checksums are not served: Maven's default is to
+/// warn about a missing one and go on, and nothing here is about checksums.
+fn maven_registry(at: &Path, mvn: &Path, javac: &Path, zip: &Path) -> Registry {
+    let lib = maven_home(mvn).join("lib");
+    let api = std::fs::read_dir(&lib)
+        .expect("the lib directory of the Maven installation")
+        .flatten()
+        .map(|entry| entry.path())
+        .find(|jar| {
+            jar.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("maven-plugin-api-"))
+        })
+        .unwrap_or_else(|| panic!("no maven-plugin-api jar under {}", lib.display()));
+
+    let sources = at.join("sources");
+    let greet = at.join("classes/greet");
+    let plugin = at.join("classes/plugin");
+
+    for dir in [&sources, &greet, &plugin.join("META-INF/maven")] {
+        std::fs::create_dir_all(dir).unwrap();
+    }
+
+    std::fs::write(
+        sources.join("Greet.java"),
+        format!(
+            "package example.greet;\n\
+             public final class Greet {{\n\
+             \x20 public static String hello() {{ return \"{OUT_OF_THE_STORE}\"; }}\n\
+             }}\n"
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        sources.join("Say.java"),
+        "package example.say;\n\
+         public final class Say extends org.apache.maven.plugin.AbstractMojo {\n\
+         \x20 public void execute() { getLog().info(\"said: \" + example.greet.Greet.hello()); }\n\
+         }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        plugin.join("META-INF/maven/plugin.xml"),
+        format!(
+            "<plugin>\n\
+             \x20 <name>say</name>\n\
+             \x20 <groupId>{MAVEN_GROUP}</groupId>\n\
+             \x20 <artifactId>{MAVEN_PLUGIN}</artifactId>\n\
+             \x20 <version>{MAVEN_VERSION}</version>\n\
+             \x20 <goalPrefix>say</goalPrefix>\n\
+             \x20 <mojos>\n\
+             \x20   <mojo>\n\
+             \x20     <goal>hello</goal>\n\
+             \x20     <implementation>example.say.Say</implementation>\n\
+             \x20     <language>java</language>\n\
+             \x20     <requiresDependencyResolution>runtime</requiresDependencyResolution>\n\
+             \x20     <requiresProject>true</requiresProject>\n\
+             \x20     <instantiationStrategy>per-lookup</instantiationStrategy>\n\
+             \x20     <executionStrategy>once-per-session</executionStrategy>\n\
+             \x20     <threadSafe>true</threadSafe>\n\
+             \x20     <parameters/>\n\
+             \x20   </mojo>\n\
+             \x20 </mojos>\n\
+             \x20 <dependencies>\n\
+             \x20   <dependency>\n\
+             \x20     <groupId>{MAVEN_GROUP}</groupId>\n\
+             \x20     <artifactId>{MAVEN_GREET}</artifactId>\n\
+             \x20     <type>jar</type>\n\
+             \x20     <version>{MAVEN_VERSION}</version>\n\
+             \x20   </dependency>\n\
+             \x20 </dependencies>\n\
+             </plugin>\n"
+        ),
+    )
+    .unwrap();
+
+    let compiled = |into: &Path, classpath: &str, source: &str| {
+        let made = Command::new(javac)
+            .args(["--release", "11", "-nowarn", "-d"])
+            .arg(into)
+            .args(["-cp", classpath])
+            .arg(sources.join(source))
+            .stdin(Stdio::null())
+            .output()
+            .expect("the `javac` this machine was found to have");
+
+        assert!(
+            made.status.success(),
+            "{source} did not compile: {}",
+            String::from_utf8_lossy(&made.stderr),
+        );
+    };
+
+    compiled(&greet, "", "Greet.java");
+    compiled(
+        &plugin,
+        &format!("{}:{}", greet.display(), api.display()),
+        "Say.java",
+    );
+
+    let jarred = |classes: &Path| {
+        let jar = classes.with_extension("jar");
+        let made = Command::new(zip)
+            .args(["-q", "-r", "-X"])
+            .arg(&jar)
+            .arg(".")
+            .current_dir(classes)
+            .stdin(Stdio::null())
+            .status()
+            .expect("the suite's own `zip`");
+
+        assert!(made.success(), "{} was not jarred", classes.display());
+
+        std::fs::read(&jar).unwrap()
+    };
+
+    let pom = |artifact: &str, packaging: &str, dependencies: &str| {
+        format!(
+            "<project xmlns=\"http://maven.apache.org/POM/4.0.0\">\n\
+             \x20 <modelVersion>4.0.0</modelVersion>\n\
+             \x20 <groupId>{MAVEN_GROUP}</groupId>\n\
+             \x20 <artifactId>{artifact}</artifactId>\n\
+             \x20 <version>{MAVEN_VERSION}</version>\n\
+             \x20 <packaging>{packaging}</packaging>\n\
+             {dependencies}\
+             </project>\n"
+        )
+        .into_bytes()
+    };
+
+    // Every file a build of the consumer fetches, by the path Maven asks for
+    // it at: `<group as directories>/<artifact>/<version>/<artifact>-<version>.<ext>`.
+    let under = |artifact: &str, ext: &str| {
+        format!(
+            "/{group}/{artifact}/{MAVEN_VERSION}/{artifact}-{MAVEN_VERSION}.{ext}",
+            group = MAVEN_GROUP.replace('.', "/"),
+        )
+    };
+
+    let served: std::collections::HashMap<String, Vec<u8>> = [
+        (under(MAVEN_GREET, "jar"), jarred(&greet)),
+        (under(MAVEN_GREET, "pom"), pom(MAVEN_GREET, "jar", "")),
+        (under(MAVEN_PLUGIN, "jar"), jarred(&plugin)),
+        (
+            under(MAVEN_PLUGIN, "pom"),
+            pom(
+                MAVEN_PLUGIN,
+                "maven-plugin",
+                &format!(
+                    "\x20 <dependencies>\n\
+                     \x20   <dependency>\n\
+                     \x20     <groupId>{MAVEN_GROUP}</groupId>\n\
+                     \x20     <artifactId>{MAVEN_GREET}</artifactId>\n\
+                     \x20     <version>{MAVEN_VERSION}</version>\n\
+                     \x20   </dependency>\n\
+                     \x20 </dependencies>\n"
+                ),
+            ),
+        ),
+    ]
+    .into_iter()
+    .collect();
+
+    // Bound here rather than on the thread below, for the reason the npm
+    // registry's is: the consumer names the port, so it has to be known before
+    // anything is served.
+    let listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .expect("a loopback port for the registry");
+    let url = format!("http://{}", listener.local_addr().expect("the port it got"));
+
+    listener
+        .set_nonblocking(true)
+        .expect("what tokio takes a standard listener over");
+
+    // Anything else Maven asks for — a checksum, a `maven-metadata.xml` — is
+    // answered 404, which is what a repository without it says.
+    let app = Router::new()
+        .fallback(get(
+            |State(served): State<std::sync::Arc<std::collections::HashMap<String, Vec<u8>>>>,
+             uri: axum::http::Uri| async move {
+                match served.get(uri.path()) {
+                    Some(file) => Ok((
+                        [(header::CONTENT_TYPE, "application/octet-stream")],
+                        file.clone(),
+                    )),
+                    None => Err(axum::http::StatusCode::NOT_FOUND),
+                }
+            },
+        ))
+        .with_state(std::sync::Arc::new(served));
+
+    let (stop, stopping) = tokio::sync::oneshot::channel();
+
+    let serving = std::thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("a runtime for the registry's own thread");
+
+        runtime.block_on(async move {
+            let listener = tokio::net::TcpListener::from_std(listener)
+                .expect("the listener this thread was handed");
+
+            tokio::select! {
+                served = axum::serve(listener, app) => { let _ = served; }
+                _ = stopping => {}
+            }
+        });
+    });
+
+    Registry {
+        url,
+        stop: Some(stop),
+        serving: Some(serving),
+    }
+}
+
+/// And what a Conversation's Worktree holds: a `pom` project depending on the
+/// jar in the registry, with the plugin bound to `validate`, so that
+/// `mvn validate` resolves all of it and runs the plugin.
+///
+/// **The registry replaces Central by taking its id.** A repository named
+/// `central` in a project overrides the one Maven's super POM declares, so
+/// nothing a build here resolves is looked for on the internet. `from` is
+/// `None` where a Repo's own settings file is what names it instead.
+///
+/// Plain HTTP on the loopback is allowed: Maven's blocker of `http://`
+/// repositories matches external hosts only.
+fn maven_consumer(worktree: &Path, from: Option<&str>) {
+    let repositories = from.map_or_else(String::new, |url| {
+        format!(
+            "\x20 <repositories>\n\
+             \x20   <repository><id>central</id><url>{url}</url></repository>\n\
+             \x20 </repositories>\n\
+             \x20 <pluginRepositories>\n\
+             \x20   <pluginRepository><id>central</id><url>{url}</url></pluginRepository>\n\
+             \x20 </pluginRepositories>\n"
+        )
+    });
+
+    std::fs::write(
+        worktree.join("pom.xml"),
+        format!(
+            "<project xmlns=\"http://maven.apache.org/POM/4.0.0\">\n\
+             \x20 <modelVersion>4.0.0</modelVersion>\n\
+             \x20 <groupId>{MAVEN_GROUP}</groupId>\n\
+             \x20 <artifactId>app</artifactId>\n\
+             \x20 <version>{MAVEN_VERSION}</version>\n\
+             \x20 <packaging>pom</packaging>\n\
+             {repositories}\
+             \x20 <dependencies>\n\
+             \x20   <dependency>\n\
+             \x20     <groupId>{MAVEN_GROUP}</groupId>\n\
+             \x20     <artifactId>{MAVEN_GREET}</artifactId>\n\
+             \x20     <version>{MAVEN_VERSION}</version>\n\
+             \x20   </dependency>\n\
+             \x20 </dependencies>\n\
+             \x20 <build>\n\
+             \x20   <plugins>\n\
+             \x20     <plugin>\n\
+             \x20       <groupId>{MAVEN_GROUP}</groupId>\n\
+             \x20       <artifactId>{MAVEN_PLUGIN}</artifactId>\n\
+             \x20       <version>{MAVEN_VERSION}</version>\n\
+             \x20       <executions>\n\
+             \x20         <execution>\n\
+             \x20           <phase>validate</phase>\n\
+             \x20           <goals><goal>hello</goal></goals>\n\
+             \x20         </execution>\n\
+             \x20       </executions>\n\
+             \x20     </plugin>\n\
+             \x20   </plugins>\n\
+             \x20 </build>\n\
+             </project>\n"
+        ),
+    )
+    .unwrap();
+}
+
+/// Where the artifacts a build resolved land in a Maven local repository.
+fn resolved_into(repository: &Path) -> PathBuf {
+    repository
+        .join(MAVEN_GROUP.replace('.', "/"))
+        .join(MAVEN_PLUGIN)
+        .join(MAVEN_VERSION)
+        .join(format!("{MAVEN_PLUGIN}-{MAVEN_VERSION}.jar"))
+}
+
+/// Maven: two Sandboxes building at once against one local repository, a third
+/// building with `-o` and the registry off the air, and the control that says
+/// the third proved something.
+///
+/// **The two at once are the half the locks are for.** Maven 3.9 guards its
+/// local repository with locks inside one JVM unless told otherwise, so two
+/// sessions would each take a lock the other cannot see. The descriptor's
+/// `file-lock` puts them in the repository instead, where both sessions see
+/// them. Both builds succeeding is what says the store came through; the third
+/// resolving everything out of it is what says it came through whole.
+///
+/// The control fails with Maven's own words for an artifact it has nowhere to
+/// get: offline, and "has not been downloaded from it before".
+#[tokio::test]
+async fn two_maven_builds_at_once_fill_one_repository_and_a_third_builds_out_of_it() {
+    let Some(found) = tools("Maven", &["mvn", "javac", "zip"]) else {
+        return;
+    };
+    let [mvn, javac, zip] = &found[..] else {
+        unreachable!("three tools were asked for");
+    };
+
+    // Four: the two that race, the one denied its registry, and the control.
+    let machine = machine(4).await;
+    let cache = machine.cache();
+    let dir = cache.dir().expect("the fixture's cache has a directory");
+
+    let registry = maven_registry(&machine.registries.join("maven"), mvn, javac, zip);
+
+    for nth in 0..4 {
+        maven_consumer(machine.worktree(nth), Some(&registry.url));
+    }
+
+    let building = format!(
+        "set -e\n'{mvn}' {MVN_FLAGS} validate\n",
+        mvn = mvn.display()
+    );
+    let offline = format!(
+        "set -e\n'{mvn}' {MVN_FLAGS} --offline validate\n",
+        mvn = mvn.display()
+    );
+
+    // Started together and waited on together, which is the only way the two
+    // are ever really writing the repository at the same moment.
+    let first = starting(&machine.sandbox(0, &cache, reaching_nothing()), &building);
+    let second = starting(&machine.sandbox(1, &cache, reaching_nothing()), &building);
+
+    let first = finished(first);
+
+    first.worked("the first session's build fills the repository");
+    finished(second).worked("and the second one racing it finishes just as well");
+
+    assert!(
+        resolved_into(&dir.join("maven/repository")).is_file(),
+        "and what they downloaded is under the directory the descriptor named, \
+         which is the one the third session is about to be given. It said:\n{}",
+        first.said,
+    );
+
+    // And the proof. The registry stops answering and Maven is told not to
+    // look: what is left to build out of is the repository the two filled.
+    registry.shut();
+
+    let third = installing(&machine.sandbox(2, &cache, reaching_nothing()), &offline);
+
+    third.worked(
+        "a third session builds offline with the registry gone, which it can only do out \
+         of the shared local repository",
+    );
+    assert!(
+        third.said.contains(&format!("said: {OUT_OF_THE_STORE}")),
+        "and the plugin it ran really came out of the store, calling into the \
+         jar beside it. It said:\n{}",
+        third.said,
+    );
+
+    // The control. Everything the same but the Build Cache, which nothing has
+    // filled.
+    let control = installing(
+        &machine.sandbox(3, &machine.empty_cache(), reaching_nothing()),
+        &offline,
+    );
+
+    assert!(
+        !control.worked,
+        "an empty repository and no registry has to fail, or the build above \
+         proved nothing about either. It said:\n{}",
+        control.said,
+    );
+    assert!(
+        control
+            .said
+            .contains("has not been downloaded from it before"),
+        "and it fails for want of anywhere to get the plugin, in Maven's own \
+         words, rather than for some other reason. It said:\n{}",
+        control.said,
+    );
+}
+
+/// And Maven's own account of what it was told: the local repository it used,
+/// and the locks it took on it, out of its debug log.
+///
+/// **This is what guards the locks.** Two builds at once succeeding is a race
+/// that could go either way, and a Maven that stopped reading the two lock
+/// properties would pass it most runs. The debug log is not a race: Resolver
+/// names the lock factory and the name mapper it built, and they are the ones
+/// the descriptor set. `rwlock-local` and `gaecv` are what 3.9 says without
+/// them.
+///
+/// And the lock files are where every session sees them: `.locks` inside the
+/// shared repository, not in the session's own `/tmp`.
+#[tokio::test]
+async fn the_repository_and_the_locks_maven_names_for_itself_are_the_ones_the_descriptor_set() {
+    let Some(found) = tools("Maven", &["mvn", "javac", "zip"]) else {
+        return;
+    };
+    let [mvn, javac, zip] = &found[..] else {
+        unreachable!("three tools were asked for");
+    };
+
+    let machine = machine(1).await;
+    let cache = machine.cache();
+    let dir = cache.dir().expect("the fixture's cache has a directory");
+
+    let registry = maven_registry(&machine.registries.join("maven-locks"), mvn, javac, zip);
+
+    maven_consumer(machine.worktree(0), Some(&registry.url));
+
+    // Only the two lines this is about, so that a failure is readable: the
+    // debug log of one build is thousands of lines.
+    let asked = installing(
+        &machine.sandbox(0, &cache, reaching_nothing()),
+        &format!(
+            "'{mvn}' {MVN_FLAGS} -X validate > debug.log 2>&1 || {{ cat debug.log; exit 1; }}\n\
+             grep -E 'Using local repository at|Creating adapter using' debug.log\n",
+            mvn = mvn.display(),
+        ),
+    );
+
+    registry.shut();
+
+    asked.worked("a session builds with Maven's debug log on");
+
+    let repository = dir.join("maven/repository");
+
+    assert!(
+        asked.said.contains(&format!(
+            "Using local repository at {}",
+            repository.display()
+        )),
+        "Maven's local repository is the one inside the Build Cache, which is \
+         what says it read the property rather than that it was set. It \
+         said:\n{}",
+        asked.said,
+    );
+    assert!(
+        asked
+            .said
+            .contains("Creating adapter using nameMapper 'file-gav' and factory 'file-lock'"),
+        "and the locks it takes on it are files, which two sessions both see. \
+         It said:\n{}",
+        asked.said,
+    );
+    assert!(
+        repository.join(".locks").is_dir(),
+        "and the lock files are inside the shared repository, rather than \
+         anywhere a session keeps to itself",
+    );
+}
+
+/// And a Repo's own configuration still wins: a local repository it pins in
+/// `.mvn/maven.config` is the one it gets, and a settings file it names there
+/// with `-s` is still read.
+///
+/// **Which way this goes is a fact about Maven.** `.mvn/maven.config` holds
+/// command-line arguments, so a `-D` in it is a *user* property, and the
+/// descriptor's is a *system* property out of `MAVEN_OPTS`. Maven reads the
+/// local repository out of the user properties first.
+///
+/// Two Worktrees, and in both the registry is named by the Repo's settings
+/// file rather than the project, through a profile: a build that fetches
+/// anything at all read that file. The first also pins its repository inside
+/// the Worktree, and keeps it. The second pins nothing, and resolves into the
+/// shared repository, so naming a settings file does not take a Repo out of
+/// the store.
+#[tokio::test]
+async fn a_repos_own_maven_config_is_still_read_and_its_own_repository_wins() {
+    let Some(found) = tools("Maven", &["mvn", "javac", "zip"]) else {
+        return;
+    };
+    let [mvn, javac, zip] = &found[..] else {
+        unreachable!("three tools were asked for");
+    };
+
+    let machine = machine(2).await;
+    let cache = machine.cache();
+    let dir = cache.dir().expect("the fixture's cache has a directory");
+
+    let registry = maven_registry(&machine.registries.join("maven-own"), mvn, javac, zip);
+
+    for nth in 0..2 {
+        let worktree = machine.worktree(nth);
+
+        maven_consumer(worktree, None);
+
+        std::fs::create_dir_all(worktree.join(".mvn")).unwrap();
+        std::fs::write(
+            worktree.join(".mvn/settings.xml"),
+            format!(
+                "<settings>\n\
+                 \x20 <profiles>\n\
+                 \x20   <profile>\n\
+                 \x20     <id>the-repos-own</id>\n\
+                 \x20     <repositories>\n\
+                 \x20       <repository><id>central</id><url>{url}</url></repository>\n\
+                 \x20     </repositories>\n\
+                 \x20     <pluginRepositories>\n\
+                 \x20       <pluginRepository><id>central</id><url>{url}</url></pluginRepository>\n\
+                 \x20     </pluginRepositories>\n\
+                 \x20   </profile>\n\
+                 \x20 </profiles>\n\
+                 \x20 <activeProfiles><activeProfile>the-repos-own</activeProfile></activeProfiles>\n\
+                 </settings>\n",
+                url = registry.url,
+            ),
+        )
+        .unwrap();
+    }
+
+    let pinned = machine.worktree(0).join("its-own-repository");
+
+    std::fs::write(
+        machine.worktree(0).join(".mvn/maven.config"),
+        format!(
+            "-s\n.mvn/settings.xml\n-Dmaven.repo.local={}\n",
+            pinned.display()
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        machine.worktree(1).join(".mvn/maven.config"),
+        "-s\n.mvn/settings.xml\n",
+    )
+    .unwrap();
+
+    let building = format!(
+        "set -e\n'{mvn}' {MVN_FLAGS} validate\n",
+        mvn = mvn.display()
+    );
+
+    let own = installing(&machine.sandbox(0, &cache, reaching_nothing()), &building);
+
+    own.worked(
+        "a Repo naming its settings file in `.mvn/maven.config` builds, which it can only \
+         do by reading that file: nothing else names the registry",
+    );
+    assert!(
+        resolved_into(&pinned).is_file(),
+        "and a Repo pinning its own local repository there keeps it. It said:\n{}",
+        own.said,
+    );
+    assert!(
+        !resolved_into(&dir.join("maven/repository")).exists(),
+        "and nothing of its went into the shared one",
+    );
+
+    let shared = installing(&machine.sandbox(1, &cache, reaching_nothing()), &building);
+
+    registry.shut();
+
+    shared.worked("a Repo naming only its settings file builds as well");
+    assert!(
+        resolved_into(&dir.join("maven/repository")).is_file(),
+        "and resolves into the shared repository, since a settings file of its \
+         own does not take it out of the store. It said:\n{}",
+        shared.said,
+    );
+}
+
+/// And a Build Cache whose path has a space in it, which is what a Windows
+/// user name with one in it gives by default: Maven still builds, with a
+/// repository of the session's own.
+///
+/// **The descriptor's variable is a line of flags**, since Maven has no
+/// variable for its local repository, and Maven 3's `mvn` splits `MAVEN_OPTS`
+/// on whitespace without reading a quote. Handed a path with a space in it,
+/// every `mvn` in the session would die: "Could not find or load main class"
+/// and the half of the path after the space. So the loader leaves a line of
+/// words out wherever a directory in it would split it, and this is that rule
+/// against a real Maven: the session is not given `MAVEN_OPTS`, the build
+/// works, and nothing of it went under the Build Cache.
+#[tokio::test]
+async fn a_build_cache_with_a_space_in_its_path_leaves_maven_working_and_unshared() {
+    let Some(found) = tools("Maven", &["mvn", "javac", "zip"]) else {
+        return;
+    };
+    let [mvn, javac, zip] = &found[..] else {
+        unreachable!("three tools were asked for");
+    };
+
+    let machine = machine(1).await;
+    let cache = machine.cache_named("a cache with spaces");
+    let dir = cache.dir().expect("the fixture's cache has a directory");
+
+    let registry = maven_registry(&machine.registries.join("maven-spaced"), mvn, javac, zip);
+
+    maven_consumer(machine.worktree(0), Some(&registry.url));
+
+    let built = installing(
+        &machine.sandbox(0, &cache, reaching_nothing()),
+        &format!(
+            "set -e\n\
+             printf 'maven-opts=%s\\n' \"${{MAVEN_OPTS-unset}}\"\n\
+             '{mvn}' {MVN_FLAGS} validate\n",
+            mvn = mvn.display(),
+        ),
+    );
+
+    registry.shut();
+
+    built.worked("a session on a Build Cache with a space in its path still builds with Maven");
+
+    assert_eq!(
+        line(&built, "maven-opts"),
+        "unset",
+        "and it was not handed the line of flags that would have split at the \
+         space. It said:\n{}",
+        built.said,
+    );
+    assert!(
+        built.said.contains(&format!("said: {OUT_OF_THE_STORE}")),
+        "and the plugin ran. It said:\n{}",
+        built.said,
+    );
+    assert!(
+        !dir.join("maven").exists(),
+        "and nothing of it went under the Build Cache, which it was not given",
+    );
+}

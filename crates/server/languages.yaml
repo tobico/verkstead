@@ -63,6 +63,13 @@
 # switched on is opened onto it; an installation with every language that names
 # it switched off is opened onto none.
 #
+# **A value that is a line of words is left out where a directory in it has
+# whitespace.** A line of flags is what a tool with no variable for a path
+# reads one out of, and such a tool splits the line on whitespace — so a Build
+# Cache under a name with a space in it would hand over a line that breaks the
+# tool outright. A value that is one word is a path, read whole, space and all.
+# See the `jvm` entry, which is where this came from.
+#
 # **Write `/` between the placeholder and what is under it, on every platform.**
 # A descriptor is one file read on three, so the grammar has one separator: what
 # a Windows session is handed is the path its own tools compose, `\` and all.
@@ -634,3 +641,78 @@ languages:
         env:
           CMAKE_C_COMPILER_LAUNCHER: "{sccache}"
           CMAKE_CXX_COMPILER_LAUNCHER: "{sccache}"
+
+  jvm:
+    # The JVM: Maven now, and Gradle beside it. One entry for the ecosystem the
+    # way Node's is for six tools, since a Repo on the JVM picks one build tool
+    # or the other and the settings page is better off with one box for both
+    # (ADR-0021). Kotlin needs nothing of its own: it builds through one of
+    # these two and resolves out of the same stores.
+    label: JVM
+
+    # Maven's manifest. Gradle's are added with Gradle.
+    detect:
+      - pom.xml
+
+    # **Maven has no variable for its local repository**, so this is
+    # `MAVEN_OPTS`, the JVM options `mvn` starts Maven's own JVM with, and three
+    # system properties inside it:
+    #
+    #   maven.repo.local                     the local repository: everything
+    #                                        a build has downloaded, plugins
+    #                                        included, and what `-o` resolves
+    #                                        out of.
+    #
+    #   aether.syncContext.named.factory     and **file locks on it**. Maven
+    #   aether.syncContext.named.nameMapper  3.9's Resolver guards the local
+    #                                        repository only within one JVM by
+    #                                        default (`rwlock-local`), so two
+    #                                        sessions writing at once would each
+    #                                        take a lock the other cannot see.
+    #                                        `file-lock` with `file-gav` puts
+    #                                        one lock file per artifact under
+    #                                        `.locks` in the repository itself,
+    #                                        where every session sharing it
+    #                                        sees it. That is NuGet's lesson,
+    #                                        and Resolver's documentation for
+    #                                        Maven 3.9 names these two values
+    #                                        for exactly this case. `mvn -X`
+    #                                        says it took them: "Creating
+    #                                        adapter using nameMapper 'file-gav'
+    #                                        and factory 'file-lock'".
+    #
+    # Measured against Maven 3.8.8, 3.9.0–3.9.12 and 4.0.0-rc-5. Maven 4 uses
+    # file locks by default, so for it the last two properties change nothing.
+    # Maven 3.8 has no named locks at all and ignores them, so two sessions on
+    # a 3.8 still share the repository with nothing guarding it.
+    #
+    # **System properties, so a Repo's own settings still win.** A
+    # `-Dmaven.repo.local` in a Repo's `.mvn/maven.config` is a *user* property
+    # and beats this one, so a Repo that pins its own repository keeps it. The
+    # same goes for one on the command line. A `-s` there is still read,
+    # though a `<localRepository>` inside that settings file loses to this
+    # property, the way it always loses to `maven.repo.local`.
+    #
+    # **Maven 3's `mvn` splits `MAVEN_OPTS` on whitespace and reads no
+    # quotes**, so a Build Cache path with a space in it would break every
+    # `mvn` in the session: "Could not find or load main class" and the half of
+    # the path after the space. A Windows user name with a space in it gives
+    # one by default. There is no spelling that survives: Maven 4's `mvn`
+    # `eval`s the line instead, so a quote either one reads breaks the other,
+    # and `MAVEN_ARGS` with `${env.…}` in it works only from 3.9.2 and kills
+    # Maven 4 outright. So the loader leaves a line of words out wherever a
+    # directory in it has whitespace (see the placeholders above), and a
+    # session on such a machine builds with a repository of its own, unshared.
+    #
+    # **`MAVEN_USER_HOME` is left alone.** It is where `mvnw` keeps the Maven
+    # releases it downloads, and sharing it would save a download per session.
+    # But the wrapper unpacks into the session's own `/tmp` and then `mv`s the
+    # result into place. Across two mounts that is a copy, not a rename, so a
+    # second session could find a half-copied release there and run it.
+    #
+    # Nothing here is a session's own. `settings.xml`, where a server's
+    # password goes, is under `~/.m2` beside the default repository rather
+    # than inside it, and moving the repository leaves it in the session's
+    # home.
+    env:
+      MAVEN_OPTS: "-Dmaven.repo.local={cache}/maven/repository -Daether.syncContext.named.factory=file-lock -Daether.syncContext.named.nameMapper=file-gav"

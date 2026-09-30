@@ -2248,6 +2248,7 @@ async fn a_session_gets_the_shared_cargo_home_and_the_compiler_wrapper() {
         Note 'nuget-packages' $env:NUGET_PACKAGES
         Note 'nuget-http' $env:NUGET_HTTP_CACHE_PATH
         Note 'nuget-scratch' $env:NUGET_SCRATCH
+        Note 'maven-opts' $env:MAVEN_OPTS
 
         # Run the thing it was pointed at, which is the only way to ask whether
         # the boundary really lets a session open it.
@@ -2404,6 +2405,20 @@ async fn a_session_gets_the_shared_cargo_home_and_the_compiler_wrapper() {
     // second Conversation could reach them.
     assert_eq!(fixture.written("poetry-in-project").await, "true");
     assert_eq!(fixture.written("pipenv-in-project").await, "1");
+
+    // And the JVM's one, which is a line of flags with Maven's local
+    // repository inside it: the path is the one this platform composes, and
+    // nothing else in the line has a separator to turn.
+    assert_eq!(
+        fixture.written("maven-opts").await,
+        format!(
+            "-Dmaven.repo.local={} -Daether.syncContext.named.factory=file-lock \
+             -Daether.syncContext.named.nameMapper=file-gav",
+            cache.path().join("maven").join("repository").display(),
+        ),
+        "Maven's local repository is under the one shared cache, written the \
+         way this platform writes a path",
+    );
 
     let downloaded = cache.path().join("cargo").join("downloaded.crate");
 

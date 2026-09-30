@@ -88,6 +88,15 @@
       {
         "compiling": null,
         "enabled": true,
+        "label": "JVM",
+        "name": "jvm",
+        "size": "30G",
+        "size_configured": false,
+        "unread": null
+      },
+      {
+        "compiling": null,
+        "enabled": true,
         "label": "Gleam",
         "name": "gleam",
         "size": "8G",

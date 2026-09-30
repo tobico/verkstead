@@ -5617,6 +5617,7 @@ async fn the_build_cache_is_writable_inside_and_the_stores_are_in_it() {
             say nuget-packages "${{NUGET_PACKAGES-unset}}"
             say nuget-http "${{NUGET_HTTP_CACHE_PATH-unset}}"
             say nuget-scratch "${{NUGET_SCRATCH-unset}}"
+            say maven-opts "${{MAVEN_OPTS-unset}}"
             "#,
             dir = quoted(&fixture.cache_dir()),
         ),
@@ -5706,6 +5707,20 @@ async fn the_build_cache_is_writable_inside_and_the_stores_are_in_it() {
         reported["pipenv-in-project"], "1",
         "and pipenv's, which keeps its environments under a home rather than \
          under its cache: in the project they outlive the session that made them"
+    );
+
+    // And the JVM's one, which is a line of flags rather than a path: Maven's
+    // local repository has no variable of its own, and the file locks two
+    // sessions writing it at once need go beside it.
+    assert_eq!(
+        reported["maven-opts"],
+        format!(
+            "-Dmaven.repo.local={} -Daether.syncContext.named.factory=file-lock \
+             -Daether.syncContext.named.nameMapper=file-gav",
+            fixture.cache_dir().join("maven/repository").display(),
+        ),
+        "Maven's local repository is inside the same bind, and it is locked \
+         with files every session can see",
     );
 }
 
@@ -5885,7 +5900,7 @@ async fn a_build_cache_switched_off_is_no_bind_and_no_variables() {
     fixture.configure(
         "rust_build_cache:\n  enabled: false\nlanguages:\n  go:\n    enabled: false\n  \
          node:\n    enabled: false\n  python:\n    enabled: false\n  dotnet:\n    \
-         enabled: false\n  cpp:\n    enabled: false\n",
+         enabled: false\n  cpp:\n    enabled: false\n  jvm:\n    enabled: false\n",
     );
 
     // The server still resolved one, sccache and all: what is being shown is
@@ -5916,6 +5931,7 @@ async fn a_build_cache_switched_off_is_no_bind_and_no_variables() {
             say nuget-packages "${{NUGET_PACKAGES-unset}}"
             say nuget-http "${{NUGET_HTTP_CACHE_PATH-unset}}"
             say nuget-scratch "${{NUGET_SCRATCH-unset}}"
+            say maven-opts "${{MAVEN_OPTS-unset}}"
             dir {beside} stores
             file /verkstead/bin/sccache binary
             "#,
@@ -5952,6 +5968,7 @@ async fn a_build_cache_switched_off_is_no_bind_and_no_variables() {
     assert_eq!(reported["nuget-packages"], "unset");
     assert_eq!(reported["nuget-http"], "unset");
     assert_eq!(reported["nuget-scratch"], "unset");
+    assert_eq!(reported["maven-opts"], "unset");
     assert_eq!(
         reported["stores"], "absent",
         "and the directory beside the Worktrees closes with it, both of the \

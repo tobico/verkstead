@@ -3295,6 +3295,7 @@ async fn the_build_cache_is_writable_inside_and_the_stores_are_in_it() {
             say nuget-packages "${{NUGET_PACKAGES-unset}}"
             say nuget-http "${{NUGET_HTTP_CACHE_PATH-unset}}"
             say nuget-scratch "${{NUGET_SCRATCH-unset}}"
+            say maven-opts "${{MAVEN_OPTS-unset}}"
             dir {beside} stores
             "#,
             dir = quoted(&fixture.cache_dir()),
@@ -3397,6 +3398,19 @@ async fn the_build_cache_is_writable_inside_and_the_stores_are_in_it() {
     // cache directory itself.
     assert_eq!(reported["poetry-in-project"], "true");
     assert_eq!(reported["pipenv-in-project"], "1");
+
+    // And the JVM's one, a line of flags with Maven's local repository inside
+    // it, since Maven has no variable of its own for that.
+    assert_eq!(
+        reported["maven-opts"],
+        format!(
+            "-Dmaven.repo.local={} -Daether.syncContext.named.factory=file-lock \
+             -Daether.syncContext.named.nameMapper=file-gav",
+            fixture.cache_dir().join("maven/repository").display(),
+        ),
+        "Maven's local repository is inside the same policy, and locked with \
+         files every session can see",
+    );
 }
 
 /// And with an sccache the server resolved: a session finds it beside the

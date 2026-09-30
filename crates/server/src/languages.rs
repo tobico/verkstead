@@ -121,6 +121,12 @@ pub const DOTNET: &str = "dotnet";
 /// no store of its own — one server, one store and one size for the machine.
 pub const CPP: &str = "cpp";
 
+/// And the JVM, which is one entry for Maven and Gradle. Maven's local
+/// repository has no variable of its own, so its value is a line of JVM
+/// options with the path inside it, and the file locks two sessions need to
+/// write one repository at once beside it.
+pub const JVM: &str = "jvm";
+
 /// The one capability this server has: the **Compile Server**, which is one
 /// sccache server for the machine in a sandbox of its own — see
 /// [`crate::build_cache::BuildCache::compiling`].
@@ -799,6 +805,34 @@ impl Machine {
     /// `value` with its placeholders filled in, or `None` where one of them
     /// names something this machine has not got.
     ///
+    /// The directory `value` would put whitespace into, where `value` is a
+    /// **line of words** — a line of flags, which is what the file writes where
+    /// a tool has no variable for a path and reads it out of its options.
+    ///
+    /// A tool reading such a line splits it on whitespace, and not every one
+    /// reads a quote: Maven 3's `mvn` splits `MAVEN_OPTS` bare. So a Build
+    /// Cache under a name with a space in it, which a Windows user name gives
+    /// by default, would hand over a line that breaks the tool outright, and
+    /// the variable is left out instead. A value that is one word is a path
+    /// read whole, and a space in it is nobody's business.
+    fn splitting(&self, value: &str) -> Option<&Path> {
+        if !value.contains(char::is_whitespace) {
+            return None;
+        }
+
+        [
+            value.contains(CACHE).then_some(self.cache.as_path()),
+            value.contains(STORES).then_some(self.stores.as_path()),
+            value
+                .contains(SCCACHE_AT)
+                .then_some(self.sccache.as_deref())
+                .flatten(),
+        ]
+        .into_iter()
+        .flatten()
+        .find(|dir| dir.to_string_lossy().contains(char::is_whitespace))
+    }
+
     /// A variable that cannot be filled is left out rather than written with the
     /// placeholder still in it: what a `RUSTC_WRAPPER` naming `{sccache}`
     /// literally would do is fail every build inside.
@@ -941,6 +975,21 @@ impl Given {
             let Some(value) = value else {
                 continue;
             };
+
+            // A line of words with a directory among them, where the directory
+            // has whitespace in it: whatever reads the line splits it there.
+            if let Some(split) = machine.splitting(value) {
+                tracing::warn!(
+                    language,
+                    variable = name,
+                    directory = %split.display(),
+                    "a variable is a line of words with a directory among them, and the \
+                     directory has whitespace in it that would split the line, so the \
+                     session was not given it",
+                );
+
+                continue;
+            }
 
             let mut used = self.used;
 
@@ -1276,6 +1325,16 @@ mod tests {
         under(&stores(Path::new("/var/lib/verkstead")), rest)
     }
 
+    /// What the JVM's descriptor hands Maven: the local repository under the
+    /// Build Cache, and the file locks two sessions writing it need.
+    fn maven_opts() -> String {
+        format!(
+            "-Dmaven.repo.local={} -Daether.syncContext.named.factory=file-lock \
+             -Daether.syncContext.named.nameMapper=file-gav",
+            cached("maven/repository"),
+        )
+    }
+
     /// `rest` under `base`, **a segment at a time**, which is how a descriptor's
     /// own `/` becomes this platform's separator — see [`separated`].
     ///
@@ -1388,12 +1447,21 @@ mod tests {
             cpp.env.is_empty(),
             "and no store of its own: its objects are the one Compile Server's",
         );
+
+        let jvm = built_in().get(JVM).expect("and the JVM is the seventh");
+
+        assert_eq!(jvm.label(), Some("JVM"));
+        assert_eq!(jvm.detect, vec![String::from("pom.xml")]);
+        assert!(
+            !jvm.names(SCCACHE),
+            "and nothing on the JVM compiles through sccache",
+        );
     }
 
     /// A session of a machine with an sccache: Rust's four variables, in the
     /// order it has always had them, then Go's two, Node's seven, Python's
-    /// six, .NET's three and C/C++'s two launchers, and the two directories
-    /// they name open underneath.
+    /// six, .NET's three, C/C++'s two launchers and the JVM's one, and the two
+    /// directories they name open underneath.
     ///
     /// Rust's four lead and are unchanged, which is the promise the descriptors
     /// landed on: a language added to the file is variables after the ones a
@@ -1444,6 +1512,7 @@ mod tests {
                     String::from("CMAKE_CXX_COMPILER_LAUNCHER"),
                     String::from("/verkstead/bin/sccache")
                 ),
+                (String::from("MAVEN_OPTS"), maven_opts()),
             ],
         );
 
@@ -1494,10 +1563,11 @@ mod tests {
                 (String::from("NUGET_PACKAGES"), cached("nuget/packages")),
                 (String::from("NUGET_HTTP_CACHE_PATH"), cached("nuget/http")),
                 (String::from("NUGET_SCRATCH"), cached("nuget/scratch")),
+                (String::from("MAVEN_OPTS"), maven_opts()),
             ],
-            "Go's two, Node's seven, Python's six and .NET's three are in no \
-             capability, so a machine with no sccache gets the whole of what \
-             those descriptors say — and C/C++'s two launchers are the whole \
+            "Go's two, Node's seven, Python's six, .NET's three and the JVM's \
+             one are in no capability, so a machine with no sccache gets the \
+             whole of what those descriptors say — and C/C++'s two launchers are the whole \
              of its capability, so it gets neither",
         );
         assert!(
@@ -1534,9 +1604,9 @@ mod tests {
         );
         assert_eq!(
             given.env().len(),
-            18,
-            "which is Go's two, Node's seven, Python's six and .NET's three and \
-             nothing else"
+            19,
+            "which is Go's two, Node's seven, Python's six, .NET's three and the \
+             JVM's one, and nothing else"
         );
         assert!(!given.sccache());
         assert!(
@@ -1575,7 +1645,8 @@ mod tests {
         // And with every one of them off there is nothing to open at all,
         // which is what an installation that wants none of this looks like.
         let none = without_either.merged(&written(
-            "languages:\n  go:\n    enabled: false\n  dotnet:\n    enabled: false\n",
+            "languages:\n  go:\n    enabled: false\n  dotnet:\n    enabled: false\n  jvm:\n    \
+             enabled: false\n",
         ));
         let given = none.given(&machine(true));
 
@@ -1790,6 +1861,26 @@ mod tests {
         joined("NUGET_HTTP_CACHE_PATH", &cache.join("nuget"), "http");
         joined("NUGET_SCRATCH", &cache.join("nuget"), "scratch");
 
+        // And the first value that is a path *inside* a line of flags: Maven's
+        // local repository has no variable of its own. The path in it is the
+        // one this platform joins, and nothing else in the line has a
+        // separator to turn.
+        assert_eq!(
+            given
+                .env()
+                .iter()
+                .find_map(|(named, value)| (named == "MAVEN_OPTS").then_some(value.as_str())),
+            Some(
+                format!(
+                    "-Dmaven.repo.local={} -Daether.syncContext.named.factory=file-lock \
+                     -Daether.syncContext.named.nameMapper=file-gav",
+                    cache.join("maven").join("repository").display(),
+                )
+                .as_str()
+            ),
+            "MAVEN_OPTS carries the path this platform joins, inside the flag",
+        );
+
         // And Python's other two, which name no directory at all: poetry and
         // pipenv are each told to keep a virtual environment in the project,
         // which is a setting's answer rather than a path, and what a value like
@@ -1808,6 +1899,53 @@ mod tests {
                  in it names a directory",
             );
         }
+    }
+
+    /// A Build Cache with a space in its path, which is what a Windows user
+    /// name with one in it gives by default: a value that is a path is handed
+    /// over as it stands, and a value that is a **line of words** with the
+    /// path among them is left out.
+    ///
+    /// Because a tool reading a line of words splits it on whitespace, and
+    /// Maven 3's `mvn` splits `MAVEN_OPTS` without reading a quote. Handed the
+    /// line, every `mvn` in the session would die on a main class named after
+    /// the half of the path after the space. Left out, Maven works and keeps a
+    /// repository of the session's own.
+    #[test]
+    fn a_directory_with_a_space_leaves_out_a_line_of_flags_and_keeps_a_path() {
+        let spaced = Machine::of(
+            Path::new("/home/Jo Doe/.cache/verkstead"),
+            Path::new("/var/lib/verkstead"),
+            None,
+        );
+        let given = built_in().given(&spaced);
+        let named = |name: &str| {
+            given
+                .env()
+                .iter()
+                .find_map(|(named, value)| (named == name).then_some(value.clone()))
+        };
+
+        assert_eq!(
+            named("CARGO_HOME"),
+            Some(under(Path::new("/home/Jo Doe/.cache/verkstead"), "cargo")),
+            "a variable that is a path is read as one whole value, space and all",
+        );
+        assert_eq!(
+            named("MAVEN_OPTS"),
+            None,
+            "and a line of flags with that path inside it is left out, rather \
+             than handed to a tool that would split it at the space",
+        );
+
+        // And the same line with no space to split on is given as ever.
+        assert!(
+            built_in()
+                .given(&machine(true))
+                .env()
+                .iter()
+                .any(|(name, _)| name == "MAVEN_OPTS")
+        );
     }
 
     /// And a value naming none of them is left exactly as the file wrote it,

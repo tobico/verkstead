@@ -350,7 +350,8 @@ jobs:
       # `JAVA_HOME` it exports is one no Sandbox is handed. So 21, the major the
       # dev shell's nixpkgs carries, is linked onto `/usr/local/bin`, which a
       # session's `PATH` puts ahead of `/usr/bin`: that `java` is the one Maven
-      # and Gradle below start on when nothing names another.
+      # and Gradle below start on when nothing names another. Its `javac`
+      # beside it, which the Maven proofs compile their plugin with.
       #
       # Its Maven and Gradle are whatever releases it pins. These are the ones
       # the dev shell's nixpkgs carries, from each project's own distribution,
@@ -362,6 +363,7 @@ jobs:
       - name: Install JDK 21, Maven 3.9.12 and Gradle 8.14.4
         run: |
           sudo ln -sf /usr/lib/jvm/temurin-21-jdk-amd64/bin/java /usr/local/bin/java
+          sudo ln -sf /usr/lib/jvm/temurin-21-jdk-amd64/bin/javac /usr/local/bin/javac
 
           curl -sSfL -o "$RUNNER_TEMP/maven.tar.gz" \
             https://repo.maven.apache.org/maven2/org/apache/maven/apache-maven/3.9.12/apache-maven-3.9.12-bin.tar.gz
@@ -389,7 +391,7 @@ jobs:
         run: |
           status=0
 
-          for tool in go zip node npm pnpm yarn yarn-berry deno bun python3 uv poetry pipenv dotnet tar sha1sum sccache cmake ninja cc c++ java mvn gradle; do
+          for tool in go zip node npm pnpm yarn yarn-berry deno bun python3 uv poetry pipenv dotnet tar sha1sum sccache cmake ninja cc c++ java javac mvn gradle; do
             found=$(command -v "$tool" || true)
 
             if [ -z "$found" ]; then

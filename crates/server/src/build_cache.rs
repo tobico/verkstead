@@ -1432,7 +1432,7 @@ mod tests {
                     "rust_build_cache:\n  enabled: false\nlanguages:\n  go:\n    \
                      enabled: false\n  node:\n    enabled: false\n  python:\n    \
                      enabled: false\n  dotnet:\n    enabled: false\n  cpp:\n    \
-                     enabled: false\n"
+                     enabled: false\n  jvm:\n    enabled: false\n"
                 )
             )
             .is_none(),

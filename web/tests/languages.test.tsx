@@ -52,6 +52,7 @@ const NODE = "node";
 const PYTHON = "python";
 const DOTNET = "dotnet";
 const CPP = "cpp";
+const JVM = "jvm";
 const GLEAM = "gleam";
 
 /// The binds the fixture holds, as a save puts them back on the wire: the
@@ -219,7 +220,7 @@ describe("the card", () => {
 
     await waitFor(() =>
       expect(container.querySelector(`.${styles.standing}`)?.textContent).toBe(
-        "Rust, Go, Node, Python, .NET, C/C++, Gleam",
+        "Rust, Go, Node, Python, .NET, C/C++, JVM, Gleam",
       ),
     );
   });
@@ -232,7 +233,7 @@ describe("the card", () => {
 
     await waitFor(() =>
       expect(container.querySelector(`.${styles.standing}`)?.textContent).toBe(
-        "Rust, Go, Node, Python, .NET, C/C++",
+        "Rust, Go, Node, Python, .NET, C/C++, JVM",
       ),
     );
   });
@@ -242,7 +243,7 @@ describe("the card", () => {
   it("says nothing under the heading while they are all off", async () => {
     theSettings(
       off(
-        off(off(off(off(off(off(TOLD), GO), NODE), PYTHON), DOTNET), CPP),
+        off(off(off(off(off(off(off(TOLD), GO), NODE), PYTHON), DOTNET), CPP), JVM),
         GLEAM,
       ),
     );
@@ -287,7 +288,7 @@ describe("the card", () => {
     mountCard();
 
     await waitFor(() =>
-      screen.getByText("Rust, Go, Node, Python, .NET, C/C++"),
+      screen.getByText("Rust, Go, Node, Python, .NET, C/C++, JVM"),
     );
     expect(screen.queryByText(/No sccache is installed/)).toBeNull();
   });
@@ -351,8 +352,9 @@ describe("the languages as the pane draws them", () => {
     expect(theCheck("Python").checked).toBe(true);
     expect(theCheck(".NET").checked).toBe(true);
     expect(theCheck("C/C++").checked).toBe(true);
+    expect(theCheck("JVM").checked).toBe(true);
     expect(theCheck("Gleam").checked).toBe(true);
-    expect(screen.getAllByRole("checkbox")).toHaveLength(7);
+    expect(screen.getAllByRole("checkbox")).toHaveLength(8);
   });
 
   /// The box says where its language stands rather than whether anybody has
@@ -578,6 +580,7 @@ describe("changing the languages", () => {
           { name: PYTHON, enabled: true, size: "" },
           { name: DOTNET, enabled: true, size: "" },
           { name: CPP, enabled: true, size: "" },
+          { name: JVM, enabled: true, size: "" },
           { name: GLEAM, enabled: true, size: "8G" },
         ],
         // Untouched by this form, and sent back as it stands: one request
@@ -613,6 +616,7 @@ describe("changing the languages", () => {
         { name: PYTHON, enabled: true, size: "" },
         { name: DOTNET, enabled: true, size: "" },
         { name: CPP, enabled: true, size: "" },
+        { name: JVM, enabled: true, size: "" },
         { name: GLEAM, enabled: false, size: "8G" },
       ]),
     );
@@ -674,6 +678,7 @@ describe("changing the languages", () => {
           { name: PYTHON, enabled: true, size: "" },
           { name: DOTNET, enabled: true, size: "" },
           { name: CPP, enabled: true, size: "" },
+          { name: JVM, enabled: true, size: "" },
           { name: GLEAM, enabled: true, size: "8G" },
         ],
         // Untouched by this form, and sent back as it stands: one request
@@ -732,6 +737,7 @@ describe("changing the languages", () => {
         { name: PYTHON, enabled: true, size: "" },
         { name: DOTNET, enabled: true, size: "" },
         { name: CPP, enabled: true, size: "" },
+        { name: JVM, enabled: true, size: "" },
         { name: GLEAM, enabled: true, size: "8G" },
       ]),
     );
@@ -750,14 +756,14 @@ describe("changing the languages", () => {
 
     await waitFor(() => expect(theCheck().checked).toBe(true));
     expect(container.querySelector(`.${styles.standing}`)?.textContent).toBe(
-      "Rust, Go, Node, Python, .NET, C/C++, Gleam",
+      "Rust, Go, Node, Python, .NET, C/C++, JVM, Gleam",
     );
 
     fireEvent.click(theCheck());
 
     await waitFor(() =>
       expect(container.querySelector(`.${styles.standing}`)?.textContent).toBe(
-        "Go, Node, Python, .NET, C/C++, Gleam",
+        "Go, Node, Python, .NET, C/C++, JVM, Gleam",
       ),
     );
   });
