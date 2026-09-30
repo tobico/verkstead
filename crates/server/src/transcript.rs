@@ -29,11 +29,20 @@
 //! which is Codex's rule against a store of another shape.
 //!
 //! **And a session continuing an earlier one's conversation is followed from
-//! where that one left off.** A resumed Claude session appends to the log it is
-//! resuming, so nothing is looked for at all: the log is the one the launch proved
-//! was there, and the following of it opens at the end of what crossed — see
+//! where that one left off.** A resumed session appends to the log it is resuming,
+//! so nothing is looked for at all: the log is the one the launch proved was
+//! there, and the following of it opens at the end of what crossed — see
 //! [`Carried`]. Each Event holds its own session's words, so a Tail that began at
 //! the top would draw the same conversation twice across the two machines.
+//!
+//! **Which is the one thing here that writes into a harness's own store.** A store
+//! keyed by the directory a session ran in arrives from another machine still keyed
+//! by that machine's own path for it, and a harness that resolves a resume against
+//! the directory it is started in would never look where the sync put the log — so
+//! before the log of a carried Grok session is anything to resume against, the
+//! directory holding it is moved under this store's own name for this Worktree. See
+//! [`relocated`]. It is still the store's own directories that say which name that
+//! is: what the reader never does is compute one.
 //!
 //! Lines go to the store exactly as they were written, and nothing here parses
 //! one — a database's records included, which reach it as their payload
@@ -192,6 +201,14 @@ const SESSIONS: &str = "sessions";
 /// is: `summary.json` beside it is the store's index entry, and the rest is the
 /// session's own furniture — its plan, its rewind points, its raw chat history.
 const UPDATES: &str = "updates.jsonl";
+
+/// And what grok leaves the working directory itself in, beside the sessions it
+/// grouped under it, where the group's own name could not be the encoded path.
+///
+/// Read in one place — [`stands_for`], which is what says which group a Worktree's
+/// sessions belong in — and named here beside the two spellings above it for their
+/// reason: it is somebody else's, and one place to edit when it moves.
+const CWD: &str = ".cwd";
 
 impl Tail {
     /// Follow the record of the session named `session`, run under `profile`
@@ -557,12 +574,14 @@ pub(crate) struct Carried {
 /// The log of the session named `session`, as something a session launched under
 /// `profile` could carry on from — see [`Carried`].
 ///
-/// **Claude's alone, because it is the one harness whose store this build carries
-/// a conversation on from.** The three after it key a store by the directory a
-/// session ran in somewhere the memory sync does not rewrite, so each needs a
-/// relocation of its own before there is a log here to find; until then a launch
-/// under one of them has nothing to carry on from, which is Verkstead's own Resume
-/// and nothing lost.
+/// **Two harnesses, because a store keyed by the directory a session ran in has to
+/// be put right first.** Claude's log lands where this device would have written
+/// one, so it is the lookup the Transcript makes; Grok Build's arrives still filed
+/// under the *sending* device's name for the *sending* device's Worktree, so it is
+/// relocated before there is anything here to resume against — see [`relocated`].
+/// The two after them have no resume line at all and nothing looks for their logs:
+/// a launch under one of them opens a session of its own, which is Verkstead's own
+/// Resume and nothing lost.
 ///
 /// **`None` is a log that is not there**, and that is the answer a Conversation
 /// whose store did not come across gets. Claude's store crosses as a labelled part
@@ -571,27 +590,192 @@ pub(crate) struct Carried {
 /// the part the home device named it off is that device's worktrees directory
 /// joined onto the stem this Worktree carries, so a stem that came out differently
 /// here is a part that was asked for under a name the sending device never used.
-/// Proved rather than assumed, which is what this call is.
+/// Proved rather than assumed, which is what this call is. Grok's answer is the
+/// same word with the relocation as a third way of arriving at it.
 ///
 /// Looked for the way the Transcript looks for one — see [`named`] — because that
 /// is also the way *claude* looks for one: a session id is resolved across the
 /// whole of `projects/` rather than under the entry for the directory the session
 /// is being started in (checked against claude 2.1.278, which resumes a log filed
-/// under another directory's entry).
+/// under another directory's entry). Grok is the other way about, and that is what
+/// the relocation is for: it resolves a resume against the directory it is started
+/// in, so a log filed anywhere else in the store is a log it will not find.
+///
+/// `worktree` is the directory the session about to be launched runs in, which is
+/// the path the relocation names its destination by. A Conversation with none never
+/// reaches a launch at all — see [`crate::sessions::Sessions::start`].
 pub(crate) async fn carried(
     profile: &store::Profile,
     session: &str,
+    worktree: &Path,
     home: &crate::sandbox::Home,
 ) -> Option<Carried> {
-    let store::Account::Claude { claude_dir, .. } = &profile.account else {
-        return None;
-    };
+    let log = match &profile.account {
+        store::Account::Claude { claude_dir, .. } => {
+            named(&claude_projects(claude_dir, profile.memory, home), session).await?
+        }
 
-    let log = named(&claude_projects(claude_dir, profile.memory, home), session).await?;
+        store::Account::Grok { home: account } => {
+            relocated(
+                &grok_sessions(account, profile.memory, home),
+                session,
+                worktree,
+            )
+            .await?
+        }
+
+        store::Account::Codex { .. } | store::Account::OpenCode { .. } => return None,
+    };
 
     let read = tokio::fs::metadata(&log).await.ok()?.len();
 
     Some(Carried { log, read })
+}
+
+/// The log of a carried Grok session, **under this device's own name for this
+/// device's Worktree** — moved there first where it arrived under somebody else's.
+///
+/// Grok files a session's directory under its own encoding of the working directory
+/// the session ran in, and the memory sync carries that directory verbatim: what it
+/// picks out of a store is the session directories called one of the ids Verkstead
+/// named, and what it sends is each one under its path relative to the store — see
+/// [`crate::sandbox::root::Whose::Called`]. So the log arrives on this device still
+/// filed under the sending device's name for the sending device's Worktree, which is
+/// a directory grok will never look in when it is started in this one.
+///
+/// **The destination is what this store already calls this Worktree**, rather than
+/// what grok would have called it. Which name that is, is grok's own arithmetic over
+/// a path — URL-encoded where that fits and a slug with a hash of it where it does
+/// not — and reproducing somebody else's private scheme is what ADR 0006 is about.
+/// So the store's own directories are asked instead: each of them says which
+/// directory it stands for, and the one that says this Worktree is where the session
+/// belongs. See [`stands_for`].
+///
+/// **`None` is the fallback rather than a failure**, and there are three ways to it:
+/// a store with no directory of this Worktree's, which is a device that has never
+/// run grok in it — the first session of an arriving Conversation, whose Resume is
+/// Verkstead's own and whose own run leaves the directory there for the visit after
+/// it; a session directory that did not come across; and a move the filesystem
+/// refused. Each of them is a re-prime, which is what [`crate::sessions`] does with
+/// a `None` from here.
+///
+/// **Already where it belongs is the ordinary case on the way home**: the store this
+/// Conversation was first grilled in holds that session under its own name for the
+/// Worktree, and only the sessions that ran on another machine have to be moved.
+async fn relocated(sessions: &Path, session: &str, worktree: &Path) -> Option<PathBuf> {
+    let group = stands_for(sessions, worktree).await?;
+    let held = holding(sessions, session).await?;
+
+    let belongs = group.join(session);
+
+    if held != belongs {
+        if let Err(error) = tokio::fs::rename(&held, &belongs).await {
+            tracing::info!(
+                error = ?error,
+                from = %held.display(),
+                to = %belongs.display(),
+                "the carried session directory of a Grok session could not be filed under this \
+                 device's own name for the Worktree, so the session is re-primed rather than \
+                 resumed",
+            );
+
+            return None;
+        }
+    }
+
+    let log = belongs.join(UPDATES);
+
+    is_file(&log).await.then_some(log)
+}
+
+/// The directory of `sessions` that this store groups a session working in
+/// `worktree` under, as the store itself says it.
+///
+/// **Two spellings, and both are read rather than computed.** grok names a group
+/// directory by URL-encoding the working directory, and where that name would run
+/// past what a filesystem takes it uses a slug with a hash of the path instead and
+/// leaves the path itself in a `.cwd` file inside the group — grok 1.0.34's own
+/// account of its store, which ships inside the binary. So the file is what is asked
+/// first and the directory's name read back as the encoding of a path second, which
+/// is a reading either way: nothing here has to know where the one spelling gives
+/// out and the other begins, or how the hash is taken.
+///
+/// `None` is a store with no group of this Worktree's — one that has never had grok
+/// run in this directory, and one whose group is spelled some third way this cannot
+/// read.
+async fn stands_for(sessions: &Path, worktree: &Path) -> Option<PathBuf> {
+    for group in directories(sessions).await {
+        let stands_for = match tokio::fs::read_to_string(group.join(CWD)).await {
+            Ok(said) => Some(PathBuf::from(said.trim_end_matches(['\n', '\r']))),
+
+            // No `.cwd` beside the sessions is the ordinary group, whose own name
+            // is the encoding of the path. A name that is not valid text, or not a
+            // percent-encoding, is a group this cannot name and so is not this one.
+            Err(_) => group
+                .file_name()
+                .and_then(|name| name.to_str())
+                .and_then(decoded)
+                .map(PathBuf::from),
+        };
+
+        if stands_for.as_deref() == Some(worktree) {
+            return Some(group);
+        }
+    }
+
+    None
+}
+
+/// Where a session directory called `session` is under `sessions`, wherever the
+/// sync happened to land it.
+///
+/// [`updates`]'s own walk without the log at the end of it: directly under the
+/// store and one level down, because which of the two grok grouped a session under
+/// is grok's business and what crosses a link is whatever was there.
+async fn holding(sessions: &Path, session: &str) -> Option<PathBuf> {
+    let beside = sessions.join(session);
+
+    if is_directory(&beside).await {
+        return Some(beside);
+    }
+
+    for group in directories(sessions).await {
+        let inside = group.join(session);
+
+        if is_directory(&inside).await {
+            return Some(inside);
+        }
+    }
+
+    None
+}
+
+/// A percent-encoded name read back as the text it stands for, or `None` where it
+/// is not one.
+///
+/// The inverse of somebody else's encoding rather than a second copy of it, which is
+/// what keeps [`stands_for`] a reading: a `%` and two hexadecimal digits are the
+/// byte they spell, every other byte is itself, and a `%` with anything else after
+/// it is a name this cannot read.
+fn decoded(name: &str) -> Option<String> {
+    let spelt = name.as_bytes();
+    let mut read = Vec::with_capacity(spelt.len());
+    let mut at = 0;
+
+    while at < spelt.len() {
+        if spelt[at] == b'%' {
+            let digits = spelt.get(at + 1..at + 3)?;
+
+            read.push(u8::from_str_radix(std::str::from_utf8(digits).ok()?, 16).ok()?);
+            at += 3;
+            continue;
+        }
+
+        read.push(spelt[at]);
+        at += 1;
+    }
+
+    String::from_utf8(read).ok()
 }
 
 /// Where Claude Code keeps its logs for a session run under a Profile: under the
@@ -606,6 +790,16 @@ fn claude_projects(claude_dir: &Path, memory: bool, home: &crate::sandbox::Home)
     match memory {
         true => claude_dir.join("projects"),
         false => home.claude_projects(),
+    }
+}
+
+/// And where Grok Build keeps its sessions for one, which is the same two answers
+/// for the same reason — see [`claude_projects`], and [`Tail::of`]'s own reading of
+/// the switch, which this is the other caller of.
+fn grok_sessions(account: &Path, memory: bool, home: &crate::sandbox::Home) -> PathBuf {
+    match memory {
+        true => account.join(SESSIONS),
+        false => home.grok_sessions(),
     }
 }
 
@@ -880,6 +1074,13 @@ async fn is_file(path: &Path) -> bool {
     tokio::fs::metadata(path)
         .await
         .is_ok_and(|found| found.is_file())
+}
+
+/// And whether there is a directory at it, asked the same way.
+async fn is_directory(path: &Path) -> bool {
+    tokio::fs::metadata(path)
+        .await
+        .is_ok_and(|found| found.is_dir())
 }
 
 #[cfg(test)]
@@ -1264,6 +1465,195 @@ mod tests {
             updates(&sessions, "aaaa-1111").await,
             Some(log),
             "and the poll after the session started talking finds it"
+        );
+    }
+
+    /// **A carried session's directory is filed under this store's own name for
+    /// this Worktree**, whatever the machine it came from called the directory it
+    /// ran in.
+    ///
+    /// Which is the whole of the relocation: the sync lands the session where the
+    /// sending device had it, and grok resolves a resume against the directory it
+    /// is started in — so what the launch resumes against is a log under the name
+    /// *this* store uses, and the log it was sent is where it goes.
+    #[tokio::test]
+    async fn a_carried_session_is_moved_under_this_store_s_own_name_for_the_worktree() {
+        let store = tempfile::tempdir().unwrap();
+        let sessions = store.path().join("sessions");
+        let worktree = Path::new("/var/lib/verkstead/worktrees/verkstead-rate-limiting");
+
+        // What this device's store already calls that Worktree, which is the
+        // session it ran there before the work went away.
+        kept(
+            &sessions,
+            "%2Fvar%2Flib%2Fverkstead%2Fworktrees%2Fverkstead-rate-limiting",
+            "aaaa-1111",
+        );
+
+        // And what arrived: the session that was running on the other machine,
+        // still under that machine's own name for its own Worktree.
+        kept(
+            &sessions,
+            "%2Fsrv%2Fwork%2Fverkstead-rate-limiting",
+            "bbbb-2222",
+        );
+
+        assert_eq!(
+            relocated(&sessions, "bbbb-2222", worktree).await,
+            Some(
+                sessions
+                    .join("%2Fvar%2Flib%2Fverkstead%2Fworktrees%2Fverkstead-rate-limiting")
+                    .join("bbbb-2222")
+                    .join(UPDATES)
+            ),
+            "the carried session is where this store files a session working in \
+             this Worktree, which is where grok will look for it",
+        );
+
+        assert!(
+            !sessions
+                .join("%2Fsrv%2Fwork%2Fverkstead-rate-limiting")
+                .join("bbbb-2222")
+                .exists(),
+            "and nowhere else: a log in two places is a conversation appended to in \
+             one of them",
+        );
+
+        assert_eq!(
+            relocated(&sessions, "bbbb-2222", worktree).await,
+            Some(
+                sessions
+                    .join("%2Fvar%2Flib%2Fverkstead%2Fworktrees%2Fverkstead-rate-limiting")
+                    .join("bbbb-2222")
+                    .join(UPDATES)
+            ),
+            "and a session already where it belongs is answered without being moved, \
+             which is every session that ran on this machine",
+        );
+    }
+
+    /// The directory grok grouped a Worktree's sessions under is read off the
+    /// store rather than worked out, and there are two spellings of it.
+    ///
+    /// A path short enough to URL-encode is the group's own name; a longer one is a
+    /// slug with a hash of it and the path itself in a `.cwd` file beside the
+    /// sessions. Nothing here has to know where the one gives out and the other
+    /// begins — the file first, the name read back second.
+    #[tokio::test]
+    async fn the_group_a_worktree_s_sessions_are_under_is_read_either_way_it_is_spelled() {
+        let store = tempfile::tempdir().unwrap();
+        let sessions = store.path().join("sessions");
+
+        let encoded = "%2Fsrv%2Fworktrees%2Ftables";
+        kept(&sessions, encoded, "aaaa-1111");
+
+        let hashed = "srv-worktrees-verkstead-rate-limiting-8f2c1d9e";
+        kept(&sessions, hashed, "bbbb-2222");
+        std::fs::write(
+            sessions.join(hashed).join(CWD),
+            "/srv/worktrees/verkstead-rate-limiting\n",
+        )
+        .unwrap();
+
+        assert_eq!(
+            stands_for(&sessions, Path::new("/srv/worktrees/tables")).await,
+            Some(sessions.join(encoded)),
+            "the encoded name is read back as the path it stands for",
+        );
+        assert_eq!(
+            stands_for(
+                &sessions,
+                Path::new("/srv/worktrees/verkstead-rate-limiting")
+            )
+            .await,
+            Some(sessions.join(hashed)),
+            "and a group grok could not name that way says so in its own file",
+        );
+        assert_eq!(
+            stands_for(&sessions, Path::new("/srv/worktrees/rate-limiting")).await,
+            None,
+            "and a Worktree no group of this store stands for is a Worktree grok \
+             has never run in here",
+        );
+    }
+
+    /// A store with no group of this Worktree's is the fallback rather than a
+    /// guess: nothing is created, nothing is moved, and the launch re-primes.
+    ///
+    /// Which is a device that has never had grok run in this Worktree — the first
+    /// session of an arriving Conversation, whose own run leaves the group behind
+    /// for the visit after it.
+    #[tokio::test]
+    async fn a_store_that_has_never_run_grok_in_this_worktree_carries_nothing_on() {
+        let store = tempfile::tempdir().unwrap();
+        let sessions = store.path().join("sessions");
+        let worktree = Path::new("/var/lib/verkstead/worktrees/verkstead-rate-limiting");
+
+        let arrived = kept(
+            &sessions,
+            "%2Fsrv%2Fwork%2Fverkstead-rate-limiting",
+            "bbbb-2222",
+        );
+
+        assert_eq!(
+            relocated(&sessions, "bbbb-2222", worktree).await,
+            None,
+            "there is nowhere in this store a session of this Worktree's belongs, \
+             so there is nothing to resume against",
+        );
+
+        assert!(
+            arrived.is_file(),
+            "and what arrived is left exactly where the sync put it: the next \
+             session's Transcript still follows it, and the visit after this one \
+             has a group to be moved into",
+        );
+    }
+
+    /// And a session directory that did not come across at all is the same answer,
+    /// which is a memory sync that carried nothing.
+    #[tokio::test]
+    async fn a_session_whose_directory_did_not_cross_carries_nothing_on() {
+        let store = tempfile::tempdir().unwrap();
+        let sessions = store.path().join("sessions");
+        let worktree = Path::new("/srv/worktrees/tables");
+
+        kept(&sessions, "%2Fsrv%2Fworktrees%2Ftables", "aaaa-1111");
+
+        assert_eq!(
+            relocated(&sessions, "bbbb-2222", worktree).await,
+            None,
+            "the group is here and the session is not",
+        );
+    }
+
+    /// A percent-encoded name reads back as the path it spells, and a name that is
+    /// not one reads back as nothing.
+    ///
+    /// The inverse of somebody else's encoding rather than a second copy of it:
+    /// what it has to get right is the escape and the byte it stands for, and a
+    /// name it cannot read is a group this does not claim.
+    #[test]
+    fn an_encoded_name_reads_back_as_the_path_it_spells() {
+        assert_eq!(
+            decoded("%2Fsrv%2Fworktrees%2Ftables").as_deref(),
+            Some("/srv/worktrees/tables"),
+        );
+        assert_eq!(
+            decoded("srv-worktrees-tables").as_deref(),
+            Some("srv-worktrees-tables"),
+            "a name with nothing escaped in it is itself",
+        );
+        assert_eq!(
+            decoded("%C3%A5rsrapport").as_deref(),
+            Some("årsrapport"),
+            "and a character escaped a byte at a time is the character",
+        );
+        assert_eq!(decoded("%2").as_deref(), None, "a cut escape is not a name");
+        assert_eq!(
+            decoded("%zz").as_deref(),
+            None,
+            "and nor is one that is not hexadecimal",
         );
     }
 }

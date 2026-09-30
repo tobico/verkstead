@@ -519,12 +519,23 @@ harness has a resume of its own, the session started on arrival is that resume
 rather than a fresh one: the same session id, against the log the **Memory sync**
 carried over, primed with the note below and nothing else. Where it cannot be
 made, Verkstead's own **Resume** stands exactly as it did.
-**The harness's resume where it has one, and Claude's is the one there is.** Its
-line is the resume flag and the session id, written where the id a fresh session
-would be named by goes: the two are mutually exclusive, a conversation carried on
-keeping the id it already had. The three after it key their store by the directory
-the session ran in somewhere the sync does not rewrite, so each wants a relocation
-of its own before there is a log on the far end to resume against.
+**The harness's resume where it has one, and Claude's and Grok Build's are the two
+there are.** Each line is the resume flag and the session id, written where the id a
+fresh session would be named by goes: the two are mutually exclusive, a conversation
+carried on keeping the id it already had. The two after them are named by nothing at
+launch, so there is no id on the record to resume by until the **Transcript** search
+has found the backend's own and written it down.
+**And Grok's store has to be put right before it is anything to resume against.**
+Grok files a session's directory under its own encoding of the working directory the
+session ran in, and the sync carries that directory verbatim — so the log arrives
+still filed under the *sending* device's name for the *sending* device's Worktree,
+which is a directory grok will never look in when it is started in this one. So the
+arriving directory is moved under the name this device's own store already uses for
+this Worktree, found by asking the store's directories which path each stands for
+rather than by working out what grok would have called one. Which leaves a device
+that has never run grok in this Worktree with nowhere to put it: that is
+Verkstead's own Resume, and the session it starts leaves the directory there for
+the visit after it.
 **What it carries on from is the last session of this Conversation**, which is the
 newest name on the record: that is the conversation the agent was having when the
 work moved. The arrival writes it down once the record has landed, and the first
@@ -542,13 +553,15 @@ a **Transcript** read out of the wrong file.
 **Three things leave it Verkstead's Resume**, each of them said in the log and
 nothing more: no session on the record, a **Pairing** on a harness other than the
 one that session ran on — a Conversation whose Profile was changed under it has a
-log no other backend can read — and a log that is not there. The last is proved
-rather than assumed: Claude's store crosses as a labelled part each machine names
-its own path for, so it should land under this device's own encoding of this
-device's Worktree path with nothing to do — but the part the home device named it
-off is *its* worktrees directory joined onto the stem this Worktree carries, and a
-stem that came out differently here is a part asked for under a name the sending
-device never used.
+log no other backend can read — and a log that is not where the harness will look
+for it. The last is proved rather than assumed: Claude's store crosses as a labelled
+part each machine names its own path for, so it should land under this device's own
+encoding of this device's Worktree path with nothing to do — but the part the home
+device named it off is *its* worktrees directory joined onto the stem this Worktree
+carries, and a stem that came out differently here is a part asked for under a name
+the sending device never used. Grok's is the same word with the relocation above in
+front of it: a store with no directory of this Worktree's, a session directory that
+did not cross, and a move the filesystem refused are each a log that is not there.
 **The Note is the whole of what a carried conversation is primed with.** The
 session has its own context and is mid-turn in its own thinking, so being told the
 Brief again is worse than being told nothing: what it is sent is what it cannot

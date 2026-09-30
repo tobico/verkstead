@@ -92,6 +92,10 @@ const SIDEBAR: &str = "/api/ui/conversations";
 const ACCOUNT: &str = "work";
 const MODEL: &str = "claude-opus-5";
 
+/// And the model a **Grok Build** account of the same name lists, for the one test
+/// that runs on the other harness a conversation is carried on from.
+const GROK_MODEL: &str = "grok-4.6";
+
 /// What every repository in this suite is called. Neither end has an origin, so
 /// the match is by name — which is the ordinary case for two clones nobody has
 /// pushed anywhere.
@@ -446,6 +450,50 @@ impl Verkstead {
         self.profile_called(ACCOUNT).await.id
     }
 
+    /// And a **Grok Build** account of this device's own, saved the same way over
+    /// the one directory that harness keeps an account in.
+    ///
+    /// Here because Grok is the second harness a conversation is carried on from,
+    /// and the one whose store is keyed by the directory a session ran in: what it
+    /// takes to resume one is a store put right rather than a store that crossed,
+    /// so a test about it has to run on a Grok Profile rather than on a Claude one
+    /// under another name.
+    async fn grok_account(&self) -> i64 {
+        let home = self.elsewhere.path().join(ACCOUNT).join(".grok");
+
+        std::fs::create_dir_all(home.join("sessions")).unwrap();
+        std::fs::write(home.join("auth.json"), "{\"access\":\"the-desk\"}").unwrap();
+
+        let said = press(
+            &self.workbench,
+            PROFILES,
+            Some(
+                &serde_json::json!({
+                    "name": ACCOUNT,
+                    "account": { "agent_type": "Grok", "home": home },
+                    "models": [GROK_MODEL],
+                    "memory": true,
+                })
+                .to_string(),
+            ),
+        )
+        .await;
+
+        assert_eq!(said, "\"Saved\"", "saving the Grok account");
+
+        self.profile_called(ACCOUNT).await.id
+    }
+
+    /// Where this device's Grok account keeps its sessions, which is the store the
+    /// relocation files a carried one into.
+    fn grok_sessions(&self) -> PathBuf {
+        self.elsewhere
+            .path()
+            .join(ACCOUNT)
+            .join(".grok")
+            .join("sessions")
+    }
+
     /// The row of this device's Profiles with that name, once there is one —
     /// which on B is the **mirror** its refresher writes off A's list.
     async fn profile_called(&self, name: &str) -> ProfileEntry {
@@ -476,6 +524,12 @@ impl Verkstead {
     ///
     /// What starts it is [`Self::grills`], one press along.
     async fn drafting_under(&self, profile: i64) -> i64 {
+        self.drafting_under_on(profile, MODEL).await
+    }
+
+    /// The same over a Profile whose models are another harness's, which is the one
+    /// thing a Pairing has to agree with the account about.
+    async fn drafting_under_on(&self, profile: i64, model: &str) -> i64 {
         let repos: Vec<verkstead_render::RepoEntry> =
             reading(&self.workbench, "/api/ui/repos").await;
 
@@ -493,7 +547,7 @@ impl Verkstead {
             panic!("the Conversation was not started: {started}")
         };
 
-        let pairing = serde_json::json!({ "profile_id": profile, "model": MODEL });
+        let pairing = serde_json::json!({ "profile_id": profile, "model": model });
         let role = serde_json::json!({ "pairing": pairing });
 
         for (path, saying) in [
@@ -1204,6 +1258,72 @@ fi
     )
 }
 
+/// And what stands where **grok** goes, on either machine: one script for both of
+/// the launches a device makes, because a device has one harness on its `PATH` and
+/// whether a launch opens a conversation or carries one on is what the line says.
+///
+/// **Its store is written where grok writes one and named what grok names it**: a
+/// directory per working directory, under grok's own URL-encoding of the path, with
+/// a directory per session inside it and the conversation in `updates.jsonl` — see
+/// grok 1.0.34's own account of its store. So what crosses with the memory sync is a
+/// store of the shape the far end has to put right, and nothing here is told where
+/// to put one.
+///
+/// **A launch it was named for** writes the question it is on and waits at the gate,
+/// which is the turn in flight a move has to run to the end of. **A launch it was
+/// told to resume** says every word of its own line, one per line, and appends to
+/// the log it was told to carry on — which is what only a session that really
+/// resumed could have written, and what says the relocation put the log where grok
+/// looks for it.
+///
+/// `opening` is the word the first of those prints, and it is a different one on
+/// each machine for [`drafted_running`]'s reason: a suite whose two devices printed
+/// the same words could not say which of them had run.
+fn grok_that_carries_on_at(gate: &Path, opening: &str) -> String {
+    format!(
+        r#"
+session=
+resuming=
+take=
+for word in "$@"; do
+  case "$take" in
+    id) session=$word; take= ;;
+    resume) session=$word; resuming=yes; take= ;;
+  esac
+  case "$word" in
+    --session-id) take=id ;;
+    --resume) take=resume ;;
+  esac
+done
+
+group=$(printf '%s' "$PWD" | sed -e 's|/|%2F|g')
+kept="$HOME/.grok/sessions/$group/$session"
+mkdir -p "$kept"
+
+if [ -n "$resuming" ]; then
+  printf 'carried on\r\n'
+  for word in "$@"; do printf 'arg=%s\r\n' "$word"; done
+  printf '%s\n' '{carrying}' >> "$kept/updates.jsonl"
+  exit 0
+fi
+
+printf '{opening}\r\n'
+printf 'prompt=%s\r\n' "$2"
+printf '%s\n' '{asked}' > "$kept/updates.jsonl"
+
+{waiting}
+"#,
+        carrying = CARRYING_ON,
+        asked = THE_QUESTION_IT_WAS_ON,
+        waiting = waits_at(gate),
+    )
+}
+
+/// What A's grok says as it opens a conversation, and what B's says as it re-primes
+/// one — the two halves of [`grok_that_carries_on_at`]'s `opening`.
+const OPENED_HERE: &str = "opened";
+const RE_PRIMED_THERE: &str = "re-primed";
+
 /// Set `core.autocrlf` on a repository, the way the machine it is on would have
 /// it — and respell whatever is checked out of it so the trees agree with the
 /// switch.
@@ -1413,6 +1533,40 @@ async fn ready_to_carry_on(gate: &Path, spill: &Path) -> (Verkstead, Verkstead, 
         Repositories::Apart,
     )
     .await;
+
+    a.grills(conversation).await;
+
+    (a, b, holding, conversation)
+}
+
+/// And the same again on **Grok Build**, whose store is keyed by the directory a
+/// session ran in: both machines run the one script that opens a conversation or
+/// carries one on as its line says, each waiting at a gate of its own so that either
+/// leg of a round trip can be pressed with a turn in flight.
+///
+/// Every test about carrying a Grok conversation on starts here.
+async fn ready_to_carry_grok_on(
+    here: &Path,
+    there: &Path,
+    spill: &Path,
+) -> (Verkstead, Verkstead, Holding, i64) {
+    let a = Verkstead::running(A, &grok_that_carries_on_at(here, OPENED_HERE), spill).await;
+    let b = Verkstead::running(B, &grok_that_carries_on_at(there, RE_PRIMED_THERE), spill).await;
+
+    a.linked_to(&b.device, B_MACHINE, B_OS, vec![b.at()]).await;
+
+    let (machine, os) = this_machine();
+    b.linked_to(&a.device, &machine, &os, vec![a.at()]).await;
+
+    let theirs = a.repo().await;
+    b.cloned_from(&theirs).await;
+
+    let account = a.grok_account().await;
+
+    let holding = b.holding();
+    b.profile_called(ACCOUNT).await;
+
+    let conversation = a.drafting_under_on(account, GROK_MODEL).await;
 
     a.grills(conversation).await;
 
@@ -3246,6 +3400,152 @@ async fn the_set_a_resumed_session_was_idling_on_stays_open_under_the_id_the_not
         b.answering(there, crossed[2], ANSWERED).await.is_success(),
         "the Deferred Ask is answerable where the work now is",
     );
+}
+
+/// **A Grok grilling transferred mid-interview carries on where the store has been
+/// put right, and re-primes where it has not** — which is one round trip, because
+/// the two are the two legs of it.
+///
+/// Grok files a session's directory under its own encoding of the working directory
+/// the session ran in, and the memory sync carries that directory verbatim. So a log
+/// arrives still filed under the *sending* device's name for the sending device's
+/// Worktree, and grok resolves a resume against the directory it is started in: what
+/// makes a resume possible is the arriving directory being moved under the name
+/// *this* store uses for this Worktree, and what names that is the store's own
+/// directories rather than grok's arithmetic reproduced.
+///
+/// **So the first leg falls through and the second carries on.** B has never had grok
+/// run in the Worktree the work lands in, so nothing there stands for it and B's
+/// Resume is Verkstead's own — the fallback, with the log left where the sync put it
+/// and a session re-primed off the record. B's own run leaves the directory behind.
+/// Then the work comes home, where A's store has stood for that Worktree since the
+/// grilling started: the session B was part way through is moved under it, and A's
+/// launch is the harness's own resume of it — told the id, primed with the note
+/// alone, and appending to the conversation rather than opening one.
+#[tokio::test]
+async fn a_grok_grilling_carries_on_where_the_store_has_a_name_for_the_worktree() {
+    let spill = tempfile::tempdir().unwrap();
+    let here = spill.path().join("go-here");
+    let there = spill.path().join("go-there");
+    let (a, b, _holding, conversation) = ready_to_carry_grok_on(&here, &there, spill.path()).await;
+
+    // A holds its own streams too, so the work can be sent back to it.
+    let _holding_here = a.holding();
+
+    a.printed(conversation, "grilling").await;
+
+    let worktree = a.worktree(conversation).await;
+
+    assert_eq!(
+        a.transcript_of(conversation, 0).await,
+        vec![THE_QUESTION_IT_WAS_ON.to_owned()],
+        "the interview is on A's Transcript, read out of the log grok wrote",
+    );
+
+    // The first leg. The turn ends, the move follows it, and the far end has
+    // nothing in its store that stands for the Worktree the work lands in.
+    std::fs::write(&here, "go").unwrap();
+
+    let over_there = handed_on(&a, conversation, B).await;
+
+    came_home(&b, over_there).await;
+
+    let re_primed = b.latest_capture_saying(over_there, RE_PRIMED_THERE).await;
+
+    assert!(
+        !re_primed.contains("arg=--resume"),
+        "B has never run grok in this Worktree, so there is nowhere in its store a \
+         carried session belongs and Verkstead's own Resume stands: {re_primed:?}",
+    );
+    assert!(
+        re_primed.contains("Rate limiting"),
+        "which means the session was primed off the record, Brief and all: \
+         {re_primed:?}",
+    );
+
+    // And the second. B's own session has left its store standing for the Worktree
+    // it ran in, and the log of that session is what comes home.
+    let running = session_names(&b.pool)
+        .await
+        .pop()
+        .expect("the name Verkstead gave the session on B")
+        .1;
+
+    std::fs::write(&there, "go").unwrap();
+
+    handed_on(&b, over_there, A).await;
+
+    came_home(&a, conversation).await;
+
+    let said = a.latest_capture_saying(conversation, "carried on").await;
+
+    assert!(
+        said.contains("arg=--resume"),
+        "A's session was told to resume rather than to open one: {said:?}",
+    );
+    assert!(
+        said.contains(&format!("arg={running}")),
+        "and to resume the session that was running on B, which is {running}: \
+         {said:?}",
+    );
+    assert!(
+        !said.contains("arg=--session-id"),
+        "and it was not named as well, the two being mutually exclusive: {said:?}",
+    );
+
+    assert!(
+        said.contains(&worktree.display().to_string()),
+        "the note names the Worktree's path here: {said:?}",
+    );
+    assert!(
+        !said.contains("Rate limiting"),
+        "and nothing else: the Brief is already in the context this session kept: \
+         {said:?}",
+    );
+
+    // Where the log is, which is the relocation itself: under the directory A's
+    // store already stood for this Worktree, rather than under B's name for B's.
+    let filed = a
+        .grok_sessions()
+        .join(encoded(&worktree))
+        .join(&running)
+        .join("updates.jsonl");
+
+    assert!(
+        filed.is_file(),
+        "the carried session is filed under A's own name for its own Worktree: \
+         {}",
+        filed.display(),
+    );
+    assert!(
+        !a.grok_sessions()
+            .join(encoded(&b.worktree(over_there).await))
+            .join(&running)
+            .exists(),
+        "and not under the name it arrived with, a log in two places being a \
+         conversation appended to in one of them",
+    );
+
+    assert_eq!(
+        a.transcript_of(conversation, 2).await,
+        vec![CARRYING_ON.to_owned()],
+        "and the resumed session's Transcript holds what it said and not what the \
+         session on B had already written into the same log",
+    );
+
+    assert_eq!(
+        a.view(conversation).await.state,
+        Lifecycle::Grilling,
+        "and it is still a grilling: what moved is where the work is being done \
+         rather than how far it has got",
+    );
+}
+
+/// The name grok's store gives the directory it groups a Worktree's sessions
+/// under, which is the URL-encoding of the path — the stub's own rule, so that a
+/// test can say where a log ought to be.
+fn encoded(worktree: &Path) -> String {
+    worktree.display().to_string().replace('/', "%2F")
 }
 
 /// **Each end's Timeline says what happened to it**: the far end's that the work

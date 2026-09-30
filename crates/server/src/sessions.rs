@@ -652,12 +652,12 @@ struct Line {
     /// there is nothing left to name it.
     ///
     /// `None` where Verkstead does not carry a conversation on from a session of
-    /// this backend — which is the three after Claude. Each of them keys its
-    /// store by the directory the session ran in somewhere the memory sync does
-    /// not rewrite, so each needs a relocation of its own before there is a log
-    /// on this machine to resume against; until then a launch under one of them
-    /// opens a session of its own, which is Verkstead's own Resume and nothing
-    /// lost.
+    /// this backend — which is Codex and OpenCode. Neither is named at launch, so
+    /// there is no id on the record to resume by until the Transcript search has
+    /// found the backend's own and written it down; each also keys its store by the
+    /// directory the session ran in, so each needs a relocation of its own on top
+    /// of that. Until then a launch under one of them opens a session of its own,
+    /// which is Verkstead's own Resume and nothing lost.
     resume: Option<&'static str>,
 
     /// The flags and configuration overrides that go last, after the prompt.
@@ -713,16 +713,27 @@ enum Named {
 /// the same at-work label — is what to reach for the day the Capture has to be
 /// that record instead.
 ///
-/// **And Claude is the one backend Verkstead continues a conversation on.** Its
-/// resume is `--resume <session-id>`, written where the session id it is mutually
-/// exclusive with would have gone — after the prompt, which stays exactly where it
-/// already is, and which claude takes alongside the flag as the first message of
-/// the conversation it picks up (checked against claude 2.1.278: the log it
-/// resumed carries the prompt as its own last one, under the same session id and
-/// in the same file). A session id it holds no log for is refused by name rather
-/// than opened, which is why the log is proved to be there before the line is
-/// built at all — see [`crate::transcript::carried`]. The other three are
-/// [`Line::resume`]'s `None`.
+/// **And Claude and Grok Build are the backends Verkstead continues a conversation
+/// on.** Claude's resume is `--resume <session-id>`, written where the session id it
+/// is mutually exclusive with would have gone — after the prompt, which stays
+/// exactly where it already is, and which claude takes alongside the flag as the
+/// first message of the conversation it picks up (checked against claude 2.1.278:
+/// the log it resumed carries the prompt as its own last one, under the same session
+/// id and in the same file). A session id it holds no log for is refused by name
+/// rather than opened, which is why the log is proved to be there before the line is
+/// built at all — see [`crate::transcript::carried`].
+///
+/// **Grok Build's is the same shape under the same spelling**, and the exclusion is
+/// the backend's own rather than Verkstead's reading of it: grok 1.0.34 says of
+/// `--session-id` that it names a **new** conversation, that it must not already
+/// exist, and that with `--resume` it is only valid alongside `--fork-session` —
+/// which a conversation carried on is the opposite of. So `--resume <session-id>`
+/// stands where the name would have been, the prompt stays positional, and a
+/// UUID-shaped value is always read as an id rather than matched against session
+/// titles. Its log is proved to be there for Claude's reason and one more: grok
+/// resolves a resume against the directory it was started in, so the log has to have
+/// been moved under this device's own name for this Worktree first — see
+/// [`crate::transcript::relocated`], and the two left on [`Line::resume`]'s `None`.
 ///
 /// **Grok Build is the one backend after Claude that takes the session id.** It
 /// takes it under the spelling [`Agents::argv`] writes, it insists on a valid
@@ -803,7 +814,7 @@ fn line(agent_type: store::AgentType, worktree: Option<&Path>) -> Line {
             model: "-m",
             prompt: None,
             names_the_session: true,
-            resume: None,
+            resume: Some("--resume"),
             tail: vec![
                 "--always-approve".to_owned(),
                 "--sandbox".to_owned(),
@@ -3177,25 +3188,30 @@ struct Continuing {
 ///   Conversation whose Profile was changed under it has a log no other backend
 ///   could read.
 /// - **That harness has a resume line at all** — see [`Line::resume`], which is
-///   Claude's and, for now, nobody else's.
-/// - **And the log is really on this machine.** Claude's store crosses with the
-///   memory sync as a labelled part each machine names its own path for, so it
-///   should land under this device's own encoding of this device's Worktree path
-///   with nothing further to do — but a claude told to resume a session it holds
-///   no log for refuses to start rather than opening one, so it is proved rather
-///   than assumed. See [`crate::transcript::carried`].
+///   Claude's and Grok Build's, and for now nobody else's.
+/// - **And the log is really on this machine, where the harness will look for it.**
+///   Claude's store crosses with the memory sync as a labelled part each machine
+///   names its own path for, so it should land under this device's own encoding of
+///   this device's Worktree path with nothing further to do — but a claude told to
+///   resume a session it holds no log for refuses to start rather than opening one,
+///   so it is proved rather than assumed. Grok's store crosses keyed by the
+///   *sending* device's name for the sending device's Worktree, so the same call
+///   files it under this one's first, and answers `None` where it cannot — a device
+///   that has never run grok in this Worktree being the plain case of that. See
+///   [`crate::transcript::carried`].
 ///
 /// `home` is the Conversation's own, which is where the log of a session whose
 /// Profile shares no memory is.
 ///
-/// **Asked after the memory sync, which is also what the sync was not told.** The
-/// pull composed its question under the name the Capture was opened with — see
-/// [`crate::mirroring::memory`], which reads every name this Conversation's
-/// sessions have had — so a store keyed by the session's own name rather than by
-/// the directory it ran in was asked for a name this launch may then not run
-/// under. Nothing to Claude's, whose parts are the two `projects/` entries; the
-/// first harness whose store is keyed by the name has that to settle as well as
-/// its relocation.
+/// **Asked after the memory sync, and the sync asked for more than this session.**
+/// The pull composes its question out of every name this Conversation's sessions
+/// have had — see [`crate::mirroring::memory`] — which on this device is the crossed
+/// Event's name as well as the one the Capture was just opened under. So a store
+/// keyed by the session's own name is asked for the session being carried on
+/// whatever this launch then turns out to run as: Grok Build's is, a directory per
+/// session inside the directory per working directory, and what the name the Capture
+/// opened with buys is nothing, there being no session of that name anywhere. Nothing
+/// to Claude's either way, whose parts are the two `projects/` entries.
 ///
 /// **And this is where a relaunch's holding off is made good**, which is the one
 /// thing a launch does that is not about the launch. A relaunch locks every
@@ -3301,24 +3317,26 @@ async fn carried_on(
         return None;
     }
 
+    // The Worktree is what the note says has moved, and what the harness whose
+    // store is keyed by it has its log filed under. A Conversation with none never
+    // reaches a launch at all — see [`Sessions::start`], whose sandbox cannot be
+    // built without one — so this is a case that cannot happen rather than one
+    // guessed at.
+    let worktree = conversation.worktree.as_deref()?;
+
     let Some(carried) =
-        crate::transcript::carried(&pairing.profile, &continued.session_id, home).await
+        crate::transcript::carried(&pairing.profile, &continued.session_id, worktree, home).await
     else {
         tracing::info!(
             conversation_id = conversation.id,
             session = continued.session_id,
             "the log of the session this Conversation arrived mid-conversation with is not on \
-             this machine, so the session is re-primed rather than resumed",
+             this machine under this device's own name for the Worktree, so the session is \
+             re-primed rather than resumed",
         );
 
         return None;
     };
-
-    // The Worktree is what the note says has moved, and a Conversation with none
-    // never reaches a launch at all — see [`Sessions::start`], whose sandbox
-    // cannot be built without one. So this is a case that cannot happen rather
-    // than one guessed at.
-    let worktree = conversation.worktree.as_deref()?;
 
     Some(Continuing {
         session: continued.session_id,
@@ -4199,6 +4217,46 @@ mod tests {
         );
     }
 
+    /// And a continued **Grok** session is told the same thing under the same
+    /// spelling, its own line's shape being Claude's: the flag and the id where the
+    /// name would have gone, and the prompt left positional in front of them.
+    ///
+    /// The exclusion is grok's own rather than Verkstead's reading of it — grok
+    /// 1.0.34 takes `--session-id` for a *new* conversation, refuses one it already
+    /// has a session for, and allows it alongside `--resume` only with
+    /// `--fork-session`, which a conversation carried on is the opposite of.
+    #[test]
+    fn a_continued_grok_session_is_told_to_resume_the_one_it_carries_on() {
+        let state = tempfile::tempdir().unwrap();
+        let argv = agents(vec!["grok".to_owned()], state.path()).resumed(
+            &grok_pairing(),
+            "This Conversation has been moved onto another machine\n",
+            Some("d3b07384-d9a0-4c9b-8f2a-1b7c5e6f0a12"),
+            worktree(),
+        );
+
+        assert_eq!(
+            argv,
+            vec![
+                "grok".to_owned(),
+                "-m".to_owned(),
+                "grok-4.6".to_owned(),
+                "This Conversation has been moved onto another machine\n".to_owned(),
+                "--resume".to_owned(),
+                "d3b07384-d9a0-4c9b-8f2a-1b7c5e6f0a12".to_owned(),
+                "--always-approve".to_owned(),
+                "--sandbox".to_owned(),
+                "off".to_owned(),
+                "--no-alt-screen".to_owned(),
+            ],
+            "the resume stands where the session id would have: {argv:?}",
+        );
+        assert!(
+            !argv.iter().any(|argument| argument == "--session-id"),
+            "and the name is not said as well: {argv:?}",
+        );
+    }
+
     /// And a harness Verkstead does not carry a conversation on from is told
     /// neither: no resume, because it has no line for one, and no name either,
     /// because the name belongs to a session it is not opening.
@@ -4211,7 +4269,7 @@ mod tests {
     fn a_harness_with_no_resume_line_is_told_neither() {
         let state = tempfile::tempdir().unwrap();
 
-        for pairing in [grok_pairing(), codex_pairing(), opencode_pairing()] {
+        for pairing in [codex_pairing(), opencode_pairing()] {
             let argv = agents(vec!["agent".to_owned()], state.path()).resumed(
                 &pairing,
                 "# Rate limiting\n",

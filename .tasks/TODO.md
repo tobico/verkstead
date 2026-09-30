@@ -23,7 +23,7 @@ Roadmap stage: [10: Resuming the harness](docs/roadmaps/cluster-mode/10-resuming
 
 - [x] 01: Claude continued on arrival — [details](01-claude-continued-on-arrival.md)
 - [x] 02: The Set ids across — [details](02-the-set-ids-across.md)
-- [ ] 03: Grok, and the directory its store is keyed by — [details](03-grok-resumed.md)
+- [x] 03: Grok, and the directory its store is keyed by — [details](03-grok-resumed.md)
 - [ ] 04: Codex, and the id nobody named — [details](04-codex-resumed.md)
 - [ ] 05: OpenCode, and the row in the carried database — [details](05-opencode-resumed.md)
 - [ ] 06: The fallback, said — [details](06-the-fallback-said.md)
