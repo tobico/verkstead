@@ -499,25 +499,43 @@ pub(crate) async fn arrived(
 ///
 /// A Conversation with no named session is one there is nothing to carry on:
 /// every backend Verkstead names no session for, and every Conversation whose
-/// work had not started when it moved. Said in the log and nowhere else — what
-/// follows is the ordinary Resume, which is what the Timeline already reads as.
+/// work had not started when it moved. **Said on the Timeline**, because it is one
+/// of the reasons the human is owed for a session that starts from the record
+/// rather than mid-turn — and the one of them known here rather than at the launch.
+/// Which is also why it is worded about whatever is started rather than about a
+/// session: an arrival into a state nothing drives starts nothing at all, and the
+/// press somebody makes the next morning is the one this is about. The two ways
+/// the writing itself can fail are the same answer read a moment later: nothing
+/// was written down, so nothing will be carried on. See [`crate::carrying`].
 async fn carries_on(state: &AppState, id: i64) {
-    match store::the_last_session(&state.pool, id).await {
+    let written = match store::the_last_session(&state.pool, id).await {
         Ok(Some(continued)) => {
-            if let Err(error) = store::continue_on_arrival(&state.pool, id, &continued).await {
-                tracing::error!(error = ?error, conversation_id = id, "recording the conversation the arriving work was part way through failed, so the session started here will be re-primed instead");
+            match store::continue_on_arrival(&state.pool, id, &continued).await {
+                Ok(()) => true,
+
+                Err(error) => {
+                    tracing::error!(error = ?error, conversation_id = id, "recording the conversation the arriving work was part way through failed, so the session started here will be re-primed instead");
+                    false
+                }
             }
         }
 
-        Ok(None) => tracing::info!(
-            conversation_id = id,
-            "the Conversation that arrived here has no named session to carry on from, so what \
-             starts for it is a session of its own",
-        ),
+        Ok(None) => false,
 
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "reading the newest session of an arriving Conversation failed, so the session started here will be re-primed instead");
+            false
         }
+    };
+
+    if !written {
+        crate::carrying::instead(
+            &state.pool,
+            &state.nudges,
+            id,
+            &crate::carrying::Instead::NoSession,
+        )
+        .await;
     }
 }
 

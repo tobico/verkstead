@@ -428,6 +428,14 @@ impl Verkstead {
     /// An account of this device's own, really on disk, with a Profile saved over
     /// it the way the form saves one.
     async fn account(&self) -> i64 {
+        self.account_keeping(true).await
+    }
+
+    /// The same with the **memory switch** put where `memory` says, which is what
+    /// decides whether a session under it is given the account's store or one of
+    /// its own and empty — and so, across a move, whether there is anything of the
+    /// harness's record on the far end to carry a conversation on from.
+    async fn account_keeping(&self, memory: bool) -> i64 {
         let under = self.elsewhere.path().join(ACCOUNT);
         let claude_dir = under.join(".claude");
         let config_file = under.join(".claude.json");
@@ -452,7 +460,7 @@ impl Verkstead {
                         "config_file": config_file,
                     },
                     "models": [MODEL],
-                    "memory": true,
+                    "memory": memory,
                 })
                 .to_string(),
             ),
@@ -1219,8 +1227,6 @@ impl Verkstead {
 
     /// And every Notice on its Timeline, which is where Verkstead says what it
     /// did on its own account — a move that failed among them.
-    /// And every Notice on its Timeline, which is where Verkstead says what it
-    /// did on its own account — a move that failed among them.
     async fn notices(&self, conversation: i64) -> Vec<String> {
         self.view(conversation)
             .await
@@ -1231,6 +1237,33 @@ impl Verkstead {
                 _ => None,
             })
             .collect()
+    }
+
+    /// The Notice that says `saying`, once one does — or a panic listing every
+    /// Notice there is instead.
+    ///
+    /// Waited for, because the two Notices a move writes about the resume are
+    /// written a launch apart: the arrival puts down where the work came from,
+    /// and which resume it was taken up with is not settled until the launch has
+    /// run the memory sync.
+    async fn notice_saying(&self, conversation: i64, saying: &str) -> String {
+        let deadline = Instant::now() + WAITING;
+
+        loop {
+            let notices = self.notices(conversation).await;
+
+            if let Some(found) = notices.iter().find(|notice| notice.contains(saying)) {
+                return found.clone();
+            }
+
+            assert!(
+                Instant::now() < deadline,
+                "no Notice on Conversation {conversation} ever said {saying:?}. \
+                 The Timeline holds: {notices:#?}",
+            );
+
+            tokio::time::sleep(LOOKING).await;
+        }
     }
 }
 
@@ -1370,6 +1403,23 @@ fi
 "#,
         carrying = CARRYING_ON,
     )
+}
+
+/// And what stands where a claude that **will not take the session id it is given**
+/// goes: it says so and exits non-zero, having written nothing anywhere.
+///
+/// Which is the one way a carried conversation falls through that nothing can know
+/// before the launch — the log was proved to be there and the line was written, and
+/// the harness said no anyway. What Verkstead reads it off is the shape rather than
+/// the words: a session that ended badly having never added a line to the record it
+/// was launched to carry on. So the sentence here is claude's as a reminder of what
+/// the real one looks like, and nothing whatever is read off it.
+fn refuses_to_resume() -> String {
+    r#"
+printf 'No conversation found with session ID\r\n'
+exit 1
+"#
+    .to_owned()
 }
 
 /// And what stands where **grok** goes, on either machine: one script for both of
@@ -1784,6 +1834,56 @@ async fn ready_to_carry_on(gate: &Path, spill: &Path) -> (Verkstead, Verkstead, 
     (a, b, holding, conversation)
 }
 
+/// And the same with the Profile sharing no memory, which is what one of the
+/// reasons an arrival falls back to Verkstead's own Resume looks like from the
+/// outside: A's session writes its log into a store of its own, nothing of it
+/// travels, and B has nothing to carry a conversation on from.
+///
+/// B's script is the one that *would* carry on, deliberately: what is being read
+/// is that it was never asked to.
+async fn ready_to_carry_on_sharing_no_memory(
+    gate: &Path,
+    spill: &Path,
+) -> (Verkstead, Verkstead, Holding, i64) {
+    let (a, b, holding, conversation) = drafted_remembering(
+        &writes_a_log_and_waits_at(gate),
+        &carries_on(),
+        spill,
+        Repositories::Apart,
+        false,
+    )
+    .await;
+
+    a.grills(conversation).await;
+
+    (a, b, holding, conversation)
+}
+
+/// And the same with B's harness **refusing the resume it is given**, which is the
+/// one reason a carried conversation falls through that nothing knows before the
+/// launch: the log crossed, the line was written, and the harness said no anyway.
+///
+/// What stands for the refusal is what a claude does with a session id it will not
+/// take — it says so and exits non-zero, having touched no log — and what says it
+/// really was the resume being refused rather than a session that merely failed is
+/// that nothing was ever added to the record it was launched to carry on.
+async fn ready_for_a_harness_that_will_not_resume(
+    gate: &Path,
+    spill: &Path,
+) -> (Verkstead, Verkstead, Holding, i64) {
+    let (a, b, holding, conversation) = drafted_running(
+        &writes_a_log_and_waits_at(gate),
+        &refuses_to_resume(),
+        spill,
+        Repositories::Apart,
+    )
+    .await;
+
+    a.grills(conversation).await;
+
+    (a, b, holding, conversation)
+}
+
 /// And the same again on **Grok Build**, whose store is keyed by the directory a
 /// session ran in: both machines run the one script that opens a conversation or
 /// carries one on as its line says, each waiting at a gate of its own so that either
@@ -1923,6 +2023,22 @@ async fn drafted_running(
     spill: &Path,
     repositories: Repositories,
 ) -> (Verkstead, Verkstead, Holding, i64) {
+    drafted_remembering(on_a, on_b, spill, repositories, true).await
+}
+
+/// The same with the Profile's **memory switch** put where `memory` says.
+///
+/// One setup takes it off, and it is the one about what the switch means to an
+/// arrival: a session under a Profile that shares no memory gets a store of its
+/// own and empty, so nothing of the harness's record travels with the work and
+/// there is nothing on the far end to carry a conversation on from.
+async fn drafted_remembering(
+    on_a: &str,
+    on_b: &str,
+    spill: &Path,
+    repositories: Repositories,
+    memory: bool,
+) -> (Verkstead, Verkstead, Holding, i64) {
     let a = Verkstead::running(A, on_a, spill).await;
     let b = Verkstead::running(B, on_b, spill).await;
 
@@ -1938,7 +2054,7 @@ async fn drafted_running(
         Repositories::Cloned => b.cloned_from(&theirs).await,
     };
 
-    let account = a.account().await;
+    let account = a.account_keeping(memory).await;
 
     // B's mirror of that account, which is stage 08's machinery and what the
     // Pairings arriving there are resolved against: a Profile is named across a
@@ -3738,6 +3854,471 @@ async fn the_set_a_resumed_session_was_idling_on_stays_open_under_the_id_the_not
     );
 }
 
+/// **The arrival says which resume it was taken up with**, so that the two
+/// outcomes of one press can be told apart.
+///
+/// *Transfer to…* lands the work on another machine and something starts there,
+/// and what starts is either a resume of the conversation the agent was having or
+/// Verkstead's own Resume — a session picking up mid-sentence, or one starting the
+/// state again from the record. From the outside both are a session appearing on
+/// the Timeline, so each of them says which it was: here, that the conversation was
+/// carried on, by which harness and under which name.
+#[tokio::test]
+async fn an_arrival_that_carried_the_conversation_on_says_so_on_the_timeline() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = ready_to_carry_on(&gate, spill.path()).await;
+
+    a.printed(conversation, "grilling").await;
+
+    let running = session_names(&a.pool)
+        .await
+        .pop()
+        .expect("the name Verkstead gave the session on A")
+        .1;
+
+    std::fs::write(&gate, "go").unwrap();
+
+    let there = handed_on(&a, conversation, B).await;
+
+    let said = b
+        .notice_saying(there, "the session started here carries it on")
+        .await;
+
+    assert!(
+        said.contains("claude was told to resume session"),
+        "the Notice names the harness that was told to resume: {said:?}",
+    );
+    assert!(
+        said.contains(&running),
+        "and the session it was told to resume, which is {running}: {said:?}",
+    );
+
+    // And nothing said the fallback happened, which is the half that makes the
+    // telling apart worth anything.
+    let notices = b.notices(there).await;
+
+    assert!(
+        !notices
+            .iter()
+            .any(|notice| notice.contains("Verkstead") && notice.contains("own Resume")),
+        "and nothing on the Timeline says it was Verkstead's own Resume: \
+         {notices:#?}",
+    );
+}
+
+/// **And a Profile that shares no memory says so**, which is the first of the
+/// reasons an arrival comes up with Verkstead's own Resume instead.
+///
+/// A session under a Profile whose memory switch is off gets a store of its own
+/// and empty — the rule at home as much as away — so the log the session on A
+/// wrote went nowhere the memory sync could carry it, and B has nothing to resume
+/// against. Nothing about that is a failure and nothing about it is the human's to
+/// put right: it is the switch they set, reaching the arrival.
+#[tokio::test]
+async fn a_profile_that_shares_no_memory_says_why_the_conversation_was_not_carried_on() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) =
+        ready_to_carry_on_sharing_no_memory(&gate, spill.path()).await;
+
+    a.printed(conversation, "grilling").await;
+    std::fs::write(&gate, "go").unwrap();
+
+    let there = handed_on(&a, conversation, B).await;
+
+    let said = b.notice_saying(there, "travelled with the work").await;
+
+    assert!(
+        said.contains("memory"),
+        "the Notice names the switch that is off: {said:?}",
+    );
+    assert!(
+        said.contains("Resume"),
+        "and says what was started instead: {said:?}",
+    );
+
+    // And the session really was the fallback: B's script is the one that would
+    // have carried on, and it was never given a resume to make.
+    let capture = b.latest_capture_saying(there, "carried on").await;
+
+    assert!(
+        !capture.contains("arg=--resume"),
+        "B's session was launched as a session of its own: {capture:?}",
+    );
+}
+
+/// **And a log that never landed says that instead**, which is the reason the
+/// Notice exists to tell apart from the one above: the switch was on, the sync ran,
+/// and the record is still not where the harness will look for it.
+///
+/// `a_grilling_whose_log_did_not_cross_comes_up_re_primed_over_there` is the same
+/// move read for what the session was primed with; this is it read for what the
+/// human is told about why.
+#[tokio::test]
+async fn a_record_that_did_not_land_says_so_where_the_work_arrives() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = ready_to_move(&gate, spill.path()).await;
+
+    a.printed(conversation, "grilling").await;
+    std::fs::write(&gate, "go").unwrap();
+
+    let there = handed_on(&a, conversation, B).await;
+
+    let said = b
+        .notice_saying(there, "the memory sync carried none of it")
+        .await;
+
+    assert!(
+        said.contains("claude"),
+        "the record that is not here is named by the harness that keeps it: \
+         {said:?}",
+    );
+    assert!(
+        !said.contains("memory switch"),
+        "and it is not the switch being blamed for it, the switch being on: \
+         {said:?}",
+    );
+}
+
+/// **And a Conversation that arrived with no session on its record says that**,
+/// which is the one reason known at the arrival rather than at the launch: there
+/// is nothing whatever to carry on, so nothing is written down for a launch to
+/// read and the Notice goes in as the work lands.
+///
+/// **What it stands for is a Conversation that moved before anything named a
+/// session** — work started and moved in the same breath, a launch that never got
+/// as far as opening a Capture. Standing it up as it really happens would mean a
+/// device that cannot start a session, which is a device that cannot run the
+/// sending half of this either — so the names are taken off the record instead,
+/// which leaves exactly what crosses in that case: Events, and nothing saying
+/// which session wrote them.
+#[tokio::test]
+async fn a_conversation_with_no_session_on_its_record_says_there_was_nothing_to_carry_on() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = ready_to_carry_on(&gate, spill.path()).await;
+
+    a.printed(conversation, "grilling").await;
+    std::fs::write(&gate, "go").unwrap();
+    a.view_saying(conversation, |drawn| !drawn.working).await;
+
+    sqlx::query("DELETE FROM session_names")
+        .execute(&a.pool)
+        .await
+        .unwrap();
+
+    assert!(
+        session_names(&a.pool).await.is_empty(),
+        "nothing on A's record says which session wrote what",
+    );
+
+    let there = handed_on(&a, conversation, B).await;
+
+    let said = b
+        .notice_saying(there, "no session on its record to carry on from")
+        .await;
+
+    assert!(
+        said.contains("Resume"),
+        "and the Notice says what was started instead: {said:?}",
+    );
+
+    // Which it was: B's script would have carried on if it had been asked to.
+    let capture = b.latest_capture_saying(there, "carried on").await;
+
+    assert!(
+        !capture.contains("arg=--resume"),
+        "B's session was a session of its own: {capture:?}",
+    );
+}
+
+/// **And a Pairing on another harness than the record says that**, a Conversation
+/// whose Profile was changed under it having a record no other backend can read.
+///
+/// **The Profile change is stood in for rather than played out.** What names the
+/// harness a launch runs under is the Pairing, and a Pairing is resolved on the far
+/// end to the mirror of the very Profile the session ran on — so the two agree by
+/// construction until somebody edits the account, which is a change that reaches
+/// the far end when its next refresh gets there rather than at any moment a test
+/// can name. What the launch reads is the row the arrival writes, so the row is
+/// what this writes: the same session, said to have been had on another harness.
+/// Everything after it is the launch's own reading, which is the whole of what is
+/// under test.
+#[tokio::test]
+async fn a_pairing_on_another_harness_than_the_record_says_so_where_the_work_arrives() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = ready_to_carry_on(&gate, spill.path()).await;
+
+    a.printed(conversation, "grilling").await;
+
+    let running = session_names(&a.pool)
+        .await
+        .pop()
+        .expect("the name Verkstead gave the session on A")
+        .1;
+
+    std::fs::write(&gate, "go").unwrap();
+
+    let there = handed_on(&a, conversation, B).await;
+
+    // The arrival's own launch first, and out of the way: it spends the row the
+    // arrival wrote, and what this test is about is the row after it.
+    b.latest_capture_saying(there, "carried on").await;
+    b.view_saying(there, |drawn| !drawn.working).await;
+
+    store::continue_on_arrival(
+        &b.pool,
+        there,
+        &store::Continued {
+            session_id: running.clone(),
+            agent_type: store::AgentType::Grok,
+        },
+    )
+    .await
+    .unwrap();
+
+    let pressed = press(
+        &b.workbench,
+        &format!("/api/ui/conversations/{there}/resume"),
+        None,
+    )
+    .await;
+
+    assert_eq!(pressed, "\"Resumed\"", "Resume started something");
+
+    let said = b
+        .notice_saying(there, "a record one harness wrote is one no other can read")
+        .await;
+
+    assert!(
+        said.contains("grok") && said.contains("claude"),
+        "the Notice names both: the harness the conversation was had on, and the \
+         one this session runs: {said:?}",
+    );
+}
+
+/// **And a harness that will not resume says that**, which is the one reason
+/// nothing can know before the launch: the record crossed, the line was written,
+/// and the harness said no anyway.
+///
+/// **Read off the shape of the ending rather than off anything it printed.** What
+/// a harness says when it will not resume is that harness's wording and free to
+/// change under us, so what is read is that the session ended badly having never
+/// added a line to the record it was launched to carry on — a resume that took
+/// would have written into that record as it worked.
+///
+/// **And what was held open for it is locked**, which is the reversal put back. The
+/// relaunch held the Question Sets the gone session was idling on because a resume
+/// was about to bring that reader back on this machine; it did not, so they are
+/// locked exactly as the relaunch would have locked them.
+#[tokio::test]
+async fn a_harness_that_will_not_resume_says_so_and_locks_what_was_held_for_it() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) =
+        ready_for_a_harness_that_will_not_resume(&gate, spill.path()).await;
+
+    a.printed(conversation, "grilling").await;
+
+    let idled = a.asks(conversation, ASKED).await;
+
+    std::fs::write(&gate, "go").unwrap();
+
+    let there = handed_on(&a, conversation, B).await;
+
+    let said = b.notice_saying(there, "would not resume session").await;
+
+    assert!(
+        said.contains("claude"),
+        "the Notice names the harness that said no: {said:?}",
+    );
+
+    let crossed = b.sets_on(there).await;
+
+    assert_eq!(crossed.len(), 1, "the one Set crossed with the work");
+
+    assert!(
+        b.locked(there, crossed[0]).await,
+        "the Set held open for a reader that never came back is locked \
+         unanswered: {idled} on A, {} on B",
+        crossed[0],
+    );
+
+    assert_eq!(
+        b.answering(there, crossed[0], ANSWERED).await,
+        StatusCode::GONE,
+        "and it takes no Answer, which is what locked unanswered means to the \
+         human on the machine the work is on now",
+    );
+}
+
+/// **The stage, end to end and read back on both machines**: a grilling mid-
+/// interview on one device, moved, carrying on from the same question on the other
+/// — with a Question Set left open across the move, answered afterwards, and its
+/// Answer reaching the session that asked it.
+///
+/// Every part of this is proved somewhere above on its own. What this is for is the
+/// whole of it in one run, read from both ends the way the human reads it: what A
+/// holds after the work has gone, and what B holds now that it has it.
+///
+/// **What a run on two operating systems would add, and what stands for it here.**
+/// The three things an OS difference puts in the way of *this* feature are the
+/// Worktree's new path, which the far end names off its own Data Directory rather
+/// than joining anything that arrived onto a directory of its own; the harness's own
+/// encoding of a working directory, which is what its store is keyed by and which
+/// comes out differently on every machine; and the **stem** the memory sync names
+/// the Worktree's part by, which is what a store crossing as a labelled part is
+/// asked for. All three are exercised here — the two devices cut their Worktrees
+/// under Data Directories of their own, so the paths differ, the `projects/` entries
+/// the harness computes from them differ, and the part is asked for by a stem each
+/// machine names for itself. What is left of a two-OS run after that is the path
+/// separators and the run itself, which is a human with two machines — the same
+/// remainder `the_move_crosses_what_an_operating_system_brings` leaves.
+#[tokio::test]
+async fn a_grilling_carried_on_between_two_devices_reads_back_on_both_ends() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = ready_to_carry_on(&gate, spill.path()).await;
+
+    // The interview, mid-question, with the human's answer still to come.
+    a.printed(conversation, "grilling").await;
+
+    let running = session_names(&a.pool)
+        .await
+        .pop()
+        .expect("the name Verkstead gave the session on A")
+        .1;
+
+    let idled = a.asks(conversation, ASKED).await;
+
+    assert_eq!(
+        a.transcript_of(conversation, 0).await,
+        vec![THE_QUESTION_IT_WAS_ON.to_owned()],
+        "the question the session is on is on A's Transcript, read out of the \
+         log claude itself wrote",
+    );
+
+    let here = a.worktree(conversation).await;
+
+    // The turn ends, and the move follows it.
+    std::fs::write(&gate, "go").unwrap();
+
+    let there = handed_on(&a, conversation, B).await;
+
+    came_home(&b, there).await;
+
+    // **Read back on B.** The line, the note, the Transcript, the Timeline and
+    // the Worktree — each of them something only a resume on this machine could
+    // have left.
+    let said = b.latest_capture_saying(there, "carried on").await;
+
+    let landed = b.worktree(there).await;
+
+    assert_ne!(landed, here, "B cut a Worktree of its own for the work");
+    assert!(
+        landed.starts_with(b._dir.path()),
+        "under its own Data Directory: {}",
+        landed.display(),
+    );
+
+    assert!(
+        said.contains("arg=--resume") && said.contains(&format!("arg={running}")),
+        "B's session was told to resume the session that was running on A, which \
+         is {running}: {said:?}",
+    );
+    assert!(
+        said.contains(&landed.display().to_string()) && said.contains(&this_machine().0),
+        "and primed with the note, which names the machine the work now runs on \
+         and the Worktree's new path: {said:?}",
+    );
+    assert!(
+        !said.contains("Rate limiting"),
+        "and with nothing else: the Brief is already in the context this session \
+         kept: {said:?}",
+    );
+
+    assert_eq!(
+        b.transcript_of(there, 1).await,
+        vec![CARRYING_ON.to_owned()],
+        "and its Transcript opens where the carried log ended, rather than \
+         drawing what the session on A said into this Event too",
+    );
+
+    let carried_on = b
+        .notice_saying(there, "the session started here carries it on")
+        .await;
+
+    assert!(
+        carried_on.contains(&running),
+        "the Timeline says which resume this was, and under which name: \
+         {carried_on:?}",
+    );
+
+    let came = b.notice_saying(there, &this_machine().0).await;
+
+    assert!(
+        came.contains("moved onto this device"),
+        "and, above it, which machine the work came from: {came:?}",
+    );
+
+    // **And the Set the session was idling on**, which is the reversal: still
+    // open where the work is now, answerable, and its Answer reaching the very
+    // session that asked it on the other machine.
+    let crossed = b.sets_on(there).await;
+
+    assert_eq!(crossed.len(), 1, "the Set crossed with the work");
+
+    let carried = crossed[0];
+
+    assert!(
+        said.contains(&format!(
+            "The Set you asked as {idled} is Set {carried} here: `verkstead answers {carried}`"
+        )),
+        "the note names it by both ids, with the line that fetches the Answers: \
+         {said:?}",
+    );
+
+    assert!(
+        b.answering(there, carried, ANSWERED).await.is_success(),
+        "the human answers it on the machine the work is on now",
+    );
+
+    let (status, handed) = b.fetches(there, carried).await;
+
+    assert_eq!(status, StatusCode::OK, "coming back for it: {handed}");
+    assert!(
+        handed.contains("shared between instances"),
+        "and what the resumed session is handed is the Answer to the question it \
+         asked on the other machine: {handed}",
+    );
+
+    // **Read back on A.** The copy it kept leads to the live record, its Timeline
+    // still holds the interview that happened here, and the Worktree it cut is
+    // still its own.
+    let left = a.view(conversation).await;
+
+    assert_eq!(
+        left.transferred.expect("the mark the move wrote").id,
+        there,
+        "A's copy leads to the record on B",
+    );
+    assert!(
+        left.timeline
+            .iter()
+            .any(|event| matches!(event, TimelineEvent::AgentOutput(_))),
+        "and still holds the session that ran here: {:#?}",
+        left.timeline,
+    );
+    assert!(
+        here.is_dir(),
+        "and the Worktree A cut is where it was: {}",
+        here.display(),
+    );
+}
+
 /// **A Grok grilling transferred mid-interview carries on where the store has been
 /// put right, and re-primes where it has not** — which is one round trip, because
 /// the two are the two legs of it.
@@ -4061,6 +4642,20 @@ async fn a_codex_rollout_that_named_no_session_falls_through_to_verksteads_resum
         re_primed.contains("Rate limiting"),
         "which means the session was primed off the record, Brief and all: \
          {re_primed:?}",
+    );
+
+    // And the human is told which of the two they are looking at, and why. A
+    // rollout that named no session leaves the row the Capture opened with, which
+    // is a name no codex answers to — so what the record holds is a session id
+    // that finds no rollout, and the reason is the rollout rather than the row.
+    let said = b
+        .notice_saying(there_id, "the memory sync carried none of it")
+        .await;
+
+    assert!(
+        said.contains("codex") && said.contains("Resume"),
+        "the Notice names the harness whose record could not be found, and what \
+         was started instead: {said:?}",
     );
 }
 

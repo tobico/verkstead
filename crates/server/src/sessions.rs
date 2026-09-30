@@ -25,7 +25,11 @@
 //! things — the line says *resume* where it would have said the session's name,
 //! the prompt is the note and nothing else, and the Transcript opens at the end
 //! of what crossed. See [`continuing`], where the decision is made and where each
-//! way of answering no leaves Verkstead's own Resume exactly as it was.
+//! way of answering no leaves Verkstead's own Resume exactly as it was — and
+//! [`crate::carrying`], which is what both answers are said with, the human having
+//! pressed one thing and being able to see two outcomes from it. The one answer
+//! that is not [`continuing`]'s is the harness refusing a resume it was given,
+//! which is read off the ending instead — see [`Resuming`].
 //!
 //! Whether a session is running is held here and nowhere else. A running session
 //! is a process, and no table can hold one — a restarted server has no sessions
@@ -2984,6 +2988,28 @@ impl Sessions {
             )
         });
 
+        // And, where this session *is* that resume, what the relay owes the
+        // record if the harness turns out not to have it. Which is the one reason
+        // a carried conversation can fail to be carried on that nothing knows
+        // before the launch: the log was proved to be there and the line was
+        // written, and the harness still said no. See [`relay`], which reads it
+        // off the ending, and [`crate::carrying`].
+        //
+        // The channel travels with it for [`Held`]'s reason: the Sets this launch
+        // left open were left open for a reader that then never came back, and
+        // shutting one takes the channel besides the store.
+        let resuming = match (named, session.as_deref()) {
+            (Named::Continuing, Some(carrying)) => Some(Resuming {
+                why: crate::carrying::Instead::Refused {
+                    harness: pairing.profile.agent_type(),
+                    session: carrying.to_owned(),
+                },
+                settlements: held.settlements.clone(),
+            }),
+
+            _ => None,
+        };
+
         // And the same output watched for the one thing a session says that is
         // about the account rather than about the work: that its window is
         // spent. The Profile is taken now because that is what the stop names,
@@ -3075,6 +3101,7 @@ impl Sessions {
                         reading,
                         &idle,
                         tail,
+                        resuming,
                         limits,
                         stopping,
                     )
@@ -3336,20 +3363,32 @@ struct Continuing {
 /// an earlier session was having, and what it takes to do so (ADR-0020,
 /// *Transfer*).
 ///
-/// **Four things have to hold, and each of them is a way this answers `None`** —
-/// which is Verkstead's own Resume, unchanged, and nothing lost:
+/// **Five things have to hold, and each of them is a way this answers no** —
+/// which is Verkstead's own Resume, unchanged, and nothing lost. **Each of them
+/// but the first is said on the Timeline too**, because the human pressed one
+/// thing and can see two outcomes from it and has no way to tell which happened:
+/// see [`crate::carrying`], and [`Carrying`], which is what this answers in.
 ///
 /// - **The record says a session is to be carried on from here.** A Conversation
 ///   that has just been moved onto this device is one whose agent was part way
 ///   through a turn somewhere else, and the arrival writes that down — see
 ///   [`store::take_up_the_conversation`], which is read and spent in one step. No
-///   row is every ordinary launch, and the launch after this one is ordinary too.
+///   row is every ordinary launch, and the launch after this one is ordinary too:
+///   the one answer here that is nothing to tell anybody about, nothing having
+///   arrived for it to be a fallback from. A Conversation that arrived with no
+///   session on its record is told about at the arrival instead, where that is
+///   known — see [`crate::peer::transfers`].
 /// - **The Pairing about to run is the harness that session ran on.** A
 ///   Conversation whose Profile was changed under it has a log no other backend
 ///   could read.
 /// - **That harness has a resume line at all** — see [`Line::resume`], which is
 ///   now every one of the four, and is still asked because a fifth backend lands
 ///   without one.
+/// - **The Profile shares its account's memory.** A session under one that does
+///   not gets a store of its own and empty, at home as much as away — so nothing
+///   of the conversation travelled and there is nothing here to resume against.
+///   Asked ahead of the looking so that the reason names the switch rather than
+///   the record it is the reason for.
 /// - **And the record is really on this machine, where the harness will look for
 ///   it.**
 ///   Claude's store crosses with the memory sync as a labelled part each machine
@@ -3358,16 +3397,21 @@ struct Continuing {
 ///   resume a session it holds no log for refuses to start rather than opening one,
 ///   so it is proved rather than assumed. Grok's store crosses keyed by the
 ///   *sending* device's name for the sending device's Worktree, so the same call
-///   files it under this one's first, and answers `None` where it cannot — a device
+///   files it under this one's first, and answers no where it cannot — a device
 ///   that has never run grok in this Worktree being the plain case of that. Codex's
 ///   crosses to the path it left and needs nothing moved, but nothing names it
 ///   either: the rollout the id belongs to is searched for in the store, and a
-///   rollout that never crossed is a `None` like the rest. And OpenCode's crosses
+///   rollout that never crossed is a no like the rest. And OpenCode's crosses
 ///   as one database with a row per session, so the same call looks for the row
 ///   and brings the directory it records onto this device's Worktree — a store
 ///   that did not cross, a row of that id that is not in it and a shape this
-///   build cannot write each being a `None` with nothing written. See
+///   build cannot write each being a no with nothing written. See
 ///   [`crate::transcript::carried`].
+///
+/// **And a sixth is known only after the launch**, so it is not here: a harness
+/// that is asked to resume and will not. That is the relay's to read, off a
+/// resumed session that ended badly having never added a line to the record it
+/// was resuming — see [`relay`].
 ///
 /// `home` is the Conversation's own, which is where the log of a session whose
 /// Profile shares no memory is.
@@ -3409,9 +3453,24 @@ async fn continuing(
     home: &crate::sandbox::Home,
     held: Held<'_>,
 ) -> Option<Continuing> {
-    let continuing = carried_on(pool, conversation, pairing, home).await;
+    match carried_on(pool, conversation, pairing, home).await {
+        Carrying::On(continuing) => {
+            // Said on the Timeline, because the human pressed one thing and can
+            // see two outcomes: a resumed agent picks up mid-sentence and a
+            // re-primed one starts the state again from the record, and from the
+            // outside both are a session appearing. See [`crate::carrying`].
+            crate::carrying::carried_on(
+                pool,
+                nudges,
+                conversation.id,
+                pairing.profile.agent_type(),
+                &continuing.session,
+            )
+            .await;
 
-    if continuing.is_none() {
+            Some(continuing)
+        }
+
         // The resume is not going to happen, so the reader really has gone, and
         // whatever the caller held for it goes the way a relaunch has always sent
         // it — a launch later than it would otherwise have gone. `held` rather
@@ -3423,94 +3482,124 @@ async fn continuing(
         // steer that spent the row between the caller's reading and this one is
         // the human replacing the session, which is the case the caller would
         // have locked for.
-        crate::sets::locking(
-            pool,
-            held.settlements,
-            nudges,
-            conversation.id,
-            held.sets,
-            "the session that asked it is on the machine the work has left",
-        )
-        .await;
-    }
+        carrying => {
+            crate::sets::locking(
+                pool,
+                held.settlements,
+                nudges,
+                conversation.id,
+                held.sets,
+                "the session that asked it is on the machine the work has left",
+            )
+            .await;
 
-    continuing
+            // And where there was a conversation standing to be carried on, why
+            // it was not — which is the whole of what tells the two outcomes
+            // apart. [`Carrying::Nothing`] is every ordinary launch and says
+            // nothing: no Conversation arrived, so nothing about this session is
+            // a fallback from anything.
+            if let Carrying::Instead(why) = carrying {
+                crate::carrying::instead(pool, nudges, conversation.id, &why).await;
+            }
+
+            None
+        }
+    }
+}
+
+/// What a launch made of the conversation that was standing to be carried on:
+/// the three answers [`continuing`] has to tell apart.
+///
+/// Parted from the two things that hang off the answer — the holding a relaunch
+/// left for it, and the Notice — so that each way of answering no is one return
+/// rather than five each having to remember what the fallback owes.
+enum Carrying {
+    /// Nothing was standing, which is every ordinary launch there is: no
+    /// Conversation arrived, or what arrived has already been carried on from.
+    /// Nothing to say and nothing to make good.
+    Nothing,
+
+    /// It is being carried on, and this is what that takes.
+    On(Continuing),
+
+    /// One was standing and it cannot be, which is Verkstead's own Resume —
+    /// unchanged, and nothing lost — with the reason to put on the Timeline.
+    Instead(crate::carrying::Instead),
 }
 
 /// The decision itself — [`continuing`]'s middle, with nothing to say about what a
-/// caller is holding.
+/// caller is holding or about what the Timeline is told.
 ///
-/// Parted from it so that every way of answering no is one `None` rather than five
-/// returns each having to remember what the fallback owes. What each of them means
-/// is written up there.
+/// What each of its answers means is written up there.
 async fn carried_on(
     pool: &SqlitePool,
     conversation: &store::Conversation,
     pairing: &store::Pairing,
     home: &crate::sandbox::Home,
-) -> Option<Continuing> {
+) -> Carrying {
     // Spent whichever way this comes out, and that is the point of reading it
     // here: the session launched in the moment after an arrival is the one with a
     // conversation to carry on, and the next session of the work is not — so a
     // row left standing because the log had not come across would prime a task
     // session with a note about a move it had already been told about.
     let continued = match store::take_up_the_conversation(pool, conversation.id).await {
-        Ok(continued) => continued?,
+        Ok(Some(continued)) => continued,
 
+        // Nothing arrived, or what arrived has been carried on from already.
+        Ok(None) => return Carrying::Nothing,
+
+        // And a row that could not be read is the same answer as one that is not
+        // there, for want of anything better to say: what a Notice would name is
+        // the reason, and the reason is that the reading failed. Said in the log,
+        // which is where a store that will not answer belongs.
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = conversation.id, "reading whether this session carries an earlier one's conversation on failed, so it opens one of its own");
-            return None;
+            return Carrying::Nothing;
         }
     };
 
-    if continued.agent_type != pairing.profile.agent_type() {
-        tracing::info!(
-            conversation_id = conversation.id,
-            ran = continued.agent_type.word(),
-            running = pairing.profile.agent_type().word(),
-            "the Conversation that arrived here was running on another harness than the one \
-             this session runs on, so the session is re-primed rather than resumed",
-        );
+    let running = pairing.profile.agent_type();
 
-        return None;
+    if continued.agent_type != running {
+        return Carrying::Instead(crate::carrying::Instead::AnotherHarness {
+            ran: continued.agent_type,
+            running,
+        });
     }
 
     if line(continued.agent_type, conversation.worktree.as_deref())
         .resume
         .is_none()
     {
-        tracing::info!(
-            conversation_id = conversation.id,
-            harness = continued.agent_type.word(),
-            "Verkstead does not carry a conversation on from a session of this harness, so the \
-             session that arrived is re-primed rather than resumed",
-        );
+        return Carrying::Instead(crate::carrying::Instead::NoResumeLine(continued.agent_type));
+    }
 
-        return None;
+    // The switch, ahead of the looking rather than left to come out as a record
+    // that is not there. A Profile that shares no memory gives every session a
+    // store of its own and empty — which is the rule at home as much as away, so
+    // an arrival under one is a session starting new exactly as the last one did,
+    // and saying *the record is not here* about it would name the symptom.
+    if !pairing.profile.memory {
+        return Carrying::Instead(crate::carrying::Instead::MemoryOff(continued.agent_type));
     }
 
     // The Worktree is what the note says has moved, and what the harness whose
     // store is keyed by it has its log filed under. A Conversation with none never
     // reaches a launch at all — see [`Sessions::start`], whose sandbox cannot be
     // built without one — so this is a case that cannot happen rather than one
-    // guessed at.
-    let worktree = conversation.worktree.as_deref()?;
+    // guessed at, and where it did happen it is a device with nowhere for the
+    // record to be, which is what the reason beside it says.
+    let Some(worktree) = conversation.worktree.as_deref() else {
+        return Carrying::Instead(crate::carrying::Instead::NoRecord(continued.agent_type));
+    };
 
     let Some(carried) =
         crate::transcript::carried(&pairing.profile, &continued.session_id, worktree, home).await
     else {
-        tracing::info!(
-            conversation_id = conversation.id,
-            session = continued.session_id,
-            "the record of the session this Conversation arrived mid-conversation with is not \
-             on this machine under this device's own name for the Worktree, so the session is \
-             re-primed rather than resumed",
-        );
-
-        return None;
+        return Carrying::Instead(crate::carrying::Instead::NoRecord(continued.agent_type));
     };
 
-    Some(Continuing {
+    Carrying::On(Continuing {
         session: continued.session_id,
         note: skills::moved(
             &crate::platform::hostname(),
@@ -3691,6 +3780,7 @@ async fn relay(
     mut reading: Reading,
     idle: &Idle,
     mut tail: Option<Tail>,
+    resuming: Option<Resuming>,
     mut limits: crate::limits::Watch,
     mut stopping: oneshot::Receiver<()>,
 ) -> Ended {
@@ -3943,7 +4033,87 @@ async fn relay(
         summarise(pool, nudges, printing, &reading, told(&tail)).await;
     }
 
+    // And where this session was the harness's own resume and the harness would
+    // not have it, the one reason a carried conversation falls through that
+    // nothing could know before the launch — see [`Resuming`], where what says so
+    // is argued.
+    //
+    // Last, and after the final poll above rather than before it: what it turns
+    // on is whether anything was ever added to the record being resumed, and the
+    // lines an agent writes on its way out arrive at exactly that poll.
+    if let Some(resuming) = resuming
+        && matches!(ended, Ended::Badly(_))
+        && tail.as_ref().and_then(Tail::turns).is_none()
+    {
+        refused(pool, nudges, printing.conversation_id, resuming).await;
+    }
+
     ended
+}
+
+/// A session launched as the harness's resume of an earlier one, as the relay
+/// holds one: what to say if the harness would not have it, and what to settle.
+///
+/// **`None` is every session but one**, and the one is the launch after an
+/// arrival that found everything it needed — see [`continuing`]. So the reading
+/// below costs an ordinary session nothing at all.
+struct Resuming {
+    /// Which harness was asked and what it was asked to resume, already worded:
+    /// the refusal is the one [`crate::carrying::Instead`] the launch cannot
+    /// write for itself.
+    why: crate::carrying::Instead,
+
+    /// And the channel a Set settled is announced on, so that a wait held on one
+    /// of the Sets this launch left open ends rather than sitting out its window.
+    /// [`Held`]'s own, carried this far for the same reason it was carried there.
+    settlements: store::Settlements,
+}
+
+/// What a refused resume owes the record: the Notice saying the session in front
+/// of the human is Verkstead's own Resume after all, and the Question Sets that
+/// were held open for a reader who never came back.
+///
+/// **Read off the ending rather than off anything the harness said**, because
+/// what a harness prints when it will not resume is that harness's wording and
+/// free to change under us — see ADR 0006. What is read instead is the shape:
+/// the session ended badly, and nothing was ever added to the record it was
+/// launched to carry on. A resume that took would have written into that record
+/// as it worked; one that never started wrote nothing, which is the same thing
+/// said about the file rather than about the screen.
+///
+/// **The Sets are the reversal put back.** A relaunch locks every Set it orphans
+/// and this launch held them open, the resume being about to bring that reader
+/// back on this machine — and it did not, so they are locked exactly as the
+/// relaunch would have locked them. Read off the record here rather than taken
+/// from what was held: this is a moment later than the launch, and what is open
+/// now is what is open now.
+///
+/// **And Verkstead's own Resume is what takes the work up from here**, by the
+/// standing route rather than a new one: the row that said a conversation was to
+/// be carried on was spent by the launch that has just failed, so the next
+/// session started for this Conversation is a session of its own, primed from
+/// the record. Which is what the Notice says has happened.
+async fn refused(pool: &SqlitePool, nudges: &Nudges, conversation_id: i64, resuming: Resuming) {
+    crate::carrying::instead(pool, nudges, conversation_id, &resuming.why).await;
+
+    let open = match store::timeline(pool, conversation_id).await {
+        Ok(timeline) => crate::sets::open(&timeline, crate::sets::Open::Idled),
+
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading what a refused resume had been holding open failed, so nothing was locked");
+            return;
+        }
+    };
+
+    crate::sets::locking(
+        pool,
+        &resuming.settlements,
+        nudges,
+        conversation_id,
+        &open,
+        "the harness would not resume the session that asked it",
+    )
+    .await;
 }
 
 /// End the sandbox a session runs in, which is what reaches the session itself:

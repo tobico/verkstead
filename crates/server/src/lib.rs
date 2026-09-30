@@ -44,6 +44,7 @@ mod browsing;
 pub mod boundaries;
 pub mod build_cache;
 mod capture;
+mod carrying;
 mod checklist;
 mod checks;
 mod cleanup;

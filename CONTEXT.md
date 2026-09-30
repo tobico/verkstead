@@ -583,11 +583,26 @@ about a move.
 one. What the name is *for* is finding the log the harness keeps, and a resumed
 claude goes on writing the log it resumed — so a row naming anything else would be
 a **Transcript** read out of the wrong file.
-**Three things leave it Verkstead's Resume**, each of them said in the log and
-nothing more: no session on the record, a **Pairing** on a harness other than the
-one that session ran on — a Conversation whose Profile was changed under it has a
-log no other backend can read — and a log that is not where the harness will look
-for it. The last is proved rather than assumed: Claude's store crosses as a labelled
+**Five things leave it Verkstead's Resume, and each of them is said on the
+Timeline.** The human presses one thing and can see two outcomes from it: a
+resumed agent picks up mid-sentence and a re-primed one starts the state again
+from the record, and from the outside both are a session appearing. So the
+arrival that *did* carry a conversation on says so in a **Notice** of its own —
+which harness was told to resume which session — and the one that did not says
+that instead, with the reason. None of the reasons is a failure and none of them
+is anything to answer: whatever the arrival takes the work up with is already on
+its way by the time the Notice is written, and Verkstead's Resume is a complete way
+to take up work that has landed.
+**The Profile's memory switch off** is the first: nothing of the harness's store
+travelled, because a session under a Profile that shares no memory gets a store of
+its own and empty, away from home exactly as at home. **No session on the record**
+is the second — a Conversation that moved before it had ever run one, and one whose
+sessions were on a backend that names none and whose own id was never written down —
+and it is the one known at the arrival rather than at the launch. **A Pairing on a
+harness other than the one that session ran on** is the third, a Conversation whose
+Profile was changed under it having a log no other backend can read. **A log that is
+not where the harness will look for it** is the fourth, and it is proved rather than
+assumed: Claude's store crosses as a labelled
 part each machine names its own path for, so it should land under this device's own
 encoding of this device's Worktree path with nothing to do — but the part the home
 device named it off is *its* worktrees directory joined onto the stem this Worktree
@@ -600,6 +615,15 @@ one whose opening line said nothing about which session it was, which is a sessi
 that was never named on the record at all. OpenCode's is the same said of a row: a
 store that did not come across, a store holding no row of that id, and one whose
 shape this build cannot write into.
+**And the fifth is the harness refusing**, which is the one reason nothing can know
+before the launch: the log was proved to be there and the line was written, and the
+harness said no anyway. What says so is the shape of the ending rather than anything
+the harness printed — the session ended badly having never added a line to the record
+it was launched to carry on — and what follows is what follows any session that has
+died: the **Question Sets** held open for a reader who is not coming back are locked
+as a relaunch would have locked them, and the next session started for the
+Conversation is Verkstead's own Resume, the row saying a conversation was to be
+carried on having been spent by the launch that failed.
 **The Note is the whole of what a carried conversation is primed with.** The
 session has its own context and is mid-turn in its own thinking, so being told the
 Brief again is worse than being told nothing: what it is sent is what it cannot
@@ -2682,7 +2706,10 @@ run, that the roadmap on the record is not on the branch to read, that a branch
 wrote no single roadmap so no Stage was started, that a Stage predates the
 record of which roadmap it belongs to and is the human's to continue, that a
 wrap-up is down to its checks, that a session away from home could not write its
-Profile's login back to the device the account is on — see **Account mirror** — or
+Profile's login back to the device the account is on — see **Account mirror** —
+that a Conversation moved onto this device was taken up with the harness's own
+resume of the conversation it arrived part way through, or with Verkstead's own
+Resume and which reason it was — see **Carried Conversation** — or
 — as a **stop Notice** — what stopped driving, why, and what the evidence was. No
 agent wrote it and nobody pressed anything for it. It is what running unattended
 owes the human: a decision made while nobody was watching is one they have to be
