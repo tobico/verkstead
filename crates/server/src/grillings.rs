@@ -97,69 +97,18 @@ pub(crate) async fn again(state: AppState, conversation_id: i64, driving: Drivin
         }
     };
 
-    // What the prompt names first is the grilling skill, by the path this
-    // server installed it at — and a server that installed none runs no
-    // sessions to name it to.
-    let Some(skills) = state.sessions.skills() else {
-        tracing::error!(
-            conversation_id,
-            "this server has no grilling skill to send a session into, so none was started"
-        );
-        return;
-    };
-
-    // The round's own Brief either way — the newest on the Timeline, which is
-    // the one the round this session belongs to was opened with.
+    // What the dead grilling left open: locked here as it always has been, or
+    // held for the resume that is about to be tried — in which case the launch is
+    // what makes the holding good, either by naming those Sets in the note it
+    // primes the resumed session with or by locking them after all. See
+    // [`orphaned`].
     //
-    // And, where the digest is carried, the files the human put on those
-    // Answers: a relaunch is primed with what was settled, and what came with a
-    // decision is part of it. Read only where there is a digest to name them
-    // under — a steer into Grilling carries none, and neither does the reading.
-    let prompt = match digest {
-        Digest::Prime => skills::grilling_again(
-            skills,
-            &brief(&timeline),
-            &settled(&timeline, &OnAnswers::of(&state, conversation_id).await),
-        ),
-        Digest::Skip => skills::grilling(skills, &brief(&timeline)),
-    };
-
-    // Read back here rather than carried from anywhere: a stall may be answered
-    // the next morning, and where an agent is about to be let loose is the one
-    // thing that must not be guessed at.
-    let conversation = match store::load_conversation(&state.pool, conversation_id).await {
-        Ok(Some(conversation)) => conversation,
-        Ok(None) => {
-            tracing::error!(conversation_id, "there is no Conversation left to grill");
-            return;
-        }
-        Err(error) => {
-            tracing::error!(error = ?error, conversation_id, "reading the Conversation to grill again failed");
-            return;
-        }
-    };
-
-    // The grilling Pairing, which is the one a grilling runs under whatever else
-    // has happened since — the implementation one is what the work is built
-    // under, and this session is not building anything.
-    let Some(pairing) = conversation.grilling_pairing.clone() else {
-        tracing::error!(
-            conversation_id,
-            "the grilling Pairing is gone, so the grilling was not started again"
-        );
-        return;
-    };
-
-    // What the dead grilling left open: locked as it always has been, or held for
-    // the resume that is about to be tried — in which case the launch is what
-    // makes the holding good, either by naming those Sets in the note it primes
-    // the resumed session with or by locking them after all. See [`orphaned`].
-    //
-    // **Here rather than up with the reading of the Timeline**, and that is the
-    // whole of why it is this far down: everything between the two is a way this
-    // relaunch gives up, and a Set held for a launch that never happened would be
-    // one nobody ever settled. Past this point the only way out is the launch
-    // itself, and both of its answers are dealt with below.
+    // **The moment the Timeline has been read, and locked here where nothing is
+    // standing**, because everything below this is a way the relaunch can give
+    // up: a Set locked any later than this is one the human could answer into a
+    // session that is never going to exist. Where a conversation *is* standing
+    // the holding runs past all of that instead, and what makes it good is the
+    // answer [`relaunching`] comes back with.
     let held = if held_for_a_resume(&state, conversation_id).await {
         let held = crate::sets::open(&timeline, crate::sets::Open::Idled);
 
@@ -174,6 +123,100 @@ pub(crate) async fn again(state: AppState, conversation_id: i64, driving: Drivin
     } else {
         orphaned(&state, conversation_id, &timeline).await;
         Vec::new()
+    };
+
+    let started = relaunching(&state, conversation_id, &timeline, digest, &held).await;
+
+    // And where no session came of it, whatever was held is made good here
+    // instead: the launch settles what it was handed, and a launch that did not
+    // happen — or that was never reached — settled nothing. Which leaves this
+    // relaunch exactly where one that held nothing leaves it: a Conversation with
+    // no session, and no question standing in front of the human with nobody
+    // behind it.
+    if !held.is_empty() && !started {
+        orphaned(&state, conversation_id, &timeline).await;
+    }
+
+    // Whatever came of it, the registration goes now: either there is a session
+    // driving the Conversation or there is nothing to drive it with, and the
+    // second of those is a stall the next sweep should find.
+    drop(driving);
+}
+
+/// The relaunch itself: the prompt built, the Conversation and the Pairing it
+/// runs under read back, and the session started. `true` where there is a session
+/// driving the Conversation at the end of it.
+///
+/// **Its own function so that every way of giving up is one answer.** What the
+/// caller owes the Question Sets it held turns on whether a session started, and
+/// there are four ways to leave here without one — a server with no grilling
+/// skill to name, a Conversation that has gone, a grilling Pairing that has gone,
+/// and the launch itself. Each of them is `false`, and the caller makes the
+/// holding good once rather than at four returns that would each have to remember
+/// to.
+///
+/// `held` is what the caller held and is passed on to the launch and nowhere
+/// else: the launch names those Sets in the note it primes a resumed session
+/// with, or locks them where the resume turns out not to be possible — see
+/// [`crate::sessions::Held`].
+async fn relaunching(
+    state: &AppState,
+    conversation_id: i64,
+    timeline: &[store::TimelineEvent],
+    digest: Digest,
+    held: &[i64],
+) -> bool {
+    // What the prompt names first is the grilling skill, by the path this
+    // server installed it at — and a server that installed none runs no
+    // sessions to name it to.
+    let Some(skills) = state.sessions.skills() else {
+        tracing::error!(
+            conversation_id,
+            "this server has no grilling skill to send a session into, so none was started"
+        );
+        return false;
+    };
+
+    // The round's own Brief either way — the newest on the Timeline, which is
+    // the one the round this session belongs to was opened with.
+    //
+    // And, where the digest is carried, the files the human put on those
+    // Answers: a relaunch is primed with what was settled, and what came with a
+    // decision is part of it. Read only where there is a digest to name them
+    // under — a steer into Grilling carries none, and neither does the reading.
+    let prompt = match digest {
+        Digest::Prime => skills::grilling_again(
+            skills,
+            &brief(timeline),
+            &settled(timeline, &OnAnswers::of(state, conversation_id).await),
+        ),
+        Digest::Skip => skills::grilling(skills, &brief(timeline)),
+    };
+
+    // Read back here rather than carried from anywhere: a stall may be answered
+    // the next morning, and where an agent is about to be let loose is the one
+    // thing that must not be guessed at.
+    let conversation = match store::load_conversation(&state.pool, conversation_id).await {
+        Ok(Some(conversation)) => conversation,
+        Ok(None) => {
+            tracing::error!(conversation_id, "there is no Conversation left to grill");
+            return false;
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading the Conversation to grill again failed");
+            return false;
+        }
+    };
+
+    // The grilling Pairing, which is the one a grilling runs under whatever else
+    // has happened since — the implementation one is what the work is built
+    // under, and this session is not building anything.
+    let Some(pairing) = conversation.grilling_pairing.clone() else {
+        tracing::error!(
+            conversation_id,
+            "the grilling Pairing is gone, so the grilling was not started again"
+        );
+        return false;
     };
 
     // One Worktree holds one agent. The session this is replacing died rather
@@ -191,7 +234,7 @@ pub(crate) async fn again(state: AppState, conversation_id: i64, driving: Drivin
             &pairing,
             &prompt,
             sessions::Held {
-                sets: &held,
+                sets: held,
                 settlements: &state.settlements,
             },
         )
@@ -212,19 +255,7 @@ pub(crate) async fn again(state: AppState, conversation_id: i64, driving: Drivin
         }
     }
 
-    // And where there is no session at all, whatever was held is made good here
-    // instead: the launch settles what it was handed, and a launch that did not
-    // happen settled nothing. Which leaves this relaunch exactly where one that
-    // held nothing leaves it — a Conversation with no session, and no question
-    // standing in front of the human with nobody behind it.
-    if !held.is_empty() && !matches!(started, Ok(Some(_))) {
-        orphaned(&state, conversation_id, &timeline).await;
-    }
-
-    // Whatever came of it, the registration goes now: either there is a session
-    // driving the Conversation or there is nothing to drive it with, and the
-    // second of those is a stall the next sweep should find.
-    drop(driving);
+    matches!(started, Ok(Some(_)))
 }
 
 /// Lock every Question Set the dead grilling left open, so that nothing is left
