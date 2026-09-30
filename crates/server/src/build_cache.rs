@@ -738,6 +738,16 @@ impl BuildCache {
         compiles
     }
 
+    /// How many sessions and terminals hold the Compile Server right now — see
+    /// [`Compiles`] — which is what a restart for a new Worktree waits on.
+    ///
+    /// Read by nothing in the server but the decision itself, which counts
+    /// under the lock instead; out here so a test of whoever carries a hold can
+    /// see it is still held.
+    pub fn holding(&self) -> usize {
+        self.using.load(Ordering::Acquire)
+    }
+
     /// The compile server, locked.
     fn held(&self) -> std::sync::MutexGuard<'_, Option<Compiling>> {
         self.compiling

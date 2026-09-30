@@ -5825,6 +5825,49 @@ async fn the_sccache_the_server_resolved_is_what_rustc_is_wrapped_in() {
     assert_eq!(reported["cache"], "write");
 }
 
+/// A launch's hold on the Compile Server lives as long as what it started, and
+/// no longer: carried from the sandbox into what the rendering leaves to see
+/// to, so dropping the sandbox once the process is started lets nothing go,
+/// and seeing to the ending does.
+///
+/// **Which is the whole of what keeps the Compile Server from being started
+/// again under a running build** — a new Worktree restarts it only while
+/// nothing holds one (see `build_cache`'s own tests, where that decision is
+/// asked). A hold that fell off with the sandbox would be a restart landing
+/// under every session, with the decision itself still passing its tests.
+#[tokio::test]
+async fn a_launch_holds_the_compile_server_until_its_ending_is_seen_to() {
+    let fixture = grilling().await;
+    let cache = BuildCache::none();
+
+    // What a spawn does: take a hold, and hand it to the sandbox it builds.
+    let sandbox = fixture
+        .sandbox(vec![])
+        .compiling_through(cache.compiling(&fixture.settings.config(), None));
+
+    assert_eq!(cache.holding(), 1, "the spawn is counted as it takes it");
+
+    let (_rendering, closing) = sandbox
+        .command(&[SH, "-c", "true"])
+        .expect("a rendering on a platform with no identity to make");
+
+    drop(sandbox);
+
+    assert_eq!(
+        cache.holding(),
+        1,
+        "still held once the sandbox has gone: the ending carries it",
+    );
+
+    drop(closing);
+
+    assert_eq!(
+        cache.holding(),
+        0,
+        "and let go of once what the rendering left has been seen to",
+    );
+}
+
 /// The switch is the human's, in `config.yaml` and on the settings page, and it
 /// is read as each sandbox is built — so turning it off is a next session with
 /// no bind and none of the variables.
