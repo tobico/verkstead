@@ -49,6 +49,34 @@ Which variable each tool reads is not recorded here on purpose. It is a fact
 about each tool's current release, checked against its documentation when the
 stage starts and then proven by the real install.
 
+## Settled when the stage started
+
+The grilling of 2026-09-30, which is what the open questions above were left to.
+
+- **The eleven tools are four descriptors** — `go`, `node`, `python`, `dotnet` —
+  so one box on the **Language support** pane covers an ecosystem. Node, Deno
+  and Bun are one language, not three: turning Node off turns all five
+  JavaScript tools off. Rejected: an entry per runtime, and an entry per tool.
+- **One scenario per tool, not two.** Two installs at once in two Sandboxes,
+  then a third denied its registry. That proves the store was read and that two
+  writers did not damage it in three installs rather than five.
+- **A skipped proof is green locally and red in CI.** A checkout run on a
+  machine that builds only Rust stays green; a tool leaving CI's list cannot do
+  so quietly.
+- **CI gets a job of its own on Linux**, installing what the runner image lacks,
+  rather than more steps in the Rust job.
+- **.NET's `detect` list is empty**, and the YAML says why: `detect` matches
+  literal filenames and a .NET project is `*.csproj` or `*.sln`. Rejected: globs
+  in the grammar, which would be the new server behaviour this stage exists to
+  show is unnecessary.
+- **Both yarns, in one descriptor.** Classic and Berry read different variables,
+  and the entry carries both.
+- **poetry and pipenv are told to keep the virtual environment in the project.**
+  Both otherwise keep venvs under the directory their cache variable names, and
+  a venv holds absolute paths, so a shared one is broken in every Worktree but
+  the one that built it. A descriptor's value does not have to be a path, so
+  this needs no new placeholder.
+
 ## Proposed tasks (provisional)
 
 1. **The tools in the dev shell and CI.** AC: each tool answers inside a
