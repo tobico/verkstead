@@ -16,9 +16,10 @@
 //!    tool **denied its registry** — the offline flag the tool documents, and
 //!    no bind of the registry either. An install that succeeds with nothing to
 //!    fetch from succeeded out of the store. **Where a tool documents no such
-//!    flag** — bun is the one so far — the third install is the second one word
+//!    flag** — bun, poetry and pipenv — the third install is the second one word
 //!    for word, against a registry that has stopped answering, which is the
-//!    same proof by the other route.
+//!    same proof by the other route, and arguably the plainer one: there is no
+//!    flag that could be doing the work instead of the store.
 //! 3. And the control: a fourth Sandbox, denied its registry the same way, on a
 //!    Build Cache **nothing has filled**. It must fail. Without it, step 2 is a
 //!    branch that would pass whatever the tool did with its variable — a build
@@ -43,6 +44,9 @@
 //!   answering before the install that must not reach it starts. deno and bun
 //!   install out of that same registry, which is what makes them Node's rather
 //!   than entries of their own.
+//! - And Python's four serve one of their own, PEP 503's rather than npm's — see
+//!   [`pypi_registry`] — shut the same way. All four install out of it, which is
+//!   what makes them one entry as well.
 //!
 //! **A tool that is not installed is skipped in a line naming it**, so a
 //! checkout run on a machine that only builds Rust stays green. Set
@@ -64,6 +68,9 @@ use axum::Router;
 use axum::extract::State;
 use axum::http::header;
 use axum::routing::get;
+use base64::Engine;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use sha2::{Digest, Sha256};
 
 use verkstead_server::attachments::Attachments;
 use verkstead_server::build_cache::BuildCache;
@@ -1934,55 +1941,67 @@ const PYPI_WHEEL: &str = "greet_from_the_store-1.0.0-py3-none-any.whl";
 /// The wheel is a zip with two members and no compiled anything: the module,
 /// and the `.dist-info` directory that says what it is. Built with the suite's
 /// own `zip`, exactly as the Go proof builds its module archive.
+///
+/// **`RECORD` names every file by sha256 and size**, which is the spec's own
+/// shape and is not decoration: poetry reads that file as it installs and says
+/// so where an entry is missing, so a `RECORD` with the hashes left out is three
+/// paragraphs of warning on every poetry install in this suite. The hash is
+/// urlsafe base64 without padding, prefixed `sha256=`, and `RECORD`'s own line
+/// carries neither — both of which the spec says.
 fn pypi_registry(at: &Path, zip: &Path) -> Registry {
     let inside = at.join("what-goes-in-the-wheel");
+    let dist_info = format!("{PYPI_MODULE}-{PYPI_VERSION}.dist-info");
     let module = inside.join(PYPI_MODULE);
-    let metadata = inside.join(format!("{PYPI_MODULE}-{PYPI_VERSION}.dist-info"));
+    let metadata = inside.join(&dist_info);
 
     std::fs::create_dir_all(&module).unwrap();
     std::fs::create_dir_all(&metadata).unwrap();
 
-    std::fs::write(
-        module.join("__init__.py"),
-        format!("GREETING = \"{OUT_OF_THE_STORE}\"\n"),
-    )
-    .unwrap();
+    // The three files a wheel has to carry, and then the fourth that says what
+    // the three of them are.
+    let files = [
+        (
+            format!("{PYPI_MODULE}/__init__.py"),
+            format!("GREETING = \"{OUT_OF_THE_STORE}\"\n"),
+        ),
+        (
+            format!("{dist_info}/METADATA"),
+            format!(
+                "Metadata-Version: 2.1\nName: {PYPI_PACKAGE}\nVersion: {PYPI_VERSION}\n\
+                 Summary: what a shared store held\n\n"
+            ),
+        ),
+        (
+            format!("{dist_info}/WHEEL"),
+            String::from(
+                "Wheel-Version: 1.0\nGenerator: verkstead-tests\nRoot-Is-Purelib: true\n\
+                 Tag: py3-none-any\n",
+            ),
+        ),
+    ];
 
-    // The three files a wheel has to carry. `RECORD` names its own members with
-    // the hash and the size left empty, which the spec allows and both tools
-    // accept: what is being proved here is where the file came from rather than
-    // that this suite can compute a sha256 the way a build backend does.
-    std::fs::write(
-        metadata.join("METADATA"),
-        format!(
-            "Metadata-Version: 2.1\nName: {PYPI_PACKAGE}\nVersion: {PYPI_VERSION}\n\
-             Summary: what a shared store held\n\n"
-        ),
-    )
-    .unwrap();
-    std::fs::write(
-        metadata.join("WHEEL"),
-        "Wheel-Version: 1.0\nGenerator: verkstead-tests\nRoot-Is-Purelib: true\n\
-         Tag: py3-none-any\n",
-    )
-    .unwrap();
-    std::fs::write(
-        metadata.join("RECORD"),
-        format!(
-            "{PYPI_MODULE}/__init__.py,,\n\
-             {PYPI_MODULE}-{PYPI_VERSION}.dist-info/METADATA,,\n\
-             {PYPI_MODULE}-{PYPI_VERSION}.dist-info/WHEEL,,\n\
-             {PYPI_MODULE}-{PYPI_VERSION}.dist-info/RECORD,,\n"
-        ),
-    )
-    .unwrap();
+    let mut record = String::new();
+
+    for (named, content) in &files {
+        std::fs::write(inside.join(named), content).unwrap();
+
+        record.push_str(&format!(
+            "{named},sha256={hash},{size}\n",
+            hash = URL_SAFE_NO_PAD.encode(Sha256::digest(content.as_bytes())),
+            size = content.len(),
+        ));
+    }
+
+    record.push_str(&format!("{dist_info}/RECORD,,\n"));
+
+    std::fs::write(metadata.join("RECORD"), &record).unwrap();
 
     let archive = at.join(PYPI_WHEEL);
     let made = Command::new(zip)
         .args(["-q", "-r", "-X", "-D"])
         .arg(&archive)
         .arg(PYPI_MODULE)
-        .arg(format!("{PYPI_MODULE}-{PYPI_VERSION}.dist-info"))
+        .arg(&dist_info)
         .current_dir(&inside)
         .stdin(Stdio::null())
         .status()
@@ -2087,6 +2106,22 @@ struct Python {
     /// takes something out of the way rather than moving a store.
     settings: &'static str,
 
+    /// What the Worktree holds before any of it runs: the manifest this tool
+    /// reads, named and written, with `{registry}` and `{wheel}` in it the way
+    /// the scripts have them.
+    ///
+    /// pip and uv name what they are installing on the command line and need
+    /// none; poetry and pipenv read a project rather than an argument, which is
+    /// also where each is told which index to use.
+    manifest: Option<(&'static str, &'static str)>,
+
+    /// And the lockfile the first install writes, which a Repo would have
+    /// committed: the two installs after it are handed a copy, which is what a
+    /// second Conversation on a checked-out Repo really starts from — see
+    /// [`one_javascript_tools_store`], where the same thing is done for the same
+    /// reason. pip and uv write none.
+    lockfile: Option<&'static str>,
+
     /// The install that fills the store, with `{registry}` for the index's base
     /// URL and `{wheel}` for the wheel's own.
     filling: &'static str,
@@ -2109,11 +2144,17 @@ struct Python {
 /// proved something.
 ///
 /// The same four Sandboxes as [`one_javascript_tools_store`], and the same
-/// reasoning throughout. Two things are its own. The registry is PEP 503's
-/// rather than npm's — see [`pypi_registry`]. And there is no lockfile to carry
-/// from the first install to the ones that follow: neither of these two writes
-/// one, and what a Python Repo pins is a file it committed rather than a file an
-/// install left behind.
+/// reasoning throughout. One thing is its own: the registry is PEP 503's rather
+/// than npm's — see [`pypi_registry`].
+///
+/// **Two of the four tools install out of a project and two out of a command
+/// line**, which is the only other difference and is the reason the manifest and
+/// the lockfile are each an `Option` here where they are not in Node's. pip and
+/// uv are told what to install and which index to take it from as arguments, and
+/// leave nothing behind that the next install reads; poetry and pipenv read a
+/// file in the Worktree for both, and write a lockfile that a Repo would have
+/// committed — so those two have one written into all four Worktrees, and the
+/// first install's lock carried into the two that follow it.
 async fn one_python_tools_store(proof: Python) {
     let Some(found_them) = tools(proof.tool, proof.wants) else {
         return;
@@ -2148,6 +2189,15 @@ async fn one_python_tools_store(proof: Python) {
     // taking it off the air.
     let url = registry.url.clone();
 
+    // And the manifest every one of the four Worktrees holds, where this tool
+    // installs out of one: a Repo's own file, naming the index this proof serves
+    // and the distribution it is to install out of it.
+    if let Some((called, written)) = proof.manifest {
+        for nth in 0..4 {
+            std::fs::write(machine.worktree(nth).join(called), named(written, &url)).unwrap();
+        }
+    }
+
     let script = |install: &str| {
         named(
             &format!(
@@ -2166,11 +2216,31 @@ async fn one_python_tools_store(proof: Python) {
     let first = starting(&machine.sandbox(0, &cache, vec![]), &filling);
     let second = starting(&machine.sandbox(1, &cache, vec![]), &filling);
 
-    finished(first).worked(&format!(
+    let first = finished(first);
+
+    first.worked(&format!(
         "the first session's {} install fills the store",
         proof.tool
     ));
     finished(second).worked("and the second one racing it finishes just as well");
+
+    // The lockfile the first one wrote, carried to the two that follow the way
+    // a Repo carries one: committed, and checked out into every Worktree.
+    if let Some(called) = proof.lockfile {
+        let written = machine.worktree(0).join(called);
+        let lock = std::fs::read(&written).unwrap_or_else(|error| {
+            panic!(
+                "{} should have written {} ({error}), and it said:\n{}",
+                proof.tool,
+                written.display(),
+                first.said,
+            )
+        });
+
+        for nth in 2..4 {
+            std::fs::write(machine.worktree(nth).join(called), &lock).unwrap();
+        }
+    }
 
     // And the proof. The index stops answering and the tool is told not to look
     // for one: what is left to install out of is the store the two above
@@ -2249,6 +2319,10 @@ async fn pip_fills_one_cache_and_a_third_install_reads_it() {
     one_python_tools_store(Python {
         tool: "pip",
         wants: &["python3", "zip"],
+        // Nothing in the Worktree: what pip installs is named on its command
+        // line, and what it writes is a directory rather than a lockfile.
+        manifest: None,
+        lockfile: None,
         // `PIP_DISABLE_PIP_VERSION_CHECK` so that nothing here asks pypi.org
         // whether there is a newer pip — the one thing in this proof that would
         // otherwise reach the internet — and `PIP_RETRIES=1` so that the
@@ -2295,6 +2369,11 @@ async fn uv_fills_one_store_and_a_third_install_reads_it() {
     one_python_tools_store(Python {
         tool: "uv",
         wants: &["uv", "python3", "zip"],
+        // `uv pip install` is pip's interface, so this one names what it is
+        // installing on the command line too, and `uv lock` — which would write
+        // a file — is a different verb from the one being proved.
+        manifest: None,
+        lockfile: None,
         settings: "export UV_PYTHON_DOWNLOADS=never UV_NO_PROGRESS=1",
         filling: "{uv} venv --python {python3}\n\
                   {uv} pip install --index-url {registry}/simple/ greet-from-the-store",
@@ -2433,17 +2512,377 @@ async fn uvs_cache_is_beside_the_worktrees_and_it_says_it_could_not_hardlink() {
     );
 }
 
-/// And the environment those installs ran in was the descriptor's: pip's cache
-/// under the one Build Cache and uv's beside the Worktrees, and a session can
-/// write in both.
+/// poetry: `POETRY_CACHE_DIR`, `POETRY_VIRTUALENVS_IN_PROJECT`, and **no offline
+/// flag at all**, which is bun's shape rather than pip's.
+///
+/// `poetry install --help` lists nothing that says *cache only*, and poetry
+/// needs nothing: the third install is the second **word for word**, against an
+/// index that has stopped answering. Which is the plainer proof of the two —
+/// there is no flag here that could be doing the work instead of the store.
+///
+/// **Two directories under that one variable, and an install offline needs
+/// both**, which is pnpm's finding with one variable rather than two.
+/// `artifacts` holds the distributions poetry downloaded and
+/// `cache/repositories/<source>` the release information it resolved out of the
+/// index — and an install handed the artifacts and not the repositories cache
+/// goes to the network for the file's URL and fails. Measured rather than read:
+/// both halves are under `POETRY_CACHE_DIR`, so what a session is given covers
+/// it, but a descriptor naming a directory *inside* poetry's cache would have
+/// covered half.
+///
+/// **What it installs into is `.venv` in the Worktree**, which is the other
+/// variable. See
+/// [`poetrys_environment_stays_in_the_worktree_and_the_store_holds_no_venv`] for
+/// what that is there to stop.
+///
+/// `poetry env use` names the interpreter absolutely, for [`found`]'s reason: a
+/// sandbox's `PATH` is the machine's system profile, so the `python3` this suite
+/// found is one it has to name in full — and poetry left to itself takes
+/// whatever `python3` that `PATH` happens to hold.
+///
+/// The control fails on `All attempts to connect to`, which is poetry's own
+/// account of an index it had to reach and could not.
+#[tokio::test]
+async fn poetry_fills_one_cache_and_a_third_install_reads_it() {
+    one_python_tools_store(Python {
+        tool: "poetry",
+        wants: &["poetry", "python3", "zip"],
+        // A Repo's own project file, which is where poetry is told both what to
+        // install and which index to install it from: poetry has no
+        // `--index-url`, a source being a thing a project declares.
+        //
+        // `package-mode = false` so that what is installed is the dependency and
+        // not the project itself, which has no package to build.
+        manifest: Some((
+            "pyproject.toml",
+            "[project]\n\
+             name = \"app\"\n\
+             version = \"1.0.0\"\n\
+             requires-python = \">=3.8\"\n\
+             dependencies = [\"greet-from-the-store==1.0.0\"]\n\
+             \n\
+             [tool.poetry]\n\
+             package-mode = false\n\
+             \n\
+             [[tool.poetry.source]]\n\
+             name = \"the-one-this-proof-serves\"\n\
+             url = \"{registry}/simple/\"\n\
+             priority = \"primary\"\n",
+        )),
+        lockfile: Some("poetry.lock"),
+        // Each of these takes something out of the way rather than moving a
+        // store: nothing is asked of a human, no keyring is consulted for a
+        // registry on the loopback, and virtualenv does not ask PyPI in the
+        // background whether there is a newer pip to seed the environment with.
+        settings: "export POETRY_NO_INTERACTION=1 POETRY_KEYRING_ENABLED=false \
+                   VIRTUALENV_NO_PERIODIC_UPDATE=1",
+        filling: "{poetry} env use {python3}\n{poetry} install",
+        offline: "{poetry} env use {python3}\n{poetry} install",
+        running: "./.venv/bin/python -c \
+                  \"import greet_from_the_store as it; print(it.GREETING)\"",
+        denied: "All attempts to connect to",
+    })
+    .await;
+}
+
+/// pipenv: `PIPENV_CACHE_DIR`, `PIPENV_VENV_IN_PROJECT`, and no offline flag
+/// either — so the third install is the second word for word here as well.
+///
+/// **pipenv's store is pip's, and that is the thing this proof is really
+/// about.** pipenv runs pip in an environment of its own making:
+/// `PIP_CACHE_DIR` pointed at `PIPENV_CACHE_DIR`, `PIP_CONFIG_FILE` at the null
+/// device, and not one other `PIP_` of the session's carried through. So the
+/// `PIP_CACHE_DIR` the descriptor sets does nothing for a pipenv install, and
+/// leaving pipenv's out would leave every pipenv install downloading into the
+/// empty home each session gets — which no assertion about the environment could
+/// have caught, and which this install is what catches.
+///
+/// And because the store is pip's, it is an **HTTP cache** with pip's limits:
+/// what it can serve with nothing on the air is a distribution already asked for
+/// by URL rather than one named by name. So the `Pipfile` pins the wheel by its
+/// URL, exactly as [`pip_fills_one_cache_and_a_third_install_reads_it`] pins it
+/// on the command line and for the same measured reason. `verify_ssl = false` is
+/// what makes pipenv name the loopback trusted to pip, which is the other half
+/// of that finding: pip mounts a non-caching adapter for plain `http://` and the
+/// caching one only for a host that was named.
+///
+/// The control fails on `Connection refused`, which is pip having had to fetch.
+#[tokio::test]
+async fn pipenv_fills_one_cache_and_a_third_install_reads_it() {
+    one_python_tools_store(Python {
+        tool: "pipenv",
+        wants: &["pipenv", "python3", "zip"],
+        manifest: Some((
+            "Pipfile",
+            "[[source]]\n\
+             name = \"the-one-this-proof-serves\"\n\
+             url = \"{registry}/simple/\"\n\
+             verify_ssl = false\n\
+             \n\
+             [packages]\n\
+             greet-from-the-store = {file = \"{wheel}\"}\n",
+        )),
+        lockfile: Some("Pipfile.lock"),
+        settings: "export VIRTUALENV_NO_PERIODIC_UPDATE=1",
+        filling: "{pipenv} install --python {python3}",
+        offline: "{pipenv} install --python {python3}",
+        running: "./.venv/bin/python -c \
+                  \"import greet_from_the_store as it; print(it.GREETING)\"",
+        denied: "Connection refused",
+    })
+    .await;
+}
+
+/// Anything under `dir` that is a virtual environment, which is the one file
+/// every one of them has: `pyvenv.cfg`, at the root of the environment.
+///
+/// Walked without following a link, because an environment is full of them —
+/// `lib64` pointing at `lib` is the ordinary case — and a walk that followed one
+/// would be a walk that could go round.
+fn a_virtualenv_under(dir: &Path) -> Option<PathBuf> {
+    let mut looking = vec![dir.to_owned()];
+
+    while let Some(here) = looking.pop() {
+        for entry in std::fs::read_dir(&here).into_iter().flatten().flatten() {
+            let Ok(what) = entry.file_type() else {
+                continue;
+            };
+
+            if what.is_dir() {
+                looking.push(entry.path());
+            } else if what.is_file() && entry.file_name() == "pyvenv.cfg" {
+                return Some(entry.path());
+            }
+        }
+    }
+
+    None
+}
+
+/// What one of the two tools that had to be told where to keep an environment is
+/// asked, once it has really installed something.
+struct Environment {
+    /// What the skip line names and the assertions call it.
+    tool: &'static str,
+
+    /// The programs it takes, standing in the script as `{its-own-name}`.
+    wants: &'static [&'static str],
+
+    /// The manifest its Worktree holds, with `{registry}` and `{wheel}` in it.
+    manifest: (&'static str, &'static str),
+
+    /// The variable that says where its downloads go, and what the session is
+    /// expected to have been given for it — which is a directory named under the
+    /// one Build Cache.
+    store: (&'static str, &'static str),
+
+    /// And the install, which has to end with the distribution installed into an
+    /// environment of the Worktree's.
+    installing: &'static str,
+}
+
+/// One tool's environment: **in the Worktree, and nothing of it in the shared
+/// store** — asserted by looking in both.
+///
+/// This is what the second of each tool's two variables is for, and it is worth a
+/// proof of its own because it is the half no install proof can see. A venv holds
+/// absolute paths, so one built in another Worktree is broken in this one, and
+/// two sessions racing on a shared one is worse than a cold install — and
+/// **poetry's default place for one is the cache directory itself**
+/// (`virtualenvs.path` is `{cache-dir}/virtualenvs`), which is the shared store.
+/// So a session that was given the cache variable and not the setting beside it
+/// would be a session handing its environment to every other Conversation on the
+/// Repo, and every install proof would go on passing.
+///
+/// Both halves, because either on its own is half an answer: the module really
+/// imported out of an environment under this Conversation's own checkout, and no
+/// `pyvenv.cfg` anywhere under the Build Cache or the directory beside the
+/// Worktrees. The second is the one that would catch a release that started
+/// putting something else of an environment's there.
+async fn one_tools_environment(proof: Environment) {
+    let Some(found_them) = tools(proof.tool, proof.wants) else {
+        return;
+    };
+
+    let machine = machine(1).await;
+    let cache = machine.cache();
+    let dir = cache.dir().expect("the fixture's cache has a directory");
+
+    let registry = pypi_registry(
+        &machine
+            .registries
+            .join(format!("{}-environment", proof.tool)),
+        &found_them[proof
+            .wants
+            .iter()
+            .position(|program| *program == "zip")
+            .expect("every Python proof builds its wheel with `zip`")],
+    );
+
+    let named = |script: &str| {
+        let mut said = script
+            .replace("{registry}", &registry.url)
+            .replace("{wheel}", &format!("{}/files/{PYPI_WHEEL}", registry.url));
+
+        for (program, path) in proof.wants.iter().zip(&found_them) {
+            said = said.replace(&format!("{{{program}}}"), &path.display().to_string());
+        }
+
+        said
+    };
+
+    let (called, written) = proof.manifest;
+    std::fs::write(machine.worktree(0).join(called), named(written)).unwrap();
+
+    let (variable, under) = proof.store;
+
+    let installed = installing(
+        &machine.sandbox(0, &cache, vec![]),
+        &named(&format!(
+            "set -e\n\
+             printf 'store=%s\\n' \"${{{variable}-unset}}\"\n\
+             {installing}\n\
+             installed=\"$(./.venv/bin/python -c \
+               'import {PYPI_MODULE}; print({PYPI_MODULE}.__file__)')\"\n\
+             printf 'installed=%s\\n' \"$installed\"\n",
+            installing = proof.installing,
+        )),
+    );
+
+    registry.shut();
+
+    installed.worked(&format!(
+        "a {} session installs the distribution the index is serving",
+        proof.tool
+    ));
+
+    assert_eq!(
+        line(&installed, "store"),
+        dir.join(under).display().to_string(),
+        "{}'s downloads go under the one Build Cache, which is the half of this \
+         that is shared. The session said:\n{}",
+        proof.tool,
+        installed.said,
+    );
+
+    // Read off the interpreter rather than composed here, for the reason uv's is:
+    // the directory under `.venv/lib` is named for the Python that made it, and
+    // which Python that is is the machine's business.
+    let inside = PathBuf::from(line(&installed, "installed"));
+    let worktree = machine.worktree(0);
+
+    assert!(
+        inside.starts_with(worktree),
+        "the environment {} installed into is inside this Conversation's \
+         Worktree, which is where a venv has to stay: {} is not under {}. It \
+         said:\n{}",
+        proof.tool,
+        inside.display(),
+        worktree.display(),
+        installed.said,
+    );
+    assert!(
+        inside.starts_with(worktree.join(".venv")),
+        "and it is the `.venv` beside the manifest rather than somewhere else in \
+         the checkout, which is what the setting names: {}",
+        inside.display(),
+    );
+
+    // And the other half: nothing of an environment in either shared directory.
+    for shared in [dir.to_owned(), machine.stores_beside("shared")] {
+        assert_eq!(
+            a_virtualenv_under(&shared),
+            None,
+            "and no environment of {}'s is in the shared {}: a venv holds \
+             absolute paths, so one left there is one the next Conversation \
+             would find broken. It said:\n{}",
+            proof.tool,
+            shared.display(),
+            installed.said,
+        );
+    }
+}
+
+/// poetry's environment: in the Worktree, and its cache holds none.
+///
+/// The one this matters most for. poetry keeps its virtual environments under
+/// `cache-dir` unless it is told otherwise — measured, not read — so the
+/// descriptor's `POETRY_VIRTUALENVS_IN_PROJECT` is the whole of what keeps a
+/// Conversation's environment out of the directory every other Conversation is
+/// given. See [`one_tools_environment`].
+#[tokio::test]
+async fn poetrys_environment_stays_in_the_worktree_and_the_store_holds_no_venv() {
+    one_tools_environment(Environment {
+        tool: "poetry",
+        wants: &["poetry", "python3", "zip"],
+        manifest: (
+            "pyproject.toml",
+            "[project]\n\
+             name = \"app\"\n\
+             version = \"1.0.0\"\n\
+             requires-python = \">=3.8\"\n\
+             dependencies = [\"greet-from-the-store==1.0.0\"]\n\
+             \n\
+             [tool.poetry]\n\
+             package-mode = false\n\
+             \n\
+             [[tool.poetry.source]]\n\
+             name = \"the-one-this-proof-serves\"\n\
+             url = \"{registry}/simple/\"\n\
+             priority = \"primary\"\n",
+        ),
+        store: ("POETRY_CACHE_DIR", "poetry"),
+        installing: "export POETRY_NO_INTERACTION=1 POETRY_KEYRING_ENABLED=false \
+                     VIRTUALENV_NO_PERIODIC_UPDATE=1\n\
+                     {poetry} env use {python3}\n\
+                     {poetry} install",
+    })
+    .await;
+}
+
+/// And pipenv's, where the premise was half wrong and the answer is the same.
+///
+/// pipenv does not keep its environments under its cache variable the way poetry
+/// does: they go to `WORKON_HOME`, which is under the session's own home. So a
+/// shared cache was never a shared venv here, and what
+/// `PIPENV_VENV_IN_PROJECT` buys is that the environment outlives the session
+/// that made it — a home being a thing a sandbox throws away. Asserted the same
+/// way for both, because *in the Worktree and not in the store* is what the
+/// descriptor promises whichever of the two reasons it is true for.
+#[tokio::test]
+async fn pipenvs_environment_stays_in_the_worktree_and_the_store_holds_no_venv() {
+    one_tools_environment(Environment {
+        tool: "pipenv",
+        wants: &["pipenv", "python3", "zip"],
+        manifest: (
+            "Pipfile",
+            "[[source]]\n\
+             name = \"the-one-this-proof-serves\"\n\
+             url = \"{registry}/simple/\"\n\
+             verify_ssl = false\n\
+             \n\
+             [packages]\n\
+             greet-from-the-store = {file = \"{wheel}\"}\n",
+        ),
+        store: ("PIPENV_CACHE_DIR", "pipenv"),
+        installing: "export VIRTUALENV_NO_PERIODIC_UPDATE=1\n\
+                     {pipenv} install --python {python3}",
+    })
+    .await;
+}
+
+/// And the environment those installs ran in was the descriptor's: Python's six
+/// variables — three of the four stores under the one Build Cache, uv's beside
+/// the Worktrees, and the two settings that are not directories at all — with a
+/// session able to write in both directories.
 ///
 /// Beside the proofs rather than inside them, for the reason Go's and Node's
 /// are: what a session is *told* is asserted on all three platforms in the
 /// sandbox suites, and what a tool *does* with it is what an install is for.
-/// This is here so that a run with neither tool installed still leaves
+/// This is here so that a run with none of the four tools installed still leaves
 /// something of Python's in this file that ran.
 #[tokio::test]
-async fn a_session_is_given_pips_cache_and_uvs_store() {
+async fn a_session_is_given_the_four_python_tools_stores() {
     let machine = machine(1).await;
     let cache = machine.cache();
     let sandbox = machine.sandbox(0, &cache, vec![]);
@@ -2454,29 +2893,40 @@ async fn a_session_is_given_pips_cache_and_uvs_store() {
     let reported = installing(
         &sandbox,
         "set -e\n\
-         for named in PIP_CACHE_DIR UV_CACHE_DIR; do\n\
+         for named in PIP_CACHE_DIR UV_CACHE_DIR POETRY_CACHE_DIR PIPENV_CACHE_DIR; do\n\
            eval \"value=\\${$named-unset}\"\n\
            printf '%s=%s\\n' \"$named\" \"$value\"\n\
            mkdir -p \"$value\"\n\
            : > \"$value/written-from-inside\"\n\
+         done\n\
+         for named in POETRY_VIRTUALENVS_IN_PROJECT PIPENV_VENV_IN_PROJECT; do\n\
+           eval \"value=\\${$named-unset}\"\n\
+           printf '%s=%s\\n' \"$named\" \"$value\"\n\
          done\n",
     );
 
-    reported.worked("a session can make and write both of the directories it is pointed at");
+    reported.worked("a session can make and write every directory it is pointed at");
 
-    assert_eq!(
-        line(&reported, "PIP_CACHE_DIR"),
-        dir.join("pip").display().to_string(),
-        "pip's is inside the one Build Cache, because pip unpacks a wheel into \
-         `site-packages` and has nothing to link out of it. The session \
-         said:\n{}",
-        reported.said,
-    );
-    assert!(
-        dir.join("pip/written-from-inside").is_file(),
-        "and what the session wrote is on the host, in the directory the next \
-         Conversation's session will be given",
-    );
+    // The three under the one Build Cache, which is where a store goes that
+    // nothing links a package out of: pip unpacks a wheel into `site-packages`,
+    // poetry unpacks one out of its artifacts, and pipenv is pip.
+    for (named, under) in [
+        ("PIP_CACHE_DIR", "pip"),
+        ("POETRY_CACHE_DIR", "poetry"),
+        ("PIPENV_CACHE_DIR", "pipenv"),
+    ] {
+        assert_eq!(
+            line(&reported, named),
+            dir.join(under).display().to_string(),
+            "{named} is {under} inside the one Build Cache. The session said:\n{}",
+            reported.said,
+        );
+        assert!(
+            dir.join(under).join("written-from-inside").is_file(),
+            "and what the session wrote under {under} is on the host, in the \
+             directory the next Conversation's session will be given",
+        );
+    }
 
     assert_eq!(
         line(&reported, "UV_CACHE_DIR"),
@@ -2489,5 +2939,23 @@ async fn a_session_is_given_pips_cache_and_uvs_store() {
         beside.join("uv/written-from-inside").is_file(),
         "which is the second bind a session gets, and it is writable under uv's \
          name too",
+    );
+
+    // And the two that name no directory: poetry and pipenv each told to keep a
+    // virtual environment in the project, which is why there is no fifth
+    // directory here for either of them to have kept one in.
+    assert_eq!(
+        line(&reported, "POETRY_VIRTUALENVS_IN_PROJECT"),
+        "true",
+        "poetry would otherwise keep its environments under the cache directory \
+         above, which every Conversation on the Repo is given. The session \
+         said:\n{}",
+        reported.said,
+    );
+    assert_eq!(
+        line(&reported, "PIPENV_VENV_IN_PROJECT"),
+        "1",
+        "and pipenv's, which is the same promise for the tool that would \
+         otherwise keep one under a home the sandbox throws away",
     );
 }

@@ -2193,17 +2193,23 @@ fn whose(pid: u32) -> String {
 /// session started inside itself for want of it. That hazard is exactly the
 /// ordinary case, a manifest one directory down from the root.
 ///
-/// **And Go's two directories beside them, Node's seven and Python's two**, which
+/// **And Go's two directories beside them, Node's seven and Python's six**, which
 /// is this platform's half of what the package stores promise: the same one
 /// grant, with every language's store under it, written the way Windows writes a
 /// path.
 ///
-/// Four of Node's seven are under that one directory, and pip's with them. The
-/// other four — pnpm's, deno's and bun's stores and uv's, each of which links a
-/// package out into the project rather than copying — are under the directory
-/// beside the Worktrees, and that is **a second grant this platform has to
-/// write**: a path a session cannot open is a store it installs past rather than
-/// out of, so it is written to as well as printed.
+/// Four of Node's seven are under that one directory, and three of Python's —
+/// pip's, poetry's and pipenv's — with them. The other four — pnpm's, deno's and
+/// bun's stores and uv's, each of which links a package out into the project
+/// rather than copying — are under the directory beside the Worktrees, and that
+/// is **a second grant this platform has to write**: a path a session cannot
+/// open is a store it installs past rather than out of, so it is written to as
+/// well as printed.
+///
+/// And Python's last two are settings rather than stores — poetry and pipenv
+/// each told to keep a virtual environment in the project — which this platform
+/// hands over exactly as the other two do: a descriptor's value is text where it
+/// names no directory, on all three.
 #[tokio::test]
 async fn a_session_gets_the_shared_cargo_home_and_the_compiler_wrapper() {
     // Held for as long as this fixture is up. A session handed a cache is a
@@ -2231,6 +2237,10 @@ async fn a_session_gets_the_shared_cargo_home_and_the_compiler_wrapper() {
         Note 'bun-cache' $env:BUN_INSTALL_CACHE_DIR
         Note 'pip-cache' $env:PIP_CACHE_DIR
         Note 'uv-cache' $env:UV_CACHE_DIR
+        Note 'poetry-cache' $env:POETRY_CACHE_DIR
+        Note 'pipenv-cache' $env:PIPENV_CACHE_DIR
+        Note 'poetry-in-project' $env:POETRY_VIRTUALENVS_IN_PROJECT
+        Note 'pipenv-in-project' $env:PIPENV_VENV_IN_PROJECT
 
         # Run the thing it was pointed at, which is the only way to ask whether
         # the boundary really lets a session open it.
@@ -2316,15 +2326,18 @@ async fn a_session_gets_the_shared_cargo_home_and_the_compiler_wrapper() {
 
     // And Node's four under the same directory, composed the same way: four
     // tools rather than one, with a directory per yarn because the two of them
-    // read two different variables. And pip's, which is under the cache because
-    // pip unpacks a wheel into `site-packages` and has nothing to link out of
-    // it.
+    // read two different variables. And three of Python's four, which are under
+    // the cache because pip unpacks a wheel into `site-packages`, poetry unpacks
+    // one out of its artifacts, and pipenv is pip: none of the three has
+    // anything to link out of its store.
     for (said, under) in [
         ("npm-cache", vec!["npm"]),
         ("pnpm-metadata", vec!["pnpm", "metadata"]),
         ("yarn-cache", vec!["yarn", "cache"]),
         ("yarn-global", vec!["yarn", "global"]),
         ("pip-cache", vec!["pip"]),
+        ("poetry-cache", vec!["poetry"]),
+        ("pipenv-cache", vec!["pipenv"]),
     ] {
         let composed = under
             .iter()
@@ -2355,6 +2368,12 @@ async fn a_session_gets_the_shared_cargo_home_and_the_compiler_wrapper() {
              the others",
         );
     }
+
+    // And the two that name no directory: poetry's and pipenv's virtual
+    // environments, which stay in the Worktree rather than going anywhere a
+    // second Conversation could reach them.
+    assert_eq!(fixture.written("poetry-in-project").await, "true");
+    assert_eq!(fixture.written("pipenv-in-project").await, "1");
 
     let downloaded = cache.path().join("cargo").join("downloaded.crate");
 

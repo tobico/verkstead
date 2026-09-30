@@ -199,6 +199,14 @@
               # without it is a shell where that sentence is never read.
               (python3.withPackages (ps: [ ps.pip ]))
               uv
+              # And Python's other two, which are the same descriptor's. Each
+              # reads a cache variable of its own and each has to be told to
+              # keep its virtual environment in the project — poetry's default
+              # place for one is the cache directory itself — so a shell
+              # without them is a shell where neither half of that is ever run
+              # against the tool that has to obey it.
+              poetry
+              pipenv
               # What a ticked `gh` row unpacks on an Intel Mac, which has no
               # Homebrew to install one with — see
               # `crates/server/src/onboarding/install.rs`'s `GH_RELEASE`. Both

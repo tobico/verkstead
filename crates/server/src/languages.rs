@@ -1322,7 +1322,7 @@ mod tests {
 
     /// A session of a machine with an sccache: Rust's four variables, in the
     /// order it has always had them, then Go's two, Node's seven and Python's
-    /// two, and the two directories they name open underneath.
+    /// six, and the two directories they name open underneath.
     ///
     /// Rust's four lead and are unchanged, which is the promise the descriptors
     /// landed on: a language added to the file is variables after the ones a
@@ -1355,6 +1355,13 @@ mod tests {
                 (String::from("BUN_INSTALL_CACHE_DIR"), stored("bun")),
                 (String::from("PIP_CACHE_DIR"), cached("pip")),
                 (String::from("UV_CACHE_DIR"), stored("uv")),
+                (String::from("POETRY_CACHE_DIR"), cached("poetry")),
+                (
+                    String::from("POETRY_VIRTUALENVS_IN_PROJECT"),
+                    String::from("true")
+                ),
+                (String::from("PIPENV_CACHE_DIR"), cached("pipenv")),
+                (String::from("PIPENV_VENV_IN_PROJECT"), String::from("1")),
             ],
         );
 
@@ -1395,8 +1402,15 @@ mod tests {
                 (String::from("BUN_INSTALL_CACHE_DIR"), stored("bun")),
                 (String::from("PIP_CACHE_DIR"), cached("pip")),
                 (String::from("UV_CACHE_DIR"), stored("uv")),
+                (String::from("POETRY_CACHE_DIR"), cached("poetry")),
+                (
+                    String::from("POETRY_VIRTUALENVS_IN_PROJECT"),
+                    String::from("true")
+                ),
+                (String::from("PIPENV_CACHE_DIR"), cached("pipenv")),
+                (String::from("PIPENV_VENV_IN_PROJECT"), String::from("1")),
             ],
-            "Go's two, Node's seven and Python's two are in no capability, so a \
+            "Go's two, Node's seven and Python's six are in no capability, so a \
              machine with no sccache gets the whole of what those descriptors say",
         );
         assert_eq!(
@@ -1424,8 +1438,8 @@ mod tests {
         );
         assert_eq!(
             given.env().len(),
-            11,
-            "which is Go's two, Node's seven and Python's two and nothing else"
+            15,
+            "which is Go's two, Node's seven and Python's six and nothing else"
         );
         assert!(!given.sccache());
         assert!(
@@ -1587,6 +1601,27 @@ mod tests {
         joined("BUN_INSTALL_CACHE_DIR", &beside, "bun");
         joined("PIP_CACHE_DIR", cache, "pip");
         joined("UV_CACHE_DIR", &beside, "uv");
+        joined("POETRY_CACHE_DIR", cache, "poetry");
+        joined("PIPENV_CACHE_DIR", cache, "pipenv");
+
+        // And Python's other two, which name no directory at all: poetry and
+        // pipenv are each told to keep a virtual environment in the project,
+        // which is a setting's answer rather than a path, and what a value like
+        // that has to come out as is the text the file wrote.
+        for (named, said) in [
+            ("POETRY_VIRTUALENVS_IN_PROJECT", "true"),
+            ("PIPENV_VENV_IN_PROJECT", "1"),
+        ] {
+            assert_eq!(
+                given
+                    .env()
+                    .iter()
+                    .find_map(|(name, value)| (name == named).then_some(value.as_str())),
+                Some(said),
+                "{named} is the value the descriptor wrote, untouched: nothing \
+                 in it names a directory",
+            );
+        }
     }
 
     /// And a value naming none of them is left exactly as the file wrote it,

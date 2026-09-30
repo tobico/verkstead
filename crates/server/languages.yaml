@@ -309,10 +309,9 @@ languages:
 
   python:
     # Python, and the third of the package stores. One entry for the whole
-    # ecosystem rather than one per tool, exactly as Node is: pip and uv here,
-    # poetry and pipenv joining them, so switching Python off switches every
-    # one of them off and the settings page draws one box for the language
-    # (ADR-0021).
+    # ecosystem rather than one per tool, exactly as Node is: pip, uv, poetry
+    # and pipenv, so switching Python off switches every one of them off and the
+    # settings page draws one box for the language (ADR-0021).
     label: Python
 
     # What says a Repo builds it, at the root of a checkout — for the setup
@@ -325,9 +324,10 @@ languages:
       - pyproject.toml
       - requirements.txt
 
-    # Two tools and two variables, each read out of the tool that reads it as
-    # this entry was written — `pip config`, `uv cache dir`, against the
-    # releases the dev shell and the CI job pin:
+    # Four tools and six variables, each read out of the tool that reads it as
+    # this entry was written — `pip config`, `uv cache dir`,
+    # `poetry config --list`, pipenv's own documented list, against the releases
+    # the dev shell and the CI job pin:
     #
     #   PIP_CACHE_DIR   pip's `cache-dir`, which is `--cache-dir` under pip's
     #                   own documented `PIP_` prefix: every command-line option
@@ -344,12 +344,72 @@ languages:
     #                   (`simple-v21`), the wheels and sdists it downloaded, and
     #                   `archive-v0`, the unpacked wheels it installs *out of*.
     #
-    # **uv's is under `{stores}` and pip's is not**, which is the one placement
-    # decision here. uv links a package out of `archive-v0` into the
+    #   POETRY_CACHE_DIR
+    #                   poetry's `cache-dir`, under the prefix poetry documents
+    #                   for every one of its settings — `POETRY_`, the setting
+    #                   upper-cased, dots and dashes turned into underscores.
+    #                   Two directories under it and an install offline needs
+    #                   **both**, which is pnpm's shape with one variable rather
+    #                   than two: `artifacts`, the distributions it downloaded,
+    #                   and `cache/repositories/<source>`, the release
+    #                   information it resolved out of the index. An install
+    #                   given the artifacts and not the repositories cache goes
+    #                   to the network for the file's URL and fails — measured,
+    #                   in `tests/package_stores.rs`.
+    #
+    #   PIPENV_CACHE_DIR
+    #                   pipenv's, which its documentation calls the "custom
+    #                   cache directory" and defaults to `~/.cache/pipenv`.
+    #                   **And it is pip's**: pipenv builds the environment it
+    #                   runs pip in out of nothing but this directory —
+    #                   `PIP_CACHE_DIR` pointed here, `PIP_CONFIG_FILE` at the
+    #                   null device, and not one other `PIP_` of the session's
+    #                   passed through. So the `PIP_CACHE_DIR` above does
+    #                   nothing for a pipenv install and this is the variable
+    #                   that does the work, which is the one thing here a proof
+    #                   asserting the environment could not have told anybody.
+    #                   It also means pipenv's store is an HTTP cache with
+    #                   pip's limits, below, and its proof is shaped the way
+    #                   pip's is.
+    #
+    # **And two that are not paths at all**, which is what these two tools cost
+    # that pip and uv did not. A descriptor's value is a variable's value: it is
+    # read as a path where it names a directory and left as the text it is where
+    # it does not, so a setting whose answer is *yes* is as much a descriptor's
+    # business as a directory is.
+    #
+    #   POETRY_VIRTUALENVS_IN_PROJECT
+    #                   poetry's `virtualenvs.in-project`, "create the virtualenv
+    #                   inside the project's root directory". **Poetry keeps its
+    #                   virtual environments under the cache directory above** —
+    #                   `virtualenvs.path` defaults to `{cache-dir}/virtualenvs`,
+    #                   which measurement confirms: with this unset, the venv
+    #                   poetry builds lands in the shared store. A venv holds
+    #                   absolute paths, so one built in another Worktree is
+    #                   broken in this one, and two sessions racing on a shared
+    #                   one is worse than a cold install. So the downloads are
+    #                   shared and the environment is `.venv` in the Worktree.
+    #
+    #   PIPENV_VENV_IN_PROJECT
+    #                   pipenv's, "create virtualenv in project directory".
+    #                   **The premise that brought it here was half wrong, and
+    #                   it is set anyway.** pipenv does *not* keep its
+    #                   environments under its cache variable the way poetry
+    #                   does: they go to `WORKON_HOME`, which is
+    #                   `$XDG_DATA_HOME/virtualenvs` in the session's own empty
+    #                   home — so a shared cache was never a shared venv here.
+    #                   What this buys instead is that a venv in the Worktree
+    #                   outlives the session that made it, where one under a home
+    #                   goes with the sandbox, and that one sentence covers both
+    #                   of these tools rather than two.
+    #
+    # **uv's is under `{stores}` and the other three are not**, which is the one
+    # placement decision here. uv links a package out of `archive-v0` into the
     # environment — `--link-mode` defaults to `hardlink` on Linux and Windows —
     # and falls back to copying where the two are on different filesystems. pip
-    # unpacks a wheel into `site-packages` and has nothing to link, so its
-    # cache is as free as Rust's registry to be a disk of its own.
+    # unpacks a wheel into `site-packages` and has nothing to link; poetry
+    # unpacks one out of `artifacts` and pipenv is pip. So those three are as
+    # free as Rust's registry to be a disk of their own.
     #
     # **And on Linux uv copies anyway, and says so**, which is the same finding
     # pnpm, deno and bun landed: a Worktree and this directory are two bind
@@ -361,23 +421,27 @@ languages:
     # the thing this stage found, and it goes away when one mount holds both.
     # See `tests/package_stores.rs`.
     #
-    # Both are safe for two installs at once, which is the other half of what a
-    # shared store has to be: pip writes a cached response to a temporary name
-    # beside it and renames it into place, and uv is documented as safe for
-    # concurrent use and does the same. Two Sandboxes installing at the same
-    # moment is what says so here.
+    # All four are safe for two installs at once, which is the other half of
+    # what a shared store has to be: pip writes a cached response to a temporary
+    # name beside it and renames it into place, uv is documented as safe for
+    # concurrent use and does the same, poetry writes its artifacts and its
+    # release information the same way, and pipenv's store is pip's. Two
+    # Sandboxes installing at the same moment is what says so here, per tool.
     #
-    # And neither holds anything that is a session's own. A registry login is
-    # `~/.netrc`, a keyring, or `UV_INDEX_*_PASSWORD` in the environment — none
-    # of them under either directory. What uv keeps beside the downloads is
-    # `interpreter-v4`, which is what it learned about the Pythons on this
-    # machine: a fact about the machine rather than about a session.
+    # And none of them holds anything that is a session's own. A registry login
+    # is `~/.netrc`, a keyring, or `UV_INDEX_*_PASSWORD` in the environment —
+    # none of them under any of these directories; poetry's own configuration
+    # and the credentials it keeps are under its `config-dir` and `data-dir`,
+    # which are two other directories and neither of them this one. What uv
+    # keeps beside the downloads is `interpreter-v4`, which is what it learned
+    # about the Pythons on this machine: a fact about the machine rather than
+    # about a session.
     #
-    # **A virtual environment is not shared and there is nothing here to make
-    # it one.** A venv holds absolute paths, so one built in another Worktree is
-    # broken in this one; both tools put it where the session asked and neither
-    # reads a variable set here to decide. So what is shared is downloads, and
-    # every `.venv` stays in the Worktree that made it.
+    # **A virtual environment is never shared.** pip and uv put one where the
+    # session asked and read nothing set here to decide, so for those two there
+    # is nothing to say; poetry and pipenv are the two that had to be told, and
+    # the two variables above are the telling. Either way what is shared is
+    # downloads, and every `.venv` stays in the Worktree that made it.
     #
     # **pip's cache is an HTTP cache rather than a store an install can be
     # resolved against**, which is worth knowing before trusting `--no-index`:
@@ -385,8 +449,15 @@ languages:
     # *name* cannot be resolved with the index unreachable however full the
     # cache is. What the cache serves offline is a distribution already asked
     # for by URL — which is what a pinned requirements file holds, and what
-    # `tests/package_stores.rs` installs. uv has no such limit: it resolves out
-    # of `simple-v21` under `--offline`.
+    # `tests/package_stores.rs` installs. **pipenv inherits that**, its store
+    # being pip's, so what its proof pins by URL is a `Pipfile` entry. uv and
+    # poetry have no such limit: uv resolves out of `simple-v21` under
+    # `--offline`, and poetry out of `cache/repositories` with no flag at all —
+    # neither of those two documents an offline switch, and neither needs one.
     env:
       PIP_CACHE_DIR: "{cache}/pip"
       UV_CACHE_DIR: "{stores}/uv"
+      POETRY_CACHE_DIR: "{cache}/poetry"
+      POETRY_VIRTUALENVS_IN_PROJECT: "true"
+      PIPENV_CACHE_DIR: "{cache}/pipenv"
+      PIPENV_VENV_IN_PROJECT: "1"

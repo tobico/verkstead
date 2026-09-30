@@ -5574,7 +5574,7 @@ async fn the_settings_held_binds_compose_the_way_the_installations_do() {
 /// languages' stores point into it: `CARGO_HOME`, which is the half of Rust's
 /// cache that works with no sccache anywhere, Go's two — the downloads and the
 /// compiled objects, which for Go is a directory and nothing more — four of
-/// Node's seven, and pip's.
+/// Node's seven, and three of Python's four: pip's, poetry's and pipenv's.
 ///
 /// That is what stops two Conversations downloading one crate, one module or
 /// one package twice.
@@ -5604,6 +5604,10 @@ async fn the_build_cache_is_writable_inside_and_the_stores_are_in_it() {
             say yarn-cache "${{YARN_CACHE_FOLDER-unset}}"
             say yarn-global "${{YARN_GLOBAL_FOLDER-unset}}"
             say pip-cache "${{PIP_CACHE_DIR-unset}}"
+            say poetry-cache "${{POETRY_CACHE_DIR-unset}}"
+            say pipenv-cache "${{PIPENV_CACHE_DIR-unset}}"
+            say poetry-in-project "${{POETRY_VIRTUALENVS_IN_PROJECT-unset}}"
+            say pipenv-in-project "${{PIPENV_VENV_IN_PROJECT-unset}}"
             "#,
             dir = quoted(&fixture.cache_dir()),
         ),
@@ -5639,15 +5643,19 @@ async fn the_build_cache_is_writable_inside_and_the_stores_are_in_it() {
 
     // And Node's four, which are four tools rather than one: npm's packages,
     // pnpm's registry metadata, and a directory per yarn, the two of them
-    // reading two different variables. And pip's, which is here rather than
-    // beside the Worktrees because pip unpacks a wheel into `site-packages` and
-    // has nothing to link out of its cache.
+    // reading two different variables. And three of Python's four — pip's,
+    // poetry's and pipenv's, which are here rather than beside the Worktrees
+    // because pip unpacks a wheel into `site-packages`, poetry unpacks one out
+    // of its artifacts, and pipenv is pip: none of the three has anything to
+    // link out of its store.
     for (said, under) in [
         ("npm-cache", "npm"),
         ("pnpm-metadata", "pnpm/metadata"),
         ("yarn-cache", "yarn/cache"),
         ("yarn-global", "yarn/global"),
         ("pip-cache", "pip"),
+        ("poetry-cache", "poetry"),
+        ("pipenv-cache", "pipenv"),
     ] {
         assert_eq!(
             reported[said],
@@ -5656,6 +5664,23 @@ async fn the_build_cache_is_writable_inside_and_the_stores_are_in_it() {
              store of every tool this machine shares under it",
         );
     }
+
+    // And the two variables Python's entry sets that are not directories at
+    // all: poetry and pipenv each keep a virtual environment under the
+    // directory a session would otherwise be sharing, so each is told to keep
+    // it in the project instead. What is shared is the downloads above, and the
+    // environment stays in the Worktree.
+    assert_eq!(
+        reported["poetry-in-project"], "true",
+        "poetry keeps its virtual environments under its own cache directory, \
+         so a shared one without this is a shared venv — and a venv holds \
+         absolute paths, so one built in another Worktree is broken in this one"
+    );
+    assert_eq!(
+        reported["pipenv-in-project"], "1",
+        "and pipenv's, which keeps its environments under a home rather than \
+         under its cache: in the project they outlive the session that made them"
+    );
 }
 
 /// And the stores beside the Worktrees, which are the second bind a session
@@ -5798,6 +5823,10 @@ async fn a_build_cache_switched_off_is_no_bind_and_no_variables() {
             say bun-cache "${{BUN_INSTALL_CACHE_DIR-unset}}"
             say pip-cache "${{PIP_CACHE_DIR-unset}}"
             say uv-cache "${{UV_CACHE_DIR-unset}}"
+            say poetry-cache "${{POETRY_CACHE_DIR-unset}}"
+            say pipenv-cache "${{PIPENV_CACHE_DIR-unset}}"
+            say poetry-in-project "${{POETRY_VIRTUALENVS_IN_PROJECT-unset}}"
+            say pipenv-in-project "${{PIPENV_VENV_IN_PROJECT-unset}}"
             dir {beside} stores
             file /verkstead/bin/sccache binary
             "#,
@@ -5822,6 +5851,15 @@ async fn a_build_cache_switched_off_is_no_bind_and_no_variables() {
     assert_eq!(reported["bun-cache"], "unset");
     assert_eq!(reported["pip-cache"], "unset");
     assert_eq!(reported["uv-cache"], "unset");
+    assert_eq!(reported["poetry-cache"], "unset");
+    assert_eq!(reported["pipenv-cache"], "unset");
+    assert_eq!(
+        reported["poetry-in-project"], "unset",
+        "and the two that are settings rather than stores go with them: a \
+         language switched off is told nothing at all, not told where to keep \
+         an environment it has no store for"
+    );
+    assert_eq!(reported["pipenv-in-project"], "unset");
     assert_eq!(
         reported["stores"], "absent",
         "and the directory beside the Worktrees closes with it, both of the \

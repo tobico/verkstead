@@ -3244,7 +3244,7 @@ async fn the_configured_binds_beside_a_read_only_companion_are_still_writable() 
 /// languages' stores point into it: `CARGO_HOME`, which is the half of Rust's
 /// cache that works with no sccache anywhere, Go's two — the downloads and the
 /// compiled objects, which for Go is a directory and nothing more — four of
-/// Node's seven, and pip's.
+/// Node's seven, and three of Python's four: pip's, poetry's and pipenv's.
 ///
 /// That is what stops two Conversations downloading one crate, one module or
 /// one package twice.
@@ -3282,6 +3282,10 @@ async fn the_build_cache_is_writable_inside_and_the_stores_are_in_it() {
             say bun-cache "${{BUN_INSTALL_CACHE_DIR-unset}}"
             say pip-cache "${{PIP_CACHE_DIR-unset}}"
             say uv-cache "${{UV_CACHE_DIR-unset}}"
+            say poetry-cache "${{POETRY_CACHE_DIR-unset}}"
+            say pipenv-cache "${{PIPENV_CACHE_DIR-unset}}"
+            say poetry-in-project "${{POETRY_VIRTUALENVS_IN_PROJECT-unset}}"
+            say pipenv-in-project "${{PIPENV_VENV_IN_PROJECT-unset}}"
             dir {beside} stores
             "#,
             dir = quoted(&fixture.cache_dir()),
@@ -3319,15 +3323,18 @@ async fn the_build_cache_is_writable_inside_and_the_stores_are_in_it() {
 
     // And Node's four under the cache, which are four tools rather than one:
     // npm's packages, pnpm's registry metadata, and a directory per yarn, the
-    // two of them reading two different variables. And pip's, which is here
-    // because pip unpacks a wheel into `site-packages` and has nothing to link
-    // out of its cache.
+    // two of them reading two different variables. And three of Python's four —
+    // pip's, poetry's and pipenv's, which are here because pip unpacks a wheel
+    // into `site-packages`, poetry unpacks one out of its artifacts, and pipenv
+    // is pip: none of the three has anything to link out of its store.
     for (said, under) in [
         ("npm-cache", "npm"),
         ("pnpm-metadata", "pnpm/metadata"),
         ("yarn-cache", "yarn/cache"),
         ("yarn-global", "yarn/global"),
         ("pip-cache", "pip"),
+        ("poetry-cache", "poetry"),
+        ("pipenv-cache", "pipenv"),
     ] {
         assert_eq!(
             reported[said],
@@ -3359,6 +3366,13 @@ async fn the_build_cache_is_writable_inside_and_the_stores_are_in_it() {
              the whole of what the second placeholder says",
         );
     }
+
+    // And the two of Python's six that name no directory at all: poetry and
+    // pipenv are each told to keep a virtual environment in the project, a venv
+    // holding absolute paths and poetry's default place for one being the shared
+    // cache directory itself.
+    assert_eq!(reported["poetry-in-project"], "true");
+    assert_eq!(reported["pipenv-in-project"], "1");
 }
 
 /// And with an sccache the server resolved: a session finds it beside the

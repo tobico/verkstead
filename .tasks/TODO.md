@@ -20,6 +20,6 @@ Roadmap stage: [02: Package stores](docs/roadmaps/language-caches/02-package-sto
 - [x] 02: npm, pnpm and yarn — [details](02-npm-pnpm-and-yarn.md)
 - [x] 03: deno and bun — [details](03-deno-and-bun.md)
 - [x] 04: pip and uv — [details](04-pip-and-uv.md)
-- [ ] 05: poetry and pipenv — [details](05-poetry-and-pipenv.md)
+- [x] 05: poetry and pipenv — [details](05-poetry-and-pipenv.md)
 - [ ] 06: NuGet — [details](06-nuget.md)
 - [ ] 07: The docs — [details](07-the-docs.md)

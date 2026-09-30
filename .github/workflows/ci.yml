@@ -147,9 +147,11 @@ jobs:
   #
   # Node's six tools add one tarball, two archives and two `npm install -g`
   # runs to the setup below, and six installs of one package to the suite.
-  # Nothing here builds a project, so what each ecosystem costs this job is its
-  # toolchain's download rather than its proofs — which is the shape to keep as
-  # the later stages add Python's four and NuGet.
+  # Python's four add one archive and one `pip install` — the runner's own
+  # interpreter carries pip already — and a proof apiece. Nothing here
+  # builds a project, so what each ecosystem costs this job is its toolchain's
+  # download rather than its proofs, which is the shape to keep as the last
+  # stage adds NuGet.
   package-stores:
     name: Package stores
     runs-on: ubuntu-24.04
@@ -262,10 +264,11 @@ jobs:
           unzip -q -o "$RUNNER_TEMP/bun.zip" -d "$RUNNER_TEMP/bun"
           sudo install -m 0755 "$RUNNER_TEMP/bun/bun-linux-x64/bun" /usr/local/bin/bun
 
-      # **uv, which is the one Python tool this runner has not got.** The image
-      # carries a `python3` under `/usr/bin` with pip in it, which is what the
-      # pip proof runs (`python3 -m pip`, pip being a module of its interpreter
-      # rather than a program of its own) — so nothing here installs a Python.
+      # **uv, the first of the three Python tools this runner has not got.** The
+      # image carries a `python3` under `/usr/bin` with pip in it, which is what
+      # the pip proof runs (`python3 -m pip`, pip being a module of its
+      # interpreter rather than a program of its own) — so nothing here installs
+      # a Python, and poetry and pipenv below are installed *with* that one.
       # uv is one binary from its project's own release, into `/usr/local/bin`
       # for the reason deno and bun are: the tool cache is outside every bind a
       # session gets.
@@ -278,6 +281,26 @@ jobs:
             https://github.com/astral-sh/uv/releases/download/0.11.21/uv-x86_64-unknown-linux-gnu.tar.gz
           tar -C "$RUNNER_TEMP" -xzf "$RUNNER_TEMP/uv.tar.gz"
           sudo install -m 0755 "$RUNNER_TEMP/uv-x86_64-unknown-linux-gnu/uv" /usr/local/bin/uv
+
+      # **poetry and pipenv, which are the Python ecosystem's other two.**
+      # Neither is on the runner image, and neither is a single binary: both are
+      # Python programs, so what installs them is the interpreter that is going
+      # to run them — `python3 -m pip` into the system, which writes their
+      # console scripts to `/usr/local/bin` and their modules beside the
+      # runner's own. Inside every bind a session gets, for the reason Go and
+      # the JavaScript six are: the tool cache is outside all of it.
+      #
+      # `--break-system-packages` because the runner's Python is externally
+      # managed (PEP 668) and this is a throwaway machine whose whole job is to
+      # have these installed — the same check pip's own proof turns off with
+      # `--target`.
+      #
+      # The same releases the dev shell's nixpkgs carries, so that a proof that
+      # passes here is a proof of the versions a developer ran it against.
+      - name: Install poetry 2.4.1 and pipenv 2026.5.1
+        run: |
+          sudo python3 -m pip install --break-system-packages \
+            poetry==2.4.1 pipenv==2026.5.1
 
       # And the same question asked of every tool on the list, in a line naming
       # the one that fails it rather than as a test failure about a shell that
@@ -292,7 +315,7 @@ jobs:
         run: |
           status=0
 
-          for tool in go zip node npm pnpm yarn yarn-berry deno bun python3 uv tar sha1sum; do
+          for tool in go zip node npm pnpm yarn yarn-berry deno bun python3 uv poetry pipenv tar sha1sum; do
             found=$(command -v "$tool" || true)
 
             if [ -z "$found" ]; then
