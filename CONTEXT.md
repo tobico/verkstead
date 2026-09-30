@@ -2339,18 +2339,27 @@ ADR-0021.
 
 **And where it is, is a word the viewer is told.** The pinned stage card's row
 and the roadmap's details pane both say where each Stage of the roadmap has got
-to — *done*, *in progress*, *halted* or *to do* — in place of the *done* and *to
-do* the card used to work out from the box. The words come off Verkstead's own
-reading, the same one above: *done* is a Stage that settled, or one the record
-holds nothing about whose box is ticked; *in progress* is one the record has in
-flight; *halted* is one whose Conversation has stopped or that was closed before
-it ever wrapped up, one word for the two because what a reader does about either
-is go and look at that Conversation; and *to do* is everything else. The viewer
-works none of them out — a card that decided for itself whether a Stage was
-under way would be a second opinion about something the record already knows —
-and a roadmap the record holds nothing about reads *done* or *to do* throughout,
-off its boxes, exactly as it always has. The pane says it twice, on the Stage's
-section heading and on the line the table of contents reaches it by.
+to — *done*, *in progress*, *halted*, *waiting on* a named Stage or *to do* — in
+place of the *done* and *to do* the card used to work out from the box. The words
+come off Verkstead's own reading, the same one above: *done* is a Stage that
+settled, or one the record holds nothing about whose box is ticked; *in progress*
+is one the record has in flight; *halted* is one whose Conversation has stopped
+or that was closed before it ever wrapped up, one word for the two because what a
+reader does about either is go and look at that Conversation; *waiting on* is a
+Stage of a declaring roadmap that nothing has started yet, naming the Stages its
+own line stands on that have not settled — only those, so what it says moves as
+the roadmap runs where what it *stands on* does not; and *to do* is everything
+else. The viewer works none of them out — a card that decided for itself whether
+a Stage was under way, or which of its neighbours it was behind, would be a
+second opinion about something the record already knows — and a roadmap the
+record holds nothing about reads *done* or *to do* throughout, off its boxes,
+exactly as it always has. **An undeclared roadmap's unstarted Stages read *to
+do*** whatever the record says: such a roadmap is scheduled as each Stage
+standing on the one before it, but the silence is the scheduler's reading rather
+than something the roadmap says, and *waiting on 03* about a line that declares
+nothing would be Verkstead putting a declaration in the human's mouth. The pane
+says the state twice, on the Stage's section heading and on the line the table of
+contents reaches it by, beside what the Stage's line declares it stands on.
 
 **And it joins its roadmap's chain at its finish, not before.** A roadmap is one
 chain of branches in the order its Stages finish, and a Stage joins it when its

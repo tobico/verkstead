@@ -9,12 +9,13 @@
 //! finishes. So the Event is a reading of the Worktree as it stands and cannot
 //! disagree with the branch it is read off.
 //!
-//! **Where** each stage of it is — *done*, *in progress*, *halted* or *to do* —
-//! is [`state`], which is what the card's rows and the pane's headings say. The
-//! same rule as [`done`] below and one word further: what a scheduler asks is
-//! whether a stage is done, so that it knows what may start, and what a human
-//! reading the roadmap asks is where each of its stages has got to. So the states
-//! that are not done are told apart there and are all one *not done* here.
+//! **Where** each stage of it is — *done*, *in progress*, *halted*, *waiting on*
+//! a named stage or *to do* — is [`states`], which is what the card's rows and the
+//! pane's headings say. The same rule as [`done`] below and one word further: what
+//! a scheduler asks is whether a stage is done, so that it knows what may start,
+//! and what a human reading the roadmap asks is where each of its stages has got
+//! to. So the states that are not done are told apart there and are all one *not
+//! done* here.
 //!
 //! What says a stage is done is **Verkstead's own record where it has a row for
 //! that stage, and the checkbox in `ROADMAP.md` where it has none** — see
@@ -1093,8 +1094,8 @@ fn done(entry: &checklist::Entry<'_>, standing: Option<store::StageStanding>) ->
     }
 }
 
-/// **Where** one stage of a roadmap is, which is what the card's row and the
-/// pane's heading say about it.
+/// **Where** every stage of a roadmap is, in the order `list` has them — which is
+/// what the card's rows, the pane's headings and the pane's contents lines say.
 ///
 /// [`done`] widened from a box into a word, and the same rule under it: the record
 /// decides wherever it says anything about the stage, and the box decides wherever
@@ -1114,27 +1115,108 @@ fn done(entry: &checklist::Entry<'_>, standing: Option<store::StageStanding>) ->
 ///   reading, so nothing here has to be careful the way that one does: what the
 ///   box says about a stage somebody walked away from is worth less to a reader
 ///   than the walking away.
-/// - **No row at all** leaves the box to speak, and comes out
-///   [`StageState::Done`] or [`StageState::ToDo`] — which is every roadmap worked
-///   by hand or by the old tools, drawn exactly as it always was.
-fn state(
-    entry: &checklist::Entry<'_>,
-    roadmap: &str,
-    record: &store::StageStandings,
-) -> StageState {
-    match record.of(roadmap, entry.label) {
-        Some(store::StageStanding::Settled) => StageState::Done,
-        Some(store::StageStanding::Abandoned) => StageState::Halted,
-        Some(store::StageStanding::InFlight) => {
-            if record.stopped(roadmap, entry.label) {
-                StageState::Halted
-            } else {
-                StageState::InProgress
+/// - **No row at all** leaves the box to speak. A ticked box is
+///   [`StageState::Done`], and an unticked one is [`StageState::WaitingOn`] the
+///   stages its own line stands on that have not settled, or
+///   [`StageState::ToDo`] where there are none of those.
+///
+/// **The whole list rather than a stage at a time**, which is the one thing this
+/// does that [`done`] does not have to: what a stage is waiting on is a fact about
+/// its neighbours, so the declarations and each stage's settling are read once
+/// over the file and the answers come back in its own order.
+///
+/// **Only a declaring roadmap waits on anything.** A roadmap that declares on no
+/// line is scheduled as each stage standing on the one before it — see [`ready`],
+/// where that reading of silence lives — but the silence is the scheduler's
+/// reading rather than something the roadmap says, and *waiting on 03* about a
+/// line that declares nothing would be this putting a declaration in the human's
+/// mouth. So an undeclared roadmap's unstarted stages read [`StageState::ToDo`],
+/// exactly as they always have.
+///
+/// A roadmap that declares **badly** says what its lines say all the same, the way
+/// the pane draws them: nothing of it will start until the human fixes it, and the
+/// lines are what they have to go and look at. Which is why the file is asked
+/// whether it declares rather than what it declared — see [`declarations::judge`],
+/// which answers the second question for a good roadmap only.
+fn states(roadmap: &str, list: &str, record: &store::StageStandings) -> Vec<StageState> {
+    let entries: Vec<checklist::Entry<'_>> = list.lines().filter_map(checklist::entry).collect();
+
+    // Whether this roadmap declares at all, which is a fact about the whole file
+    // rather than about a line — see [`opened`], which asks it the same way for
+    // the same reason.
+    let declaring = !matches!(
+        declarations::judge(roadmap, list),
+        declarations::Judgement::Undeclared
+    );
+
+    // And whether each of them has settled, once each: the same question [`ready`]
+    // asks of every stage before it decides what may start, and the answer *that*
+    // reading stands what is above a stage on.
+    let settled: Vec<bool> = entries
+        .iter()
+        .map(|entry| done(entry, record.of(roadmap, entry.label)))
+        .collect();
+
+    entries
+        .iter()
+        .map(|entry| match record.of(roadmap, entry.label) {
+            Some(store::StageStanding::Settled) => StageState::Done,
+            Some(store::StageStanding::Abandoned) => StageState::Halted,
+            Some(store::StageStanding::InFlight) => {
+                if record.stopped(roadmap, entry.label) {
+                    StageState::Halted
+                } else {
+                    StageState::InProgress
+                }
             }
-        }
-        None if entry.checked => StageState::Done,
-        None => StageState::ToDo,
+            None if entry.checked => StageState::Done,
+            None => match waiting_on(entry, &entries, &settled, declaring) {
+                stages if stages.is_empty() => StageState::ToDo,
+                stages => StageState::WaitingOn { stages },
+            },
+        })
+        .collect()
+}
+
+/// What one unstarted stage is **waiting on**: the stages its own line declares
+/// it stands on that have not settled, by the labels the roadmap writes them
+/// under.
+///
+/// Empty where there are none of those, which is the three ways a stage is not
+/// waiting on a stage: the roadmap declares on no line, the line is a root, or
+/// everything it stands on has settled already. The last of those is a stage
+/// waiting for a place or halted for itself rather than for a neighbour, and
+/// saying nothing about it here is what leaves room for those.
+///
+/// The labels are the *entries'* rather than the declaration's, so that what is
+/// drawn is what the human reads the lines by — the two are the same string for a
+/// roadmap that declares well, the judging having checked every label against the
+/// roadmap's own, and a label naming no stage of it is dropped the way [`ready`]
+/// drops one.
+fn waiting_on(
+    entry: &checklist::Entry<'_>,
+    entries: &[checklist::Entry<'_>],
+    settled: &[bool],
+    declaring: bool,
+) -> Vec<String> {
+    if !declaring {
+        return Vec::new();
     }
+
+    // Read off the same tail the in-flight annotation lives in, the two sharing it
+    // in either order — see [`opened`], which reads it for what the pane says a
+    // stage stands on.
+    let Some(declarations::StandsOn::Stages(stages)) = declarations::read(entry.after).stands_on
+    else {
+        return Vec::new();
+    };
+
+    stages
+        .iter()
+        .filter_map(|named| entries.iter().position(|one| one.label == *named))
+        .filter(|stood| !settled[*stood])
+        .map(|stood| entries[stood].label.to_owned())
+        .collect()
 }
 
 /// Whether what a roadmap wrote after a stage's link says the stage is in
@@ -1191,15 +1273,18 @@ fn roadmap(directory: &Path, record: &store::StageStandings) -> Option<StageList
     // a Repo may hold any number of roadmaps and a label means nothing on its own.
     let name = name(directory);
 
+    // The record where it says anything about a stage, the box where it does not,
+    // and what the line stands on where nothing has started it — see [`states`],
+    // which is that rule, read over the whole file because what a stage waits on
+    // is a fact about its neighbours.
     let stages: Vec<StageEntry> = list
         .lines()
         .filter_map(checklist::entry)
-        .map(|entry| StageEntry {
+        .zip(states(&name, &list, record))
+        .map(|(entry, state)| StageEntry {
             number: entry.label.to_owned(),
             title: entry.title.to_owned(),
-            // The record where it says anything about the stage, and the box
-            // where it does not — see [`state`], which is that rule.
-            state: state(&entry, &name, record),
+            state,
         })
         .collect();
 
@@ -1306,7 +1391,8 @@ fn opened(
     let stages: Vec<StageSource> = list
         .lines()
         .filter_map(checklist::entry)
-        .map(|entry| {
+        .zip(states(name, &list, record))
+        .map(|(entry, state)| {
             // What its line declares, read off the same tail the in-flight
             // annotation lives in: the two share it in either order and neither
             // reading trips on the other.
@@ -1316,10 +1402,10 @@ fn opened(
                 number: entry.label.to_owned(),
                 title: entry.title.to_owned(),
                 // The same state the card's row says, off the same reading — see
-                // [`state`]. A stage's brief stays where it is for ever, so a
+                // [`states`]. A stage's brief stays where it is for ever, so a
                 // stage that is over has a document like any other and the
                 // section says where it is on its heading.
-                state: state(&entry, name, record),
+                state,
                 // The root comes over as the empty list, which is what the pane
                 // draws it as: *stands on nothing*.
                 stands_on: declared
@@ -2752,7 +2838,7 @@ Turns this askance clone into Verkstead.
             repo.lists()[0]
                 .stages
                 .iter()
-                .map(|stage| stage.state)
+                .map(|stage| stage.state.clone())
                 .collect::<Vec<_>>(),
             [StageState::Done, StageState::Done, StageState::ToDo],
             "the record holds nothing about this roadmap, so its boxes are the \
@@ -2845,7 +2931,7 @@ Turns this askance clone into Verkstead.
         assert_eq!(
             pane.stages
                 .iter()
-                .map(|stage| stage.state)
+                .map(|stage| stage.state.clone())
                 .collect::<Vec<_>>(),
             states(&repo.lists_with(&record)),
         );
@@ -2888,7 +2974,139 @@ Turns this askance clone into Verkstead.
             panic!("this reading should have come back with one roadmap: {lists:?}");
         };
 
-        list.stages.iter().map(|stage| stage.state).collect()
+        list.stages
+            .iter()
+            .map(|stage| stage.state.clone())
+            .collect()
+    }
+
+    /// One *waiting on*, by the labels it names.
+    #[track_caller]
+    fn behind(stages: &[&str]) -> StageState {
+        StageState::WaitingOn {
+            stages: stages.iter().map(|named| (*named).to_owned()).collect(),
+        }
+    }
+
+    /// A stage of a **declaring** roadmap that has not started says which stages it
+    /// is standing behind, in place of the *to do* that says nothing.
+    ///
+    /// [`DECLARED`] with a record holding nothing, which is the roadmap as it reads
+    /// the moment it lands: 01 and 02 stand on nothing and are the two that could
+    /// start, 03 stands on 02, and 04 stands on 01 and 03 both — so the card says
+    /// what each of the other two is behind rather than lining all four up as work
+    /// to do.
+    #[test]
+    fn a_stage_of_a_declaring_roadmap_says_which_stages_it_is_waiting_on() {
+        let repo = Repo::with(&[]);
+        repo.write("mvp", DECLARED);
+
+        assert_eq!(
+            states(&repo.lists()),
+            [
+                StageState::ToDo,
+                StageState::ToDo,
+                behind(&["02"]),
+                behind(&["01", "03"]),
+            ],
+            "a root has nothing to wait on, and the two that stand on stages say \
+             which ones",
+        );
+    }
+
+    /// And the pane says it too, off the same reading: the section's heading and the
+    /// contents line beside it are the card's row one level deeper.
+    #[test]
+    fn the_pane_says_what_a_stage_is_waiting_on_exactly_as_the_card_does() {
+        let repo = Repo::with(&[]);
+        repo.write("mvp", DECLARED);
+
+        let pane = repo.opened("mvp").expect("there is a roadmap to open");
+
+        assert_eq!(
+            pane.stages
+                .iter()
+                .map(|stage| stage.state.clone())
+                .collect::<Vec<_>>(),
+            states(&repo.lists()),
+        );
+    }
+
+    /// Only the ones that have **not settled**, which is what makes this a state
+    /// rather than the declaration said again: what a stage stands on does not move
+    /// as the roadmap runs, and what it is still behind does.
+    ///
+    /// Stage 04 stands on 01 and 03 throughout. With 01 settled it is behind 03
+    /// alone; with both settled it is behind nothing and reads *to do* — which is a
+    /// stage waiting for a place or halted for itself rather than for a neighbour.
+    #[test]
+    fn it_names_only_the_stages_that_have_not_settled_yet() {
+        let repo = Repo::with(&[]);
+        repo.write("mvp", DECLARED);
+
+        let settled = |labels: &[&str]| {
+            record(
+                labels
+                    .iter()
+                    .map(|label| ("mvp", *label, store::StageStanding::Settled))
+                    .collect::<Vec<_>>(),
+            )
+        };
+
+        assert_eq!(
+            states(&repo.lists_with(&settled(&["01"])))[3],
+            behind(&["03"]),
+            "01 has settled, so what 04 is behind is 03 alone",
+        );
+
+        assert_eq!(
+            states(&repo.lists_with(&settled(&["01", "02", "03"])))[3],
+            StageState::ToDo,
+            "and with both of them settled 04 is waiting on no stage at all",
+        );
+    }
+
+    /// A stage the record has something to say about is where the record says it is,
+    /// whatever its line stands on: *waiting on* replaces *to do* rather than
+    /// standing in front of the states that come off the record.
+    #[test]
+    fn a_stage_the_record_speaks_for_is_not_waiting_on_anything() {
+        let repo = Repo::with(&[]);
+        repo.write("mvp", DECLARED);
+
+        assert_eq!(
+            states(&repo.lists_with(&record([
+                ("mvp", "03", store::StageStanding::InFlight),
+                ("mvp", "04", store::StageStanding::Abandoned),
+            ]))),
+            [
+                StageState::ToDo,
+                StageState::ToDo,
+                StageState::InProgress,
+                StageState::Halted,
+            ],
+            "03 stands on 02 and somebody is on it anyway, and 04 was walked away \
+             from",
+        );
+    }
+
+    /// And an **undeclared** roadmap's unstarted stages go on reading *to do*.
+    ///
+    /// Such a roadmap is scheduled as each stage standing on the one before it — see
+    /// [`ready`] — but that is the scheduler's reading of silence rather than
+    /// anything the roadmap says, and *waiting on 01* about a line that declares
+    /// nothing would be Verkstead putting a declaration in the human's mouth.
+    #[test]
+    fn every_unstarted_stage_of_an_undeclared_roadmap_still_reads_to_do() {
+        let repo = Repo::with(&[]);
+        repo.write("mvp", UNTICKED);
+
+        assert_eq!(
+            states(&repo.lists()),
+            [StageState::ToDo, StageState::ToDo, StageState::ToDo],
+            "nothing here declares anything, so nothing here is waiting on \
+             anything either",
+        );
     }
 
     /// A roadmap is this Conversation's whether the session has committed it
@@ -3011,7 +3229,11 @@ Turns this askance clone into Verkstead.
         assert_eq!(
             pane.stages
                 .iter()
-                .map(|stage| (stage.number.as_str(), stage.title.as_str(), stage.state))
+                .map(|stage| (
+                    stage.number.as_str(),
+                    stage.title.as_str(),
+                    stage.state.clone()
+                ))
                 .collect::<Vec<_>>(),
             [
                 ("01", "Workbench", StageState::Done),

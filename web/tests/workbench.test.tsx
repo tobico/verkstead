@@ -74,6 +74,7 @@ import type {
   ShowingArchived,
   StageEntry,
   StageListEvent,
+  StageState,
   SteerCancelled,
   SteerOpened,
   SteerSaved,
@@ -281,7 +282,7 @@ import { AUTOMATIC, DRAFT, titled } from "../src/workbench/naming";
 import { STATE } from "../src/workbench/states";
 // And the words a roadmap stage's state is said in, which the card's row, the
 // pane's heading and the pane's nav line are all drawn with.
-import { STAGE_STATE } from "../src/workbench/stages";
+import { stageState } from "../src/workbench/stages";
 // And the timeline, both ways again: it is the biggest of these, and a good
 // deal of what it says about a card is a rule rather than an element.
 // What is still the human's to settle on the brief card.
@@ -15229,10 +15230,36 @@ const ROADMAP = (() => {
 /// The fixture itself reads off its boxes — every roadmap does where Verkstead's
 /// record holds nothing about it — so the states that the record is the only
 /// possible source of are put in here.
-const STATED: StageEntry[] = ROADMAP.stages.map((stage, at) => ({
-  ...stage,
-  state: (["Done", "InProgress", "Halted", "ToDo"] as const)[at]!,
-}));
+const STATED: StageEntry[] = stated([
+  { state: "Done" },
+  { state: "InProgress" },
+  { state: "Halted" },
+  { state: "ToDo" },
+]);
+
+/// And the same four stages as a **declaring** roadmap part-way through — the
+/// shape [`BEHIND_STANDS_ON`] declares: 01 is over, 02 is somebody's now, and the
+/// two that stand on stages say which of those they are still behind rather than
+/// reading *to do*.
+///
+/// One name and two of them, because what a stage is behind is a list: 03 stands
+/// on 02 alone, and 04 stands on 01, 02 and 03 with 01 settled out of the way.
+const BEHIND: StageEntry[] = stated([
+  { state: "Done" },
+  { state: "InProgress" },
+  { state: "WaitingOn", stages: ["02"] },
+  { state: "WaitingOn", stages: ["02", "03"] },
+]);
+
+/// What that roadmap's lines declare, which is what makes those four states the
+/// ones it would arrive with: two roots, 03 standing on 02, and 04 standing on all
+/// three of them.
+const BEHIND_STANDS_ON: string[][] = [[], [], ["02"], ["01", "02", "03"]];
+
+/// The fixture's stages with one state each, in the roadmap's own order.
+function stated(states: StageState[]): StageEntry[] {
+  return ROADMAP.stages.map((stage, at) => ({ ...stage, state: states[at]! }));
+}
 
 /// The workbench with that conversation open.
 function theStaged(
@@ -15329,9 +15356,42 @@ describe("the pinned stage list", () => {
     ]);
   });
 
+  /// And a stage of a declaring roadmap that has not started says which stages it
+  /// is standing behind, in place of the *to do* that says nothing: the ones the
+  /// server's reading found still unsettled, one name or several.
+  it("says which stages one that has not started is waiting on", async () => {
+    theStaged({
+      pinned: [
+        {
+          StageList: {
+            ...ROADMAP,
+            stages: BEHIND,
+          },
+        },
+      ],
+    });
+    const { container } = mount(`/conversations/${STAGED.id}`);
+
+    const list = await drawn(container, `.${timeline.pinned} .${timeline.stageList}`);
+    const rows = [...list.querySelectorAll(`.${timeline.stages} li`)];
+
+    expect(
+      rows.map((row) => row.querySelector(`.${timeline.state}`)!.textContent),
+    ).toEqual(["done", "in progress", "waiting on 02", "waiting on 02, 03"]);
+
+    // And a stage that is waiting is a stage whose work is not over, so only the
+    // one that settled is struck through and ticked.
+    expect(rows.map((row) => row.classList.contains(timeline.done!))).toEqual([
+      true,
+      false,
+      false,
+      false,
+    ]);
+  });
+
   /// The word is drawn rather than kept for the readers that need words, which is
-  /// where this parts company with the backlog's card: four states and a box that
-  /// can say two of them.
+  /// where this parts company with the backlog's card: a box can say two of the
+  /// states there are, and one of them names stages.
   it("draws the state word rather than hiding it, unlike a task's", async () => {
     expect(timelineCss).toContain(
       ".stageList .state {\n" +
@@ -15399,7 +15459,7 @@ describe("the pinned stage list", () => {
         row.querySelector(`.${timeline.state}`)!.textContent,
       ]),
     ).toEqual(
-      ROADMAP.stages.map((stage) => [stage.title, STAGE_STATE[stage.state]]),
+      ROADMAP.stages.map((stage) => [stage.title, stageState(stage.state)]),
     );
 
     expect(listed.querySelectorAll("button")).toHaveLength(0);
@@ -15493,7 +15553,7 @@ function stagesOfTen(done: number): StageListEvent {
     stages: ofTen(done).tasks.map((task) => ({
       number: task.number,
       title: task.title,
-      state: task.done ? ("Done" as const) : ("ToDo" as const),
+      state: task.done ? ({ state: "Done" } as const) : ({ state: "ToDo" } as const),
     })),
   };
 }
@@ -15737,6 +15797,23 @@ const DECLARING: RoadmapPane = {
   })),
 };
 
+/// And the same pane for the declaring roadmap part-way through that [`BEHIND`] is
+/// the card of: what each line stands on, and which of those the server's reading
+/// found it still behind.
+///
+/// The two side by side is the point of them being two things. What a stage stands
+/// on is its line and does not move; what it is waiting on is where the roadmap
+/// has got to, and stage 04 stands on all three of its neighbours while waiting on
+/// the two of them that have not settled.
+const BEHIND_PANE: RoadmapPane = {
+  ...ROADMAP_PANE,
+  stages: ROADMAP_PANE.stages.map((stage, at) => ({
+    ...stage,
+    state: BEHIND[at]!.state,
+    stands_on: BEHIND_STANDS_ON[at]!,
+  })),
+};
+
 /// Where the details pane fetches it from — the conversation and the roadmap's
 /// own directory name, a worktree being allowed any number of roadmaps.
 const THE_ROADMAP = `/api/ui/conversations/${STAGED.id}/roadmap/${ROADMAP.name}`;
@@ -15833,6 +15910,53 @@ describe("the stage list opened", () => {
 
     expect(said.closest(`.${contents.link}`)).toBeNull();
     expect(said.previousElementSibling!.classList).toContain(contents.link!);
+  });
+
+  /// And a declaring roadmap's stages that have not started say which stages they
+  /// are standing behind, in both of the places the pane says where a stage is.
+  ///
+  /// Beside what each of them stands on rather than instead of it: the line is what
+  /// the roadmap says and does not move, and what a stage is still behind is where
+  /// the roadmap has got to — stage 04 stands on all three of its neighbours and
+  /// waits on the two of them that have not settled.
+  it("says which stages one that has not started is waiting on, in both places", async () => {
+    theStaged({}, whenever(THE_ROADMAP, json(BEHIND_PANE)));
+    const { container } = mount(`/conversations/${STAGED.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.pinned} .${timeline.stageList}`),
+    );
+
+    const nav = await drawn(container, `.${shell.detailsPane} .${contents.contents}`);
+
+    const said = ["done", "in progress", "waiting on 02", "waiting on 02, 03"];
+
+    expect(
+      [...nav.querySelectorAll(`.${contents.sections} > li`)].map(
+        (line) => line.querySelector(`.${contents.mark}`)?.textContent,
+      ),
+    ).toEqual(said);
+
+    const sections = [
+      ...container.querySelectorAll(`.${shell.detailsPane} .${documents.section}`),
+    ];
+
+    expect(
+      sections.map((section) => section.querySelector(`.${documents.mark}`)!.textContent),
+    ).toEqual(said);
+
+    // And what the line itself declared is still its own sentence under the
+    // heading, unmoved by where the roadmap has got to.
+    expect(
+      sections.map(
+        (section) => section.querySelector(`.${documents.declares}`)!.textContent,
+      ),
+    ).toEqual([
+      "Stands on nothing",
+      "Stands on nothing",
+      "Stands on 02",
+      "Stands on 01, 02, 03",
+    ]);
   });
 
   /// What each stage's line declared, said on the stage's own section: what it

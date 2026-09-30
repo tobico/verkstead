@@ -5043,8 +5043,25 @@ at: string, roadmaps: Array<StageListEvent>, };
  * A roadmap the record holds no rows for — one worked by hand or by the old
  * tools — comes out [`Done`](StageState::Done) or [`ToDo`](StageState::ToDo)
  * throughout, off its boxes alone, which is exactly how it has always read.
+ *
+ * Flat on the wire — `{"state": "WaitingOn", "stages": ["02"]}` — the way
+ * [`DependencyState`](crate::DependencyState) is, so the viewer
+ * narrows on a field rather than unwrapping a variant name. One of these states
+ * carries something beside its word, and a state said one way here and another
+ * way there would be two states to the person reading them.
  */
-export type StageState = "Done" | "InProgress" | "Halted" | "ToDo";
+export type StageState = { "state": "Done" } | { "state": "InProgress" } | { "state": "Halted" } | { "state": "WaitingOn", 
+/**
+ * The ones that have not settled, by the labels the roadmap's own lines
+ * carry — `["02"]` — zero-padding and all, because those are what the
+ * human reads the lines by. Never empty: a stage whose every dependency
+ * has settled is not waiting on any of them.
+ *
+ * A part of what the line declared rather than the whole of it — the
+ * whole is [`StageDocument::stands_on`], which the pane says beside this
+ * and which does not move as the roadmap runs.
+ */
+stages: Array<string>, } | { "state": "ToDo" };
 
 /**
  * How a Set stands: still waiting on the human, answered, or closed unanswered.

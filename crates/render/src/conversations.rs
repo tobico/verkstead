@@ -1689,7 +1689,14 @@ pub struct StageEntry {
 /// A roadmap the record holds no rows for — one worked by hand or by the old
 /// tools — comes out [`Done`](StageState::Done) or [`ToDo`](StageState::ToDo)
 /// throughout, off its boxes alone, which is exactly how it has always read.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// Flat on the wire — `{"state": "WaitingOn", "stages": ["02"]}` — the way
+/// [`DependencyState`](crate::DependencyState) is, so the viewer
+/// narrows on a field rather than unwrapping a variant name. One of these states
+/// carries something beside its word, and a state said one way here and another
+/// way there would be two states to the person reading them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state")]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum StageState {
     /// Its work is finished: the record says the stage settled, or it holds no
@@ -1708,6 +1715,27 @@ pub enum StageState {
     /// the distinction worth drawing. A halted stage holds up only the stages
     /// that stand on it.
     Halted,
+
+    /// Nothing has started it, and its own line says what it is standing behind:
+    /// the stages it declared it stands on that have not settled yet.
+    ///
+    /// A **declaring** roadmap's state and only one of those. A roadmap that
+    /// declares on no line is scheduled as each stage standing on the one before
+    /// it, but that is the scheduler's reading of silence rather than anything the
+    /// roadmap says, so saying this about a line that declares nothing would be
+    /// the viewer inventing a declaration. Such a stage reads
+    /// [`ToDo`](StageState::ToDo), exactly as it always has.
+    WaitingOn {
+        /// The ones that have not settled, by the labels the roadmap's own lines
+        /// carry — `["02"]` — zero-padding and all, because those are what the
+        /// human reads the lines by. Never empty: a stage whose every dependency
+        /// has settled is not waiting on any of them.
+        ///
+        /// A part of what the line declared rather than the whole of it — the
+        /// whole is [`StageDocument::stands_on`], which the pane says beside this
+        /// and which does not move as the roadmap runs.
+        stages: Vec<String>,
+    },
 
     /// Everything else: nothing has started it and nothing says why.
     ToDo,

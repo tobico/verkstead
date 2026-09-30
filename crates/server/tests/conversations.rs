@@ -7170,7 +7170,11 @@ async fn the_stage_list_opens_as_every_stage_brief_it_names() {
     assert_eq!(
         pane.stages
             .iter()
-            .map(|stage| (stage.number.as_str(), stage.title.as_str(), stage.state))
+            .map(|stage| (
+                stage.number.as_str(),
+                stage.title.as_str(),
+                stage.state.clone()
+            ))
             .collect::<Vec<_>>(),
         [
             ("01", "Workbench", StageState::Done),

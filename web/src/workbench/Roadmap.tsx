@@ -11,9 +11,10 @@
 //! Two things are the roadmap's own. It is named by the roadmap rather than by
 //! the conversation, a worktree being allowed any number of roadmaps where it has
 //! one `.tasks/`; and where each of its stages *is* comes over as a state the
-//! server read off its own record — see `stages.ts`, which keeps the words — so
-//! this pane says one of four things about a stage where the backlog's says one
-//! of two. It says it twice, on the section's heading and on the line the table
+//! server read off its own record and the roadmap's own declarations — see
+//! `stages.ts`, which keeps the words — so this pane says where a stage is, and
+//! which of its neighbours it is behind, where the backlog's says one of two
+//! words. It says it twice, on the section's heading and on the line the table
 //! of contents reaches that section by, which is what makes the way around the
 //! roadmap an answer to where the effort has got to.
 //!
@@ -34,7 +35,7 @@ import { spied } from "../set/outline";
 import { Documents, type DocumentSection } from "./Documents";
 import styles from "./Documents.module.css";
 import { PaneHead } from "./PaneHead";
-import { STAGE_STATE } from "./stages";
+import { stageState } from "./stages";
 
 /// What one stage's section is reached by. Its own prefix, as a task's is, and
 /// a different one: the two panes are never open at once, but the anchors say
@@ -115,7 +116,7 @@ export function Roadmap(props: {
       // its own two words the same way for the same reason. The server's
       // reading, in the words `stages.ts` keeps: what the card's row says about
       // this stage, said again here.
-      mark: STAGE_STATE[stage.state],
+      mark: stageState(stage.state),
       // What the roadmap's own line said about it, which is the one thing here
       // that comes off the list rather than out of the brief.
       declares: declares(stage),
@@ -131,7 +132,7 @@ export function Roadmap(props: {
       anchor: anchor(stage),
       name: `${stage.number} ${stage.title}`,
       entries: [],
-      mark: STAGE_STATE[stage.state],
+      mark: stageState(stage.state),
     })),
   );
 

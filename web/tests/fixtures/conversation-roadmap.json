@@ -57,22 +57,30 @@
         "stages": [
           {
             "number": "01",
-            "state": "Done",
+            "state": {
+              "state": "Done"
+            },
             "title": "Workbench"
           },
           {
             "number": "02",
-            "state": "Done",
+            "state": {
+              "state": "Done"
+            },
             "title": "Grilling"
           },
           {
             "number": "03",
-            "state": "ToDo",
+            "state": {
+              "state": "ToDo"
+            },
             "title": "Implementation"
           },
           {
             "number": "04",
-            "state": "ToDo",
+            "state": {
+              "state": "ToDo"
+            },
             "title": "Wrap-up"
           }
         ],
@@ -143,22 +151,30 @@
             "stages": [
               {
                 "number": "01",
-                "state": "Done",
+                "state": {
+                  "state": "Done"
+                },
                 "title": "Workbench"
               },
               {
                 "number": "02",
-                "state": "Done",
+                "state": {
+                  "state": "Done"
+                },
                 "title": "Grilling"
               },
               {
                 "number": "03",
-                "state": "ToDo",
+                "state": {
+                  "state": "ToDo"
+                },
                 "title": "Implementation"
               },
               {
                 "number": "04",
-                "state": "ToDo",
+                "state": {
+                  "state": "ToDo"
+                },
                 "title": "Wrap-up"
               }
             ],

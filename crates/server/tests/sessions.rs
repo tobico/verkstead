@@ -7208,7 +7208,11 @@ async fn choosing_a_roadmap_stages_the_work_in_the_grilling_session() {
         stages
             .stages
             .iter()
-            .map(|stage| (stage.number.as_str(), stage.title.as_str(), stage.state))
+            .map(|stage| (
+                stage.number.as_str(),
+                stage.title.as_str(),
+                stage.state.clone()
+            ))
             .collect::<Vec<_>>(),
         [
             ("01", "Count the requests", StageState::Done),
@@ -18518,7 +18522,11 @@ async fn a_settled_wrap_up_starts_the_next_stage_on_a_conversation_of_its_own() 
         stages
             .stages
             .iter()
-            .map(|stage| (stage.number.as_str(), stage.title.as_str(), stage.state))
+            .map(|stage| (
+                stage.number.as_str(),
+                stage.title.as_str(),
+                stage.state.clone()
+            ))
             .collect::<Vec<_>>(),
         [
             ("01", "Count the requests", StageState::InProgress),
