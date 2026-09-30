@@ -25,9 +25,9 @@ use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Birth, Marked, Transferred, ask_to_transfer, birth, conversations, open_database, record_birth,
-    register_repo, stamp_the_births, start_conversation, transfer_asked, transfer_away,
-    transfer_made, transferred,
+    AskedBy, Birth, Marked, Transferred, ask_to_transfer, birth, conversations, open_database,
+    record_birth, register_repo, stamp_the_births, start_conversation, transfer_asked,
+    transfer_away, transfer_made, transferred,
 };
 
 /// The device every Conversation started here is drafted on, named the way a
@@ -265,7 +265,7 @@ async fn the_mark_is_written_only_while_the_request_still_names_that_device() {
     // A request naming somewhere else: the second press, landed while this move
     // was packing and pushing.
     let elsewhere = "ff11223344556677889900aabbccddee";
-    ask_to_transfer(&pool, conversation, elsewhere)
+    ask_to_transfer(&pool, conversation, elsewhere, AskedBy::Human)
         .await
         .unwrap();
 
@@ -288,13 +288,16 @@ async fn the_mark_is_written_only_while_the_request_still_names_that_device() {
     );
 
     // And the request this move is actually for, which is the ordinary one.
-    ask_to_transfer(&pool, conversation, &onwards.device)
+    ask_to_transfer(&pool, conversation, &onwards.device, AskedBy::Session)
         .await
         .unwrap();
 
     assert_eq!(
         transfer_made(&pool, conversation, &onwards).await.unwrap(),
-        Marked::Marked,
+        Marked::Marked {
+            by: AskedBy::Session
+        },
+        "the mark says who asked for the move it made",
     );
     assert_eq!(
         transferred(&pool, conversation).await.unwrap(),

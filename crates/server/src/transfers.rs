@@ -65,8 +65,8 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use serde::{Deserialize, Serialize};
 use verkstead_render::{
-    Arrived, BirthKey, CameFrom, ConversationAcross, PairingAcross, PickedAcross, ProfileAcross,
-    Transferring,
+    Arrived, BirthKey, CameFrom, ConversationAcross, MovedFor, PairingAcross, PickedAcross,
+    ProfileAcross, Transferring,
 };
 use verkstead_schema::Nudge;
 
@@ -192,7 +192,7 @@ pub(crate) async fn transfer(
         return Ok(Transferring::Lacking(reading));
     }
 
-    store::ask_to_transfer(&state.pool, conversation_id, device)
+    asked(state, conversation_id, device, store::AskedBy::Human)
         .await
         .map_err(|why| Refusal::ours(format!("the transfer could not be written down: {why:#}")))?;
 
@@ -203,14 +203,274 @@ pub(crate) async fn transfer(
         "the human asked for a Conversation to be moved onto another device",
     );
 
+    Ok(Transferring::Transferring)
+}
+
+/// Write the request down, say so on the page, and put a mover behind it.
+///
+/// **The later request is the one that stands**, whoever made either: a press
+/// after the session's call, or a call after the press, replaces what was there.
+/// A request that already named this device already has a mover seeing the
+/// session out, so none is started beside it — that one reads who asked at its
+/// commit point, which is where the Timeline's wording is settled.
+async fn asked(
+    state: &AppState,
+    conversation_id: i64,
+    device: &str,
+    by: store::AskedBy,
+) -> anyhow::Result<()> {
+    let before = store::ask_to_transfer(&state.pool, conversation_id, device, by).await?;
+
     // The pane says *Transferring to* from here, and the sidebar rows with it.
     state.nudges.announce(Nudge::Conversation {
         conversation: conversation_id,
     });
 
-    see_out(state.clone(), conversation_id, device.to_owned());
+    if before.as_deref() != Some(device) {
+        see_out(state.clone(), conversation_id, device.to_owned());
+    }
 
-    Ok(Transferring::Transferring)
+    Ok(())
+}
+
+/// `POST /conversations/{conversation}/api/v1/transfer` — the session running
+/// in this Conversation asks for the work to be moved onto the device the body
+/// names, by its name or its Device Id (ADR-0020, *The agent's call*).
+///
+/// `verkstead done`'s pattern: nothing but the base URL says which Conversation,
+/// and what is recorded is a request the mover acts on once the session has
+/// ended. 200 with the machine's name where it is written down; 409 with the
+/// reason, and nothing written, where it is refused.
+pub(crate) async fn call(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    axum::extract::Path(conversation_id): axum::extract::Path<i64>,
+    body: String,
+) -> axum::response::Response {
+    use axum::http::StatusCode;
+    use axum::response::IntoResponse;
+
+    match by_the_session(&state, conversation_id, body.trim()).await {
+        Ok(named) => {
+            tracing::info!(
+                conversation_id,
+                named,
+                "a session asked for its Conversation to be moved onto another device",
+            );
+
+            (StatusCode::OK, format!("{named}\n")).into_response()
+        }
+
+        Err(why) => {
+            tracing::info!(
+                conversation_id,
+                why,
+                "a session asked for its Conversation to be moved and was refused",
+            );
+
+            crate::reply::yaml(StatusCode::CONFLICT, &verkstead_schema::ApiError::new(why))
+        }
+    }
+}
+
+/// Decide a session's call, and write the request down where it holds: the name
+/// of the machine it is going to, or the reason it is not.
+///
+/// **Everything a press is refused for, and three things more.** The ticks are
+/// the consent, so a device the human did not tick — and that is not the one the
+/// work was drafted on — is refused; so is a name that is nobody's or is two
+/// machines', and the machine the work is on already. The preflight runs before
+/// the answer rather than after it, and a finding comes back in the words the
+/// Transfer dialog shows, so that the agent can pick another device or ask the
+/// human while it still has a turn to do it in.
+async fn by_the_session(
+    state: &AppState,
+    conversation_id: i64,
+    said: &str,
+) -> Result<String, String> {
+    if state.sessions.following(conversation_id).is_none() {
+        return Err(
+            "there is no session running in this Conversation, so there is nothing \
+                    here to move"
+                .to_owned(),
+        );
+    }
+
+    if said.is_empty() {
+        return Err("name the device to move to, by its name or its id: \
+                    `verkstead transfer <device>`"
+            .to_owned());
+    }
+
+    let ours = |why: anyhow::Error| format!("this device could not decide the transfer: {why:#}");
+
+    let Some(conversation) = store::load_conversation(&state.pool, conversation_id)
+        .await
+        .map_err(ours)?
+    else {
+        return Err("this Conversation is not on this device".to_owned());
+    };
+
+    if conversation.transferred.is_some() {
+        return Err("the work has already been moved to another device".to_owned());
+    }
+
+    if !movable(conversation.state) {
+        return Err(
+            "this Conversation cannot be moved: a draft moves by its own composer, and \
+                    a closed one has no work left to move"
+                .to_owned(),
+        );
+    }
+
+    let Some(devices) = state.devices.as_ref() else {
+        return Err(
+            "this device is in no cluster, so there is no other device to move to".to_owned(),
+        );
+    };
+
+    let members = devices.membership().rows().await.map_err(ours)?;
+
+    if said == devices.id() || said == devices.name() {
+        return Err(format!(
+            "the work is already on {}, which is this device",
+            devices.name()
+        ));
+    }
+
+    let device = match members.iter().find(|member| member.device == said) {
+        Some(member) => member,
+        None => {
+            let named: Vec<_> = members
+                .iter()
+                .filter(|member| member.name == said)
+                .collect();
+
+            match named.as_slice() {
+                [member] => *member,
+                [] => {
+                    return Err(format!(
+                        "no device of this cluster is called {said} or has that id{}",
+                        known(&members),
+                    ));
+                }
+                several => {
+                    return Err(format!(
+                        "{} devices of this cluster are called {said}, so name the one you mean \
+                         by its id: {}",
+                        several.len(),
+                        several
+                            .iter()
+                            .map(|member| format!("{} ({})", member.device, member.os))
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                    ));
+                }
+            }
+        }
+    };
+
+    let born = store::birth(&state.pool, conversation_id)
+        .await
+        .map_err(ours)?;
+    let ticked = store::permitted_devices(&state.pool, conversation_id)
+        .await
+        .map_err(ours)?;
+
+    if born.is_none_or(|born| born.device != device.device)
+        && !ticked.contains(&device.device)
+    {
+        return Err(format!(
+            "{} ({}) is not a device the human has said this work may be moved to — they tick \
+             those under *May be transferred to* in the Transfer dialog. Pick one that is, or \
+             ask them",
+            device.name, device.device,
+        ));
+    }
+
+    let reading = crate::preflight::of(Some(devices), &state.pool, &conversation, &device.device)
+        .await
+        .map_err(|refusal| refusal.saying)?;
+
+    if !reading.lacks.is_empty() {
+        return Err(format!(
+            "the work cannot be moved to {} yet: {}",
+            reading.device,
+            reading
+                .lacks
+                .iter()
+                .map(|lacking| lacks(lacking, &reading.device))
+                .collect::<Vec<_>>()
+                .join(" "),
+        ));
+    }
+
+    asked(
+        state,
+        conversation_id,
+        &device.device,
+        store::AskedBy::Session,
+    )
+    .await
+    .map_err(ours)?;
+
+    Ok(device.name.clone())
+}
+
+/// The devices a name could have been, said after a name that is none of them.
+fn known(members: &[store::Member]) -> String {
+    if members.is_empty() {
+        return String::new();
+    }
+
+    format!(
+        " — the others are {}",
+        members
+            .iter()
+            .map(|member| format!("{} ({})", member.name, member.device))
+            .collect::<Vec<_>>()
+            .join(", "),
+    )
+}
+
+/// One finding of the preflight, in the words the Transfer dialog draws it in —
+/// see `lacking` in `web/src/workbench/Transfer.tsx`.
+fn lacks(lacking: &verkstead_render::Lacking, device: &str) -> String {
+    use verkstead_render::{AgentType, Lacking, PairingRole};
+
+    match lacking {
+        Lacking::Unreachable => format!(
+            "{device} is unreachable, so it cannot say what it has. It will answer when it is \
+             awake."
+        ),
+
+        Lacking::Repo { name, companion } => format!(
+            "The {repo} {name} is not on {device}. Open repo there to register it.",
+            repo = if *companion { "companion repo" } else { "repo" },
+        ),
+
+        Lacking::Harness {
+            role,
+            profile,
+            agent_type,
+        } => {
+            let role = match role {
+                PairingRole::Grilling => "Grilling",
+                PairingRole::Implementation => "Implementation",
+                PairingRole::Review => "Review",
+            };
+            let agent = match agent_type {
+                AgentType::Claude => "Claude Code",
+                AgentType::Codex => "Codex",
+                AgentType::Grok => "Grok Build",
+                AgentType::OpenCode => "OpenCode",
+            };
+
+            format!(
+                "{role} is paired with {profile}, which runs {agent}. {agent} is not on {device}.",
+                profile = profile.as_deref().unwrap_or("Default"),
+            )
+        }
+    }
 }
 
 /// Tick a device under *May be transferred to*, or untick it (ADR-0020, *The
@@ -737,7 +997,7 @@ async fn across(state: &AppState, conversation_id: i64, device: &str) -> Result<
     // A failure at this one step is the one that has something over there to take
     // back, and so is being overtaken — the copy this mover landed is a copy
     // nothing is going to use either way.
-    match store::transfer_made(
+    let by = match store::transfer_made(
         &state.pool,
         conversation_id,
         &store::Transferred {
@@ -747,7 +1007,7 @@ async fn across(state: &AppState, conversation_id: i64, device: &str) -> Result<
     )
     .await
     {
-        Ok(store::Marked::Marked) => {}
+        Ok(store::Marked::Marked { by }) => by,
 
         Ok(store::Marked::Superseded { asked }) => {
             return Ok(Outcome::StoodDown {
@@ -762,7 +1022,12 @@ async fn across(state: &AppState, conversation_id: i64, device: &str) -> Result<
                 landed: Some(arrived.id),
             });
         }
-    }
+    };
+
+    let asked = match by {
+        store::AskedBy::Human => MovedFor::Human,
+        store::AskedBy::Session => MovedFor::Session,
+    };
 
     // What this copy has to say for itself from here, which is where the work
     // went. The page redirects off a tombstone rather than drawing it — see
@@ -773,8 +1038,9 @@ async fn across(state: &AppState, conversation_id: i64, device: &str) -> Result<
         state,
         conversation_id,
         &format!(
-            "This Conversation was moved onto **{named}**. What is left here is a copy: the \
+            "Transferred to **{named}** at {whose} request. What is left here is a copy: the \
              live record is on that device, and every link to this one leads there.",
+            whose = asked.whose(),
         ),
     )
     .await;
@@ -796,7 +1062,11 @@ async fn across(state: &AppState, conversation_id: i64, device: &str) -> Result<
             onwards: ONE_TRANSFERS_ARRIVAL.replace("{id}", &arrived.id.to_string()),
             headers: as_json(),
             body: Streamed::saying(
-                serde_json::to_vec(&CameFrom { device: here }).unwrap_or_default(),
+                serde_json::to_vec(&CameFrom {
+                    device: here,
+                    asked,
+                })
+                .unwrap_or_default(),
             ),
         },
     )

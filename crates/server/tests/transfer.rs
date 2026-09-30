@@ -986,6 +986,60 @@ impl Verkstead {
         .await
     }
 
+    /// Run `verkstead transfer <device>` from the session running in that
+    /// Conversation, and answer with the status and what the server said.
+    ///
+    /// Made the way the CLI makes it, over the agent API, for the reason every
+    /// stand-in for a verb here is: the router is driven by `oneshot` and has no
+    /// socket a session inside a sandbox could reach. The CLI's own end of it is
+    /// `crates/cli/tests/transfer.rs`.
+    async fn calls(&self, conversation: i64, device: &str) -> (StatusCode, String) {
+        let answered = self
+            .workbench
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/conversations/{conversation}/api/v1/transfer"))
+                    .body(Body::from(device.to_owned()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let status = answered.status();
+        let bytes = answered.into_body().collect().await.unwrap().to_bytes();
+
+        (status, String::from_utf8_lossy(&bytes).into_owned())
+    }
+
+    /// The same, refused: a 409, and the reason, which must say `saying` — and
+    /// nothing written down, so the Conversation is going nowhere.
+    async fn refused(&self, conversation: i64, device: &str, saying: &[&str]) {
+        let (status, said) = self.calls(conversation, device).await;
+
+        assert_eq!(
+            status,
+            StatusCode::CONFLICT,
+            "`verkstead transfer {device}` is refused: {said}",
+        );
+
+        for words in saying {
+            assert!(
+                said.contains(words),
+                "`verkstead transfer {device}` says {words:?}: {said}",
+            );
+        }
+
+        assert_eq!(
+            store::transfer_asked(&self.pool, conversation)
+                .await
+                .unwrap(),
+            None,
+            "and a refused call leaves no request behind: {said}",
+        );
+    }
+
     /// One of its Conversations as its own browser reads it.
     async fn view(&self, conversation: i64) -> ConversationView {
         reading(
@@ -2444,6 +2498,228 @@ async fn the_ticks_arrive_with_the_record_and_the_drafting_device_stays_permitte
 
     // And the copy left behind is not the list's any more: the live one is.
     assert_eq!(a.permits(conversation, C, false).await, "\"Elsewhere\"",);
+}
+
+/// **The agent moves the work itself** (ADR-0020, *The agent's call*): a session
+/// on A that runs `verkstead transfer` with B's name, to a device the human
+/// ticked, and then ends is moved to B and carried on there — and B's Timeline
+/// says whose request that was.
+#[tokio::test]
+async fn a_session_that_asks_for_a_ticked_device_by_name_is_moved_there_and_carried_on() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = ready_to_carry_on(&gate, spill.path()).await;
+
+    a.printed(conversation, "grilling").await;
+
+    assert_eq!(a.permits(conversation, B, true).await, "\"Recorded\"");
+
+    let (status, said) = a.calls(conversation, B_MACHINE).await;
+    assert_eq!(status, StatusCode::OK, "the call is taken: {said}");
+    assert_eq!(said.trim(), B_MACHINE, "naming the machine it is going to");
+
+    let going = a.view(conversation).await;
+    assert_eq!(
+        going.transferring.as_deref(),
+        Some(B_MACHINE),
+        "the Conversation is on its way from the call",
+    );
+    assert!(
+        going.working,
+        "and the session that made it is not cut short",
+    );
+
+    // The session ends, which is when the move is made.
+    std::fs::write(&gate, "go").unwrap();
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    let arrived = b.notice_saying(there, "at the session").await;
+    assert!(
+        arrived.starts_with("<p>Transferred to"),
+        "B's Timeline says the work was transferred to it at the session's request: {arrived}",
+    );
+
+    let left = a.notice_saying(conversation, "at the session").await;
+    assert!(
+        left.contains(B_MACHINE),
+        "and the copy left on A says the same, naming B: {left}",
+    );
+
+    // And the conversation is carried on over there.
+    let resumed = b.latest_capture_saying(there, "carried on").await;
+    assert!(
+        resumed.contains("arg=--resume"),
+        "B's session carries on the conversation A's was having: {resumed:?}",
+    );
+}
+
+/// **By its id as well as its name**, which is what an agent retries with when
+/// two machines share a name.
+#[tokio::test]
+async fn a_session_may_name_the_device_by_its_id() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = ready_to_move(&gate, spill.path()).await;
+
+    a.printed(conversation, "grilling").await;
+    assert_eq!(a.permits(conversation, B, true).await, "\"Recorded\"");
+
+    let (status, said) = a.calls(conversation, B).await;
+    assert_eq!(status, StatusCode::OK, "the call is taken: {said}");
+    assert_eq!(said.trim(), B_MACHINE);
+
+    std::fs::write(&gate, "go").unwrap();
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    b.notice_saying(there, "at the session").await;
+}
+
+/// **What the call refuses, each by name, and nothing written down for any of
+/// them**: a device the human did not tick, a name two machines share, the
+/// device the work is on, a machine that does not answer, and one without a
+/// repository the work is in.
+#[tokio::test]
+async fn a_call_the_device_cannot_take_is_refused_saying_why_and_records_nothing() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = ready_to_draft(&gate, spill.path()).await;
+
+    // A Companion B has never heard of, which is the repository a move would
+    // find nowhere to land.
+    a.repo_called(COMPANION).await;
+    let beside = a.repo_row(COMPANION).await;
+    assert_eq!(
+        store::add_companion(&a.pool, conversation, beside)
+            .await
+            .unwrap(),
+        store::Adding::Added,
+    );
+
+    a.grills(conversation).await;
+    a.printed(conversation, "grilling").await;
+
+    // Two more machines of the cluster: one nothing answers at, and one that
+    // shares B's name.
+    let third = tempfile::tempdir().unwrap();
+    let c = Device::stated(third.path(), C).unwrap();
+    a.linked_to(&c, "the-vm", "Windows 11", Vec::new()).await;
+
+    let fourth = tempfile::tempdir().unwrap();
+    let twin = "1234567890abcdef1234567890abcdef";
+    let d = Device::stated(fourth.path(), twin).unwrap();
+    a.linked_to(&d, B_MACHINE, "Linux", Vec::new()).await;
+
+    // Off the list: nobody ticked the VM.
+    a.refused(
+        conversation,
+        "the-vm",
+        &["not a device the human has said", C],
+    )
+    .await;
+
+    // Two machines by that name, both named with their ids.
+    a.refused(conversation, B_MACHINE, &[B, twin]).await;
+
+    // The machine the work is on already.
+    a.refused(conversation, A, &["already on"]).await;
+
+    // A name that is nobody's.
+    a.refused(conversation, "the-toaster", &["no device of this cluster"])
+        .await;
+
+    // Ticked, and asleep: the preflight's finding in the dialog's words.
+    assert_eq!(a.permits(conversation, C, true).await, "\"Recorded\"");
+    a.refused(conversation, C, &["the-vm is unreachable"]).await;
+
+    // Ticked, awake, and without the Companion.
+    assert_eq!(a.permits(conversation, B, true).await, "\"Recorded\"");
+    a.refused(
+        conversation,
+        B,
+        &[&format!(
+            "The companion repo {COMPANION} is not on {B_MACHINE}"
+        )],
+    )
+    .await;
+
+    let drawn = a.view(conversation).await;
+    assert_eq!(
+        drawn.transferring, None,
+        "the Conversation is going nowhere"
+    );
+    assert!(drawn.working, "and the session is left running");
+    assert!(b.own_rows().await.is_empty());
+}
+
+/// **The later request wins, whoever made it**, and the Timeline names whoever
+/// that was: a press after the session's call is the human's move, and a call
+/// after the press is the session's.
+#[tokio::test]
+async fn a_press_after_the_sessions_call_is_the_one_that_moves() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = ready_to_move(&gate, spill.path()).await;
+
+    a.printed(conversation, "grilling").await;
+    assert_eq!(a.permits(conversation, B, true).await, "\"Recorded\"");
+
+    assert_eq!(a.calls(conversation, B_MACHINE).await.0, StatusCode::OK);
+    assert_eq!(a.transfers(conversation, B).await, "\"Transferring\"");
+
+    std::fs::write(&gate, "go").unwrap();
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    let arrived = b.notice_saying(there, "Transferred to").await;
+    assert!(
+        arrived.contains("at the human"),
+        "the press came last, so the move is the human's: {arrived}",
+    );
+}
+
+#[tokio::test]
+async fn a_call_after_the_press_is_the_one_that_moves() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = ready_to_move(&gate, spill.path()).await;
+
+    a.printed(conversation, "grilling").await;
+    assert_eq!(a.permits(conversation, B, true).await, "\"Recorded\"");
+
+    assert_eq!(a.transfers(conversation, B).await, "\"Transferring\"");
+    assert_eq!(a.calls(conversation, B).await.0, StatusCode::OK);
+
+    std::fs::write(&gate, "go").unwrap();
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    let arrived = b.notice_saying(there, "Transferred to").await;
+    assert!(
+        arrived.contains("at the session"),
+        "the call came last, so the move is the session's: {arrived}",
+    );
 }
 
 /// **The source is marked only once the far end has confirmed**, and what it

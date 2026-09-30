@@ -21,6 +21,11 @@
 //! device named here is the one the move will be made to. Nothing has left this
 //! machine until then, so there is nothing to take back.
 //!
+//! **And it says who asked**: the human's press, or the session's own call to
+//! `verkstead transfer` (ADR-0020, *The agent's call*). Whichever asked last is
+//! the request that stands, and it is what the Timeline names once the move is
+//! made — which is why the mark hands it back, read in the same transaction.
+//!
 //! **And it is forgotten by whatever acts on it** — by the move that landed, or
 //! by the move that failed and stopped the Conversation instead. A request left
 //! behind would be a second move made at the next moment nothing was running.
@@ -45,7 +50,51 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     .await
     .context("creating the transfers table")?;
 
+    // And who asked, through `ALTER TABLE` rather than in the declaration above,
+    // so that a database made before there was any other way to ask takes the
+    // same path. A request written then was a press, so that is the default.
+    let there: Option<(String,)> =
+        sqlx::query_as("SELECT name FROM pragma_table_info('transfers') WHERE name = ?")
+            .bind("asked_by")
+            .fetch_optional(pool)
+            .await
+            .context("looking for the column saying who asked for a transfer")?;
+
+    if there.is_none() {
+        sqlx::query("ALTER TABLE transfers ADD COLUMN asked_by TEXT NOT NULL DEFAULT 'human'")
+            .execute(pool)
+            .await
+            .context("adding the column saying who asked for a transfer")?;
+    }
+
     Ok(())
+}
+
+/// Who asked for a Conversation to be moved.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AskedBy {
+    /// The human, pressing *Transfer to…*.
+    Human,
+
+    /// The session running in the Conversation, through `verkstead transfer` —
+    /// to a device the human ticked, or the one the work was drafted on.
+    Session,
+}
+
+impl AskedBy {
+    fn column(self) -> &'static str {
+        match self {
+            AskedBy::Human => "human",
+            AskedBy::Session => "session",
+        }
+    }
+
+    fn read(column: &str) -> AskedBy {
+        match column {
+            "session" => AskedBy::Session,
+            _ => AskedBy::Human,
+        }
+    }
 }
 
 /// Ask for this Conversation to be moved onto `device` once whatever is running
@@ -55,20 +104,45 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
 /// from here is that the work is going somewhere, which is what the Timeline
 /// reads as *Transferring to* that machine and what keeps anything else from
 /// being launched in the meantime.
-pub async fn ask_to_transfer(pool: &SqlitePool, conversation_id: i64, device: &str) -> Result<()> {
+///
+/// Hands back the device the request it replaced named, where there was one: a
+/// request that already named this device already has a mover behind it.
+pub async fn ask_to_transfer(
+    pool: &SqlitePool,
+    conversation_id: i64,
+    device: &str,
+    by: AskedBy,
+) -> Result<Option<String>> {
+    let mut tx = super::writing(pool, "asking for a Conversation to be transferred").await?;
+
+    let before: Option<(String,)> =
+        sqlx::query_as("SELECT device FROM transfers WHERE conversation_id = ?")
+            .bind(conversation_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .with_context(|| {
+                format!("reading which device Conversation {conversation_id} was going to")
+            })?;
+
     sqlx::query(
-        "INSERT INTO transfers (conversation_id, device, asked_at)
-         VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+        "INSERT INTO transfers (conversation_id, device, asked_at, asked_by)
+         VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?)
          ON CONFLICT (conversation_id) DO UPDATE SET device = excluded.device,
-                                                     asked_at = excluded.asked_at",
+                                                     asked_at = excluded.asked_at,
+                                                     asked_by = excluded.asked_by",
     )
     .bind(conversation_id)
     .bind(device)
-    .execute(pool)
+    .bind(by.column())
+    .execute(&mut *tx)
     .await
     .with_context(|| format!("asking for Conversation {conversation_id} to be transferred"))?;
 
-    Ok(())
+    tx.commit()
+        .await
+        .context("asking for a Conversation to be transferred")?;
+
+    Ok(before.map(|(device,)| device))
 }
 
 /// Which device this Conversation is on its way to, where a press has asked for
@@ -118,8 +192,8 @@ pub async fn transfer_made(
 ) -> Result<Marked> {
     let mut tx = super::writing(pool, "recording where a Conversation's work went").await?;
 
-    let asked: Option<(String,)> =
-        sqlx::query_as("SELECT device FROM transfers WHERE conversation_id = ?")
+    let asked: Option<(String, String)> =
+        sqlx::query_as("SELECT device, asked_by FROM transfers WHERE conversation_id = ?")
             .bind(conversation_id)
             .fetch_optional(&mut *tx)
             .await
@@ -129,11 +203,14 @@ pub async fn transfer_made(
 
     // A request naming another device, or none at all: either way the move this
     // mark would be about is not the move the record is asking for any more.
-    if asked.as_ref().map(|(device,)| device.as_str()) != Some(to.device.as_str()) {
-        return Ok(Marked::Superseded {
-            asked: asked.map(|(device,)| device),
-        });
-    }
+    let by = match asked {
+        Some((device, by)) if device == to.device => AskedBy::read(&by),
+        asked => {
+            return Ok(Marked::Superseded {
+                asked: asked.map(|(device, _)| device),
+            });
+        }
+    };
 
     super::births::mark_away(&mut tx, conversation_id, to).await?;
 
@@ -152,15 +229,16 @@ pub async fn transfer_made(
         .await
         .context("recording where a Conversation's work went")?;
 
-    Ok(Marked::Marked)
+    Ok(Marked::Marked { by })
 }
 
 /// What became of writing a move's mark at its commit point.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Marked {
     /// The mark is written and the request is spent: the work is over there, and
-    /// this copy is the tombstone.
-    Marked,
+    /// this copy is the tombstone. With who asked for the move, as the request
+    /// stood when it was spent — which is what the Timeline names.
+    Marked { by: AskedBy },
 
     /// The request names somewhere else now, so nothing was written: a second
     /// press landed while this move was in flight, and the mover that holds it

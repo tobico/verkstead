@@ -293,6 +293,30 @@ pub struct ProfileAcross {
 pub struct CameFrom {
     /// The **Device Id** of the machine the work was moved off.
     pub device: String,
+
+    /// And who asked for the move, which the arrival's Notice names. Absent is
+    /// a sender from before a session could ask, which was always the human.
+    #[serde(default)]
+    pub asked: MovedFor,
+}
+
+/// Who a move was made for: the human's press on *Transfer to…*, or the
+/// session's own `verkstead transfer` (ADR-0020, *The agent's call*).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MovedFor {
+    #[default]
+    Human,
+    Session,
+}
+
+impl MovedFor {
+    /// Whose request the Timeline says the move was made at.
+    pub fn whose(self) -> &'static str {
+        match self {
+            MovedFor::Human => "the human's",
+            MovedFor::Session => "the session's",
+        }
+    }
 }
 
 /// What the receiving device answers: the id it numbered its copy.

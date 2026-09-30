@@ -1560,6 +1560,12 @@ fn serving(state: AppState, gate: &key::Gate) -> Router {
             &format!("{ASKING_FROM}/{{conversation}}/api/v1/done"),
             post(done::signal),
         )
+        // And asking for the work to be moved onto another device, which the
+        // mover acts on once the session has ended (ADR-0020, *The agent's call*).
+        .route(
+            &format!("{ASKING_FROM}/{{conversation}}/api/v1/transfer"),
+            post(transfers::call),
+        )
         // And saying it is waiting on work of its own, which keeps it at work.
         .route(
             &format!("{ASKING_FROM}/{{conversation}}/api/v1/waiting"),

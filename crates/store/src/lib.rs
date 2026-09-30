@@ -183,7 +183,9 @@ pub use stops::{
     stop_as_asked, stopped,
 };
 pub use transcripts::{append_transcript, transcript, transcript_after};
-pub use transfers::{Marked, ask_to_transfer, forget_transfer, transfer_asked, transfer_made};
+pub use transfers::{
+    AskedBy, Marked, ask_to_transfer, forget_transfer, transfer_asked, transfer_made,
+};
 pub use unseen::{see_conversation, stamp_unseen};
 pub use waits::{WaitHeld, Waits};
 pub use wrap_up::{
