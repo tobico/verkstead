@@ -2596,9 +2596,17 @@ async fn a_session_that_asks_for_a_ticked_device_by_name_is_moved_there_and_carr
     let gate = spill.path().join("go");
     let (a, b, _holding, conversation) = ready_to_carry_on(&gate, spill.path()).await;
 
+    // A third machine both hold as a member, ticked too, so the list B's session
+    // is told has something on it beyond the way home.
+    let third = tempfile::tempdir().unwrap();
+    let c = Device::stated(third.path(), C).unwrap();
+    a.linked_to(&c, "the-vm", "Windows 11", Vec::new()).await;
+    b.linked_to(&c, "the-vm", "Windows 11", Vec::new()).await;
+
     a.printed(conversation, "grilling").await;
 
     assert_eq!(a.permits(conversation, B, true).await, "\"Recorded\"");
+    assert_eq!(a.permits(conversation, C, true).await, "\"Recorded\"");
 
     let (status, said) = a.calls(conversation, B_MACHINE).await;
     assert_eq!(status, StatusCode::OK, "the call is taken: {said}");
@@ -2642,6 +2650,27 @@ async fn a_session_that_asks_for_a_ticked_device_by_name_is_moved_there_and_carr
     assert!(
         resumed.contains("arg=--resume"),
         "B's session carries on the conversation A's was having: {resumed:?}",
+    );
+
+    // And it is told where it may go from B: home to A, which drafted the work,
+    // and on to the VM that was ticked — each by name, id and OS — and not to B,
+    // which is where it is.
+    let (machine, os) = this_machine();
+    assert!(
+        resumed.contains(&format!("**{machine}** (id `{A}`), {os}.")),
+        "B's session is told it may go home to A: {resumed:?}",
+    );
+    assert!(
+        resumed.contains(&format!("**the-vm** (id `{C}`), Windows 11.")),
+        "and on to the ticked VM: {resumed:?}",
+    );
+    assert!(
+        !resumed.contains(&format!("(id `{B}`)")),
+        "and not to B, where it is: {resumed:?}",
+    );
+    assert!(
+        resumed.contains("verkstead transfer <device>"),
+        "{resumed:?}"
     );
 }
 

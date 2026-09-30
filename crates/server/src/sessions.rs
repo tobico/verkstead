@@ -2763,6 +2763,17 @@ impl Sessions {
             None => (session, Named::Opening, prompt, None),
         };
 
+        // And the devices it may move the work onto, under whichever of the two
+        // it is primed with — the carried note too, because a session carried on
+        // here is told where it may go from here rather than from where it came.
+        // Here for the listings above's reason, and read from this device's side:
+        // see [`crate::transfers::may_go_to`], and [`skills::transferable`],
+        // which says nothing where the list is empty.
+        let prompt = skills::transferable(
+            &prompt,
+            &crate::transfers::may_go_to(pool, devices, conversation_id).await,
+        );
+
         // The sandbox asks git where the worktree's object database is, and the
         // dev-shell question is a `nix eval` or two. The line itself blocks on
         // the platform that writes the prompt to a file — see [`Agents::argv`].

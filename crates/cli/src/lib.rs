@@ -166,12 +166,15 @@ enum Command {
     /// Ask for this session's work to be moved onto another device of the
     /// cluster, and carried on there.
     ///
-    /// Only to a device the human has said the work may go to, or the one it was
-    /// drafted on. Verkstead checks the device there and then — that it is
-    /// awake, holds the repository and has the harness. Accepted, it prints a
-    /// confirmation, exits 0, and the work moves once this session has ended, so
-    /// say anything left to say first; refused, it exits non-zero and says why
-    /// on stderr, and nothing is moved.
+    /// For work this platform cannot do, such as building or testing for
+    /// another operating system. Only to a device the human has ticked for this
+    /// work, or the one it was drafted on — the session's prompt names them, and
+    /// a prompt that names none is a session that may move nowhere. Verkstead
+    /// checks the device there and then — that it is awake, holds the
+    /// repository and has the harness. Accepted, it prints a confirmation, exits
+    /// 0, and the work moves once this session has ended, so say anything left
+    /// to say first; refused, it exits non-zero and says why on stderr, and
+    /// nothing is moved. `verkstead guide` says more.
     Transfer {
         /// The device to move to: its name, or its id where two devices share
         /// a name.

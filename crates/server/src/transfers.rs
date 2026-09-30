@@ -1637,9 +1637,142 @@ pub(crate) async fn transferring(state: &AppState, conversation_id: i64) -> Opti
     Some(relaying::called(state.devices.as_ref(), &device).await)
 }
 
+/// The devices a session of this Conversation, running here, may move its work
+/// onto — what its prompt names (ADR-0020, *The agent's call*).
+///
+/// The rule [`by_the_session`] refuses a call by, read from this device's side
+/// before there is a call: the ticks and the drafting device, less this one. So
+/// a session carried on at the far end is told it may go home, and a session
+/// still where the work was drafted, with nothing ticked, is told of nowhere.
+///
+/// A device that is not a member any more is not named, there being no name or
+/// OS to name it by and no call that could reach it. A read that fails is an
+/// empty list, said in the log: a prompt that says nothing about moving is a
+/// session that stays, which is the way round that loses nothing.
+pub(crate) async fn may_go_to(
+    pool: &sqlx::SqlitePool,
+    devices: Option<&crate::device::Devices>,
+    conversation_id: i64,
+) -> Vec<store::Member> {
+    let Some(devices) = devices else {
+        return Vec::new();
+    };
+
+    let read = async {
+        anyhow::Ok((
+            store::birth(pool, conversation_id).await?,
+            store::permitted_devices(pool, conversation_id).await?,
+            devices.membership().rows().await?,
+        ))
+    };
+
+    match read.await {
+        Ok((born, ticked, members)) => permitted_among(
+            devices.id(),
+            born.as_ref().map(|born| born.device.as_str()),
+            &ticked,
+            members,
+        ),
+
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading where this Conversation's work may be moved failed, so its session is told of nowhere");
+            Vec::new()
+        }
+    }
+}
+
+/// [`may_go_to`]'s rule, with nothing to read: the drafting device first, it
+/// being the one that is always there, then the ticks in the order they were
+/// made — and never `here`.
+fn permitted_among(
+    here: &str,
+    born: Option<&str>,
+    ticked: &[String],
+    members: Vec<store::Member>,
+) -> Vec<store::Member> {
+    let order = born
+        .into_iter()
+        .chain(ticked.iter().map(String::as_str))
+        .filter(|device| *device != here);
+
+    let mut members = members;
+    let mut permitted = Vec::new();
+
+    for device in order {
+        if let Some(at) = members.iter().position(|member| member.device == device) {
+            permitted.push(members.remove(at));
+        }
+    }
+
+    permitted
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn member(device: &str, name: &str, os: &str) -> store::Member {
+        store::Member {
+            device: device.to_owned(),
+            name: name.to_owned(),
+            os: os.to_owned(),
+            addresses: vec!["192.168.1.24".to_owned()],
+            fingerprint: format!("{device}-print"),
+            last_seen: "2026-09-26T00:00:00Z".to_owned(),
+            reachable: true,
+            renewing_from: None,
+            acknowledged: None,
+        }
+    }
+
+    fn named(permitted: &[store::Member]) -> Vec<&str> {
+        permitted
+            .iter()
+            .map(|member| member.name.as_str())
+            .collect()
+    }
+
+    /// On the drafting device with nothing ticked, the list is empty — which is
+    /// what makes the prompt say nothing about moving.
+    #[test]
+    fn nothing_ticked_where_the_work_was_drafted_is_nowhere_to_go() {
+        let members = vec![member("b", "vm", "Windows"), member("c", "laptop", "macOS")];
+
+        assert!(permitted_among("a", Some("a"), &[], members).is_empty());
+    }
+
+    /// The ticks, in the order they were made, and never a device that has
+    /// left the cluster.
+    #[test]
+    fn the_ticks_are_named_in_order_and_only_while_they_are_members() {
+        let members = vec![
+            member("b", "vm", "Windows"),
+            member("c", "laptop", "macOS"),
+            member("d", "vm", "Linux (WSL)"),
+        ];
+        let ticked = ["d".to_owned(), "gone".to_owned(), "b".to_owned()];
+
+        assert_eq!(
+            named(&permitted_among("a", Some("a"), &ticked, members)),
+            vec!["vm", "vm"],
+        );
+    }
+
+    /// Carried to B, the list is B's: the drafting device A first, and B not
+    /// on it though it was ticked.
+    #[test]
+    fn from_the_far_end_home_is_named_first_and_here_is_not() {
+        let members = vec![
+            member("a", "workstation", "Linux"),
+            member("c", "laptop", "macOS"),
+        ];
+        let ticked = ["b".to_owned(), "c".to_owned()];
+
+        assert_eq!(
+            named(&permitted_among("b", Some("a"), &ticked, members)),
+            vec!["workstation", "laptop"],
+        );
+    }
 
     /// Every state but the two, which is the rule the row is drawn by and the
     /// rule the press is refused by — one rule, said here.

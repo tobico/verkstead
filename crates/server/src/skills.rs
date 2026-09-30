@@ -1163,6 +1163,58 @@ pub(crate) fn naming(prompt: &str, naming: bool) -> String {
     )
 }
 
+/// The same prompt again, with the devices this session may move its work onto
+/// named under it (ADR-0020, *The agent's call*).
+///
+/// `devices` is the list as it stands **from this device's side** — the ones the
+/// human ticked and the drafting device, less the one the session is running on
+/// — see [`crate::transfers::may_go_to`]. Each is named with its id as well as
+/// its name, because a name is a hostname and two devices can share one, and
+/// with the word for its OS the device select draws, a WSL being *Linux (WSL)*
+/// rather than the Windows machine it shares a hostname with: the OS is the
+/// whole reason a session reaches for this.
+///
+/// **Said, rather than left neutral like the listings above it**, because what
+/// the call is for is not in the Brief: the human ticked the devices so that
+/// the agent could reach for one when the work needs a platform this is not, and
+/// a list with no word on when to use it is one no session would think to.
+///
+/// Applied at the launch point to the fresh prompt and the carried note alike,
+/// so a session carried on at the far end is told where it may go from *there*.
+///
+/// **Nothing where the list is empty**, which is every Conversation nobody
+/// ticked a device on that is still where it was drafted: a heading over
+/// nothing, or a sentence about a verb it may not use, would tell a session
+/// that moving was on the table.
+pub(crate) fn transferable(prompt: &str, devices: &[store::Member]) -> String {
+    if devices.is_empty() {
+        return prompt.to_owned();
+    }
+
+    let listed: Vec<String> = devices
+        .iter()
+        .map(|device| {
+            format!(
+                "- **{}** (id `{}`), {}.",
+                device.name, device.device, device.os
+            )
+        })
+        .collect();
+
+    format!(
+        "{}\n\n# Devices this work may move to\n\nThe human has said this Conversation's \
+         work may be moved onto another device of their cluster:\n\n{}\n\nWhen the work \
+         needs something this platform cannot do — building or testing for another \
+         operating system, say — run `verkstead transfer <device>`, naming one of these \
+         by its name or its id. Accepted, this session is ended once the turn is over \
+         and the work carries on over there: the same conversation, the branch and \
+         the Worktree with it. Refused, it exits non-zero and says why, and nothing \
+         moves — pick another device or ask the human. `verkstead guide` says more.\n",
+        prompt.trim_end(),
+        listed.join("\n"),
+    )
+}
+
 /// The whole of what a **resumed** session is primed with: the note saying the
 /// work has been moved onto this machine (ADR-0020, *Transfer*).
 ///
@@ -4166,6 +4218,62 @@ mod tests {
             built,
             "a heading over nothing would tell a session the name was in question",
         );
+    }
+
+    fn member(device: &str, name: &str, os: &str) -> store::Member {
+        store::Member {
+            device: device.to_owned(),
+            name: name.to_owned(),
+            os: os.to_owned(),
+            addresses: vec!["192.168.1.24".to_owned()],
+            fingerprint: format!("{device}-print"),
+            last_seen: "2026-09-26T00:00:00Z".to_owned(),
+            reachable: true,
+            renewing_from: None,
+            acknowledged: None,
+        }
+    }
+
+    /// A Conversation with devices to move to is told each by name, id and OS
+    /// — a WSL as the OS it reports — and when to reach for the call.
+    #[test]
+    fn a_session_is_told_each_device_it_may_move_to_and_when() {
+        let prompt = transferable(
+            &implementing(&mounted(), "# Fix the Windows build\n", None),
+            &[
+                member("22222222222222222222222222222222", "winvm", "Windows"),
+                member("33333333333333333333333333333333", "winvm", "Linux (WSL)"),
+            ],
+        );
+
+        assert!(
+            prompt.contains("- **winvm** (id `22222222222222222222222222222222`), Windows."),
+            "{prompt}"
+        );
+        assert!(
+            prompt.contains("- **winvm** (id `33333333333333333333333333333333`), Linux (WSL)."),
+            "{prompt}"
+        );
+
+        let said = prompt.split_whitespace().collect::<Vec<_>>().join(" ");
+        for phrase in [
+            "verkstead transfer <device>",
+            "something this platform cannot do",
+            "by its name or its id",
+            "ended once the turn is over",
+            "pick another device or ask the human",
+        ] {
+            assert!(said.contains(phrase), "should say {phrase:?}: {said}");
+        }
+    }
+
+    /// And one with nowhere to go says nothing about moving at all.
+    #[test]
+    fn a_session_with_nowhere_to_move_is_told_nothing_about_transfer() {
+        let built = implementing(&mounted(), "# Rate limiting\n", None);
+
+        assert_eq!(transferable(&built, &[]), built);
+        assert!(!built.contains("transfer"), "{built}");
     }
 
     /// The listing says what is there and nothing about what to do with it. What
