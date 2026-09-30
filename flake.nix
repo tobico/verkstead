@@ -207,6 +207,13 @@
               # against the tool that has to obey it.
               poetry
               pipenv
+              # And .NET, which is the `dotnet` descriptor's one tool: NuGet is
+              # what every .NET project installs through, and it comes in the
+              # SDK rather than as a package of its own. `dotnet-sdk` is 8.0.x
+              # here, which is the same major the runner image carries, so a
+              # proof that passes in the shell is a proof of the SDK CI runs it
+              # against.
+              dotnet-sdk
               # What a ticked `gh` row unpacks on an Intel Mac, which has no
               # Homebrew to install one with — see
               # `crates/server/src/onboarding/install.rs`'s `GH_RELEASE`. Both

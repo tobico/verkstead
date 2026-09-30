@@ -461,3 +461,95 @@ languages:
       POETRY_VIRTUALENVS_IN_PROJECT: "true"
       PIPENV_CACHE_DIR: "{cache}/pipenv"
       PIPENV_VENV_IN_PROJECT: "1"
+
+  dotnet:
+    # .NET, and the last of the package stores. One entry for the ecosystem the
+    # way Node and Python are, and it happens to carry one tool: everything on
+    # a .NET machine installs through NuGet — `dotnet restore`, `dotnet add
+    # package`, `nuget.exe`, MSBuild — so a box per tool would be several boxes
+    # naming one store (ADR-0021).
+    label: .NET
+
+    # **Empty, on purpose, and this is the one descriptor where it is.** A .NET
+    # project is a `*.csproj`, a `*.fsproj` or a `*.sln`, and `detect` matches
+    # literal filenames at the root of a checkout — it has no globs. Adding them
+    # would be behaviour in the server, which is the one thing this stage is
+    # meant to prove unnecessary.
+    #
+    # And it costs nothing but the warning. Detection is the setup card's
+    # warning and nothing else — the variables below are every session's
+    # whatever the Repo holds, exactly as Rust's and Go's are — so what an empty
+    # list gives up is a line .NET never had, and what it keeps is a store that
+    # works for every Repo that installs a package.
+    detect: []
+
+    # Three directories and three variables, each read out of the tool that
+    # reads it as this entry was written — `dotnet nuget locals all --list`,
+    # against the SDK the dev shell pins and the one the runner image carries:
+    #
+    #   NUGET_PACKAGES          the **global packages folder**, which is where
+    #                           restore puts what it downloaded, unpacked, and
+    #                           what a build then compiles against in place.
+    #                           This is the store: a `<PackageReference>` whose
+    #                           exact version is already here resolves out of it
+    #                           with no source configured at all.
+    #
+    #   NUGET_HTTP_CACHE_PATH   and the **http cache**, which is the responses
+    #                           behind it — the service index, the version list
+    #                           and the `.nupkg` as it came off the wire. A
+    #                           second half rather than a duplicate, and each
+    #                           can serve an install the other cannot: with the
+    #                           packages folder emptied and nothing answering on
+    #                           the source, a restore still finishes out of this
+    #                           one. Measured in `tests/package_stores.rs`,
+    #                           which is what says both variables are read.
+    #
+    #   NUGET_SCRATCH           and NuGet's **temp** directory, which holds no
+    #                           downloads at all and is here for the one reason
+    #                           below. Its default is `$TMPDIR/NuGetScratch` and
+    #                           the user's name, which a session's own `dotnet`
+    #                           prints as `temp:` beside the other two.
+    #
+    # **The third variable is what makes two sessions at once safe, and it was
+    # found by two of them damaging the store.** NuGet does guard the global
+    # packages folder against concurrent writers — it extracts a package under
+    # a lock before it renames anything into place — and that lock is a *file*,
+    # in the temp directory above. Every session's `/tmp` is a tmpfs of its own
+    # inside its sandbox, so two Conversations restoring the same package took
+    # two different locks, extracted over each other, and one of them failed on
+    # a temporary file the other had renamed away. Measured: with the two
+    # directories above and not this one, the two-at-once proof in
+    # `tests/package_stores.rs` fails about three runs in five under load. A
+    # lock is only a lock where both parties can see it, so it goes where the
+    # store it guards is.
+    #
+    # **All three under `{cache}`, and nothing here wants `{stores}`.** NuGet never
+    # links a package out of the global packages folder into the project: a
+    # build reads the assemblies where they lie and copies what it needs into
+    # `bin/`. So none of these has to share a filesystem with a Worktree, which
+    # is the whole of what that placeholder is for.
+    #
+    # **And no compiled half.** NuGet has no store of built output to share —
+    # what a build leaves is `obj/` and `bin/` in the project, which is the
+    # Worktree's. So this entry is the downloads and nothing else, where Go's is
+    # two halves and Rust's names a Compile Server.
+    #
+    # Nothing that is written here is a session's own, this third directory
+    # included: what NuGet keeps in its temp directory is lock files and
+    # part-downloads, which is why `dotnet nuget locals temp --clear` is a thing
+    # somebody may do at any moment. Sharing it is the point of it.
+    #
+    # **And each variable names the store rather than the directory above it**,
+    # which for .NET is the difference between sharing downloads and sharing a
+    # session's own things. The user-level `NuGet.Config` — which is where
+    # `<packageSourceCredentials>` goes — is `~/.nuget/NuGet/NuGet.Config`, a
+    # *sibling* of `~/.nuget/packages`: a descriptor that had moved `~/.nuget`
+    # would have handed every Conversation one login. The http cache is the
+    # same shape, `~/.local/share/NuGet/http-cache` beside
+    # `~/.local/share/NuGet/plugin-cache` — and `NUGET_PLUGINS_CACHE_PATH` is
+    # deliberately not set, a credential provider's cached answers about what it
+    # can do being a session's business rather than a download.
+    env:
+      NUGET_PACKAGES: "{cache}/nuget/packages"
+      NUGET_HTTP_CACHE_PATH: "{cache}/nuget/http"
+      NUGET_SCRATCH: "{cache}/nuget/scratch"

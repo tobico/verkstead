@@ -150,8 +150,13 @@ jobs:
   # Python's four add one archive and one `pip install` — the runner's own
   # interpreter carries pip already — and a proof apiece. Nothing here
   # builds a project, so what each ecosystem costs this job is its toolchain's
-  # download rather than its proofs, which is the shape to keep as the last
-  # stage adds NuGet.
+  # download rather than its proofs.
+  #
+  # **And .NET, the last of them, costs this job no download at all**: the
+  # runner image carries a .NET SDK under `/usr/lib/dotnet`, which is inside
+  # `/usr` and so inside every bind a session gets. So there is no install step
+  # for it below — only the same line in the tool check every other tool has,
+  # which is what would catch the image moving or dropping it.
   package-stores:
     name: Package stores
     runs-on: ubuntu-24.04
@@ -315,7 +320,7 @@ jobs:
         run: |
           status=0
 
-          for tool in go zip node npm pnpm yarn yarn-berry deno bun python3 uv poetry pipenv tar sha1sum; do
+          for tool in go zip node npm pnpm yarn yarn-berry deno bun python3 uv poetry pipenv dotnet tar sha1sum; do
             found=$(command -v "$tool" || true)
 
             if [ -z "$found" ]; then

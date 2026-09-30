@@ -3244,7 +3244,9 @@ async fn the_configured_binds_beside_a_read_only_companion_are_still_writable() 
 /// languages' stores point into it: `CARGO_HOME`, which is the half of Rust's
 /// cache that works with no sccache anywhere, Go's two — the downloads and the
 /// compiled objects, which for Go is a directory and nothing more — four of
-/// Node's seven, and three of Python's four: pip's, poetry's and pipenv's.
+/// Node's seven, three of Python's four — pip's, poetry's and pipenv's — and
+/// all three of .NET's: NuGet's global packages folder, the http cache behind
+/// it, and the directory it takes the lock on the first of those in.
 ///
 /// That is what stops two Conversations downloading one crate, one module or
 /// one package twice.
@@ -3286,6 +3288,9 @@ async fn the_build_cache_is_writable_inside_and_the_stores_are_in_it() {
             say pipenv-cache "${{PIPENV_CACHE_DIR-unset}}"
             say poetry-in-project "${{POETRY_VIRTUALENVS_IN_PROJECT-unset}}"
             say pipenv-in-project "${{PIPENV_VENV_IN_PROJECT-unset}}"
+            say nuget-packages "${{NUGET_PACKAGES-unset}}"
+            say nuget-http "${{NUGET_HTTP_CACHE_PATH-unset}}"
+            say nuget-scratch "${{NUGET_SCRATCH-unset}}"
             dir {beside} stores
             "#,
             dir = quoted(&fixture.cache_dir()),
@@ -3326,7 +3331,11 @@ async fn the_build_cache_is_writable_inside_and_the_stores_are_in_it() {
     // two of them reading two different variables. And three of Python's four —
     // pip's, poetry's and pipenv's, which are here because pip unpacks a wheel
     // into `site-packages`, poetry unpacks one out of its artifacts, and pipenv
-    // is pip: none of the three has anything to link out of its store.
+    // is pip: none of the three has anything to link out of its store. And both
+    // of .NET's, for the same reason: a build reads a package's assemblies
+    // where they lie in NuGet's global packages folder and copies what it needs
+    // into `bin/`. The third of .NET's is the directory NuGet locks the first
+    // in, which two sessions at once have to be taking the same lock out of.
     for (said, under) in [
         ("npm-cache", "npm"),
         ("pnpm-metadata", "pnpm/metadata"),
@@ -3335,6 +3344,9 @@ async fn the_build_cache_is_writable_inside_and_the_stores_are_in_it() {
         ("pip-cache", "pip"),
         ("poetry-cache", "poetry"),
         ("pipenv-cache", "pipenv"),
+        ("nuget-packages", "nuget/packages"),
+        ("nuget-http", "nuget/http"),
+        ("nuget-scratch", "nuget/scratch"),
     ] {
         assert_eq!(
             reported[said],

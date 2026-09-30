@@ -57,6 +57,7 @@ const LANGUAGES = {
     { name: "go", enabled: true, size: "" },
     { name: "node", enabled: true, size: "" },
     { name: "python", enabled: true, size: "" },
+    { name: "dotnet", enabled: true, size: "" },
     { name: "gleam", enabled: true, size: "8G" },
   ],
 };

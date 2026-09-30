@@ -108,6 +108,14 @@ pub const NODE: &str = "node";
 /// it could not link out of one.
 pub const PYTHON: &str = "python";
 
+/// And .NET, which is one entry for one tool — everything on a .NET machine
+/// installs through NuGet — and the only built-in whose `detect` is empty: a
+/// project is a `*.csproj` or a `*.sln`, and detection matches filenames rather
+/// than globs. Three variables, the third of them the directory NuGet locks
+/// its store in: two sessions with a `/tmp` each took a lock apiece and wrote
+/// over one another.
+pub const DOTNET: &str = "dotnet";
+
 /// The one capability this server has: the **Compile Server**, which is one
 /// sccache server for the machine in a sandbox of its own — see
 /// [`crate::build_cache::BuildCache::compiling`].
@@ -1318,6 +1326,22 @@ mod tests {
             !python.names(SCCACHE),
             "and nothing in this ecosystem compiles through a server either",
         );
+
+        let dotnet = built_in().get(DOTNET).expect("and .NET is the fifth");
+
+        assert_eq!(dotnet.label(), Some(".NET"));
+        assert!(
+            dotnet.detect.is_empty(),
+            "the one built-in with nothing to detect it by: a .NET project is a \
+             `*.csproj` or a `*.sln`, and `detect` matches a filename rather \
+             than a glob — so the list is empty rather than the server growing \
+             a matcher for one language",
+        );
+        assert!(
+            !dotnet.names(SCCACHE),
+            "and NuGet has no compiled half at all, so there is nothing here \
+             for a Compile Server to be",
+        );
     }
 
     /// A session of a machine with an sccache: Rust's four variables, in the
@@ -1362,6 +1386,9 @@ mod tests {
                 ),
                 (String::from("PIPENV_CACHE_DIR"), cached("pipenv")),
                 (String::from("PIPENV_VENV_IN_PROJECT"), String::from("1")),
+                (String::from("NUGET_PACKAGES"), cached("nuget/packages")),
+                (String::from("NUGET_HTTP_CACHE_PATH"), cached("nuget/http")),
+                (String::from("NUGET_SCRATCH"), cached("nuget/scratch")),
             ],
         );
 
@@ -1409,9 +1436,13 @@ mod tests {
                 ),
                 (String::from("PIPENV_CACHE_DIR"), cached("pipenv")),
                 (String::from("PIPENV_VENV_IN_PROJECT"), String::from("1")),
+                (String::from("NUGET_PACKAGES"), cached("nuget/packages")),
+                (String::from("NUGET_HTTP_CACHE_PATH"), cached("nuget/http")),
+                (String::from("NUGET_SCRATCH"), cached("nuget/scratch")),
             ],
-            "Go's two, Node's seven and Python's six are in no capability, so a \
-             machine with no sccache gets the whole of what those descriptors say",
+            "Go's two, Node's seven, Python's six and .NET's three are in no \
+             capability, so a machine with no sccache gets the whole of what \
+             those descriptors say",
         );
         assert_eq!(
             given.dirs(),
@@ -1438,8 +1469,9 @@ mod tests {
         );
         assert_eq!(
             given.env().len(),
-            15,
-            "which is Go's two, Node's seven and Python's six and nothing else"
+            18,
+            "which is Go's two, Node's seven, Python's six and .NET's three and \
+             nothing else"
         );
         assert!(!given.sccache());
         assert!(
@@ -1476,7 +1508,9 @@ mod tests {
 
         // And with every one of them off there is nothing to open at all,
         // which is what an installation that wants none of this looks like.
-        let none = without_either.merged(&written("languages:\n  go:\n    enabled: false\n"));
+        let none = without_either.merged(&written(
+            "languages:\n  go:\n    enabled: false\n  dotnet:\n    enabled: false\n",
+        ));
         let given = none.given(&machine(true));
 
         assert!(given.is_empty());
@@ -1512,9 +1546,10 @@ mod tests {
             "pnpm's, deno's, bun's and uv's stores are beside the Worktrees"
         );
 
-        // Rust and Go on their own name none of it: Rust's store is under the
-        // Build Cache and so are both of Go's, so an installation of only
-        // those two is opened onto no second directory at all.
+        // Rust, Go and .NET on their own name none of it: Rust's store is under
+        // the Build Cache and so are both of Go's and both of NuGet's, so an
+        // installation of only those three is opened onto no second directory
+        // at all.
         let only_compiled = built_in().merged(&written(
             "languages:\n  node:\n    enabled: false\n  python:\n    enabled: false\n",
         ));
@@ -1603,6 +1638,9 @@ mod tests {
         joined("UV_CACHE_DIR", &beside, "uv");
         joined("POETRY_CACHE_DIR", cache, "poetry");
         joined("PIPENV_CACHE_DIR", cache, "pipenv");
+        joined("NUGET_PACKAGES", &cache.join("nuget"), "packages");
+        joined("NUGET_HTTP_CACHE_PATH", &cache.join("nuget"), "http");
+        joined("NUGET_SCRATCH", &cache.join("nuget"), "scratch");
 
         // And Python's other two, which name no directory at all: poetry and
         // pipenv are each told to keep a virtual environment in the project,

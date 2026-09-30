@@ -5574,7 +5574,9 @@ async fn the_settings_held_binds_compose_the_way_the_installations_do() {
 /// languages' stores point into it: `CARGO_HOME`, which is the half of Rust's
 /// cache that works with no sccache anywhere, Go's two — the downloads and the
 /// compiled objects, which for Go is a directory and nothing more — four of
-/// Node's seven, and three of Python's four: pip's, poetry's and pipenv's.
+/// Node's seven, three of Python's four — pip's, poetry's and pipenv's — and
+/// all three of .NET's: NuGet's global packages folder, the http cache behind
+/// it, and the directory it takes the lock on the first of those in.
 ///
 /// That is what stops two Conversations downloading one crate, one module or
 /// one package twice.
@@ -5608,6 +5610,9 @@ async fn the_build_cache_is_writable_inside_and_the_stores_are_in_it() {
             say pipenv-cache "${{PIPENV_CACHE_DIR-unset}}"
             say poetry-in-project "${{POETRY_VIRTUALENVS_IN_PROJECT-unset}}"
             say pipenv-in-project "${{PIPENV_VENV_IN_PROJECT-unset}}"
+            say nuget-packages "${{NUGET_PACKAGES-unset}}"
+            say nuget-http "${{NUGET_HTTP_CACHE_PATH-unset}}"
+            say nuget-scratch "${{NUGET_SCRATCH-unset}}"
             "#,
             dir = quoted(&fixture.cache_dir()),
         ),
@@ -5647,7 +5652,13 @@ async fn the_build_cache_is_writable_inside_and_the_stores_are_in_it() {
     // poetry's and pipenv's, which are here rather than beside the Worktrees
     // because pip unpacks a wheel into `site-packages`, poetry unpacks one out
     // of its artifacts, and pipenv is pip: none of the three has anything to
-    // link out of its store.
+    // link out of its store. And all three of .NET's, for the same reason: a
+    // build reads a package's assemblies where they lie in the global packages
+    // folder and copies what it needs into `bin/`, so NuGet links nothing into
+    // a Worktree either. The third is NuGet's temp directory, which holds the
+    // lock two sessions restoring at once have to be taking the same one of —
+    // see `tests/package_stores.rs`, where two of them not doing so is how it
+    // got here.
     for (said, under) in [
         ("npm-cache", "npm"),
         ("pnpm-metadata", "pnpm/metadata"),
@@ -5656,6 +5667,9 @@ async fn the_build_cache_is_writable_inside_and_the_stores_are_in_it() {
         ("pip-cache", "pip"),
         ("poetry-cache", "poetry"),
         ("pipenv-cache", "pipenv"),
+        ("nuget-packages", "nuget/packages"),
+        ("nuget-http", "nuget/http"),
+        ("nuget-scratch", "nuget/scratch"),
     ] {
         assert_eq!(
             reported[said],
@@ -5799,7 +5813,8 @@ async fn a_build_cache_switched_off_is_no_bind_and_no_variables() {
     let fixture = grilling().await;
     fixture.configure(
         "rust_build_cache:\n  enabled: false\nlanguages:\n  go:\n    enabled: false\n  \
-         node:\n    enabled: false\n  python:\n    enabled: false\n",
+         node:\n    enabled: false\n  python:\n    enabled: false\n  dotnet:\n    \
+         enabled: false\n",
     );
 
     // The server still resolved one, sccache and all: what is being shown is
@@ -5827,6 +5842,9 @@ async fn a_build_cache_switched_off_is_no_bind_and_no_variables() {
             say pipenv-cache "${{PIPENV_CACHE_DIR-unset}}"
             say poetry-in-project "${{POETRY_VIRTUALENVS_IN_PROJECT-unset}}"
             say pipenv-in-project "${{PIPENV_VENV_IN_PROJECT-unset}}"
+            say nuget-packages "${{NUGET_PACKAGES-unset}}"
+            say nuget-http "${{NUGET_HTTP_CACHE_PATH-unset}}"
+            say nuget-scratch "${{NUGET_SCRATCH-unset}}"
             dir {beside} stores
             file /verkstead/bin/sccache binary
             "#,
@@ -5860,6 +5878,9 @@ async fn a_build_cache_switched_off_is_no_bind_and_no_variables() {
          an environment it has no store for"
     );
     assert_eq!(reported["pipenv-in-project"], "unset");
+    assert_eq!(reported["nuget-packages"], "unset");
+    assert_eq!(reported["nuget-http"], "unset");
+    assert_eq!(reported["nuget-scratch"], "unset");
     assert_eq!(
         reported["stores"], "absent",
         "and the directory beside the Worktrees closes with it, both of the \

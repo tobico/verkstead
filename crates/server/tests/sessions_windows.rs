@@ -2241,6 +2241,9 @@ async fn a_session_gets_the_shared_cargo_home_and_the_compiler_wrapper() {
         Note 'pipenv-cache' $env:PIPENV_CACHE_DIR
         Note 'poetry-in-project' $env:POETRY_VIRTUALENVS_IN_PROJECT
         Note 'pipenv-in-project' $env:PIPENV_VENV_IN_PROJECT
+        Note 'nuget-packages' $env:NUGET_PACKAGES
+        Note 'nuget-http' $env:NUGET_HTTP_CACHE_PATH
+        Note 'nuget-scratch' $env:NUGET_SCRATCH
 
         # Run the thing it was pointed at, which is the only way to ask whether
         # the boundary really lets a session open it.
@@ -2329,7 +2332,11 @@ async fn a_session_gets_the_shared_cargo_home_and_the_compiler_wrapper() {
     // read two different variables. And three of Python's four, which are under
     // the cache because pip unpacks a wheel into `site-packages`, poetry unpacks
     // one out of its artifacts, and pipenv is pip: none of the three has
-    // anything to link out of its store.
+    // anything to link out of its store. And both of .NET's, for the same
+    // reason: a build reads a package's assemblies where they lie in NuGet's
+    // global packages folder and copies what it needs into `bin\`. And
+    // .NET's third is the directory NuGet locks the first in, which two
+    // sessions restoring at once have to be taking the same lock out of.
     for (said, under) in [
         ("npm-cache", vec!["npm"]),
         ("pnpm-metadata", vec!["pnpm", "metadata"]),
@@ -2338,6 +2345,9 @@ async fn a_session_gets_the_shared_cargo_home_and_the_compiler_wrapper() {
         ("pip-cache", vec!["pip"]),
         ("poetry-cache", vec!["poetry"]),
         ("pipenv-cache", vec!["pipenv"]),
+        ("nuget-packages", vec!["nuget", "packages"]),
+        ("nuget-http", vec!["nuget", "http"]),
+        ("nuget-scratch", vec!["nuget", "scratch"]),
     ] {
         let composed = under
             .iter()

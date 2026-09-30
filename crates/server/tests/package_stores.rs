@@ -16,10 +16,10 @@
 //!    tool **denied its registry** — the offline flag the tool documents, and
 //!    no bind of the registry either. An install that succeeds with nothing to
 //!    fetch from succeeded out of the store. **Where a tool documents no such
-//!    flag** — bun, poetry and pipenv — the third install is the second one word
-//!    for word, against a registry that has stopped answering, which is the
-//!    same proof by the other route, and arguably the plainer one: there is no
-//!    flag that could be doing the work instead of the store.
+//!    flag** — bun, poetry, pipenv and NuGet — the third install is the second
+//!    one word for word, against a registry that has stopped answering, which
+//!    is the same proof by the other route, and arguably the plainer one: there
+//!    is no flag that could be doing the work instead of the store.
 //! 3. And the control: a fourth Sandbox, denied its registry the same way, on a
 //!    Build Cache **nothing has filled**. It must fail. Without it, step 2 is a
 //!    branch that would pass whatever the tool did with its variable — a build
@@ -47,6 +47,12 @@
 //! - And Python's four serve one of their own, PEP 503's rather than npm's — see
 //!   [`pypi_registry`] — shut the same way. All four install out of it, which is
 //!   what makes them one entry as well.
+//! - NuGet reads a directory of `.nupkg` files as a source, so it could have
+//!   gone Go's way — and does not, because a source that is never fetched from
+//!   would leave the http cache half of its descriptor unproved. So the .NET
+//!   proofs serve the v3 protocol's flat container over the loopback — see
+//!   [`nuget_registry`] — and deny it two ways at once: the Worktree's own
+//!   `NuGet.config` clears every source, and the port stops answering.
 //!
 //! **A tool that is not installed is skipped in a line naming it**, so a
 //! checkout run on a machine that only builds Rust stays green. Set
@@ -2958,4 +2964,797 @@ async fn a_session_is_given_the_four_python_tools_stores() {
         "and pipenv's, which is the same promise for the tool that would \
          otherwise keep one under a home the sandbox throws away",
     );
+}
+
+// ---------------------------------------------------------------------------
+// .NET: NuGet.
+// ---------------------------------------------------------------------------
+
+/// The package every .NET proof installs, and the version of it.
+///
+/// Two spellings because NuGet has two: a package is *named* however its author
+/// capitalised it and *addressed* in lower case, the flat container's paths and
+/// the global packages folder's directories both being the lower-cased id.
+const NUGET_PACKAGE: &str = "GreetFromTheStore";
+const NUGET_ID: &str = "greetfromthestore";
+const NUGET_VERSION: &str = "1.0.0";
+
+/// What every `dotnet` in this suite is told, beside the two variables the
+/// descriptor sets — which are the two this is here to prove.
+///
+/// Each of these takes something out of the way rather than moving a store.
+/// `DOTNET_CLI_TELEMETRY_OPTOUT` so that nothing here talks to Microsoft,
+/// `DOTNET_NOLOGO` and the two first-run switches so that a session's first
+/// `dotnet` is an install rather than a welcome banner and an HTTPS
+/// certificate, and `DOTNET_SKIP_WORKLOAD_INTEGRITY_CHECK` so that a warning
+/// about workloads nothing here has is not in the middle of what a failure has
+/// to be read out of.
+///
+/// **And the last three are why a proof finishes at all.** MSBuild leaves
+/// worker nodes and Roslyn leaves a compiler server behind after a build, both
+/// of them waiting a quarter of an hour for the next one — and a sandbox is
+/// over when the last process in it is, so a session that left either would be
+/// an install this suite waited fifteen minutes for. `bwrap` has no more to say
+/// about it than `wait` does: the two switches and the property are what say
+/// not to start them.
+const DOTNET_SETTINGS: &str = "export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1 \
+                               DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1 \
+                               DOTNET_GENERATE_ASPNET_CERTIFICATE=false \
+                               DOTNET_SKIP_WORKLOAD_INTEGRITY_CHECK=1 \
+                               DOTNET_CLI_USE_MSBUILD_SERVER=0 MSBUILDDISABLENODEREUSE=1 \
+                               UseSharedCompilation=false";
+
+/// Lay [`NUGET_PACKAGE`] out under `at` as a `.nupkg`, and serve it.
+///
+/// **A `.nupkg` is a zip**, exactly as a Go module archive and a wheel are, so
+/// this is built with the suite's own `zip` and nothing of .NET's own is needed
+/// to publish. Three entries and no compiled anything: the `.nuspec` that says
+/// what the package is, one C# source file, and a `build/<id>.targets` — which
+/// NuGet imports into any project that references the package, and which here
+/// adds that source file to the compile. So what the consumer below builds is
+/// code that came out of the package, which is what makes running it evidence
+/// that the store held the package rather than something shaped like it.
+///
+/// **Served over the loopback rather than laid out as a folder feed.** NuGet
+/// reads a directory of `.nupkg` files as a source perfectly well, and the Go
+/// proof's `file://` proxy is the precedent for using one — but a folder feed
+/// is never fetched, so it would leave the http cache empty and half of this
+/// descriptor unproved. What is served is the **v3 protocol's flat container**,
+/// which is the whole of what restoring one package at an exact version reads:
+/// a service index naming the base address, a version list per package, and the
+/// `.nupkg` at a path composed out of the lower-cased id and version.
+fn nuget_registry(at: &Path, zip: &Path) -> Registry {
+    let inside = at.join("what-goes-in-the-nupkg");
+    std::fs::create_dir_all(inside.join("build")).unwrap();
+    std::fs::create_dir_all(inside.join("src")).unwrap();
+
+    std::fs::write(
+        inside.join(format!("{NUGET_PACKAGE}.nuspec")),
+        format!(
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n\
+             <package xmlns=\"http://schemas.microsoft.com/packaging/2012/06/nuspec.xsd\">\n\
+             \x20 <metadata>\n\
+             \x20   <id>{NUGET_PACKAGE}</id>\n\
+             \x20   <version>{NUGET_VERSION}</version>\n\
+             \x20   <authors>this suite</authors>\n\
+             \x20   <description>What a package-store proof installs.</description>\n\
+             \x20 </metadata>\n\
+             </package>\n"
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        inside.join(format!("build/{NUGET_PACKAGE}.targets")),
+        "<Project>\n\
+         \x20 <ItemGroup>\n\
+         \x20   <Compile Include=\"$(MSBuildThisFileDirectory)../src/Greet.cs\" />\n\
+         \x20 </ItemGroup>\n\
+         </Project>\n",
+    )
+    .unwrap();
+    std::fs::write(
+        inside.join("src/Greet.cs"),
+        format!(
+            "public static class Greet {{ public static string Hello() => \
+             \"{OUT_OF_THE_STORE}\"; }}\n"
+        ),
+    )
+    .unwrap();
+
+    let archive = at.join(format!("{NUGET_ID}.{NUGET_VERSION}.nupkg"));
+    let made = Command::new(zip)
+        .args(["-q", "-r", "-X", "-D"])
+        .arg(&archive)
+        .args([
+            format!("{NUGET_PACKAGE}.nuspec"),
+            "build".into(),
+            "src".into(),
+        ])
+        .current_dir(&inside)
+        .stdin(Stdio::null())
+        .status()
+        .expect("the suite's own `zip`");
+
+    assert!(made.success(), "the package was not built");
+
+    // Bound here rather than on the thread below, for the reason the npm
+    // registry's is: the port it gets goes in the service index, so it has to
+    // be known before anything is served.
+    let listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .expect("a loopback port for the registry");
+    let url = format!("http://{}", listener.local_addr().expect("the port it got"));
+
+    listener
+        .set_nonblocking(true)
+        .expect("what tokio takes a standard listener over");
+
+    let served = Feed {
+        index: format!(
+            "{{\"version\":\"3.0.0\",\"resources\":[{{\"@id\":\"{url}/flat/\",\
+              \"@type\":\"PackageBaseAddress/3.0.0\"}}]}}"
+        ),
+        versions: format!("{{\"versions\":[\"{NUGET_VERSION}\"]}}"),
+        nupkg: std::fs::read(&archive).unwrap(),
+    };
+
+    let app = Router::new()
+        .route(
+            "/index.json",
+            get(|State(served): State<Feed>| async move {
+                ([(header::CONTENT_TYPE, "application/json")], served.index)
+            }),
+        )
+        .route(
+            &format!("/flat/{NUGET_ID}/index.json"),
+            get(|State(served): State<Feed>| async move {
+                (
+                    [(header::CONTENT_TYPE, "application/json")],
+                    served.versions,
+                )
+            }),
+        )
+        .route(
+            &format!("/flat/{NUGET_ID}/{NUGET_VERSION}/{{nupkg}}"),
+            get(|State(served): State<Feed>| async move {
+                (
+                    [(header::CONTENT_TYPE, "application/octet-stream")],
+                    served.nupkg,
+                )
+            }),
+        )
+        .with_state(served);
+
+    let (stop, stopping) = tokio::sync::oneshot::channel();
+
+    let serving = std::thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("a runtime for the registry's own thread");
+
+        runtime.block_on(async move {
+            let listener = tokio::net::TcpListener::from_std(listener)
+                .expect("the listener this thread was handed");
+
+            tokio::select! {
+                served = axum::serve(listener, app) => { let _ = served; }
+                _ = stopping => {}
+            }
+        });
+    });
+
+    Registry {
+        url,
+        stop: Some(stop),
+        serving: Some(serving),
+    }
+}
+
+/// The three things a v3 feed has to answer with, fixed once it is listening.
+#[derive(Clone)]
+struct Feed {
+    index: String,
+    versions: String,
+    nupkg: Vec<u8>,
+}
+
+/// And what a Conversation's Worktree holds: a project referencing the package
+/// in the registry, so that restoring it is a fetch.
+///
+/// `targeting` is [`dotnet_target`]'s answer rather than a framework written
+/// here, for the reason given there.
+///
+/// **`NuGet.config` is where *denied its registry* lives for this tool.** Every
+/// .NET machine has a user-level config naming nuget.org, written by the first
+/// `dotnet` to run — so a project that said nothing about sources would restore
+/// off the internet, a session's sandbox sharing the host's network. `<clear />`
+/// is what takes every inherited source away, and `from` is the one this proof
+/// serves put back where a Worktree is allowed it. A Worktree given `None` has
+/// no source at all, which is the state the third restore has to succeed in.
+///
+/// `allowInsecureConnections` because a registry on this machine is not one
+/// with a certificate: it is Berry's `YARN_UNSAFE_HTTP_WHITELIST` and pip's
+/// `--trusted-host` again, and for the same reason. The SDKs this runs against
+/// only warn about plain HTTP; newer ones refuse it without this.
+fn nuget_consumer(worktree: &Path, targeting: &str, from: Option<&str>) {
+    std::fs::write(
+        worktree.join("app.csproj"),
+        format!(
+            "<Project Sdk=\"Microsoft.NET.Sdk\">\n\
+             \x20 <PropertyGroup>\n\
+             \x20   <OutputType>Exe</OutputType>\n\
+             \x20   <TargetFramework>{targeting}</TargetFramework>\n\
+             \x20 </PropertyGroup>\n\
+             \x20 <ItemGroup>\n\
+             \x20   <PackageReference Include=\"{NUGET_PACKAGE}\" Version=\"{NUGET_VERSION}\" />\n\
+             \x20 </ItemGroup>\n\
+             </Project>\n"
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        worktree.join("Program.cs"),
+        "public static class Program {\n\
+         \x20 public static void Main() => System.Console.WriteLine(Greet.Hello());\n\
+         }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        worktree.join("NuGet.config"),
+        format!(
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n\
+             <configuration>\n\
+             \x20 <packageSources>\n\
+             \x20   <clear />\n\
+             {named}\
+             \x20 </packageSources>\n\
+             </configuration>\n",
+            named = from.map_or_else(String::new, |url| format!(
+                "\x20   <add key=\"the-one-this-proof-serves\" value=\"{url}/index.json\" \
+                 protocolVersion=\"3\" allowInsecureConnections=\"true\" />\n"
+            )),
+        ),
+    )
+    .unwrap();
+}
+
+/// The framework a proof's project targets: whichever one the SDK on this
+/// machine is its own.
+///
+/// **Not a version written into this file**, and that is the whole of why this
+/// function exists. An SDK ships the targeting pack for its own framework and
+/// fetches one for any older framework as a NuGet package — from nuget.org,
+/// which every Worktree here has cleared. So a project pinned to the dev
+/// shell's framework would restore here and fail on a runner image that had
+/// moved a major on, in a proof about package stores, for a reason that is
+/// nothing to do with one. `dotnet --version` is the SDK's own version and its
+/// major is the framework it needs to fetch nothing at all to build.
+///
+/// A `HOME` of the fixture's rather than the machine's, because a first
+/// `dotnet` writes sentinels into one, and a suite that wrote into the
+/// developer's home to read a version back would be doing something it was
+/// never asked to.
+fn dotnet_target(dotnet: &Path, home: &Path) -> String {
+    let said = Command::new(dotnet)
+        .arg("--version")
+        .current_dir(home)
+        .env("HOME", home)
+        .env("DOTNET_CLI_TELEMETRY_OPTOUT", "1")
+        .env("DOTNET_NOLOGO", "1")
+        .env("DOTNET_SKIP_FIRST_TIME_EXPERIENCE", "1")
+        .env("DOTNET_GENERATE_ASPNET_CERTIFICATE", "false")
+        .stdin(Stdio::null())
+        .output()
+        .expect("the `dotnet` this machine was found to have");
+
+    assert!(
+        said.status.success(),
+        "`dotnet --version` should answer: {}",
+        String::from_utf8_lossy(&said.stderr),
+    );
+
+    let version = String::from_utf8(said.stdout).expect("a version is ASCII");
+    let major = version
+        .trim()
+        .split('.')
+        .next()
+        .filter(|major| major.chars().all(|digit| digit.is_ascii_digit()))
+        .unwrap_or_else(|| panic!("`dotnet --version` said {version:?}, which has no major in it"));
+
+    format!("net{major}.0")
+}
+
+/// What a `dotnet` proof runs: a restore, then the project it restored.
+///
+/// One script for every Sandbox in this section, filling and denied alike —
+/// which is the shape bun's and poetry's proofs have and the plainest of the
+/// three. NuGet documents no offline switch: `dotnet restore` has
+/// `--no-http-cache`, which is the opposite of what is wanted, and nothing that
+/// says *store only*. So what changes between a restore that fetches and one
+/// that must not is the machine — the sources the Worktree names, and whether
+/// anything is answering — and never the command line. There is no flag here
+/// that could be doing the work instead of the store.
+fn nuget_script(dotnet: &Path) -> String {
+    format!(
+        "set -e\n{DOTNET_SETTINGS}\n{dotnet} restore\n{dotnet} run --no-restore\n",
+        dotnet = dotnet.display(),
+    )
+}
+
+/// .NET: two Sandboxes restoring one package at once against one store, a third
+/// restoring it with every source taken away, and the control that says the
+/// third proved something.
+///
+/// **`NUGET_PACKAGES` is the store**, and what makes the third restore work is
+/// that NuGet resolves a `<PackageReference>` at an exact version out of the
+/// global packages folder before it asks a source anything — so a project whose
+/// package is already there restores with no source configured at all. Which is
+/// what the third Worktree has: a `NuGet.config` holding `<clear />` and nothing
+/// after it, against a registry that has stopped answering as well.
+///
+/// **The two at once are the other half, and they are what found the third
+/// variable.** NuGet does guard the global packages folder — it extracts a
+/// package under a lock before it renames anything into place — but that lock
+/// is a *file*, in NuGet's temp directory, and a session's `/tmp` is a tmpfs
+/// of its own inside its sandbox. So the two below took a lock apiece, both
+/// extracted, and one of them failed on a temporary file the other had renamed
+/// away: `Could not find file '<store>/greetfromthestore/1.0.0/<random>'`,
+/// about three runs in five with this file's other tests running beside it.
+/// `NUGET_SCRATCH` is what the descriptor answers with — the lock goes where
+/// the store it guards is — and dropping it turns this red again.
+///
+/// Which is also why it is not the only thing guarding that variable. A race
+/// caught three runs in five is a poor guard, so
+/// [`the_directories_nuget_names_for_itself_are_the_ones_the_descriptor_set`]
+/// asks NuGet where its temp directory is and gets a straight answer.
+///
+/// The control fails `NU1100`, which is NuGet's own word for a package it could
+/// resolve from nowhere.
+#[tokio::test]
+async fn two_dotnet_restores_at_once_fill_one_store_and_a_third_restores_out_of_it() {
+    let Some(found_them) = tools(".NET", &["dotnet", "zip"]) else {
+        return;
+    };
+    let (dotnet, zip) = (&found_them[0], &found_them[1]);
+
+    // Four: the two that race, the one denied its registry, and the control.
+    let machine = machine(4).await;
+    let cache = machine.cache();
+    let dir = cache.dir().expect("the fixture's cache has a directory");
+
+    let targeting = dotnet_target(dotnet, &machine.registries);
+    let registry = nuget_registry(&machine.registries.join("nuget"), zip);
+
+    // The two that fill the store name the feed; the two that follow have every
+    // source taken away, which is *denied its registry* for a tool with no
+    // offline flag of its own.
+    for nth in 0..2 {
+        nuget_consumer(machine.worktree(nth), &targeting, Some(&registry.url));
+    }
+
+    for nth in 2..4 {
+        nuget_consumer(machine.worktree(nth), &targeting, None);
+    }
+
+    let restoring = nuget_script(dotnet);
+
+    // Started together and waited on together, which is the only way the two
+    // are ever really writing the store at the same moment.
+    let first = starting(&machine.sandbox(0, &cache, reaching_nothing()), &restoring);
+    let second = starting(&machine.sandbox(1, &cache, reaching_nothing()), &restoring);
+
+    let first = finished(first);
+
+    first.worked("the first session's restore fills the store");
+    finished(second).worked("and the second one racing it finishes just as well");
+
+    assert!(
+        dir.join(format!("nuget/packages/{NUGET_ID}/{NUGET_VERSION}"))
+            .is_dir(),
+        "and what they downloaded is under the directory the descriptor named, \
+         which is the one the third session is about to be given. It said:\n{}",
+        first.said,
+    );
+
+    // And the proof. The registry stops answering and the Worktree names no
+    // source: what is left to restore out of is the store the two above filled.
+    registry.shut();
+
+    let third = installing(&machine.sandbox(2, &cache, reaching_nothing()), &restoring);
+
+    third.worked(
+        "a third session restores the same package with every source taken away, which it \
+         can only do out of the shared global packages folder",
+    );
+    assert!(
+        third.said.contains(OUT_OF_THE_STORE),
+        "and what it built really runs, so the store held the package rather \
+         than something shaped like it. It said:\n{}",
+        third.said,
+    );
+
+    // The control. Everything the same but the Build Cache, which nothing has
+    // filled — so a pass here would mean the restore above needed no store at
+    // all, and the proof was asserting nothing.
+    let control = installing(
+        &machine.sandbox(3, &machine.empty_cache(), reaching_nothing()),
+        &restoring,
+    );
+
+    assert!(
+        !control.worked,
+        "an empty store and no source has to fail, or the restore above proved \
+         nothing about either. It said:\n{}",
+        control.said,
+    );
+    assert!(
+        control.said.contains("NU1100"),
+        "and it fails for want of anywhere to get the package rather than for \
+         some other reason: `NU1100` is what NuGet says about that. It \
+         said:\n{}",
+        control.said,
+    );
+}
+
+/// And the **other** directory the descriptor names, which no store proof can
+/// reach: the http cache, read when the global packages folder has gone.
+///
+/// This entry sets two variables and the proof above turns on one of them. A
+/// descriptor naming `NUGET_HTTP_CACHE_PATH` and a NuGet that had stopped
+/// reading it would leave every assertion up there green — the packages folder
+/// answers first, so the http cache is never the thing a restore needs. Which
+/// makes it exactly the branch this stage says a tool quietly ignoring its
+/// variable would get through, and this is the run that closes it.
+///
+/// So: one session fills both halves off the registry. Then the registry stops
+/// answering **and the packages folder is taken away on the host** — a fact
+/// about the machine rather than anything the session was told, and the only
+/// way to leave a session with one half of its Build Cache and not the other,
+/// both being under the one directory. What is left for the second session to
+/// restore out of is the responses NuGet cached under the variable this is
+/// about: the service index, the version list, and the `.nupkg` as it came off
+/// the wire.
+///
+/// The control is the same run on a Build Cache nothing has filled, where
+/// neither half is there: it fails `NU1301`, NuGet's own word for a source it
+/// had to reach and could not — which is what says the run above did not simply
+/// need nothing.
+#[tokio::test]
+async fn the_http_cache_the_descriptor_names_answers_when_the_packages_folder_has_gone() {
+    let Some(found_them) = tools(".NET", &["dotnet", "zip"]) else {
+        return;
+    };
+    let (dotnet, zip) = (&found_them[0], &found_them[1]);
+
+    // Three: the one that fills both halves, the one that reads the half that
+    // is left, and the control.
+    let machine = machine(3).await;
+    let cache = machine.cache();
+    let dir = cache.dir().expect("the fixture's cache has a directory");
+
+    let targeting = dotnet_target(dotnet, &machine.registries);
+    let registry = nuget_registry(&machine.registries.join("nuget-http"), zip);
+
+    // Every one of them names the feed, which is the difference from the proof
+    // above: what is denied here is the answer rather than the address.
+    for nth in 0..3 {
+        nuget_consumer(machine.worktree(nth), &targeting, Some(&registry.url));
+    }
+
+    let restoring = nuget_script(dotnet);
+
+    let filled = installing(&machine.sandbox(0, &cache, reaching_nothing()), &restoring);
+
+    filled.worked("the first session's restore fills both halves off the registry");
+
+    let packages = dir.join("nuget/packages");
+    let http = dir.join("nuget/http");
+
+    assert!(
+        holds_anything(&http),
+        "and the responses went under the directory the descriptor named rather \
+         than under the session's own home, which is what the rest of this is \
+         about. It said:\n{}",
+        filled.said,
+    );
+
+    registry.shut();
+
+    // The half this is *not* about, taken away — so that what the next session
+    // finds is the http cache and nothing else.
+    std::fs::remove_dir_all(&packages).expect("the packages half of the Build Cache");
+
+    let second = installing(&machine.sandbox(1, &cache, reaching_nothing()), &restoring);
+
+    second.worked(
+        "a second session restores with the packages folder gone and the registry off the \
+         air, which it can only do out of the http cache the descriptor named",
+    );
+    assert!(
+        second.said.contains(OUT_OF_THE_STORE),
+        "and what it built really runs, so the cache held the package as it came \
+         off the wire. It said:\n{}",
+        second.said,
+    );
+    assert!(
+        packages.is_dir(),
+        "and it filled the packages folder back in out of it, which is what \
+         restoring out of an http cache *is*",
+    );
+
+    // The control. The same Worktree and the same registry gone, on a Build
+    // Cache where neither half was ever filled.
+    let control = installing(
+        &machine.sandbox(2, &machine.empty_cache(), reaching_nothing()),
+        &restoring,
+    );
+
+    assert!(
+        !control.worked,
+        "an empty cache and a registry that is not answering has to fail, or \
+         the restore above proved nothing about either. It said:\n{}",
+        control.said,
+    );
+    assert!(
+        control.said.contains("NU1301"),
+        "and it fails for want of the registry rather than for some other \
+         reason: `NU1301` is what NuGet says about a source it could not load. \
+         It said:\n{}",
+        control.said,
+    );
+}
+
+/// Whether anything at all is under `at`, which is how the proof above says a
+/// directory the descriptor named is the one a tool really wrote in.
+fn holds_anything(at: &Path) -> bool {
+    std::fs::read_dir(at).is_ok_and(|mut entries| entries.next().is_some())
+}
+
+/// What every .NET Sandbox in this section is opened onto beside its own: the
+/// registry is served rather than laid out on disk, so the answer is nothing.
+///
+/// Said once and named, rather than `vec![]` in six places, because *nothing*
+/// is the assertion: a Sandbox here reaches its registry over the loopback or
+/// not at all, and there is no directory anywhere that could be quietly
+/// standing in for one.
+fn reaching_nothing() -> Vec<Bind> {
+    Vec::new()
+}
+
+/// And the environment those restores ran in was the descriptor's: NuGet's
+/// three directories inside the one Build Cache, and a session can write in
+/// every one of them.
+///
+/// Beside the proofs rather than inside them, for the reason Go's, Node's and
+/// Python's are: what a session is *told* is asserted on all three platforms in
+/// the sandbox suites, and what a tool *does* with it is what a restore is for.
+/// This is here so that a run on a machine with no .NET SDK still leaves
+/// something of .NET's in this file that ran.
+#[tokio::test]
+async fn a_session_is_given_nugets_three_directories_inside_the_one_build_cache() {
+    let machine = machine(1).await;
+    let cache = machine.cache();
+    let sandbox = machine.sandbox(0, &cache, reaching_nothing());
+
+    let dir = cache.dir().expect("the fixture's cache has a directory");
+
+    let reported = installing(
+        &sandbox,
+        "set -e\n\
+         for named in NUGET_PACKAGES NUGET_HTTP_CACHE_PATH NUGET_SCRATCH; do\n\
+           eval \"value=\\${$named-unset}\"\n\
+           printf '%s=%s\\n' \"$named\" \"$value\"\n\
+           mkdir -p \"$value\"\n\
+           : > \"$value/written-from-inside\"\n\
+         done\n",
+    );
+
+    reported.worked("a session can make and write every directory it is pointed at");
+
+    for (named, under) in [
+        ("NUGET_PACKAGES", "nuget/packages"),
+        ("NUGET_HTTP_CACHE_PATH", "nuget/http"),
+        ("NUGET_SCRATCH", "nuget/scratch"),
+    ] {
+        assert_eq!(
+            line(&reported, named),
+            dir.join(under).display().to_string(),
+            "{named} is {under} inside the one Build Cache. The session said:\n{}",
+            reported.said,
+        );
+        assert!(
+            dir.join(under).join("written-from-inside").is_file(),
+            "and what the session wrote under {under} is on the host, in the \
+             directory the next Conversation's session will be given",
+        );
+    }
+}
+
+/// And nothing that is a session's own is in either of them: the configuration
+/// NuGet keeps, and the credentials that go in it, stay in the session's home.
+///
+/// .NET is the entry where this needed asking, because its defaults put the two
+/// next to each other. The global packages folder is `~/.nuget/packages` and
+/// the user-level `NuGet.Config` — which is where `<packageSourceCredentials>`
+/// lives — is `~/.nuget/NuGet/NuGet.Config`: one directory up, and a descriptor
+/// that had moved `~/.nuget` rather than the folder under it would have handed
+/// every Conversation on the machine one login. The http cache is the same
+/// shape, `http-cache` beside `plugin-cache` under `~/.local/share/NuGet`.
+///
+/// So this restores for real and then looks in three places: the session's own
+/// config is in its home, where a home that goes with the sandbox is what
+/// keeps it a session's; there is no config of any kind under either shared
+/// directory; and the plugins cache — which is a credential provider's account
+/// of itself rather than a download — is not there either, that variable being
+/// deliberately unset.
+#[tokio::test]
+async fn nothing_of_a_sessions_own_is_in_the_shared_nuget_directories() {
+    let Some(found_them) = tools(".NET", &["dotnet", "zip"]) else {
+        return;
+    };
+    let (dotnet, zip) = (&found_them[0], &found_them[1]);
+
+    let machine = machine(1).await;
+    let cache = machine.cache();
+    let dir = cache.dir().expect("the fixture's cache has a directory");
+
+    let targeting = dotnet_target(dotnet, &machine.registries);
+    let registry = nuget_registry(&machine.registries.join("nuget-nothing-of-its-own"), zip);
+
+    nuget_consumer(machine.worktree(0), &targeting, Some(&registry.url));
+
+    let restored = installing(
+        &machine.sandbox(0, &cache, reaching_nothing()),
+        &format!(
+            "{script}\
+             printf 'own-config=%s\\n' \"$(ls \"$HOME/.nuget/NuGet/NuGet.Config\" 2>/dev/null \
+               || echo none)\"\n",
+            script = nuget_script(dotnet),
+        ),
+    );
+
+    registry.shut();
+
+    restored.worked("a session restores the package the registry is serving");
+
+    assert_ne!(
+        line(&restored, "own-config"),
+        "none",
+        "and it wrote a configuration of its own, which is the thing this is \
+         about: without one there would be nothing that could have landed in \
+         the wrong place. It said:\n{}",
+        restored.said,
+    );
+
+    let shared = dir.join("nuget");
+
+    assert_eq!(
+        named_under(&shared, "NuGet.Config"),
+        None,
+        "and no configuration is under either shared directory: what a session \
+         is given is the store, one level below the directory NuGet keeps its \
+         own things in. It said:\n{}",
+        restored.said,
+    );
+    assert_eq!(
+        named_under(&shared, "plugin-cache"),
+        None,
+        "and neither is the plugins cache, which is a credential provider's \
+         account of what it can do rather than anything downloaded — \
+         `NUGET_PLUGINS_CACHE_PATH` is unset on purpose, so it goes to the home \
+         the sandbox throws away",
+    );
+}
+
+/// Whatever under `at` is called `named`, at any depth — file or directory.
+///
+/// A walk rather than a `join`, because what is being asked is whether a tool
+/// put something anywhere in a directory a session shares, and where it might
+/// have put it is exactly what nobody knows. [`a_virtualenv_under`] is the same
+/// question asked of Python.
+fn named_under(at: &Path, named: &str) -> Option<PathBuf> {
+    let mut looking = vec![at.to_owned()];
+
+    while let Some(here) = looking.pop() {
+        for entry in std::fs::read_dir(&here).into_iter().flatten().flatten() {
+            if entry.file_name() == named {
+                return Some(entry.path());
+            }
+
+            if entry.file_type().is_ok_and(|what| what.is_dir()) {
+                looking.push(entry.path());
+            }
+        }
+    }
+
+    None
+}
+
+/// And NuGet's own account of where its directories are, which is the
+/// deterministic half of all three variables.
+///
+/// `dotnet nuget locals all --list` prints the four directories NuGet works
+/// out of, and three of them are this descriptor's: the global packages
+/// folder, the http cache, and the temp directory it takes a lock in. Asked of
+/// the tool inside a session, so what comes back is what NuGet made of the
+/// environment rather than what the environment said — the same question the
+/// variables were read out of when this entry was written, asked again on
+/// every run.
+///
+/// **This is what guards the third variable.** The two-at-once proof is what
+/// found it — two sessions with a private `/tmp` each took a lock apiece and
+/// wrote over one another — but a race caught three runs in five is a poor
+/// guard against a release that stopped reading `NUGET_SCRATCH`, and this is
+/// not a race at all.
+///
+/// And the fourth line is the other half of
+/// [`nothing_of_a_sessions_own_is_in_the_shared_nuget_directories`]: the
+/// plugins cache is a credential provider's account of itself rather than a
+/// download, `NUGET_PLUGINS_CACHE_PATH` is deliberately unset, and what this
+/// says is that it really did go to the home the sandbox throws away.
+#[tokio::test]
+async fn the_directories_nuget_names_for_itself_are_the_ones_the_descriptor_set() {
+    let Some(found_them) = tools(".NET", &["dotnet"]) else {
+        return;
+    };
+    let dotnet = &found_them[0];
+
+    let machine = machine(1).await;
+    let cache = machine.cache();
+    let dir = cache.dir().expect("the fixture's cache has a directory");
+
+    let asked = installing(
+        &machine.sandbox(0, &cache, reaching_nothing()),
+        &format!(
+            "set -e\n{DOTNET_SETTINGS}\n\
+             printf 'home=%s\\n' \"$HOME\"\n\
+             {dotnet} nuget locals all --list\n",
+            dotnet = dotnet.display(),
+        ),
+    );
+
+    asked.worked("a session asks its own `dotnet` where it keeps things");
+
+    for (said, under) in [
+        ("global-packages", "nuget/packages"),
+        ("http-cache", "nuget/http"),
+        ("temp", "nuget/scratch"),
+    ] {
+        assert_eq!(
+            listed(&asked, said),
+            dir.join(under).display().to_string(),
+            "NuGet's own `{said}` is {under} inside the one Build Cache, which \
+             is what says it read the variable rather than that the variable \
+             was set. It said:\n{}",
+            asked.said,
+        );
+    }
+
+    let home = line(&asked, "home");
+
+    assert!(
+        listed(&asked, "plugins-cache").starts_with(&home),
+        "and the one directory this descriptor deliberately leaves alone is \
+         under the session's own home, where a credential provider's account of \
+         itself belongs. It said:\n{}",
+        asked.said,
+    );
+}
+
+/// And what `dotnet nuget locals` printed under `<name>: `, which is NuGet's
+/// own shape rather than the `key=` [`line`] reads: this one line is the tool
+/// speaking for itself, so it is read as the tool writes it.
+fn listed(ran: &Ran, name: &str) -> String {
+    ran.said
+        .lines()
+        .find_map(|line| line.strip_prefix(&format!("{name}: ")))
+        .unwrap_or_else(|| {
+            panic!(
+                "`dotnet nuget locals all --list` was supposed to print a \
+                 `{name}: ` line, and the session said:\n{}",
+                ran.said
+            )
+        })
+        .trim()
+        .to_owned()
 }
