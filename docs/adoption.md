@@ -999,7 +999,9 @@ two Unixes have no equivalent of, refused on every platform so that a file
 which loaded on a Mac cannot break the same install on a Windows box — is
 refused by name, because a descriptor that could rewrite those is one that
 could take a session's `verkstead` away from it, or its agent's login. And an
-entry nothing can parse is refused the same way. Either way that language falls
+entry nothing can parse is refused the same way — **a key this grammar does not
+have included**, which is what stops `detct:` being a manifest list that
+silently did nothing. Either way that language falls
 back to the descriptor Verkstead ships, which is the cache you already had;
 every other language loads; the server comes up. A language with no built-in
 behind it — your Gleam, with a typo in it — goes **off** rather than on at

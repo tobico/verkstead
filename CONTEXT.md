@@ -559,7 +559,8 @@ the only language built in, nothing names the one beside the Worktrees and no
 session is opened onto it.
 **An entry that will not load falls back to the built-in of that name.** Two
 ways one fails — naming a variable the Sandbox sets itself, which is refused by
-name, and being something nothing can parse — and one answer to both: what is
+name, and being something nothing can parse, a key the grammar does not have
+included — and one answer to both: what is
 left is the descriptor Verkstead ships, which is the cache the installer
 already had. A language with no built-in behind it goes **off** rather than on
 at nothing, every other language loads, and the server comes up; losing a

@@ -54,7 +54,11 @@
 //! Two ways one fails and one answer to both: an entry naming a variable the
 //! Sandbox sets itself is refused — see [`crate::sandbox::sets_itself`], which
 //! is the union of all three platforms' names — and an entry nothing can parse
-//! is refused the same way. Either way what is left is the descriptor Verkstead
+//! is refused the same way. **A key nothing here knows is the second of those**
+//! rather than a key quietly skipped: `detct` is the likeliest thing to be
+//! wrong with a hand-written descriptor, and a language that silently did
+//! nothing about it would be the one mistake this whole arrangement never told
+//! anybody about. Either way what is left is the descriptor Verkstead
 //! ships, which is the cache the installer already had; a language with no
 //! built-in behind it goes **off** rather than on at nothing; every other
 //! language loads; and the server comes up. Losing Rust's build cache to one
@@ -414,7 +418,23 @@ impl Languages {
 /// Written away when it is absent, every field of it, so that a save from the
 /// settings page rewrites `config.yaml` with the keys the human put there and
 /// no others — see [`crate::settings::Config::keeping_what_the_page_never_drew`].
+///
+/// **A key that is not one of these is refused**, which makes a misspelled one
+/// an entry that falls back to the built-in with a reason naming the key — see
+/// [`Descriptor::read`]. Skipped instead, it would be the one way of writing a
+/// descriptor wrong that nothing anywhere mentioned: no variable set, no
+/// warning, and a language that looks configured and is not.
+///
+/// What it costs is a descriptor written for a Verkstead newer than this one,
+/// which falls back rather than loading the keys this release does understand.
+/// Deliberately the other way round from a **capability** name, which is
+/// tolerated so that such a descriptor still gets its variables — see
+/// [`Machine::offers`]. The difference is what each one is: a key nobody knows
+/// is a descriptor this release cannot honour the shape of, and a capability
+/// nobody offers is behaviour this release has not got, which is the ordinary
+/// answer on a machine with no sccache either.
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct Descriptor {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     enabled: Option<bool>,
@@ -469,7 +489,9 @@ impl Descriptor {
     /// descriptor saying **nothing**, carrying the reason and the text.
     ///
     /// Two ways it fails and one answer to both: an entry naming a variable the
-    /// Sandbox sets itself, and an entry nothing can parse. A descriptor saying
+    /// Sandbox sets itself, and an entry nothing can parse — a key this grammar
+    /// does not have being the commonest of the second sort, because
+    /// [`Descriptor`] refuses one. A descriptor saying
     /// nothing is what makes the answer the same in both cases and in every
     /// place downstream — it merges into the built-in of that name without
     /// changing a key of it, which is that language running on exactly what it
@@ -679,6 +701,7 @@ impl Descriptor {
 /// pointed at the same binary — one capability, two descriptors, and nothing in
 /// the server that knows which language asked.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct Capability {
     #[serde(default, skip_serializing_if = "Ordered::is_empty")]
     env: Ordered<Option<String>>,
@@ -1479,6 +1502,53 @@ mod tests {
                 .get("gleam")
                 .is_some_and(|gleam| gleam.unread().is_none()),
             "and every other language still loads",
+        );
+    }
+
+    /// And a misspelled key is one of the ways nothing can parse it, rather
+    /// than a key skipped in silence.
+    ///
+    /// The likeliest thing to be wrong with a hand-written descriptor, and the
+    /// reason names it — so what the page says is what there is to fix, the way
+    /// it is for a refused variable.
+    #[test]
+    fn a_key_this_grammar_does_not_have_is_refused_and_named() {
+        let loaded = built_in().merged(&written(
+            "languages:\n  rust:\n    detct:\n      - Cargo.toml\n",
+        ));
+
+        let why = loaded
+            .get(RUST)
+            .unwrap()
+            .unread()
+            .expect("a key nothing here knows is an entry that was not used");
+
+        assert!(
+            why.starts_with("could not be read:") && why.contains("detct"),
+            "the reason names the key, because that is what there is to fix: {why}",
+        );
+        assert_eq!(
+            loaded.given(&machine(true)).env(),
+            built_in().given(&machine(true)).env(),
+            "and the language runs on the descriptor Verkstead ships",
+        );
+    }
+
+    /// And so is one inside a capability, that being the same grammar again.
+    #[test]
+    fn a_key_a_capability_does_not_have_is_refused_too() {
+        let loaded = built_in().merged(&written(
+            "languages:\n  rust:\n    capabilities:\n      sccache:\n        \
+             envs:\n          SCCACHE_DIR: /tmp\n",
+        ));
+
+        assert!(
+            loaded
+                .get(RUST)
+                .unwrap()
+                .unread()
+                .is_some_and(|why| why.contains("envs")),
+            "a variable written under the wrong key is a variable no session gets",
         );
     }
 

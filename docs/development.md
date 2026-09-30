@@ -189,7 +189,9 @@ key. `{cache}` in one of them is this directory; `{stores}` is a second one
 beside the worktrees, for a store that has to share a filesystem with the
 project, and it is made only where a loaded descriptor names it — at startup and
 again as each session is spawned, so a descriptor hand-edited in between the two
-is one the next session really starts with. The grammar,
+is one the next session really starts with. A key the grammar does not have is
+refused like a refused variable, so a misspelled one falls back to the built-in
+with a reason rather than silently setting nothing. The grammar,
 with the built-ins as its worked examples, is
 [adoption.md](adoption.md#languages).
 
