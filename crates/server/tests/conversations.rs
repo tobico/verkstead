@@ -22,14 +22,14 @@ use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_render::{
     AbandonedRepo, Adopted, AgentType, BacklogPane, BaseRecorded, BranchRenamed, BriefSaved,
-    CheckRollup, CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed, CompanionMode,
-    CompanionModeChosen, CompanionRefusal, CompanionRemoved, ConversationArchived,
+    Broken, CheckRollup, CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed,
+    CompanionMode, CompanionModeChosen, CompanionRefusal, CompanionRemoved, ConversationArchived,
     ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
     ConversationUnarchived, ConversationView, GrillingStarted, Lifecycle, Merging, PickedView,
-    PinnedEvent, Process, ProcessPicked, ProfileChosen, ProfileSaved, Registered, RepoEntry,
-    RepoSwitched, Resolved, Resumed, RoadmapPane, ShowingArchived, StageState, Standing, Started,
-    SteerCancelled, SteerCompanionRefusal, SteerOpened, SteerPairingView, SteerSaved, TakenUp,
-    TargetRecorded, TimelineEvent, Uncommitted,
+    PinnedEvent, Process, ProcessPicked, ProfileChosen, ProfileSaved, ProfileTrouble, Registered,
+    RepoEntry, RepoSwitched, Resolved, Resumed, RoadmapPane, ShowingArchived, StageState, Standing,
+    Started, SteerCancelled, SteerCompanionRefusal, SteerOpened, SteerPairingView, SteerSaved,
+    TakenUp, TargetRecorded, TimelineEvent, Uncommitted,
 };
 use verkstead_server::{Gh, open_database, router_asking_github, router_keeping, store};
 
@@ -1344,23 +1344,49 @@ async fn order(app: &Router) -> Vec<i64> {
     sidebar(app).await.into_iter().map(|row| row.id).collect()
 }
 
-/// Say where the whole list goes, which is what letting go of a dragged row
-/// sends. Answered with nothing, because there is nothing to answer.
-async fn place(app: &Router, ids: &[i64]) {
-    let (status, body) = fetch(
+/// Say where one row of the list now sits, which is what letting go of a dragged
+/// card sends: the Conversation that moved, and the row it landed under —
+/// `None` being the top of the list. Answered with nothing, because there is
+/// nothing to answer.
+///
+/// Both rows are named by device and id, an id alone naming a row on no
+/// particular machine — and `null` is the device the browser opened, which is
+/// this one and the only one there is here. What a drag across two of them comes
+/// to is `tests/merging.rs`.
+async fn rank(app: &Router, id: i64, below: Option<i64>) {
+    let (status, body) = dropped(app, id, below).await;
+
+    assert_eq!(status, StatusCode::NO_CONTENT, "ranking failed: {body}");
+}
+
+/// The same press, with its answer handed back rather than asserted on.
+async fn dropped(app: &Router, id: i64, below: Option<i64>) -> (StatusCode, String) {
+    fetch(
         app,
         Request::builder()
-            .method("POST")
-            .uri("/api/ui/conversations/order")
+            .method("PUT")
+            .uri("/api/ui/conversations/rank")
             .header(header::CONTENT_TYPE, "application/json")
             .body(Body::from(
-                serde_json::to_vec(&serde_json::json!({ "order": ids })).unwrap(),
+                serde_json::to_vec(&serde_json::json!({
+                    "row": { "device": None::<String>, "id": id },
+                    "below": below.map(|id| serde_json::json!({ "device": None::<String>, "id": id })),
+                }))
+                .unwrap(),
             ))
             .unwrap(),
     )
-    .await;
+    .await
+}
 
-    assert_eq!(status, StatusCode::NO_CONTENT, "placing failed: {body}");
+/// The rank one row carries, read off the sidebar it came back on.
+async fn rank_of(app: &Router, id: i64) -> String {
+    sidebar(app)
+        .await
+        .into_iter()
+        .find(|row| row.id == id)
+        .expect("the row is on the sidebar")
+        .rank
 }
 
 #[tokio::test]
@@ -1373,44 +1399,224 @@ async fn the_sidebar_comes_back_in_the_order_it_was_dragged_into() {
     assert_eq!(
         order(&app).await,
         vec![third, second, first],
-        "unplaced, the list is newest first",
+        "nobody having dragged anything, the list is newest first",
     );
 
-    place(&app, &[second, first, third]).await;
+    // The top card dropped between the two under it, which is one row moving and
+    // so one request naming one Conversation.
+    rank(&app, third, Some(second)).await;
 
     assert_eq!(
         order(&app).await,
-        vec![second, first, third],
+        vec![second, third, first],
         "and afterwards it is where the human put it — which is what a reload, a \
          restart and a second device each read",
     );
+
+    // And the same row again, this time to the top, which is the drop with no
+    // row to name.
+    rank(&app, first, None).await;
+
+    assert_eq!(order(&app).await, vec![first, second, third]);
 }
 
-/// The one row nobody could have placed, because it did not exist when they
-/// dragged. Above the order rather than at the end of it: it is where the work
-/// they just started will be looked for.
+/// The one row nobody could have dragged, because it did not exist when they
+/// did. Above the order rather than at the end of it: it is where the work they
+/// just started will be looked for, and it is there because a start ranks it
+/// there rather than because the list makes a case of it.
 #[tokio::test]
 async fn a_conversation_started_after_the_order_lands_at_the_top() {
     let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
     let first = started(&app, repo_id).await;
     let second = started(&app, repo_id).await;
 
-    place(&app, &[first, second]).await;
+    rank(&app, first, Some(second)).await;
     let third = started(&app, repo_id).await;
 
-    assert_eq!(order(&app).await, vec![third, first, second]);
+    assert_eq!(order(&app).await, vec![third, second, first]);
 }
 
-/// A viewer sends the list it drew, and a row can be gone by the time it lands.
+/// A viewer sends the list it drew, and the row it names as a neighbour can be
+/// gone by the time it lands. There is nothing left to rank against, so the list
+/// stays as the rest of it says rather than the drag being refused.
 #[tokio::test]
-async fn an_order_naming_a_conversation_that_is_not_there_is_still_taken() {
+async fn a_neighbour_that_is_not_there_is_still_taken() {
     let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
     let first = started(&app, repo_id).await;
     let second = started(&app, repo_id).await;
 
-    place(&app, &[second, 9_999, first]).await;
+    rank(&app, first, Some(9_999)).await;
 
     assert_eq!(order(&app).await, vec![second, first]);
+}
+
+/// A card let go at the top of the list, which is the one drop with no row to
+/// name: the key minted is outside the range rather than between two of them.
+#[tokio::test]
+async fn a_row_dropped_at_the_top_is_ranked_above_everything() {
+    let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let first = started(&app, repo_id).await;
+    let second = started(&app, repo_id).await;
+    let third = started(&app, repo_id).await;
+
+    rank(&app, first, None).await;
+
+    assert_eq!(order(&app).await, vec![first, third, second]);
+    assert!(
+        rank_of(&app, first).await < rank_of(&app, third).await,
+        "the row that moved is above the one that was the top",
+    );
+}
+
+/// And one let go at the foot, which is the other end of the same thing: the row
+/// it lands under is the last one there is, so there is nothing under the gap.
+#[tokio::test]
+async fn a_row_dropped_at_the_foot_is_ranked_below_everything() {
+    let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let first = started(&app, repo_id).await;
+    let second = started(&app, repo_id).await;
+    let third = started(&app, repo_id).await;
+
+    rank(&app, third, Some(first)).await;
+
+    assert_eq!(order(&app).await, vec![second, first, third]);
+    assert!(
+        rank_of(&app, third).await > rank_of(&app, first).await,
+        "the row that moved is under the one that was the foot",
+    );
+}
+
+/// The drop everything else is a special case of: the key minted sorts between
+/// its two neighbours **with the suffixes on**, which is what the separator is
+/// there to buy — the arithmetic never sees a device, and the strings the
+/// database sorts always carry one.
+#[tokio::test]
+async fn a_row_dropped_between_two_sorts_between_them() {
+    let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let first = started(&app, repo_id).await;
+    let second = started(&app, repo_id).await;
+    let third = started(&app, repo_id).await;
+
+    rank(&app, third, Some(second)).await;
+
+    assert_eq!(order(&app).await, vec![second, third, first]);
+
+    let moved = rank_of(&app, third).await;
+
+    assert!(
+        rank_of(&app, second).await < moved && moved < rank_of(&app, first).await,
+        "the minted rank sorts between its neighbours, suffixes and all: {moved}",
+    );
+}
+
+/// A row dropped where it already is has to be a row that has not moved. It is
+/// its own neighbour's neighbour, and a key minted between a row and itself is
+/// one the arithmetic has nothing to compute — so the row that moved is left out
+/// of the search for the rank under the gap.
+#[tokio::test]
+async fn a_row_dropped_where_it_already_sits_stays_there() {
+    let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let first = started(&app, repo_id).await;
+    let second = started(&app, repo_id).await;
+    let third = started(&app, repo_id).await;
+
+    rank(&app, second, Some(third)).await;
+
+    assert_eq!(order(&app).await, vec![third, second, first]);
+}
+
+/// Two drops into one gap in quick succession are two ranks rather than one key
+/// minted twice: the mint is read, computed and written under one lock — see the
+/// server's `ranking` module.
+#[tokio::test]
+async fn two_drops_into_one_gap_mint_two_ranks() {
+    let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let first = started(&app, repo_id).await;
+    let second = started(&app, repo_id).await;
+    let third = started(&app, repo_id).await;
+    let fourth = started(&app, repo_id).await;
+
+    // Both of them dropped under the same row, at once — which is the press
+    // made twice before either answer has come back.
+    let (one, other) = tokio::join!(
+        dropped(&app, first, Some(fourth)),
+        dropped(&app, second, Some(fourth)),
+    );
+
+    assert_eq!(one.0, StatusCode::NO_CONTENT, "{}", one.1);
+    assert_eq!(other.0, StatusCode::NO_CONTENT, "{}", other.1);
+
+    assert_ne!(
+        rank_of(&app, first).await,
+        rank_of(&app, second).await,
+        "two drops into one gap are two ranks",
+    );
+    assert_eq!(
+        order(&app).await.len(),
+        4,
+        "and the list is still the four rows it was",
+    );
+    assert_eq!(
+        order(&app).await[0],
+        fourth,
+        "under the row they were dropped under"
+    );
+    assert_eq!(order(&app).await[3], third);
+}
+
+/// An id out of a URL, which is not always a number — and the rank a hub writes
+/// is a PUT under the Conversation, so it has one to parse like every other row
+/// does.
+#[tokio::test]
+async fn ranking_something_that_is_not_a_conversation_is_not_found() {
+    let (_elsewhere, _dir, app, _repo, _repo_id) = workbench().await;
+
+    let (status, _) = fetch(
+        &app,
+        Request::builder()
+            .method("PUT")
+            .uri("/api/ui/conversations/nonsense/rank")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&serde_json::json!({ "rank": "a0-whoever" })).unwrap(),
+            ))
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+/// And the rank a hub minted, put straight onto the row it was minted for. The
+/// other half of a drag's sentence, which is what a member is told over the
+/// Relay and what this device is told by its own mint.
+#[tokio::test]
+async fn a_rank_stated_is_the_rank_the_row_comes_back_with() {
+    let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let first = started(&app, repo_id).await;
+    let second = started(&app, repo_id).await;
+
+    let under_them = format!(
+        "z0-{}",
+        rank_of(&app, first).await.split_once('-').unwrap().1
+    );
+
+    let (status, body) = fetch(
+        &app,
+        Request::builder()
+            .method("PUT")
+            .uri(format!("/api/ui/conversations/{second}/rank"))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&serde_json::json!({ "rank": under_them })).unwrap(),
+            ))
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+    assert_eq!(rank_of(&app, second).await, under_them);
+    assert_eq!(order(&app).await, vec![first, second]);
 }
 
 /// A claude dir and config file pair inside `elsewhere`, so a Profile saved from
@@ -2507,7 +2713,18 @@ async fn starting_is_refused_when_a_chosen_profiles_pair_has_gone() {
     std::fs::remove_dir_all(elsewhere.path().join("fable")).unwrap();
 
     assert!(!opened(&app, id).await.ready_to_grill);
-    assert_eq!(grill(&app, id).await, GrillingStarted::ProfileBroken);
+
+    // Named rather than lumped: the refusal carries what the Profile's own row
+    // carries, so the sentence at the press is the sentence the row is already
+    // showing.
+    assert_eq!(
+        grill(&app, id).await,
+        GrillingStarted::ProfileBroken(ProfileTrouble {
+            broken: Broken::DirMissing,
+            agent_type: AgentType::Claude,
+            device: None,
+        }),
+    );
 }
 
 /// The Brief is what the grilling starts from, and freezing an empty one would
@@ -9497,7 +9714,14 @@ async fn adopting_is_refused_when_a_chosen_profiles_pair_has_gone() {
     let id = ready_to_adopt(&app, elsewhere.path(), repo_id, "mvp").await;
     std::fs::remove_dir_all(elsewhere.path().join("fable")).unwrap();
 
-    assert_eq!(press_adopt(&app, id).await, Adopted::ProfileBroken);
+    assert_eq!(
+        press_adopt(&app, id).await,
+        Adopted::ProfileBroken(ProfileTrouble {
+            broken: Broken::DirMissing,
+            agent_type: AgentType::Claude,
+            device: None,
+        }),
+    );
     nothing_adopted(&app, id, &repo).await;
 }
 
@@ -11107,7 +11331,14 @@ async fn a_start_refused_for_its_profiles_or_its_target_closes_nothing() {
     .await;
     std::fs::remove_dir_all(elsewhere.path().join("opus")).unwrap();
 
-    assert_eq!(press_take_up(&app, unready).await, TakenUp::ProfileBroken);
+    assert_eq!(
+        press_take_up(&app, unready).await,
+        TakenUp::ProfileBroken(ProfileTrouble {
+            broken: Broken::DirMissing,
+            agent_type: AgentType::Claude,
+            device: None,
+        }),
+    );
     assert_eq!(
         opened(&app, first).await.state,
         Lifecycle::Done,

@@ -763,6 +763,78 @@ fn room(path: &Path) -> bool {
     true
 }
 
+/// Put the checkout at `path` onto `branch` at `commit`, whatever it was holding,
+/// and say whether it went.
+///
+/// **What a Conversation coming home is checked out into** (ADR-0020,
+/// *Transfer*). The device the work is returning to still has the directory it
+/// cut the first time, on the branch, at whatever commit the work was at when it
+/// left — so the branch is brought up to date *in* that checkout rather than a
+/// second one being cut beside it, which is what keeps everything the human's
+/// machine built in there and never travels: the ignored files, the
+/// `node_modules`, the `target`.
+///
+/// `-B` rather than a fetch into the branch, because the branch is checked out
+/// *here*: git refuses to fetch into a ref one of its worktrees is standing on,
+/// and what this is doing is moving the branch and the tree together, which is
+/// the one operation that is allowed from inside the checkout holding it. It
+/// makes the branch where there is none, which is a checkout that was left
+/// detached or on a name a session has since renamed away from.
+///
+/// `--force` because whatever is in the tree is the stale copy's: the record
+/// arriving is the live one, and the working changes that go with it arrive
+/// beside it as a patch.
+pub(crate) fn onto(path: &Path, branch: &str, commit: &str) -> bool {
+    git(
+        path,
+        &[
+            "checkout",
+            "--force",
+            "-B",
+            branch,
+            "--end-of-options",
+            commit,
+        ],
+    )
+    .is_some()
+}
+
+/// The same for a checkout that holds no branch: detached at `commit`, which is
+/// the shape a read-only companion is kept in.
+pub(crate) fn onto_detached(path: &Path, commit: &str) -> bool {
+    git(
+        path,
+        &[
+            "checkout",
+            "--force",
+            "--detach",
+            "--end-of-options",
+            commit,
+        ],
+    )
+    .is_some()
+}
+
+/// Take the untracked files out of the checkout at `path`, leaving the ignored
+/// ones where they are.
+///
+/// **The other half of putting a returning Conversation's tree back.** A checkout
+/// is brought onto the arriving commit with [`onto`], which settles everything
+/// git is tracking; what is left is whatever the copy that has been superseded
+/// left lying about untracked, and the arriving untracked files are written over
+/// the top of that. A file the work no longer has would otherwise survive a
+/// transfer it was deleted in.
+///
+/// **Ignored files are not untracked files**, which is the whole of why this is
+/// `-fd` and never `-fdx`: what a machine builds for itself stays behind on a
+/// move in both directions, and a return that swept a `target` directory would
+/// cost an hour of somebody's day for tidiness.
+pub(crate) fn tidied(path: &Path) {
+    if git(path, &["clean", "-fd"]).is_none() {
+        tracing::warn!(path = %path.display(), "the untracked files of a checkout being reused could not be swept");
+    }
+}
+
 /// Make `branch` off `from` in `repo`, checked out at `path`.
 ///
 /// One git call, because it is one thing: a worktree registered with the branch
@@ -934,6 +1006,20 @@ fn head(worktree: &Path) -> Option<String> {
     let head = head.trim();
 
     (!head.is_empty()).then(|| head.to_owned())
+}
+
+/// The branch checked out at `worktree`, by its short name, or `None` where it
+/// is detached — which a read-only companion's checkout always is.
+///
+/// [`head`] without the `refs/heads/` in front of it, for the callers that want
+/// a name rather than a ref. What reads it is a transfer: what goes over is the
+/// name a checkout is *actually* on rather than the name the record was written
+/// with, and a companion knows its own name the way the Conversation's own
+/// checkout does.
+pub(crate) fn on_branch(worktree: &Path) -> Option<String> {
+    let head = head(worktree)?;
+
+    head.strip_prefix("refs/heads/").map(str::to_owned)
 }
 
 /// Whether there is still a worktree at `path` to do `repo`'s work in, on
@@ -1401,6 +1487,10 @@ pub(crate) fn at_startup(state: &crate::AppState) {
 #[cfg(test)]
 mod tests {
     use std::io::Read;
+
+    /// The device every Conversation started here is ranked by, named the way a
+    /// cluster names one (ADR-0020, *Ranks*).
+    const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
     use std::net::{TcpListener, TcpStream};
 
     use super::*;
@@ -2066,7 +2156,7 @@ mod tests {
             .unwrap()
             .expect("nothing is registered at that path yet");
 
-        let id = store::start_conversation(&pool, registered.id, "rate-limiting")
+        let id = store::start_conversation(&pool, registered.id, "rate-limiting", THIS_DEVICE)
             .await
             .unwrap()
             .expect("the Repo was just registered");

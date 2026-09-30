@@ -29,7 +29,8 @@ import { createSignal, For, type JSX, Show } from "solid-js";
 import { adoptRoadmap } from "../api/client";
 import type { Adopted, ConversationView } from "../api/types";
 import { Empty, ErrorLine, Note } from "../notices";
-import { companionRefusal } from "./Timeline";
+import { keyOf, useDevice } from "../reaching";
+import { companionRefusal, profileRefusal } from "./Timeline";
 import styles from "./Adoption.module.css";
 
 /// Each way of being refused an adoption, in the words of what to go and do
@@ -49,8 +50,6 @@ export const ADOPT_REFUSAL: Record<Extract<Adopted, string>, string> = {
   NoImplementationProfile:
     "Choose an implementation profile and model first, on the brief.",
   NoReviewProfile: "Choose a review profile and model first, on the brief.",
-  ProfileBroken:
-    "A chosen profile's claude pair is not where it was left, so there is no account to run under.",
   NoGitAuthor:
     "No git author is configured, so Verkstead cannot commit on the branch. Set one in Settings before starting work.",
   FetchFailed:
@@ -94,6 +93,10 @@ export function adoptRefusal(outcome: Adopted): string {
       return `${outcome.Companion.repo}: ${companionRefusal(outcome.Companion.why)}`;
     }
 
+    if ("ProfileBroken" in outcome) {
+      return profileRefusal(outcome.ProfileBroken);
+    }
+
     if ("Misdeclared" in outcome) {
       return `That roadmap declares badly, so nothing of it can start: ${outcome.Misdeclared.why}.`;
     }
@@ -109,21 +112,26 @@ export function Adoption(props: {
   adopting: NonNullable<ConversationView["adopting"]>;
 }): JSX.Element {
   const queries = useQueryClient();
+  const device = useDevice();
 
   const [refused, setRefused] = createSignal<Adopted | null>(null);
 
   const adopt = useMutation(() => ({
-    mutationFn: () => adoptRoadmap(props.conversation.id),
+    mutationFn: () => adoptRoadmap(device(), props.conversation.id),
     onSuccess: (outcome: Adopted) => {
       // Whatever it came back with, the page is read again: what adopting did
       // is a conversation that has moved, and what refused it is a repository
       // that has moved — and reading it again is the correction either way.
       setRefused(outcome === "Adopted" ? null : outcome);
 
-      void queries.invalidateQueries({ queryKey: ["conversation"] });
+      void queries.invalidateQueries({
+        queryKey: keyOf(device(), "conversation"),
+      });
       void queries.invalidateQueries({ queryKey: ["conversations"] });
-      void queries.invalidateQueries({ queryKey: ["abandoned-roadmaps"] });
-      void queries.invalidateQueries({ queryKey: ["profiles"] });
+      void queries.invalidateQueries({
+        queryKey: keyOf(device(), "abandoned-roadmaps"),
+      });
+      void queries.invalidateQueries({ queryKey: keyOf(device(), "profiles") });
     },
   }));
 

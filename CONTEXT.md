@@ -52,6 +52,24 @@ Profile, which is refused for nothing: a Repo is the directory a session is
 standing in, where a Profile is only the account the next one would have been
 launched under. Registering the same path again brings the same Repo back rather
 than making a second one.
+**And across a cluster, which of a member's Repos is this repository is a reading
+rather than a press**: a Repo is one directory on this machine and the same
+repository is another on the next, so a device that syncs what a member remembers
+of this repository, or lands a branch of it there, has first to say which of that
+machine's Repos it means. **Origin URL first** — the `origin` remote's URL, held
+against the other end's after a trailing `.git`, a trailing slash and the
+`scp`-style spelling of an SSH URL are taken out, those three and nothing else —
+**then by name where neither end has an origin**, the name being the directory's
+own. A Repo with an origin never matches one without: they are two repositories
+until something says so, and a shared name is not that something. Nothing about
+the registration is trusted for it — a registration records a path, a name and a
+default branch and no origin at all — so both ends ask git afresh, and the far
+end sends what git said while the device that asked applies the rule, which is
+what keeps two Verksteads one version apart from disagreeing about which
+repository the work is in. **No match is an answer** and the caller decides what
+to do without one; **a device that is not answering is refused by name** instead,
+those being two different things to say — one sends the human to **Open repo**
+and the other to the machine.
 _Avoid_: project, codebase, checkout
 
 **Conversation**:
@@ -91,6 +109,15 @@ everything else it ends, and nothing else on that menu is both past taking back
 and unaware of what it is ending — the two stops are about the run, and the
 archives end nothing. Where nothing is running there is nothing to warn about,
 and the press is the eager one it has always been.
+
+**And it can be moved to another device of the cluster, from every state but
+Draft and Closed.** *Transfer to…* on the actions menu — the pane's and the
+sidebar card's alike — opens a card over the page with the device select and the
+**Preflight** of whatever machine is picked, and Go is refused while that reading
+holds anything. What Go does is write the move down: the turn the session is part
+way through ends first, and the work goes then — see **Transfer**. A Draft is
+moved by the device select on its own composer, there being a Brief and no work
+to carry; a Closed Conversation has none left to move.
 
 **What it is called is its branch, where anybody has named one.** A Conversation
 is started on a name Verkstead invented, because there has to be a branch to cut
@@ -207,6 +234,463 @@ only once its stage has landed, as an agent type is offered only once it can
 launch the real thing. See ADR-0020.
 _Avoid_: mode, kind, type, workflow, flow, template, Direction (that is how
 Develop's building is run, and is picked inside it)
+**Rank**:
+Where a **Conversation** sits in the sidebar, and the whole of what the list is
+ordered by: a **fractional-indexing key**, a separator, and the **Device Id** of
+the device that issued it — `a0-aa00bb…`. Every Conversation has one from the
+moment it is started, so there is no unranked row and no rule about where one
+would go.
+**A key between any two keys always exists**, which is what makes a drag between
+two of this device's rows expressible wherever it lands: the keys are base62
+strings with a head character saying how long the integer part is, so ranking
+above the current top — which is what every start does — goes `a0`, `Zz`, `Zy`, …
+and carries rather than running out. They grow only where somebody keeps dropping
+cards in the one spot, and there is no bucket to size and no rebalance pass to
+run. Jira-style lexorank was rejected for that pass, and a dense integer per row
+for what it cost: the whole table rewritten on every drag, which is a sentence
+that cannot be sent to two devices that each own part of the list.
+**The device is suffixed because a device computes its keys off its own list
+alone.** Two devices each ranking a new Conversation above their own top produce
+the *same* key — on a fresh device that is its first few rows rather than a rare
+coincidence — and two rows sorting equal would leave a merged order ambiguous and
+a drag between them inexpressible, fractional indexing having no key strictly
+between two equal ones. Suffixed, they are distinct by construction and no merge
+needs a tiebreaker of its own. The separator sorts below every character of the
+alphabet, which is what makes ordering the whole strings ordering by key and then
+by device — and what keeps a key minted between two neighbours between them once
+the suffixes are on. What it does not buy is room *between* two rows at one key:
+those two sort apart, but every rank at that key names a device and the row being
+moved carries its own, so nothing sorts between them and minting is refused.
+Only a merged list reaches it, and it is the first rows of two devices rather than
+a rare case — see *the gap is opened first* below.
+**A drag writes one row.** The viewer says which Conversation moved and which row
+it now sits under — nothing at all being the top of the list, and each of the two
+named by **Device Id** and id, a bare id naming a row on no particular machine —
+and the device the browser opened mints the key between that row's rank and the
+rank under the gap, out of the merged list it holds. So the arithmetic exists
+once, in one language, the viewer never learns what a key looks like, and a drag
+on a list merged from several devices is a write to the device that owns the row
+and to nobody else. A neighbour that has gone since the list was drawn is not a
+refusal: there is nothing left to rank against, so the order stays as the rest of
+the list says.
+**The rank a row comes back with is its own device's**, whoever its neighbours
+belong to: a device ranks its own Conversations, and a hub that computes a key for
+somebody else's hands it to that device to write. What it hands over is the *rank*
+rather than a neighbour — *this row, under that one* cannot cross a device
+boundary, the neighbour being a row the far end may never have heard of — and the
+hub tells itself the same way for its own rows, so there is one way a rank is
+written.
+**And into the one gap there is not, the gap is opened first.** Two devices each
+ranking above their own top mint the same key, so their first rows are two rows at
+one key, sitting at the top of the list where cards are dropped most. A card
+dropped between them lands where it was dropped all the same: the hub re-ranks the
+*lower* of the pair through its own device — a key between the pair's shared one
+and whatever is under that row — and then mints the dropped row into the gap that
+opened. Two devices are written to in that one case and one in every other, and it
+does not recur at that spot, the pair no longer sharing a key. Where the lower
+row's own device cannot be reached the gap cannot be opened, so the drag is
+refused and the sidebar says which device it was.
+**Two drops into one gap are held apart on the hub**, a mint off a held merge
+having no transaction around it. What that lock does not reach is a Conversation
+*started* on a member while the hub is minting for that member: it is a second key
+computed over there off the same top row and carrying the same suffix, so the two
+rows can land at one rank. They are still drawn in a stated order, and a later drag
+between them is refused the way any pair at one key is until one of them is
+re-ranked. It is the price of serving the merge from memory rather than a round
+trip per row.
+_Avoid_: position, index, place, sort order, priority
+
+**Birth Key**:
+What names a piece of work across a whole cluster: the **Device Id** of the
+device a **Conversation** was drafted on, and the id it was given there — stamped
+at creation and never touched again (ADR-0020, *Transfer*). Every Conversation has
+one from the moment it is started, and a Conversation written before there were
+any is stamped with this device's id and its own local id, which is exactly what a
+Conversation that has never moved has.
+**It exists because a transfer copies rather than moves.** A Conversation handed
+to another device is written into that device's own tables under ids that device
+issued, and the device it came from keeps its copy — so one piece of work has a
+row in several databases, none of which can name the others: ids are each
+device's own and collide by construction. The birth key is the one thing every
+copy of it says the same, which is what lets the **Merged List** draw the work
+once however many machines hold a copy, and what lets a transfer back find the
+row it is replacing. So it travels with the work rather than being invented by
+whoever receives it: a Conversation that has moved twice still answers to the key
+it was born under.
+**Where it is not the Rank.** A rank tells one *row* from another and a birth key
+tells one piece of *work* from another: two copies of one Conversation carry two
+ranks and one birth key. Both ride out on the sidebar row, and both are opaque to
+everything that reads them.
+**And beside it, the mark saying a copy is not the live one**: the device holding
+the record and the id it goes by there, written on the copy the work has left. A
+Conversation wearing it is a **tombstone** — nothing writes to it, the Merged List
+does not draw it, and its own URL leads to wherever the work is now, whether or
+not the device holding it is answering. It is kept rather than deleted so that
+every link anybody kept still leads to the work and so that a transfer back has a
+row to replace under the id it already had. A forwarding stub with no record
+behind it was the recommendation; keeping the copy was the human's call.
+_Avoid_: global id, UUID, canonical id, origin, the stub
+
+**Preflight**:
+A reading of what another device lacks before a **Conversation** could be moved
+onto it, drawn under the device select in the *Transfer to…* dialog and refusing
+**Go** while it holds anything (ADR-0020, *Transfer*). Not a press and not a
+promise: it is what the far end says about itself at the moment it is asked, and
+what moves the work is the press after it.
+**Asked of the far end, with one exception.** Which of that device's **Repo**s is
+this repository is settled here rather than there, by the rule above — the far
+end sends its registry and the device holding the work applies it, so two
+Verksteads one version apart cannot disagree about which repository the work is
+in. Everything else only that machine can look at, so it answers about itself:
+which harnesses are on its `PATH`, and whether it is answering at all.
+**What it holds is named rather than counted.** A repository with no match names
+the repository and points at **Open repo** on that device; a harness that is not
+there is named against the **Pairing** that wants it, in the onboarding probe's
+own words; and a device that answered nothing is *unreachable*, named. Each is a
+different errand — a repository to open over there, a harness to install over
+there, or a machine to go and wake — and a count would be none of them.
+**And *unreachable* is never *no match*.** A machine that said nothing has failed
+none of the questions under it, so it is the whole of its own preflight: no match
+sends somebody to open a repository on a machine that may already have it, and a
+machine that is asleep will answer perfectly well tomorrow.
+_Avoid_: check, validation, dry run, health check
+
+**Transfer**:
+Moving a **Conversation** onto another device of the cluster, pressed from
+*Transfer to…* on its actions menu and refused while the **Preflight** of the
+machine picked holds anything (ADR-0020, *Transfer*). Allowed from every state
+but Draft and Closed.
+**The press writes down that the work is going rather than moving it.** The
+session running for that Conversation is part way through a turn, and a move
+that cut across it would leave the work wherever the agent had got to — so the
+press is a request, the way **Stop** after the current task and `verkstead done`
+are: whatever is running runs to its own end, nothing is started after it, and
+the move runs once the session is out. Pressed with nothing running there is
+nothing to see out and it runs where it stands. From the press until it lands
+the head of the Timeline reads *Transferring to* that machine, by the name the
+human gave it.
+**What crosses is a copy, and the far end's confirmation is the commit point.**
+The receiving device writes a row of its own — the **Repo** its own registry
+matched, the branch, the state, the **Pairing**s as its own Profile ids and the
+**Rank** and **Birth Key** verbatim, neither of which is any device's to invent —
+and answers with the id it gave it; only then does the sending device mark its
+own copy transferred. Which is what makes a failure safe: a move that falls over
+before that answer leaves the Conversation live and **stopped** where it was,
+with a Notice naming what failed, and whatever reached the far end is swept
+rather than left as a half-record. The Worktree on the sending device is left
+exactly where it is either way.
+**And then the record itself, in a leg of its own.** Everything about *that
+Conversation* and nothing about the machine it was on: the Timeline Events, the
+Question Sets asked from them with their Responses and their deferrals and their
+deliveries, the Captures, the Transcripts, the session names and Pairings and
+endings, the Steers, the stops and escalations, the commits recorded, the pull
+request and wrap-up bookkeeping, the unseen mark, the shares, the Companion
+rows, and the Attachments — their rows in the record and their bytes beside it,
+landing in the receiving device's own attachments directory under its own
+Conversation id, so a session there is given the paths its own sandbox expects.
+What stays behind is the device's own: its Repos, its Agent Profiles, what it
+remembers of a Repo's Pairings, its Members, its joins, its push subscriptions,
+its Remote access banner — and the Worktrees, which each machine cuts for
+itself.
+**Every id is renumbered as it lands**, because both ends issue their own and
+every Verkstead has a Conversation 1: an Event id a Capture, a Transcript, a
+session Pairing or a Set points at comes out naming the Event it actually landed
+as, and a Set's own id moves with it — which is what leaves one still open
+answerable on the far end, its Answers reaching a wait opened *there*. Two
+ids are not the record's to renumber and are settled by the devices instead: the
+Repos, by the same match that settled the Conversation's own, refused by name
+where one has nowhere to land; and the Agent Profiles, named across the cluster
+by the device each is at home on, the column landing empty where the far end has
+never heard of the account — which is a Steer whose account was deleted a year
+later rather than a Pairing anything is about to run under. A record is prose
+and binary and can be large, so it crosses under a bound of its own and is
+refused whole rather than in part, naming the Conversation that was too big to
+move.
+**And then the work, in a third leg after the record** — because a Worktree hangs
+off a Conversation and the far end needs one to hang it from. The far end is
+asked first what it already holds of the matched Repo, the tips of its refs, and
+the branch is packed as a **git bundle** against exactly that: a machine that
+cloned the same repository yesterday is sent the branch rather than the history
+under it, and one standing on the branch's own tip is sent no bundle at all and
+just writes the ref. Beside it go the working changes, which are two different
+things. Tracked changes travel as a **binary patch** — `git diff --binary`
+against `HEAD`, which is what carries a changed image or a compiled fixture, and
+what the **Diff** a Question Set carries deliberately leaves out. Untracked files
+git does not ignore travel as raw bytes, each by its path relative to the
+Worktree; **ignored files stay behind** and the far end builds its own, and a
+file the far end's *own* rules cover is not written there either. The far end
+fetches the bundle, cuts the Worktree under its own Data Directory at a path it
+names itself, applies the patch and writes the untracked files: nothing that
+arrives is ever joined onto a directory there as a path, the way the memory sync
+names its own parts. Line endings need nothing done to them — a binary patch is
+index form, so `git apply` puts back whatever working-tree convention the far end
+keeps, and untracked files are converted by neither end. **And the branch is
+followed where a session renamed it**: what goes over is the name the checkout is
+actually on rather than the name the record was written with, read off the
+checkout before either leg is composed.
+**Companions travel in the same leg**, each matched on the far end by the rule
+the Conversation's own Repo is matched by and each cut beside the Conversation's
+own checkout there. What differs between the two kinds is what travels: a
+**read-write** Companion is a repository a session commits in and leaves
+uncommitted work in, so it gets the whole of the above — its branch as a bundle
+packed against what the far end holds of *that* repository, a binary patch and
+its untracked unignored files — while a **read-only** one is checked out detached
+and bound read-only and carries its commit and nothing else, a patch to one being
+changes a session was never able to make. A Companion on the empty *mirroring*
+setting moves with the Conversation's own branch, rename and all. It is all one
+message and the far end makes every checkout or none: a Conversation whose own
+checkout landed and whose Companion's did not is one no session could be launched
+in, and a move that would leave one behind is refused by name with the work still
+where it was.
+**And the arrival, which is the leg after the mark.** The sending device marks its
+own copy and only then tells the receiving one that the move is over: every leg in
+front of that is in front of the commit point, and a session started in a checkout
+that was about to be swept would be an agent working in a directory nobody could
+account for. What the far end does with that word is two things. It puts a Notice
+on the Timeline saying which machine the work came from — the sending device's own
+copy carrying the matching one, saying where it went — so the record reads as one
+story across two databases rather than as a Conversation that appeared from
+nowhere. And it presses **Resume** for itself: the one standing way in, which asks
+what *ought* to be running now from the state the Conversation is in and what the
+branch has written, which is exactly the question a Conversation that has just
+landed poses. What the *session* it starts is, is the **Carried Conversation**
+below: the harness's own resume where there is one to reach for, and Verkstead's
+own — a fresh session re-primed from the record — where there is not. The refusals
+are Resume's own and land as a stop with a Notice naming the arrival. **A stop
+somebody decided on crosses and is left
+exactly where it stands**, the way a restart leaves one: moving work onto another
+machine is not somebody deciding differently about a brake the human pulled. And
+what a relaunched grilling does to the Sets the gone session was idling on, it does
+here too — it locks them unanswered, the reader being on a machine the work has
+left, and asks again what it still needs. **Unless the conversation itself is
+carried on**, which is the one thing that takes the premise away: a **Carried
+Conversation** brings that very reader back on this machine, so the Sets are held
+open for it rather than locked, and the Note names each of them by the id it landed
+under. Which of the two it is turns on the log having come across, and that is not
+settled until the launch has run the **Memory sync** — so the relaunch holds off
+and the launch locks them after all where the resume cannot be made. **Which of
+the two it is, is asked the moment the Timeline has been read**, so that a
+relaunch with nothing to hold locks as early as it ever did: everything after that
+is a way a relaunch can give up without starting anything, and a Set locked any
+later than that is one somebody could answer into a session that is never going to
+exist. A relaunch that held and then started nothing locks them on its way out.
+A **Deferred Ask** had nobody behind it to begin with and lands open either way,
+answerable where the work now is.
+**And a Conversation that has been on a device before comes home rather than
+arriving.** The second time work moves it is usually coming back — drafted on the
+laptop, worked on the desktop, home again — and the **Birth Key** is what says
+the arriving Conversation and the copy the receiving device kept are one piece of
+work. So that copy is written over wholesale, **under the id it already has**:
+what the sending device holds is the live record and what is here is a stale copy
+of it, so nothing is merged and nothing is reconciled. The id is the whole point
+of doing it that way — a bookmark, a Timeline reference on another Conversation,
+the URL in a Question Set answered months ago all name it, and a second
+Conversation beside the first would leave every one of them pointing at a copy of
+work that had come back. The record lands over the old one in the very
+transaction that takes it out, the attached files with it; and the **Worktree**
+that device cut the first time is the one the branch goes back into, rather than
+a second one beside it. Its branch is brought up to date from the inside — git
+refuses to fetch into a ref one of its own checkouts is standing on, so the
+bundle lands under a holding ref and the branch and the tree are moved together —
+the tree is forced onto the arriving commit, what the superseded copy left lying
+about untracked is swept, and the **ignored files stay exactly where they are**,
+which is what the directory was kept for: they never travelled, and a checkout
+taken away and cut again would cost an hour of somebody's compiling every time
+the work came home. Companions come home the same way, each to the checkout
+beside the one the Conversation comes home to. The copy goes on wearing its mark
+through every leg of the return, every one of those being in front of the
+commit point, so a return that falls over leaves the tombstone it started as,
+still pointing at the machine still doing the work; what takes the mark off is
+the word that the move is over. From there the direction is simply reversed — the
+device the work left keeps the copy, its URL redirects, and the merged list draws
+one row — and a third leg lands on the same two ids and the same two checkouts
+again.
+**Before any of it, the account goes home.** A session away from home keeps a
+mirror of its account's login and of this Repo's memory entries and writes both
+back to the device they are at home on as it ends — and the move runs at the turn's
+end, which is exactly when that happens. So the ordering is the thing: the write-back
+is the last thing a session's ending does before the word that it is over, the mover
+waits for that word, and a launch that has been decided but has not reached the
+register yet is waited for too. The account is home before the slice and the bundle
+leave, or the far end would launch under a login the source had not finished
+returning.
+_Avoid_: migrate, hand off, sync, failover
+
+**Permitted Device**:
+A device of the cluster the agent doing a **Conversation**'s work may move it
+onto itself, ticked by the human under *May be transferred to* (ADR-0020, *The
+agent's call*). The ticks stand at the foot of the device select's rows: on the
+compose page, held with the rest of the page and sent with the draft; on a saved
+draft's composer; and in the *Transfer to…* dialog afterwards, where ticking one
+changes the list and moves nothing. Nothing is ticked by default.
+**The ticks are the consent.** Nothing asks the human again when the agent calls
+for a move, so the list is the whole of their say in one — and a **Transfer** the
+human presses ignores it entirely.
+**The drafting device is always permitted and is never a tick**: the device in
+the Conversation's **Birth Key**, so a session that has moved can always come
+home. The device the work is on now is not offered either, being where the work
+already is.
+**Device Ids rather than anything renumbered**, which is what lets the list cross
+with the record as it stands: an id names the same machine from every device of
+the cluster, so the far end reads the same list, and the drafting device is still
+implicit there because the birth key crossed too. A device that leaves the
+cluster is taken off every Conversation's list by the unlink itself.
+_Avoid_: allowed device, whitelist, target list
+
+**Carried Conversation**:
+The conversation a transferred agent was having, picked up on the device the work
+landed on (ADR-0020, *Transfer*). A **Transfer** runs at the turn's end, so the
+agent is part way through its own thinking when the work moves — and where its
+harness has a resume of its own, the session started on arrival is that resume
+rather than a fresh one: the same session id, against the log the **Memory sync**
+carried over, primed with the note below and nothing else. Where it cannot be
+made, Verkstead's own **Resume** stands exactly as it did.
+**The harness's resume, and all four of them have one.** Claude's line, Grok
+Build's and OpenCode's are the resume flag and the session id, written where the id
+a fresh session would be named by goes: the two are mutually exclusive, a
+conversation carried on keeping the id it already had. **Codex's is a subcommand**
+rather than a flag, which changes the shape of the line rather than what is on the
+end of it — the word comes straight after the binary and the session id and the
+prompt are its positionals, with the model and every configuration override the
+ordinary line carries come across onto it. What separates the four is not whether
+they can be resumed but whether Verkstead knows the id to resume by, and whether
+their store has to be put right first.
+**And the id Codex resumes by is one Verkstead never picked.** It takes no session
+id at launch, so nothing known before the session starts names its log — but a
+rollout names *itself*, in the same opening line the Transcript search reads the
+Worktree off. So the moment the log is found, that id goes on the record beside the
+session where a named backend's would have gone, and a device that never ran the
+session can resume by it. Its store needs nothing put right: codex files its
+rollouts by the date they were written, so what the sync carries lands at the path
+it left, and a resume by an explicit id is resolved against the whole store rather
+than against the directory codex was started in. What the resume line carries
+instead is the answer to the one question a carried rollout makes codex stop and
+ask — whether to resume in the directory the rollout records or the one it was
+started in — and the answer is the Worktree the work is now in.
+**And Grok's store has to be put right before it is anything to resume against.**
+Grok files a session's directory under its own encoding of the working directory the
+session ran in, and the sync carries that directory verbatim — so the log arrives
+still filed under the *sending* device's name for the *sending* device's Worktree,
+which is a directory grok will never look in when it is started in this one. So the
+arriving directory is moved under the name this device's own store already uses for
+this Worktree, found by asking the store's directories which path each stands for
+rather than by working out what grok would have called one. Which leaves a device
+that has never run grok in this Worktree with nowhere to put it: that is
+Verkstead's own Resume, and the session it starts leaves the directory there for
+the visit after it.
+**And OpenCode is both of those at once: named by nothing, and keyed by the
+directory.** Its id is the store's own, as Codex's is — opencode keeps a row per
+session in one database rather than a log apiece, and the reader that follows those
+records already finds the row recording this Worktree that appeared after this
+session was launched. That row carries the id, and it goes on the record beside the
+session the moment the row is found. Its resume is the session flag with that id,
+the prompt under its own flag as it already is, and the model and the approvals
+unchanged.
+**What it needs put right is one column.** The sync carries the whole database,
+because narrowing further means writing rows of a schema that is opencode's own and
+moves between releases — so what travels with it is the working directory recorded
+against every session in it, this Conversation's included, and opencode resumes a
+session in the directory its row names rather than in the one it was started in. So
+that row is brought onto this device's Worktree path as the database lands, and
+nothing else in the file is ever written. A database whose shape this build does not
+recognise, and one holding no row of that id, each leave the store exactly as it
+arrived: that is Verkstead's own Resume again.
+**What it carries on from is the last session of this Conversation**, which is the
+newest name on the record: that is the conversation the agent was having when the
+work moved. The arrival writes it down once the record has landed, and the first
+launch after that takes it up and spends it — so the session that lands in the
+moment after an arrival is the one that carries a conversation on, and the session
+after that is an ordinary session of the work. **And a Steer spends it too**: a
+Conversation that arrives stopped by a decision waits for a press, the press may be
+a steer rather than a Resume, and a steer is the human saying what is to happen
+instead — so what it launches is primed with their words rather than with a note
+about a move.
+**And the Capture is written down under that same id**, rather than under a fresh
+one. What the name is *for* is finding the log the harness keeps, and a resumed
+claude goes on writing the log it resumed — so a row naming anything else would be
+a **Transcript** read out of the wrong file.
+**Five things leave it Verkstead's Resume, and each of them is said on the
+Timeline.** The human presses one thing and can see two outcomes from it: a
+resumed agent picks up mid-sentence and a re-primed one starts the state again
+from the record, and from the outside both are a session appearing. So the
+arrival that *did* carry a conversation on says so in a **Notice** of its own —
+which harness was told to resume which session — and the one that did not says
+that instead, with the reason. None of the reasons is a failure and none of them
+is anything to answer: whatever the arrival takes the work up with is already
+settled by the time the Notice is written, and Verkstead's Resume is a complete way
+to take up work that has landed. **The first of them is written once there is a
+process** rather than where the decision is made: a whole launch stands between
+the two, and a sandbox that cannot be built, a terminal that will not open and a
+spawn that fails each refuse a session there — so a Notice in front of them would
+say a conversation had been picked up where nothing ever ran.
+**The Profile's memory switch off** is the first: nothing of the harness's store
+travelled, because a session under a Profile that shares no memory gets a store of
+its own and empty, away from home exactly as at home. **No session on the record**
+is the second — a Conversation that moved before it had ever run one, and one whose
+sessions were on a backend that names none and whose own id was never written down —
+and it is the one known at the arrival rather than at the launch. **A Pairing on a
+harness other than the one that session ran on** is the third, a Conversation whose
+Profile was changed under it having a log no other backend can read. **A log that is
+not where the harness will look for it** is the fourth, and it is proved rather than
+assumed: Claude's store crosses as a labelled
+part each machine names its own path for, so it should land under this device's own
+encoding of this device's Worktree path with nothing to do — but the part the home
+device named it off is *its* worktrees directory joined onto the stem this Worktree
+carries, and a stem that came out differently here is a part asked for under a name
+the sending device never used. Grok's is the same word with the relocation above in
+front of it: a store with no directory of this Worktree's, a session directory that
+did not cross, and a move the filesystem refused are each a log that is not there.
+Codex's is a rollout nothing in the store answers to — one that never crossed, and
+one whose opening line said nothing about which session it was, which is a session
+that was never named on the record at all. OpenCode's is the same said of a row: a
+store that did not come across, a store holding no row of that id, and one whose
+shape this build cannot write into.
+**And the fifth is the harness refusing**, which is the one reason nothing can know
+before the launch: the log was proved to be there and the line was written, and the
+harness said no anyway. What says so is the shape of the ending rather than anything
+the harness printed — the session ended badly having never added a line to the record
+it was launched to carry on — and what follows is what follows any session that has
+died: the **Question Sets** held open for a reader who is not coming back are locked
+as a relaunch would have locked them, and the next session started for the
+Conversation is Verkstead's own Resume, the row saying a conversation was to be
+carried on having been spent by the launch that failed.
+**The Note is the whole of what a carried conversation is primed with.** The
+session has its own context and is mid-turn in its own thinking, so being told the
+Brief again is worse than being told nothing: what it is sent is what it cannot
+know — the device the work now runs on, the **Worktree**'s new path, where the
+files attached to it are read now, and the **Question Sets** it was idling on. Not
+the ordinary re-prime with the note over it. The attachments are named only where
+there are any, and for the Worktree's reason: their directory is made of the Data
+Directory and the Conversation's id, and a landing gives it an id of this device's
+inside a Data Directory of this device's — so a session that is never going to get
+the ordinary listing again is carrying the sending machine's path for them.
+**Those Sets are the one place the note bends from statement to instruction**,
+because a wait that has gone is something to do again rather than something to
+know. A blocking ask is a wait held open by a command running in the session's
+sandbox, and that command died with the process on the other machine — so the agent
+comes back to a question it asked with nothing in front of it, and under an id that
+is not the one it asked under, every id of an arriving record being renumbered as
+it lands. The landing writes the map from old id to new down against the
+Conversation as it walks, because everything pointing at a Set has to be renumbered
+against it anyway, and the record lands a leg before the arrival: so the note reads
+that map back and names each Set both ways round, with the `verkstead answers` line
+that fetches the Answers.
+**And those Sets are left open rather than locked**, which is the reversal a
+carried conversation makes: a relaunch locks what it orphans because the reader has
+gone, and here the reader is coming back. So a Set the human was part way through
+answering when the work moved is still there on the **Timeline**, answerable, and
+their answer reaches the session that asked it — rather than being struck through
+and asked again from the new machine. **Conditional on the resume happening**: a
+fallback to Verkstead's own Resume locks them exactly as it does today, because
+there the reader really has gone. Only the ones the session was *idling on* are
+any of this: a Set the human answered before the move is one the agent has already
+read, and a **Deferred Ask** never had anybody waiting on it.
+**And the Transcript opens where the carried log ends.** Each **Event** holds its
+own session's words, and the resumed session appends to the same file — so the
+following of it starts at the end of what crossed, rather than drawing the whole of
+the conversation on the sending device onto the new Event.
+_Avoid_: resumed session (that is ambiguous with Verkstead's **Resume**),
+rehydrate, replay, continuation
 
 **Worktree**:
 The checkout a Conversation's work is done in, made when the work starts along
@@ -217,9 +701,13 @@ reading.
 A Conversation may have more than one: its own, and one per Companion Repo,
 made when its own is made and given back when its own is. A steered
 Conversation keeps the one it has; where the directory has gone, one is checked
-out again on the branch that was worked, which is one of the two times a
+out again on the branch that was worked, which is one of the three times a
 Worktree is made without a branch being made with it — a read-only companion's,
-checked out detached, is the other.
+checked out detached, is the second, and the one a **Transfer** cuts on arrival
+is the third, its branch having come over in the bundle. Where that device has
+held the work before, nothing is cut at all: the checkout it made the first time
+is the one the branch goes back into, with everything the machine built for
+itself still in it.
 A removal git refuses — a directory it no longer reads as a Worktree — does not
 hold the close up: it is logged with its path and closed around, closing being
 what the human asked for and a directory nobody can be rid of being what they
@@ -259,9 +747,10 @@ _Avoid_: checkout, working copy, sandbox (that's what runs *in* it), clone
 **Data Directory**:
 The one directory Verkstead keeps what it makes in — the database, at
 `verkstead.db` inside it, the Worktrees, the installed Skills, the handoff
-directories, the settings files it is told the human's credentials and identity
-in, and whatever later stages need to put somewhere. Said once, as
-`--data-dir`, and the platform's own place for it when nothing says otherwise —
+directories, the **Device** this install is, the settings files it is told the
+human's credentials and identity in, and whatever later stages need to put
+somewhere. Said once, as `--data-dir`, and the platform's own place for it when
+nothing says otherwise —
 `~/.local/share/verkstead` on Linux, `~/Library/Application Support/Verkstead`
 on macOS, `%APPDATA%\Verkstead` on Windows, whichever binary was started, so
 that a Verkstead launched from an icon finds what one launched from a shell
@@ -811,7 +1300,11 @@ at the first start and read back at every one after it — because clearing the
 GitHub token writes `secrets.yaml` empty and would take a key kept there with
 it.
 **What it gates is every page of the workbench and the viewer's own `/api/ui/`
-namespace**: without a cookie carrying the current key, a 401. **The link is
+namespace**: without a cookie carrying the current key, a 401. **And it never
+leaves the device it was issued on** — a **Relay** is admitted at the far end
+by this device's certificate rather than by anybody's key, the `Cookie` header
+is not passed on, and the three prefixes that would hand one over are refused
+at the **Member Gate**. **The link is
 the address with `?key=…` on it**, and opening one is the whole of logging in:
 the server sets the cookie and redirects to the same path without the
 parameter, so the secret is out of the URL bar, the history entry and any
@@ -866,13 +1359,15 @@ _Avoid_: password, login, token, API key, session
 **Remote Access**:
 The settings section that puts this workbench in front of a phone: what this
 machine's Tailscale is doing, the checkbox that puts the tailnet name in front
-of the port Verkstead is listening on, and the **Workbench Key** handed over as
-something a camera can read. A card and a pane like every other section, and
+of the port Verkstead is listening on, the **Workbench Key** handed over as
+something a camera can read, and the **Devices** this workbench is one of. A
+card and a pane like every other section, and
 the answer to what used to be a `tailscale serve --bg 8422` somebody ran in a
 terminal. **The pane is the controls and nothing around them**: the box with the
-one line that is its own, the code, the link with its copy beside it, and
-**Reset key** with the one line that is its own. Which of the four states the
-machine is in is the card's line; the pane says what the machine said only where
+one line that is its own, the code, the link with its copy beside it,
+**Reset key** with the one line that is its own, and the Devices list. Which of
+the four states the machine is in is the card's line, with how many devices are
+linked after it; the pane says what the machine said only where
 somebody has something to do about it.
 **Everything on it is read off the machine rather than configured**: two
 commands at the moment the pane opens, so a tailnet joined in a terminal and a
@@ -928,11 +1423,649 @@ device it sent them to.
 _Avoid_: remote settings, tailnet settings, VPN, tunnel, exposing the workbench
 (it is served to a tailnet, never to the internet)
 
+**Device**:
+One Verkstead install, as another one sees it. What it *is* is a **Device Id**
+and a self-signed certificate, both invented at its first start and kept in the
+**Data Directory** beside `workbench.key` — `device.id` and `device.pem`, files
+of their own at mode `0600`, read back at every start after, and an empty one
+counting as one that is not there. **One that is there and cannot be read stops
+the start instead**, as one that will not parse does: writing a fresh identity
+over the one a cluster has pinned is the single act here that cannot be taken
+back, and a file left out of this account's reach by one start under `sudo` is
+not a file that is missing. Nothing is configured and nothing is typed.
+**The certificate is what a link is made of** rather than a detail of how a
+connection is encrypted: a link between two devices is the two fingerprints
+each side holds, with no bearer token and nothing stored beside the
+certificates. It is good for **ninety days**, said in Verkstead's own code
+rather than inherited from a crate's default, because an expired certificate is
+refused at the handshake and a validity nobody chose is the day every link goes
+down together.
+**And it is made again before it runs out**, at the first start with fewer than
+**thirty** of those days left — which is what a **Changeover** is the middle
+of. Nothing is on a timer: a start is when these files are read at all, which
+leaves two months of ordinary starts to make the certificate again in and a
+month of them after in which to notice that one did. A process left running
+past its own ninety days is the trade that buys, and a restart is its whole
+remedy.
+**Its fingerprint is spelled to be compared by eye**: the SHA-256 of the
+certificate's own bytes as upper-case hex in colon-separated pairs, which is
+what every other tool prints of the same certificate. That is what it is for —
+two people, one reading off a phone and one off a screen, checking that the
+device being linked is the device being offered.
+**What it is shown under is its hostname**, with an icon for its OS and the
+addresses it can be reached on beside it — the **Device Reading**, which is read
+off the machine as it is answered rather than kept anywhere.
+**The startup line names it**: `device=` and `fingerprint=` beside the listen
+address and the **Data Directory**, which is where an operator reads either of
+them off a machine.
+_Avoid_: node, host, machine (a device is an install, and two of them can be on
+one machine), peer (which is what a device is to another device)
+
+**Device Id**:
+What every record and URL names a **Device** by: sixteen random bytes as
+lower-case hex, invented at the first start and never changing. Short enough to
+sit in a URL segment, and spelled in an alphabet no URL and no host name has to
+escape — the certificate is made out to it, in the subject's common name and as
+its one subject alternative name.
+**The tailnet node name and the hostname were both rejected as ids.** The first
+is gone the moment the machine leaves the tailnet; the second collides, a
+Windows machine and its WSL answering to one. Which is why the id is invented
+rather than read off the machine: what a device is *called* can change and can
+be shared, and what a device is *named by* can do neither.
+_Avoid_: name (which is the hostname a device is shown under), uuid, serial
+
+**Device Reading**:
+What a **Device** says about the machine it is on, as against what it *is*:
+its **name**, its **OS** and its **addresses**. None of the three is
+configured, none is typed, and none is written down — they are read at the
+moment the identity endpoint answers, because a laptop moves between the LAN
+and the tailnet and DHCP moves everybody.
+**The name is the hostname**, the same reading the install run's status line
+names a machine by, and a machine that will not say what it is called reads
+*this machine*.
+**The OS is the platform's own word** — *Linux*, *macOS*, *Windows* — except
+under WSL, which reads ***Linux (WSL)*** and is detected from the kernel
+release. That case is the reason the reading exists at all: a Windows machine
+and the WSL on it share a hostname, so the OS is the only thing that tells the
+two rows apart.
+**The addresses are every one a peer could try, in the order to try them**: the
+tailnet name and its addresses first where Tailscale is up, then the LAN
+addresses, with the loopback and the link-local left out and the tailnet
+address not named twice for being on an interface as well. **The tailnet half
+stands for five seconds** — reading it is a command run on this machine and the
+endpoint that wants it is the one nobody has to be anybody to read, so without
+that a stranger's request is a process, as fast as they care to ask; the LAN
+half is read every time, being a syscall. A machine with no
+Tailscale, or one whose daemon is not up — or whose daemon does not answer
+within five seconds — answers with its LAN addresses rather
+than failing — and a device on neither a tailnet nor a network still answers,
+having an id and a fingerprint, which is what somebody typing an address by
+hand is looking at. The address typed at link time is only the first one ever
+known: this list is what keeps a device that moved reachable.
+_Avoid_: device info, device metadata, machine details, the device's profile
+
+**Devices**:
+The list of every **Device** this workbench is one of, and the third section of
+the **Remote Access** pane. One row each: the OS icon, the name, and the
+addresses under them — with *this device* on this machine's own row, where
+another's carries an Unlink.
+**A section of that pane rather than a settings section of its own**, because
+linking is how this machine is reached as much as the serve and the key are.
+There is no word of its own in the settings' openings, no card and no route: the
+pane grows a section and a reading. A section of its own was considered — the
+pane is long already and this list brings an Add, a Discovered list and a
+pending row with it — and was not taken.
+**It reads off the machine rather than out of the settings**, as the two
+sections beside it do and for their reason: nothing about a device is
+configured, so what it draws is the **Device Reading** answered fresh — the same
+answer a stranger reads off the **Peer Listener**, told to the browser instead,
+that listener presenting a certificate no browser has a reason to trust.
+**It is drawn whatever Tailscale is doing.** A machine that has never heard of
+a tailnet has an identity all the same, and a list that vanished on one would be
+a cluster feature that appeared to need Tailscale.
+**And the card above it says how many devices are linked** — *other* devices,
+this one being the row the list already holds — after whichever of its sentences
+the machine's Tailscale earned. **Counted off the rows themselves** rather than
+answered beside them: there is one membership, and a number that could disagree
+with the list would be two answers about it.
+_Avoid_: linked devices pane, cluster list, machines, the device list (it is
+**Devices**, as **Repos** is)
+
+**Changeover**:
+What a **Device** is in the middle of between making its certificate again and
+every member holding the new one. Two certificates side by side in the **Data
+Directory**: `device.pem`, which is what the **Peer Listener** presents, and
+`device.next.pem`, which is what is coming.
+**The outgoing one goes on being presented** until every member has
+acknowledged the new fingerprint, so a changeover never costs a call — what a
+member holds is what it is answered with.
+**Every member is told over the link this device already holds**, presenting the
+outgoing certificate, because that is the only one any of them holds and so the
+only one that gets through a **Member Gate**. A member records the new
+fingerprint against the same **Device Id** and answers, and that answer is the
+acknowledgement — one member fewer to wait on. Nobody over there confirms
+anything: the call arrives down a link that device verified, and the id it
+arrives under is one its human allowed once already.
+**And a member holds both certificates while one is in flight.** The incoming
+fingerprint is what its row is keyed on from then, and the outgoing one is kept
+beside it and goes on being accepted — a member that let go the moment it
+acknowledged would be refusing the device it had just acknowledged, for as long
+as the last machine in the cluster stayed switched off. It lets go of the old one
+when it meets the new, that being the only unambiguous sign the far end has
+stopped presenting it.
+**The last acknowledgement completes it**: the new certificate is written over
+the old and the file it was waiting in goes — by the same path a re-issue with
+nobody to tell takes at the start that began it. What a running process presents
+does not change then; the next start reads the file, and every member has both by
+then.
+**A member that was unreachable is owed the telling**, on the one record a join
+and an unlink are owed on, and is told by the next call that gets through to it —
+which is also when the changeover it was holding up finishes. One that never
+answers leaves it in flight rather than failing anything, and is a member the
+human unlinks; that press is what lets the changeover finish.
+**And a device that arrives in the middle of one is told at once**, however it
+arrived — an Allow pressed here, a **Member** naming a newcomer, or a whole
+roster handed over by an **Exchange**. A row written while a changeover is in
+flight has acknowledged nothing and is one more holdout by the fact of being
+written, and nothing at the other end of the call that wrote it knows there is a
+changeover to hear about. Untold, it is not a link that breaks but a changeover
+that cannot end: the device holding it up is answering perfectly well, and the
+certificate still going out is the one with at most the renewal window left on
+it.
+**Both fingerprints are printable while one is in flight**, on a startup line
+of its own, because that is the only way anybody tells which of the two a peer
+met.
+**With no member there is nobody to announce to**, and then it completes at the
+start that began it, and the line says it had nobody to tell. Which is every
+re-issue on a Verkstead that has never been linked to anything.
+**A device keeps its id through one.** It is the certificate that is renewed —
+the **Device Id** was invented once and lasts as long as the **Data Directory**
+does.
+_Avoid_: rotation, rollover, key rotation, cert refresh
+
+**Peer Listener**:
+The second listener, and the one another **Device** dials: TLS on every
+interface, port 8423 by default — `--peer-listen`, `VERKSTEAD_PEER_LISTEN` —
+presenting this device's own certificate and naming its address on the startup
+line beside the workbench's. What a device is reached *on*, where the **Device
+Id** and the certificate are what it is.
+**A listener of its own rather than a share of the workbench's.** The workbench
+stays as it was — loopback, `tailscale serve` in front of it, plain HTTP to the
+browser, the **Workbench Key** over it — and two things ruled out putting this
+on it: the served address carries Tailscale's certificate rather than this
+device's, so a link pinned on a fingerprint could never go through it, and the
+workbench port speaks plain HTTP to the browser and to the serve alike. A
+listener that sniffed the first byte of every connection for a TLS handshake was
+considered and rejected as a trick where a port would do. The
+Conversation-scoped session API is on neither: it answers the loopback and the
+named pipe, which is all a session ever dials.
+**A client certificate is asked for and not insisted on.** The request goes out
+once per connection, before any path is known, so the handshake cannot be what
+decides which endpoints a caller reaches: whatever arrives is taken — or
+nothing — and the routes are what act on it. A verifier that refused every
+non-member outright was the first shape of this and is the shape a join could
+never have got through, the device posting one being a stranger by definition.
+What the handshake does insist on is that the certificate is a certificate — the
+caller holds the key that signed it, and it is inside its own validity. That
+second check is what the renewal rests on: nothing in a cluster checks a chain
+and a membership is a set of fingerprints that would go on matching one for
+ever, so the handshake is the only place an expiry is a fact rather than a date
+in a file. What the certificate *means* is a per-route question.
+**The identity endpoint is the one route nobody has to be anybody to read**, at
+`/api/peer/v1/identity`: the **Device Id** and the fingerprint of the
+certificate the handshake just presented, so that a caller can check the device
+naming itself is the device that presented and a human can compare the
+fingerprint by eye — and the **Device Reading** beside them, which is what says
+which machine that is and where else it could have been dialled. It asks for no certificate at all, which is what makes
+linking possible — the human types an address, and what comes back is the device
+they are about to link to, before anything has been agreed between the two
+machines.
+**And behind the gate is the viewer's whole namespace**, which is how a
+**Member** reaches this device's workbench: the same `/api/ui/` router the
+browser asks, mounted a second time over the one state, with the **Member
+Gate** in front of it instead of the **Workbench Key**'s — see **Relay**, which
+is the other end of it, and where the three prefixes this device keeps to
+itself are. Nothing else of the workbench is here: the health check is nobody's
+Conversation, and a page of the workbench is something a browser asks the
+device it opened.
+**Two Verksteads on one machine want a port each**, as they want a `--listen`
+each: an address somebody else is already on refuses the start rather than
+letting a server come up answering half of what it promised.
+**On NixOS it is an option and a firewall rule**: `peerListen` beside `listen`
+in the module, and `openFirewall` on by default, which opens the port that
+option named and nothing else. A NixOS host firewalls by default, so a module
+that left it shut would ship a listener nothing could reach — which is a linking
+that cannot happen, with nothing on either machine saying why. A host that says
+its open ports somewhere of its own turns the option off.
+_Avoid_: peer port (which is only the number), mutual TLS listener, cluster
+port, the second socket
+
+**Advertising**:
+What a **Device** says about itself on the LAN, so that a Verkstead on the next
+desk finds it without anybody typing an address: the service
+`_verkstead._tcp.local`, with a TXT record of the **Device Id**, the name and
+the OS word out of the **Device Reading**, and the port the **Peer Listener**
+answers on.
+**In the server's own process**, advertised and browsed with `mdns-sd`: there is
+no avahi to install on Linux and no Bonjour to find on Windows, which is one
+behaviour on three platforms rather than three ways of shelling out to somebody
+else's daemon.
+**The instance is named by the Device Id** rather than by the hostname, because
+two Verksteads on one machine are two devices and a hostname cannot tell them
+apart — which is the same reason the id was invented rather than read off the
+machine. It is what the address records are hung off as well, that being the one
+string on a machine that is certainly a legal label and certainly not somebody
+else's.
+**Against the port the listener landed on** rather than the one the
+configuration asked for: a `:0` is a port the operating system chose, and an
+advertisement naming any other number is one nothing can be dialled at.
+**And it can be turned off** — `--no-advertising`, `VERKSTEAD_NO_ADVERTISING`,
+and `advertising` beside `peerListen` in the NixOS module. What goes out is a
+hostname, an operating system and a **Device Id**, on a LAN that may not be the
+human's alone, and anything saying that much about a machine to whoever is on
+the wire has to be able to be told not to. On by default for the reason
+`openFirewall` is: a discovery nothing can hear is a feature that silently does
+not work, with nothing on either machine saying why — and the rule that opens
+the peer port opens UDP 5353 beside it, whether or not this host advertises,
+because the answers to its own browsing arrive there too.
+**And it is withdrawn on the way out**, which is the one ordered stop this
+server has: a signal it is asked to stop on sends the goodbye that takes the row
+off every other machine's list at once, and then the process ends as it always
+did — nothing else is drained and nothing else waits. A *killed* server
+withdraws nothing and its row runs out on its own TTL instead, the same thing
+that covers a machine whose lid shut, so the withdrawal is what makes a restart
+tidy rather than what makes a stale row impossible.
+_Avoid_: broadcasting, publishing, mDNS registration (it is **Advertising**),
+Bonjour, zeroconf
+
+**Discovered**:
+The list of every **Device** this one has found and is not in a cluster with,
+under the rows of the **Devices** section. One row each: the OS icon, the name it
+gave, the addresses it was found at, where it was found — *LAN*, *Tailscale*, or
+both words — and an **Add** that runs a **Join** with nothing typed.
+**Two halves, merged by Device Id.** The LAN half is the reading half of
+**Advertising**, browsing the same `_verkstead._tcp.local` in the same process;
+the tailnet half is the **Peer Probe**. Keyed by the **Device Id** because two
+Verksteads on one machine answer to one hostname at one address, and the id is
+the only thing about either that is nobody else's — so a machine on one network
+and one tailnet is one row saying both, its LAN address first, that being the
+shorter road.
+**A reading of its own rather than a field of the Devices one**, and that is what
+it is for: a browse hears something every few seconds and a probe costs a handful
+of dials, and a list arriving on the same answer as the membership would be the
+rows the pane had already drawn replaced each time the LAN said anything. What
+moves it is a **Nudge** of its own kind, so the membership is not re-read for a
+device turning up.
+**Three kinds of device are left out**: a **Member**, which is in the cluster
+already and would be a press with nothing behind it; this device, which hears its
+own advertisement; and one this device holds a **Join** for, whose **pending
+row** is already the answer to the press somebody made — a row that was refused
+or ran out included, until it is dismissed. All three are left out of the merged
+list, so a device found both ways is left out once.
+**The browse is held while somebody is looking.** It starts when this list is
+first read and is dropped once nothing has read it for five minutes: a phone that
+closes a tab says nothing, so the reading being read is the whole of what governs
+it — and an open pane reads it again every minute, which is the one thing in this
+viewer on an interval and is there to say *somebody is still looking* rather than
+to fetch anything. Without it a browse that heard nothing new would announce
+nothing, prompt no read, and be dropped under a pane somebody was sitting in
+front of. Which is why the first read of it is empty or short — a browse is cold
+when it starts — and why the LAN rows arrive over the seconds after a pane is
+drawn, each announced. The tailnet rows are in the first answer instead, a probe
+being made as the list is read.
+**A device that stopped advertising leaves it**, at once on the goodbye an ordered
+stop sends and at the end of its TTL where there was none, which is a machine
+whose lid shut; both arrive as one event. One that stopped answering a probe
+leaves it on the next read.
+**And the Add on a row is a Join with nothing typed.** The press names the device
+by its **Device Id** rather than by an address, a discovery having found a list of
+them: the server dials every address the row holds, in the order it found them —
+the LAN's first, that being the shorter road — and posts the join at the first
+that answers, exactly as a dial to a **Member** works down that member's
+addresses. What it leaves is what the typed box leaves, and the row goes with the
+press: a device a Join is pending for is one this list leaves out, so a press
+moves a row from this list to the rows above rather than leaving two rows about
+one device.
+**A row can be stale by the time it is pressed**, the device having gone off the
+LAN or left the tailnet since it was drawn. That press is refused in the words a
+dial that reached nobody uses, naming the device rather than failing bare — and
+the row is forgotten, so the list the refusal is drawn beside is one without it.
+**Only a press that reached nobody forgets one.** A far end that answered and
+said no — one already holding as many join requests as it will, say — is a
+machine exactly where the row said it was, so its row stands: forgetting it is not
+cheaply undone, a browse announcing a resolution only when a record *changes*, so
+a row taken away comes back when that device says something new or when the browse
+itself is dropped at the end of its spell and a later read starts a fresh one.
+_Avoid_: found devices, nearby devices, the browse (which is how half of it is
+read), available devices
+
+**Peer Probe**:
+The tailnet half of **Discovered**: the nodes of this machine's tailnet asked,
+one by one, what they are. A tailnet carries no multicast for an **Advertising**
+to go out over, so there is nothing to hear on one — what finds a device there is
+the peer list out of `tailscale status --json`, every node it says is online
+asked over the **Peer Listener**'s own un-gated identity endpoint, and whatever
+certificate that node presents taken for the one call the way a **Join** takes
+one.
+**Made as the list is read rather than on a schedule**, which is why the tailnet
+rows are in the first answer where the LAN rows arrive after it.
+**Bounded, because how many nodes a tailnet has is not this machine's to
+choose**: at most sixty-four peers asked, at most sixteen in flight, and three
+seconds apiece. A tailnet with more machines than that in it is one where the
+typed address is the answer.
+**A node that is not a Verkstead is no row.** It refuses, it answers something
+that is not a **Device Reading**, or it answers nothing, and all three come to
+the same absent row — which is most of a tailnet.
+**And the peer port is assumed**, a peer list naming none: a device told to
+listen somewhere else is found on the LAN and not on the tailnet, which is a
+known limit of the same kind as a Windows machine and the WSL on it.
+**Having no Tailscale is an answer rather than a failure.** No `tailscale`, a
+daemon that is down and one that does not answer each leave the LAN half of the
+list standing, which is the stance every other reading of this daemon takes.
+_Avoid_: tailnet browsing, tailnet discovery (there is no browse on a tailnet),
+scanning
+
+**Join**:
+One **Device** asking another to let it into its cluster, and the whole of what
+follows the press on **Add**. The asking device dials the address somebody
+typed — or, from a **Discovered** row, each address that row holds until one
+answers, an address that answered *anything* ending the walk — takes whatever
+certificate that address presents for the one call, and posts what it is — its
+**Device Id**, that certificate's fingerprint, and its **Device Reading**. The
+pending row names the address that answered, which for a typed press is the one
+typed and for a discovered one is wherever that walk landed: it is what a Cancel
+dials. The device asked writes the question down, pinning the
+certificate the handshake took from the caller, and asks its human: a modal in
+every open workbench, and a push to every phone. The asking device is left a
+**pending row** reading *waiting for confirmation on* that device, with **its
+own** fingerprint under it — the same string the modal over there draws, so
+that two people at two screens compare one certificate by eye — and a Cancel.
+**Held for ten minutes, written down as the moment it runs out at** rather than
+as a length, so a restart inside them is a question still being held rather than
+ten fresh minutes. Both sides keep a row, and the two are not one record: one
+knows the address that was typed and the certificate it met, the other the whole
+of what a stranger said about itself.
+**The certificate pinned into the request is what everything after it is matched
+against**, which is why the post may stand outside the **Member Gate** without
+being un-authenticated: the cancel has to come under it, and so does the
+**Exchange** that answers it.
+**A join asks for a membership rather than taking one.** Nothing is agreed while
+the row is drawn — it is not a **Member** and does not count as one — and a
+device turned away is free to ask again, a cluster being a membership rather
+than a list of verdicts.
+**And it is the one thing a stranger writes into this machine, so how much of it
+a join is worth is this machine's to say.** A post is refused for saying more
+about itself than is kept — an id, a name, an OS word or an address longer than
+any real one, or more addresses than a device is reachable at — and refused
+again once this device is already holding as many questions as it will, the ones
+that have run out being let go of first. Not stinginess but arithmetic: a held
+question is a row, a push to a human's phone, a Nudge to every open workbench and
+a dial down every address it named ten minutes later, and without a ceiling how
+often all of that is spent is decided by whoever can reach the port.
+_Avoid_: pairing, invitation, handshake (which is the TLS one), link request
+
+**Exchange**:
+How a **Join** ends: the device that was asked dials the device that asked it,
+at the addresses that device advertised and pinned on the certificate the
+request is holding, and says what came of the question.
+**On Allow it hands over the roster** — itself and every **Member** it holds, in
+the one call — and the asking device checks the certificate it is dialled under
+is the one it met when it posted, then records the lot. A member arriving that
+way needs no press of its own: it came over a link that has just been proved
+against a certificate this device pinned itself, which is the same vouching that
+lets the introducer announce the newcomer to each of them. The roster is one
+shape whatever the cluster's size — empty beside the introducer in a cluster of
+two — so that a newcomer is never half linked while some second call is made.
+**On Deny it says so**, and the pending row reads *refused* until it is
+dismissed. The ADR spelled the dial back out on an Allow and left this one; the
+human settled that a refusal comes back the same way, without it the asking
+device reading *waiting* until somebody over there gets bored. **An expiry is
+told the same way and records nothing**: the moment it is about is already
+written on the asking device's own row, so what that call is worth is the row
+redrawing as it happens — and one that never arrives costs nothing, the clock
+reaching the same answer alone.
+**It is the third route outside the Member Gate and the last of them.** It
+arrives before the asking device has recorded anybody, so it cannot be a
+member's call; what stands in the gate's place is the request — its certificate
+and its ten minutes — and a call failing either is refused with nothing written.
+**A dial back that reaches nobody does not undo the press.** The human pressed
+Allow and the device is a member for it; what is left over there is a row that
+runs out and an **Add** to press again.
+_Avoid_: the callback, the confirmation call, the handshake, the reply
+
+**Member**:
+A **Device** this one is linked to, as a row this one keeps: its **Device Id**,
+the name and the OS and the addresses it last advertised, the fingerprint of the
+certificate it presents, and when it was last heard from. Keyed by the id,
+because that is what outlives both the others — a certificate is renewed and an
+address moves, and the id lasts as long as the far end's **Data Directory**.
+**A cluster is a membership rather than a set of pairs**: every member holds the
+same list, so what is kept here is what a device is to all of them rather than
+what two machines agreed between themselves.
+**The addresses are a list and the order is load-bearing** — the tailnet name
+and its addresses first, then the LAN — because a peer dials them in the order
+the far end advertised them, and the address typed at link time is only the
+first one ever known.
+**And a Changeover puts two more things on the row, one for each direction it
+runs in.** What that member is changing over *from* is a second fingerprint this
+device goes on accepting, because a device in the middle of one presents the
+certificate it was presenting until the last of *its* members has acknowledged —
+so both get through the **Member Gate** and both satisfy a dial. And what it has
+*acknowledged* is the fingerprint of this device's own certificate it last said it
+holds, which is what this device's changeover counts: a positive record rather
+than the absence of a debt, because a device that joined in the middle of one has
+no debt and has heard nothing.
+**Three things read it**: the **Member Gate**, which asks whether a caller's
+certificate is a member's; the **Changeover**, which asks which of them have yet
+to acknowledge a new fingerprint; and **Devices**, which draws a row apiece.
+Each asks at the moment it asks — a membership read once and held would be a
+device that went on being admitted after the human unlinked it.
+_Avoid_: peer (which is what a device is to another device), linked device,
+node, cluster member (it is a **Member**)
+
+**Member Gate**:
+What stands over every route on the **Peer Listener** but the un-gated three:
+the certificate the handshake took is matched against this device's **Members**
+by fingerprint, and a caller that is not one of them is refused. The handshake
+asks for a certificate and does not insist on one, so this is the first place a
+path and a caller are known together and the only place either is judged.
+**The rows are read at every call**, so a member taken off the list is refused
+on the next one — and a membership that cannot be read at all admits nobody,
+refusing a member being a call that is retried where admitting a stranger is the
+whole of what the gate is for.
+**The un-gated surface is a list of three and nothing grows it.** The identity
+endpoint, which asks for no certificate at all; the join post, which comes from
+a non-member by definition and whose certificate is pinned into the pending
+request it creates; and the dial-back answering a join, matched against the
+certificate that pending request is holding rather than against the member
+list. Everything else on that listener is a member's or is refused — including
+a path no route answers, which is refused rather than missed, a stranger having
+no business being told which of this device's endpoints exist.
+**And three prefixes are refused inside it**, which is the one thing a member
+does not reach: `/api/ui/remote/`, `/api/ui/devices/` and `/api/ui/push/` — see
+**Relay**, which is what they are kept back from and why. Inside the gate
+rather than outside, so that a stranger is refused for not being a member and
+learns nothing about which of this device's namespaces are relayed.
+**The refusal says it is a membership rather than a missing path.** A device
+posting a join has two ways of not getting through — a Verkstead that will not
+have it, and a Verkstead too old to have the route at all — and those want
+different things of it: a human to press Allow, or an upgrade on the other
+machine. So the refusal is `Forbidden` and names what it is, and it carries no
+challenge, the credential being a certificate already asked for and already
+given or withheld.
+_Avoid_: peer auth, mutual TLS gate, the cluster gate, peer middleware
+
+**Relay**:
+The device the browser opened putting a call to one of its **Members** and
+handing the answer back untouched, which is how a **Member**'s whole workbench
+is reachable through any other (ADR-0020, *The opened device relays*). A
+Conversation of a member's is opened at `/devices/{device}/conversations/{id}`
+with every leaf under it, and everything that page asks for goes to
+`/api/ui/members/{device}/…` on the device it is served from. The prefix takes
+the place of `/api/ui`, so the far end sees the path the browser would have
+written locally — `/api/ui/members/0011…ee/conversations/4` is that device's own
+`/api/ui/conversations/4` and nothing else — and it is a prefix of its own
+rather than a segment under `/api/ui/devices/`, that being the **Devices**
+section's namespace already.
+**The browser stays same-origin and holds one cookie.** Teaching the client N
+origins was the other shape and was rejected: CORS and cross-origin cookies on
+every device, every device served to the phone, a query cache keyed by server.
+So the client learns one thing and one thing only — *which device* — and a
+local URL keeps the shape it always had, because this device is where most of
+the work is and a device segment on every URL would say nothing.
+**Verbatim in both directions**: the method, the path, the query, the body and
+the headers that matter go over, and the status, the headers and the body come
+back. The body is streamed rather than held, both ways, so an attachment is an
+ordinary post through the hop and what refuses an oversized one is the far
+end's own `413` rather than a judgement made after buffering the file. The
+three attach endpoints are carried too — a Conversation terminal, a session's
+**Screen** and the **Code** pane's watcher — as a socket rather than a call:
+the same upgrade is put to the member, its own `101` handed back untouched and
+the two connections joined byte for byte, with either end going taking the
+other with it.
+**What admits it at the far end is this device's certificate**, at the **Member
+Gate**, and the `Cookie` header does not travel. Which is what makes *a
+device's **Workbench Key** never leaves it* a fact about the mechanism: the
+three prefixes the gate refuses inside itself are the other half of it, and
+`/api/ui/remote/` is there because the **Remote Access** reading carries the
+login link with that key on it. `/api/ui/devices/` is one human at one machine
+deciding who this device is linked to, and `/api/ui/push/` is the browsers
+*this* device pushes to. Refused **by name** rather than quietly missing, so
+that a caller can tell *this is not relayed* from *this Verkstead is too old to
+have it*.
+**Three Device Ids are refused rather than dialled**, each by name: one that is
+no member's, this device's own — local URLs keep their shape, so nothing should
+ask — and a member that answered at none of the addresses it advertised, which
+is the row **Devices** is already drawing dimmed. That last is a verdict rather
+than a bad moment, so the page says it at once rather than walking the dead
+list again.
+**And the news comes back the same way**, which is what keeps a remote page
+from drawing once and going stale: this device holds one **Nudge** stream to
+each of its members — that member's own `/api/ui/nudges`, read over the **Peer
+Listener** — and announces everything down it locally under the **Device Id**
+it came from. Held by the server rather than by the browser, so one connection
+per member serves every page this device has open, the phone on the tailnet
+included. A stream that ends is taken up again, and what a stream that has just
+come back says is *everything* of that device, there being no knowing what it
+missed. A member that is not answering is announced about not at all: the page
+keeps what it last read and goes stale, exactly as it does when its own stream
+is down. What goes over the **Peer Listener** is this device's own news alone —
+in a cluster everybody holds a stream to everybody, so a device passing on what
+a third one told it would be saying that news was its own.
+**And news worth a phone goes the other way, as the news happens.** A device that
+has just told its own browsers something — a run stopped, a session gone idle, an
+account out of window, work on a pull request, a roadmap moved on or run out, a
+Conversation done — tells every **Member** the same sentence over the **Peer
+Listener**, behind the **Member Gate** with the announcement and the renewal, and
+each of them pushes it to its own phones. Which is what makes one phone enough for
+a cluster: a phone is installed from one device and subscribes to *that* device's
+browsers, and the subscriptions a device pushes to are one of the three prefixes
+never served over the link, so a hub cannot subscribe to a member's push instead. A
+**Nudge** is the wrong carrier for it by construction — it says what kind of thing
+moved and never what it was, and a notification is a sentence.
+**The device leads the title** — *the-laptop — pwa-and-push is done* — so that a
+lock screen says which machine the work was on, while a device's own news carries
+nothing in front of it. The receiving device writes that title rather than passing
+a sentence through untouched, and bounds both the name and the sentence the way a
+title already bounds the one thing in a notification that another machine wrote.
+**What travels is prose**, so a news kind a newer member has and this one has not
+still reads; and no device is on it, the certificate the call was made under being
+what says whose news it is. **And the tap is routed onto the sending device's own
+segment**, `/devices/{device}/conversations/{id}`: a path taken verbatim would open
+the receiver's Conversation of the same number, ids being each device's own.
+It goes out behind the local push, which is behind the record, and **a member that
+is off costs the notification and nothing else** — nothing is queued and nothing is
+retried, which is what a push service that cannot be reached already costs, and the
+**Timeline** says it in full either way. Nothing is passed on: a device tells its
+own phones what a member told it and no third machine, for the reason the streams
+above carry each device's own news alone.
+_Avoid_: proxy, forwarding, tunnel, the bridge (which is the socket half of it
+alone), remote mode
+
+**Merged List**:
+The conversations sidebar of a device that is in a cluster: every **Member**'s
+Conversations and its own, in one list ordered by **Rank** (ADR-0020, *The
+opened device relays*). So the sidebar is not one machine's work any more — it
+reads the same from every device in the cluster, and the workbench is entered
+from whichever one is to hand.
+**Served from the device the browser opened, out of memory.** That device holds
+the list each of its members last answered — that member's own
+`/api/ui/conversations`, read over the **Relay** — and merges it with its own at
+the moment the sidebar is asked for. Fanning out per load was rejected: it is a
+round trip per device per read, the sidebar is re-read constantly, and a member
+that is switched off would stall the whole list behind a dial down its
+addresses. Nothing of it is stored: every row in it is a Conversation of
+somebody else's, and what a restart costs is the lists being read again.
+**Refreshed on that member's own Nudges**, which is what keeps it fresh without
+a poll: the list is read when the **Nudge** stream to that member is taken up,
+and again whenever a Nudge announced under it is one an open sidebar would
+re-read on — `conversations`, `conversation`, `set` and `everything`. A member
+printing a line of transcript is not one of them.
+**Ordered by Rank alone, and that is the whole of the merge.** Every rank
+carries the **Device Id** of the device that issued it, so the keys are distinct
+cluster-wide and the merged order is total with no tiebreaker — which is why the
+rank rides out on the row rather than staying in the `ORDER BY`: a list that had
+been ordered and then had its keys taken off could not be merged with another.
+**Every row says whose it is**, its own device's rows included, so the list reads
+as one list rather than as this device's work with somebody else's mixed in. What
+a row carries is the Device Id — nothing at all for this device's own, which is
+the shape the viewer keys and composes paths by — with the name and the OS word
+of that machine beside it, so the viewer draws a row without joining it against
+the **Devices** section. Whether a row says anything at all is the server's call
+and the membership decides it: a device linked to nothing draws the sidebar it
+always drew.
+**And it is said in the three places a Conversation is named**: under the
+branch on the sidebar row, beside the branch on the header of the pane that row
+opens, and in the sentence the row is read aloud by. The row's second line is
+the mark for that machine's OS, its name, and then the Repo — on every row
+there is a device on, this device's own included, which is what makes it one
+list rather than this device's list with visitors on it. The mark is the one a
+device wears wherever it is drawn, off the OS word the row carries, so a WSL
+wears the Linux mark here as it does on the Devices section. Where there is no
+cluster none of the three says anything at all, which is the sidebar nearly
+every Verkstead draws. The header looks its device up rather than being handed
+one — the URL says which machine and the **Devices** reading says its name — and
+the spoken row names it because the mark is nothing to a screen reader.
+**A member that stops answering keeps its rows**, from the last list held and
+drawn dimmed, the row's own flag saying the device is not there — while a member
+never reached holds nothing and contributes nothing. The dimming is the one a
+finished Conversation wears, so what tells the two apart is the label read
+aloud, which says *unreachable* beside the device it names.
+**And a piece of work is drawn once however many machines hold a copy of it**,
+which is what the **Birth Key** on every row is for: a **Conversation** that has
+been transferred has a row in the database it came from and a row in the one it
+went to, and both are on this list. The copy that has been handed on says so, and
+it comes off; the key is what says the two are one piece of work rather than two,
+for the moment between a copy landing and the mark on its source arriving. So the
+merge is *one row per birth key, and no tombstones*, which is here rather than in
+the query each device answers for itself — a member answers its own rows and
+knows nothing of the copy on the machine that asked.
+**And a row is addressed by its device everywhere in the sidebar**, ids being
+each device's own and colliding by construction: which row is selected, which
+one a press was on, what a drag is holding and what the DOM carries are each a
+Conversation *and* a device. Opening one goes to that device's own
+`/devices/{device}/conversations/{id}`, and a card's right-click menu acts on the
+Conversation on the machine that holds it — a menu that closed this device's
+Conversation 4 because a member's row said 4 is what the addressing is against.
+**And what a member is answered over the Peer Listener is this device's own rows
+alone**, with no device on them. The viewer's namespace is one router mounted
+twice, so a member reading it would otherwise get a merge of merges and two
+devices would each claim the other's rows as their own. Which is the same rule
+the switch below is answered by, and there for a second reason: a member folding
+its own members' archives in would be folding the hub that asked it.
+**The hub's *Show archived* switch governs the whole of it**, each member being
+read with the position that switch stands at and a device with nothing archived
+of its own drawing the switch while a member has something behind it — see
+**Archived**.
+_Avoid_: the cluster list, the global sidebar, syncing
+
 **Onboarding Mode**:
 The state a Verkstead that cannot do anything yet is in, and while it is on the
 wizard at `/setup` is the only page there is: every other URL redirects there.
 What it is about is the **objective** — a sandbox, `git` and at least one of the
-four harnesses present; at least one **Agent Profile**; a git author. Present
+four harnesses present; at least one **Agent Profile**, a **mirror** of a
+member's counting as one, its account being fetched from the device it is at
+home on before every launch; a git author. Present
 means a session would find it, so every probe resolves on the `PATH` inside the
 **Sandbox** rather than the server's own: a harness on the server's `PATH` and
 nowhere a session looks is a row that ticks and a session that cannot start. The
@@ -1164,6 +2297,77 @@ when it is pressed, the way the press on a draft's own composer does. Either way
 the page lands in the Conversation it made and this device stops holding
 anything. A field the server refuses leaves the rest of the work on that draft,
 and the refusal is said on the draft's own composer.
+
+**And that page has one control the composer of a record does not: a device
+select**, at the head of the row and left of the **Repo**, drawn only where
+another device is linked — with nothing linked the row is the row it has always
+been. It lists this device first and then each **Member** of the cluster, every
+row wearing the mark for its operating system, and a member that did not answer
+the last dial is listed like any other: the list is the membership rather than a
+reachability probe, and a call that cannot be made is refused by the **Relay** in
+its own words. Everything under the select is the named device's — the Repos the
+dropdown offers, the branches the base picker lists, the registry the companion
+rows are drawn from, the Profiles behind the three Pairing pickers, and the
+Repo's own Pairing memory the pickers stand on until they are touched. **The two
+rows at the foot of that dropdown are that device's too**: Open repo's field
+browses the named machine's directories and registers on its registry, and Create
+repo makes the directory and the repository there — each refused in the far end's
+own words rather than as a failed call, and the parent a create opens in
+remembered one answer per device, where somebody keeps their code being a fact
+about the machine it is on. So a pick
+takes with it everything that named the machine it came off, a Repo id and a
+Profile id each being one Verkstead's own: the Repo, the base commit, the
+companions and the three Pairings go, and the Brief, the branch name and the
+files being held stay where they are. **The pick is remembered in the browser**
+the way the pane widths are — this device until something is picked, which is
+what the laptop that drives the desktop needs — and a device the cluster has lost
+reads as this device again, taking a draft's Repo id with it. It reads disabled
+while a roadmap or a pull request is loaded, both of those lists being this
+device's own, and loading either puts the work back here — **the page and not the
+memory**, that row being drawn at the start of every piece of work: a stage looked
+at and cleared again is not somebody saying they have finished with the desktop.
+
+**And the press goes to the named device too.** The Conversation is started
+against its Repo *there* and every request of the replay after it is addressed the
+same way — each field, each held file, and the kickoff, which is the grilling, the
+adoption or the take-up as ever — all of it through the **Relay** unchanged, so
+there is no batched create and no second set of rules, and every refusal is the
+far end's own in the words the composer says them in. What the replay could not do
+is left against the Conversation *and* its device, the way a row of the merged
+sidebar is named: ids collide by construction, so refusals keyed by the number
+alone would be drawn on the composer of an unrelated draft. The page then lands on
+that device's URL for what it made — `/devices/{device}/conversations/{id}`, where
+a member's Conversation already stands — and the row appears in the merged sidebar
+under the machine that is doing the work.
+
+**And a saved draft's composer carries the same select, where a pick moves the
+draft.** A draft started on the wrong machine is worth moving rather than worth
+making again, so a pick asks which of that device's **Repos** the work is in —
+the same dropdown with the same two rows behind it, so a target with no such
+repository yet is not a dead end — and the press replays the draft onto it: the
+Conversation started there, the **Brief**, the branch name and the base written
+onto it, and every attached file read back off the device the draft is on and put
+on it through the route a paperclip uses. That read is the one read of an
+attachment there is. The base goes because it is not one of the ids: an override
+is a branch *name* picked out of that repository's own list, so it means what it
+means wherever the repository is cloned, and a target that has not got that branch
+refuses it by name like any other field. What cannot travel says so by being asked
+again: the companions are ids in the old device's registry and are left behind,
+and the **Pairings** are Profile ids on the old machine, so the new draft arrives
+showing the target's own prefill — which is exactly what a draft created there
+would have arrived showing. **The old draft is
+then closed, with a Timeline saying where its work went** — the machine and the
+Conversation it became there — because the human who comes back to a closed draft
+weeks later is the one who needs to read it. Nothing is undone by a refusal: the
+new Conversation is real from its first request, a field the target would not take
+leaves the rest of the work on it and is said on its composer, and a move that
+left anything behind closes nothing, so both ends are there to be looked at. A
+start the target would not make leaves both drafts exactly where they were. The
+select reads settled wherever the **Repo** picker beside it does, that being the
+same question one level up — *which machine* is what *which repository* is a fact
+about: a branch that has been cut settles it for good, a later round being a
+checkout and a record of the work in it, and so do the two kinds of draft that
+adopt, their lists being this device's own.
 
 **And where there is nothing to list, that page is the whole of Verkstead.** The
 sidebar's list *as filtered* being empty — no unarchived Conversation, and the
@@ -1539,11 +2743,15 @@ place, that a roadmap has no Stage left to run, that the roadmap on the record
 is not on the branch to read, that a branch wrote no single roadmap so no Stage
 was started, that the roadmap declares badly so nothing of it was started, that
 a Stage predates the record of which roadmap it belongs to and is the human's to
-continue, that a wrap-up is down to its checks, or — as a **stop Notice** — what
-stopped driving, why, and what the evidence was. No agent wrote it and nobody
-pressed anything for it. It is what running unattended owes the human: a
-decision made while nobody was watching is one they have to be able to read
-afterwards.
+continue, that a wrap-up is down to its checks, that a session away from home
+could not write its Profile's login back to the device the account is on — see
+**Account mirror** — that a Conversation moved onto this device was taken up
+with the harness's own resume of the conversation it arrived part way through,
+or with Verkstead's own Resume and which reason it was — see **Carried
+Conversation** — or — as a **stop Notice** — what stopped driving, why, and what
+the evidence was. No agent wrote it and nobody pressed anything for it. It is
+what running unattended owes the human: a decision made while nobody was
+watching is one they have to be able to read afterwards.
 
 One Stage settling writes as many as the settle had things to say: a sentence
 naming each Stage that started, and a sentence for each ready Stage that did
@@ -1587,7 +2795,10 @@ session's name rather than the path worked out. A backend that takes none —
 Codex is the first — writes a log of its own choosing, so the session's is
 *found* rather than named: the one that appeared in the account's own session
 store after this session was launched and whose opening line names this
-Conversation's Worktree.
+Conversation's Worktree. **And finding it is what gives that session its name**:
+the same opening line says which session the rollout is of, and that id goes on
+the record beside the session as the log is found — the only name a Codex session
+ever has, and the one a **Carried Conversation** on another device is resumed by.
 
 **And a backend may keep no file of lines at all.** opencode writes its
 sessions into one database under its account — a row per session and a row per
@@ -1598,6 +2809,13 @@ more than one matches. What is followed is the sequence number of the last
 record taken rather than a byte offset into a file, and each record still
 reaches the Transcript verbatim, with the kind opencode filed it under and its
 place in that sequence around it.
+
+**And a session carrying a conversation on is followed from where the session
+before it left off.** A resumed harness appends to the log it resumed — see
+**Carried Conversation** — so nothing is looked for: the log is the one the launch
+proved was there, and the following of it opens at the end of what crossed. Each
+Event holds its own session's words, so a following that began at the top would
+draw the same conversation twice across the two machines.
 
 **And a record may be written over and over.** opencode writes a part of a
 message again every time it grows — an empty sentence, the sentence so far, the
@@ -1838,7 +3056,10 @@ the transcript it leaves are the account's, and the next session reads them.
 **Off**, the store is the root's own and empty as each session starts: fresh
 memory, none of the human's transcripts in reach, and the session's own
 transcript written into the root, where Verkstead reads it from. The login and
-the written configuration are the same either way. On the Profile form it is one
+the written configuration are the same either way. **And the switch holds away
+from home**: a session on one device under a Profile whose account is on another
+is given what that account remembers of this Repo, and what it writes goes back
+— see **Memory sync**. On the Profile form it is one
 checkbox, drawn for every agent type; the cards and the pickers do not show it.
 **A Profile need not be named.** The harness's mark and the model already say
 the whole of what most accounts are — the one Claude Code login on this machine,
@@ -1860,6 +3081,82 @@ Profile anything falls back to: there is no default Profile, exactly as there is
 no default model. And a session run under one writes no name into its record, so
 a finished run draws as the harness and the model alone — which is how a record
 from before Verkstead wrote the name down already drew.
+**A cluster's Profiles are one list on every device of it.** A device linked to
+another keeps a **mirror** per Profile that other device holds: a row of its own
+`profiles` table carrying what a row is drawn and picked by — the name, the
+harness, the account as the far end holds it, the models and the memory switch —
+marked with the **Device Id** it is at home on and the id it has there
+(ADR-0020). A row rather than a list held in memory, because a Pairing, a Repo's
+memory of what it was last grilled with and every Conversation name a Profile by
+a **local** id, and a mirror is what gives a member's account one here — so
+nothing that reads a Profile id changes, and a mirror keeps its local id across
+every refresh. What that costs is that the two uniqueness rules above become
+*this device's own rows'*: two machines may each hold a `work`, and each the one
+unnamed Claude account, which is what nearly every installation holds.
+**Which machine an account sits on is a fact on the row**, drawn with the mark
+its operating system wears wherever a device is drawn — on the settings card and
+on every pairing picker, one list rather than a section per device. And nothing
+at all on this device's own rows, a machine's own name on every one of them being
+a column of one answer repeated.
+**They are fetched device to device rather than through the browser**: each
+device reads its members' own `/api/ui/profiles` over the **Relay**, at the
+start, whenever a member says its Profiles moved, and whenever the membership
+itself moves. A member that is not answering keeps the rows it last gave, exactly
+as its Conversations are kept; a Profile removed at home is gone from what that
+device answers, so the mirror goes with it on the next refresh — nulled out of
+every Pairing that named it, exactly as a removal pressed here is. A device that
+has been unlinked takes its mirrors with it, the membership being what prunes
+those.
+**And a session runs under a mirror wherever it is drawn**, the account being
+fetched from the machine it is on before each launch — see **Account mirror**.
+Nothing about the home machine's paths is judged here: they belong to that
+filesystem, and what a session is given is the mirror.
+**Which does not make a mirror unbreakable; it makes it break over other
+things.** Brokenness is answered per read for every Profile — a local one
+against its own paths — and for a mirror the question is the three that would
+stop a launch away from home, asked **in the order a launch would meet them**.
+**The home is not answering**, which is this device's own reading of its
+membership and reads the way that machine reads in the sidebar: nothing can be
+fetched, so nothing can be built. **The account at home holds no login file**,
+which the home device answers as the mirrors refresh and which is what a Claude
+login in the macOS Keychain comes to, and a sign-out at home with it — there is
+nothing to mirror, the fix is a login on that machine, and the Profile is
+meanwhile perfectly runnable there. **Or the harness is not on this machine**,
+which is the onboarding probe's own question answered in the onboarding probe's
+own word, rather than a second vocabulary for one fact.
+**Whether an account holds a login file is a fact on every row**, answered by
+the device the account is on: one of this device's own says *it cannot be used
+away from here*, which is a note rather than a trouble, and the same account
+read as a mirror elsewhere is broken there. Which is the difference the two
+readings are for.
+**Refused rather than hidden.** None of the three takes the row out of a picker
+or out of the Profiles section, and a Conversation paired with one reads as
+paired with a **broken** Profile rather than as one nothing was picked for: a
+row saying why it cannot be run is something to go and put right, where a row
+quietly missing is a human looking for a Profile they know they saved. What they
+do refuse is the **Start**, **by name and before anything starts** — the refusal
+carries what the row carries, so the sentence at the press is the sentence
+already on the row, and a Start refused over a machine that is not answering
+names that machine.
+**And a mirror is edited and removed from wherever it is drawn too**, and the
+press is relayed to the device the account is on: every device's Profiles
+section lists everyone's, and the form over a mirror saves. A save is put to the
+home device as
+the ordinary edit of *its own* Profile, addressed by the id the row records for
+it there, and what comes back is that device's own answer rather than a second
+opinion composed here — a name already taken at home is a name already taken,
+said in the words a local clash is said in, the two uniqueness rules staying that
+device's to hold. The mirror then redraws off the refreshed row rather than off
+what was typed, and the pane says which machine the press goes to, the paths on
+the form being that machine's. A removal is the same hop and takes the Profile
+off its home device, so every device's mirror of it goes on that device's next
+refresh — a Profile removed from one device leaves a Conversation on a third
+reading as one nothing has been picked for. **A home that is not answering
+refuses the press by name** and writes nothing here: a mirror edited against a
+machine that is not there would be a row disagreeing with the account it stands
+for. And **nothing is relayed twice** — a device puts the edit to the Profile's
+home and nowhere else, a third device learning of it by refreshing its own
+mirror, which is the rule every announcement in a cluster is held under.
 **Removing one is always allowed**, and it is a delete rather than an
 unregistering: a Profile is a way in to an account, so one the human is finished
 with is one Verkstead should stop holding. Every Conversation that had chosen it
@@ -1950,6 +3247,157 @@ namespace, so on the host the account's directory is the only place that log is.
 What a Profile stores, and how the setup wizard finds an account, do not change:
 a Built Root is what a session is *given*.
 _Avoid_: account home, joined account, claude home, mounted account
+
+**Account mirror**:
+What a device holds of a **member's** account so that a session can run here
+under a Profile whose account is on that machine: the files a **Built Root** is
+made of, and nothing else of it (ADR-0020). The row travels and the account does
+not — so the login, and whatever the written configuration is composed from, are
+fetched from the home device into a directory of this device's own and the root is
+built out of that, exactly as it is built out of an account on this machine.
+Nothing downstream of the launch knows the difference: the four parts, the trust
+seeded into the copied `.claude.json`, the launch line and the model are what they
+already were.
+**Per Profile, under the Data Directory**, named by the **local** Profile id —
+which is what makes the Windows rule hold by construction: a session's profile is
+under that same directory, so the hard link that joins the login in never crosses
+a volume, and the refusal for an account on another volume cannot fire for a
+mirror.
+**Fetched before each launch**, never kept: a login refreshed at home since the
+last session is the one this session has to be given, and a mirror gone stale
+would sign a session out for no reason anybody could see. What the home device
+sends is written over what is there — beside and renamed, so a session already
+running keeps the file it started with — and every file of the allowlist it did
+*not* send is taken away, a sign-out at home being a mirror with no login in it.
+**And it goes when the mirror row does**, which is the last thing on this device
+that says whose login it holds: a Profile the human removed at home, or a device
+unlinked, takes the directory with the row rather than leaving a member's login
+here with nothing pointing at it.
+**Only the allowlist travels.** The login as the harness wrote it, and the
+configuration composed the way a root's is: Claude's `settings.json` filtered to
+what reaches a model, its `.claude.json` without the MCP servers *or* the
+`projects` entries — those being every repository the human has run claude in,
+their paths and their history — and each other harness's `config.toml` or
+`opencode.json` filtered the same way. No plugins, hooks, rules, skills, global
+instructions file, or any other repository's transcripts. The memory store is not
+on the list: it is joined rather than composed, and is carried entry by entry on
+its own terms — see **Memory sync**.
+**A member's own call rather than the viewer's**: the home device answers it at
+`/api/peer/v1/profiles/<id>/account` on the **Peer Listener** behind the **Member
+Gate**, by the id the mirror row records for it there, and only for a Profile of
+its own — a row that is itself a mirror is an account on a third machine.
+**A home that is not answering starts no session**, and says which machine: a
+session launched under an account nothing fetched is one that comes up logged out
+with nothing on the Timeline saying why, so the refusal goes in the session's
+Capture naming the machine. Which is the backstop rather than the reading: a
+mirror whose home has stopped answering is **broken** on the row long before
+anybody presses anything, and the press is refused there — see **Agent
+Profile**. This is what catches a machine that went away between the two.
+**And the login is written back as the session ends**, at
+`/api/peer/v1/profiles/<id>/account/login` on the same listener behind the same
+gate. It is the one file of a root a session genuinely changes — the harness
+refreshes its OAuth pair as it works — so an account lent out and never written
+back would be one signing itself out a session at a time. What the session left is
+read off the mirror once the ending has written everything back into it, and the
+home device writes it **in place over the account's own file**, which is how a
+local session's ending writes one: whatever else is a name for that file — a
+session running there has it linked into its root — is a name for what arrived.
+Nothing else of a root comes home, the rest being Verkstead's own or the human's
+and no session's to change. A **Terminal**'s ending goes the same way, a human who
+logged in at that shell having logged in to somebody else's account.
+**Only what changed travels**: a login the session replaced, or made where the
+account had none, goes back whole; one still exactly what came down is not sent at
+all. Which is the three cases a local ending already tells apart.
+**Last write wins.** Two machines refreshing one login at once may sign one of
+them out; that is accepted rather than locked against — nothing is merged and
+nothing is held, and the write that arrives later is the one the account keeps. A
+sign-out that results reads as the Profile being broken there, and the fix is a
+login on its home device. Lending a Profile out exclusively was rejected as a lock
+nobody asked for.
+**And a home that has gone away by then is said rather than swallowed**: the
+mirror is left exactly where it is, nothing retries, and the Conversation's
+Timeline carries a **Notice** saying the account was not written and naming the
+machine. The next session at home may find itself signed out, which is worth a
+line rather than a silent loss.
+_Avoid_: account copy, cached account, synced login, borrowed account
+
+**Memory sync**:
+What carries an **Agent Profile**'s memory store to the device a session is
+running on and back again, where that Profile's account is at home on another
+one (ADR-0020). The **Account mirror** carries what a **Built Root** is *made*
+from; this carries what it *joins*, and the two together are what makes a
+session away from home the session it would have been at home. Before launch,
+what the home account remembers of this Repo and of this Conversation is
+written into the mirror; as the session ends, what the session wrote goes back.
+That is what makes a session run on B readable on A afterwards, and what a
+harness's own resume stands on after a **Transfer**.
+**The memory switch holds away from home.** Switched off, nothing syncs in
+either direction and the session starts on an empty store, exactly as it does
+at home.
+**A label apiece, and each machine names its own path.** A memory store is keyed
+by the path a session ran in wherever it is keyed by anything, and every one of
+those paths is a different string on every machine. So nothing crosses the link
+but the part of the store — the Repo's entry, the Worktree's, the sessions, the
+memory files, the data store — and the files under it, and each device joins
+that word onto a directory of its own. Which is the whole of the path rewrite,
+done twice rather than sent: the name is computed by the harness's own encoding
+on both ends, and a name computed any other way is a second entry rather than
+the same memory.
+**The unit is the smallest one each harness's store has.** Claude's is the two
+entries a Built Root already names, one for the Repo and one for the Worktree.
+Codex's is its memory files whole, and out of the one flat directory of
+rollouts it keeps for every directory it has ever run in, the ones whose session
+was working in a Worktree of this name — the Worktree being called the same
+thing on every machine of a cluster and at a different path on each. Grok
+Build's is the same, its session directories picked out by the ids Verkstead
+named them with, and not its index of the whole store. OpenCode's is the one
+database Verkstead pins every session it runs onto, with the two siblings SQLite
+keeps beside it — the store runs in write-ahead-log mode and one carried a file
+at a time will not open — and not the data directory around it, which also holds
+the login the **Account mirror** carries and whatever other channel of opencode
+the host installed.
+**And OpenCode is the one harness whose unit is not this Repo's.** It keeps a
+row per session in that one database rather than a directory per working
+directory, so what crosses carries the sessions of every repository the human
+has run it in, and the file is the smallest thing there is to carry. Going
+narrower means reading and writing rows of a schema that is opencode's own and
+moves between releases, which is the dependency the records reader deliberately
+does not take — it is allowed to stop reading where this would have to go on
+writing. So the bound on a store is what stands in front of a big one.
+**One column of one row is the exception**, and it is an arrival's rather than a
+sync's: the session a **Carried Conversation** is resumed as has the directory
+its row records brought onto this device's Worktree before the harness starts,
+because opencode resumes a session where that row says. It is written the way
+everything else here fails — a store whose shape this build does not recognise is
+left alone and the resume falls through — and nothing else in the database is
+ever written.
+**Which path each part is named off is two different answers.** The Repo's goes
+through the match across devices — see **Repo**, where origin then name is the
+rule — and **no match is an answer**: there is nothing of that Repo to pull, the
+session starts without it, and the Timeline says so rather than the launch being
+refused. The Worktree's is named off the Data Directory instead, a Worktree
+living under one rather than under the Repo: the home device joins **its own**
+worktrees directory onto the same stem this Worktree carries, which is the path
+it would have used for this work and is what leaves the transcript findable when
+the work comes home.
+**A member's own call rather than the viewer's**, beside the account's: the home
+device answers at `/api/peer/v1/profiles/<id>/memory` on the **Peer Listener**
+behind the **Member Gate**, and takes what the session left at
+`/api/peer/v1/profiles/<id>/memory/left`. A press rather than a path each way,
+the question being three facts about the asking device's side and one of them a
+list.
+**Only what changed travels back**, which is the account mirror's rule for the
+login: what came down is remembered by a fingerprint apiece, and a file still
+exactly as it arrived is not sent. **Nothing at home is deleted** — a file the
+session took away is not a file it asked the account to lose, and the rest of
+that store is the human's own work in other repositories.
+**Best effort rather than a gate.** A home that will not answer is a session
+that starts on an empty store with a **Notice** saying so, where a home that
+will not answer for the *account* starts no session at all: a session with no
+memory comes up new, and a session with no login comes up logged out with
+nothing saying why. The same at the end — what could not be written home is a
+line on the Timeline rather than a retry.
+_Avoid_: memory mirror, transcript sync, store copy
 
 **Pairing**:
 An Agent Profile and one of the models it lists, chosen together, and what a
@@ -3480,6 +4928,19 @@ conversations** is a way of looking rather than a change to anything: with it
 on, what has been archived is drawn in its ordinary place; with it off, it is
 not. That is the human's standing choice rather than a device's, so it is kept
 beside the archivings and read back on every load.
+
+**In a cluster that switch is one switch for the whole Merged List, and it is
+the opened device's.** The choice is about a list, and the list in front of them
+is every **Member**'s merged with that device's own — so the position that
+device's switch stands at is what governs every member's rows, and each member
+is *asked* with it rather than told to change its own: a member's own switch is
+its standing choice for the browser in front of *it*, and a hub writing it would
+be one device changing what another one sees. The moment the switch moves, every
+list the hub holds is read again, each of them having been fetched under the
+position before it. And whether the switch is worth drawing folds the same way —
+*anything archived anywhere* — so a device with nothing of its own still draws
+it while a member has something behind it, that being the only way a member's
+archived rows could be brought back.
 _Avoid_: locked (the Question Set word), deleted, hidden, closed (the state
 being archived, not the archiving), done, restore or unhide (the word is
 unarchive)
@@ -3801,6 +5262,18 @@ to visibility each fall back to re-reading everything — which is also the
 whole meaning of the push-relayed Nudge. A query whose rendering holds reader
 state must still reconcile its re-reads, or be `static` where its payload
 cannot change (ADR-0005).
+**And it says whose news it is, where it is not this device's own.** A page reads
+a **Member's** Conversation through the device it opened, so that member's news
+arrives on the same stream: the device holds one Nudge stream to each of its
+members and announces what comes down one under that **Device Id**, which is what
+the viewer's table keys its invalidation by — ids being each device's own and
+colliding by construction. A Nudge naming no device is this device's own and is
+the signal it has always been. One kind exists for the stream itself rather than
+for anything in the world: *everything* of one device's, which is what a stream
+that has just been taken up says, having no way to know what it missed while it
+was down. A member that is not answering is not announced about at all: the page
+keeps what it last read and goes stale, exactly as it does when its own stream is
+down. See **Relay**, which is the hop those streams come back over.
 
 Not the nudge in **Store-and-nudge Ask**, which is a line of English typed into
 an agent's terminal. This one is a signal to a browser and never leaves the

@@ -118,6 +118,7 @@ import type {
   CommitEvent,
   CompanionRefusal,
   ConversationView,
+  DeviceIdentity,
   GrillingStarted,
   HandoffEvent,
   Lifecycle,
@@ -127,6 +128,7 @@ import type {
   PendingSteerView,
   PinnedEvent,
   ProfileEntry,
+  ProfileTrouble,
   PullRequestEvent,
   QuestionSetEvent,
   StageEntry,
@@ -139,12 +141,16 @@ import type {
   UnreadableSetEvent,
 } from "../api/types";
 import { CardButton } from "../CardButton";
+import { Icon } from "../Icon";
 import { IconButton } from "../IconButton";
 import { PaneSticky } from "../Panes";
 import { Truncated } from "../Truncated";
+import { troubleReading } from "../broken";
+import { deviceShown, osIcon, useDevices } from "../devices";
 import { useReading } from "../freshness";
 import { HarnessMark } from "../HarnessMark";
 import { Empty } from "../notices";
+import { keyOf, useDevice } from "../reaching";
 import { followBottom } from "../scrolling";
 // The badge and the sentence a Set this build cannot read is drawn with, taken
 // from the page that draws the whole record rather than kept a second time
@@ -191,10 +197,7 @@ export const BRIEF_REFUSAL: Record<BriefSaved, string> = {
 ///
 /// Every one of them is something different to go and do, which is the whole
 /// reason the server names them separately rather than saying "cannot start".
-const GRILL_REFUSAL: Record<
-  Exclude<GrillingStarted, { Companion: unknown }>,
-  string
-> = {
+const GRILL_REFUSAL: Record<Extract<GrillingStarted, string>, string> = {
   Started: "",
   NoSuchConversation: "This conversation is gone.",
   NotDrafting: "This conversation has already been started.",
@@ -204,8 +207,6 @@ const GRILL_REFUSAL: Record<
     "Choose an implementation profile and model first, on the brief.",
   NoReviewProfile:
     "Pick a review profile and model — or No review — first, on the brief.",
-  ProfileBroken:
-    "A chosen profile's claude pair is not where it was left, so there is no account to run under.",
   EmptyBrief: "Write the brief first — it is what the work starts from.",
   NoGitAuthor:
     "No git author is configured, so Verkstead cannot commit on the branch. Set one in Settings before starting work.",
@@ -256,10 +257,24 @@ export function companionRefusal(why: CompanionRefusal): string {
 /// thing to go and look at is one of several repos rather than the obvious one.
 export function grillRefusal(outcome: GrillingStarted): string {
   if (typeof outcome === "object") {
-    return `${outcome.Companion.repo}: ${companionRefusal(outcome.Companion.why)}`;
+    return "ProfileBroken" in outcome
+      ? profileRefusal(outcome.ProfileBroken)
+      : `${outcome.Companion.repo}: ${companionRefusal(outcome.Companion.why)}`;
   }
 
   return GRILL_REFUSAL[outcome];
+}
+
+/// What to say about a press refused over a chosen profile, whichever press it
+/// was.
+///
+/// **The sentence the row is already showing.** Every one of the findings is
+/// drawn on the profile's own card and in the picker it was chosen in, so the
+/// refusal says what the human is being shown rather than a vaguer second
+/// account of it — which is what makes a start refused over a member's machine
+/// name that machine. The words are [`troubleReading`](../broken.ts).
+export function profileRefusal(why: ProfileTrouble): string {
+  return `A chosen profile cannot be run: ${troubleReading(why)}`;
 }
 
 /// The state a move came *from*: the state the move before it went to, and
@@ -344,13 +359,20 @@ function Openable(props: {
   );
 }
 
-/// What this pane is called: the branch it is titled by, and the Repo that
-/// branch is in understated beside it.
+/// What this pane is called: the branch it is titled by, and understated
+/// beside it the machine the work is on and the Repo that branch is in.
 ///
-/// The two facts the sidebar's card says in the same order and the same voice,
-/// so the card and the header of the pane it opens read as the one name said
+/// The facts the sidebar's card says, in the same order and the same voice, so
+/// the card and the header of the pane it opens read as the one name said
 /// twice — and the status button at the foot of the block goes on in that voice
 /// with its own status and state.
+///
+/// The device is drawn wherever there is a cluster to name one and nowhere
+/// else, which is the rule the card's own second line is drawn under: a
+/// Verkstead linked to nothing draws the header it has always drawn. Where the
+/// card reads its device off the row it was handed, this pane looks one up —
+/// the URL says which machine and the Devices reading says its name and its
+/// mark.
 ///
 /// Drawn in every state, a Draft's included. A Conversation nobody has named is
 /// called *Draft* on both, which is what it is; the Repo beside it is then the
@@ -369,10 +391,43 @@ function Openable(props: {
 /// took the controls at the far end of the row with it. The Repo beside it is
 /// not cut: it is a word about the name rather than the name, and on a Draft it
 /// is the whole of what tells one from another.
-function PaneName(props: { conversation: ConversationView }): JSX.Element {
+function PaneName(props: {
+  conversation: ConversationView;
+
+  /// Whether this is a record to read rather than a Conversation to work in,
+  /// which is what a share is — and so whether there is a machine here to ask
+  /// about its cluster at all. A share fetches nothing.
+  readOnly?: boolean;
+}): JSX.Element {
+  // Which machine this record's work is being done on: the page reads that
+  // off the URL it is drawn at, and what it needs beside it is the name and
+  // the mark — which is the Devices reading, this device's own identity and
+  // every member's in the one shape, moving on the `devices` Nudge. The pane
+  // the Remote access settings draw of it read the same thing.
+  const device = useDevice();
+  const devices = useDevices(() => !props.readOnly);
+
+  const machine = (): DeviceIdentity | null =>
+    deviceShown(devices.data, device());
+
   return (
     <>
       <Truncated class={styles.paneTitle} text={titled(props.conversation)} />{" "}
+      {/* The device, where there is a cluster to name one — the same rule the
+          sidebar's rows are drawn under and for the same reason: a machine's
+          own name on the header of a Verkstead linked to nothing would be a
+          word that never changes. The mark is the one that device wears
+          wherever it is drawn, and it is labelled here rather than hidden
+          because this heading is read out of its own contents — unlike the
+          sidebar's card, which has the whole sentence written for it. */}
+      <Show when={machine()} keyed>
+        {(on) => (
+          <span class={styles.paneDevice}>
+            <Icon of={osIcon(on.os)} label={on.os} class={styles.paneOs} />{" "}
+            {on.name}
+          </span>
+        )}
+      </Show>{" "}
       <span class={styles.paneRepo}>{props.conversation.repo.name}</span>
     </>
   );
@@ -433,9 +488,11 @@ export function Timeline(props: {
   // Agent run never boards one anyway — so this is a read for a card that
   // cannot be there. A list that has not been read says the account's name,
   // which is the answer that can never misattribute a run.
+  const device = useDevice();
+
   const profiles = useReading(() => ({
-    queryKey: ["profiles"],
-    queryFn: listProfiles,
+    queryKey: keyOf(device(), "profiles"),
+    queryFn: () => listProfiles(device()),
     enabled: !props.readOnly,
     freshness: { reconcile: "id" },
   }));
@@ -489,7 +546,12 @@ export function Timeline(props: {
               : { to: "Conversations", go: props.back }
           }
           heading={styles.paneName}
-          title={<PaneName conversation={props.conversation} />}
+          title={
+            <PaneName
+              conversation={props.conversation}
+              readOnly={props.readOnly}
+            />
+          }
         >
           {/* The pane's own controls, in the slot the settings gear stands in
               at the head of the conversations. Both of them page into the

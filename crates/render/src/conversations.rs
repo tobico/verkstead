@@ -216,6 +216,105 @@ pub struct ConversationEntry {
     /// *something wants you* against *there is news here*. Cleared by opening
     /// the Conversation, which the browser says in a call of its own.
     pub unseen: bool,
+
+    /// Where this row sits: its **Rank**, which is the whole of what the list
+    /// is ordered by (ADR-0020, *Ranks*).
+    ///
+    /// **It rides out on the row because the merge cannot be made without
+    /// it.** The device the browser opened holds each member's list and merges
+    /// it with its own, and what it merges by is this string — every rank
+    /// carries the device that issued it, so the keys are distinct
+    /// cluster-wide and the merged order is total with no tiebreaker of its
+    /// own. A hub holding the rows and not the keys could not put them in an
+    /// order at all.
+    ///
+    /// **And it is what one merged row is told apart from another by**, which
+    /// is the other thing it is read for: ids are each device's own and
+    /// collide by construction, and this is the one field on a merged list
+    /// that is nobody else's.
+    ///
+    /// Empty where the row has none, which is a database written before there
+    /// were ranks and not yet rewritten — it sorts first, exactly where the
+    /// list a device draws of its own rows puts it. No served answer carries
+    /// one: a serve ranks every Conversation before it answers anything.
+    pub rank: String,
+
+    /// The device this row belongs to, or `null` where there is no cluster and
+    /// nothing to say — a lone device draws no device on any row.
+    ///
+    /// **The server's call rather than the page's**, the membership being what
+    /// decides it: a Verkstead linked to nothing draws the sidebar it has
+    /// always drawn, and one that is linked says whose every row is — its own
+    /// included, so that the list reads as one list rather than as this
+    /// device's work with somebody else's mixed in.
+    pub device: Option<RowDevice>,
+
+    /// The key this Conversation was born under, as one string: the device it
+    /// was drafted on and the id it was given there (ADR-0020, *Transfer*).
+    ///
+    /// **What one row of a merged list is told apart from another by.** A piece
+    /// of work that has been transferred has a row in more than one database, and
+    /// every copy of it carries this same string — so the merge draws the work
+    /// once however many machines hold a copy of it. The rank tells one *row*
+    /// from another and this tells one piece of *work* from another, which is why
+    /// there are two: two copies of one Conversation carry two ranks and one
+    /// birth key.
+    ///
+    /// Opaque to everything that reads it: it is compared for equality and never
+    /// taken apart, exactly as a rank is. Empty where the row has none, which is
+    /// a database the backfill has not reached — and one that is empty stands on
+    /// its own rather than merging with every other empty one. No served answer
+    /// carries one: a serve stamps every Conversation before it answers
+    /// anything.
+    pub born: String,
+
+    /// Whether this row is a copy that has been transferred away, its live
+    /// record being on another device.
+    ///
+    /// **Which is the row the merged list drops.** A device that has handed its
+    /// Conversation on keeps the copy as a tombstone — it holds the id so that
+    /// old links still lead to the work — and what a tombstone is not is a
+    /// second row of the sidebar beside the copy doing the work.
+    ///
+    /// It rides out here because the dropping is the hub's: a member answers its
+    /// own rows and has no idea that the device asking is merging them with
+    /// anything. See the server's `merging`.
+    pub transferred: bool,
+}
+
+/// Which device a sidebar row belongs to, as the row itself says it.
+///
+/// **The name and the OS word are the hub's own**, answered on every row
+/// rather than left to be joined against another reading: the hub holds them
+/// for each member and reads its own machine for itself, so nothing in the
+/// viewer needs the Devices section in hand to draw a row.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct RowDevice {
+    /// The **Device Id**, or `null` for this device's own rows.
+    ///
+    /// Which is the shape the viewer already keys its queries and composes its
+    /// paths by — `null` is *this device*, and a local URL keeps the shape it
+    /// has always had. A row naming this device by its id would be a second
+    /// spelling of every local call.
+    pub id: Option<String>,
+
+    /// What it is shown as: the hostname of the machine, as that machine last
+    /// said it.
+    pub name: String,
+
+    /// And the word for its operating system, which is what draws the mark
+    /// beside the name. *Linux (WSL)* is the one that is not a bare platform
+    /// name, and it is the whole reason the word is carried rather than a
+    /// flag.
+    pub os: String,
+
+    /// And whether the device is answering. `false` is the row drawn dimmed,
+    /// from the last list this device held of that member.
+    ///
+    /// Always `true` on this device's own rows: a device that could not reach
+    /// itself would not be answering this call.
+    pub reachable: bool,
 }
 
 /// A running session that has gone quiet without asking: how long it has been
@@ -864,6 +963,71 @@ pub struct ConversationView {
     /// has no place in the record and is drawn after everything that does — and
     /// a Share, which is the record, carries no trace of it.
     pub pending_steer: Option<PendingSteerView>,
+
+    /// Where the live record of this Conversation is, where this copy is not it
+    /// (ADR-0020, *Transfer*).
+    ///
+    /// `null` on every ordinary Conversation, which is nearly all of them: this
+    /// device's row *is* the record. Anything else is a tombstone — a copy this
+    /// device transferred away and keeps so that old links still lead to the
+    /// work — and what the page does about one is leave: the URL naming it
+    /// redirects to the device and the id inside, the way the Terminal pane's
+    /// old path redirects to Code.
+    ///
+    /// **And it redirects whether or not that device is answering.** The
+    /// redirect is about which copy is the record rather than about who can be
+    /// reached, and a tombstone drawn because the far end was asleep would be a
+    /// read-only copy of the work presented as the work.
+    pub transferred: Option<TransferredTo>,
+
+    /// And the machine it is on its way to, where a press has asked for it to be
+    /// moved and the move has not run yet (ADR-0020, *Transfer*).
+    ///
+    /// **The name the human gave that machine**, rather than the Device Id
+    /// beside it in [`Self::transferred`]: this one is drawn in a sentence at the
+    /// head of the Timeline — *Transferring to the-laptop* — where that one is
+    /// the address a redirect is built out of.
+    ///
+    /// `null` is every Conversation staying where it is. It is the state between
+    /// the press and the move: the session running now runs to its own end,
+    /// nothing is started after it, and then the work goes.
+    pub transferring: Option<String>,
+
+    /// The device this Conversation was drafted on — the device in its birth
+    /// key — which is always permitted as somewhere its agent may move the work
+    /// to, so a session that has moved can go home (ADR-0020, *The agent's
+    /// call*).
+    ///
+    /// `null` where the record has no birth key yet, which is a database the
+    /// start-up backfill has not reached.
+    pub drafted_on: Option<String>,
+
+    /// And the other devices the human has ticked under *May be transferred
+    /// to*, by Device Id, in the order they were ticked.
+    ///
+    /// Never the drafting device, which is implicit. Empty is the ordinary
+    /// Conversation, whose agent may go nowhere but home.
+    pub permitted: Vec<String>,
+}
+
+/// Which copy of a transferred Conversation is the live one: the device holding
+/// it, and the id it goes by there.
+///
+/// **The Device Id rather than `null` for this device**, unlike the block a
+/// sidebar row carries. A record is read through whichever device the browser
+/// opened — this one's own, or a member's over the Relay — so the answer is that
+/// machine's account of where the work went, and a `null` in it would mean
+/// *whoever answered* rather than *here*. What turns it back into a path is the
+/// page, which knows which device it is reading and what this one's id is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct TransferredTo {
+    /// The **Device Id** of the machine holding the live record.
+    pub device: String,
+
+    /// And the id that machine numbered its copy, which is the other half of
+    /// where the redirect goes.
+    pub id: i64,
 }
 
 /// A pending steer as the page receives it: when the press was made, and the
@@ -2223,6 +2387,10 @@ pub struct SteerRecordView {
 /// nothing, and a steer whose account has been removed since picked something
 /// that is gone. A pane that drew them the same would say *nothing picked* over
 /// a choice the human made.
+///
+/// The size lint is left alone here for [`crate::PickedView`]'s reason, which is
+/// the same shape and the same Profile inside it.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum SteerPairingView {
@@ -3329,18 +3497,59 @@ pub struct NewAdoption {
     pub base: Option<String>,
 }
 
-/// The order the human has just dragged the sidebar into: every Conversation
-/// they can see, by id, top first.
+/// One row of the merged sidebar, as a caller names one: the device it lives on
+/// and the id that device numbered it.
 ///
-/// The whole list rather than the one row that moved, because the whole list is
-/// what a drag produces and what the human is looking at when they let go. A
-/// move said as *this one, to there* would have to be replayed against a list
-/// the server might have added to since; a list said whole is simply what they
-/// meant.
+/// **An id alone is not a row on a merged list.** Every Verkstead issues a
+/// Conversation 1, so the pair is the whole of what names one (ADR-0020, *The
+/// opened device relays*) — the same pair the viewer keys every row by. `null`
+/// is the device the browser opened, which is the one device a page never has an
+/// id for.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub struct NewOrder {
-    pub order: Vec<i64>,
+pub struct MergedRow {
+    pub device: Option<String>,
+    pub id: i64,
+}
+
+/// Where the human has just dropped one row of the merged sidebar: which row
+/// moved, and the row it now sits directly under — nothing at all being the top
+/// of the list.
+///
+/// One row rather than the whole list, because one row is what moved. The device
+/// the browser opened mints the key between that neighbour and whatever is next
+/// below it, out of the merged list it holds, so the arithmetic exists once, in
+/// one language, and the viewer never learns what a rank looks like (ADR-0020,
+/// *Ranks*).
+///
+/// **Both rows are named by device and id**, because either of them may belong
+/// to any device in the cluster: the hub has every rank in hand — its own in its
+/// store and each member's in the list it holds — so it mints the key itself and
+/// never asks a member what its neighbours are. What the owning device is told
+/// afterwards is the rank, which is [`NewRank`].
+///
+/// A neighbour that has gone since the list was drawn is not a refusal — see
+/// `server::ranking`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct DroppedRow {
+    pub row: MergedRow,
+    pub below: Option<MergedRow>,
+}
+
+/// And what the device that owns a moved row is told: its new **Rank**, minted
+/// by the device that merges the lists.
+///
+/// **The other sentence a drag is said in.** *This row, under that one* cannot
+/// cross a device boundary — the neighbour may be a row the far end has never
+/// heard of — so what travels is the key itself, which means the same thing on
+/// every machine in the cluster. Reached on a member through the Relay, and used
+/// by the hub on itself for its own rows too, so there is one way a rank is
+/// written.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct NewRank {
+    pub rank: String,
 }
 
 /// What became of starting one.
@@ -3415,6 +3624,34 @@ pub enum ProcessPicked {
     /// server's list; the rows the picker draws are the viewer's, and a stage
     /// that adds one adds the other.
     NotLanded,
+}
+
+/// Where a saved draft's work has gone: the device it was moved onto, and the
+/// Conversation it became there (ADR-0020, *Drafting on a device*).
+///
+/// What the compose page sends to finish a move — the Brief, the branch and the
+/// files having been replayed onto that other device already — so that the draft
+/// left here is closed with the words on its Timeline saying where to look.
+///
+/// **The name travels with the id.** A Device Id is what a record and a URL name
+/// a device by, and it is not what a human reads; and the machine that made the
+/// move is the only one that is certainly linked to both ends of it — a laptop
+/// moves a draft from the desktop to the WSL beside it, and the desktop need
+/// never have been linked to the WSL. So the name comes from the browser that
+/// knows it rather than being looked up at the end that cannot.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct ConversationMove {
+    /// The Device Id of the machine the work went to.
+    pub device: String,
+
+    /// And what that machine is shown as, for the sentence on the Timeline.
+    pub name: String,
+
+    /// The Conversation the work became there, which is a number on that
+    /// machine: every Verkstead issues a Conversation 1, so this is read with
+    /// the device beside it and never alone.
+    pub conversation: i64,
 }
 
 /// What the branch is to be called.
@@ -3851,9 +4088,11 @@ pub enum GrillingStarted {
     /// rather than swapped underneath it.
     NoReviewProfile,
 
-    /// A chosen Profile's pair is not where it was left, so there is no account
-    /// to run the session under.
-    ProfileBroken,
+    /// A chosen Profile cannot be run under as things stand — its account is
+    /// not where it was left, or it is a member's and something about this
+    /// device or that one is in the way. Which of them, said the way the
+    /// Profile's own row says it.
+    ProfileBroken(crate::ProfileTrouble),
 
     /// The Brief is empty, and the Brief is what the grilling starts from.
     /// Freezing an empty one would freeze nothing worth having.
@@ -4703,9 +4942,11 @@ pub enum Adopted {
     /// which every stage after this one inherits along with the other two.
     NoReviewProfile,
 
-    /// A chosen Profile's pair is not where it was left, so there is no account
-    /// to run the session under.
-    ProfileBroken,
+    /// A chosen Profile cannot be run under as things stand — its account is
+    /// not where it was left, or it is a member's and something about this
+    /// device or that one is in the way. Which of them, said the way the
+    /// Profile's own row says it.
+    ProfileBroken(crate::ProfileTrouble),
 
     /// No git author is configured, so there is nobody for Verkstead to commit
     /// the clearing of an inherited task list as — see
@@ -4921,9 +5162,11 @@ pub enum TakenUp {
     /// said on it.
     NoReviewProfile,
 
-    /// A chosen Profile's pair is not where it was left, so there is no account
-    /// to run the session under.
-    ProfileBroken,
+    /// A chosen Profile cannot be run under as things stand — its account is
+    /// not where it was left, or it is a member's and something about this
+    /// device or that one is in the way. Which of them, said the way the
+    /// Profile's own row says it.
+    ProfileBroken(crate::ProfileTrouble),
 
     /// Git would not fetch from the Repo's remote, so what origin holds on the
     /// head branch cannot be known. Refused rather than taken up against refs
@@ -5120,6 +5363,10 @@ pub enum ConversationUnarchived {
 /// [`ShowArchived`] rather than this — a position, and nothing about what is
 /// behind it, that half being the server's own fact.
 ///
+/// **One switch for the whole merged list**, which is the device the browser
+/// opened's: every member of its cluster is asked for its rows at this position
+/// rather than filtering by its own (ADR-0020, *The opened device relays*).
+///
 /// Two answers in one payload because the page has one question. The sidebar's
 /// list is filtered by the switch in SQL, so an empty list says nothing about
 /// which of the two empties it is — nothing archived, or everything archived
@@ -5135,6 +5382,10 @@ pub struct ShowingArchived {
     /// And whether there is anything archived at all, whichever position the
     /// switch is in. False is a switch with nothing behind it, which is a
     /// switch not worth drawing.
+    ///
+    /// **Anything archived anywhere in the cluster**, this being the switch for
+    /// the merged list: a device with nothing of its own still draws it while a
+    /// member has something behind it.
     pub any: bool,
 }
 

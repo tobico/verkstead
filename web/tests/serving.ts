@@ -6,7 +6,21 @@
 
 import { vi } from "vitest";
 
-import type { SetReading, SetView, UnreadableSet } from "../src/api/types";
+import type {
+  DevicesView,
+  SetReading,
+  SetView,
+  UnreadableSet,
+} from "../src/api/types";
+import devices from "./fixtures/devices.json" with { type: "json" };
+
+/// Where the shell asks whether another device is asking to link — see the
+/// default [`serving`] holds for it.
+const ASKING = "/api/ui/devices/asking";
+
+/// And where this machine says what it is and who it is linked to, which is
+/// the other read that belongs to no one page — see the default below.
+const DEVICES = "/api/ui/devices";
 
 /// One answer per fetch in the order given. The last answer is repeated,
 /// because a page polls for as long as it is open and a test should not have to
@@ -19,6 +33,27 @@ import type { SetReading, SetView, UnreadableSet } from "../src/api/types";
 export function serving(...answers: Array<Answer>) {
   const asked: Array<(init?: RequestInit) => Promise<Response>> = [];
   const held = new Map<string, (init?: RequestInit) => Promise<Response>>();
+
+  // The one read the app makes whatever page it is drawing: the devices asking
+  // to be let into this one's cluster, which the shell every page sits inside
+  // holds the modal for — see `src/Joining.tsx`. Nobody asking, which is what
+  // is true of every machine in every test here that has not said otherwise.
+  //
+  // Seeded rather than written out in each file's own list, and *before* the
+  // answers below so that a test about the modal overrides it with a `whenever`
+  // of its own: it belongs to no page, so there is no page whose test would
+  // naturally carry it, and a file that forgot it would be one whose mounts
+  // fell through to the positional answers meant for something else.
+  held.set(`GET ${ASKING}`, json([]));
+
+  // And what this machine is and who it is linked to, which the header of an
+  // open Conversation reads to say which device the work is on — see
+  // `PaneName` in `src/workbench/Timeline.tsx`. Seeded here for the reason
+  // above and answered as the golden fixture has it: a device in no cluster,
+  // which draws no device anywhere and is what every test that has not said
+  // otherwise is about.
+  held.set(`GET ${DEVICES}`, json(devices as DevicesView));
+
   for (const answer of answers) {
     if (typeof answer === "function") {
       asked.push(answer);
@@ -107,6 +142,27 @@ export function json(body: unknown, status = 200): () => Promise<Response> {
       new Response(JSON.stringify(body), {
         status,
         headers: { "content-type": "application/json" },
+      }),
+    );
+}
+
+/// One file, as the one route that answers with a file hands it over: the bytes,
+/// and the name the record says they were stored under.
+///
+/// Not JSON, which is what makes it worth a helper of its own — see
+/// `readAttachment` in `src/api/client.ts`, which reads the body as a blob and
+/// is the only caller in the app that does.
+export function bytes(
+  body: string,
+  name: string,
+): () => Promise<Response> {
+  return () =>
+    Promise.resolve(
+      new Response(body, {
+        headers: {
+          "content-type": "application/octet-stream",
+          "content-disposition": `attachment; filename="${name}"`,
+        },
       }),
     );
 }

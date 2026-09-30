@@ -43,9 +43,9 @@ use verkstead_render::{
     Adopted, Attached, AttachedServerView, AttachmentRemoved, AttachmentView, BaseRecorded,
     BranchRenamed, BriefSaved, CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed,
     CompanionMode, CompanionModeChosen, CompanionRefusal, CompanionRemoved, ConversationClosed,
-    GrillingStarted, PairingView, PickedView, Process, ProcessPicked, RepoPairingsView,
-    RepoSwitched, ServerAttached, ServerRemoved, Started, TakenUp, TargetRecorded, Uncommitted,
-    Worktree,
+    ConversationMove, GrillingStarted, PairingView, PickedView, Process, ProcessPicked,
+    ProfileEntry, ProfileTrouble, RepoPairingsView, RepoSwitched, ServerAttached, ServerRemoved,
+    Started, TakenUp, TargetRecorded, Uncommitted, Worktree,
 };
 use verkstead_schema::{Direction, Nudge};
 
@@ -77,7 +77,9 @@ use crate::worktrees;
 /// grilled with — see [`prefill`].
 pub(crate) async fn start(state: &AppState, repo_id: i64) -> Result<Started> {
     Ok(
-        match store::start_unnamed_conversation(&state.pool, repo_id, &branch_name()).await? {
+        match store::start_unnamed_conversation(&state.pool, repo_id, &branch_name(), &state.device)
+            .await?
+        {
             Some(id) => {
                 prefill(state, id, repo_id).await;
                 Started::Started { id }
@@ -115,7 +117,9 @@ pub(crate) async fn start_adopting(
     base: Option<&str>,
 ) -> Result<Started> {
     Ok(
-        match store::start_adoption(&state.pool, repo_id, &branch_name(), roadmap).await? {
+        match store::start_adoption(&state.pool, repo_id, &branch_name(), roadmap, &state.device)
+            .await?
+        {
             Some(id) => {
                 if let Some(base) = base {
                     fix(state, id, base).await;
@@ -248,9 +252,9 @@ pub(crate) async fn pairing_prefill(state: &AppState, repo_id: i64) -> Result<Re
         // the grilling picker has no row to prefill onto since *No grilling*
         // retired, so a Repo remembering one arrives exactly as a Repo with
         // nothing remembered for the role does.
-        grilling: usable(remembered.grilling).await?,
-        implementation: usable(remembered.implementation).await?,
-        review: prefilled(remembered.review).await?,
+        grilling: usable(state, remembered.grilling).await?,
+        implementation: usable(state, remembered.implementation).await?,
+        review: prefilled(state, remembered.review).await?,
     })
 }
 
@@ -285,24 +289,35 @@ async fn unremembered(state: &AppState) -> Result<RepoPairingsView> {
     };
 
     Ok(RepoPairingsView {
-        grilling: filled(last.grilling, &profiles, store::Role::Grilling).await?,
-        implementation: filled(last.implementation, &profiles, store::Role::Implementation).await?,
-        review: under(filled(last.review, &profiles, store::Role::Review).await?),
+        grilling: filled(state, last.grilling, &profiles, store::Role::Grilling).await?,
+        implementation: filled(
+            state,
+            last.implementation,
+            &profiles,
+            store::Role::Implementation,
+        )
+        .await?,
+        review: under(filled(state, last.review, &profiles, store::Role::Review).await?),
     })
 }
 
 /// One role of [`unremembered`]: the last start's pick where it is a usable
 /// Pairing, and the platform default where it is anything else.
 async fn filled(
+    state: &AppState,
     copied: store::Picked,
     profiles: &[store::Profile],
     role: store::Role,
 ) -> Result<Option<PairingView>> {
-    if let Some(pairing) = usable(copied).await? {
+    if let Some(pairing) = usable(state, copied).await? {
         return Ok(Some(pairing));
     }
 
-    usable(crate::pairing_defaults::platform_default(profiles, role)).await
+    usable(
+        state,
+        crate::pairing_defaults::platform_default(profiles, role),
+    )
+    .await
 }
 
 /// One role's memory as a picker would show it, for the one role that can
@@ -310,12 +325,12 @@ async fn filled(
 ///
 /// The row is not judged — there is no Profile to have gone — so it comes back
 /// as itself, and everything else goes through [`usable`].
-async fn prefilled(remembered: store::Picked) -> Result<PickedView> {
+async fn prefilled(state: &AppState, remembered: store::Picked) -> Result<PickedView> {
     if remembered.skipped() {
         return Ok(PickedView::Skipped);
     }
 
-    Ok(match usable(remembered).await? {
+    Ok(match usable(state, remembered).await? {
         Some(pairing) => PickedView::Under(pairing),
         None => PickedView::Nothing,
     })
@@ -338,7 +353,7 @@ async fn prefilled(remembered: store::Picked) -> Result<PickedView> {
 /// What comes back is the Pairing whole, both halves settled: it is what one
 /// caller writes onto a new Conversation and what the other hands to a page, and
 /// neither of them should have to put the two together again.
-async fn usable(remembered: store::Picked) -> Result<Option<PairingView>> {
+async fn usable(state: &AppState, remembered: store::Picked) -> Result<Option<PairingView>> {
     let Some(model) = remembered
         .pairing()
         .and_then(|pairing| pairing.model.clone())
@@ -346,7 +361,8 @@ async fn usable(remembered: store::Picked) -> Result<Option<PairingView>> {
         return Ok(None);
     };
 
-    let Some(pairing) = crate::profiles::pairing(remembered.pairing().cloned()).await? else {
+    let Some(pairing) = crate::profiles::pairing(state, remembered.pairing().cloned()).await?
+    else {
         return Ok(None);
     };
 
@@ -846,6 +862,81 @@ pub(crate) async fn detach(
     store::detach(&state.pool, id, attachment).await?;
 
     Ok(AttachmentRemoved::Removed)
+}
+
+/// One attached file, for reading it back: the name it is stored under and
+/// where it stands on disk.
+///
+/// **The one read of an attachment there is.** Everything else about them is
+/// written and taken away — the row and the bytes go up together and come off
+/// together — and what wants a file back is the compose page moving a saved
+/// draft onto another device (ADR-0020, *Drafting on a device*): a file on the
+/// old device's Data Directory is read off it and put on the new Conversation
+/// through the route a paperclip uses.
+///
+/// Refused by nothing but the pair naming no row. The Brief's freeze is what
+/// stops a file being *changed*, and a Conversation past drafting is one whose
+/// files are worth reading like any other — a Share's row of pills names them,
+/// and a session in the worktree reads them off the disk.
+///
+/// The path is not opened here: what a reader does with it is hand it to the
+/// browser as it arrives — see `read_attachment` in [`crate::ui`] — so a file
+/// the row names and the directory no longer holds is that reader's to refuse.
+pub(crate) async fn attached_file(
+    state: &AppState,
+    id: i64,
+    attachment: i64,
+) -> Result<Option<(String, PathBuf)>> {
+    let Some(found) = store::attachment(&state.pool, id, attachment).await? else {
+        return Ok(None);
+    };
+
+    let path = Attachments::under(&state.data_dir).file(id, &found.name);
+
+    Ok(Some((found.name, path)))
+}
+
+/// The draft's work has moved to another device: say so on its Timeline, and
+/// close it.
+///
+/// **Two acts in one request because they are one act.** A move is the compose
+/// page's replay run against a Conversation that already exists — the Brief, the
+/// branch and the files replayed onto a Conversation made on the other device —
+/// and the last thing it does is finish with the draft here. A close alone would
+/// leave a Closed draft that says nothing about where its work went, which is
+/// exactly what the human coming back to it weeks later needs to read; a notice
+/// alone would leave two drafts of one piece of work.
+///
+/// **The notice first, so that it is on the record whatever the close does.**
+/// Closing walks a session, a worktree per checkout and a directory, and the
+/// words are what this request is here for — a notice written after a close that
+/// failed would be a move nothing recorded. Nothing between them can be lost the
+/// other way round: a Closed Conversation takes a notice like any other.
+///
+/// **Named by the machine rather than by its id**, which is what the browser
+/// sends along — see [`ConversationMove`]. The device the work
+/// went to is a member of *the browser's* device rather than necessarily of this
+/// one: a laptop moves a draft from the desktop to the WSL beside it, and the
+/// desktop may never have been linked to the WSL. So the name comes with the id
+/// from the one machine that knows both, and the id is written beside it for
+/// whoever reads this back against a cluster whose names have moved.
+pub(crate) async fn moved(
+    state: &AppState,
+    id: i64,
+    to: &ConversationMove,
+) -> Result<ConversationClosed> {
+    let said = format!(
+        "This draft's work moved to **{}** — it is Conversation {} there. \
+         Nothing was left to do here, so this one is closed.\n\n\
+         The device is `{}`.",
+        to.name, to.conversation, to.device,
+    );
+
+    if !store::note(&state.pool, id, &said).await? {
+        return Ok(ConversationClosed::NoSuchConversation);
+    }
+
+    close(state, id).await
 }
 
 /// The Brief's files, in the shape the workbench draws them.
@@ -1396,10 +1487,10 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     // Read as rows rather than judged off the ids, which is the same reading the
     // pane gets — a Profile whose pair has gone is not one to launch a session
     // under, and the id alone cannot say so.
-    let grilling = crate::profiles::pairing(conversation.grilling_pairing.clone()).await?;
+    let grilling = crate::profiles::pairing(state, conversation.grilling_pairing.clone()).await?;
     let implementation =
-        crate::profiles::pairing(conversation.implementation_pairing.clone()).await?;
-    let review = crate::profiles::picked(conversation.review_pairing.clone()).await?;
+        crate::profiles::pairing(state, conversation.implementation_pairing.clone()).await?;
+    let review = crate::profiles::picked(state, conversation.review_pairing.clone()).await?;
 
     // What kind of work this is, which decides three things below: which roles
     // the press waits on, where it lands the Conversation, and which session it
@@ -1763,7 +1854,17 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
             .map(|skills| skills::grilling(skills, &brief))
         && let Err(error) = state
             .sessions
-            .start(pool, &state.nudges, &conversation, &pairing, &prompt)
+            .start(
+                pool,
+                &state.nudges,
+                state.devices.as_ref(),
+                &conversation,
+                &pairing,
+                &prompt,
+                // Nothing held: this is a Conversation's first session, so there
+                // is nothing anybody left open for it.
+                crate::sessions::Held::nothing(&state.settlements),
+            )
             .await
     {
         tracing::error!(error = ?error, conversation_id = id, "a grilling session could not be started");
@@ -2271,10 +2372,10 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
     // All of them, rather than only the one the work runs under: a stage
     // inherits every one from its predecessor, so what this one is adopted with
     // is what every stage after it starts with.
-    let grilling = crate::profiles::pairing(conversation.grilling_pairing.clone()).await?;
+    let grilling = crate::profiles::pairing(state, conversation.grilling_pairing.clone()).await?;
     let implementation =
-        crate::profiles::pairing(conversation.implementation_pairing.clone()).await?;
-    let review = crate::profiles::picked(conversation.review_pairing.clone()).await?;
+        crate::profiles::pairing(state, conversation.implementation_pairing.clone()).await?;
+    let review = crate::profiles::picked(state, conversation.review_pairing.clone()).await?;
 
     if let Some(refusal) = unready(grilling.as_ref(), implementation.as_ref(), &review) {
         return Ok(refusal.adopting());
@@ -2618,7 +2719,8 @@ async fn alongside(
     // The row first, because everything after it is written against the id — and
     // a Repo taken off the registry between the press and here is the one thing
     // that refuses it.
-    let started = store::start_conversation(&state.pool, adopting.repo.id, &branch).await;
+    let started =
+        store::start_conversation(&state.pool, adopting.repo.id, &branch, &state.device).await;
 
     let id = match started {
         Ok(Some(id)) => id,
@@ -3164,8 +3266,8 @@ pub(crate) async fn take_up(state: &AppState, id: i64, discarding: &[i64]) -> Re
     // reads them: a Profile whose pair has gone is not one to run a session
     // under, and the id alone cannot say so.
     let implementation =
-        crate::profiles::pairing(conversation.implementation_pairing.clone()).await?;
-    let review = crate::profiles::picked(conversation.review_pairing.clone()).await?;
+        crate::profiles::pairing(state, conversation.implementation_pairing.clone()).await?;
+    let review = crate::profiles::picked(state, conversation.review_pairing.clone()).await?;
 
     // And how many of them this Process waits on, which is the one thing about
     // the press its own row decides: a **Review** reads the branch under the
@@ -4847,18 +4949,36 @@ fn unready(
     [Some(grilling), Some(implementation), review]
         .into_iter()
         .flatten()
-        .any(|pairing| pairing.profile.broken.is_some())
-        .then_some(Unready::ProfileBroken)
+        .find_map(|pairing| trouble(&pairing.profile))
+        .map(Unready::ProfileBroken)
+}
+
+/// What is wrong with one chosen Profile, in the three facts the row's own
+/// sentence about it is composed out of — or nothing, where it is a row to run
+/// under.
+///
+/// **The same sentence, said at the press.** Every one of the readings is drawn
+/// on the Profile's row before anybody presses anything, and a refusal that
+/// said only *a chosen profile is broken* would be a second, vaguer account of
+/// it — so what goes back is what the row carries, and the viewer composes the
+/// one sentence for both. Which is what makes a Start refused over a Profile
+/// whose home has stopped answering name that machine.
+fn trouble(profile: &ProfileEntry) -> Option<ProfileTrouble> {
+    Some(ProfileTrouble {
+        broken: profile.broken?,
+        agent_type: profile.account.agent_type(),
+        device: profile.device.as_ref().map(|device| device.name.clone()),
+    })
 }
 
 /// What is wrong with a Conversation's pair of Profiles, before it is put in
 /// the words of whichever press asked.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum Unready {
     NoGrillingProfile,
     NoImplementationProfile,
     NoReviewProfile,
-    ProfileBroken,
+    ProfileBroken(ProfileTrouble),
 }
 
 impl Unready {
@@ -4868,7 +4988,7 @@ impl Unready {
             Unready::NoGrillingProfile => GrillingStarted::NoGrillingProfile,
             Unready::NoImplementationProfile => GrillingStarted::NoImplementationProfile,
             Unready::NoReviewProfile => GrillingStarted::NoReviewProfile,
-            Unready::ProfileBroken => GrillingStarted::ProfileBroken,
+            Unready::ProfileBroken(trouble) => GrillingStarted::ProfileBroken(trouble),
         }
     }
 
@@ -4878,7 +4998,7 @@ impl Unready {
             Unready::NoGrillingProfile => Adopted::NoGrillingProfile,
             Unready::NoImplementationProfile => Adopted::NoImplementationProfile,
             Unready::NoReviewProfile => Adopted::NoReviewProfile,
-            Unready::ProfileBroken => Adopted::ProfileBroken,
+            Unready::ProfileBroken(trouble) => Adopted::ProfileBroken(trouble),
         }
     }
 
@@ -4892,7 +5012,7 @@ impl Unready {
                 TakenUp::NoImplementationProfile
             }
             Unready::NoReviewProfile => TakenUp::NoReviewProfile,
-            Unready::ProfileBroken => TakenUp::ProfileBroken,
+            Unready::ProfileBroken(trouble) => TakenUp::ProfileBroken(trouble),
         }
     }
 }
@@ -4919,8 +5039,8 @@ fn unready_to_wrap(implementation: Option<&PairingView>, review: &PickedView) ->
     [Some(implementation), review]
         .into_iter()
         .flatten()
-        .any(|pairing| pairing.profile.broken.is_some())
-        .then_some(Unready::ProfileBroken)
+        .find_map(|pairing| trouble(&pairing.profile))
+        .map(Unready::ProfileBroken)
 }
 
 /// And what is wrong with the one Profile an investigation runs under, or
@@ -4941,11 +5061,7 @@ fn unready_to_investigate(implementation: Option<&PairingView>) -> Option<Unread
         return Some(Unready::NoImplementationProfile);
     };
 
-    implementation
-        .profile
-        .broken
-        .is_some()
-        .then_some(Unready::ProfileBroken)
+    trouble(&implementation.profile).map(Unready::ProfileBroken)
 }
 
 /// The Brief the round a Conversation is in started from.

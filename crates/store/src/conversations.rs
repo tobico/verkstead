@@ -428,6 +428,23 @@ pub struct Conversation {
     /// Conversation acts on these too — the root its sessions are given and the
     /// prompt they are started on.
     pub mcp_servers: Vec<String>,
+
+    /// The devices the agent may move this work to, by Device Id, in the order
+    /// they were ticked — see [`super::permitted`].
+    ///
+    /// The drafting device is never among them: it is always permitted, and
+    /// implicit. Empty is the ordinary Conversation, whose agent may go nowhere
+    /// but home.
+    pub permitted: Vec<String>,
+
+    /// Where the live record is, where this copy is not it — see
+    /// [`super::transferred`].
+    ///
+    /// `None` is every ordinary Conversation: this database's row is the record.
+    /// `Some` is a tombstone, a copy that has been transferred to the device
+    /// named inside and goes by the id beside it there. Nothing writes to one,
+    /// and its own URL leads to wherever the work is now.
+    pub transferred: Option<super::Transferred>,
 }
 
 /// Where a sidebar row's state word got to: the state it names, or the word
@@ -523,6 +540,47 @@ pub struct ConversationRow {
     /// Read here rather than asked for per row, the way the two above are: the
     /// mark is one `EXISTS` over a table with a row per Conversation at most.
     pub unseen: bool,
+
+    /// And where the row sits: its **Rank**, which is what this list is ordered
+    /// by — see [`super::ranks`].
+    ///
+    /// **Carried out rather than left in the `ORDER BY`**, because the device
+    /// the browser opened merges its members' lists with its own by exactly
+    /// this string, and a list that had been ordered and then had the keys
+    /// taken off it could not be merged with another (ADR-0020, *The opened
+    /// device relays*).
+    ///
+    /// Empty where the column is null, which is a database the rewrite has not
+    /// reached yet — and it sorts first, which is where `ORDER BY c.rank` puts
+    /// a null too. A serve ranks every row before it answers anything, so no
+    /// answer of a running server carries one.
+    pub rank: String,
+
+    /// And the key it was born under, as one string — see
+    /// [`super::Birth::key`].
+    ///
+    /// **What one row of a merged list is told apart from another by.** The
+    /// sidebar of a cluster is this device's rows and every member's together,
+    /// and a piece of work that has been transferred has a row in more than one
+    /// of those databases: every copy of it carries this same string, which is
+    /// what lets the merge draw the work once. See `server::merging`.
+    ///
+    /// Empty where the row has none, which is a database the backfill has not
+    /// reached — and a row with nothing to be told apart by is told apart from
+    /// nothing, so it stands on its own. No answer of a running server carries
+    /// one: a serve stamps every Conversation before it answers anything, the
+    /// way it ranks every one of them.
+    pub born: String,
+
+    /// And whether this row is a tombstone: a copy that has been transferred
+    /// away, whose live record is on another device.
+    ///
+    /// **Which is a row the merged list does not draw.** The mark holds the id
+    /// so that old links keep working and a transfer back has somewhere to
+    /// land; what it does not do is stand in the sidebar beside the copy that
+    /// is doing the work — see `server::merging`, and [`super::transferred`],
+    /// which is where the device holding that record is read.
+    pub transferred: bool,
 }
 
 /// The word the `kind` column holds for a Question Set.
@@ -1237,6 +1295,15 @@ pub enum Closing {
 /// And a third column beside them for the stretch between: `naming` says the
 /// work has started on a name Verkstead invented and the first session has been
 /// told to pick a real one — see [`Conversation::naming`].
+///
+/// `rank` is where the row sits in the sidebar: a fractional-indexing key with
+/// the device that issued it suffixed after it (ADR-0020, *Ranks*) — see
+/// [`super::ranks`]. Nullable here and filled by nothing that writes a row:
+/// every start mints one, and a database written before the column existed has
+/// every row of it ranked at the first start that can say which device it is —
+/// see [`super::rank_the_conversations`]. Which is the one thing a column on
+/// this table can be, `conversations` being STRICT and the arrival being what
+/// the rewrites in [`super::migrations`] are.
 pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS conversations (
@@ -1249,6 +1316,7 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
              base_commit               TEXT,
              base_ref                  TEXT,
              state                     TEXT NOT NULL,
+             rank                      TEXT,
              grilling_profile_id       INTEGER REFERENCES profiles(id),
              implementation_profile_id INTEGER REFERENCES profiles(id),
              review_profile_id         INTEGER REFERENCES profiles(id)
@@ -1650,12 +1718,26 @@ async fn collapse_the_direction_state(pool: &SqlitePool) -> Result<()> {
 /// The Brief goes in with it, in the same transaction: the Brief is the first
 /// Event, and a Conversation whose Timeline was empty because the second insert
 /// failed would be one the human could not write anything into.
+///
+/// `device` is this Verkstead's own id, and what it is for is the Rank: the row
+/// is ranked above everything in the sidebar as it is written, with that id
+/// suffixed after the key (ADR-0020, *Ranks*) — see [`started`], where every
+/// start path's minting is.
 pub async fn start_conversation(
     pool: &SqlitePool,
     repo_id: i64,
     branch: &str,
+    device: &str,
 ) -> Result<Option<i64>> {
-    started(pool, repo_id, branch, Named::Settled, Adopts::Nothing).await
+    started(
+        pool,
+        repo_id,
+        branch,
+        device,
+        Named::Settled,
+        Adopts::Nothing,
+    )
+    .await
 }
 
 /// The same, on a name Verkstead invented rather than one anybody settled on.
@@ -1668,8 +1750,17 @@ pub async fn start_unnamed_conversation(
     pool: &SqlitePool,
     repo_id: i64,
     branch: &str,
+    device: &str,
 ) -> Result<Option<i64>> {
-    started(pool, repo_id, branch, Named::Prefilled, Adopts::Nothing).await
+    started(
+        pool,
+        repo_id,
+        branch,
+        device,
+        Named::Prefilled,
+        Adopts::Nothing,
+    )
+    .await
 }
 
 /// Start a Conversation adopting `roadmap` against a registered Repo, on
@@ -1689,11 +1780,13 @@ pub async fn start_adoption(
     repo_id: i64,
     branch: &str,
     roadmap: &str,
+    device: &str,
 ) -> Result<Option<i64>> {
     started(
         pool,
         repo_id,
         branch,
+        device,
         Named::Prefilled,
         Adopts::Roadmap(roadmap),
     )
@@ -1760,21 +1853,43 @@ enum Named {
     Prefilled,
 }
 
-/// What all three of them do: the row, its empty Brief, and the adoption mark
-/// where there is one to write.
+/// What all three of them do: the row, its Rank, its empty Brief, and the
+/// adoption mark where there is one to write.
 ///
 /// All of it in one transaction. A Conversation whose Timeline was empty
 /// because the second insert failed would be one the human could not write
 /// anything into, and one that lost its mark to a third would be a Draft drawn
 /// on the wrong page.
+///
+/// **And the rank is read and written inside that same transaction**, which is
+/// the other thing being one place buys. Ranking above everything means reading
+/// what is at the top, and two Conversations started a moment apart would
+/// otherwise read the same top and mint the same key — they carry the same
+/// suffix, being the same device's, so the suffix is no help at all here. See
+/// [`super::ranks`], and [`super::rank_the_conversations`], which is where the
+/// rows written before there were ranks got theirs.
 async fn started(
     pool: &SqlitePool,
     repo_id: i64,
     branch: &str,
+    device: &str,
     named: Named,
     adopts: Adopts<'_>,
 ) -> Result<Option<i64>> {
     let mut tx = super::writing(pool, "starting a Conversation").await?;
+
+    // Above everything, which is where a Conversation nobody has had the chance
+    // to place belongs — and writing it down rather than leaving the row
+    // unranked is what makes *the unplaced float to the top* a rule the sidebar
+    // no longer needs.
+    let top: Option<String> = sqlx::query_scalar(
+        "SELECT rank FROM conversations WHERE rank IS NOT NULL ORDER BY rank LIMIT 1",
+    )
+    .fetch_optional(&mut *tx)
+    .await
+    .context("reading the rank at the top of the sidebar")?;
+
+    let rank = super::ranks::between(None, top.as_deref(), device)?;
 
     // The registry is asked in the insert's own `SELECT` rather than before it,
     // for the reason the path's uniqueness is left to the index: a look taken
@@ -1787,8 +1902,8 @@ async fn started(
     // name somebody chose has that name to fall back on and no other.
     let row: Option<(i64,)> = sqlx::query_as(
         "INSERT INTO conversations
-             (repo_id, created_at, branch, named_branch, base_commit, state)
-         SELECT id, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?, ?, NULL, ?
+             (repo_id, created_at, branch, named_branch, base_commit, state, rank)
+         SELECT id, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?, ?, NULL, ?, ?
          FROM repos
          WHERE id = ? AND id NOT IN (SELECT repo_id FROM unregistered_repos)
          RETURNING id",
@@ -1796,6 +1911,7 @@ async fn started(
     .bind(branch)
     .bind((named == Named::Settled).then_some(branch))
     .bind(Lifecycle::Draft.stored())
+    .bind(&rank)
     .bind(repo_id)
     .fetch_optional(&mut *tx)
     .await
@@ -1804,6 +1920,22 @@ async fn started(
     let Some((id,)) = row else {
         return Ok(None);
     };
+
+    // And the key it was born under, which is this device and the id the insert
+    // just issued: a Conversation drafted here has never moved, and that is
+    // exactly what the pair says. Inside this transaction for the rank's reason —
+    // a Conversation whose key went missing to a later failure would be one the
+    // Merged List could not tell from a copy of somebody else's work. See
+    // [`super::births`].
+    super::births::stamp(
+        &mut tx,
+        id,
+        &super::Birth {
+            device: device.to_owned(),
+            id,
+        },
+    )
+    .await?;
 
     // Empty, because nothing has been written yet. It is an Event all the same:
     // the Brief is the first thing on the Timeline whether or not it says
@@ -1943,14 +2075,24 @@ pub async fn waiting(pool: &SqlitePool, conversation_id: i64) -> Result<bool> {
 ///
 /// The order is theirs: this is one person's working set, and which piece of
 /// work sits at the top is something they say by dragging a row rather than
-/// something a sort decides — see [`super::place_conversations`], which is where
-/// what they said is kept.
+/// something a sort decides. What they said is the **Rank** each row carries —
+/// see [`super::ranks`] — so ordering this list is reading one column, and a
+/// drag writes one row rather than renumbering the table.
 ///
-/// What has never been placed goes above what has, newest first among itself.
-/// A Conversation started a minute ago is the one thing on this list nobody has
-/// had the chance to place, and putting it at the top is both the predictable
-/// answer and the useful one: it arrives where it will be seen, and the hand-made
-/// order underneath it is left exactly as it was.
+/// **And the rank comes out on the row as well as into the `ORDER BY`.** This
+/// list is merged with the lists a device holds of its members, and whoever does
+/// that merging needs the keys: a list ordered here and then stripped of them
+/// could not be put in order with another (ADR-0020, *The opened device
+/// relays*).
+///
+/// **There is no unplaced Conversation for the order to make a case of.** A
+/// start mints a rank above everything — see [`started`] — so the row nobody
+/// has had the chance to move is at the top because its own rank says so,
+/// rather than because the query says something about a null. `c.id DESC`
+/// under the rank is a stated order for rows that have no rank at all, which
+/// is a database the rewrite has not reached yet: a serve ranks every row
+/// before it answers anything, and two ranks that are there are distinct by
+/// construction, each carrying the device that issued it.
 ///
 /// `waiting` is folded inside the query rather than by the caller, because
 /// every source of it is a read of this database and the sidebar is one list: a
@@ -1970,25 +2112,61 @@ pub async fn waiting(pool: &SqlitePool, conversation_id: i64) -> Result<bool> {
 /// above, because the two say different things and the row says which in words:
 /// *something wants you* against *there is news here*.
 ///
-/// What the human has archived is not here at all, unless they have asked to be
-/// shown it — see [`super::archive_conversation`] and
-/// [`super::showing_archived`]. Archiving is the one thing that takes a
+/// And the key each row was born under rides along a fourth time, with the mark
+/// saying whether this copy is a tombstone beside it — see
+/// [`ConversationRow::born`] and [`super::births`]. Both out of the join rather
+/// than asked per row, for the reason the three above are.
+///
+/// **A tombstone is on this list.** What drops it is the merge, one layer up,
+/// because that is where a cluster's one sidebar is made and where the live copy
+/// of the same work is in hand — see `server::merging`. A lone Verkstead has no
+/// merge and so no such row either, nothing having been transferred anywhere.
+///
+/// What the human has archived is not here at all, unless `showing_archived`
+/// says they have asked to be shown it — see [`super::archive_conversation`]
+/// and [`super::showing_archived`]. Archiving is the one thing that takes a
 /// Conversation off this list, and it takes it off nothing else: its Timeline,
 /// its branch and its own page are where they were.
 ///
-/// The toggle is read inside the query rather than handed in, because it is a
-/// fact about this list and this is the one thing that draws it: a caller given
-/// the choice would be a second place to get it wrong, and there is no other way
-/// the sidebar should ever be read.
+/// **The position is handed in rather than read inside the query**, because the
+/// list it draws is the cluster's rather than this machine's (ADR-0020, *The
+/// opened device relays*). The switch is the human's standing choice about a
+/// list, and the list they are looking at is the one the device they opened
+/// merged — so that device's position is what every member is asked with, and a
+/// member reading its own rows out for a hub answers to the hub's rather than to
+/// the one its own browser last stood at. Reading the row in here would be this
+/// query deciding that on the wrong machine.
+///
+/// So the endpoint that draws a sidebar says which position it is drawing at,
+/// and the sweeps that walk every Conversation — a restart's resume, the stall
+/// sweep — ask for the lot: an archived Conversation is a Closed one, and
+/// neither sweep has anything to say about one either way.
 ///
 /// A row whose state word this Verkstead does not know is still on the list,
 /// carrying the word — see [`RowState`]. Every other read of that column
 /// refuses one, and this one cannot afford to: the list is the only route to a
 /// Conversation's own page, so one bad row failing it would leave the human
 /// with nothing to press on any of them.
-pub async fn conversations(pool: &SqlitePool) -> Result<Vec<ConversationRow>> {
+pub async fn conversations(
+    pool: &SqlitePool,
+    showing_archived: bool,
+) -> Result<Vec<ConversationRow>> {
     /// The columns in the order the query below selects them.
-    type Row = (i64, String, bool, bool, String, String, bool, bool, bool);
+    type Row = (
+        i64,
+        String,
+        bool,
+        bool,
+        String,
+        String,
+        bool,
+        bool,
+        bool,
+        String,
+        Option<String>,
+        Option<i64>,
+        bool,
+    );
 
     let rows: Vec<Row> = sqlx::query_as(&format!(
         "SELECT c.id, COALESCE(c.named_branch, c.branch),
@@ -2012,17 +2190,23 @@ pub async fn conversations(pool: &SqlitePool) -> Result<Vec<ConversationRow>> {
                 EXISTS (
                     SELECT 1 FROM unseen_conversations u
                     WHERE u.conversation_id = c.id
-                ) AS unseen
+                ) AS unseen,
+                COALESCE(c.rank, '') AS rank,
+                b.device AS born_on, b.born_as,
+                EXISTS (
+                    SELECT 1 FROM transferred t WHERE t.conversation_id = c.id
+                ) AS transferred
          FROM conversations c
          JOIN repos r ON r.id = c.repo_id
-         LEFT JOIN placements m ON m.conversation_id = c.id
-         WHERE EXISTS (SELECT 1 FROM shown_archives)
+         LEFT JOIN births b ON b.conversation_id = c.id
+         WHERE ?
             OR NOT EXISTS (
                    SELECT 1 FROM archived_conversations a WHERE a.conversation_id = c.id
                )
-         ORDER BY m.place IS NULL DESC, m.place, c.id DESC",
+         ORDER BY c.rank, c.id DESC",
         waiting = waits_on_the_human(),
     ))
+    .bind(showing_archived)
     .fetch_all(pool)
     .await
     .context("listing the Conversations")?;
@@ -2040,6 +2224,10 @@ pub async fn conversations(pool: &SqlitePool) -> Result<Vec<ConversationRow>> {
                 waiting,
                 narrowed_to_checks,
                 unseen,
+                rank,
+                born_on,
+                born_as,
+                transferred,
             )| ConversationRow {
                 id,
                 branch,
@@ -2057,9 +2245,96 @@ pub async fn conversations(pool: &SqlitePool) -> Result<Vec<ConversationRow>> {
                 waiting,
                 narrowed_to_checks,
                 unseen,
+                rank,
+                // The two halves of the key put back together, or nothing at
+                // all where the row has neither — see [`ConversationRow::born`].
+                born: match (born_on, born_as) {
+                    (Some(device), Some(id)) => super::Birth { device, id }.key(),
+                    _ => String::new(),
+                },
+                transferred,
             },
         )
         .collect())
+}
+
+/// Write one Conversation's **Rank**: the key the device that merges the lists
+/// minted for it, put on that row and on nothing else.
+///
+/// **The sentence is *this row's rank is now this*** rather than *this row,
+/// under that one*, and that is the whole of what changed when the sidebar
+/// became the cluster's. A neighbour on a merged list may be a row this database
+/// has never heard of — ids are numbered per device, so the `7` a hub means is
+/// not the `7` found here — and the one thing that crosses a device boundary
+/// intact is the key itself. So the hub reads both neighbours off the merged
+/// list it holds, mints between them, and hands the row's owner the answer. See
+/// `server::ranking`, which is the one place a key is minted for a row that
+/// already has one, and [`super::ranks`], which is the arithmetic.
+///
+/// **The suffix on it is the owner's**, which is what makes the rank that
+/// arrives here this device's own to keep: the hub mints with the Device Id of
+/// the row that moved, whoever its neighbours belong to. Nothing here checks it
+/// — a rank is an opaque string to everything but the arithmetic, and a device
+/// sending a key of some other shape would be one this device is not in a
+/// cluster with.
+///
+/// **An id naming no Conversation writes nothing, and is not a refusal.** A
+/// viewer sends the list it drew and a Conversation can be closed and swept from
+/// under it, so the `UPDATE` finding nothing is the ordinary end of a drag that
+/// was overtaken rather than something to report.
+///
+/// One statement rather than a transaction, there being nothing to read: what
+/// used to be read here — the two neighbours, inside the write, so that two
+/// drops into one gap could not mint one key — is read on the hub now and held
+/// apart there. See `server::ranking`, where what that costs is set out.
+pub async fn rank_conversation(pool: &SqlitePool, conversation_id: i64, rank: &str) -> Result<()> {
+    sqlx::query("UPDATE conversations SET rank = ? WHERE id = ?")
+        .bind(rank)
+        .bind(conversation_id)
+        .execute(pool)
+        .await
+        .with_context(|| format!("ranking Conversation {conversation_id}"))?;
+
+    Ok(())
+}
+
+/// Every Conversation's **Rank**, by the id this database numbered it.
+///
+/// This device's half of the table a mint is made against — see
+/// `server::ranking`. Every row rather than the sidebar's, the archived and the
+/// closed alike: what a mint needs beyond the neighbour named is the rank *under
+/// the gap*, and a row the switch is hiding still sits in the order. A key
+/// minted over a list with the hidden rows left out could land on one of them.
+///
+/// Rows from a database the rewrite has not reached carry no rank and are left
+/// out, there being nothing to order them by. No served answer holds one: a
+/// serve ranks every Conversation before it answers anything.
+pub async fn conversation_ranks(pool: &SqlitePool) -> Result<Vec<(i64, String)>> {
+    sqlx::query_as("SELECT id, rank FROM conversations WHERE rank IS NOT NULL ORDER BY rank")
+        .fetch_all(pool)
+        .await
+        .context("reading where every Conversation sits")
+}
+
+/// And where one of them sits, which is the other way a rank is read.
+///
+/// A transfer carries it verbatim onto the device the work is moving to — the
+/// key and the Device Id that issued it, unchanged, so the copy keeps its place
+/// in the merged order (ADR-0020, *Transfer*). One row rather than the list
+/// above because that is the question: a move is about one Conversation, and a
+/// mint is the only thing that wants every neighbour.
+///
+/// `None` is a row from a database the rewrite has not reached, which no served
+/// answer holds.
+pub async fn conversation_rank(pool: &SqlitePool, id: i64) -> Result<Option<String>> {
+    let row: Option<(Option<String>,)> =
+        sqlx::query_as("SELECT rank FROM conversations WHERE id = ?")
+            .bind(id)
+            .fetch_optional(pool)
+            .await
+            .with_context(|| format!("reading where Conversation {id} sits"))?;
+
+    Ok(row.and_then(|(rank,)| rank))
 }
 
 /// How much work is on one Repo, counted by whether it is over.
@@ -2204,6 +2479,11 @@ pub async fn load_conversation(pool: &SqlitePool, id: i64) -> Result<Option<Conv
         target: target(pool, id).await?,
         companions: super::companions(pool, id).await?,
         mcp_servers: super::mcp_servers(pool, id).await?,
+        permitted: super::permitted_devices(pool, id).await?,
+        // A read of its own beside the row for the worktree's reason: nearly
+        // every Conversation has no mark at all, and a `LEFT JOIN`'s worth of
+        // column would say nothing this does not — see [`super::births`].
+        transferred: super::transferred(pool, id).await?,
     }))
 }
 

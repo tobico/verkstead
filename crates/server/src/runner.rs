@@ -4242,7 +4242,18 @@ async fn launch(state: &AppState, conversation_id: i64, inside: Prompt) -> Optio
 
     match state
         .sessions
-        .start(&state.pool, &state.nudges, &conversation, &pairing, &prompt)
+        .start(
+            &state.pool,
+            &state.nudges,
+            state.devices.as_ref(),
+            &conversation,
+            &pairing,
+            &prompt,
+            // Nothing held: a run's relaunch locks no Question Set, so there is
+            // nothing for the launch to make good either way — see
+            // [`crate::sessions::Held`].
+            crate::sessions::Held::nothing(&state.settlements),
+        )
         .await
     {
         Ok(session) => {
@@ -5049,6 +5060,7 @@ mod tests {
                 },
                 models: vec![model.to_owned()],
                 memory: true,
+                mirror: None,
             },
             model: Some(model.to_owned()),
         }

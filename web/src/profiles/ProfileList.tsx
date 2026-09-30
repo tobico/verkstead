@@ -51,6 +51,14 @@
 //! agent type stays on the card as the mark it is drawn by rather than as a
 //! word, and is the form's own field in the pane, over the paths it decides.
 //!
+//! And under that line, on the rows that have one, the machine the account is
+//! on: every device of a cluster lists every member's accounts here beside its
+//! own, so which machine a row's account sits on is a fact on the row rather
+//! than a section it is filed under. Nothing at all on this device's own, which
+//! is every row where there is no cluster — and what the warning under it says
+//! for one of those rows is where to go and look rather than a path to put
+//! right, nothing here having fetched the account.
+//!
 //! Removing is in that pane too, under the form. It was a second control on
 //! every row, which put a destructive press beside a list somebody was only
 //! reading; under the form it is beside the Profile it is about, and its
@@ -106,6 +114,7 @@ import { For, Match, Show, Switch, createSignal, type JSX } from "solid-js";
 import { CardButton } from "../CardButton";
 import { Check } from "../Check";
 import { HarnessMark } from "../HarnessMark";
+import { Icon } from "../Icon";
 import { IconButton } from "../IconButton";
 import { PaneSticky } from "../Panes";
 import { PathField } from "../PathField";
@@ -116,8 +125,9 @@ import {
   listProfiles,
 } from "../api/client";
 import { AGENT_NAME, type AgentType } from "../agents";
+import { NOT_USABLE_AWAY, brokenReading } from "../broken";
+import { osIcon } from "../devices";
 import type {
-  Broken,
   ProfileAccount,
   ProfileDeleted,
   ProfileEdit,
@@ -127,7 +137,7 @@ import type {
 import { useReading } from "../freshness";
 import { rowPress } from "../rows";
 import { KNOWN_MODELS, known, prettify } from "../models";
-import { Empty, ErrorLine } from "../notices";
+import { Empty, ErrorLine, Note } from "../notices";
 import { Listbox } from "../picking";
 import { PaneHead } from "../workbench/PaneHead";
 import app from "../App.module.css";
@@ -170,13 +180,6 @@ export const PROFILE_REFUSAL: Record<ProfileSaved, string> = {
 export const PROFILE_REMOVAL_REFUSAL: Record<ProfileDeleted, string> = {
   Removed: "",
   NoSuchProfile: "That profile is gone already.",
-};
-
-/// What is wrong with a profile whose pair is no longer where it was left.
-export const BROKEN: Record<Broken, string> = {
-  DirMissing: "Its claude directory is gone.",
-  ConfigMissing: "Its config file is gone.",
-  HomeMissing: "The home it kept its account under is gone.",
 };
 
 /// One path an account of some agent type is: the key it is held under, what the
@@ -340,7 +343,9 @@ const written = (
 function useProfiles() {
   return useReading(() => ({
     queryKey: ["profiles"],
-    queryFn: listProfiles,
+    // This device's own: the Profiles pane is the settings page's, and a member's
+    // accounts are configured on the member.
+    queryFn: () => listProfiles(null),
     freshness: { reconcile: "id" },
   }));
 }
@@ -462,13 +467,34 @@ function ProfileCard(props: {
           <HarnessMark of={props.profile.account.agent_type} />
           {summary(props.profile)}
         </span>
+        {/* And which machine the account is on, where it is not this one: every
+            device lists every member's accounts as one list, so which machine a
+            row's account sits on is a fact on the row rather than a section it
+            is filed under. Drawn the way a sidebar row draws the same fact —
+            the mark for the operating system and the name after it, the mark
+            unlabelled because the words beside it say it. Nothing at all for
+            this device's own, which is every row where there is no cluster. */}
+        <Show when={props.profile.device}>
+          {(device) => (
+            <span class={styles.device}>
+              <Icon of={osIcon(device().os)} class={styles.os} />
+              {device().name}
+            </span>
+          )}
+        </Show>
         {/* Said here rather than left to be found out when a session will not
             start: the profile was checked when it was saved, and what has become
             of its pair since is the server's to report on every read. */}
-        <Show when={props.profile.broken}>
-          {(broken) => (
-            <ErrorLine class={styles.broken}>{BROKEN[broken()]}</ErrorLine>
-          )}
+        <Show when={brokenReading(props.profile)}>
+          {(why) => <ErrorLine class={styles.broken}>{why()}</ErrorLine>}
+        </Show>
+        {/* And the one thing a row says that is not a refusal: an account with
+            no login file is perfectly runnable here and cannot be lent to
+            another device, there being nothing to mirror. Said on every
+            device's row — a mirror with none is broken and says so above, and
+            this is the same account read where it lives. */}
+        <Show when={!props.profile.login && props.profile.device === null}>
+          <Note>{NOT_USABLE_AWAY}</Note>
         </Show>
       </CardButton>
     </li>
@@ -550,6 +576,23 @@ export function ProfilePane(props: {
           title={adding() ? "Add a profile" : "Edit profile"}
         />
       </PaneSticky>
+
+      {/* And where a save over this Profile goes, on the rows whose account is
+          on another machine. Every device's Profiles section lists every
+          member's accounts and the form over one of those saves like any other
+          — the save and the removal are put to the machine the account is on,
+          as edits of its own Profile (ADR-0020, *Shared Profiles*), and what
+          comes back is that machine's own answer. Said because the paths under
+          it are that machine's rather than this one's, which is the one thing
+          about this form a reader cannot tell by looking at it. */}
+      <Show when={saved()?.device}>
+        {(device) => (
+          <p class={styles.athome}>
+            This account is on {device().name}. Saving or removing it here is
+            put to that machine.
+          </p>
+        )}
+      </Show>
 
       {/* The blank form first, so that adding one never waits on a read it has
           no use for. Everything below it is about a Profile that is saved, and

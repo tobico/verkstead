@@ -125,7 +125,7 @@ harness: boolean, };
  * watching says itself on a Timeline instead — see the server's `continuing`
  * module, which starts the same stage by the other route.
  */
-export type Adopted = "Adopted" | "NoSuchConversation" | "NotDrafting" | "NotAdopting" | "NoGrillingProfile" | "NoImplementationProfile" | "NoReviewProfile" | "ProfileBroken" | "NoGitAuthor" | "FetchFailed" | "NoBaseCommit" | "NoRoadmap" | { "Misdeclared": { 
+export type Adopted = "Adopted" | "NoSuchConversation" | "NotDrafting" | "NotAdopting" | "NoGrillingProfile" | "NoImplementationProfile" | "NoReviewProfile" | { "ProfileBroken": ProfileTrouble } | "NoGitAuthor" | "FetchFailed" | "NoBaseCommit" | "NoRoadmap" | { "Misdeclared": { 
 /**
  * Why, as the judgement put it.
  */
@@ -430,6 +430,43 @@ text_html: string,
  * still needs no markdown parser to draw a header.
  */
 columns: Array<string>, options: Array<OptionView>, };
+
+/**
+ * One device asking to be let into this one's cluster, as the modal draws it.
+ *
+ * **The other side of [`PendingJoin`].** That one is the row the *asking*
+ * device draws while it waits; this is the question the device that was asked
+ * is holding, and it carries the whole of what the asker said about itself
+ * because that is what the human is being asked to judge.
+ *
+ * **And it carries no moment, where the pending row carries a flag.** A row
+ * that has run out is still drawn, reading so — somebody pressed Add over
+ * there and is owed the answer that nobody pressed anything back. A question
+ * that has run out is simply not asked any more, so it is left out of this
+ * list where it is answered, and the modal over it goes when the page reads
+ * the list again. Which leaves the page nothing to count down and nothing to
+ * hold a clock for.
+ *
+ * **The identity whole rather than four fields picked out of it**, the way
+ * [`LinkedDevice`](crate::LinkedDevice) carries one: it is the same description
+ * of a device the join post arrived as and the same one a member row keeps, so
+ * the modal and the row a press on it creates cannot come to disagree about a
+ * name or an OS word. The modal draws the name, the mark for the OS, the first
+ * address advertised and the fingerprint — and that last is the string the
+ * asking device's own pending row is drawing, which is the whole reason both
+ * ends show one.
+ */
+export type AskingDevice = { 
+/**
+ * What this device calls the request, which is what Allow and Deny name.
+ */
+request: string, 
+/**
+ * And what the device asking said it is: the id, the fingerprint of the
+ * certificate the handshake took from it, the name and OS word it is shown
+ * under, and every address it advertised.
+ */
+identity: DeviceIdentity, };
 
 /**
  * And how much Verkstead is to run at once, as the human has just set it.
@@ -754,8 +791,21 @@ export type BriefSaved = "Saved" | "NoSuchConversation" | "NotDrafting";
  * Not a way of being saved: every Profile here passed the same checks when it
  * was written down. This is what has become of its account since — the pair
  * for a Claude Profile, and the one home for every type that keeps one.
+ *
+ * **And three of them are a mirror's**, which is the same question asked of a
+ * Profile whose account is on another machine. None of that machine's paths is
+ * judged here — they belong to no filesystem this device can read — so what is
+ * asked instead is the three things that would stop a launch away from home,
+ * in the order a launch would meet them: the home device answering at all, an
+ * account with a login to lend, and the harness to run it on this machine.
+ *
+ * **Refused rather than hidden.** A row that says why it cannot be run is
+ * something to go and put right, and a row quietly missing is a human looking
+ * for a Profile they know they saved. So none of the three takes a row out of
+ * a picker, and a Pairing made against one goes on reading as a Pairing — with
+ * a broken Profile in it.
  */
-export type Broken = "DirMissing" | "ConfigMissing" | "HomeMissing";
+export type Broken = "DirMissing" | "ConfigMissing" | "HomeMissing" | "HomeUnreachable" | "NoLoginAtHome" | "HarnessMissing";
 
 /**
  * The build cache as the human has just set it.
@@ -1383,7 +1433,106 @@ parked: Parked | null,
  * *something wants you* against *there is news here*. Cleared by opening
  * the Conversation, which the browser says in a call of its own.
  */
-unseen: boolean, };
+unseen: boolean, 
+/**
+ * Where this row sits: its **Rank**, which is the whole of what the list
+ * is ordered by (ADR-0020, *Ranks*).
+ *
+ * **It rides out on the row because the merge cannot be made without
+ * it.** The device the browser opened holds each member's list and merges
+ * it with its own, and what it merges by is this string — every rank
+ * carries the device that issued it, so the keys are distinct
+ * cluster-wide and the merged order is total with no tiebreaker of its
+ * own. A hub holding the rows and not the keys could not put them in an
+ * order at all.
+ *
+ * **And it is what one merged row is told apart from another by**, which
+ * is the other thing it is read for: ids are each device's own and
+ * collide by construction, and this is the one field on a merged list
+ * that is nobody else's.
+ *
+ * Empty where the row has none, which is a database written before there
+ * were ranks and not yet rewritten — it sorts first, exactly where the
+ * list a device draws of its own rows puts it. No served answer carries
+ * one: a serve ranks every Conversation before it answers anything.
+ */
+rank: string, 
+/**
+ * The device this row belongs to, or `null` where there is no cluster and
+ * nothing to say — a lone device draws no device on any row.
+ *
+ * **The server's call rather than the page's**, the membership being what
+ * decides it: a Verkstead linked to nothing draws the sidebar it has
+ * always drawn, and one that is linked says whose every row is — its own
+ * included, so that the list reads as one list rather than as this
+ * device's work with somebody else's mixed in.
+ */
+device: RowDevice | null, 
+/**
+ * The key this Conversation was born under, as one string: the device it
+ * was drafted on and the id it was given there (ADR-0020, *Transfer*).
+ *
+ * **What one row of a merged list is told apart from another by.** A piece
+ * of work that has been transferred has a row in more than one database, and
+ * every copy of it carries this same string — so the merge draws the work
+ * once however many machines hold a copy of it. The rank tells one *row*
+ * from another and this tells one piece of *work* from another, which is why
+ * there are two: two copies of one Conversation carry two ranks and one
+ * birth key.
+ *
+ * Opaque to everything that reads it: it is compared for equality and never
+ * taken apart, exactly as a rank is. Empty where the row has none, which is
+ * a database the backfill has not reached — and one that is empty stands on
+ * its own rather than merging with every other empty one. No served answer
+ * carries one: a serve stamps every Conversation before it answers
+ * anything.
+ */
+born: string, 
+/**
+ * Whether this row is a copy that has been transferred away, its live
+ * record being on another device.
+ *
+ * **Which is the row the merged list drops.** A device that has handed its
+ * Conversation on keeps the copy as a tombstone — it holds the id so that
+ * old links still lead to the work — and what a tombstone is not is a
+ * second row of the sidebar beside the copy doing the work.
+ *
+ * It rides out here because the dropping is the hub's: a member answers its
+ * own rows and has no idea that the device asking is merging them with
+ * anything. See the server's `merging`.
+ */
+transferred: boolean, };
+
+/**
+ * Where a saved draft's work has gone: the device it was moved onto, and the
+ * Conversation it became there (ADR-0020, *Drafting on a device*).
+ *
+ * What the compose page sends to finish a move — the Brief, the branch and the
+ * files having been replayed onto that other device already — so that the draft
+ * left here is closed with the words on its Timeline saying where to look.
+ *
+ * **The name travels with the id.** A Device Id is what a record and a URL name
+ * a device by, and it is not what a human reads; and the machine that made the
+ * move is the only one that is certainly linked to both ends of it — a laptop
+ * moves a draft from the desktop to the WSL beside it, and the desktop need
+ * never have been linked to the WSL. So the name comes from the browser that
+ * knows it rather than being looked up at the end that cannot.
+ */
+export type ConversationMove = { 
+/**
+ * The Device Id of the machine the work went to.
+ */
+device: string, 
+/**
+ * And what that machine is shown as, for the sentence on the Timeline.
+ */
+name: string, 
+/**
+ * The Conversation the work became there, which is a number on that
+ * machine: every Verkstead issues a Conversation 1, so this is read with
+ * the device beside it and never alone.
+ */
+conversation: number, };
 
 /**
  * What became of submitting one.
@@ -1940,7 +2089,56 @@ mcp_servers: Array<AttachedServerView>,
  * has no place in the record and is drawn after everything that does — and
  * a Share, which is the record, carries no trace of it.
  */
-pending_steer: PendingSteerView | null, };
+pending_steer: PendingSteerView | null, 
+/**
+ * Where the live record of this Conversation is, where this copy is not it
+ * (ADR-0020, *Transfer*).
+ *
+ * `null` on every ordinary Conversation, which is nearly all of them: this
+ * device's row *is* the record. Anything else is a tombstone — a copy this
+ * device transferred away and keeps so that old links still lead to the
+ * work — and what the page does about one is leave: the URL naming it
+ * redirects to the device and the id inside, the way the Terminal pane's
+ * old path redirects to Code.
+ *
+ * **And it redirects whether or not that device is answering.** The
+ * redirect is about which copy is the record rather than about who can be
+ * reached, and a tombstone drawn because the far end was asleep would be a
+ * read-only copy of the work presented as the work.
+ */
+transferred: TransferredTo | null, 
+/**
+ * And the machine it is on its way to, where a press has asked for it to be
+ * moved and the move has not run yet (ADR-0020, *Transfer*).
+ *
+ * **The name the human gave that machine**, rather than the Device Id
+ * beside it in [`Self::transferred`]: this one is drawn in a sentence at the
+ * head of the Timeline — *Transferring to the-laptop* — where that one is
+ * the address a redirect is built out of.
+ *
+ * `null` is every Conversation staying where it is. It is the state between
+ * the press and the move: the session running now runs to its own end,
+ * nothing is started after it, and then the work goes.
+ */
+transferring: string | null, 
+/**
+ * The device this Conversation was drafted on — the device in its birth
+ * key — which is always permitted as somewhere its agent may move the work
+ * to, so a session that has moved can go home (ADR-0020, *The agent's
+ * call*).
+ *
+ * `null` where the record has no birth key yet, which is a database the
+ * start-up backfill has not reached.
+ */
+drafted_on: string | null, 
+/**
+ * And the other devices the human has ticked under *May be transferred
+ * to*, by Device Id, in the order they were ticked.
+ *
+ * Never the drafting device, which is implicit. Empty is the ordinary
+ * Conversation, whose agent may go nowhere but home.
+ */
+permitted: Array<string>, };
 
 /**
  * What became of a create.
@@ -2062,6 +2260,129 @@ export type DependencyView = { dependency: Dependency, state: DependencyState,
 install: InstallState, };
 
 /**
+ * One device, as it answers for itself.
+ */
+export type DeviceIdentity = { 
+/**
+ * The Device Id: sixteen random bytes as lower-case hex, invented at this
+ * device's first start and never changing.
+ *
+ * Spelled `device` rather than `id` because that is what the startup line
+ * calls it and what a URL segment will be — an `id` on a payload that is
+ * about a device could be a Conversation's or a Repo's.
+ */
+device: string, 
+/**
+ * And the fingerprint of the certificate the handshake that carried this
+ * answer presented: the SHA-256 of its own bytes, upper-case hex in
+ * colon-separated pairs.
+ *
+ * Answered rather than left to be worked out from the connection, because
+ * the two are checked against each other: a caller compares what it read
+ * here with what the handshake handed it, and a device that named a
+ * certificate other than the one it presented is not the device it says it
+ * is. And it is what the human compares by eye — one person reading off a
+ * phone while another reads off a screen — which is why it is spelled the
+ * way every other tool spells one.
+ */
+fingerprint: string, 
+/**
+ * What this device is *shown* under: the hostname of the machine it is on,
+ * read at the moment this is answered.
+ *
+ * Nothing is configured and nothing is typed. A name somebody could set
+ * would be a name two devices could be given, and what a device is *named
+ * by* is the id above — which was invented precisely because neither the
+ * hostname nor the tailnet node name can be relied on to be anybody's
+ * alone.
+ *
+ * A machine that will not say what it is called reads *this machine*,
+ * which is what the one other sentence naming this box already falls back
+ * to.
+ */
+name: string, 
+/**
+ * And the word for the operating system it is running, which is what
+ * draws the icon beside the name.
+ *
+ * **A WSL reads *Linux (WSL)*, and that is the whole reason this is
+ * here.** A Windows machine and the WSL on it share a hostname, so the
+ * name cannot tell the two apart and this is the only thing that can —
+ * which is the setup cluster mode was written for. Everywhere else it is
+ * the platform's own spelling of itself: *Linux*, *macOS*, *Windows*.
+ */
+os: string, 
+/**
+ * And every address a peer could reach this device on, in the order one
+ * should try them: the tailnet name and its addresses first where
+ * Tailscale is up, then the LAN addresses.
+ *
+ * **All of them, read at each answer rather than configured.** A laptop
+ * moves between the LAN and the tailnet and DHCP moves everybody, so the
+ * address somebody typed to link two devices is only the first one ever
+ * known — this list is what keeps a device that moved reachable.
+ *
+ * Empty is a device on neither a tailnet nor a network, which is an answer
+ * rather than a failure: it still has an id and a fingerprint, and those
+ * are what somebody looking at this is comparing.
+ */
+addresses: Array<string>, };
+
+/**
+ * The **Devices** list, as the Remote access pane reads it off this machine.
+ *
+ * The other side of [`DeviceIdentity`]: that one is what this device tells a
+ * *peer* over the peer listener, and this is what it tells the browser over
+ * the workbench. The same device described twice rather than two descriptions
+ * of it — the identity is carried whole inside this, so the row the pane draws
+ * and the answer a stranger reads cannot come to disagree about a name, an OS
+ * or an address.
+ *
+ * **Read off the machine rather than out of the settings.** Nothing here is
+ * configured, which is why the pane's Devices section reads this rather than
+ * the settings query the rest of the page shares — the two sections beside it
+ * are read the same way and for the same reason.
+ */
+export type DevicesView = { 
+/**
+ * This device, which is the row marked *this device* and the one the list
+ * always holds: a Verkstead linked to nothing still has an identity.
+ */
+this: DeviceIdentity, 
+/**
+ * And every other device in its cluster, each as it last answered for
+ * itself — with whether it is still answering beside it.
+ *
+ * The identity is the same shape as the row above, because it is the same
+ * thing said: a member is drawn with its name, the mark for its OS and the
+ * addresses a peer could reach it on, exactly as this device is. What is
+ * different is where the answer came from — this device reads its own
+ * machine as the pane is drawn, and a member was read off the far end at
+ * the last exchange.
+ *
+ * **The count on the Remote access card comes off this**, rather than
+ * being answered beside it: there is one membership, and a number that
+ * could disagree with the rows would be two answers about it. An
+ * unreachable member counts like any other — it is linked, and a count
+ * that left it out would say the cluster had shrunk.
+ */
+members: Array<LinkedDevice>, 
+/**
+ * And every join this device has asked for and not yet been answered on —
+ * see [`PendingJoin`].
+ *
+ * **Beside the members rather than among them**, because a pending join is
+ * not a device: nothing has been agreed, and a row that sat in the list
+ * looking like a member would be a cluster this device had joined itself
+ * to. The count on the card is the members' alone for the same reason.
+ *
+ * Read at the moment the pane asks, the way the members are: a request
+ * whose ten minutes ran out a second ago reads expired on this answer and
+ * waiting on the one before it, and both are true when they are given.
+ */
+pending: Array<PendingJoin>, };
+
+/**
  * The Diff as the browser receives it: the HTML the server rendered, and the
  * path of each file in it, in Diff order — `paths[0]` is what `#diff-1` shows.
  *
@@ -2124,6 +2445,69 @@ export type DirectoryListing = { "Listed": {
 path: string | null, entries: Array<DirectoryEntry>, } } | "NotAbsolute" | "Missing" | "NotADirectory" | { "Unreadable": { why: string, } };
 
 /**
+ * One device nobody has typed an address for, as the **Discovered** list under
+ * that same section draws it (ADR-0020, *Discovery*).
+ *
+ * **Not a [`DeviceIdentity`], and that is the difference between the two
+ * lists.** An identity is what a member *answered* over a handshake this device
+ * had pinned, with the fingerprint of the certificate it presented in it.
+ * Nothing on this row has been proved like that: it is drawn off an
+ * advertisement on the LAN, which says where a device is and nothing about what
+ * it is, or off a stranger's answer taken under whatever certificate it
+ * happened to show — so there is no fingerprint here, and the string two people
+ * compare by eye is on the pending row the press leaves rather than on this
+ * one.
+ *
+ * **Three kinds of device are not in this list**: a **Member**, which is in the
+ * cluster already; this device, which hears its own advertisement; and a device
+ * a **Join** is already pending for, whose pending row is the answer to the
+ * press somebody made. Where they are left out is the server's `discovery`.
+ */
+export type DiscoveredDevice = { 
+/**
+ * The Device Id this one was heard under, which is what the row is keyed by
+ * and what an **Add** on it names.
+ *
+ * Keyed by it rather than by the address, because that is the one thing
+ * about a device that is nobody else's: two Verksteads on one machine
+ * answer to one hostname on one address, and a list keyed on where
+ * something was found would draw the two of them as one row.
+ */
+device: string, 
+/**
+ * The name it is shown under: the hostname it advertised, or the one it
+ * answered with.
+ */
+name: string, 
+/**
+ * And the word for its operating system, which draws the mark beside the
+ * name — *Linux (WSL)* being the one thing that tells a Windows machine
+ * from the WSL on it.
+ */
+os: string, 
+/**
+ * Where it was found, the port and all, in the order to try them.
+ *
+ * **With the port on every one of them**, unlike the addresses a member
+ * advertises: these are places this device has *heard* something rather
+ * than a device's own account of where it is, so a row drawn from them has
+ * to be one an **Add** can dial as it is written. The port on a LAN address
+ * is the one that device's listener really bound; the port on a tailnet
+ * address is the peer port assumed, a peer list naming none. It is also the
+ * only thing that tells two Verksteads on one machine apart on the page,
+ * both of them answering to one hostname at one address.
+ *
+ * **The LAN ones first where both halves found it**, that being the shorter
+ * road: two machines on one network reach each other without a tailnet in
+ * the middle.
+ */
+addresses: Array<string>, 
+/**
+ * And how this device came to hear of it.
+ */
+found: Array<FoundOn>, };
+
+/**
  * And which of the wizard's nine tabs this machine is.
  *
  * The five Linux distributions whose commands are written down, everything
@@ -2138,6 +2522,28 @@ path: string | null, entries: Array<DirectoryEntry>, } } | "NotAbsolute" | "Miss
  * rather than the one past every Linux.
  */
 export type Distro = "MacOs" | "MacOsIntel" | "Windows" | "NixOs" | "Ubuntu" | "Fedora" | "Debian" | "Arch" | "OtherLinux";
+
+/**
+ * Where the human has just dropped one row of the merged sidebar: which row
+ * moved, and the row it now sits directly under — nothing at all being the top
+ * of the list.
+ *
+ * One row rather than the whole list, because one row is what moved. The device
+ * the browser opened mints the key between that neighbour and whatever is next
+ * below it, out of the merged list it holds, so the arithmetic exists once, in
+ * one language, and the viewer never learns what a rank looks like (ADR-0020,
+ * *Ranks*).
+ *
+ * **Both rows are named by device and id**, because either of them may belong
+ * to any device in the cluster: the hub has every rank in hand — its own in its
+ * store and each member's in the list it holds — so it mints the key itself and
+ * never asks a member what its neighbours are. What the owning device is told
+ * afterwards is the rank, which is [`NewRank`].
+ *
+ * A neighbour that has gone since the list was drawn is not a refusal — see
+ * `server::ranking`.
+ */
+export type DroppedRow = { row: MergedRow, below: MergedRow | null, };
 
 /**
  * What the human's Nothing-else mark on this Set would end, which is the whole
@@ -2584,6 +2990,16 @@ export type FolderListing = { "Listed": {
 path: string, entries: Array<FolderEntry>, } } | "Outside" | "UnderGit" | "RootGone" | "Missing" | "NotAFolder" | { "Unreadable": { why: string, } };
 
 /**
+ * Where a discovered device was found.
+ *
+ * **A list of these on the row rather than one**, because the two sources are
+ * merged by Device Id and a device that is on one LAN *and* one tailnet is
+ * found twice: the row says every way this device was heard of rather than
+ * whichever way was heard of first.
+ */
+export type FoundOn = "Lan" | "Tailscale";
+
+/**
  * What became of starting a Conversation grilling.
  *
  * Every refusal is named rather than collapsed into one, because each of them
@@ -2597,7 +3013,7 @@ path: string, entries: Array<FolderEntry>, } } | "Outside" | "UnderGit" | "RootG
  * the Repo they are about. Nothing gates the button on a companion: the
  * configuration is always complete, so refusal at the start is the whole story.
  */
-export type GrillingStarted = "Started" | "NoSuchConversation" | "NotDrafting" | "NoGrillingProfile" | "NoImplementationProfile" | "NoReviewProfile" | "ProfileBroken" | "EmptyBrief" | "NoGitAuthor" | "FetchFailed" | "NoBaseCommit" | "BranchExists" | "WorktreeRefused" | { "Companion": { 
+export type GrillingStarted = "Started" | "NoSuchConversation" | "NotDrafting" | "NoGrillingProfile" | "NoImplementationProfile" | "NoReviewProfile" | { "ProfileBroken": ProfileTrouble } | "EmptyBrief" | "NoGitAuthor" | "FetchFailed" | "NoBaseCommit" | "BranchExists" | "WorktreeRefused" | { "Companion": { 
 /**
  * What the companion Repo is called, which is what the human picked it
  * by and what they will go and look at.
@@ -2692,6 +3108,31 @@ export type InstallState = { "install": "Idle" } | { "install": "Installing" } |
 why: string, };
 
 /**
+ * One thing the far end has not got.
+ *
+ * Each names the *somewhere* it is to be put right, because each is a different
+ * errand: a repository to open over there, a harness to install over there, or
+ * a machine to go and wake.
+ */
+export type Lacking = "Unreachable" | { "Repo": { 
+/**
+ * What this device calls the repository, which is its directory's own
+ * name and the only name there is to point at.
+ */
+name: string, 
+/**
+ * Whether it is one of the Conversation's Companions rather than the
+ * repository the work itself is in. Both are refusals; they are not
+ * the same sentence.
+ */
+companion: boolean, } } | { "Harness": { role: PairingRole, 
+/**
+ * The Agent Profile's name as it reads here, or nothing for the one
+ * account on its harness that nobody named.
+ */
+profile: string | null, agent_type: AgentType, } };
+
+/**
  * Where a Conversation has got to.
  *
  * The whole ladder, though only the first two are reachable yet: the states are
@@ -2699,6 +3140,30 @@ why: string, };
  * assuming the only one it can currently be.
  */
 export type Lifecycle = "Draft" | "Grilling" | "Implementing" | "Wrapping" | "FollowUp" | "Investigating" | "Done" | "Closed";
+
+/**
+ * One device linked to this one: what it says it is, and whether the last dial
+ * to it got through.
+ *
+ * **Two things rather than one, because only one of them is the far end's.**
+ * The identity is what that machine said about itself at the last exchange;
+ * whether it is answering is this device's own finding, written by a dial that
+ * worked down its addresses and reached none of them. So it sits beside the
+ * identity rather than inside it — a device does not tell anybody it is
+ * unreachable, and the row a peer reads off [`DeviceIdentity`] is the same
+ * whichever machine is asking.
+ */
+export type LinkedDevice = { 
+/**
+ * The device, as it last answered for itself.
+ */
+identity: DeviceIdentity, 
+/**
+ * And whether the last dial to it got through. False is the row drawn
+ * dimmed, reading *unreachable* — it stays on the list, with everything
+ * about it, and an Unlink on it still works.
+ */
+reachable: boolean, };
 
 /**
  * What a Set still waiting on the human says about itself: whether an agent is
@@ -2826,6 +3291,18 @@ export type McpServerEdit = { name: string, url: string, headers: Array<McpHeade
 export type McpServersEdit = "Keep" | { "Set": { servers: Array<McpServerEdit>, } };
 
 /**
+ * One row of the merged sidebar, as a caller names one: the device it lives on
+ * and the id that device numbered it.
+ *
+ * **An id alone is not a row on a merged list.** Every Verkstead issues a
+ * Conversation 1, so the pair is the whole of what names one (ADR-0020, *The
+ * opened device relays*) — the same pair the viewer keys every row by. `null`
+ * is the device the browser opened, which is the one device a page never has an
+ * id for.
+ */
+export type MergedRow = { device: string | null, id: number, };
+
+/**
  * And whether it merges into its base.
  *
  * The store's own word again, and two rather than GitHub's three for the reason
@@ -2898,16 +3375,28 @@ export type NewCompanion = { repo_id: number, };
 export type NewConversation = { repo_id: number, };
 
 /**
- * The order the human has just dragged the sidebar into: every Conversation
- * they can see, by id, top first.
+ * What **Add** takes: an address to go and ask at.
  *
- * The whole list rather than the one row that moved, because the whole list is
- * what a drag produces and what the human is looking at when they let go. A
- * move said as *this one, to there* would have to be replayed against a list
- * the server might have added to since; a list said whole is simply what they
- * meant.
+ * **A port is optional and usually absent.** Every device answers on the peer
+ * port unless its host has been told another, so what somebody types is a
+ * machine's name or its address — and the port is something they should not
+ * have to know. One that carries a port is dialled at it, because an install
+ * that was told to listen elsewhere is reachable no other way.
  */
-export type NewOrder = { order: Array<number>, };
+export type NewJoin = { address: string, };
+
+/**
+ * And what the device that owns a moved row is told: its new **Rank**, minted
+ * by the device that merges the lists.
+ *
+ * **The other sentence a drag is said in.** *This row, under that one* cannot
+ * cross a device boundary — the neighbour may be a row the far end has never
+ * heard of — so what travels is the key itself, which means the same thing on
+ * every machine in the cluster. Reached on a member through the Relay, and used
+ * by the hub on itself for its own rows too, so there is one way a rank is
+ * written.
+ */
+export type NewRank = { rank: string, };
 
 /**
  * A notice as the page receives it: what Verkstead did, and when.
@@ -2935,7 +3424,32 @@ html: string, };
  * the behaviour every kind used to get — so a new kind is safe to add and an
  * old page stays correct against a newer server.
  */
-export type Nudge = { "kind": "transcript", conversation: number, } | { "kind": "screen", conversation: number, } | { "kind": "commit", conversation: number, } | { "kind": "files", conversation: number, } | { "kind": "set", conversation: number, } | { "kind": "liveness", conversation: number, } | { "kind": "conversation", conversation: number, } | { "kind": "conversations" } | { "kind": "repos" } | { "kind": "profiles" };
+export type Nudge = { "kind": "transcript", conversation: number, } | { "kind": "screen", conversation: number, } | { "kind": "commit", conversation: number, } | { "kind": "files", conversation: number, } | { "kind": "set", conversation: number, } | { "kind": "liveness", conversation: number, } | { "kind": "conversation", conversation: number, } | { "kind": "conversations" } | { "kind": "repos" } | { "kind": "joins" } | { "kind": "devices" } | { "kind": "discovered" } | { "kind": "profiles" } | { "kind": "everything" };
+
+/**
+ * One Nudge as it goes down a stream: what moved, and **whose news it is**.
+ *
+ * A page reaches a member's Conversation through the device it opened
+ * (ADR-0020, *The opened device relays*), so the news of one has to arrive on
+ * that device's stream too: the hub holds a Nudge stream to each of its members
+ * and re-announces what comes down one under the Device Id it came from — see
+ * `relaying::freshness`. Which device a Nudge is about is what the viewer's
+ * table keys its invalidation by, ids being each device's own and colliding by
+ * construction.
+ *
+ * **A local Nudge is the JSON it always was.** The device is flattened over
+ * [`Nudge`] and left out when there is none, so what an open page has been
+ * reading since ADR-0009 goes down the wire byte for byte — a kind, and a
+ * Conversation where the change belongs to one — and a member's carries one
+ * field more.
+ */
+export type Nudged = { 
+/**
+ * Which device the news is about: a member of this one's cluster, by its
+ * Device Id — absent for this device's own, which is every Nudge a
+ * workbench has ever sent about its own work.
+ */
+device?: string | null, } & ({ "kind": "transcript", conversation: number, } | { "kind": "screen", conversation: number, } | { "kind": "commit", conversation: number, } | { "kind": "files", conversation: number, } | { "kind": "set", conversation: number, } | { "kind": "liveness", conversation: number, } | { "kind": "conversation", conversation: number, } | { "kind": "conversations" } | { "kind": "repos" } | { "kind": "joins" } | { "kind": "devices" } | { "kind": "discovered" } | { "kind": "profiles" } | { "kind": "everything" });
 
 /**
  * Whether a fresh Verkstead can do anything yet, and what it would take.
@@ -3044,6 +3558,16 @@ text_html: string, recommended: boolean,
 cells: Array<string>, };
 
 /**
+ * Which of a Conversation's three roles a Pairing is for.
+ *
+ * Here rather than read off a Profile, because what a missing harness has to be
+ * named against is the Pairing that wants it: two roles can want two harnesses,
+ * and a sentence that said only *Claude Code is not over there* would leave the
+ * human to work out which picker to go and change.
+ */
+export type PairingRole = "Grilling" | "Implementation" | "Review";
+
+/**
  * One of a Conversation's Pairings, as the page shows it: the Profile
  * whole, and the model paired with it.
  *
@@ -3144,6 +3668,64 @@ export type PathsView = {
 binds: Array<BindEntry>, };
 
 /**
+ * One join this device is waiting on, as the Devices section draws it.
+ *
+ * **A row that is not a device yet.** It sits under the members with nothing of
+ * a device's own on it — no OS mark and no addresses — because nothing has been
+ * agreed: what is known is where this device knocked, what answered, and that
+ * somebody at the far end has been asked.
+ */
+export type PendingJoin = { 
+/**
+ * What the far end calls this request, which is what Cancel names.
+ */
+request: string, 
+/**
+ * The address the question went to, which is the one place this device has
+ * been told to look for the other — and what a Cancel dials.
+ *
+ * The address somebody typed, where the press was a typed one; and where it
+ * was a press on a **Discovered** row, the one that answered out of the list
+ * that row held. Either way it is where this device really knocked rather
+ * than where it was told to try.
+ */
+address: string, 
+/**
+ * And what the device at that address said it is shown under, which is what
+ * the row reads *waiting for confirmation on*.
+ */
+name: string, 
+/**
+ * Whether the ten minutes have run out.
+ *
+ * **This device's own reading of the far end's word for the moment**, made
+ * as the pane is answered. Which is why it is a flag here rather than the
+ * moment itself: the page would otherwise be holding a clock, and the row
+ * says one of two things.
+ *
+ * An expired row is drawn as expired and dismissed rather than taken away
+ * on this device's say-so — somebody pressed Add and is owed the answer
+ * that nobody pressed anything back.
+ */
+expired: boolean, 
+/**
+ * And whether the far end came back and said no.
+ *
+ * **The one thing on this row that was told to this device rather than
+ * read off it**, which is why it sits beside the flag above rather than
+ * being folded into it: an expiry is a clock and a refusal is a press, and
+ * a row that said only *this did not happen* would leave the human unable
+ * to tell a machine nobody was at from a human who said no.
+ *
+ * It outranks the expiry when the page draws the row, because it is the
+ * thing that really happened: a request refused three minutes in is a
+ * refusal for as long as it is drawn, whatever the clock goes on to say.
+ * And it ends at the same press — Dismiss, which is Cancel under another
+ * word.
+ */
+refused: boolean, };
+
+/**
  * A pending steer as the page receives it: when the press was made, and the
  * form as the last save left it.
  *
@@ -3166,6 +3748,16 @@ at: string,
 form: SteerForm, };
 
 /**
+ * What became of ticking or unticking a device under *May be transferred to*
+ * (ADR-0020, *The agent's call*).
+ *
+ * One answer for both presses, because they refuse for the same reasons: an
+ * untick of a device that was not ticked is the state it asked for, so there
+ * is no refusal only one of them could meet.
+ */
+export type Permitting = "Recorded" | "NotAMember" | "DraftedThere" | "WorkIsHere" | "Elsewhere" | "NoSuchConversation";
+
+/**
  * What a Conversation has settled about one of its roles, as the page shows
  * it: the Pairing its sessions run under, that the role runs none, or nothing
  * picked yet.
@@ -3174,6 +3766,13 @@ form: SteerForm, };
  * review* as a row of its own: a Conversation that picked it is as ready to
  * start as one that picked a Pairing, and a page that could not tell it from an
  * empty picker would draw the placeholder over a settled choice.
+ *
+ * One variant carries a Profile and the other two carry nothing, which is what
+ * the size lint is about — a Profile got bigger when it gained the device it is
+ * at home on. Left as it is: these are made one at a time on the way to being
+ * serialized, none of them is held in a collection, and a `Box` in a view type
+ * would be a pointer written into the shape the viewer is generated from for a
+ * few bytes nobody is counting.
  */
 export type PickedView = "Nothing" | "Skipped" | { "Under": PairingView };
 
@@ -3249,6 +3848,23 @@ token: Prefilled | null, };
  * blind.
  */
 export type Prefilled = { value: string, source: Source, };
+
+/**
+ * What one device lacks, as the device holding the work found it.
+ */
+export type Preflight = { 
+/**
+ * The device it was asked of, by the name the human gave that machine —
+ * which is what every one of these findings has to be said against, rather
+ * than sixteen bytes of hex.
+ */
+device: string, 
+/**
+ * Everything in the way, in the order a move would meet it: the machine,
+ * then the repositories, then the harnesses. Empty is a device the work can
+ * go to.
+ */
+lacks: Array<Lacking>, };
 
 /**
  * What kind of work a Conversation is for, and so which states it runs
@@ -3391,16 +4007,44 @@ account: ProfileAccount,
  */
 models: Array<string>, 
 /**
- * `null` while the account is where it was left, which is the ordinary
- * case.
+ * `null` while the account is where it was left and there is nothing in
+ * the way of running a session under it here, which is the ordinary case.
  */
 broken: Broken | null, 
+/**
+ * Whether the account this row names holds a **login file**, which is what
+ * says the Profile can be used away from the device it is at home on.
+ *
+ * Answered on the row wherever it is drawn, and by the device the account
+ * is on: a mirror carries what that machine last said, and this device's
+ * own rows are looked at here. A login kept somewhere that is not a file —
+ * the macOS Keychain — leaves nothing for another device to mirror, and so
+ * does a sign-out; either way the account is still perfectly runnable on
+ * the machine it is on, which is why this is a fact beside [`Self::broken`]
+ * rather than a way of being it. A *mirror* with no login at home is
+ * broken, and that is [`Broken::NoLoginAtHome`].
+ */
+login: boolean, 
 /**
  * Whether a session under this Profile shares the account's memory store,
  * or starts with an empty one of its own. On unless the human switched it
  * off.
  */
-memory: boolean, };
+memory: boolean, 
+/**
+ * Which device this Profile is at home on, and `null` for this one's own —
+ * which is every Profile on a Verkstead that is linked to nothing.
+ *
+ * The same shape a Conversation's row carries whose work it is, and for the
+ * same reason: the name and the mark for the operating system are this
+ * device's own reading of its membership rather than anything the far end
+ * said, and one shape means one way of drawing a device wherever a list has
+ * several machines' rows in it. See [`crate::RowDevice`].
+ *
+ * One list rather than a section per device: a Profile is a Profile, and
+ * which machine its account sits on is a fact on the row.
+ */
+device: RowDevice | null, };
 
 /**
  * What became of saving a Profile.
@@ -3410,6 +4054,31 @@ memory: boolean, };
  * whether or not a form was involved.
  */
 export type ProfileSaved = "Saved" | "NoSuchProfile" | "Modelless" | "NameTaken" | "DefaultTaken" | "DirNotAbsolute" | "DirMissing" | "NotADirectory" | "ConfigNotAbsolute" | "ConfigMissing" | "NotAFile" | "HomeNotAbsolute" | "HomeMissing" | "HomeNotADirectory";
+
+/**
+ * Why a press that would have started a session was refused over a Profile:
+ * what is wrong with it, what it runs, and the machine it is at home on.
+ *
+ * **Enough to say the sentence the row says.** Every one of the readings above
+ * is drawn on the Profile's own row, and a refusal saying only *a chosen
+ * profile is broken* would be a second, vaguer account of something the human
+ * is already being told precisely. So what travels is the three facts that
+ * sentence is composed out of, and the viewer composes it once for both.
+ */
+export type ProfileTrouble = { 
+/**
+ * What is wrong with it.
+ */
+broken: Broken, 
+/**
+ * Which harness it runs, for the trouble that is about the harness.
+ */
+agent_type: AgentType, 
+/**
+ * And the machine the account is at home on, where that is not this one —
+ * which is what the two troubles about a home name.
+ */
+device: string | null, };
 
 /**
  * The grilling's closing proposal as the Set it rides draws it: which direction
@@ -4072,6 +4741,45 @@ diagrams: boolean, };
  * — see [`PickedView`].
  */
 export type RoleChoice = { pairing: ProfileChoice | null, };
+
+/**
+ * Which device a sidebar row belongs to, as the row itself says it.
+ *
+ * **The name and the OS word are the hub's own**, answered on every row
+ * rather than left to be joined against another reading: the hub holds them
+ * for each member and reads its own machine for itself, so nothing in the
+ * viewer needs the Devices section in hand to draw a row.
+ */
+export type RowDevice = { 
+/**
+ * The **Device Id**, or `null` for this device's own rows.
+ *
+ * Which is the shape the viewer already keys its queries and composes its
+ * paths by — `null` is *this device*, and a local URL keeps the shape it
+ * has always had. A row naming this device by its id would be a second
+ * spelling of every local call.
+ */
+id: string | null, 
+/**
+ * What it is shown as: the hostname of the machine, as that machine last
+ * said it.
+ */
+name: string, 
+/**
+ * And the word for its operating system, which is what draws the mark
+ * beside the name. *Linux (WSL)* is the one that is not a bare platform
+ * name, and it is the whole reason the word is carried rather than a
+ * flag.
+ */
+os: string, 
+/**
+ * And whether the device is answering. `false` is the row drawn dimmed,
+ * from the last list this device held of that member.
+ *
+ * Always `true` on this device's own rows: a device that could not reach
+ * itself would not be answering this call.
+ */
+reachable: boolean, };
 
 /**
  * Which of a rule's two patterns something is about.
@@ -4867,6 +5575,10 @@ showing: boolean, };
  * [`ShowArchived`] rather than this — a position, and nothing about what is
  * behind it, that half being the server's own fact.
  *
+ * **One switch for the whole merged list**, which is the device the browser
+ * opened's: every member of its cluster is asked for its rows at this position
+ * rather than filtering by its own (ADR-0020, *The opened device relays*).
+ *
  * Two answers in one payload because the page has one question. The sidebar's
  * list is filtered by the switch in SQL, so an empty list says nothing about
  * which of the two empties it is — nothing archived, or everything archived
@@ -4883,6 +5595,10 @@ showing: boolean,
  * And whether there is anything archived at all, whichever position the
  * switch is in. False is a switch with nothing behind it, which is a
  * switch not worth drawing.
+ *
+ * **Anything archived anywhere in the cluster**, this being the switch for
+ * the merged list: a device with nothing of its own still draws it while a
+ * member has something behind it.
  */
 any: boolean, };
 
@@ -5304,6 +6020,9 @@ export type SteerOpened = "Opened" | "NoSuchConversation";
  * nothing, and a steer whose account has been removed since picked something
  * that is gone. A pane that drew them the same would say *nothing picked* over
  * a choice the human made.
+ *
+ * The size lint is left alone here for [`crate::PickedView`]'s reason, which is
+ * the same shape and the same Profile inside it.
  */
 export type SteerPairingView = "Nothing" | "Removed" | { "Under": PairingView };
 
@@ -5553,7 +6272,11 @@ export type StepsView = {
  */
 dependencies: boolean, 
 /**
- * At least one Agent Profile, however it was made.
+ * At least one Agent Profile, however it was made — a **mirror** of a
+ * member's among them, whose account is fetched from the device it is at
+ * home on before every launch (ADR-0020, *Shared Profiles*). What the step
+ * asks is whether there is an account for a session to run under, and one
+ * of those is.
  */
 accounts: boolean, 
 /**
@@ -5627,7 +6350,7 @@ conversation: number, } } | { "WouldDiscard": {
  * every Conversation standing on a link of it is closed by the one
  * press.
  */
-uncommitted: Array<Uncommitted>, } } | "NoImplementationProfile" | "NoReviewProfile" | "ProfileBroken" | "FetchFailed" | "NoHeadBranch" | "BranchAhead" | "BranchDiverged" | "FastForwardFailed" | { "CheckedOutElsewhere": { 
+uncommitted: Array<Uncommitted>, } } | "NoImplementationProfile" | "NoReviewProfile" | { "ProfileBroken": ProfileTrouble } | "FetchFailed" | "NoHeadBranch" | "BranchAhead" | "BranchDiverged" | "FastForwardFailed" | { "CheckedOutElsewhere": { 
 /**
  * Where it is checked out, as git named it.
  */
@@ -5929,6 +6652,42 @@ whole: boolean,
  * and the shape of it is [`Cursor`]'s business alone.
  */
 cursor: string, };
+
+/**
+ * Which copy of a transferred Conversation is the live one: the device holding
+ * it, and the id it goes by there.
+ *
+ * **The Device Id rather than `null` for this device**, unlike the block a
+ * sidebar row carries. A record is read through whichever device the browser
+ * opened — this one's own, or a member's over the Relay — so the answer is that
+ * machine's account of where the work went, and a `null` in it would mean
+ * *whoever answered* rather than *here*. What turns it back into a path is the
+ * page, which knows which device it is reading and what this one's id is.
+ */
+export type TransferredTo = { 
+/**
+ * The **Device Id** of the machine holding the live record.
+ */
+device: string, 
+/**
+ * And the id that machine numbered its copy, which is the other half of
+ * where the redirect goes.
+ */
+id: number, };
+
+/**
+ * What became of pressing **Go**.
+ *
+ * Named the way the stops' and the close's answers are, and for their reason: a
+ * press that quietly did nothing would leave the human waiting for work to move
+ * that was never going anywhere.
+ *
+ * **Nothing here says the work has arrived**, because nothing could: the press
+ * writes down that the Conversation is going, and the move runs once the turn
+ * the session is part way through has ended. What says it landed is the record
+ * itself — the copy over there, and the mark on the copy here.
+ */
+export type Transferring = "Transferring" | { "Lacking": Preflight } | "NotTransferable" | "Elsewhere" | "NoSuchConversation";
 
 /**
  * Whether a declaration answered, and what it called itself or why it did not.

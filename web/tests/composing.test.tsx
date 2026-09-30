@@ -14,6 +14,7 @@
 //! the replay when one is made, is this page's own doing and is asked about here.
 
 import {
+  cleanup,
   fireEvent,
   screen,
   waitFor,
@@ -24,7 +25,10 @@ import { beforeEach, describe, expect, it } from "vitest";
 import type {
   AbandonedRepo,
   Adopted,
+  ConversationEntry,
+  ConversationView,
   Created,
+  DevicesView,
   DirectoryListing,
   Process,
   ProfileEntry,
@@ -45,7 +49,13 @@ import {
   ATTACH_REFUSAL,
   SERVER_REFUSAL,
 } from "../src/workbench/Composer";
-import { BRANCH_REFUSAL, TARGET, TARGET_REFUSAL } from "../src/workbench/Setup";
+import {
+  BASE_REFUSAL,
+  BRANCH_REFUSAL,
+  TARGET,
+  TARGET_REFUSAL,
+  TICK_REFUSAL,
+} from "../src/workbench/Setup";
 // The Processes the picker offers and the words they are said in, read rather
 // than spelled out again: what the row offers is that list and nothing else.
 import { OFFERED, PROCESS, ROLES } from "../src/workbench/processes";
@@ -53,7 +63,13 @@ import {
   CREATE_REFUSAL,
   REFUSAL as REPO_REFUSAL,
 } from "../src/repos/RepoList";
-import { repoParent, setRepoParent } from "../src/device";
+import { osIcon } from "../src/devices";
+import {
+  draftingOn,
+  repoParent,
+  setDraftingOn,
+  setRepoParent,
+} from "../src/remembered";
 import {
   COMPOSING,
   blank,
@@ -63,18 +79,21 @@ import {
   type Composed,
 } from "../src/workbench/composing";
 import {
+  BRANCHES,
   NO_PAIRINGS,
   OPEN,
   PROFILES,
   REPOS,
-  SETTINGS,
+    SETTINGS, SIDEBAR,
   drawn,
   mount,
   openAgent,
   theWorkbench,
 } from "./bench";
 import { carrying, drag, dropOn } from "./dragging";
-import { browse, held, listingAt } from "./fields";
+// The path field's own rows are `browsed`, the listbox's being `rows` below:
+// one page draws both, and a browse's levels are not what a picker offers.
+import { browse, held, listingAt, rows as browsed } from "./fields";
 import {
   actionRows,
   offered,
@@ -85,15 +104,28 @@ import {
   rows,
   showing,
 } from "./pickers";
-import { askedFor, hangs, json, serving, whenever } from "./serving";
+import { askedFor, bytes, hangs, json, serving, whenever } from "./serving";
 import abandoned from "./fixtures/abandoned-roadmaps.json" with { type: "json" };
+import linked from "./fixtures/devices-linked.json" with { type: "json" };
 import listing from "./fixtures/directories.json" with { type: "json" };
 import made from "./fixtures/repo.json" with { type: "json" };
 import told from "./fixtures/settings.json" with { type: "json" };
+import adopting from "./fixtures/conversation-adopting.json" with { type: "json" };
+import shared from "./fixtures/profiles-shared.json" with { type: "json" };
 
 /// The roadmaps nothing is driving, as the server answers for them: three of
 /// them in one repo, the last found on a branch that has not merged.
 const ABANDONED = abandoned as AbandonedRepo[];
+
+/// And this machine with a cluster around it: two members, one a macOS laptop
+/// that answered the last dial and one a WSL that did not. Which is the reading
+/// the device select is drawn off — see the `describe` below.
+const LINKED = linked as DevicesView;
+
+/// And a draft whose Brief is a roadmap stage's, for the one thing the device
+/// select is settled by that is not a cut branch: the stage is in the repository
+/// the roadmap is written in, which is one device's registry.
+const ADOPTING = adopting as ConversationView;
 
 /// What the page put on the wire when it wrote to `path`, and how often it did.
 ///
@@ -133,6 +165,11 @@ function order(fetching: ReturnType<typeof serving>, path: string): number {
 /// it.
 const upload = (name: string) =>
   `/api/ui/conversations/${OPEN.id}/attachments/${name}`;
+
+/// And what the server says when it takes one: the record it made, which is what
+/// the composer of the draft this page lands on draws its pill from.
+const attached = (id: number, name: string) =>
+  json({ Attached: { attachment: { id, name, bytes: 4, origin: "Brief" } } });
 
 /// The hidden picker the paperclip reaches, and files chosen through it —
 /// which is what a browser does when somebody picks them.
@@ -180,7 +217,7 @@ async function attachMenu(): Promise<HTMLElement> {
 }
 
 /// What it is offering, in the order it offers it.
-function offering(card: ParentNode): string[] {
+function offeredIn(card: ParentNode): string[] {
   return [...card.querySelectorAll('[role="menuitem"]')].map((row) =>
     row.textContent!.trim(),
   );
@@ -208,6 +245,65 @@ const remembering = (
   },
   review: { Under: { profile: review, model: review.models[0]! } },
 });
+
+/// The member of the cluster the tests below draft onto, and the one beside it:
+/// this device first and then the membership in the order it lists them — a
+/// reachable laptop, and a WSL that did not answer the last dial.
+const MEMBER = LINKED.members[0]!.identity;
+const AWAY = LINKED.members[1]!.identity;
+
+/// And the Agent Profiles a device in a cluster answers: two of its own, and a
+/// mirror of a member's account with the machine it is at home on.
+const SHARED = shared as ProfileEntry[];
+const SHARED_MACHINE = SHARED[2]!.device!;
+
+/// Where a call for that member stands. The prefix takes the place of
+/// `/api/ui`, so the far end sees the path the browser would have written
+/// locally — see `src/api/client.ts`, which is the one place a path is composed.
+const at = (path: string) => `/api/ui/members/${MEMBER.device}${path}`;
+
+/// The Repos registered on the member, which are not this device's: a Repo id is
+/// one Verkstead's own, so the two lists collide by construction and the names
+/// are what says which of them a dropdown is drawn off.
+const THEIRS: RepoEntry[] = REPOS.map((repo) => ({
+  ...repo,
+  name: `${repo.name}-on-the-laptop`,
+}));
+
+/// The workbench with a member linked, answering for its own registry and for
+/// what each of its Repos was last grilled with.
+///
+/// At module scope rather than inside the select's own `describe`, because two
+/// of them stand a cluster up: the select and the reading it changes, and the two
+/// rows at the foot of the Repo dropdown, which are the same reading one press
+/// further on.
+function theCluster(...answers: Parameters<typeof serving>) {
+  return theWorkbench(
+    ...REMEMBERED,
+    whenever("/api/ui/devices", json(LINKED)),
+    whenever(at("/repos"), json(THEIRS)),
+    whenever(at("/profiles"), json(PROFILES)),
+    ...THEIRS.map((repo) =>
+      whenever(at(`/repos/${repo.id}/pairings`), json(NO_PAIRINGS)),
+    ),
+    ...answers,
+    json(null),
+  );
+}
+
+/// Draw the compose page over a cluster and pick the member, which is where
+/// everything about the two rows on another device starts.
+///
+/// Waited for the pick to have landed rather than merely made: the select is
+/// drawn off a read of the membership, and what a pick changes is what every
+/// control under it is about — so a test that went on at once would be filling in
+/// the dropdown this device is still holding.
+async function draftingOnTheMember(container: ParentNode): Promise<void> {
+  await composing(container);
+  await drawn(container, `.${setup.deviceSelect}`);
+  pick("Device", MEMBER.name);
+  await waitFor(() => expect(showing("Device")).toBe(MEMBER.name));
+}
 
 /// Every registered Repo remembering something, which is what a workbench that
 /// has grilled anything looks like — and what the three role pickers stand on
@@ -244,6 +340,49 @@ function creating(...answers: Parameters<typeof serving>) {
     // which is fired and forgotten.
     json(null),
   );
+}
+
+/// And the same endpoints on the member, which is where a page drafting onto it
+/// walks: the same sequence under the Relay's prefix, and nothing of it on this
+/// device.
+///
+/// Its Repos remember something too, for [`REMEMBERED`]'s reason one machine
+/// along: the press carries a grilling, and the roles it needs answered are
+/// prefilled from the memory the *picked* device holds.
+function creatingOnTheMember(...answers: Parameters<typeof serving>) {
+  return theCluster(
+    ...THEIRS.map((repo) =>
+      whenever(
+        at(`/repos/${repo.id}/pairings`),
+        json(remembering(PROFILES[0]!, PROFILES[1]!, PROFILES[2]!)),
+      ),
+    ),
+    whenever(at("/conversations"), json({ Started: { id: OPEN.id } }), "POST"),
+    whenever(at(`/conversations/${OPEN.id}/brief`), json("Saved"), "POST"),
+    whenever(at(`/conversations/${OPEN.id}/branch`), json("Renamed"), "POST"),
+    whenever(at(`/conversations/${OPEN.id}/base`), json("Recorded"), "POST"),
+    whenever(at(`/conversations/${OPEN.id}/grill`), json("Started"), "POST"),
+    // And the draft the page lands on, which is the member's own record read
+    // through the same prefix — the page it lands on is an ordinary page of a
+    // member's Conversation.
+    whenever(at(`/conversations/${OPEN.id}`), json(OPEN)),
+    ...answers,
+  );
+}
+
+/// Where one file goes up on the member, which is [`upload`] one machine along.
+const uploadedThere = (name: string) =>
+  at(`/conversations/${OPEN.id}/attachments/${name}`);
+
+/// Pick one of the member's repos, the dropdown being drawn off its registry
+/// rather than this device's.
+async function pickRepoThere(container: ParentNode, id: number): Promise<void> {
+  if (container.querySelector(`.${setup.repoSelect}`) === null) {
+    await openRepo(container);
+  }
+
+  await waitFor(() => expect(offered("Repo")).toHaveLength(THEIRS.length));
+  pick("Repo", THEIRS.find((repo) => repo.id === id)!.name);
 }
 
 /// The compose page, drawn and waited for.
@@ -319,12 +458,59 @@ async function pickRepo(container: ParentNode, id: number): Promise<void> {
   pick("Repo", REPOS.find((repo) => repo.id === id)!.name);
 }
 
+/// A native `<select>` by the label that names it, once the row a test is about
+/// is really among its options.
+///
+/// Waited for the option rather than for the element: the branches and the repos
+/// alongside are reads of their own, so the control is on the page before what it
+/// offers is — and a `<select>` set to a value it has no option for keeps the one
+/// it had, which is a change nothing hears about.
+function offering(label: string, value: string): Promise<HTMLSelectElement> {
+  return waitFor(() => {
+    const select = screen.getByLabelText(label) as HTMLSelectElement;
+    if (![...select.options].some((option) => option.value === value)) {
+      throw new Error(`the "${label}" select has no option for ${value} yet`);
+    }
+    return select;
+  });
+}
+
+/// What the Create repo card's two fields are labelled, which is how they are
+/// found — on this device and on a member both, it being the one card.
+const WHERE = "Where it goes";
+const CALLED = "What it is called";
+
+/// And what the Open repo card's one field is labelled.
+const PATH = "Absolute path of a git repository";
+
+/// Fill the two in and send them.
+function make(parent: string, name: string): void {
+  fireEvent.input(screen.getByLabelText(WHERE), { target: { value: parent } });
+  fireEvent.input(screen.getByLabelText(CALLED), { target: { value: name } });
+  fireEvent.click(screen.getByRole("button", { name: "Create" }));
+}
+
+/// And what stands where the GitHub tick would have, on a Verkstead with no
+/// token saved — which is what says the card has read the settings and is taking
+/// creates.
+function noRemote(): HTMLElement | null {
+  return screen.queryByText(/needs a remote/i);
+}
+
+/// What Verkstead has been told, which the Create card asks exactly one thing
+/// of: whether a GitHub token is saved. The fixture's has one.
+const TOKENED = told as SettingsView;
+
+/// And the same with none, which is what a Verkstead nobody has told anything
+/// looks like — and what every test that is not about the tick reads.
+const UNTOKENED: SettingsView = { ...TOKENED, github_token: null };
+
 describe("the compose page", () => {
   // Per device, so every test starts on a device holding nothing — and with
   // nothing left over from the create the test before it made.
   beforeEach(() => {
     localStorage.clear();
-    leaveRefusals(0, [], null);
+    leaveRefusals(null, 0, [], null);
   });
 
   it("is the one way into a new conversation from the sidebar", async () => {
@@ -832,6 +1018,460 @@ describe("the compose page", () => {
   });
 });
 
+describe("the device the compose page is drafting onto", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    leaveRefusals(null, 0, [], null);
+  });
+
+  /// Every device the select offers, and the mark each row wears.
+  const marks = (): (string | null | undefined)[] =>
+    offered("Device").map((row) =>
+      row.querySelector("svg path")?.getAttribute("d"),
+    );
+
+  /// What one operating system's mark is drawn as, for comparing against those.
+  const mark = (os: string) => [osIcon(os).icon[4]].flat()[0];
+
+  /// With nothing linked the row is the row it has always been. Which is nearly
+  /// every Verkstead, and the reason this is the first thing asked: a select
+  /// naming the one machine there is would be a control with one answer.
+  it("draws no select at all where there is no other device", async () => {
+    theWorkbench();
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await drawn(container, `.${setup.repoSelect}`);
+
+    expect(container.querySelector(`.${setup.deviceSelect}`)).toBeNull();
+    expect(screen.queryByLabelText("Device")).toBeNull();
+  });
+
+  it("lists this device and each member with its mark, the unreachable one too", async () => {
+    theCluster();
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await drawn(container, `.${setup.deviceSelect}`);
+
+    // This device to begin with, nothing having been picked in this browser.
+    await waitFor(() => expect(showing("Device")).toBe(LINKED.this.name));
+
+    expect(rows("Device")).toEqual([
+      LINKED.this.name,
+      MEMBER.name,
+      AWAY.name,
+    ]);
+
+    // The mark a device wears wherever it is drawn: the WSL reads as Linux,
+    // which is the whole point of the word — and it is listed like any other,
+    // the list being the membership rather than a reachability probe.
+    expect(marks()).toEqual([
+      mark(LINKED.this.os),
+      mark(MEMBER.os),
+      mark(AWAY.os),
+    ]);
+  });
+
+  /// And the pairing pickers are cluster-wide, which is the other list a
+  /// membership changes the shape of: every device offers every member's
+  /// accounts beside its own, with the machine on the row (ADR-0020, *Shared
+  /// Profiles*). Two accounts called `work` are two machines', and the name
+  /// alone would not say which.
+  ///
+  /// `tests/fixtures/profiles-shared.json` is that list as the server really
+  /// answers it — the mirror row carries the machine, and this device's own
+  /// carry none.
+  it("offers a member's accounts on the pairing pickers, with the machine", async () => {
+    theCluster(whenever("/api/ui/profiles", json(SHARED)));
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await drawn(container, `.${setup.deviceSelect}`);
+    await openAgent(container);
+
+    // All three, because a member's account is offered for whichever role the
+    // human would run it in — and the two that can run nothing offer that row
+    // above the accounts, which is on no machine at all.
+    await waitFor(() =>
+      expect(rows("Implementation")).toContain(
+        `Claude Code Opus 5 — personal · ${SHARED_MACHINE.name}`,
+      ),
+    );
+
+    for (const role of ["Grilling", "Review"]) {
+      expect(rows(role)).toContain(
+        `Claude Code Opus 5 — personal · ${SHARED_MACHINE.name}`,
+      );
+    }
+
+    // This device's own say nothing about a machine: a name on every row would
+    // be a column of one answer repeated.
+    expect(rows("Implementation")).toContain("Claude Code Fable 5 — fable");
+
+    // And the member's row wears its machine's mark after the harness's, which
+    // is what a list of several devices' accounts is scanned by.
+    const theirs = offered("Implementation").find((row) =>
+      row.textContent!.includes(SHARED_MACHINE.name),
+    )!;
+
+    expect(
+      [...theirs.querySelectorAll("svg path")].map((drawn) =>
+        drawn.getAttribute("d"),
+      ),
+    ).toContain(mark(SHARED_MACHINE.os));
+  });
+
+  /// And a member's account that cannot be run from here stays on the picker
+  /// and says why (ADR-0020, *Shared Profiles*): a row saying what is in the
+  /// way is something to go and put right, and a row quietly missing is a human
+  /// looking for a profile they know they saved.
+  ///
+  /// Three findings and one word apiece — the short form of the sentence the
+  /// card in the Profiles section says in full, see `src/broken.ts`.
+  it.each([
+    ["HomeUnreachable", "unreachable"],
+    ["NoLoginAtHome", "no login at home"],
+    ["HarnessMissing", "not on this machine"],
+  ] as const)("keeps a member's account reading %s on the picker", async (broken, said) => {
+    theCluster(
+      whenever(
+        "/api/ui/profiles",
+        json(SHARED.map((row) => (row.device ? { ...row, broken } : row))),
+      ),
+    );
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await drawn(container, `.${setup.deviceSelect}`);
+    await openAgent(container);
+
+    await waitFor(() =>
+      expect(rows("Implementation")).toContain(
+        `Claude Code Opus 5 — personal · ${SHARED_MACHINE.name} · ${said}`,
+      ),
+    );
+
+    // And this device's own, which nothing is in the way of, read as they
+    // always did.
+    expect(rows("Implementation")).toContain("Claude Code Fable 5 — fable");
+  });
+
+  /// The select stands left of the Repo, because the Repo is one of the picked
+  /// device's: the question above *which repository* is *whose registry*.
+  it("stands at the head of the setup row", async () => {
+    theCluster();
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await drawn(container, `.${setup.deviceSelect}`);
+
+    const options = container.querySelector(`.${setup.options}`)!;
+    expect(options.firstElementChild!.className).toContain(setup.deviceSelect!);
+  });
+
+  /// The whole of what a pick changes: every control under the row reads the
+  /// picked device, which is one reading rather than anything composed anew.
+  it("makes the repos, the branches and the pairings the picked device's", async () => {
+    const fetching = theCluster(
+      ...THEIRS.map((repo) =>
+        whenever(at(`/repos/${repo.id}/branches`), json(BRANCHES)),
+      ),
+    );
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await drawn(container, `.${setup.deviceSelect}`);
+    pick("Device", MEMBER.name);
+
+    // The Repo dropdown is the member's registry, which is what the names say.
+    await waitFor(() =>
+      expect(offered("Repo")).toHaveLength(THEIRS.length),
+    );
+    expect(rows("Repo")).toEqual(THEIRS.map((repo) => repo.name));
+
+    pick("Repo", THEIRS[1]!.name);
+
+    // And the base picker under it, and the prefill the three role pickers show
+    // — both asked of the member, and neither asked of this device. The panel
+    // has to be open for the base picker to be on the page at all: it is drawn
+    // inside the Repo panel, with the branch and the companions it belongs
+    // beside.
+    await openRepo(container);
+    await waitFor(() =>
+      expect(askedFor(fetching, at(`/repos/${THEIRS[1]!.id}/branches`))).toBe(1),
+    );
+    await waitFor(() =>
+      expect(askedFor(fetching, at(`/repos/${THEIRS[1]!.id}/pairings`))).toBe(1),
+    );
+    expect(askedFor(fetching, `/api/ui/repos/${THEIRS[1]!.id}/branches`)).toBe(0);
+
+    // And the Profiles the three pairing pickers are made of, which is the last
+    // of the reads under the row: an account is a directory on one machine, so
+    // whose accounts is the same question as whose Repos.
+    await waitFor(() =>
+      expect(askedFor(fetching, at("/profiles"))).toBeGreaterThan(0),
+    );
+    expect(screen.getByLabelText("Works alongside")).toBeTruthy();
+  });
+
+  /// The prefill is the picked device's memory of that Repo, which is what a
+  /// draft created there would arrive showing — so it is read off the member and
+  /// what the pickers stand on is its answer rather than this device's.
+  it("shows the prefill the picked device remembers", async () => {
+    theCluster(
+      whenever(
+        at(`/repos/${THEIRS[0]!.id}/pairings`),
+        json(remembering(PROFILES[2]!, PROFILES[1]!, PROFILES[0]!)),
+      ),
+      ...THEIRS.map((repo) =>
+        whenever(at(`/repos/${repo.id}/branches`), json(BRANCHES)),
+      ),
+    );
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await drawn(container, `.${setup.deviceSelect}`);
+    pick("Device", MEMBER.name);
+
+    await waitFor(() => expect(offered("Repo")).toHaveLength(THEIRS.length));
+    pick("Repo", THEIRS[0]!.name);
+
+    await openAgent(container);
+    await waitFor(() =>
+      expect(showing("Grilling")).toBe("Sonnet 5 — sonnet"),
+    );
+  });
+
+  /// A Repo id, a companion's Repo id and a Pairing's Profile id are each one
+  /// device's own, so the pick takes them with it. The words the human wrote do
+  /// not move: a brief is a brief on any machine.
+  it("drops what named the other machine and keeps what was written", async () => {
+    theCluster(
+      ...REPOS.map((repo) =>
+        whenever(`/api/ui/repos/${repo.id}/branches`, json(BRANCHES)),
+      ),
+    );
+    const { container } = mount("/compose");
+
+    const brief = await composing(container);
+    fireEvent.input(brief, { target: { value: "the piece of work" } });
+    choose(container, new File(["notes"], "notes.md"));
+
+    await pickRepo(container, REPOS[0]!.id);
+    await openRepo(container);
+    fireEvent.input(await drawn<HTMLInputElement>(container, "#branch"), {
+      target: { value: "a-branch-of-my-own" },
+    });
+    fireEvent.change(await offering("Base branch", BRANCHES[1]!), {
+      target: { value: BRANCHES[1] },
+    });
+    fireEvent.change(
+      await offering("Works alongside", String(REPOS[1]!.id)),
+      { target: { value: String(REPOS[1]!.id) } },
+    );
+    await drawn(container, `.${setup.companion}`);
+    await openAgent(container);
+    pick("Grilling", "Claude Code Sonnet 5 — sonnet");
+
+    await waitFor(() => {
+      const held = stored();
+      expect(held.base).toBe(BRANCHES[1]);
+      expect(held.companions).toHaveLength(1);
+      expect(held.grilling).not.toBeNull();
+    });
+
+    await drawn(container, `.${setup.deviceSelect}`);
+    pick("Device", MEMBER.name);
+
+    // The repo, the base, the companions and the three pairings are gone with
+    // the machine they named: the Repo slot is the invitation again, which is
+    // the state a page that has picked nothing is in.
+    await drawn(container, `.${setup.repoSelect}`);
+    expect(showing("Device")).toBe(MEMBER.name);
+    expect(showing("Repo")).toBe("Select");
+    expect(container.querySelector(`.${setup.companion}`)).toBeNull();
+
+    const left = stored();
+    expect(left.repo).toBeNull();
+    expect(left.base).toBeNull();
+    expect(left.companions).toEqual([]);
+    expect(left.grilling).toBeNull();
+    expect(left.implementation).toBeNull();
+    expect(left.review).toBeNull();
+
+    // And what the human wrote stayed where it was.
+    expect(
+      (container.querySelector(`.${composer.box} textarea`) as HTMLTextAreaElement)
+        .value,
+    ).toBe("the piece of work");
+    expect(left.brief).toBe("the piece of work");
+    expect(left.branch).toBe("a-branch-of-my-own");
+
+    // The files with them: a file picked here is a handle this page is holding
+    // rather than anything a machine has a name for, so there is nothing about
+    // it that a move could invalidate.
+    expect(pills(container)).toEqual(["notes.md"]);
+  });
+
+  /// Remembered in the browser rather than in the compose draft beside it, so
+  /// the pick outlives a draft of nothing and the create that drops one.
+  it("comes back to the device it was left on", async () => {
+    theCluster(
+      ...THEIRS.map((repo) =>
+        whenever(at(`/repos/${repo.id}/branches`), json(BRANCHES)),
+      ),
+    );
+    const first = mount("/compose");
+
+    await composing(first.container);
+    await drawn(first.container, `.${setup.deviceSelect}`);
+    pick("Device", MEMBER.name);
+    await waitFor(() => expect(showing("Device")).toBe(MEMBER.name));
+
+    cleanup();
+    const second = mount("/compose");
+
+    await composing(second.container);
+    await drawn(second.container, `.${setup.deviceSelect}`);
+    await waitFor(() => expect(showing("Device")).toBe(MEMBER.name));
+
+    // And the Repo dropdown under it is the member's, which is the half that
+    // makes the remembered pick worth anything.
+    await waitFor(() =>
+      expect(rows("Repo")).toEqual(THEIRS.map((repo) => repo.name)),
+    );
+  });
+
+  /// The pick is in this browser and the membership is on the server, so the two
+  /// come apart: a device unlinked while this page was shut is a page that would
+  /// otherwise be pointed at a machine nothing can reach.
+  it("reads as this device where the pick has left the cluster", async () => {
+    theCluster();
+    setDraftingOn("d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0");
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await drawn(container, `.${setup.deviceSelect}`);
+
+    await waitFor(() => expect(showing("Device")).toBe(LINKED.this.name));
+
+    // And the browser is put back too, so the correction is made once rather
+    // than on every visit.
+    expect(draftingOn()).toBeNull();
+
+    // And this device's own registry under it, rather than the lost machine's.
+    await waitFor(() => expect(rows("Repo")).toEqual(REPOS.map((r) => r.name)));
+  });
+
+  /// And the same correction where the select is not drawn at all: the last
+  /// member unlinked takes the control away, and a page left pointed at that
+  /// member would have no control to put it right with.
+  /// And a draft left on that machine goes back with it. The repo it names is a
+  /// number in the lost device's registry, so a page that read as this device and
+  /// kept it would be drafting against whatever repository happens to hold that
+  /// number here.
+  it("takes a stored draft off a device that has left the cluster", async () => {
+    const lost = "d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0";
+
+    // What this device answers for an id that is no member of its cluster: a
+    // refusal before anything is dialled, which is what the reads under the row
+    // get for as long as the page is pointed at the machine that has gone.
+    theCluster(
+      whenever(
+        `/api/ui/members/${lost}/repos`,
+        json({ error: "no device by that id is a member" }, 404),
+      ),
+      whenever(
+        `/api/ui/members/${lost}/repos/${REPOS[1]!.id}/pairings`,
+        json({ error: "no device by that id is a member" }, 404),
+      ),
+    );
+    keep({
+      ...blank(),
+      device: lost,
+      repo: REPOS[1]!.id,
+      brief: "the piece of work",
+    });
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await drawn(container, `.${setup.deviceSelect}`);
+
+    await waitFor(() => expect(showing("Device")).toBe(LINKED.this.name));
+    await waitFor(() => expect(stored().device).toBeNull());
+    expect(stored().repo).toBeNull();
+
+    // The Repo slot is the invitation again, over this device's own registry —
+    // and what the human wrote is where they left it.
+    await drawn(container, `.${setup.repoSelect}`);
+    expect(showing("Repo")).toBe("Select");
+    expect(stored().brief).toBe("the piece of work");
+  });
+
+  it("reads as this device where the cluster has gone altogether", async () => {
+    setDraftingOn(MEMBER.device);
+    theWorkbench();
+    const { container } = mount("/compose");
+
+    await composing(container);
+
+    await waitFor(() => expect(draftingOn()).toBeNull());
+    expect(container.querySelector(`.${setup.deviceSelect}`)).toBeNull();
+    await waitFor(() => expect(rows("Repo")).toEqual(REPOS.map((r) => r.name)));
+  });
+
+  /// The list work is loaded from is this device's own — the roadmaps nothing is
+  /// driving — so a row of it names a Repo on this machine.
+  it("puts the work back on this device when a roadmap is loaded, and settles", async () => {
+    theCluster(whenever("/api/ui/abandoned-roadmaps", json(ABANDONED)));
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await drawn(container, `.${setup.deviceSelect}`);
+    pick("Device", MEMBER.name);
+    await waitFor(() => expect(showing("Device")).toBe(MEMBER.name));
+
+    fireEvent.click(
+      await drawn(container, `.${composer.actions} > .${menu.trigger}`),
+    );
+    fireEvent.click(
+      await waitFor(() => {
+        const level = container.querySelector<HTMLButtonElement>(
+          `.${menu.nested}`,
+        );
+        if (!level || level.disabled) throw new Error("still greyed");
+        return level;
+      }),
+    );
+    fireEvent.click(await drawn(container, `.${composer.roadmapRow}`));
+    await drawn(container, `.${composer.loaded}`);
+
+    // Back here, and settled while the card is over the box: the stage is in a
+    // repository on this machine, so moving the work off would be moving it
+    // away from what it is continuing.
+    await waitFor(() => expect(showing("Device")).toBe(LINKED.this.name));
+    expect((screen.getByLabelText("Device") as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+
+    // The page and not the browser's memory of it: this row is drawn at the
+    // start of every piece of work, and a stage looked at and cleared again is
+    // not somebody saying they have finished with the desktop.
+    expect(draftingOn()).toBe(MEMBER.device);
+
+    // And a select again the moment it is cleared.
+    fireEvent.click(await drawn(container, `.${composer.clear}`));
+    await waitFor(() =>
+      expect(
+        (screen.getByLabelText("Device") as HTMLButtonElement).disabled,
+      ).toBe(false),
+    );
+
+    expect(draftingOn()).toBe(MEMBER.device);
+  });
+});
+
 /// What kind of work the page is composing, which is the one control in the row
 /// that is *not* remembered per repo.
 ///
@@ -842,7 +1482,7 @@ describe("the compose page", () => {
 describe("the process a compose page is composing under", () => {
   beforeEach(() => {
     localStorage.clear();
-    leaveRefusals(0, [], null);
+    leaveRefusals(null, 0, [], null);
   });
 
   /// Where the row reads it, which is the order the row is read in: the
@@ -965,7 +1605,7 @@ describe("the process a compose page is composing under", () => {
 describe("the target a compose page is pointed at", () => {
   beforeEach(() => {
     localStorage.clear();
-    leaveRefusals(0, [], null);
+    leaveRefusals(null, 0, [], null);
   });
 
   /// A page on Review, against the repo it would be composed against, which is
@@ -1627,7 +2267,7 @@ describe("the pickers a compose page's process draws", () => {
 describe("the agent control on a compose page", () => {
   beforeEach(() => {
     localStorage.clear();
-    leaveRefusals(0, [], null);
+    leaveRefusals(null, 0, [], null);
   });
 
   /// The row reads Repo, Process, Agent, and the pickers are what the last of
@@ -1800,7 +2440,7 @@ describe("the agent control on a compose page", () => {
 describe("the agent dropdown on a compose page", () => {
   beforeEach(() => {
     localStorage.clear();
-    leaveRefusals(0, [], null);
+    leaveRefusals(null, 0, [], null);
   });
 
   /// A page holding a one-role Process and the repo it would be composed
@@ -1917,6 +2557,861 @@ describe("the agent dropdown on a compose page", () => {
   });
 });
 
+/// The press, once a member is picked: the Conversation is made over there, every
+/// field and every file of the replay goes there, the kickoff is that device's,
+/// and the page lands on the URL a member's Conversation already stands at.
+///
+/// Which is the whole of what this half adds. The replay is the replay — the same
+/// endpoints in the same order, and each of them refused in its own words — so
+/// what is asked here is *where* every one of them went and where the page ended
+/// up, rather than the sequence itself: that is the first `describe` in this
+/// file's, over this device.
+describe("starting the work on the picked device", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    leaveRefusals(null, 0, [], null);
+  });
+
+  /// Every row of the sidebar as it reads aloud, which is where the device a
+  /// Conversation is on is said: the merged list carries the name on the row.
+  const listed = (container: ParentNode): string[] =>
+    [...container.querySelectorAll(`.${sidebar.open}`)].map(
+      (card) => card.getAttribute("aria-label") ?? "",
+    );
+
+  it("creates on the member, replays every field there and lands on its URL", async () => {
+    const fetching = creatingOnTheMember();
+    const { container, history } = mount("/compose");
+
+    await draftingOnTheMember(container);
+    fireEvent.input(await composing(container), {
+      target: { value: "Make the widget" },
+    });
+    await pickRepoThere(container, THEIRS[1]!.id);
+    await rolesAnswered();
+
+    fireEvent.click(screen.getByRole("button", { name: "Start work" }));
+
+    // The Conversation started against a Repo of the member's, on the member.
+    await waitFor(() =>
+      expect(sent(fetching, at("/conversations"))).toEqual({
+        repo_id: THEIRS[1]!.id,
+      }),
+    );
+    await waitFor(() =>
+      expect(sent(fetching, at(`/conversations/${OPEN.id}/brief`))).toEqual({
+        markdown: "Make the widget",
+      }),
+    );
+    await waitFor(() =>
+      expect(writes(fetching, at(`/conversations/${OPEN.id}/grill`))).toBe(1),
+    );
+
+    // And nothing of it on this device: a Conversation half made here and half
+    // there is two records neither of which is the work.
+    expect(writes(fetching, "/api/ui/conversations")).toBe(0);
+    expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/brief`)).toBe(0);
+    expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/grill`)).toBe(0);
+
+    // The page lands on the member's URL for it, which is the path a member's
+    // Conversation has always stood at.
+    await waitFor(() =>
+      expect(
+        history
+          .get()
+          .startsWith(`/devices/${MEMBER.device}/conversations/${OPEN.id}`),
+      ).toBe(true),
+    );
+
+    // What was being composed is on that machine by now, so this browser holds
+    // none of it — and goes on drafting onto the member, the pick outliving the
+    // draft it was made for.
+    await waitFor(() => expect(localStorage.getItem(COMPOSING)).toBeNull());
+    expect(draftingOn()).toBe(MEMBER.device);
+  });
+
+  /// The branch and the base are the two fields under the Repo that a member's
+  /// answer decides, so both go the same way as the start above them.
+  it("names the branch and records the base on the member", async () => {
+    const fetching = creatingOnTheMember(
+      ...THEIRS.map((repo) =>
+        whenever(at(`/repos/${repo.id}/branches`), json(BRANCHES)),
+      ),
+    );
+    const { container } = mount("/compose");
+
+    await draftingOnTheMember(container);
+    fireEvent.input(await composing(container), {
+      target: { value: "Make the widget" },
+    });
+    await pickRepoThere(container, THEIRS[1]!.id);
+
+    await openRepo(container);
+    fireEvent.input(await drawn(container, "#branch"), {
+      target: { value: "widget-work" },
+    });
+    fireEvent.change(await offering("Base branch", BRANCHES[1]!), {
+      target: { value: BRANCHES[1] },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Save as draft" }));
+
+    await waitFor(() =>
+      expect(sent(fetching, at(`/conversations/${OPEN.id}/branch`))).toEqual({
+        branch: "widget-work",
+      }),
+    );
+    await waitFor(() =>
+      expect(sent(fetching, at(`/conversations/${OPEN.id}/base`))).toEqual({
+        branch: BRANCHES[1],
+      }),
+    );
+    expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/branch`)).toBe(0);
+  });
+
+  /// A `File` is a handle this page is holding rather than anything a machine has
+  /// a name for, so it travels with the Brief it was picked beside — and it goes
+  /// up before the work starts, attachments freezing when it does.
+  it("puts the files it holds on the member, before the work is kicked off", async () => {
+    const fetching = creatingOnTheMember(
+      whenever(uploadedThere("notes.md"), attached(9, "notes.md"), "POST"),
+    );
+    const { container } = mount("/compose");
+
+    await draftingOnTheMember(container);
+    fireEvent.input(await composing(container), {
+      target: { value: "Make the widget" },
+    });
+    choose(container, new File(["notes"], "notes.md"));
+    await pickRepoThere(container, THEIRS[0]!.id);
+    await rolesAnswered();
+
+    fireEvent.click(screen.getByRole("button", { name: "Start work" }));
+
+    await waitFor(() =>
+      expect(writes(fetching, uploadedThere("notes.md"))).toBe(1),
+    );
+    await waitFor(() =>
+      expect(writes(fetching, at(`/conversations/${OPEN.id}/grill`))).toBe(1),
+    );
+    expect(order(fetching, uploadedThere("notes.md"))).toBeLessThan(
+      order(fetching, at(`/conversations/${OPEN.id}/grill`)),
+    );
+
+    // And nowhere near this device, which has no Conversation for it to go on.
+    expect(writes(fetching, upload("notes.md"))).toBe(0);
+  });
+
+  /// *Save as draft* stops after the fields wherever it is pressed, and the draft
+  /// it leaves is one of the member's — which is how the merged sidebar draws it:
+  /// the row says whose machine the work is on.
+  it("saves a draft there, and the row reads under that device", async () => {
+    // The sidebar as the hub answers it, which gains the member's new draft the
+    // moment there is one: the page reads the list again when a create lands.
+    let merged: ConversationEntry[] = SIDEBAR;
+    const fetching = creatingOnTheMember(
+      whenever("/api/ui/conversations", () => json(merged)()),
+    );
+    const { container, history } = mount("/compose");
+
+    await draftingOnTheMember(container);
+    fireEvent.input(await composing(container), {
+      target: { value: "Make the widget" },
+    });
+    await pickRepoThere(container, THEIRS[0]!.id);
+
+    merged = [
+      {
+        ...SIDEBAR[0]!,
+        id: OPEN.id,
+        branch: "",
+        branch_named: false,
+        rank: `Zz-${MEMBER.device}`,
+        repo: THEIRS[0]!.name,
+        state: "Draft",
+        device: {
+          id: MEMBER.device,
+          name: MEMBER.name,
+          os: MEMBER.os,
+          reachable: true,
+        },
+      },
+      ...SIDEBAR,
+    ];
+
+    fireEvent.click(screen.getByRole("button", { name: "Save as draft" }));
+
+    await waitFor(() =>
+      expect(sent(fetching, at(`/conversations/${OPEN.id}/brief`))).toEqual({
+        markdown: "Make the widget",
+      }),
+    );
+
+    // Nothing kicked off, here or there: the press creates and stops.
+    expect(writes(fetching, at(`/conversations/${OPEN.id}/grill`))).toBe(0);
+
+    await waitFor(() =>
+      expect(
+        history
+          .get()
+          .startsWith(`/devices/${MEMBER.device}/conversations/${OPEN.id}`),
+      ).toBe(true),
+    );
+
+    // And it is in the merged list under the machine that will do the work,
+    // which every row of that list says out loud.
+    await waitFor(() =>
+      expect(
+        listed(container).some((row) =>
+          row.startsWith(`Draft, ${MEMBER.name},`),
+        ),
+      ).toBe(true),
+    );
+  });
+
+  /// Ids collide by construction — every Verkstead issues a Conversation 1 — so
+  /// what a create was refused is left against the Conversation *and* the device.
+  /// A refusal keyed by the number alone would be drawn on the composer of an
+  /// unrelated draft the moment two devices are in play.
+  it("says what the member refused on the draft it made, and not on the same number here", async () => {
+    const said = `The branch could not be named: ${BRANCH_REFUSAL.NotABranchName}`;
+
+    creatingOnTheMember(
+      whenever(
+        at(`/conversations/${OPEN.id}/branch`),
+        json("NotABranchName"),
+        "POST",
+      ),
+    );
+    const { container } = mount("/compose");
+
+    await draftingOnTheMember(container);
+    fireEvent.input(await composing(container), {
+      target: { value: "Make the widget" },
+    });
+    await pickRepoThere(container, THEIRS[0]!.id);
+    await rolesAnswered();
+
+    await openRepo(container);
+    fireEvent.input(await drawn(container, "#branch"), {
+      target: { value: "not a branch name" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Start work" }));
+
+    // On the composer of the draft that was made, which is the member's page.
+    await waitFor(() => expect(screen.getByText(said)).toBeTruthy());
+
+    // And on nothing else. This device's own Conversation 1 is another piece of
+    // work entirely, and what refused a create on the laptop is no business of
+    // its composer.
+    cleanup();
+    const here = mount(`/conversations/${OPEN.id}`);
+
+    await composing(here.container);
+    expect(screen.queryByText(said)).toBeNull();
+  });
+
+  /// The Repo the trigger names and the rows the companions are offered as are
+  /// read off the picked device's registry, because that is the registry the work
+  /// will be done against.
+  it("names the repo and the companion rows off the member's registry", async () => {
+    creatingOnTheMember(
+      ...THEIRS.map((repo) =>
+        whenever(at(`/repos/${repo.id}/branches`), json(BRANCHES)),
+      ),
+    );
+    const { container } = mount("/compose");
+
+    await draftingOnTheMember(container);
+    await pickRepoThere(container, THEIRS[1]!.id);
+
+    const trigger = await drawn(
+      container,
+      `.${setup.repoOption} .${setup.optionValue}`,
+    );
+    await waitFor(() => expect(trigger.textContent).toBe(THEIRS[1]!.name));
+
+    // And the repos it could run alongside are the rest of that same registry.
+    await openRepo(container);
+    const alongside = await offering("Works alongside", String(THEIRS[0]!.id));
+    const names = [...alongside.options].map((option) => option.textContent);
+    expect(names).toContain(THEIRS[0]!.name);
+    expect(names.some((name) => REPOS.some((repo) => repo.name === name))).toBe(
+      false,
+    );
+
+    fireEvent.change(alongside, { target: { value: String(THEIRS[0]!.id) } });
+    const row = await drawn(container, `.${setup.companion}`);
+    expect(row.textContent).toContain(THEIRS[0]!.name);
+  });
+
+  /// And with the select left where it starts, both presses are the presses they
+  /// were before there was a select at all: a cluster around this device changes
+  /// nothing about work being drafted on it.
+  it("creates here and lands here with this device left picked", async () => {
+    const fetching = theCluster(
+      whenever(
+        "/api/ui/conversations",
+        json({ Started: { id: OPEN.id } }),
+        "POST",
+      ),
+      whenever(`/api/ui/conversations/${OPEN.id}/brief`, json("Saved"), "POST"),
+      whenever(`/api/ui/conversations/${OPEN.id}/grill`, json("Started"), "POST"),
+    );
+    const { container, history } = mount("/compose");
+
+    await composing(container);
+    await drawn(container, `.${setup.deviceSelect}`);
+    await waitFor(() => expect(showing("Device")).toBe(LINKED.this.name));
+
+    fireEvent.input(await composing(container), {
+      target: { value: "Make the widget" },
+    });
+    await pickRepo(container, REPOS[1]!.id);
+    await rolesAnswered();
+
+    fireEvent.click(screen.getByRole("button", { name: "Start work" }));
+
+    await waitFor(() =>
+      expect(sent(fetching, "/api/ui/conversations")).toEqual({
+        repo_id: REPOS[1]!.id,
+      }),
+    );
+    await waitFor(() =>
+      expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/grill`)).toBe(1),
+    );
+
+    // The local path, with no device in it — which is the URL this app wrote
+    // before there was a cluster and the URL it writes for its own work still.
+    await waitFor(() =>
+      expect(history.get().startsWith(`/conversations/${OPEN.id}`)).toBe(true),
+    );
+    expect(writes(fetching, at("/conversations"))).toBe(0);
+  });
+});
+
+/// Moving a saved draft onto another device of the cluster, which is this
+/// stage's last shape: the compose page's replay run against a Conversation
+/// that already exists.
+///
+/// Asked here rather than beside the draft's other setup controls because that
+/// is what it is — the replay, with the Brief and the branch read off the record
+/// instead of out of what this device is holding — and because the cluster this
+/// file stands up is the one it needs. The half that is *drawing* a draft's
+/// setup row is `workbench.test.tsx`'s, as it always was.
+describe("moving a saved draft to another device", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    leaveRefusals(null, 0, [], null);
+  });
+
+  /// The Conversation the move makes over there, which is a number on that
+  /// machine: every Verkstead issues a Conversation 1, so a number of its own
+  /// here is what says which end of the move an assertion is about.
+  const MOVED = 9;
+
+  /// And the record the page lands on once it is made, which is the member's own
+  /// read through the Relay's prefix.
+  const ARRIVED: ConversationView = { ...OPEN, id: MOVED };
+
+  /// The Brief the draft is carrying, off the round the composer is drawing —
+  /// which is the newest on the Timeline, and the fixture's only one.
+  const BRIEF = OPEN.timeline
+    .flatMap((event) => ("Brief" in event ? [event.Brief] : []))
+    .at(-1)!.markdown;
+
+  /// Where the draft's own files are read back off this device — the one read of
+  /// an attachment there is, by the row's id.
+  const readable = (attachment: number) =>
+    `/api/ui/conversations/${OPEN.id}/attachments/${attachment}/bytes`;
+
+  /// And where the close that ends a move is made.
+  const moved = `/api/ui/conversations/${OPEN.id}/moved`;
+
+  /// Every endpoint a whole move walks, all answering yes — with whatever the
+  /// test is about handed in last, an answer named twice being the later of the
+  /// two.
+  function moving(...answers: Parameters<typeof serving>) {
+    return theCluster(
+      whenever(at("/conversations"), json({ Started: { id: MOVED } }), "POST"),
+      whenever(at(`/conversations/${MOVED}/brief`), json("Saved"), "POST"),
+      whenever(at(`/conversations/${MOVED}/branch`), json("Renamed"), "POST"),
+      whenever(at(`/conversations/${MOVED}/base`), json("Recorded"), "POST"),
+      ...OPEN.attachments.map((attachment) =>
+        whenever(
+          readable(attachment.id),
+          bytes(`the ${attachment.name} bytes`, attachment.name),
+        ),
+      ),
+      ...OPEN.attachments.map((attachment, index) =>
+        whenever(
+          at(`/conversations/${MOVED}/attachments/${attachment.name}`),
+          attached(index + 1, attachment.name),
+          "POST",
+        ),
+      ),
+      whenever(moved, json("Closed"), "POST"),
+      whenever(at(`/conversations/${MOVED}`), json(ARRIVED)),
+      ...answers,
+    );
+  }
+
+  /// The draft's composer, drawn and waited for — the box being what says the
+  /// pane is up.
+  async function draft(at = `/conversations/${OPEN.id}`) {
+    const mounted = mount(at);
+    await drawn(mounted.container, `.${composer.box} textarea`);
+    return mounted;
+  }
+
+  /// Pick the member out of the select, which is what opens the card.
+  async function moveTo(container: ParentNode): Promise<void> {
+    await drawn(container, `.${setup.deviceSelect}`);
+    await waitFor(() => expect(showing("Device")).toBe(LINKED.this.name));
+    pick("Device", MEMBER.name);
+    await screen.findByText(`Move this draft to ${MEMBER.name}?`);
+  }
+
+  /// And answer the card: which of that device's Repos, and the press.
+  async function move(repo: RepoEntry): Promise<void> {
+    await waitFor(() => expect(offered("Repo")).toHaveLength(THEIRS.length));
+    pick("Repo", repo.name);
+    fireEvent.click(screen.getByRole("button", { name: "Move" }));
+  }
+
+  /// With nothing linked the row is the row it has always been, which is the
+  /// rule the whole control is drawn under.
+  it("draws no select at all where there is no other device", async () => {
+    theWorkbench();
+    const { container } = await draft();
+
+    await drawn(container, `.${setup.options}`);
+
+    expect(container.querySelector(`.${setup.deviceSelect}`)).toBeNull();
+    expect(screen.queryByLabelText("Device")).toBeNull();
+  });
+
+  /// And with one it stands where it stands on the compose page: at the head of
+  /// the row, because the repository under it is one of the named device's.
+  it("stands at the head of the row, showing the device the draft is on", async () => {
+    theCluster();
+    const { container } = await draft();
+
+    await drawn(container, `.${setup.deviceSelect}`);
+    await waitFor(() => expect(showing("Device")).toBe(LINKED.this.name));
+
+    const options = container.querySelector(`.${setup.options}`)!;
+    expect(options.firstElementChild!.className).toContain(setup.deviceSelect!);
+  });
+
+  /// A pick asks rather than acts: the work cannot arrive over there until
+  /// somebody has said which of that device's repositories it is in, and the
+  /// move is not a thing to undo.
+  it("asks which repo over there, with the two rows behind it", async () => {
+    moving();
+    const { container } = await draft();
+
+    await moveTo(container);
+
+    await waitFor(() => expect(rows("Repo")).toEqual(THEIRS.map((r) => r.name)));
+    expect(actionRows("Repo")).toEqual(["Create repo", "Open repo"]);
+  });
+
+  /// And nothing at all happens until the press on it — which is what makes the
+  /// select safe to be corrected by something other than a hand.
+  it("writes nothing until the press, and nothing at all on the way back", async () => {
+    const fetching = moving();
+    const { container } = await draft();
+
+    await moveTo(container);
+    await waitFor(() => expect(offered("Repo")).toHaveLength(THEIRS.length));
+    pick("Repo", THEIRS[0]!.name);
+
+    fireEvent.click(screen.getByRole("button", { name: "Keep it here" }));
+
+    await waitFor(() =>
+      expect(screen.queryByText(`Move this draft to ${MEMBER.name}?`)).toBeNull(),
+    );
+
+    expect(writes(fetching, at("/conversations"))).toBe(0);
+    expect(writes(fetching, moved)).toBe(0);
+  });
+
+  /// The whole of a move in one: the Conversation started over there against the
+  /// Repo that was picked, the Brief, the branch name and the base written onto
+  /// it, and every file read off this device and put on it.
+  it("carries the brief, the branch name, the base and every attached file", async () => {
+    const fetching = moving();
+    const { container } = await draft();
+
+    await moveTo(container);
+    await move(THEIRS[1]!);
+
+    await waitFor(() =>
+      expect(sent(fetching, at("/conversations"))).toEqual({
+        repo_id: THEIRS[1]!.id,
+      }),
+    );
+
+    await waitFor(() =>
+      expect(sent(fetching, at(`/conversations/${MOVED}/brief`))).toEqual({
+        markdown: BRIEF,
+      }),
+    );
+    expect(sent(fetching, at(`/conversations/${MOVED}/branch`))).toEqual({
+      branch: OPEN.branch,
+    });
+
+    // The base too, an override being a branch name picked out of that
+    // repository's own list rather than an id — so it means what it means
+    // wherever the repository is cloned.
+    expect(sent(fetching, at(`/conversations/${MOVED}/base`))).toEqual({
+      branch: OPEN.base_commit,
+    });
+
+    // Each file read off the device the draft is on and put on the new
+    // Conversation: there is no hop between two members, so the bytes come here
+    // and go back out.
+    for (const attachment of OPEN.attachments) {
+      await waitFor(() =>
+        expect(askedFor(fetching, readable(attachment.id))).toBe(1),
+      );
+      expect(
+        writes(fetching, at(`/conversations/${MOVED}/attachments/${attachment.name}`)),
+      ).toBe(1);
+    }
+  });
+
+  /// And what a Repo id, a companion's Repo id and a Pairing's Profile id are
+  /// each one Verkstead's own means for the move: none of those travels. Which
+  /// the base is not one of — see the test above, where it goes with the branch.
+  it("carries no companions and no pairings", async () => {
+    const fetching = moving();
+    const { container } = await draft();
+
+    await moveTo(container);
+    await move(THEIRS[0]!);
+
+    await waitFor(() => expect(writes(fetching, moved)).toBe(1));
+
+    for (const path of ["companions", "grilling", "implementation", "review"]) {
+      expect(
+        writes(fetching, at(`/conversations/${MOVED}/${path}`)),
+        `nothing was written to ${path}`,
+      ).toBe(0);
+    }
+  });
+
+  /// And a base the target has not got is one more refusal to carry rather than
+  /// a move undone: the same wording the branch above it is refused in, and the
+  /// old draft left open with it.
+  it("carries a refused base as a refusal, and closes nothing", async () => {
+    const fetching = moving(
+      whenever(at(`/conversations/${MOVED}/base`), json("NoSuchBranch"), "POST"),
+    );
+    const { container } = await draft();
+
+    await moveTo(container);
+    await move(THEIRS[0]!);
+
+    await screen.findByText(
+      `The base branch could not be recorded: ${BASE_REFUSAL.NoSuchBranch}`,
+    );
+
+    expect(writes(fetching, moved)).toBe(0);
+  });
+
+  /// The draft here is closed once the new one is made, with the words that say
+  /// where its work went — and the page lands on the Conversation it became.
+  it("closes the old draft saying where it went, and lands on the new one", async () => {
+    const fetching = moving();
+    const { container, history } = await draft();
+
+    await moveTo(container);
+    await move(THEIRS[0]!);
+
+    await waitFor(() =>
+      expect(sent(fetching, moved)).toEqual({
+        device: MEMBER.device,
+        name: MEMBER.name,
+        conversation: MOVED,
+      }),
+    );
+
+    await waitFor(() =>
+      expect(history.get()).toBe(`/devices/${MEMBER.device}/conversations/${MOVED}`),
+    );
+  });
+
+  /// A refusal on the way leaves the new draft holding whatever the target took,
+  /// says so on its composer, and leaves the old draft exactly where it was.
+  it("leaves the old draft open where something was refused, and says so", async () => {
+    const fetching = moving(
+      whenever(at(`/conversations/${MOVED}/branch`), json("NotABranchName"), "POST"),
+    );
+    const { container, history } = await draft();
+
+    await moveTo(container);
+    await move(THEIRS[0]!);
+
+    // The page still lands on what was made: the Conversation is real from its
+    // first request, and the refusal is about it.
+    await waitFor(() =>
+      expect(history.get()).toBe(`/devices/${MEMBER.device}/conversations/${MOVED}`),
+    );
+
+    await screen.findByText(
+      `The branch could not be named: ${BRANCH_REFUSAL.NotABranchName}`,
+    );
+
+    // And nothing closed the draft it came off.
+    expect(writes(fetching, moved)).toBe(0);
+  });
+
+  /// And a file the far end would not take is one more refusal to carry rather
+  /// than a move undone.
+  it("carries a refused file as a refusal, and closes nothing", async () => {
+    const refused = OPEN.attachments[1]!;
+    const fetching = moving(
+      whenever(
+        at(`/conversations/${MOVED}/attachments/${refused.name}`),
+        json("TooLarge"),
+        "POST",
+      ),
+    );
+    const { container } = await draft();
+
+    await moveTo(container);
+    await move(THEIRS[0]!);
+
+    await screen.findByText(
+      `${refused.name} could not be attached: ${ATTACH_REFUSAL.TooLarge}`,
+    );
+
+    expect(writes(fetching, moved)).toBe(0);
+  });
+
+  /// A Repo picked out of a list read a moment ago and gone by the time the
+  /// press landed: nothing was made, and both drafts stay where they were.
+  /// And a close that could not be made at all is the last refusal to carry: the
+  /// Conversation over there is real by then, so a press answering *the move
+  /// failed* would be one the human could press again and have two of the work.
+  it("lands on the new draft where the close itself failed, and says so", async () => {
+    const fetching = moving(
+      whenever(moved, json({ error: "the server fell over" }, 500), "POST"),
+    );
+    const { container, history } = await draft();
+
+    await moveTo(container);
+    await move(THEIRS[0]!);
+
+    await waitFor(() =>
+      expect(history.get()).toBe(
+        `/devices/${MEMBER.device}/conversations/${MOVED}`,
+      ),
+    );
+
+    await screen.findByText(/the draft it came off could not be closed/i);
+    expect(writes(fetching, moved)).toBe(1);
+  });
+
+  /// Settled wherever the Repo picker beside it is, that being the same question
+  /// one level up: a branch that has been cut is a checkout and a record of the
+  /// work in it, and a draft that is adopting is in the repository the roadmap
+  /// is written in.
+  it.each([
+    ["a branch that has been cut", { worktree: "/srv/work/rate-limiting" }],
+    ["a roadmap being adopted", { adopting: ADOPTING.adopting }],
+  ])("reads settled on %s", async (_what, settled) => {
+    theCluster(
+      whenever(`/api/ui/conversations/${OPEN.id}`, json({ ...OPEN, ...settled })),
+    );
+    const { container } = await draft();
+
+    await drawn(container, `.${setup.deviceSelect}`);
+    await waitFor(() =>
+      expect(
+        (screen.getByLabelText("Device") as HTMLButtonElement).disabled,
+      ).toBe(true),
+    );
+  });
+
+  /// What this select is showing on a saved draft is where the Conversation is,
+  /// which is nothing this browser decided — so the correction the compose
+  /// page's own pick gets is not made here. A member unlinked while the page is
+  /// up would otherwise open the card over it, asking for a move nobody made.
+  it("opens no card for a draft on a device the cluster has lost", async () => {
+    const gone = "deadbeefdeadbeefdeadbeefdeadbeef";
+
+    theCluster(
+      whenever(`/api/ui/members/${gone}/conversations/${OPEN.id}`, json(OPEN)),
+    );
+    const { container } = await draft(
+      `/devices/${gone}/conversations/${OPEN.id}`,
+    );
+
+    await drawn(container, `.${setup.deviceSelect}`);
+
+    // Nothing to show, the membership holding no such row — which is the
+    // uncorrected reading, and the whole of what the lost device costs here.
+    await waitFor(() => expect(showing("Device")).toBe("Not chosen"));
+
+    expect(screen.queryByRole("button", { name: "Move" })).toBeNull();
+    expect(
+      screen.queryByText(`Move this draft to ${LINKED.this.name}?`),
+    ).toBeNull();
+  });
+
+  it("says a repo that has gone is gone, and moves nothing", async () => {
+    const fetching = moving(
+      whenever(at("/conversations"), json("NoSuchRepo"), "POST"),
+    );
+    const { container, history } = await draft();
+
+    await moveTo(container);
+    await move(THEIRS[0]!);
+
+    await screen.findByText(
+      new RegExp(`not registered on ${MEMBER.name} any more`),
+    );
+
+    expect(writes(fetching, moved)).toBe(0);
+    expect(history.get().startsWith(`/conversations/${OPEN.id}`)).toBe(true);
+  });
+});
+
+/// The ticks under *May be transferred to*, at the foot of the device select's
+/// rows (ADR-0020, *The agent's call*): which other devices the agent doing the
+/// work may move it onto itself. Held with the page and sent with it on the
+/// compose page, and saved as each is touched on a saved draft.
+describe("the devices the agent may move the work to", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    leaveRefusals(null, 0, [], null);
+  });
+
+  /// The ticks, by what each reads as — only there while the rows are down,
+  /// which is where they live.
+  const ticks = (): HTMLInputElement[] => {
+    opened("Device");
+    return screen.getAllByRole("checkbox") as HTMLInputElement[];
+  };
+
+  const tick = (name: string): HTMLInputElement => {
+    opened("Device");
+    return screen.getByRole("checkbox", { name }) as HTMLInputElement;
+  };
+
+  it("offers every other device on the compose page, none ticked", async () => {
+    theCluster();
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await drawn(container, `.${setup.deviceSelect}`);
+    await waitFor(() => expect(showing("Device")).toBe(LINKED.this.name));
+
+    opened("Device");
+    expect(screen.getByText("May be transferred to")).toBeTruthy();
+
+    // The device the page is drafting onto is where the work will be drafted,
+    // which is permitted without a tick — so it is not offered.
+    expect(ticks().map((box) => box.labels?.[0]?.textContent?.trim())).toEqual([
+      MEMBER.name,
+      AWAY.name,
+    ]);
+    expect(ticks().every((box) => !box.checked && !box.disabled)).toBe(true);
+  });
+
+  it("holds a tick with the page and sends it with the draft", async () => {
+    const fetching = creating(
+      whenever("/api/ui/devices", json(LINKED)),
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/permitted/${MEMBER.device}`,
+        json("Recorded"),
+        "POST",
+      ),
+    );
+    const first = mount("/compose");
+
+    await composing(first.container);
+    await drawn(first.container, `.${setup.deviceSelect}`);
+    fireEvent.click(tick(MEMBER.name));
+    await waitFor(() => expect(tick(MEMBER.name).checked).toBe(true));
+
+    // Held on this device with the rest of the page, so a reload finds it.
+    cleanup();
+    const { container } = mount("/compose");
+    await composing(container);
+    await drawn(container, `.${setup.deviceSelect}`);
+    await waitFor(() => expect(tick(MEMBER.name).checked).toBe(true));
+    expect(tick(AWAY.name).checked).toBe(false);
+
+    fireEvent.input(await composing(container), {
+      target: { value: "Make the widget" },
+    });
+    await pickRepo(container, REPOS[1]!.id);
+    fireEvent.click(screen.getByRole("button", { name: "Save as draft" }));
+
+    await waitFor(() =>
+      expect(
+        writes(
+          fetching,
+          `/api/ui/conversations/${OPEN.id}/permitted/${MEMBER.device}`,
+        ),
+      ).toBe(1),
+    );
+    expect(
+      writes(fetching, `/api/ui/conversations/${OPEN.id}/permitted/${AWAY.device}`),
+    ).toBe(0);
+  });
+
+  it("draws a saved draft's ticks off the record and saves each as it is touched", async () => {
+    const draft: ConversationView = {
+      ...OPEN,
+      drafted_on: LINKED.this.device,
+      permitted: [AWAY.device],
+    };
+    const fetching = theCluster(
+      whenever(`/api/ui/conversations/${OPEN.id}`, json(draft)),
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/permitted/${MEMBER.device}`,
+        json("Recorded"),
+        "POST",
+      ),
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/permitted/${AWAY.device}/remove`,
+        json("NoSuchConversation"),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await drawn(container, `.${composer.box} textarea`);
+    await drawn(container, `.${setup.deviceSelect}`);
+    await waitFor(() => expect(tick(AWAY.name).checked).toBe(true));
+    expect(tick(MEMBER.name).checked).toBe(false);
+
+    fireEvent.click(tick(MEMBER.name));
+    await waitFor(() =>
+      expect(
+        writes(
+          fetching,
+          `/api/ui/conversations/${OPEN.id}/permitted/${MEMBER.device}`,
+        ),
+      ).toBe(1),
+    );
+    await waitFor(() => expect(tick(MEMBER.name).checked).toBe(true));
+
+    // And one the server will not take stays where it stood, saying why.
+    fireEvent.click(tick(AWAY.name));
+    await waitFor(() =>
+      expect(screen.getByText(TICK_REFUSAL.NoSuchConversation)).toBeTruthy(),
+    );
+    expect(tick(AWAY.name).checked).toBe(true);
+  });
+});
+
 /// The two rows at the foot of the Repo dropdown, and the one this stage wires:
 /// **Open repo**, which registers a repository that already exists and lands the
 /// draft on it.
@@ -1928,7 +3423,7 @@ describe("the agent dropdown on a compose page", () => {
 describe("registering a repo from the Repo dropdown", () => {
   beforeEach(() => {
     localStorage.clear();
-    leaveRefusals(0, [], null);
+    leaveRefusals(null, 0, [], null);
   });
 
   /// A repository nothing has registered yet — not one of the fixture's, so
@@ -2043,7 +3538,7 @@ describe("registering a repo from the Repo dropdown", () => {
 describe("making a repo from the Repo dropdown", () => {
   beforeEach(() => {
     localStorage.clear();
-    leaveRefusals(0, [], null);
+    leaveRefusals(null, 0, [], null);
   });
 
   /// The repository the create made, as the server answers for it: not one of
@@ -2059,14 +3554,6 @@ describe("making a repo from the Repo dropdown", () => {
 
   /// The one directory there is to browse, which is the fixture's own.
   const LISTING = listing as DirectoryListing;
-
-  /// What Verkstead has been told, which this card asks exactly one thing of:
-  /// whether a GitHub token is saved. The fixture's has one.
-  const TOKENED = told as SettingsView;
-
-  /// And the same with none, which is what a Verkstead nobody has told anything
-  /// looks like — and what every test here that is not about the tick reads.
-  const UNTOKENED: SettingsView = { ...TOKENED, github_token: null };
 
   /// The workbench with the create answered however the test says, that
   /// directory served both by name and as the server's home, and the settings
@@ -2111,32 +3598,14 @@ describe("making a repo from the Repo dropdown", () => {
     }
   }
 
-  /// What the two fields are labelled, which is how they are found.
-  const WHERE = "Where it goes";
-  const CALLED = "What it is called";
-
-  /// And the tick beside them, where a token is saved for it to be drawn by.
+  /// The tick beside the two fields, where a token is saved for it to be drawn
+  /// by — this describe's own subject, where the labels and the fill-in above it
+  /// are shared with the cluster's copy of the same card.
   const ON_GITHUB = "Create it on GitHub too, privately";
 
   /// The tick as the card is drawing it, or `null` where it is not drawn at all.
   function tick(): HTMLInputElement | null {
     return screen.queryByLabelText(ON_GITHUB) as HTMLInputElement | null;
-  }
-
-  /// And what stands where it would have on a Verkstead with no token saved.
-  function noRemote(): HTMLElement | null {
-    return screen.queryByText(/needs a remote/i);
-  }
-
-  /// Fill them in and send them.
-  function make(parent: string, name: string): void {
-    fireEvent.input(screen.getByLabelText(WHERE), {
-      target: { value: parent },
-    });
-    fireEvent.input(screen.getByLabelText(CALLED), {
-      target: { value: name },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Create" }));
   }
 
   it("puts the draft on the repo it made", async () => {
@@ -2171,7 +3640,7 @@ describe("making a repo from the Repo dropdown", () => {
   /// among what is in it rather than among its siblings, which is what the same
   /// text typed by hand would mean.
   it("opens the browse in the parent the last repo on this device went in", async () => {
-    setRepoParent("/home/ada/src");
+    setRepoParent(null, "/home/ada/src");
     const fetching = creating(json({ Made: MADE }));
     const { container } = mount("/compose");
 
@@ -2218,7 +3687,7 @@ describe("making a repo from the Repo dropdown", () => {
     make("/home/ada/src/", "widgets");
 
     await waitFor(() => expect(stored().repo).toBe(MADE.id));
-    expect(repoParent()).toBe("/home/ada/src");
+    expect(repoParent(null)).toBe("/home/ada/src");
   });
 
   /// A refusal keeps the modal up with the reason under the fields, for the
@@ -2238,7 +3707,7 @@ describe("making a repo from the Repo dropdown", () => {
       (screen.getByLabelText(CALLED) as HTMLInputElement).value,
     ).toBe("widgets");
     expect(stored().repo).toBeNull();
-    expect(repoParent()).toBe("");
+    expect(repoParent(null)).toBe("");
   });
 
   /// And the one refusal that is not a word this app has: what git would not do,
@@ -2393,6 +3862,347 @@ describe("making a repo from the Repo dropdown", () => {
   });
 });
 
+/// And the two rows on whichever device the select names: **Open repo** and
+/// **Create repo** browsing and making directories on the machine that will do
+/// the work.
+///
+/// Everything under the select reads the picked device already — the field
+/// browses through the Relay, the registration and the `git init` go out under
+/// it — so what is asked here is that being true from this page end to end,
+/// against a second machine. And the one thing that was not: where the last repo
+/// went, which is a fact about the machine it went on rather than about the
+/// browser, and which a single key answered with a path on this one.
+describe("the two repo rows on the picked device", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    leaveRefusals(null, 0, [], null);
+  });
+
+  /// What the member's filesystem looks like, which is nothing like this
+  /// machine's: the fixture's `/home/ada/src` is this device's own, and the whole
+  /// point of a browse going out under the member is that what comes back is the
+  /// other machine's directories.
+  const OVER_THERE: DirectoryListing = {
+    Listed: {
+      path: "/mnt/code",
+      entries: [
+        { kind: "Directory", name: "projects", path: "/mnt/code/projects" },
+        { kind: "Directory", name: "widgets", path: "/mnt/code/widgets" },
+      ],
+    },
+  };
+
+  /// And this machine's own, which is the fixture's — served alongside so that a
+  /// browse that went to the wrong end is an assertable reading rather than a
+  /// call nothing answered.
+  const HERE = listing as DirectoryListing;
+
+  /// And the level above each of them, because a field being typed into asks for
+  /// one: the text `/mnt/code` names `/mnt` with `code` half-written in it, which
+  /// is how a browse narrows as somebody types — see `src/PathField.tsx`. A
+  /// filesystem has those levels, so the stand-in for one does too.
+  const ABOVE_THEIRS: DirectoryListing = {
+    Listed: {
+      path: "/mnt",
+      entries: [{ kind: "Directory", name: "code", path: "/mnt/code" }],
+    },
+  };
+
+  const ABOVE_HERE: DirectoryListing = {
+    Listed: {
+      path: "/home/ada",
+      entries: [{ kind: "Directory", name: "src", path: "/home/ada/src" }],
+    },
+  };
+
+  /// A repository opened on the member: none of the ones registered there, so a
+  /// draft landing on it is unmistakably the answer's doing rather than the
+  /// list's.
+  const THEIR_OPENED: RepoEntry = {
+    id: 5151,
+    name: "widgets-over-there",
+    path: "/mnt/code/widgets",
+    default_branch: "main",
+  };
+
+  /// And one a create made there, in the same place and for the same reason.
+  const THEIR_MADE: RepoView = {
+    ...(made as RepoView),
+    id: 5252,
+    name: "widgets",
+    path: "/mnt/code/widgets",
+  };
+
+  /// And one made here, for the test that leaves the select alone.
+  const MADE_HERE: RepoView = {
+    ...(made as RepoView),
+    id: 5353,
+    name: "widgets",
+    path: "/home/ada/src/widgets",
+  };
+
+  /// The workbench with a member linked, both filesystems answering, and
+  /// whatever the test is about handed in last.
+  ///
+  /// The settings among them because the Create card holds its press until they
+  /// answer: what the tick would ask of GitHub is nothing this describe is
+  /// about, so there is no token and the card says so.
+  const theirs = (...answers: Parameters<typeof serving>) =>
+    theCluster(
+      whenever("/api/ui/settings", json(UNTOKENED)),
+      whenever(listingAt(null, MEMBER.device), json(OVER_THERE)),
+      whenever(listingAt("/mnt/code", MEMBER.device), json(OVER_THERE)),
+      whenever(listingAt("/mnt", MEMBER.device), json(ABOVE_THEIRS)),
+      whenever(listingAt(null), json(HERE)),
+      whenever(listingAt("/home/ada/src"), json(HERE)),
+      whenever(listingAt("/home/ada"), json(ABOVE_HERE)),
+      ...answers,
+    );
+
+  /// Open the Create repo card off the dropdown's foot and wait for it to have
+  /// settled what it says about GitHub, the way the human filling it in does:
+  /// it takes no create until the settings have answered.
+  async function createCard(registry: RepoEntry[]): Promise<void> {
+    await waitFor(() => expect(offered("Repo")).toHaveLength(registry.length));
+    press("Repo", "Create repo");
+
+    await waitFor(() => expect(screen.getByLabelText(WHERE)).toBeTruthy());
+    await waitFor(() => expect(noRemote()).toBeTruthy());
+  }
+
+  /// And the Open repo card beside it, which asks the settings nothing and so
+  /// has nothing to wait for but itself.
+  async function openCard(registry: RepoEntry[]): Promise<void> {
+    await waitFor(() => expect(offered("Repo")).toHaveLength(registry.length));
+    press("Repo", "Open repo");
+
+    await waitFor(() => expect(screen.getByLabelText(PATH)).toBeTruthy());
+  }
+
+  /// Type a path into that one and send it.
+  function register(path: string): void {
+    fireEvent.input(screen.getByLabelText(PATH), { target: { value: path } });
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+  }
+
+  /// **Open repo**, end to end on the member: the browse is its filesystem, the
+  /// registration lands on its registry, and the dropdown behind the card is
+  /// that registry read again with what just arrived on it.
+  it("browses the member's directories and lands a repo on its registry", async () => {
+    // The registry as a registry behaves: what has been registered, which is one
+    // more thing the moment the press lands.
+    let landed = false;
+
+    const fetching = theirs(
+      whenever(at("/repos"), () =>
+        json(landed ? [...THEIRS, THEIR_OPENED] : THEIRS)(),
+      ),
+      whenever(
+        at("/repos"),
+        () => {
+          landed = true;
+          return json({ Added: THEIR_OPENED })();
+        },
+        "POST",
+      ),
+      whenever(at(`/repos/${THEIR_OPENED.id}/pairings`), json(NO_PAIRINGS)),
+      whenever(at(`/repos/${THEIR_OPENED.id}/branches`), json(BRANCHES)),
+    );
+    const { container } = mount("/compose");
+
+    await draftingOnTheMember(container);
+    await openCard(THEIRS);
+
+    // The field standing empty asks for the server's own home, and through the
+    // Relay that is the member's home: what comes down is the other machine's
+    // directories rather than this one's.
+    browse(PATH);
+    await waitFor(() =>
+      expect(browsed(PATH)).toEqual(["Up to /mnt", "projects", "widgets"]),
+    );
+    expect(askedFor(fetching, listingAt(null, MEMBER.device))).toBe(1);
+    expect(askedFor(fetching, listingAt(null))).toBe(0);
+
+    register(THEIR_OPENED.path);
+
+    // The registration went to the member's registry and to no other, and the
+    // draft is on the Repo that came back.
+    await waitFor(() => expect(stored().repo).toBe(THEIR_OPENED.id));
+    expect(sent(fetching, at("/repos"))).toEqual({ path: THEIR_OPENED.path });
+    expect(writes(fetching, "/api/ui/repos")).toBe(0);
+
+    // The card is spent and the row it was opened from has become the panel —
+    // whose list is the member's registry read again, now holding what landed,
+    // and settled on it.
+    await waitFor(() => expect(screen.queryByLabelText(PATH)).toBeNull());
+    await openRepo(container);
+    await waitFor(() => expect(rows("Repo")).toContain(THEIR_OPENED.name));
+    expect(showing("Repo")).toBe(THEIR_OPENED.name);
+  });
+
+  /// **Create repo** on the member, and the one thing that was genuinely wrong:
+  /// where the last repo went is a fact about the machine it went on, so there is
+  /// an answer per device and the browse opens in the picked one's.
+  it("makes a repo on the member, and opens where the last one there went", async () => {
+    // Two memories, one per machine: this browser has been making repositories
+    // in this device's own ~/src since before there was a cluster, and the
+    // member's code lives somewhere else entirely.
+    setRepoParent(null, "/home/ada/src");
+    setRepoParent(MEMBER.device, "/mnt/code");
+
+    const fetching = theirs(
+      whenever(at("/repos/new"), json({ Made: THEIR_MADE }), "POST"),
+      whenever(at(`/repos/${THEIR_MADE.id}/pairings`), json(NO_PAIRINGS)),
+    );
+    const { container } = mount("/compose");
+
+    await draftingOnTheMember(container);
+    await createCard(THEIRS);
+
+    // The member's parent rather than this device's — and, because that is a
+    // path handed over rather than one being typed, the browse opens inside it.
+    expect(held(WHERE)).toBe("/mnt/code");
+
+    browse(WHERE);
+    await waitFor(() =>
+      expect(askedFor(fetching, listingAt("/mnt/code", MEMBER.device))).toBe(1),
+    );
+    expect(askedFor(fetching, listingAt("/home/ada/src"))).toBe(0);
+
+    make("/mnt/code", "widgets");
+
+    // The directory and the repository were made over there, and the draft is on
+    // what came back.
+    await waitFor(() => expect(stored().repo).toBe(THEIR_MADE.id));
+    expect(sent(fetching, at("/repos/new"))).toEqual({
+      parent: "/mnt/code",
+      name: "widgets",
+      github: false,
+    });
+    expect(writes(fetching, "/api/ui/repos/new")).toBe(0);
+
+    // And what it came home with is remembered against the member, this device's
+    // own answer left exactly where it was.
+    expect(repoParent(MEMBER.device)).toBe("/mnt/code");
+    expect(repoParent(null)).toBe("/home/ada/src");
+  });
+
+  /// And a device nothing has been made on yet starts where a first run starts,
+  /// which is the case one key got wrong: a path on this machine, offered as
+  /// somewhere to put a repository over there.
+  it("starts at the member's own home where nothing has been made on it", async () => {
+    setRepoParent(null, "/home/ada/src");
+
+    const fetching = theirs();
+    const { container } = mount("/compose");
+
+    await draftingOnTheMember(container);
+    await createCard(THEIRS);
+
+    expect(held(WHERE)).toBe("");
+
+    browse(WHERE);
+    await waitFor(() =>
+      expect(browsed(WHERE)).toEqual(["Up to /mnt", "projects", "widgets"]),
+    );
+    expect(askedFor(fetching, listingAt(null, MEMBER.device))).toBe(1);
+    expect(askedFor(fetching, listingAt("/home/ada/src"))).toBe(0);
+  });
+
+  /// A refusal from over there is the far end's own outcome, said in the words
+  /// this app has for it wherever it is met: the hop is not something the human
+  /// is told about, and nothing was added to the four sentences.
+  it("says a create's refusal in its own words, not as a failed call", async () => {
+    theirs(
+      whenever(
+        at("/repos/new"),
+        json("AlreadyThere" satisfies Created),
+        "POST",
+      ),
+    );
+    const { container } = mount("/compose");
+
+    await draftingOnTheMember(container);
+    await createCard(THEIRS);
+    make("/mnt/code", "widgets");
+
+    await waitFor(() => screen.getByText(CREATE_REFUSAL.AlreadyThere));
+
+    // And the card stays up holding what was typed, because what answers a
+    // refusal is correcting it.
+    expect(held(WHERE)).toBe("/mnt/code");
+    expect(
+      (screen.getByLabelText(CALLED) as HTMLInputElement).value,
+    ).toBe("widgets");
+    expect(stored().repo).toBeNull();
+    // And nothing is remembered: there is no repository over there to put the
+    // next one beside.
+    expect(repoParent(MEMBER.device)).toBe("");
+  });
+
+  /// The other row refuses the same way, which is what says this is the far
+  /// end's answer reaching the card rather than the Relay's account of a call.
+  it("says an open's refusal in its own words too", async () => {
+    theirs(whenever(at("/repos"), json("NotARepository"), "POST"));
+    const { container } = mount("/compose");
+
+    await draftingOnTheMember(container);
+    await openCard(THEIRS);
+    register("/mnt/code/notes");
+
+    await waitFor(() => screen.getByText(REPO_REFUSAL.NotARepository));
+    expect(held(PATH)).toBe("/mnt/code/notes");
+    expect(stored().repo).toBeNull();
+  });
+
+  /// And with this device picked — which is what an untouched browser is on,
+  /// cluster or no cluster — both rows are the rows they were before there was a
+  /// select at all: this device's home, this device's registry, this device's
+  /// memory of where the last one went.
+  it("leaves both rows on this device where nothing is picked", async () => {
+    setRepoParent(null, "/home/ada/src");
+    setRepoParent(MEMBER.device, "/mnt/code");
+
+    const fetching = theirs(
+      whenever("/api/ui/repos/new", json({ Made: MADE_HERE }), "POST"),
+      whenever(`/api/ui/repos/${MADE_HERE.id}/pairings`, json(NO_PAIRINGS)),
+    );
+    const { container } = mount("/compose");
+
+    await composing(container);
+    // Drawn, and left alone.
+    await drawn(container, `.${setup.deviceSelect}`);
+    await waitFor(() => expect(showing("Device")).toBe(LINKED.this.name));
+
+    await createCard(REPOS);
+
+    expect(held(WHERE)).toBe("/home/ada/src");
+
+    browse(WHERE);
+    await waitFor(() =>
+      expect(askedFor(fetching, listingAt("/home/ada/src"))).toBe(1),
+    );
+    expect(
+      askedFor(fetching, listingAt("/home/ada/src", MEMBER.device)),
+    ).toBe(0);
+
+    make("/home/ada/src", "widgets");
+
+    await waitFor(() => expect(stored().repo).toBe(MADE_HERE.id));
+    expect(sent(fetching, "/api/ui/repos/new")).toEqual({
+      parent: "/home/ada/src",
+      name: "widgets",
+      github: false,
+    });
+    expect(writes(fetching, at("/repos/new"))).toBe(0);
+
+    // And the member's own memory of where its code goes is untouched by a
+    // repository made here.
+    expect(repoParent(null)).toBe("/home/ada/src");
+    expect(repoParent(MEMBER.device)).toBe("/mnt/code");
+  });
+});
+
 /// The other way work gets into the pipeline, which is this page as well: a
 /// roadmap somebody staged before Verkstead was driving anything, loaded into
 /// the composer and started from it.
@@ -2406,7 +4216,7 @@ describe("making a repo from the Repo dropdown", () => {
 describe("continuing a roadmap from the compose page", () => {
   beforeEach(() => {
     localStorage.clear();
-    leaveRefusals(0, [], null);
+    leaveRefusals(null, 0, [], null);
   });
 
   /// The workbench with roadmaps to adopt, and the two endpoints a press walks
@@ -2920,13 +4730,8 @@ describe("continuing a roadmap from the compose page", () => {
 describe("the files a compose page holds", () => {
   beforeEach(() => {
     localStorage.clear();
-    leaveRefusals(0, [], null);
+    leaveRefusals(null, 0, [], null);
   });
-
-  /// What the server says when it takes one: the record it made, which is what
-  /// the composer of the draft this page lands on draws its pill from.
-  const attached = (id: number, name: string) =>
-    json({ Attached: { attachment: { id, name, bytes: 4, origin: "Brief" } } });
 
   /// What went up to `path`, bodies and all — the count is not the question
   /// here, the body being the file itself rather than a JSON field.
@@ -3169,7 +4974,7 @@ describe("the files a compose page holds", () => {
 describe("the MCP servers a compose page holds", () => {
   beforeEach(() => {
     localStorage.clear();
-    leaveRefusals(0, [], null);
+    leaveRefusals(null, 0, [], null);
   });
 
   /// Where one goes on, the name in the path exactly as the composer sends it.
@@ -3202,7 +5007,7 @@ describe("the MCP servers a compose page holds", () => {
 
     await composing(container);
 
-    expect(offering(await attachMenu())).toEqual([
+    expect(offeredIn(await attachMenu())).toEqual([
       "Attach file",
       ...SETTINGS.mcp_servers.map((one) => one.name),
     ]);
@@ -3217,7 +5022,7 @@ describe("the MCP servers a compose page holds", () => {
 
     await composing(container);
 
-    expect(offering(await attachMenu())).toEqual([
+    expect(offeredIn(await attachMenu())).toEqual([
       "Attach file",
       "Declare an MCP server…",
     ]);
@@ -3257,13 +5062,13 @@ describe("the MCP servers a compose page holds", () => {
     await pickServer("docs");
     await waitFor(() => expect(chips(container)).toEqual(["docs"]));
 
-    expect(offering(await attachMenu())).toEqual(["Attach file", "tickets"]);
+    expect(offeredIn(await attachMenu())).toEqual(["Attach file", "tickets"]);
     shutMenu();
 
     fireEvent.click(screen.getByRole("button", { name: "Remove docs" }));
 
     await waitFor(() => expect(chips(container)).toEqual([]));
-    expect(offering(await attachMenu())).toEqual([
+    expect(offeredIn(await attachMenu())).toEqual([
       "Attach file",
       ...SETTINGS.mcp_servers.map((one) => one.name),
     ]);
@@ -3483,6 +5288,7 @@ describe("what a device holds between visits", () => {
 
   it("comes back as it was left", () => {
     const held: Composed = {
+      device: null,
       repo: 2,
       brief: "Make the widget",
       branch: "widget-work",
@@ -3497,6 +5303,7 @@ describe("what a device holds between visits", () => {
       implementation: "2:fable",
       review: null,
       adopting: null,
+      permitted: ["0011223344556677889900aabbccddee"],
     };
 
     keep(held);
@@ -3509,6 +5316,15 @@ describe("what a device holds between visits", () => {
   /// absence a field-by-field check has to read rather than discard.
   it("reads a body from before the process as one nobody picked", () => {
     const { process: _, ...before } = { ...blank(), repo: 2 };
+    localStorage.setItem(COMPOSING, JSON.stringify(before));
+
+    expect(stored()).toEqual({ ...blank(), repo: 2 });
+  });
+
+  /// And a body from before the ticks has none, which is nothing ticked rather
+  /// than a draft to throw away.
+  it("reads a body from before the ticks as nothing ticked", () => {
+    const { permitted: _, ...before } = { ...blank(), repo: 2 };
     localStorage.setItem(COMPOSING, JSON.stringify(before));
 
     expect(stored()).toEqual({ ...blank(), repo: 2 });
@@ -3555,6 +5371,59 @@ describe("what a device holds between visits", () => {
     localStorage.setItem(COMPOSING, "not json");
 
     expect(stored()).toEqual(blank());
+  });
+
+  /// The device is held with the ids that are only ids on it — the repo, the
+  /// companions and the pairings — so a draft read back knows which machine its
+  /// repository is a number on.
+  it("comes back knowing which device it was being composed for", () => {
+    keep({ ...blank(), device: MEMBER.device, repo: 2 });
+
+    expect(stored().device).toBe(MEMBER.device);
+  });
+
+  /// A body from a build before the compose page could draft anywhere else names
+  /// no device at all, which is not a fault: it reads as whatever this browser is
+  /// drafting onto, the two having been written together by the build that wrote
+  /// them.
+  it("reads a body that names no device as the one this browser is drafting onto", () => {
+    setDraftingOn(MEMBER.device);
+    const { device: _, ...before } = { ...blank(), repo: 2 };
+    localStorage.setItem(COMPOSING, JSON.stringify(before));
+
+    expect(stored().device).toBe(MEMBER.device);
+    expect(stored().repo).toBe(2);
+  });
+
+  /// Where it does say, what it says is the answer. A draft written for this
+  /// device reads as this device however the browser has drafted since, that
+  /// draft's Repo id being a number here.
+  it("reads a body that says this device as this device", () => {
+    keep({ ...blank(), repo: 2 });
+    setDraftingOn(MEMBER.device);
+
+    expect(stored().device).toBeNull();
+  });
+
+  it("discards a draft whose device is not a device", () => {
+    localStorage.setItem(
+      COMPOSING,
+      JSON.stringify({ ...blank(), device: 7, repo: 2 }),
+    );
+
+    expect(stored()).toEqual(blank());
+  });
+
+  /// A pick and nothing else is a page holding nothing: the pick is the
+  /// browser's and is kept there, so the next visit comes back to that machine
+  /// with no draft under it.
+  it("holds nothing for a page that has picked a device and nothing else", () => {
+    setDraftingOn(MEMBER.device);
+
+    keep(blank());
+
+    expect(localStorage.getItem(COMPOSING)).toBeNull();
+    expect(stored().device).toBe(MEMBER.device);
   });
 
   /// A companion row missing one of the three things it settles takes the whole

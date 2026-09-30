@@ -140,21 +140,47 @@ where it was found, with one press to Add; members are left out. Windows plus
 WSL is the case where discovery may not cross — WSL2 sits behind NAT unless
 mirrored networking is on — and typing the address is what is left.
 
+**Advertising can be turned off**, by a flag and a NixOS option beside
+`peerListen`, on by default for the reason `openFirewall` is: a discovery
+nothing can hear is a feature that silently does not work. What it broadcasts is
+a hostname, an OS and a Device Id on a LAN that may not be the human's alone,
+and anything saying this much about a machine to whoever is on the wire has to
+be able to be told not to. The rule that opens the peer port grows UDP 5353
+beside it, or the advertisement is one a NixOS host never hears.
+
+**And the advertisement is withdrawn on the way out**, which is the one ordered
+stop this server has: a signal it is asked to stop on sends the goodbye that
+takes the row off every other machine's list at once, and then the process ends
+as it always did. A killed server withdraws nothing and the row runs out on its
+TTL instead — the same thing that covers a machine whose lid shut — so the
+withdrawal is what makes a restart tidy rather than what makes a stale row
+impossible.
+
 ## The opened device relays
 
 The web client is same-origin: relative paths, one `HttpOnly` cookie per
 origin, a relative nudge stream, relative sockets. Rather than teach it N
 origins — CORS and cross-origin cookies on every device, every device served
 to the phone, a query cache keyed by server — **the device the browser opened
-relays for the rest**. A member serves the whole of `/api/ui/` to another
-member over the peer listener, authenticated by the handshake rather than the
-key cookie, and the hub forwards a call to `/api/ui/devices/{device}/…`
-verbatim and hands the answer back untouched: calls, the nudge stream, the
-terminal and file-watcher sockets, multipart uploads. A member's workbench key
-never leaves it. Remote Conversations live at
-`/devices/{device}/conversations/{id}` with every leaf under it; local ones
-keep their URLs, because this device is where most of the human's work is and
-a device segment on every URL would say nothing.
+relays for the rest**. A member serves `/api/ui/` to another member over the
+peer listener, authenticated by the handshake rather than the key cookie, and
+the hub forwards a call to `/api/ui/members/{device}/…` verbatim and hands the
+answer back untouched: calls, the nudge stream, the three attach sockets — a
+Conversation terminal, the Code pane's file watcher and a session's Screen —
+and an attachment upload, whose body is streamed through rather than held.
+**A prefix of its own rather than a segment under `/api/ui/devices/`**, that
+being the Devices section's own namespace already: a Device Id is sixteen
+random hex bytes and could not collide with the words under it, but two
+namespaces one segment apart read as one thing.
+**And three prefixes are the device's own and are not served over that listener
+at all** — `/api/ui/remote/`, `/api/ui/devices/` and `/api/ui/push/`, refused
+there by name. Which is what makes *a member's workbench key never leaves it* a
+fact about the mechanism rather than about the pages that happen to exist
+today: the Remote access reading carries the login link with that key on it, and
+a namespace served whole would hand it to whoever holds the hub's cookie.
+Remote Conversations live at `/devices/{device}/conversations/{id}` with every
+leaf under it; local ones keep their URLs, because this device is where most of
+the human's work is and a device segment on every URL would say nothing.
 
 The hub holds one nudge stream to each member, keeps that member's
 Conversation list in memory, refreshes it on a nudge, and re-announces every
@@ -187,11 +213,38 @@ coincidence. Two rows that sorted equal would leave the merged order ambiguous
 — it would read differently on different hubs, which is the one thing ranks are
 here to prevent — and fractional indexing has no key strictly between two equal
 ones, so a drag between them could not be expressed at all. Suffixed, the keys
-are distinct cluster-wide by construction, a key between any two still exists
-because they are still strings over the same alphabet, and the merge needs no
-tiebreaker of its own. A tiebreak on device id at the merge alone was the other
-way and was rejected: it settles the order and leaves the drag with nothing to
-compute between.
+are distinct cluster-wide by construction and the merge needs no tiebreaker of
+its own. A tiebreak on device id at the merge alone was the other way and was
+rejected: it settles the order and leaves the drag with nothing to compute
+between.
+
+**What the suffix does not buy is room between two rows at one key.** The two
+sort apart, which is what the merge needs of them, but every rank at that key
+reads `key-<device>`: a rank between `a0-A` and `a0-B` would take a device id
+sorting between those two, and the row being moved carries its own. There is no
+such rank, and stage 05 refuses rather than inventing one. It cannot arise on
+one device, whose own keys are distinct — on a merged list it is the first rows
+of two devices, sitting at the top of the list where cards are dropped most.
+
+**A card dropped between them lands there all the same, the hub opening the gap
+first.** It re-ranks the *lower* of the pair through that row's own device — a
+key between the pair's shared one and whatever is under it — and then mints the
+dropped row into the gap that opened, so two devices are written to in that one
+case and one in every other. It does not recur at that spot, the pair no longer
+sharing a key; and where the lower row's own device cannot be reached the gap
+cannot be opened, so the drag is refused and the sidebar says which device it
+was. Landing the row beside the pair rather than between them was the other way
+and was rejected: it puts the card somewhere the human did not drop it, and
+leaves the pair to be met again on the next drop.
+
+**Two drops into one gap are held apart on the hub**, a mint off a list held in
+memory having no transaction around it. What that lock does not reach is a
+Conversation *started* on a member while the hub is minting for that member: a
+second key computed over there off the same top row and carrying the same
+suffix, so the two rows can land at one rank. They are still drawn in a stated
+order, and a later drag between them is refused the way any pair at one key is
+until one of them is re-ranked. It is the price of serving the merge from memory
+rather than a round trip per row.
 
 A migration ranks every existing row in its present order,
 unplaced ones on top newest first, and the *unplaced float to the top* rule
@@ -209,7 +262,7 @@ only where another device exists, reading the device last picked in this
 browser — remembered the way pane widths are — and this device until then.
 Picking one makes the Repo select list that device's Repos and the pairings
 prefill from it, and Start creates the Conversation there: the compose page's
-replay goes through `/api/ui/devices/{device}/…` unchanged. A saved draft's
+replay goes through `/api/ui/members/{device}/…` unchanged. A saved draft's
 composer moves it too, by replaying it onto the other device and closing it
 here. Inside the select's panel, under *May be transferred to*, a tick per
 other device says where the agent may move the work; the device it was
@@ -271,9 +324,11 @@ stops, pull request and wrap-up bookkeeping, captures, transcripts,
 attachments — is copied to the target under new local ids, its rank string
 with it. The source **keeps its copy**, marked *transferred* and read-only.
 Every copy carries a cluster-wide **birth key** — the device the Conversation
-was drafted on and its id there — so the merged list draws only the live copy,
-a transferred copy's URL redirects to it, and each device's own list shows its
-transferred copies dimmed under *transferred to B*. A transfer back to a
+was drafted on and its id there — so the merged list draws only the live copy
+and a transferred copy's URL redirects to it. The copy itself is never drawn:
+the merge drops every tombstone and the page navigates off one rather than
+showing it, so what the source keeps is what the redirect and a transfer back
+are built out of rather than a row of its own. A transfer back to a
 device that still holds a copy replaces that copy wholesale by the live record
 under its existing local id, so old links keep working and nothing is merged
 by hand.

@@ -101,7 +101,11 @@ pub(crate) fn sweeping(state: &AppState, mut resumed: watch::Receiver<bool>) {
 /// nobody watching, and what it has to say it says on the Timeline or in the
 /// log.
 async fn sweep(state: &AppState) {
-    let conversations = match store::conversations(&state.pool).await {
+    // Archived Conversations and all, whatever the switch stands at: a stall is
+    // a fact about work in a driven state, and what has been archived is Closed
+    // — passed over below for its state rather than left off the list for having
+    // been put away.
+    let conversations = match store::conversations(&state.pool, true).await {
         Ok(conversations) => conversations,
         Err(error) => {
             tracing::error!(error = ?error, "listing the Conversations to look for a stall among failed");
@@ -121,6 +125,30 @@ async fn sweep(state: &AppState) {
         let Some(lifecycle) = conversation.state.known() else {
             continue;
         };
+
+        // And a *Transfer to…* the human pressed, whose session has since ended
+        // — which is a Conversation nothing is driving because the thing that
+        // was driving it is about to hand it to another machine. Not a stall,
+        // and this is also where a request left behind by a server that has
+        // restarted since is taken up: nothing survives a process, and a move
+        // nobody is making is exactly what this sweep is for. A copy whose work
+        // has already gone is the same answer for a plainer reason — a tombstone
+        // is nothing anything was driving. See
+        // [`crate::transfers::moving`].
+        //
+        // **Ahead of the register, because a move is asked for out of states
+        // nothing drives.** *Transfer to…* is offered from every state but Draft
+        // and Closed, Done among them — and [`crate::drivers::Drivers::driven`]
+        // answers that a Done Conversation is fine as it stands, which is the
+        // right answer about stalls and would leave this question unasked on the
+        // one state that most needs it. A request a restart left behind on a Done
+        // Conversation would then be a row reading *Transferring to* for good,
+        // with nothing able to launch behind it and no press to take it back. So
+        // it is asked of every row, at the cost of two reads on a Conversation
+        // something is already driving.
+        if crate::transfers::moving(state, conversation.id).await {
+            continue;
+        }
 
         if state.drivers.driven(&working, conversation.id, lifecycle) {
             continue;

@@ -561,6 +561,27 @@ fn name(path: &Path) -> String {
         .unwrap_or_else(|| path.display().to_string())
 }
 
+/// The URL of the repository's `origin` remote, where it has one.
+///
+/// **Asked of git rather than kept**, which is the stance every other reading of
+/// a repository takes here — the branches, the default branch, the roadmaps. A
+/// registration records a path, a name and a default branch and no origin at
+/// all, and a remote is added, changed and taken away without Verkstead hearing
+/// about it; a stored copy would be a second opinion about the one fact two
+/// devices have to agree on when they are settling whether they hold the same
+/// repository. See [`crate::matching`], which is what asks.
+///
+/// `None` where there is no `origin` — `git remote get-url` exits non-zero on
+/// a remote that is not there — and where what it answered was blank, which a
+/// remote configured with an empty URL is. A repository with no origin is
+/// matched by name or not at all, and an empty string standing in for one would
+/// be two such repositories reading as the same one.
+pub(crate) fn origin(path: &Path) -> Option<String> {
+    git(path, &["remote", "get-url", "origin"])
+        .map(|url| url.trim().to_owned())
+        .filter(|url| !url.is_empty())
+}
+
 /// Run git in `dir` and take its stdout, or `None` if it failed.
 ///
 /// Shared with [`crate::conversations`], which asks git the two questions a
@@ -576,6 +597,22 @@ pub(crate) fn git(dir: &Path, args: &[&str]) -> Option<String> {
 /// `git diff --no-index` exits 1 when the two files differ, which for the
 /// untracked file [`crate::diffs`] asks it about is the ordinary case.
 pub(crate) fn accepting(dir: &Path, args: &[&str], ok: &[i32]) -> Option<String> {
+    // Paths and patches are whatever bytes the filesystem holds; a Set is UTF-8
+    // either way, so anything else is replaced rather than refused.
+    bytes(dir, args, ok).map(|stdout| String::from_utf8_lossy(&stdout).into_owned())
+}
+
+/// And the same run again with the bytes kept as bytes.
+///
+/// [`accepting`]'s own body, split out for the one reader that must not have
+/// its answer replaced a character at a time: a **git bundle** is a pack file
+/// on standard output, and every byte of it that did not read as UTF-8 would
+/// come back as a replacement character and the bundle would not open — see
+/// `crate::transfers::checkouts`.
+///
+/// Every other reader here is asking for text and takes [`accepting`], which is
+/// this with the lossy read on the end.
+pub(crate) fn bytes(dir: &Path, args: &[&str], ok: &[i32]) -> Option<Vec<u8>> {
     let output = Command::new("git")
         // Reading a repository should never take a lock on it: an agent may well
         // be working in this one right now.
@@ -592,9 +629,7 @@ pub(crate) fn accepting(dir: &Path, args: &[&str], ok: &[i32]) -> Option<String>
         return None;
     }
 
-    // Paths and patches are whatever bytes the filesystem holds; a Set is UTF-8
-    // either way, so anything else is replaced rather than refused.
-    Some(String::from_utf8_lossy(&output.stdout).into_owned())
+    Some(output.stdout)
 }
 
 /// And the same run again with something written to it, which is the one git

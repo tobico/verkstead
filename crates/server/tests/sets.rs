@@ -13,6 +13,10 @@ use verkstead_schema::{ApiError, QuestionSet, SetCreated};
 use verkstead_server::store;
 use verkstead_server::{open_database, router};
 
+/// The device every Conversation started here is ranked by, named the way a
+/// cluster names one (ADR-0020, *Ranks*).
+const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
+
 const VALID_SET: &str = r#"
 title: Storage layout for the pending list
 preface: |
@@ -72,7 +76,7 @@ async fn fresh_pool() -> (tempfile::TempDir, SqlitePool) {
 /// says — so a test posting one needs somewhere for it to land. What the
 /// Conversation is does not matter to anything here; that there is one does.
 async fn asking_from(pool: &SqlitePool) -> i64 {
-    if let Some(row) = store::conversations(pool).await.unwrap().first() {
+    if let Some(row) = store::conversations(pool, true).await.unwrap().first() {
         return row.id;
     }
 
@@ -81,7 +85,7 @@ async fn asking_from(pool: &SqlitePool) -> i64 {
         .unwrap()
         .expect("nothing is registered at that path yet");
 
-    store::start_conversation(pool, repo.id, "api-core-and-cli")
+    store::start_conversation(pool, repo.id, "api-core-and-cli", THIS_DEVICE)
         .await
         .unwrap()
         .expect("the Repo was just registered")
@@ -117,7 +121,7 @@ async fn asking_alongside(
         .unwrap()
         .expect("nothing is registered at that path yet");
 
-    let conversation = store::start_conversation(pool, registered.id, "rate-limiting")
+    let conversation = store::start_conversation(pool, registered.id, "rate-limiting", THIS_DEVICE)
         .await
         .unwrap()
         .expect("the Repo was just registered");

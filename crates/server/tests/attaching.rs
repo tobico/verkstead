@@ -24,10 +24,14 @@ use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_render::{
     AnswerAttached, AnswerAttachmentRemoved, Attached, AttachmentOrigin, AttachmentRemoved,
-    AttachmentView, ConversationView, Registered, ServerAttached, ServerRemoved, SetReading,
-    Started,
+    AttachmentView, ConversationClosed, ConversationView, Lifecycle, Registered, ServerAttached,
+    ServerRemoved, SetReading, Started, TimelineEvent,
 };
 use verkstead_server::{attachments::MAX_BYTES, open_database, router_keeping, store};
+
+/// The device every Conversation started here is ranked by, named the way a
+/// cluster names one (ADR-0020, *Ranks*).
+const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
 
 /// A directory holding one registered repository, a Conversation drafting on
 /// it, and the app over both.
@@ -133,6 +137,37 @@ fn urlencoding(name: &str) -> String {
             other => format!("%{other:02X}"),
         })
         .collect()
+}
+
+/// Read one back, the way a move does: the row's own id, and the bytes as the
+/// body.
+///
+/// The status, the headers and the bytes rather than a payload — this is the one
+/// route in the namespace that answers with a file, so what it says about the
+/// file is in the headers and what a refusal says is in the status.
+async fn download(
+    app: &Router,
+    id: i64,
+    attachment: i64,
+) -> (StatusCode, header::HeaderMap, Vec<u8>) {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/ui/conversations/{id}/attachments/{attachment}/bytes"
+                ))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let status = response.status();
+    let headers = response.headers().clone();
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+
+    (status, headers, bytes.to_vec())
 }
 
 async fn detach(app: &Router, id: i64, attachment: i64) -> AttachmentRemoved {
@@ -311,7 +346,7 @@ async fn another_conversations_attachment_is_not_this_ones_to_remove() {
     let (_elsewhere, dir, app, pool, mine) = drafting().await;
 
     let repos: Vec<verkstead_render::RepoEntry> = get(&app, "/api/ui/repos").await;
-    let theirs = store::start_conversation(&pool, repos[0].id, "elsewhere")
+    let theirs = store::start_conversation(&pool, repos[0].id, "elsewhere", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -425,6 +460,166 @@ async fn an_upload_to_no_conversation_says_so() {
         detach(&app, 404, 1).await,
         AttachmentRemoved::NoSuchConversation,
     );
+}
+
+/// Reading one back hands over the bytes that were written, under the name the
+/// record says they were stored under.
+///
+/// The one read of an attachment there is, and what the compose page makes of a
+/// draft moving to another device: the file is read off the device it is on and
+/// put on the new Conversation through the upload above. So what it has to be is
+/// the bytes exactly, and named the way the record names them — the counted-up
+/// name where the directory already had that one, rather than the name the
+/// upload was sent under.
+#[tokio::test]
+async fn one_attachment_reads_back_as_the_bytes_under_the_name_it_was_stored_as() {
+    let (_elsewhere, _dir, app, _pool, id) = drafting().await;
+
+    kept(attach(&app, id, "notes.md", b"the first one's").await);
+    let second = kept(attach(&app, id, "notes.md", b"the second one's").await);
+
+    assert_eq!(second.name, "notes-2.md", "the name was counted up");
+
+    let (status, headers, body) = download(&app, id, second.id).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, b"the second one's");
+    let said = headers
+        .get(header::CONTENT_DISPOSITION)
+        .and_then(|said| said.to_str().ok())
+        .expect("a file comes back with a name on it");
+
+    assert!(said.starts_with("attachment;"), "an attachment: {said}");
+    assert!(
+        said.contains(r#"filename="notes-2.md""#),
+        "under the name it was stored as: {said}",
+    );
+}
+
+/// And a name that is not plain ASCII still reads back, under the name it was
+/// given.
+///
+/// What may be attached is the human's own base name — a separator, a leading dot
+/// and a control character are the whole of what is refused — so a name in any
+/// script at all is a file this has to hand over. Pasted straight into the
+/// header, it would not be a header value this server could build at all, which
+/// would be a 500 over a file that is perfectly fine.
+///
+/// A name every filesystem this runs on can hold, which is what keeps this test
+/// about the header rather than about the disk: Windows reserves nine characters
+/// a name may not have, `"` among them, so a name carrying one is a file that
+/// never lands there to be read back. What the header does with those is
+/// `disposition`'s own test in `src/ui.rs`, where no file has to exist.
+#[tokio::test]
+async fn a_name_that_is_not_ascii_reads_back_under_its_own_name() {
+    let (_elsewhere, _dir, app, _pool, id) = drafting().await;
+
+    let attachment = kept(attach(&app, id, "résumé final.pdf", b"PDF bytes").await);
+
+    let (status, headers, body) = download(&app, id, attachment.id).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, b"PDF bytes");
+
+    let said = headers
+        .get(header::CONTENT_DISPOSITION)
+        .and_then(|said| said.to_str().ok())
+        .expect("the header is one this server could build");
+
+    // The old form with what a quoted ASCII string cannot hold stood in for, and
+    // the name itself beside it.
+    assert!(
+        said.contains(r#"filename="r_sum_ final.pdf""#),
+        "the ASCII fallback: {said}",
+    );
+    assert!(
+        said.contains("filename*=UTF-8''r%C3%A9sum%C3%A9%20final.pdf"),
+        "and the name as it really is: {said}",
+    );
+}
+
+/// And a file the record does not name is a 404, whichever half of the pair is
+/// wrong — and so is one whose row is there and whose bytes are not.
+///
+/// The last of the three is nothing a human did: a directory tidied by hand, or
+/// a Data Directory restored from behind the record. There is nothing different
+/// to do about any of them, so there is nothing different to say.
+#[tokio::test]
+async fn a_file_that_is_not_there_is_no_such_file() {
+    let (_elsewhere, dir, app, _pool, id) = drafting().await;
+
+    let attachment = kept(attach(&app, id, "notes.md", b"the human's own").await);
+
+    for (conversation, row) in [(id, attachment.id + 1), (404, attachment.id)] {
+        let (status, ..) = download(&app, conversation, row).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "Conversation {conversation}");
+    }
+
+    // And the row alone, which is what a directory somebody tidied leaves.
+    std::fs::remove_file(directory(&dir, id).join("notes.md")).unwrap();
+
+    let (status, ..) = download(&app, id, attachment.id).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+/// A draft whose work moved to another device is closed, with the Timeline
+/// saying where it went.
+///
+/// The last request a move makes, once the new Conversation is real: the notice
+/// names the machine and the Conversation it became there, and the close is the
+/// one the menu's own row makes.
+#[tokio::test]
+async fn a_draft_that_moved_is_closed_and_says_where_it_went() {
+    let (_elsewhere, _dir, app, _pool, id) = drafting().await;
+
+    let closed: ConversationClosed = post(
+        &app,
+        &format!("/api/ui/conversations/{id}/moved"),
+        &serde_json::json!({
+            "device": "0011223344556677889900aabbccddee",
+            "name": "laptop",
+            "conversation": 7,
+        }),
+    )
+    .await;
+
+    assert_eq!(closed, ConversationClosed::Closed);
+
+    let view: ConversationView = get(&app, &format!("/api/ui/conversations/{id}")).await;
+
+    assert_eq!(view.state, Lifecycle::Closed);
+
+    let said = view
+        .timeline
+        .iter()
+        .find_map(|event| match event {
+            TimelineEvent::Notice(notice) => Some(notice.html.clone()),
+            _ => None,
+        })
+        .expect("the move left a notice on the Timeline");
+
+    assert!(said.contains("laptop"), "the device it went to: {said}");
+    assert!(said.contains("Conversation 7"), "and which one: {said}");
+    assert!(
+        said.contains("0011223344556677889900aabbccddee"),
+        "and the id beside the name, names moving: {said}",
+    );
+}
+
+/// And a move off a Conversation that is not there says so, leaving nothing
+/// behind: the notice is what finds out, and it is written first.
+#[tokio::test]
+async fn a_move_off_no_conversation_says_so() {
+    let (_elsewhere, _dir, app, _pool, _id) = drafting().await;
+
+    let closed: ConversationClosed = post(
+        &app,
+        "/api/ui/conversations/404/moved",
+        &serde_json::json!({ "device": "aa", "name": "laptop", "conversation": 1 }),
+    )
+    .await;
+
+    assert_eq!(closed, ConversationClosed::NoSuchConversation);
 }
 
 /// And a directory under the attachments root that no Conversation names is

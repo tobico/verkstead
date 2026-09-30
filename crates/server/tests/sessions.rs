@@ -88,6 +88,10 @@ use verkstead_server::skills::Skills;
 use verkstead_server::{Agents, Gh, Pace, open_database, router_running_sessions};
 use verkstead_store::{Decision, StageOf, stage_roadmap};
 
+/// The device every Conversation started here is ranked by, named the way a
+/// cluster names one (ADR-0020, *Ranks*).
+const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
+
 /// The Brief every Conversation here is started from, and what the stub agent
 /// is primed with.
 const BRIEF: &str = "# Rate limiting\n\nThe API has none.\n";
@@ -1217,6 +1221,31 @@ static UNSPOKEN: LazyLock<Pace> = LazyLock::new(|| Pace {
     ..*BRISKLY
 });
 
+/// And the same at a pace that holds the rescue off a session that *has* spoken,
+/// for the tests whose subject is the wrap-up or the follow-up rather than the
+/// rescue.
+///
+/// [`UNSPOKEN`] above holds the ceiling on a stir; this holds the grace behind
+/// it, which is the span a session that said its piece and went quiet is spoken
+/// to after. The trap is the review stub every one of these fixtures runs — see
+/// [`REVIEW_AND_FIND_NOTHING`], which prints what it found and exits. Between
+/// that line and the process being reaped it is a session idle with nothing open
+/// and no signal given, which is exactly the shape the rescue watches for: a reap
+/// slower than `proposing` is a line typed into it, and one slower than three of
+/// those plus the ceiling is an escalation Notice standing on the Timeline for
+/// good — the Notice being what happened, whatever the session did next. Which is
+/// a thing about how long the machine took to reap a process, and nothing about
+/// the code.
+///
+/// Longer than any of these run for, for the reason `stalls`, `merges` and
+/// `cleanup` are what they are above, and still clear of `grace` the way
+/// [`BRISKLY`]'s own is. A server's own is a minute, which is how long a real
+/// session has to be doing nothing before it is spoken to.
+static UNRESCUED: LazyLock<Pace> = LazyLock::new(|| Pace {
+    proposing: paced(Duration::from_secs(600)),
+    ..*BRISKLY
+});
+
 /// What stands where the host's `gh` goes: a branch with a pull request on it,
 /// and nothing said on it yet.
 ///
@@ -2338,6 +2367,13 @@ async fn grilling_unspoken(stub: &str) -> Grilling {
 /// script naming the path being written before there is a fixture to ask.
 async fn grilling_spilling(spill: tempfile::TempDir, stub: &str, gh: &str) -> Grilling {
     grilling_at_pace(spill, stub, gh, *BRISKLY, &[]).await
+}
+
+/// And the same on a server whose rescue speaks to nothing at all — for the
+/// tests that go all the way through a wrap-up and read what the Conversation
+/// had to say about itself afterwards. See [`UNRESCUED`].
+async fn grilling_unrescued(spill: tempfile::TempDir, stub: &str, gh: &str) -> Grilling {
+    grilling_at_pace(spill, stub, gh, *UNRESCUED, &[]).await
 }
 
 /// The same workbench with the same press, on a draft whose Process is
@@ -14735,7 +14771,7 @@ const PRINTS_AND_STOPS: &str = r#"printf 'nothing to do\n'"#;
 
 /// One archived Conversation with a session's worth of bulk on it.
 async fn archived_printing(pool: &SqlitePool, repo: i64, branch: &str) -> Archived {
-    let id = verkstead_store::start_conversation(pool, repo, branch)
+    let id = verkstead_store::start_conversation(pool, repo, branch, THIS_DEVICE)
         .await
         .unwrap()
         .expect("the Repo is registered");
@@ -22534,10 +22570,15 @@ async fn stood_on_by_a_finished_conversation(bench: &Bench, holder: Holder<'_>) 
 
     let pool = open_database(&bench.database).await.unwrap();
 
-    let id = verkstead_server::store::start_conversation(&pool, bench.repo_id, holder.branch)
-        .await
-        .unwrap()
-        .expect("nothing else has that branch");
+    let id = verkstead_server::store::start_conversation(
+        &pool,
+        bench.repo_id,
+        holder.branch,
+        THIS_DEVICE,
+    )
+    .await
+    .unwrap()
+    .expect("nothing else has that branch");
 
     verkstead_server::store::save_brief(&pool, id, "# A stage of its own\n")
         .await
@@ -23795,7 +23836,7 @@ async fn a_stage_of_the_roadmap(fixture: &Grilling, repo_id: i64, label: &str) -
     let pool = open_database(&fixture.database).await.unwrap();
     let branch = format!("roadmaps/rate-limiting/{label}-by-hand");
 
-    let id = verkstead_store::start_conversation(&pool, repo_id, &branch)
+    let id = verkstead_store::start_conversation(&pool, repo_id, &branch, THIS_DEVICE)
         .await
         .unwrap()
         .expect("the branch is free");
@@ -31163,12 +31204,17 @@ async fn a_set_asked_after_the_mark_keeps_the_follow_up_open() {
 ///
 /// Whether there is anything else is the human's to say, so a follow-up session
 /// cannot end itself however finished it believes it is.
+///
+/// **With the rescue held off**, because what is read at the end is everything
+/// this Conversation had to say about itself — and the wrap-up before the
+/// follow-up leaves a review session idle between its one line and its reaping.
+/// See [`UNRESCUED`].
 #[tokio::test]
 async fn a_follow_up_signal_without_the_mark_is_refused_and_one_with_it_ends_the_follow_up() {
     let spill = tempfile::tempdir().unwrap();
     let reviews = spill.path().join("review-prompts");
 
-    let fixture = grilling_spilling(
+    let fixture = grilling_unrescued(
         spill,
         &a_backlog_then_a_follow_up(&reviews, SIGNALS_BEFORE_THE_MARK),
         &gh_about(GREEN, "", ""),

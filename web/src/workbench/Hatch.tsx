@@ -66,6 +66,7 @@ import {
 } from "../api/client";
 import type { ConversationArchived, ConversationClosed } from "../api/types";
 import { useReading } from "../freshness";
+import { keyOf, useDevice, whose } from "../reaching";
 import {
   ARCHIVE_REFUSAL,
   Action,
@@ -88,6 +89,7 @@ export function Hatch(props: {
   back: () => void;
 }): JSX.Element {
   const queries = useQueryClient();
+  const device = useDevice();
 
   // The menu's own way to shut, held here because the press is what shuts it.
   let shut = (): void => {};
@@ -103,11 +105,19 @@ export function Hatch(props: {
 
     // Merged as the sidebar's is: the list is re-read constantly, and this is
     // the same cache entry.
-    freshness: { reconcile: "id" } as const,
+    freshness: { reconcile: "rank" } as const,
   }));
 
+  /// This Conversation's row on the sidebar, where the list holds one.
+  ///
+  /// The device as well as the id, the list being merged from the whole cluster:
+  /// a member's Conversation 4 is a row of it too, and a header that took that
+  /// row's branch for this one would name the wrong piece of work on the one
+  /// page whose whole job is to say which Conversation could not be read.
   const row = () =>
-    conversations.data?.find((entry) => String(entry.id) === props.id);
+    conversations.data?.find(
+      (entry) => String(entry.id) === props.id && whose(entry) === device(),
+    );
 
   /// The Conversation's id as the presses want it. The path is what the human's
   /// URL held: one that names no Conversation is answered by the server the way
@@ -121,7 +131,7 @@ export function Hatch(props: {
   /// is not this page's to keep.
   const reread = (): Promise<unknown> =>
     Promise.all([
-      queries.invalidateQueries({ queryKey: ["conversation"] }),
+      queries.invalidateQueries({ queryKey: keyOf(device(), "conversation") }),
       queries.invalidateQueries({ queryKey: ["conversations"] }),
     ]);
 
@@ -129,20 +139,20 @@ export function Hatch(props: {
   /// the page goes home, and the request runs behind all three. A failure puts
   /// the row back and says why in a toast — see the module's own note above.
   const leaving = <Outcome,>(press: {
-    says: Said;
+    says: Omit<Said, "device">;
     post: () => Promise<Outcome>;
     refusal: (outcome: Outcome) => string;
     fell: (error: Error) => string;
   }): void => {
     shut();
-    eagerly({ conversation: id(), reread, ...press });
+    eagerly({ device: device(), conversation: id(), reread, ...press });
     props.back();
   };
 
   const closeAway = () =>
     leaving({
       says: { closed: true, archived: true },
-      post: () => closeAndArchiveConversation(id()),
+      post: () => closeAndArchiveConversation(device(), id()),
       refusal: (outcome: ConversationClosed) => CLOSE_REFUSAL[outcome],
       fell: (error: Error) =>
         `The conversation could not be closed: ${error.message}`,
@@ -151,7 +161,7 @@ export function Hatch(props: {
   const archive = () =>
     leaving({
       says: { archived: true },
-      post: () => archiveConversation(id()),
+      post: () => archiveConversation(device(), id()),
       refusal: (outcome: ConversationArchived) => ARCHIVE_REFUSAL[outcome],
       fell: (error: Error) =>
         `The conversation could not be archived: ${error.message}`,

@@ -54,6 +54,7 @@ import {
   reads as readingOf,
   serving,
   whenever,
+  type Answer,
 } from "./serving";
 import { Streaming, stream, streaming } from "./streaming";
 import { worker } from "./worker";
@@ -462,6 +463,39 @@ function theWrapping() {
   );
 }
 
+/// A member of this device's cluster, by the Device Id a Nudge of its news
+/// carries: sixteen random hex bytes, as every Verkstead's is.
+const MEMBER = "8f2a1c0b4d6e7f902b13c4d5e6f70819";
+
+/// Where a call for that member stands. The prefix takes the place of `/api/ui`,
+/// so the far end sees the path the browser would have written locally — see
+/// `reaching.ts`, and `relaying.rs` on the other side of it.
+const at = (path: string) => `/api/ui/members/${MEMBER}${path}`;
+
+/// And where the page it is drawn on stands.
+const onTheMember = (path: string) => `/devices/${MEMBER}${path}`;
+
+/// The member's own Conversation, at the same number as this device's: every
+/// Verkstead issues a 3, so the two collide by construction and nothing but the
+/// device tells them apart.
+const ON_THE_MEMBER = at(`/conversations/${CONVERSATION.id}`);
+
+/// The workbench with a member on the other end of it: this device answers for
+/// its own sidebar, and everything the open Conversation is drawn from comes back
+/// under the member's prefix.
+function theMember(...answers: Answer[]) {
+  return serving(
+    ...BESIDE,
+    whenever(ON_THE_MEMBER, json(CONVERSATION)),
+    whenever(at("/repos"), json(repos as RepoEntry[])),
+    whenever(at("/profiles"), json(profiles as ProfileEntry[])),
+    ...answers,
+    // Anything neither side was asked for is a refusal rather than a throw, so a
+    // pane these tests are not about draws its error and says nothing here.
+    json({ error: "nothing serves that" }, 404),
+  );
+}
+
 /// The five reads every kind is judged against below.
 const COUNTED = [OPENED, SIDEBAR, REPOS, ROADMAPS, PROFILES];
 
@@ -504,6 +538,33 @@ const ABOUT: Record<string, readonly string[]> = {
   // against the saved accounts. Once however many of them are mounted — one
   // key, one query, one re-read.
   profiles: [PROFILES],
+  // The joins in flight, which move the list the modal is drawn from and the
+  // Devices section of the Remote access pane. Neither is among the five: the
+  // modal is read by the shell rather than by a page, and the Devices section
+  // is a settings pane this sweep never opens. The sidebar is, for the reason
+  // the kind below names it — an Allow settled is a membership that moved.
+  joins: [SIDEBAR],
+  // And the cluster moving with no join here to have moved it, which names that
+  // same Devices section — a settings pane this sweep never opens — and the
+  // sidebar. The membership decides which rows are on the merged list and
+  // whether any row carries a machine at all, so a device unlinked is its
+  // Conversations to take off the list and the last one unlinked is every
+  // remaining row to redraw without a device.
+  devices: [SIDEBAR],
+  // And what is out there rather than in the cluster: a device nobody has typed
+  // an address for was heard advertising itself, or one that had been heard
+  // stopped. It names the Discovered list under that same section — not the
+  // membership beside it, the two being two readings — and that pane is one this
+  // sweep never opens either.
+  discovered: [],
+  // Everything of one device's, which is what a member's stream says the moment
+  // it is taken up: it knows nothing about what it missed. The Nudges in this
+  // sweep carry no device, so what it names here is everything of *this*
+  // device — which is whatever the page has on screen rather than every path
+  // below it: the three the conversation page is drawn over, and not the two it
+  // never asks for. A member's, aimed at that member alone, is the describe
+  // after this one.
+  everything: [OPENED, SIDEBAR, PROFILES],
 };
 
 describe("what a Nudge is about", () => {
@@ -798,6 +859,83 @@ describe("what a Nudge is about", () => {
     // the agent letting go of its wait is a Nudge of its own (ADR-0009).
     await drawn(container, `.${standing.liveness}.${standing.disconnected}`);
     expect(askedFor(fetching, SET)).toBe(2);
+  });
+});
+
+describe("a member's news", () => {
+  /// A Set answered on a member refreshes the page drawn on that member's
+  /// Conversation, and the read it makes is the member's own.
+  it("reads the member's Conversation back, through the device that relays", async () => {
+    window.history.pushState({}, "", onTheMember(`/conversations/${CONVERSATION.id}`));
+    const fetching = theMember();
+    render(() => <App />);
+    await waitFor(() => screen.getByText(ALREADY_THERE));
+    stream().opens();
+    const before = askedFor(fetching, ON_THE_MEMBER);
+
+    stream().nudges({ ...SET_ARRIVED, device: MEMBER });
+    await vi.advanceTimersByTimeAsync(0);
+
+    await waitFor(() =>
+      expect(askedFor(fetching, ON_THE_MEMBER)).toBe(before + 1),
+    );
+    // And this device was asked for nothing of the member's, which is the half
+    // that makes it the member's: the same path unprefixed is this device's own
+    // Conversation of that number, and the two collide by construction.
+    expect(askedFor(fetching, OPENED)).toBe(0);
+  });
+
+  /// And nothing of this device's is read for it. The ids collide, so a table
+  /// keyed by bare ids would read this device's Conversation 3 every time a
+  /// member's 3 moved.
+  it("leaves this device's own Conversation alone", async () => {
+    window.history.pushState({}, "", `/conversations/${CONVERSATION.id}`);
+    const fetching = serving(...BESIDE, whenever(OPENED, json(CONVERSATION)));
+    render(() => <App />);
+    await waitFor(() => screen.getByText(ALREADY_THERE));
+    stream().opens();
+    const before = askedFor(fetching, OPENED);
+
+    stream().nudges({ ...SET_ARRIVED, device: MEMBER });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(askedFor(fetching, OPENED)).toBe(before);
+  });
+
+  /// A member's stream coming back says everything of that device moved, and a
+  /// page drawing it reads back what it is showing.
+  it("reads the member back when its stream is taken up again", async () => {
+    window.history.pushState({}, "", onTheMember(`/conversations/${CONVERSATION.id}`));
+    const fetching = theMember();
+    render(() => <App />);
+    await waitFor(() => screen.getByText(ALREADY_THERE));
+    stream().opens();
+    const before = askedFor(fetching, ON_THE_MEMBER);
+
+    stream().nudges({ kind: "everything", device: MEMBER });
+    await vi.advanceTimersByTimeAsync(0);
+
+    await waitFor(() =>
+      expect(askedFor(fetching, ON_THE_MEMBER)).toBe(before + 1),
+    );
+  });
+
+  /// And it is one device's queries rather than the cache: a member that was away
+  /// says nothing about this device's work, which never stopped being read.
+  it("holds this device's own when a member's stream is taken up again", async () => {
+    window.history.pushState({}, "", `/conversations/${CONVERSATION.id}`);
+    const fetching = serving(...BESIDE, whenever(OPENED, json(CONVERSATION)));
+    render(() => <App />);
+    await waitFor(() => screen.getByText(ALREADY_THERE));
+    stream().opens();
+    const before = reads(fetching);
+
+    stream().nudges({ kind: "everything", device: MEMBER });
+    await vi.advanceTimersByTimeAsync(0);
+
+    for (const path of COUNTED) {
+      expect(askedFor(fetching, path), path).toBe(before[path]);
+    }
   });
 });
 

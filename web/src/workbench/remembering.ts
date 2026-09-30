@@ -13,7 +13,7 @@
 //! record because a device's layout is a device's, exactly as the pane widths
 //! beside it are — a phone that opened Code has nothing to say about a laptop's
 //! splits. Under the same `verkstead.*` namespace as everything else this app
-//! leaves in a browser, through `device.ts`.
+//! leaves in a browser, through `remembered.ts`.
 //!
 //! **The layout is written apart from the text**, which is the one arrangement
 //! decision here. A dirty file may be two megabytes and a browser's storage is
@@ -40,7 +40,7 @@
 
 import { createEffect, type Accessor } from "solid-js";
 
-import { forget, read, write } from "../device";
+import { forget, read, write } from "../remembered";
 import type { Tab } from "./keeping";
 import {
   group as made,

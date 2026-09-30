@@ -45,6 +45,7 @@ import { For, Show, createEffect, createSignal, type JSX } from "solid-js";
 import { HarnessMark } from "../HarnessMark";
 import { AGENT_NAME, type AgentType } from "../agents";
 import { createProfile } from "../api/client";
+import { harnessAbsent } from "../broken";
 import type {
   AccountView,
   OnboardingView,
@@ -335,11 +336,16 @@ function Row(props: {
 
       {/* An account whose harness is missing is one there is nothing to run:
           the row is drawn so that it is not a surprise later, and the step
-          before this one is where it is put right. */}
+          before this one is where it is put right.
+
+          The finding is said in the words every other site says it in — a
+          mirror of a member's profile whose harness is not here reads broken in
+          this sentence too, see [`../broken.ts`] — and what is added after it
+          is this step's own, there being a step above to point at. */}
       <Show when={!props.found.harness}>
         <Note>
-          {AGENT_NAME[agent()]} is not on this machine. Install it in the step
-          above and this account can be taken on.
+          {harnessAbsent(agent())} Install it in the step above and this account
+          can be taken on.
         </Note>
       </Show>
     </li>

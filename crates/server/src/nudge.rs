@@ -21,20 +21,45 @@
 //! waiting/disconnected verdict used to cycle with that poll; what it cycles
 //! with here is the agent's long-poll itself, announced as it is taken up and
 //! as it is let go — see [`crate::responses`], which is what holds it.
+//!
+//! **And a member's news comes down this stream too.** A page reaches a
+//! Conversation of a member's through the device it opened (ADR-0020, *The
+//! opened device relays*), so the news of one has to arrive on the stream that
+//! page is already listening to: the hub holds a Nudge stream to each of its
+//! members and announces what comes down one here, under the Device Id it came
+//! from — see [`crate::relaying::freshness`], and [`Nudged`], which is the
+//! device and the Nudge together. A local Nudge carries no device and is the
+//! frame it always was.
+//!
+//! **What goes over the Peer Listener is this device's own news alone** — see
+//! [`nudges`]. That namespace is mounted twice and this is the one endpoint in it
+//! that answers the two listeners differently, because a member re-announcing
+//! what a *third* device said would be saying it was this device's: in a cluster
+//! everybody holds a stream to everybody, so the news of C reaches every member
+//! from C itself.
+//!
+//! **And one word of this device's own stops here too**: the merged sidebar
+//! catching up, which is this device saying that the account it holds of a member
+//! has been re-read and its own pages have something new to draw. Sent, it would
+//! read on the far end as this device's Conversations moving, and the two devices
+//! would tell each other about each other for ever — see [`Nudged::only_here`],
+//! and [`Nudges::announce_here`], which is how a caller says it.
 
 use std::convert::Infallible;
 use std::time::Duration;
 
+use axum::Extension;
 use axum::extract::State;
 use axum::response::Sse;
 use axum::response::sse::{Event, KeepAlive};
 use tokio::sync::broadcast;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::{Stream, StreamExt};
-use verkstead_schema::Nudge;
+use verkstead_schema::{Nudge, Nudged};
 use verkstead_store::SettledSet;
 
 use crate::AppState;
+use crate::peer::workbench::OverTheLink;
 
 /// How much may happen before a page that is behind is told it is. Falling
 /// behind costs precision rather than correctness: a page that missed a burst is
@@ -55,10 +80,10 @@ const KEEP_ALIVE: Duration = Duration::from_secs(15);
 /// on a Capture growing, so until the viewer wanted to hear about them there
 /// was nobody to tell.
 #[derive(Debug, Clone)]
-pub(crate) struct Nudges(broadcast::Sender<Nudge>);
+pub struct Nudges(broadcast::Sender<Nudged>);
 
 impl Nudges {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         let (moves, _) = broadcast::channel(NUDGE_BACKLOG);
         Self(moves)
     }
@@ -70,25 +95,90 @@ impl Nudges {
     /// The kind is not optional and has no default: what a caller knows about
     /// what it just changed is knowledge that exists nowhere else, and a Nudge
     /// that shrugged would put every page back to reading everything.
-    pub(crate) fn announce(&self, moved: Nudge) {
-        let _ = self.0.send(moved);
+    pub fn announce(&self, moved: Nudge) {
+        let _ = self.0.send(Nudged::here(moved));
+    }
+
+    /// And the same about a **member's** world rather than this device's: what
+    /// came down the Nudge stream this device holds to `device`, said again here
+    /// under the Device Id it came from.
+    ///
+    /// The kind is carried through untouched, because it is the member's own
+    /// account of what moved and this device has nothing to add to it: what the
+    /// device does is say *whose* it is, which is the one thing the far end
+    /// could not say — a Nudge is written by a Verkstead that has no idea who is
+    /// reading it.
+    ///
+    /// Only ever called by [`crate::relaying::freshness`]. Everything else in
+    /// this tree is telling the pages about work this device is doing itself,
+    /// and has no device to name.
+    pub(crate) fn announce_of(&self, device: &str, moved: Nudge) {
+        let _ = self.0.send(Nudged::of(device, moved));
+    }
+
+    /// And this device's own news that is **its own business**: told to the pages
+    /// in front of it and to no member.
+    ///
+    /// What it is for is the merged sidebar catching up — this device having
+    /// re-read the list it holds of a member, and its own pages having something
+    /// new to draw for it (see [`crate::merging`]). Said as ordinary news it
+    /// would go down the stream a member holds and read over there as *this
+    /// device's Conversations moved*, which would have that member re-read this
+    /// device's list and tell its own pages, which is news back over here, and
+    /// round for ever — see [`Nudged::only_here`], which is where that is set
+    /// out, and [`nudges`], which is the filter that keeps it here.
+    pub(crate) fn announce_here(&self, moved: Nudge) {
+        let _ = self.0.send(Nudged::only_here(moved));
     }
 
     /// Listen to what is announced. The stream is one listener; a test that
     /// wants to know whether a caller told the pages anything is another.
-    pub(crate) fn subscribe(&self) -> broadcast::Receiver<Nudge> {
+    pub(crate) fn subscribe(&self) -> broadcast::Receiver<Nudged> {
         self.0.subscribe()
     }
 }
 
-/// `GET /api/ui/nudges` — the stream an open page listens on.
+impl Default for Nudges {
+    fn default() -> Self {
+        Nudges::new()
+    }
+}
+
+/// `GET /api/ui/nudges` — the stream an open page listens on, and the one a
+/// member holds to this device.
+///
+/// **The one endpoint in this namespace that answers the two listeners
+/// differently**, and the difference is one filter: what goes over the Peer
+/// Listener is this device's own news that is not being kept here, where a
+/// browser's stream carries that and every member's besides.
+///
+/// Two things stop at this device and the filter is one line for both. A
+/// *member's* news would, passed on, be saying a stream's news was this device's,
+/// and the reader would re-announce it under the wrong Device Id — while there is
+/// nothing to pass on in the first place, a cluster being a membership every
+/// device holds the whole of: the news of C reaches every member from C's own
+/// stream. And this device's own account of a member having caught up is nobody's
+/// news at all: sent, it would read over there as this device's Conversations
+/// moving, and the two devices would tell each other about each other for ever —
+/// see [`Nudged::only_here`].
+///
+/// Which listener this is, is [`OverTheLink`] — put beside the request by the
+/// router a member reaches, and absent from the one a browser does.
 pub(crate) async fn nudges(
     State(state): State<AppState>,
+    over_the_link: Option<Extension<OverTheLink>>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    let its_own_news = over_the_link.is_some();
+
     // Subscribed to before the response goes back, so a change landing while
     // the page is still opening the stream is one it hears rather than one that
     // slips past it.
-    let moved = BroadcastStream::new(state.nudges.subscribe());
+    let moved = BroadcastStream::new(state.nudges.subscribe()).filter(move |moved| match moved {
+        Ok(moved) => !its_own_news || !moved.kept_here,
+        // Kept, because what it says is that this reader fell behind, and
+        // the take-while below is what reads it — see there.
+        Err(_) => true,
+    });
     let settled = BroadcastStream::new(state.settlements.subscribe());
 
     // A page that fell behind is told nothing narrower, because there is nothing
@@ -110,19 +200,23 @@ pub(crate) async fn nudges(
 
 /// What a settlement off the store's channel says on this one.
 ///
+/// This device's own, always: a settlement is a Response landing in this store,
+/// which is exactly as true of one a member relayed in as of one the browser
+/// here submitted — the record that moved is this device's either way.
+///
 /// A Set that settled without a Conversation behind it is a record that has been
 /// got at, rather than something a Set can be: every Set is asked from a
 /// Conversation, on one path, in one transaction. The list of Conversations is
 /// the widest thing there is to point a page at when it has happened anyway.
-fn settlement(settled: SettledSet) -> Nudge {
+fn settlement(settled: SettledSet) -> Nudged {
     match settled.conversation_id {
-        Some(conversation) => Nudge::Set { conversation },
+        Some(conversation) => Nudged::here(Nudge::Set { conversation }),
         None => {
             tracing::error!(
                 set_id = settled.set_id,
                 "a Question Set settled that is on no Conversation's Timeline",
             );
-            Nudge::Conversations
+            Nudged::here(Nudge::Conversations)
         }
     }
 }
@@ -131,10 +225,12 @@ fn settlement(settled: SettledSet) -> Nudge {
 ///
 /// The event stays named, so that whatever else may one day come down this
 /// stream is not mistaken for a Nudge by a page too old to know about it. What
-/// it says is in the data now, as the JSON the viewer's `Nudge` type is
-/// generated from.
-fn frame(moved: Nudge) -> Event {
+/// it says is in the data now, as the JSON the viewer's `Nudged` type is
+/// generated from — the kind, the Conversation where the change belongs to one,
+/// and the device where the news is a member's.
+fn frame(moved: Nudged) -> Event {
     Event::default().event("nudge").json_data(moved).expect(
-        "a Nudge is a tagged enum of integers and unit variants, which serialises without fail",
+        "a Nudge is a tagged enum of integers and unit variants under an optional Device Id, \
+         which serialises without fail",
     )
 }

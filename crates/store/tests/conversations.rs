@@ -20,6 +20,10 @@ use verkstead_store::{
     steer_conversation, stop, switch_repo, target, timeline, unarchive_conversation,
 };
 
+/// The device every Conversation started here is ranked by, named the way a
+/// cluster names one (ADR-0020, *Ranks*).
+const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
+
 /// A pool over a fresh database, plus the directory keeping it alive.
 async fn fresh_pool() -> (tempfile::TempDir, SqlitePool) {
     let dir = tempfile::tempdir().unwrap();
@@ -98,7 +102,7 @@ async fn moves(pool: &SqlitePool, id: i64) -> Vec<Lifecycle> {
 /// A drafting Conversation with a Brief written, ready to be grilled.
 async fn drafted(pool: &SqlitePool) -> i64 {
     let repo_id = repo(pool, "verkstead").await;
-    let id = start_conversation(pool, repo_id, "rate-limiting")
+    let id = start_conversation(pool, repo_id, "rate-limiting", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -111,7 +115,7 @@ async fn a_started_conversation_holds_its_repo_its_branch_and_the_default_rule()
     let (_dir, pool) = fresh_pool().await;
     let repo_id = repo(&pool, "verkstead").await;
 
-    let id = start_conversation(&pool, repo_id, "amber-kestrel")
+    let id = start_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE)
         .await
         .unwrap()
         .expect("the Repo is registered, so the Conversation should start");
@@ -135,7 +139,7 @@ async fn a_started_conversation_has_an_empty_brief_on_its_timeline() {
     let (_dir, pool) = fresh_pool().await;
     let repo_id = repo(&pool, "verkstead").await;
 
-    let id = start_conversation(&pool, repo_id, "amber-kestrel")
+    let id = start_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -148,12 +152,12 @@ async fn a_conversation_cannot_be_started_against_a_repo_that_is_not_registered(
     let (_dir, pool) = fresh_pool().await;
 
     assert!(
-        start_conversation(&pool, 404, "amber-kestrel")
+        start_conversation(&pool, 404, "amber-kestrel", THIS_DEVICE)
             .await
             .unwrap()
             .is_none()
     );
-    assert!(conversations(&pool).await.unwrap().is_empty());
+    assert!(conversations(&pool, false).await.unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -162,16 +166,16 @@ async fn conversations_are_listed_newest_first_with_the_repo_they_are_against() 
     let verkstead = repo(&pool, "verkstead").await;
     let askance = repo(&pool, "askance").await;
 
-    start_conversation(&pool, verkstead, "amber-kestrel")
+    start_conversation(&pool, verkstead, "amber-kestrel", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
-    start_conversation(&pool, askance, "quiet-harbour")
+    start_conversation(&pool, askance, "quiet-harbour", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
 
-    let listed: Vec<(String, String)> = conversations(&pool)
+    let listed: Vec<(String, String)> = conversations(&pool, false)
         .await
         .unwrap()
         .into_iter()
@@ -191,7 +195,7 @@ async fn conversations_are_listed_newest_first_with_the_repo_they_are_against() 
 async fn a_brief_is_rewritten_in_place_rather_than_added_to() {
     let (_dir, pool) = fresh_pool().await;
     let repo_id = repo(&pool, "verkstead").await;
-    let id = start_conversation(&pool, repo_id, "amber-kestrel")
+    let id = start_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -220,7 +224,7 @@ async fn a_brief_is_rewritten_in_place_rather_than_added_to() {
 async fn a_drafting_conversations_branch_and_base_commit_are_the_humans_to_change() {
     let (_dir, pool) = fresh_pool().await;
     let repo_id = repo(&pool, "verkstead").await;
-    let id = start_conversation(&pool, repo_id, "amber-kestrel")
+    let id = start_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -248,7 +252,7 @@ async fn a_drafting_conversations_branch_and_base_commit_are_the_humans_to_chang
 async fn a_conversation_can_be_started_on_a_name_nobody_has_settled_on() {
     let (_dir, pool) = fresh_pool().await;
     let repo_id = repo(&pool, "verkstead").await;
-    let id = start_unnamed_conversation(&pool, repo_id, "amber-kestrel")
+    let id = start_unnamed_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -266,11 +270,11 @@ async fn starting_the_work_leaves_an_invented_branch_name_to_be_replaced() {
     let (_dir, pool) = fresh_pool().await;
     let repo_id = repo(&pool, "verkstead").await;
 
-    let invented = start_unnamed_conversation(&pool, repo_id, "amber-kestrel")
+    let invented = start_unnamed_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
-    let typed = start_conversation(&pool, repo_id, "rate-limiting")
+    let typed = start_conversation(&pool, repo_id, "rate-limiting", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -322,11 +326,11 @@ async fn a_branch_stops_waiting_to_be_named_by_being_renamed_or_by_being_settled
     let (_dir, pool) = fresh_pool().await;
     let repo_id = repo(&pool, "verkstead").await;
 
-    let renamed = start_unnamed_conversation(&pool, repo_id, "amber-kestrel")
+    let renamed = start_unnamed_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
-    let left = start_unnamed_conversation(&pool, repo_id, "brave-otter")
+    let left = start_unnamed_conversation(&pool, repo_id, "brave-otter", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -369,7 +373,7 @@ async fn a_branch_stops_waiting_to_be_named_by_being_renamed_or_by_being_settled
 async fn a_row_says_whether_its_branch_is_still_to_be_named() {
     let (_dir, pool) = fresh_pool().await;
     let repo_id = repo(&pool, "verkstead").await;
-    let id = start_unnamed_conversation(&pool, repo_id, "amber-kestrel")
+    let id = start_unnamed_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -384,14 +388,14 @@ async fn a_row_says_whether_its_branch_is_still_to_be_named() {
     .await
     .unwrap();
 
-    let rows = conversations(&pool).await.unwrap();
+    let rows = conversations(&pool, false).await.unwrap();
     let row = rows.iter().find(|row| row.id == id).unwrap();
     assert!(row.naming);
     assert!(!row.branch_named);
 
     settle_naming(&pool, id).await.unwrap();
 
-    let rows = conversations(&pool).await.unwrap();
+    let rows = conversations(&pool, false).await.unwrap();
     assert!(!rows.iter().find(|row| row.id == id).unwrap().naming);
 }
 
@@ -406,11 +410,11 @@ async fn following_a_rename_moves_the_name_and_not_whose_it_is() {
     let (_dir, pool) = fresh_pool().await;
     let repo_id = repo(&pool, "verkstead").await;
 
-    let verksteads = start_unnamed_conversation(&pool, repo_id, "amber-kestrel")
+    let verksteads = start_unnamed_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
-    let theirs = start_conversation(&pool, repo_id, "throttling")
+    let theirs = start_conversation(&pool, repo_id, "throttling", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -453,7 +457,7 @@ async fn following_a_rename_moves_the_name_and_not_whose_it_is() {
 async fn handing_back_a_name_after_a_rename_leaves_the_branch_that_exists() {
     let (_dir, pool) = fresh_pool().await;
     let repo_id = repo(&pool, "verkstead").await;
-    let id = start_unnamed_conversation(&pool, repo_id, "amber-kestrel")
+    let id = start_unnamed_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -475,7 +479,7 @@ async fn handing_back_a_name_after_a_rename_leaves_the_branch_that_exists() {
 async fn handing_the_branch_name_back_leaves_the_one_it_started_on() {
     let (_dir, pool) = fresh_pool().await;
     let repo_id = repo(&pool, "verkstead").await;
-    let id = start_unnamed_conversation(&pool, repo_id, "amber-kestrel")
+    let id = start_unnamed_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -497,7 +501,7 @@ async fn handing_the_branch_name_back_leaves_the_one_it_started_on() {
 async fn inventing_another_name_replaces_the_one_the_conversation_started_on() {
     let (_dir, pool) = fresh_pool().await;
     let repo_id = repo(&pool, "verkstead").await;
-    let id = start_unnamed_conversation(&pool, repo_id, "amber-kestrel")
+    let id = start_unnamed_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -516,11 +520,11 @@ async fn inventing_another_name_replaces_the_one_the_conversation_started_on() {
 async fn inventing_another_name_leaves_a_name_the_human_settled() {
     let (_dir, pool) = fresh_pool().await;
     let repo_id = repo(&pool, "verkstead").await;
-    let theirs = start_conversation(&pool, repo_id, "throttling")
+    let theirs = start_conversation(&pool, repo_id, "throttling", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
-    let typed = start_unnamed_conversation(&pool, repo_id, "amber-kestrel")
+    let typed = start_unnamed_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -553,7 +557,7 @@ async fn inventing_another_name_leaves_a_name_the_human_settled() {
 async fn clearing_the_base_commit_restores_the_default_branch_rule() {
     let (_dir, pool) = fresh_pool().await;
     let repo_id = repo(&pool, "verkstead").await;
-    let id = start_conversation(&pool, repo_id, "amber-kestrel")
+    let id = start_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -582,7 +586,7 @@ async fn clearing_the_base_commit_restores_the_default_branch_rule() {
 async fn nothing_about_a_conversation_past_drafting_can_be_edited() {
     let (_dir, pool) = fresh_pool().await;
     let repo_id = repo(&pool, "verkstead").await;
-    let id = start_conversation(&pool, repo_id, "amber-kestrel")
+    let id = start_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -640,7 +644,7 @@ async fn a_conversation_and_its_brief_survive_the_database_being_reopened() {
 
     let pool = open_database(&database).await.unwrap();
     let repo_id = repo(&pool, "verkstead").await;
-    let id = start_conversation(&pool, repo_id, "amber-kestrel")
+    let id = start_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -667,7 +671,7 @@ async fn a_conversation_and_its_brief_survive_the_database_being_reopened() {
 async fn nothing_started_means_nothing_listed() {
     let (_dir, pool) = fresh_pool().await;
 
-    assert!(conversations(&pool).await.unwrap().is_empty());
+    assert!(conversations(&pool, false).await.unwrap().is_empty());
 }
 
 /// Moving a draft onto another Repo, and the three things that follow from it:
@@ -681,7 +685,7 @@ async fn switching_a_drafts_repo_resets_its_base_and_drops_only_the_companion_it
     let askance = repo(&pool, "askance").await;
     let notes = repo(&pool, "notes").await;
 
-    let id = start_conversation(&pool, verkstead, "amber-kestrel")
+    let id = start_conversation(&pool, verkstead, "amber-kestrel", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -778,7 +782,7 @@ async fn a_repo_switch_is_refused_while_a_roadmap_is_being_adopted() {
     let verkstead = repo(&pool, "verkstead").await;
     let askance = repo(&pool, "askance").await;
 
-    let id = start_adoption(&pool, verkstead, "amber-kestrel", "mvp")
+    let id = start_adoption(&pool, verkstead, "amber-kestrel", "mvp", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -889,7 +893,7 @@ async fn a_held_pull_request_is_the_target_where_nothing_else_names_one() {
 /// Which is the only way there is to one now — the start that made these is
 /// gone, and the row is written at the press. See [`hold_pull_request`].
 async fn held_by(pool: &sqlx::SqlitePool, repo_id: i64) -> i64 {
-    let id = start_unnamed_conversation(pool, repo_id, "amber-kestrel")
+    let id = start_unnamed_conversation(pool, repo_id, "amber-kestrel", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -906,11 +910,11 @@ async fn a_conversation_started_any_other_way_is_holding_no_pull_request() {
     let (_dir, pool) = fresh_pool().await;
     let verkstead = repo(&pool, "verkstead").await;
 
-    let ordinary = start_unnamed_conversation(&pool, verkstead, "amber-kestrel")
+    let ordinary = start_unnamed_conversation(&pool, verkstead, "amber-kestrel", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
-    let roadmap = start_adoption(&pool, verkstead, "quiet-heron", "mvp")
+    let roadmap = start_adoption(&pool, verkstead, "quiet-heron", "mvp", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -1323,7 +1327,7 @@ async fn archiving_a_conversation_whose_state_word_is_unreadable_says_it_is_not_
         archive_conversation(&pool, id).await.unwrap(),
         Archiving::Archived
     );
-    assert!(conversations(&pool).await.unwrap().is_empty());
+    assert!(conversations(&pool, false).await.unwrap().is_empty());
 }
 
 /// And the sidebar still draws it, carrying the word it could not read.
@@ -1336,13 +1340,13 @@ async fn the_list_carries_a_row_whose_state_word_is_unreadable() {
     let (_dir, pool) = fresh_pool().await;
     let readable = drafted(&pool).await;
     let repo_id = repo(&pool, "askance").await;
-    let broken = start_conversation(&pool, repo_id, "amber-kestrel")
+    let broken = start_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
     corrupt_the_state(&pool, broken).await;
 
-    let rows = conversations(&pool).await.unwrap();
+    let rows = conversations(&pool, false).await.unwrap();
 
     assert_eq!(
         rows.iter().map(|row| row.id).collect::<Vec<_>>(),
@@ -1372,7 +1376,7 @@ async fn archiving_a_closed_conversation_takes_it_off_the_list() {
         Archiving::Archived
     );
 
-    assert!(conversations(&pool).await.unwrap().is_empty());
+    assert!(conversations(&pool, false).await.unwrap().is_empty());
 
     let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
     assert_eq!(conversation.state, Lifecycle::Closed);
@@ -1399,7 +1403,7 @@ async fn what_was_archived_is_still_archived_after_a_restart() {
 
     let pool = open_database(&path).await.unwrap();
 
-    assert!(conversations(&pool).await.unwrap().is_empty());
+    assert!(conversations(&pool, false).await.unwrap().is_empty());
     assert_eq!(
         archive_conversation(&pool, id).await.unwrap(),
         Archiving::AlreadyArchived
@@ -1443,7 +1447,7 @@ async fn a_conversation_that_is_not_closed_cannot_be_archived() {
         Archiving::NotClosed
     );
 
-    assert_eq!(conversations(&pool).await.unwrap().len(), 1);
+    assert_eq!(conversations(&pool, false).await.unwrap().len(), 1);
 }
 
 #[tokio::test]
@@ -1472,7 +1476,7 @@ async fn unarchiving_puts_a_conversation_back_on_the_list() {
 
     assert!(!archived(&pool, id).await.unwrap());
 
-    let list = conversations(&pool).await.unwrap();
+    let list = conversations(&pool, false).await.unwrap();
     assert_eq!(list.len(), 1);
     assert_eq!(list[0].state, RowState::Known(Lifecycle::Closed));
 }
@@ -1496,7 +1500,7 @@ async fn what_was_unarchived_is_still_unarchived_after_a_restart() {
 
     let pool = open_database(&path).await.unwrap();
 
-    assert_eq!(conversations(&pool).await.unwrap().len(), 1);
+    assert_eq!(conversations(&pool, false).await.unwrap().len(), 1);
     assert_eq!(
         unarchive_conversation(&pool, id).await.unwrap(),
         Unarchiving::NotArchived
@@ -1514,7 +1518,7 @@ async fn unarchiving_one_that_is_not_archived_is_not_an_error() {
         unarchive_conversation(&pool, id).await.unwrap(),
         Unarchiving::NotArchived
     );
-    assert_eq!(conversations(&pool).await.unwrap().len(), 1);
+    assert_eq!(conversations(&pool, false).await.unwrap().len(), 1);
 }
 
 #[tokio::test]
@@ -1527,8 +1531,8 @@ async fn unarchiving_a_conversation_that_is_not_there_says_so() {
     );
 }
 
-/// The human's standing choice to be shown what they have put away: with it
-/// on, an archived Conversation is on the list in its ordinary place.
+/// The human's standing choice to be shown what they have put away: asked for
+/// with it on, an archived Conversation is on the list in its ordinary place.
 #[tokio::test]
 async fn showing_the_archived_puts_them_back_in_the_list() {
     let (_dir, pool) = fresh_pool().await;
@@ -1536,21 +1540,41 @@ async fn showing_the_archived_puts_them_back_in_the_list() {
     close_conversation(&pool, id).await.unwrap();
     archive_conversation(&pool, id).await.unwrap();
 
-    assert!(!showing_archived(&pool).await.unwrap());
-    assert!(conversations(&pool).await.unwrap().is_empty());
+    assert!(conversations(&pool, false).await.unwrap().is_empty());
 
-    show_archived(&pool, true).await.unwrap();
-
-    assert!(showing_archived(&pool).await.unwrap());
-    let list = conversations(&pool).await.unwrap();
+    let list = conversations(&pool, true).await.unwrap();
     assert_eq!(list.len(), 1);
     assert_eq!(list[0].id, id);
     assert!(archived(&pool, id).await.unwrap());
+}
 
+/// And the list is drawn at the position it is handed rather than at the one
+/// this machine's own switch is in.
+///
+/// Which is what makes one switch govern a merged list: the device the browser
+/// opened asks each of its members with its own position, and a member answers
+/// it without its own row being touched — see `crate::merging` and
+/// [`showing_archived`].
+#[tokio::test]
+async fn the_list_is_drawn_at_the_position_it_is_handed_rather_than_the_stored_one() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = drafted(&pool).await;
+    close_conversation(&pool, id).await.unwrap();
+    archive_conversation(&pool, id).await.unwrap();
+
+    // This machine's own switch is on, and a read that asked for it off is
+    // answered with the row left out all the same.
+    show_archived(&pool, true).await.unwrap();
+
+    assert!(conversations(&pool, false).await.unwrap().is_empty());
+    assert_eq!(conversations(&pool, true).await.unwrap().len(), 1);
+
+    // And the other way round, the row being the one thing neither read moves.
     show_archived(&pool, false).await.unwrap();
 
+    assert_eq!(conversations(&pool, true).await.unwrap().len(), 1);
+    assert!(conversations(&pool, false).await.unwrap().is_empty());
     assert!(!showing_archived(&pool).await.unwrap());
-    assert!(conversations(&pool).await.unwrap().is_empty());
 }
 
 /// And whether there is anything behind that switch at all, which is what the
@@ -1571,7 +1595,7 @@ async fn whether_anything_is_archived_is_read_apart_from_the_switch() {
     archive_conversation(&pool, id).await.unwrap();
 
     assert!(any_archived(&pool).await.unwrap());
-    assert!(conversations(&pool).await.unwrap().is_empty());
+    assert!(conversations(&pool, false).await.unwrap().is_empty());
 
     show_archived(&pool, true).await.unwrap();
     assert!(any_archived(&pool).await.unwrap());
@@ -1613,8 +1637,10 @@ async fn the_choice_to_show_them_survives_a_restart() {
 
     let pool = open_database(&path).await.unwrap();
 
-    assert!(showing_archived(&pool).await.unwrap());
-    assert_eq!(conversations(&pool).await.unwrap().len(), 1);
+    let showing = showing_archived(&pool).await.unwrap();
+
+    assert!(showing);
+    assert_eq!(conversations(&pool, showing).await.unwrap().len(), 1);
 }
 
 /// Where the worktree went outlives the process that made it — it is a directory
@@ -1654,7 +1680,7 @@ async fn an_adopting_conversation_records_the_roadmap_it_is_adopting() {
     let (_dir, pool) = fresh_pool().await;
     let repo_id = repo(&pool, "verkstead").await;
 
-    let id = start_adoption(&pool, repo_id, "spring-otter", "mvp")
+    let id = start_adoption(&pool, repo_id, "spring-otter", "mvp", THIS_DEVICE)
         .await
         .unwrap()
         .expect("the Repo is registered, so the Conversation should start");
@@ -1674,7 +1700,7 @@ async fn a_conversation_started_the_ordinary_way_is_adopting_nothing() {
     let (_dir, pool) = fresh_pool().await;
     let repo_id = repo(&pool, "verkstead").await;
 
-    let id = start_conversation(&pool, repo_id, "rate-limiting")
+    let id = start_conversation(&pool, repo_id, "rate-limiting", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -1695,12 +1721,12 @@ async fn an_adoption_cannot_be_started_against_a_repo_that_is_not_registered() {
     let (_dir, pool) = fresh_pool().await;
 
     assert!(
-        start_adoption(&pool, 404, "spring-otter", "mvp")
+        start_adoption(&pool, 404, "spring-otter", "mvp", THIS_DEVICE)
             .await
             .unwrap()
             .is_none()
     );
-    assert!(conversations(&pool).await.unwrap().is_empty());
+    assert!(conversations(&pool, false).await.unwrap().is_empty());
 }
 
 /// The mark is a row like every other, so it is there after a restart — a page
@@ -1709,7 +1735,7 @@ async fn an_adoption_cannot_be_started_against_a_repo_that_is_not_registered() {
 async fn the_roadmap_being_adopted_survives_the_database_being_reopened() {
     let (dir, pool) = fresh_pool().await;
     let repo_id = repo(&pool, "verkstead").await;
-    let id = start_adoption(&pool, repo_id, "spring-otter", "mvp")
+    let id = start_adoption(&pool, repo_id, "spring-otter", "mvp", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -1779,7 +1805,7 @@ async fn a_stage_with_no_label_is_told_from_a_conversation_with_no_row() {
     let (_dir, pool) = fresh_pool().await;
     let repo_id = repo(&pool, "verkstead").await;
 
-    let before = start_conversation(&pool, repo_id, "rate-limiting")
+    let before = start_conversation(&pool, repo_id, "rate-limiting", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -1822,7 +1848,7 @@ async fn a_stage_with_no_label_is_told_from_a_conversation_with_no_row() {
          stage's rather than a roadmap-writer's",
     );
 
-    let never = start_conversation(&pool, repo_id, "amber-kestrel")
+    let never = start_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -1838,7 +1864,7 @@ async fn a_stage_with_no_label_is_told_from_a_conversation_with_no_row() {
 /// A Conversation that has picked a direction, which is the one thing a pick
 /// needs: [`pick_direction`] is refused for anything but a grilling.
 async fn directed(pool: &SqlitePool, repo_id: i64, branch: &str, direction: Direction) -> i64 {
-    let id = start_conversation(pool, repo_id, branch)
+    let id = start_conversation(pool, repo_id, branch, THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -1863,10 +1889,15 @@ async fn directed(pool: &SqlitePool, repo_id: i64, branch: &str, direction: Dire
 /// The branch is named after the label rather than read off it, which is what the
 /// record is for: nothing here or anywhere else works a label out from a branch.
 async fn stage(pool: &SqlitePool, repo_id: i64, roadmap: &str, label: &str) -> i64 {
-    let id = start_conversation(pool, repo_id, &format!("roadmaps/{roadmap}/{label}"))
-        .await
-        .unwrap()
-        .unwrap();
+    let id = start_conversation(
+        pool,
+        repo_id,
+        &format!("roadmaps/{roadmap}/{label}"),
+        THIS_DEVICE,
+    )
+    .await
+    .unwrap()
+    .unwrap();
 
     start_stage(
         pool,
@@ -2499,7 +2530,7 @@ async fn a_queue_holds_no_other_repos_stages_no_other_roadmaps_and_no_unlabelled
 
     // The Conversation that wrote the roadmap: a `stage_roadmaps` row with the
     // roadmap and no label.
-    let wrote = start_conversation(&pool, ours, "roadmaps/mvp")
+    let wrote = start_conversation(&pool, ours, "roadmaps/mvp", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();

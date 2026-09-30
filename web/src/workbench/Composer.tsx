@@ -126,6 +126,7 @@ import { PaneSticky } from "../Panes";
 import shell from "../Panes.module.css";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
+import { keyOf, useDevice } from "../reaching";
 import { Adoption } from "./Adoption";
 import styles from "./Composer.module.css";
 import { refusedOnCreate, stoppedOnCreate } from "./composing";
@@ -174,6 +175,12 @@ export function Composer(props: {
   /// frame in the first place.
   back: { to: string; go: () => void };
 }): JSX.Element {
+  // Which device this Conversation is on, for the one thing on this pane that is
+  // about the record's identity rather than about a call: what the create that
+  // made it could not do is left against the Conversation *and* its device, ids
+  // colliding by construction — see `refusedOnCreate` in `composing.ts`.
+  const device = useDevice();
+
   // The files on this Conversation: the record's own and the ones this device
   // is still sending, and the requests either of them makes.
   const sending = sendingOn({
@@ -269,7 +276,7 @@ export function Composer(props: {
             {(said) => <ErrorLine class={styles.failure}>{said()}</ErrorLine>}
           </Show>
 
-          <Setup conversation={props.conversation} />
+          <Setup conversation={props.conversation} brief={props.brief} />
         </div>
 
         {/* What the setup has to say that is not a control, under the box
@@ -282,7 +289,7 @@ export function Composer(props: {
             refused is: the field is drawn holding what the server kept, and
             this is why it is not holding what was composed. See
             `composing.ts`. */}
-        <For each={refusedOnCreate(props.conversation.id)}>
+        <For each={refusedOnCreate(device(), props.conversation.id)}>
           {(said) => <ErrorLine class={styles.failure}>{said}</ErrorLine>}
         </For>
 
@@ -327,6 +334,7 @@ function Written(props: {
   brief: BriefEvent;
 }): JSX.Element {
   const queries = useQueryClient();
+  const device = useDevice();
 
   /// Whether the Brief is the human's to write here.
   const writing = () => !props.brief.frozen;
@@ -356,7 +364,8 @@ function Written(props: {
   const settled = () => refused() !== null;
 
   const save = useMutation(() => ({
-    mutationFn: (markdown: string) => saveBrief(props.conversation.id, markdown),
+    mutationFn: (markdown: string) =>
+      saveBrief(device(), props.conversation.id, markdown),
     onSuccess: (outcome: BriefSaved, markdown: string) => {
       if (outcome !== "Saved") {
         // What was typed stands: it is the only copy of it there is, and the
@@ -371,7 +380,9 @@ function Written(props: {
       setKept(markdown);
       // The readiness verdict under this pane is a fact about the Brief, so it
       // is read again every time the Brief moves.
-      void queries.invalidateQueries({ queryKey: ["conversation"] });
+      void queries.invalidateQueries({
+        queryKey: keyOf(device(), "conversation"),
+      });
     },
     // Whatever became of it, the field may have been typed into while it was in
     // flight — so the moment one save is done the next is considered.
@@ -577,23 +588,30 @@ function StartGrilling(props: {
   files: Attaching;
 }): JSX.Element {
   const queries = useQueryClient();
+  const device = useDevice();
 
   const [refused, setRefused] = createSignal<GrillingStarted | null>(null);
 
   const start = useMutation(() => ({
-    mutationFn: () => startGrilling(props.conversation.id),
+    mutationFn: () => startGrilling(device(), props.conversation.id),
     onSuccess: (outcome: GrillingStarted) => {
       if (outcome !== "Started") {
         setRefused(outcome);
         // Refused against a picture of the world this page read a moment ago:
         // reading it again is both the correction and the explanation.
-        void queries.invalidateQueries({ queryKey: ["conversation"] });
-        void queries.invalidateQueries({ queryKey: ["profiles"] });
+        void queries.invalidateQueries({
+          queryKey: keyOf(device(), "conversation"),
+        });
+        void queries.invalidateQueries({
+          queryKey: keyOf(device(), "profiles"),
+        });
         return;
       }
 
       setRefused(null);
-      void queries.invalidateQueries({ queryKey: ["conversation"] });
+      void queries.invalidateQueries({
+        queryKey: keyOf(device(), "conversation"),
+      });
       void queries.invalidateQueries({ queryKey: ["conversations"] });
     },
   }));
@@ -628,6 +646,7 @@ function StartTakeUp(props: {
   files: Attaching;
 }): JSX.Element {
   const queries = useQueryClient();
+  const device = useDevice();
 
   // Starting from whatever the create replay was stopped over, where this draft
   // came off a compose page that was: the press on that page asked the question
@@ -635,7 +654,7 @@ function StartTakeUp(props: {
   // at null the question would be asked a second time, and the line under it would
   // have said *press start again to go ahead* over a press that could only ask.
   const [said, setSaid] = createSignal<TakenUp | null>(
-    stoppedOnCreate(props.conversation.id),
+    stoppedOnCreate(device(), props.conversation.id),
   );
 
   const start = useMutation(() => ({
@@ -644,7 +663,7 @@ function StartTakeUp(props: {
     // which is every first press — and the server reads the worktrees again
     // regardless, so a list that has moved since stops this press in its turn.
     mutationFn: () =>
-      takeUpPullRequest(props.conversation.id, discarding(said())),
+      takeUpPullRequest(device(), props.conversation.id, discarding(said())),
     onSuccess: (outcome: TakenUp) => {
       // Whatever it came back with, the page is read again: what the take-up
       // did is a conversation that has moved, and what refused it is a
@@ -652,9 +671,13 @@ function StartTakeUp(props: {
       // correction either way.
       setSaid(outcome === "TakenUp" ? null : outcome);
 
-      void queries.invalidateQueries({ queryKey: ["conversation"] });
+      void queries.invalidateQueries({
+        queryKey: keyOf(device(), "conversation"),
+      });
       void queries.invalidateQueries({ queryKey: ["conversations"] });
-      void queries.invalidateQueries({ queryKey: ["profiles"] });
+      void queries.invalidateQueries({
+        queryKey: keyOf(device(), "profiles"),
+      });
     },
   }));
 
@@ -748,6 +771,11 @@ function serversOn(what: {
 }): Servers {
   const queries = useQueryClient();
 
+  // The device the Conversation is on, the way every other call on this
+  // pane is addressed: a server goes onto a row that may live on another
+  // Verkstead.
+  const device = useDevice();
+
   const [refused, setRefused] = createSignal<string | null>(null);
 
   // Which names have a press in flight, either way: the one thing a row of the
@@ -793,11 +821,19 @@ function serversOn(what: {
 
   const attach = (name: string) => {
     setRefused(null);
-    press(name, attachServer(what.conversation().id, name), "could not be attached");
+    press(
+      name,
+      attachServer(device(), what.conversation().id, name),
+      "could not be attached",
+    );
   };
 
   const forget = (name: string) =>
-    press(name, removeServer(what.conversation().id, name), "could not be removed");
+    press(
+      name,
+      removeServer(device(), what.conversation().id, name),
+      "could not be removed",
+    );
 
   const chips = (): Array<Chip> =>
     what.conversation().mcp_servers.map((server) => ({
@@ -936,6 +972,7 @@ function sendingOn(what: {
   frozen: () => boolean;
 }): Sending {
   const queries = useQueryClient();
+  const device = useDevice();
 
   const [landing, setLanding] = createSignal<Array<Landing>>([]);
   const [refusals, setRefusals] = createSignal<Array<string>>([]);
@@ -957,7 +994,7 @@ function sendingOn(what: {
       const key = (keys += 1);
       setLanding((held) => [...held, { key, name: file.name }]);
 
-      void attachFile(what.conversation().id, file)
+      void attachFile(device(), what.conversation().id, file)
         .then(async (outcome) => {
           if (typeof outcome === "string") {
             setRefusals((said) => [
@@ -975,7 +1012,9 @@ function sendingOn(what: {
           // `finally` below and the pill that replaces it is the one this read
           // brings back: firing the read and carrying straight on would be the
           // file blinking out of the row and back into it.
-          await queries.invalidateQueries({ queryKey: ["conversation"] });
+          await queries.invalidateQueries({
+            queryKey: keyOf(device(), "conversation"),
+          });
         })
         .catch((error: unknown) => {
           setRefusals((said) => [
@@ -999,7 +1038,7 @@ function sendingOn(what: {
   const forget = (attachment: AttachmentView) => {
     setRemoving((was) => [...was, attachment.id]);
 
-    void removeAttachment(what.conversation().id, attachment.id)
+    void removeAttachment(device(), what.conversation().id, attachment.id)
       .then((outcome: AttachmentRemoved) => {
         setRefusedRemoval(
           outcome === "Removed" ? null : ATTACHMENT_REMOVAL_REFUSAL[outcome],
@@ -1008,7 +1047,9 @@ function sendingOn(what: {
         // Either way: what came back is about a conversation this pane read a
         // moment ago, so reading it again is both the correction and — where
         // the pill is simply gone — the whole of what there was to do.
-        void queries.invalidateQueries({ queryKey: ["conversation"] });
+        void queries.invalidateQueries({
+          queryKey: keyOf(device(), "conversation"),
+        });
       })
       .catch((error: unknown) =>
         setRefusedRemoval(

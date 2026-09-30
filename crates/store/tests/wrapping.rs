@@ -29,6 +29,10 @@ use verkstead_store::{
     timeline, unfinished_pull_requests, wrap_up_settled,
 };
 
+/// The device every Conversation started here is ranked by, named the way a
+/// cluster names one (ADR-0020, *Ranks*).
+const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
+
 /// A pool over a fresh database, plus the directory keeping it alive.
 async fn fresh_pool() -> (tempfile::TempDir, SqlitePool) {
     let dir = tempfile::tempdir().unwrap();
@@ -50,7 +54,7 @@ async fn grilling(pool: &SqlitePool) -> i64 {
         .unwrap()
         .expect("nothing is registered at that path yet");
 
-    let id = start_conversation(pool, repo.id, "rate-limiting")
+    let id = start_conversation(pool, repo.id, "rate-limiting", THIS_DEVICE)
         .await
         .unwrap()
         .expect("the Repo was just registered");
@@ -94,7 +98,7 @@ async fn tinkering(pool: &SqlitePool) -> i64 {
         .unwrap()
         .expect("nothing is registered at that path yet");
 
-    let id = start_conversation(pool, repo.id, "rate-limiting")
+    let id = start_conversation(pool, repo.id, "rate-limiting", THIS_DEVICE)
         .await
         .unwrap()
         .expect("the Repo was just registered");
@@ -319,7 +323,7 @@ async fn a_draft_holding_no_pull_request_is_not_moved_on_by_one() {
         .unwrap()
         .expect("nothing is registered at that path yet");
 
-    let id = start_conversation(&pool, repo.id, "rate-limiting")
+    let id = start_conversation(&pool, repo.id, "rate-limiting", THIS_DEVICE)
         .await
         .unwrap()
         .expect("the Repo was just registered");
@@ -347,7 +351,7 @@ async fn a_draft_holding_a_pull_request_is_moved_on_by_recording_it() {
         .unwrap()
         .expect("nothing is registered at that path yet");
 
-    let id = start_conversation(&pool, repo.id, "verkstead-1")
+    let id = start_conversation(&pool, repo.id, "verkstead-1", THIS_DEVICE)
         .await
         .unwrap()
         .expect("the Repo was just registered");
@@ -436,7 +440,7 @@ async fn a_take_up_can_enter_wrapping_with_the_review_and_the_comments_settled()
         .unwrap()
         .expect("nothing is registered at that path yet");
 
-    let id = start_conversation(&pool, repo.id, "verkstead-1")
+    let id = start_conversation(&pool, repo.id, "verkstead-1", THIS_DEVICE)
         .await
         .unwrap()
         .expect("the Repo was just registered");
@@ -1979,7 +1983,7 @@ async fn the_old_word_for_closed_is_shut_in_the_ordering_too() {
 /// [`implementing`] carries the first: a stack in this workbench is a pull
 /// request per Conversation, so the neighbours have Conversations of their own.
 async fn beside_it_in(pool: &SqlitePool, repo: i64, branch: &str) -> i64 {
-    let id = start_conversation(pool, repo, branch)
+    let id = start_conversation(pool, repo, branch, THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();

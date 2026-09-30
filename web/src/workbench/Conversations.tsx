@@ -1,6 +1,17 @@
 //! The conversations sidebar: what there is to work on, and the ways to add
 //! to it.
 //!
+//! **One sidebar for the cluster.** The list is every device's Conversations
+//! merged by **Rank** — this device's own and each member's, the merge made by
+//! the device the browser opened out of the lists it holds of them (ADR-0020,
+//! *The opened device relays*). So this pane is not this machine's work any
+//! more, and nothing in it is addressed by a bare Conversation id: every
+//! Verkstead issues a Conversation 1, so which row is selected, which one a
+//! press was on, what the drag is holding and what the DOM carries are each a
+//! Conversation *and* a device — see `rowKey`, and [`keyFor`], which is how this
+//! pane says one. Opening a row goes to that device's own page, and the card's
+//! own menu acts on the Conversation on the machine that holds it.
+//!
 //! There is one of them: the compose page — a link at the head of the pane, and
 //! the composer with nothing behind it yet. The brief is written, the setup is
 //! settled, and the Conversation is created by the press at the end of it. See
@@ -20,12 +31,33 @@
 //! Verkstead invented, and a draft still carrying one reads *Draft* rather than
 //! a name that says nothing — see `naming.ts`.
 //!
+//! And under the name, which machine the work is on and then the Repo it is in:
+//! the mark for that device's OS, its name, and the Repo after them. On every
+//! row there is a device on, this device's own included, because that is what
+//! makes this one list rather than this device's list with visitors on it —
+//! and on no row at all where there is no cluster, a lone Verkstead drawing
+//! the Repo alone the way it always has. A row whose device has stopped
+//! answering is dimmed, which is the fade a finished Conversation wears, and
+//! says *unreachable* where it is read aloud, which is where the two are told
+//! apart.
+//!
 //! The order the rows are in is the human's own. This is one person's working
 //! set, so which piece of work sits at the top is theirs to say rather than a
 //! sort's — they say it by dragging a card, and what they said is the server's
-//! to keep. So a drag sends the whole list and the list comes back from the
-//! server on every read, which is what makes the order survive a reload, a
+//! to keep. So letting go of a card says where that one row landed — the row it
+//! now sits under, or nothing at all for the top — and the list comes back from
+//! the server on every read, which is what makes the order survive a reload, a
 //! restart and a second device without any of the three being a case.
+//!
+//! One row rather than the whole list, because one row is what moved: the order
+//! is a **Rank** per Conversation, and the key that says where this one sits is
+//! minted on the server, between the ranks of the two rows it landed between.
+//! Nothing here knows what a rank looks like. Both rows are named by device and
+//! id all the same — a bare id names a row on no particular machine — and the
+//! device the browser opened is the one that mints, holding every rank in the
+//! cluster; what it does with the answer is write it to the device that owns the
+//! row and to nobody else. See `ranking.rs`, and the error line under the list,
+//! which is where a member that could not be told is named.
 //!
 //! A card also answers a right-click with what there is to do about the
 //! Conversation it stands for — the same rows the status button at the head of
@@ -70,16 +102,19 @@ import {
 } from "solid-js";
 
 import { CardButton } from "../CardButton";
+import { Icon } from "../Icon";
 import { PaneSticky } from "../Panes";
 import { Truncated } from "../Truncated";
 import {
   listConversations,
-  placeConversations,
+  rankConversation,
   showingArchived,
 } from "../api/client";
-import type { ConversationEntry } from "../api/types";
+import type { ConversationEntry, MergedRow } from "../api/types";
+import { osIcon } from "../devices";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
+import { Reaching, rowKey, whose, type Device } from "../reaching";
 import { CardActions } from "./Actions";
 import { ShowArchived } from "./Archived";
 import { caughtUp, pressedRows } from "./eager";
@@ -97,17 +132,36 @@ import { STATE } from "./states";
 import { Wordmark } from "./Wordmark";
 
 export function Conversations(props: {
+  /// Which Conversation the page is open on, as the URL spells its id — and the
+  /// empty string where it names none.
   selected: string;
-  open: (id: number) => void;
+
+  /// And which device that Conversation lives on, `null` for this one. Beside
+  /// the id rather than folded into it because that is how the URL carries the
+  /// pair: a row is selected when both agree, ids colliding by construction.
+  device: Device;
+
+  /// Open one, which is a Conversation *and* a device: the page it opens is
+  /// that device's own — see `openings.ts`.
+  open: (id: number, device: Device) => void;
 }): JSX.Element {
   const conversations = useReading(() => ({
     queryKey: ["conversations"],
     queryFn: listConversations,
 
-    // Merged by the id each row carries flat, because this list is re-read
+    // Merged by the Rank each row carries flat, because this list is re-read
     // constantly — a session talking moves the *working* badge on one row of
     // it — and a rebuilt row is a row whose spinner starts its animation again.
-    freshness: { reconcile: "id" },
+    //
+    // The rank rather than the id, which is what it was while this list was
+    // one device's: the list is merged from the whole cluster now and every
+    // Verkstead issues a Conversation 1, so an id names a row on no particular
+    // machine. A rank names one — every one of them carries the device that
+    // issued it, so they are distinct cluster-wide by construction (ADR-0020,
+    // *Ranks*). A row that has just been dragged is rebuilt for it, which is
+    // the row the hand is on and the one the local order below is holding
+    // steady anyway.
+    freshness: { reconcile: "rank" },
   }));
 
   /// Whether the ones put away are drawn among them, read under the key the
@@ -129,26 +183,46 @@ export function Conversations(props: {
   // says the same thing. Null the rest of the time, which is every moment
   // nobody is dragging: the order is the server's fact and this is only ever
   // the half-second before it has heard about it.
-  const [dragged, setDragged] = createSignal<number[] | null>(null);
+  //
+  // Rows rather than ids, because this list is the cluster's: every Verkstead
+  // issues a Conversation 1, so what an order of ids held would be an order of
+  // rows on no particular machine — see `rowKey`, which is what a row is here.
+  const [dragged, setDragged] = createSignal<string[] | null>(null);
 
   // Which row is under the hand, or null when none is.
-  const [held, setHeld] = createSignal<number | null>(null);
+  const [held, setHeld] = createSignal<string | null>(null);
 
   // Which card was right-clicked and where the pointer was, or null while no
   // context menu is open. A signal because the menu is drawn from it, unlike
   // the press below.
+  //
+  // The device beside the id, because the menu acts on the Conversation the card
+  // stands for and has to act on it *on its own device*: a menu that closed this
+  // device's Conversation 4 because a member's row said 4 is the whole reason
+  // every press in this pane is addressed this way.
   const [pointed, setPointed] = createSignal<{
     id: number;
+    device: Device;
     x: number;
     y: number;
   } | null>(null);
+
+  // And that device again, kept past the menu going.
+  //
+  // Every row of that menu shuts the menu and *then* posts — and one of them
+  // waits for a card over the page to be answered first — so a value that went
+  // with `pointed` above would read as this device's at the very moment the
+  // press was made, on a Conversation of a member's. Overwritten by the next
+  // right-click and never cleared, which is what `fromTouch` below is for the
+  // same reason.
+  const [pointedDevice, setPointedDevice] = createSignal<Device>(null);
 
   // The list to draw: the server's, with what a press has already said about a
   // Conversation laid over it — a row closed a moment ago, one taken off the
   // list, one put back on it — and in the order being dragged where there is
   // one. A Conversation that has appeared since the drag began is not in that
-  // order and goes to the top, which is where an unplaced one goes on the
-  // server too.
+  // order and goes to the top, which is where a start ranks one on the server
+  // too.
   const shown = (): ConversationEntry[] => {
     const rows = pressedRows(
       conversations.data ?? [],
@@ -158,14 +232,18 @@ export function Conversations(props: {
     if (!order) return rows;
 
     const placed = order
-      .map((id) => rows.find((row) => row.id === id))
+      .map((key) => rows.find((row) => keyFor(row) === key))
       .filter((row): row is ConversationEntry => row !== undefined);
 
-    return [...rows.filter((row) => !order.includes(row.id)), ...placed];
+    return [
+      ...rows.filter((row) => !order.includes(keyFor(row))),
+      ...placed,
+    ];
   };
 
   const place = useMutation(() => ({
-    mutationFn: (order: number[]) => placeConversations(order),
+    mutationFn: (put: { row: MergedRow; below: MergedRow | null }) =>
+      rankConversation(put.row, put.below),
     onSuccess: () => {
       // Read the list back, which is what lets go of the local order below.
       // The other devices hear the same news as a Nudge.
@@ -190,7 +268,7 @@ export function Conversations(props: {
 
     if (
       arrived.length === order.length &&
-      arrived.every((row, n) => row.id === order[n])
+      arrived.every((row, n) => keyFor(row) === order[n])
     ) {
       setDragged(null);
     }
@@ -216,7 +294,11 @@ export function Conversations(props: {
   // from is `held` above, and the rest of this is bookkeeping between one
   // pointer event and the next.
   let press: {
+    /// Which row, as this pane spells one — see `rowKey`.
+    row: string;
+    /// And the Conversation it stands for, which is what the save names.
     id: number;
+    device: Device;
     pointer: number;
     x: number;
     y: number;
@@ -254,8 +336,8 @@ export function Conversations(props: {
     // Held first and ordered second, in that order: the two are read together
     // by the effect above, and an order taken hold of by nobody is one it is
     // entitled to throw away.
-    setHeld(at.id);
-    setDragged(shown().map((row) => row.id));
+    setHeld(at.row);
+    setDragged(shown().map(keyFor));
 
     // The list must not scroll out from under a card being moved. A
     // `touch-action` on the card would have said so before the finger landed
@@ -269,7 +351,7 @@ export function Conversations(props: {
 
   /// A press begins somewhere on a card. Which of the three things it is — a
   /// click, a scroll or a drag — is settled by what the hand does next.
-  const grab = (event: PointerEvent, id: number) => {
+  const grab = (event: PointerEvent, entry: ConversationEntry) => {
     // Which hand this is, before anything is decided about the press: a
     // right-click leaves at the next line, and the `contextmenu` behind it is
     // the one thing that still needs to know.
@@ -295,7 +377,9 @@ export function Conversations(props: {
     (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
 
     const began: NonNullable<typeof press> = {
-      id,
+      row: keyFor(entry),
+      id: entry.id,
+      device: whose(entry),
       pointer: event.pointerId,
       x: event.clientX,
       y: event.clientY,
@@ -373,9 +457,9 @@ export function Conversations(props: {
     if (!order || !list) return;
 
     const to = order.indexOf(under(list, event.clientY));
-    if (to < 0 || to === order.indexOf(at.id)) return;
+    if (to < 0 || to === order.indexOf(at.row)) return;
 
-    setDragged(moved(order, at.id, to));
+    setDragged(moved(order, at.row, to));
   };
 
   /// The drag is over: what is on the screen is what the human meant, so that
@@ -401,7 +485,12 @@ export function Conversations(props: {
     setHeld(null);
 
     const order = dragged();
-    if (order) place.mutate(order);
+    if (order) {
+      place.mutate({
+        row: { device: at.device, id: at.id },
+        below: sitsUnder(order, shown(), at.row),
+      });
+    }
   };
 
   // A sidebar that goes away mid-drag takes the whole drag with it: the
@@ -419,12 +508,12 @@ export function Conversations(props: {
   ///
   /// The flag is read once and spent, so the drag it belongs to swallows the
   /// click that follows it and nothing after that.
-  const opened = (id: number) => {
+  const opened = (entry: ConversationEntry) => {
     const dragged = reordered;
     reordered = false;
 
     if (dragged) return;
-    props.open(id);
+    props.open(entry.id, whose(entry));
   };
 
   /// A right-click asks what there is to do about the Conversation the card
@@ -441,25 +530,35 @@ export function Conversations(props: {
   /// alone, the browser's own answer to it included. What tells the two apart is
   /// the pointer that started the gesture rather than this event, which carries
   /// nothing about the hand that made it.
-  const ask = (event: MouseEvent, id: number) => {
+  const ask = (event: MouseEvent, entry: ConversationEntry) => {
     if (fromTouch) return;
 
     event.preventDefault();
-    setPointed({ id, x: event.clientX, y: event.clientY });
+    setPointedDevice(whose(entry));
+    setPointed({
+      id: entry.id,
+      device: whose(entry),
+      x: event.clientX,
+      y: event.clientY,
+    });
   };
 
   /// And the same move made from the keyboard, which is the whole of what a card
   /// has to offer somebody who is not dragging anything: one row up, one row
-  /// down, and the list saved each time as a drag saves it.
-  const step = (id: number, by: number) => {
-    const order = shown().map((row) => row.id);
-    const from = order.indexOf(id);
+  /// down, and the row saved each time as a drag saves it.
+  const step = (entry: ConversationEntry, by: number) => {
+    const key = keyFor(entry);
+    const order = shown().map(keyFor);
+    const from = order.indexOf(key);
     const to = from + by;
     if (from < 0 || to < 0 || to >= order.length) return;
 
-    const put = moved(order, id, to);
+    const put = moved(order, key, to);
     setDragged(put);
-    place.mutate(put);
+    place.mutate({
+      row: { device: whose(entry), id: entry.id },
+      below: sitsUnder(put, shown(), key),
+    });
   };
 
   return (
@@ -496,12 +595,19 @@ export function Conversations(props: {
         </Match>
         <Match when={conversations.data}>
           <ul class={styles.conversationList} ref={list}>
+            {/* What keeps a row's own element across a re-read is the merge the
+                reading is made with, which matches by the Rank each row carries
+                — the one field that is nobody else's on a list merged from the
+                whole cluster. See the reading above. */}
             <For each={shown()}>
               {(entry) => (
                 <ConversationRow
                   entry={entry}
-                  selected={String(entry.id) === props.selected}
-                  held={held() === entry.id}
+                  selected={
+                    String(entry.id) === props.selected &&
+                    whose(entry) === props.device
+                  }
+                  held={held() === keyFor(entry)}
                   open={opened}
                   grab={grab}
                   step={step}
@@ -525,8 +631,18 @@ export function Conversations(props: {
           than one per row: it is drawn where the pointer was rather than where
           the card is, so there is nothing about it that belongs to a row — and
           the cards it can open outlive the menu, which a row being dragged
-          about underneath it would not. */}
-      <CardActions pointed={pointed()} close={() => setPointed(null)} />
+          about underneath it would not.
+
+          Under a provider naming the card's own device, because every row of
+          that menu acts on the Conversation the card stands for and has to act
+          on it on the machine that holds it: the rows read the device the way
+          every other pane does, off the context around them (see
+          `reaching.ts`), and the card that was pressed is what says which one
+          this is — held apart from `pointed` because a press shuts the menu
+          before it posts. */}
+      <Reaching.Provider value={pointedDevice}>
+        <CardActions pointed={pointed()} close={() => setPointed(null)} />
+      </Reaching.Provider>
 
       {/* And the foot of the pane, under everything the pane is a list of. Last
           in the column so that the room left over is left over its head: that
@@ -576,6 +692,13 @@ const DISC = {
   unseen: "not looked at yet",
 } as const;
 
+/// And what a row whose device has stopped answering says after the name of it.
+///
+/// The Devices section's own word for the same finding, said in the same
+/// voice: one dial worked down that machine's addresses and reached none of
+/// them, which is a lid shut rather than an error.
+const UNREACHABLE = "unreachable";
+
 /// What a row says when it is read aloud.
 ///
 /// The card says where a Conversation has got to in marks rather than in words —
@@ -608,6 +731,16 @@ const DISC = {
 /// the row says it at all, the ring that marks the quiet being nothing to
 /// anybody reading by ear.
 ///
+/// And the device the work is on, where the row draws one: the card says which
+/// machine in a mark and a name beside the Repo, and of those the mark is
+/// nothing to anybody reading by ear — so the device belongs in this sentence
+/// for the reason everything else in it does, in the place the row draws it.
+///
+/// And *unreachable* beside it where that machine has stopped answering, which
+/// is the other half of what the row says in a fade: the dimming is the same
+/// one a finished Conversation wears, and this is where the two are told
+/// apart.
+///
 /// And a Conversation nobody has named is called a Draft, which is the word its
 /// state is said in as well — so where the name and the state are the one word
 /// it is said once rather than twice over. Whatever is drawn on the card is
@@ -631,6 +764,8 @@ function spoken(entry: ConversationEntry): string {
 
   return [
     name,
+    entry.device?.name ?? null,
+    entry.device && !entry.device.reachable ? UNREACHABLE : null,
     entry.repo,
     name === where ? null : where,
     entry.parked ? parked(entry.parked) : null,
@@ -679,45 +814,62 @@ function ConversationRow(props: {
   entry: ConversationEntry;
   selected: boolean;
   held: boolean;
-  open: (id: number) => void;
-  grab: (event: PointerEvent, id: number) => void;
-  step: (id: number, by: number) => void;
-  ask: (event: MouseEvent, id: number) => void;
+  open: (entry: ConversationEntry) => void;
+  grab: (event: PointerEvent, entry: ConversationEntry) => void;
+  step: (entry: ConversationEntry, by: number) => void;
+  ask: (event: MouseEvent, entry: ConversationEntry) => void;
 }): JSX.Element {
   const ended = (): boolean =>
     props.entry.state === "Done" || props.entry.state === "Closed";
+
+  /// And whether the machine this row's work is on has stopped answering,
+  /// which the row wears the same dimming for.
+  ///
+  /// The same treatment for a different reason: what the fade says on a
+  /// finished Conversation is that there is nothing here to do, and what it
+  /// says here is that there is nothing here that can be done — a press on
+  /// this row is refused by the Relay, by name. Which of the two it is is said
+  /// in the label read aloud, the fade itself being nothing to a screen
+  /// reader. The row keeps everything it had: it is the last list this device
+  /// held of that member, and none of it has stopped being true.
+  const away = (): boolean => props.entry.device?.reachable === false;
 
   return (
     <li
       class={styles.conversationRow}
       // Read by the drag to say which row the pointer is over, which is a
       // question about the rendered list rather than about the data behind it.
-      data-id={props.entry.id}
+      //
+      // The row rather than the Conversation's id: the list is merged from the
+      // whole cluster, so a number read back off the DOM would name a row on no
+      // particular machine — see `rowKey`.
+      data-row={keyFor(props.entry)}
       classList={{
         [styles.selected!]: props.selected,
         [styles.draft!]: props.entry.state === "Draft",
         [styles.ended!]: ended(),
+        [styles.unreachable!]: away(),
         [styles.held!]: props.held,
       }}
     >
       <CardButton
         class={styles.open}
         open={props.selected}
-        press={() => props.open(props.entry.id)}
+        press={() => props.open(props.entry)}
         aria-label={spoken(props.entry)}
         // What the grip's own label used to say, now that there is no second
         // control to say it in: this card can be moved, and these are the keys
         // that move it.
         aria-keyshortcuts="ArrowUp ArrowDown"
-        onPointerDown={(event) => props.grab(event, props.entry.id)}
-        onContextMenu={(event) => props.ask(event, props.entry.id)}
+        onPointerDown={(event) => props.grab(event, props.entry)}
+        onContextMenu={(event) => props.ask(event, props.entry)}
         keys={(event) => {
           if (event.key === "ArrowUp") {
             event.preventDefault();
-            props.step(props.entry.id, -1);
+            props.step(props.entry, -1);
           } else if (event.key === "ArrowDown") {
             event.preventDefault();
-            props.step(props.entry.id, 1);
+            props.step(props.entry, 1);
           }
         }}
       >
@@ -729,6 +881,27 @@ function ConversationRow(props: {
               the card above already says the whole sentence. */}
           <Truncated class={styles.title} text={titled(props.entry)} />
           <span class={styles.meta}>
+            {/* Which machine the work is on, ahead of the Repo it is in and
+                drawn on every row there is one on — this device's own
+                included, which is what makes this one list rather than this
+                device's list with visitors on it. Nothing at all where there
+                is no cluster: the row carries no device then, and a Verkstead
+                linked to nothing draws the line it always drew.
+
+                The mark is the one a device wears wherever it is drawn — see
+                `devices.ts` — so a WSL wears the Linux mark here exactly as it
+                does on the Devices section, and a word this build has no mark
+                for still draws a row. Unlabelled, like the mark at the right
+                edge: the label on the card above has already said the whole
+                sentence. */}
+            <Show when={props.entry.device}>
+              {(device) => (
+                <span class={styles.device}>
+                  <Icon of={osIcon(device().os)} class={styles.os} />
+                  {device().name}
+                </span>
+              )}
+            </Show>
             <span>{props.entry.repo}</span>
           </span>
         </span>
@@ -745,13 +918,53 @@ function ConversationRow(props: {
   );
 }
 
+/// What a row is to everything in this pane that holds one: the Conversation
+/// and the device it lives on, as the one string `rowKey` writes.
+///
+/// Named here as well as imported so that the whole pane says *the row* in one
+/// word: the order a drag is holding, the card under the hand, the key the DOM
+/// carries and the entry a press is looked up under are the one thing.
+function keyFor(entry: ConversationEntry): string {
+  return rowKey(whose(entry), entry.id);
+}
+
 /// The same list with one row moved to a place in it, which is the whole of
 /// what a drag and an arrow key each do.
-function moved(order: number[], id: number, to: number): number[] {
+function moved(order: string[], row: string, to: number): string[] {
   const put = [...order];
-  put.splice(put.indexOf(id), 1);
-  put.splice(to, 0, id);
+  put.splice(put.indexOf(row), 1);
+  put.splice(to, 0, row);
   return put;
+}
+
+/// The row a moved one now sits directly under, or `null` where it has landed
+/// at the top of the list — which is the whole of what the server is told about
+/// a move.
+///
+/// The row above rather than the row below, because the top of the list is the
+/// one end with nothing to name: a card dropped at the foot still has a row
+/// above it.
+///
+/// **Whichever device it belongs to**, named by that device and its id: the list
+/// is one list, so the row a card landed under is the row a card landed under.
+/// The device the browser opened holds every rank in the cluster — its own and
+/// each member's — so it mints the key between the two merged neighbours itself
+/// and hands the answer to whichever device owns the row that moved (see
+/// `ranking.rs`). Nothing here has to find a neighbour the owner would recognise.
+function sitsUnder(
+  order: string[],
+  rows: ConversationEntry[],
+  row: string,
+): MergedRow | null {
+  const at = order.indexOf(row);
+
+  for (let above = at - 1; above >= 0; above -= 1) {
+    const entry = rows.find((one) => keyFor(one) === order[above]);
+
+    if (entry !== undefined) return { device: whose(entry), id: entry.id };
+  }
+
+  return null;
 }
 
 /// Which row the pointer is over: the first whose bottom edge is below it, and
@@ -762,14 +975,14 @@ function moved(order: number[], id: number, to: number): number[] {
 /// a name wraps, and a row height written down here would go stale the first
 /// time anything in a card changed — and a drag that guessed would put the row
 /// somewhere the human was not pointing.
-function under(list: HTMLUListElement, y: number): number {
+function under(list: HTMLUListElement, y: number): string {
   const rows = [
     ...list.querySelectorAll<HTMLElement>(`.${styles.conversationRow}`),
   ];
   const over =
     rows.find((row) => y < row.getBoundingClientRect().bottom) ?? rows.at(-1);
 
-  return Number(over?.dataset.id ?? NaN);
+  return over?.dataset.row ?? "";
 }
 
 /// How far a pointer may travel and still have been a click, in pixels. A press

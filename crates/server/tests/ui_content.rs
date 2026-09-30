@@ -36,12 +36,22 @@ use verkstead_schema::{
     Answer, Liveness, Question, QuestionOption, QuestionSet, RepoDiff, Response, SetCreated,
     Subquestion,
 };
+use verkstead_server::device::reading::Reading;
+use verkstead_server::device::{Device, Devices};
+use verkstead_server::discovery::{Browse, Found, Probe};
 use verkstead_server::key::WorkbenchKey;
+use verkstead_server::peer::Members;
+use verkstead_server::peer::joining::Joins;
+use verkstead_server::platform::Platform;
 use verkstead_server::remote::Tailscale;
 use verkstead_server::{
-    Gh, open_database, router, router_asking_github, router_keeping, router_reading_tailscale,
-    store,
+    Gh, open_database, router, router_answering_devices, router_asking_github, router_keeping,
+    router_reading_tailscale, store,
 };
+
+/// The device every Conversation started here is ranked by, named the way a
+/// cluster names one (ADR-0020, *Ranks*).
+const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
 
 /// The Conversation every Set in this file is asked from.
 ///
@@ -107,7 +117,7 @@ async fn fresh_app() -> (tempfile::TempDir, SqlitePool, Router) {
         .unwrap()
         .expect("nothing is registered at that path yet");
 
-    let conversation = store::start_conversation(&pool, repo.id, "solid-viewer")
+    let conversation = store::start_conversation(&pool, repo.id, "solid-viewer", THIS_DEVICE)
         .await
         .unwrap()
         .expect("the Repo was just registered");
@@ -1939,7 +1949,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // adopting and nothing at the Repo level supplies them, so unchosen is the
     // state this page opens in. The Repo's path is the one thing here the
     // filesystem decided, and it is pinned like every other.
-    let adopting = store::start_adoption(&pool, registered.id, "spring-otter", "mvp")
+    let adopting = store::start_adoption(&pool, registered.id, "spring-otter", "mvp", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -1962,10 +1972,11 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     //
     // Its Brief is the human's, as every Review's is: nothing about the pull
     // request is read into it.
-    let wrapping_up = store::start_unnamed_conversation(&pool, registered.id, "quiet-heron")
-        .await
-        .unwrap()
-        .unwrap();
+    let wrapping_up =
+        store::start_unnamed_conversation(&pool, registered.id, "quiet-heron", THIS_DEVICE)
+            .await
+            .unwrap()
+            .unwrap();
 
     store::hold_pull_request(
         &pool,
@@ -2068,7 +2079,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         &pin_health(&get(&app, "/api/ui/profiles").await),
     );
 
-    let drafting = store::start_conversation(&pool, repos[0].id, "rate-limiting")
+    let drafting = store::start_conversation(&pool, repos[0].id, "rate-limiting", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -2141,7 +2152,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // Started the way the New conversation button starts one, on a name nobody
     // has settled on: the row the viewer draws from this one is the Draft, which
     // is what a Conversation whose branch name is still Verkstead's own reads as.
-    store::start_unnamed_conversation(&pool, repos[1].id, "amber-kestrel")
+    store::start_unnamed_conversation(&pool, repos[1].id, "amber-kestrel", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -2152,7 +2163,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // by pressing the button, for the reason the Repos are registered this way —
     // going in the front way means a real repository to make a real worktree in,
     // which is `conversations.rs`'s subject and not this one's.
-    let grilling = store::start_conversation(&pool, repos[0].id, "outbound-retries")
+    let grilling = store::start_conversation(&pool, repos[0].id, "outbound-retries", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -2325,7 +2336,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // Answered through `submit_response`, which is the one path a Response takes
     // — pressing the pick into the store by hand would write a fixture no Answer
     // could ever produce. What moves the Conversation is the tail landing, below.
-    let directing = store::start_conversation(&pool, repos[0].id, "usage-limits")
+    let directing = store::start_conversation(&pool, repos[0].id, "usage-limits", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -2531,7 +2542,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // holds, read every time the Conversation is. So the backlog is written into
     // a temporary directory and the path is pinned afterwards, the way every
     // other filesystem reading here is.
-    let tasked = store::start_conversation(&pool, repos[0].id, "task-runner")
+    let tasked = store::start_conversation(&pool, repos[0].id, "task-runner", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -2713,7 +2724,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // It carries a Pause Event as well, written by hand the way a Verkstead of
     // before wrote one: those are the record of what happened, nothing rewrites
     // them, and a Timeline holding one still has to draw.
-    let waiting = store::start_conversation(&pool, repos[0].id, "deferred-asks")
+    let waiting = store::start_conversation(&pool, repos[0].id, "deferred-asks", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -2814,7 +2825,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // Recorded rather than found, exactly as the commits above are recorded
     // rather than watched for: what a pull request does to a Conversation is
     // this file's subject, and whether `gh` can find one is `src/github.rs`'s.
-    let wrapping = store::start_conversation(&pool, repos[0].id, "rate-limiting")
+    let wrapping = store::start_conversation(&pool, repos[0].id, "rate-limiting", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -2995,7 +3006,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // Conversation is about the one its branch wrote — so there is a real
     // commit here and a real roadmap written over it. Both are pinned
     // afterwards, the way every other filesystem reading here is.
-    let staged = store::start_conversation(&pool, repos[0].id, "mvp-roadmap")
+    let staged = store::start_conversation(&pool, repos[0].id, "mvp-roadmap", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -3592,6 +3603,519 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         )
         .await,
     );
+
+    // And what the third section of that same pane reads: this device, and how
+    // many others are linked to it. Two of them, because the row is drawn two
+    // ways — an ordinary machine, and a WSL, which is the one case the OS word
+    // exists for and the one the whole of cluster mode was written for.
+    //
+    // The machine is stated rather than read, for the reason the four above go
+    // through a shell script: what platform the box writing these happens to be
+    // is a fact about that box, and a fixture the viewer's tests are drawn over
+    // has to read the same wherever it was written.
+    let (_dir, ordinary) = devices_app(Platform::Linux, None).await;
+    write(
+        "devices.json",
+        &a_stated_machine(&get(&ordinary, "/api/ui/devices").await),
+    );
+
+    let (_dir, wsl) = devices_app(Platform::Linux, Some(WSL_KERNEL)).await;
+    write(
+        "devices-wsl.json",
+        &a_stated_machine(&get(&wsl, "/api/ui/devices").await),
+    );
+
+    // And a third, with two devices written down as members of this one's
+    // cluster: the list draws a row apiece and the card's count comes off
+    // them, so a fixture with nothing linked could only ever draw the one row
+    // the two above hold. The members are a fixture, the join being a later
+    // task's — what is being fed to the viewer is the shape a linked Verkstead
+    // answers with.
+    let (_dir, linked) = a_linked_devices_app().await;
+    write(
+        "devices-linked.json",
+        &a_stated_machine(&get(&linked, "/api/ui/devices").await),
+    );
+
+    // And a fourth, with three joins asked for and none of them a link: the
+    // section draws a pending row apiece under the members, and the three ways
+    // such a row is drawn — still waiting, run out, and refused by the far end
+    // — are three rows on one reading.
+    //
+    // Written straight into the table, the way the members above are: what is
+    // being fed to the viewer is the shape a Verkstead answers with while
+    // somebody at another machine has yet to press anything.
+    let (_dir, asking) = a_waiting_devices_app().await;
+    write(
+        "devices-waiting.json",
+        &a_stated_machine(&get(&asking, "/api/ui/devices").await),
+    );
+
+    // And the Agent Profiles of a device that is in a cluster, which is the
+    // other list a membership changes the shape of: every device lists every
+    // member's accounts beside its own, each mirror row saying which machine it
+    // is at home on (ADR-0020, *Shared Profiles*).
+    //
+    // An app of its own rather than a member added to the one the Profiles above
+    // are written from, because a membership is not local to one reading: a
+    // member on that router would put a device on every sidebar row it answers
+    // as well.
+    let (_dir, shared) = a_shared_profiles_app().await;
+    write(
+        "profiles-shared.json",
+        &pin_health(&get(&shared, "/api/ui/profiles").await),
+    );
+
+    // And the list under those rows, which is the other reading that section
+    // makes: the devices nobody has typed an address for. Two of them, because
+    // that is what the list is for — a machine somebody is about to link, and a
+    // WSL beside it, the mark being the one thing that would tell it from the
+    // Windows it shares a hostname with.
+    //
+    // Stated rather than heard, for the reason the machine above is stated:
+    // whatever is advertising itself on the LAN of the box writing these is a
+    // fact about that LAN, and a fixture drawn from one could not be committed.
+    let (_dir, found) = a_discovering_devices_app().await;
+    write(
+        "devices-discovered.json",
+        &get(&found, "/api/ui/devices/discovered").await,
+    );
+
+    // And the other side of a join, which is not on that pane at all: the
+    // device asking to be let into *this* one's cluster, as the modal every
+    // open workbench raises is drawn from. Nothing of this machine is in it —
+    // it is the whole of what the far end said about itself — so it needs none
+    // of the stating above.
+    let (_dir, asked) = an_asked_devices_app().await;
+    write(
+        "joins-asking.json",
+        &get(&asked, "/api/ui/devices/asking").await,
+    );
+}
+
+/// What a WSL kernel calls itself, which is the one thing that tells one apart
+/// from the Linux it is in every other way.
+#[cfg(unix)]
+const WSL_KERNEL: &str = "5.15.167.4-microsoft-standard-WSL2";
+
+/// The id the device in those two fixtures is stated as, and the fingerprint
+/// and hostname written over the ones this run really had — see
+/// [`a_stated_machine`].
+#[cfg(unix)]
+const A_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
+#[cfg(unix)]
+const A_FINGERPRINT: &str = "3A:7B:1F:04:C8:92:6D:5E:AA:11:B0:47:9C:3D:2E:88:F5:60:71:1C:D4:09:B6:3F:82:5A:0E:97:44:CB:2D:16";
+#[cfg(unix)]
+const A_MACHINE_NAME: &str = "workbench";
+
+/// A router answering for a device on a stated machine, and the directory
+/// holding that device's files alive.
+///
+/// No Tailscale — `verkstead-no-such-tailscale` is a program that is not there
+/// — so the addresses are the stated LAN alone: what the tailnet half would add
+/// is the Remote access reading's own subject, and a device is reachable on
+/// what it can say it is reachable on.
+///
+/// Off Windows with its one caller, which writes the committed fixtures out of
+/// a `/bin/sh` script and is where the port below is named — see
+/// [`the_viewers_own_tests_are_fed_from_here`]. The files are committed and the
+/// viewer's own job reads them, so what a Windows run would add is a second
+/// machine writing the same bytes.
+#[cfg(unix)]
+async fn devices_app(platform: Platform, kernel: Option<&str>) -> (tempfile::TempDir, Router) {
+    let (dir, _pool, app) = devices_app_over_a_store(
+        platform,
+        kernel,
+        Browse::heard_nothing(),
+        Probe::asked_nothing(),
+    )
+    .await;
+
+    (dir, app)
+}
+
+/// The same, with the pool its membership is read out of handed back — what the
+/// linked fixture writes its members into — and what it has heard on the LAN and
+/// been answered over the tailnet, which are the two halves of the Discovered
+/// list.
+#[cfg(unix)]
+async fn devices_app_over_a_store(
+    platform: Platform,
+    kernel: Option<&str>,
+    browse: Browse,
+    probe: Probe,
+) -> (tempfile::TempDir, sqlx::SqlitePool, Router) {
+    let dir = tempfile::tempdir().unwrap();
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    let reading = Reading::stated(
+        Tailscale::running(vec!["verkstead-no-such-tailscale".to_owned()], WORKBENCH),
+        platform,
+        kernel.map(str::to_owned),
+        vec!["192.168.1.24".parse().unwrap(), "10.0.0.7".parse().unwrap()],
+    );
+
+    let device = Device::stated(dir.path(), A_DEVICE).unwrap();
+    let devices = Devices::of(
+        device,
+        reading,
+        Members::recorded(pool.clone()),
+        Joins::recorded(pool.clone()),
+    )
+    .browsing(browse)
+    .probing(probe);
+
+    (dir, pool.clone(), router_answering_devices(pool, devices))
+}
+
+/// The same router with two devices written down as members of this one's
+/// cluster: a Mac on a tailnet, and a WSL on the LAN that is answering nothing.
+///
+/// A WSL among them deliberately — a Windows machine and the WSL on it share a
+/// hostname, and the OS word beside the name is the only thing that tells two
+/// such rows apart, which is the case the whole of cluster mode was written
+/// for. Written straight into the table, the join being a later task's.
+///
+/// And one of the two unreachable, because that is the second way the pane draws
+/// a member: dimmed, reading *unreachable*, with everything about it still on the
+/// row. A fixture where both were answering could only ever draw the one of them.
+#[cfg(unix)]
+async fn a_linked_devices_app() -> (tempfile::TempDir, Router) {
+    let (dir, pool, app) = devices_app_over_a_store(
+        Platform::Linux,
+        None,
+        Browse::heard_nothing(),
+        Probe::asked_nothing(),
+    )
+    .await;
+
+    for (device, name, os, addresses) in [
+        (
+            A_MEMBER,
+            "laptop",
+            "macOS",
+            vec!["laptop.tailnet-name.ts.net", "100.64.0.2"],
+        ),
+        (
+            ANOTHER_MEMBER,
+            "workbench",
+            "Linux (WSL)",
+            vec!["172.29.0.14"],
+        ),
+    ] {
+        verkstead_store::record_member(
+            &pool,
+            &verkstead_store::Linking {
+                device: device.to_owned(),
+                name: name.to_owned(),
+                os: os.to_owned(),
+                addresses: addresses.into_iter().map(str::to_owned).collect(),
+                fingerprint: format!("AA:BB:CC:DD:{device}"),
+            },
+        )
+        .await
+        .unwrap();
+    }
+
+    verkstead_store::member_unreachable(&pool, ANOTHER_MEMBER)
+        .await
+        .unwrap();
+
+    (dir, app)
+}
+
+/// And the ids those two are written down under, for the reason this device's
+/// own is stated: a fixture committed to the tree names its rows by strings
+/// somebody chose.
+#[cfg(unix)]
+const A_MEMBER: &str = "0011223344556677889900aabbccddee";
+#[cfg(unix)]
+const ANOTHER_MEMBER: &str = "ffeeddccbbaa00998877665544332211";
+
+/// And a third, for the pending row that was refused rather than being made a
+/// member: a device that asked and was told no is a device nothing links to.
+#[cfg(unix)]
+const A_THIRD_DEVICE: &str = "99887766554433221100aabbccddeeff";
+
+/// A router whose Profiles are a cluster's: two of this device's own, and one
+/// **mirror** of a member's, which is the row every device in a cluster keeps
+/// per Profile it has heard of (ADR-0020, *Shared Profiles*).
+///
+/// The member row beside it is what the mirror is drawn with: the machine's
+/// name and the word its mark comes off are this device's own reading of its
+/// membership rather than anything the far end sent with the Profile. So the
+/// fixture holds both, which is what a linked Verkstead holds.
+///
+/// The mirror's account paths are the member's own — `/home/you/…` on a Mac,
+/// which is nowhere on the box writing this — and that is the point of them:
+/// what a session away from home is given is another stage's, and until then
+/// the row reads as one whose account is not on this device.
+#[cfg(unix)]
+async fn a_shared_profiles_app() -> (tempfile::TempDir, Router) {
+    let (dir, pool, app) = empty_app().await;
+
+    for (name, home, models) in [
+        ("fable", "/srv/accounts/fable", &["claude-fable-5"][..]),
+        ("opus", "/srv/accounts/opus", &["claude-opus-5"][..]),
+    ] {
+        store::create_profile(
+            &pool,
+            &store::ProfileFacts {
+                name: Some(name.to_owned()),
+                account: store::Account::Claude {
+                    claude_dir: std::path::PathBuf::from(format!("{home}/.claude")),
+                    config_file: std::path::PathBuf::from(format!("{home}/.claude.json")),
+                },
+                models: models.iter().map(|model| (*model).to_owned()).collect(),
+                memory: true,
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    }
+
+    verkstead_store::record_member(
+        &pool,
+        &verkstead_store::Linking {
+            device: A_MEMBER.to_owned(),
+            name: "laptop".to_owned(),
+            os: "macOS".to_owned(),
+            addresses: vec!["100.64.0.2".to_owned()],
+            fingerprint: format!("AA:BB:CC:DD:{A_MEMBER}"),
+        },
+    )
+    .await
+    .unwrap();
+
+    // Numbered the way the member numbers it rather than the way this device
+    // would: the id on the row is that machine's, and the local id this write
+    // hands out is what everything here names it by.
+    verkstead_store::record_mirror(
+        &pool,
+        &verkstead_store::Mirror {
+            device: A_MEMBER.to_owned(),
+            id: 4,
+            login: true,
+        },
+        &store::ProfileFacts {
+            name: Some("personal".to_owned()),
+            account: store::Account::Claude {
+                claude_dir: std::path::PathBuf::from("/home/you/accounts/personal/.claude"),
+                config_file: std::path::PathBuf::from("/home/you/accounts/personal/.claude.json"),
+            },
+            models: vec!["claude-opus-5".to_owned()],
+            memory: true,
+        },
+    )
+    .await
+    .unwrap();
+
+    (dir, app)
+}
+
+/// The same router with three joins asked for and none of them a link: one
+/// still inside its ten minutes, one whose ten minutes ran out, and one the far
+/// end came back and refused.
+///
+/// All three, because those are the three ways a pending row is drawn and a
+/// fixture holding one could only ever draw that one. None is a member —
+/// nothing has been agreed until somebody at the far end presses Allow — so
+/// this device's list is itself and three rows that are not devices.
+///
+/// The moments are far enough either side of any run to stay what they are in a
+/// committed file: a fixture whose *waiting* row expired the week after it was
+/// written would be a test that passed once. And the refused one is asked a
+/// couple of minutes later than the other two, so that the order the rows are
+/// drawn in is the order they were pressed in rather than an accident of the
+/// names the far ends invented.
+#[cfg(unix)]
+async fn a_waiting_devices_app() -> (tempfile::TempDir, Router) {
+    let (dir, pool, app) = devices_app_over_a_store(
+        Platform::Linux,
+        None,
+        Browse::heard_nothing(),
+        Probe::asked_nothing(),
+    )
+    .await;
+
+    for (request, address, device, name, asked_at, expires_at, refused) in [
+        (
+            "1122334455667788",
+            "laptop.tailnet-name.ts.net",
+            A_MEMBER,
+            "laptop",
+            "2026-09-25T10:00:00Z",
+            "2099-01-01T00:00:00Z",
+            false,
+        ),
+        (
+            "8877665544332211",
+            "192.168.1.31",
+            ANOTHER_MEMBER,
+            "desk",
+            "2026-09-25T10:00:00Z",
+            "2020-01-01T00:00:00Z",
+            false,
+        ),
+        (
+            "5566778811223344",
+            "100.64.0.9",
+            A_THIRD_DEVICE,
+            "studio",
+            "2026-09-25T10:02:00Z",
+            "2099-01-01T00:00:00Z",
+            true,
+        ),
+    ] {
+        verkstead_store::ask_join(
+            &pool,
+            &verkstead_store::AskedJoin {
+                request: request.to_owned(),
+                address: address.to_owned(),
+                device: device.to_owned(),
+                name: name.to_owned(),
+                fingerprint: format!("AA:BB:CC:DD:{device}"),
+                asked_at: asked_at.to_owned(),
+                expires_at: expires_at.to_owned(),
+                refused,
+            },
+        )
+        .await
+        .unwrap();
+    }
+
+    (dir, app)
+}
+
+/// The same router with one device asking to be let into this one's cluster.
+///
+/// One rather than two, because the modal raises one at a time: a second device
+/// asking is the card the first one's answer puts up, out of the same read, and
+/// a fixture of two would be feeding the viewer a state it never draws whole.
+///
+/// A WSL, which is the case the OS word exists for and the one the whole of
+/// cluster mode was written for — the mark beside the name is the only thing
+/// that would tell it from the Windows it shares a hostname with, and this is
+/// the card where somebody is deciding which machine they are looking at.
+///
+/// The moment it runs out at is far enough ahead of any run to stay ahead of
+/// one in a committed file: a fixture whose question expired the week after it
+/// was written would be an empty list.
+#[cfg(unix)]
+async fn an_asked_devices_app() -> (tempfile::TempDir, Router) {
+    let (dir, pool, app) = devices_app_over_a_store(
+        Platform::Linux,
+        None,
+        Browse::heard_nothing(),
+        Probe::asked_nothing(),
+    )
+    .await;
+
+    verkstead_store::hold_join(
+        &pool,
+        &verkstead_store::HeldJoin {
+            request: "5566778899aabbcc".to_owned(),
+            device: A_MEMBER.to_owned(),
+            name: "laptop".to_owned(),
+            os: "Linux (WSL)".to_owned(),
+            addresses: vec![
+                "laptop.tailnet-name.ts.net".to_owned(),
+                "192.168.1.31".to_owned(),
+            ],
+            fingerprint: format!("AA:BB:CC:DD:{A_MEMBER}"),
+            asked_at: "2026-09-25T10:00:00Z".to_owned(),
+            expires_at: "2099-01-01T00:00:00Z".to_owned(),
+        },
+    )
+    .await
+    .unwrap();
+
+    (dir, app)
+}
+
+/// The same router with three devices found and none of them linked, which is
+/// what the Discovered list under those rows is drawn from.
+///
+/// **Stated rather than browsed or probed**, for the reason the machine is
+/// stated: what is advertising itself on the LAN of the box writing these, and
+/// what tailnet that box is on, are facts about that box — and a committed fixture
+/// cannot be written off either. What is being fed to the viewer is the shape the
+/// endpoint answers with.
+///
+/// **One found each way and one found both**, because those are the three things
+/// the word beside a name can say: *LAN*, *Tailscale*, and both where both halves
+/// found the one machine. The middle one is a WSL, the mark beside its name being
+/// the only thing that would tell it from the Windows it shares a hostname with —
+/// which is the case the whole of cluster mode was written for and the reason the
+/// OS word is on the row at all.
+///
+/// The LAN ports are the ones those listeners landed on rather than the default,
+/// which is what a row really says: an advertisement naming any other number is
+/// one nothing can be dialled at. The tailnet ones are the peer port, which is
+/// what a probe assumes because a peer list names none — and the row found both
+/// ways carries its LAN address first, that being the shorter road.
+#[cfg(unix)]
+async fn a_discovering_devices_app() -> (tempfile::TempDir, Router) {
+    let heard = vec![
+        Found {
+            device: A_MEMBER.to_owned(),
+            name: "laptop".to_owned(),
+            os: "macOS".to_owned(),
+            addresses: vec!["192.168.1.31:8423".to_owned(), "10.0.0.31:8423".to_owned()],
+        },
+        Found {
+            device: ANOTHER_MEMBER.to_owned(),
+            name: "workbench".to_owned(),
+            os: "Linux (WSL)".to_owned(),
+            addresses: vec!["172.29.0.14:9423".to_owned()],
+        },
+    ];
+
+    let answered = vec![
+        Found {
+            device: ANOTHER_MEMBER.to_owned(),
+            name: "workbench".to_owned(),
+            os: "Linux (WSL)".to_owned(),
+            addresses: vec!["100.64.0.14:8423".to_owned()],
+        },
+        Found {
+            device: A_THIRD_DEVICE.to_owned(),
+            name: "kitchen-mini".to_owned(),
+            os: "macOS".to_owned(),
+            addresses: vec!["100.64.0.9:8423".to_owned()],
+        },
+    ];
+
+    let (dir, _pool, app) = devices_app_over_a_store(
+        Platform::Linux,
+        None,
+        Browse::stated(heard),
+        Probe::stated(answered),
+    )
+    .await;
+
+    (dir, app)
+}
+
+/// One Devices reading with the two things in it that are this run's own
+/// written back out as a machine anybody would recognise.
+///
+/// The fingerprint is the SHA-256 of a certificate made fresh in a temporary
+/// directory, so it is different every run; the name is the hostname of the box
+/// the suite is on. Both are committed fixtures' enemies, and the fingerprint is
+/// what a pending row draws for two people to compare by eye — so the fixture
+/// carries a string somebody chose rather than one this run happened to mint.
+#[cfg(unix)]
+fn a_stated_machine(json: &str) -> String {
+    let mut payload: serde_json::Value = serde_json::from_str(json).unwrap();
+
+    payload["this"]["fingerprint"] = A_FINGERPRINT.into();
+    payload["this"]["name"] = A_MACHINE_NAME.into();
+
+    serde_json::to_string(&payload).unwrap()
 }
 
 /// A machine on a tailnet with the workbench served on its tailnet name.
@@ -3817,14 +4341,19 @@ fn pin_tried(json: &str) -> String {
 fn pin_health(json: &str) -> String {
     let mut payload: serde_json::Value = serde_json::from_str(json).unwrap();
 
-    // A list of Profiles, or one Conversation carrying the two Pairings it has
-    // chosen — whose Profile half is the one the filesystem has an opinion of.
+    // A list of Profiles, or one Conversation carrying the three Pairings it
+    // has chosen — whose Profile half is the one the filesystem has an opinion
+    // of.
     match payload.as_array_mut() {
         Some(rows) => rows.iter_mut().for_each(mend),
         None => {
             let mut ready = payload["state"] == "Draft";
 
-            for role in ["grilling_pairing", "implementation_pairing"] {
+            for role in [
+                "grilling_pairing",
+                "implementation_pairing",
+                "review_pairing",
+            ] {
                 match payload.get_mut(role) {
                     // The row that runs no session, which the grilling role has
                     // one of: a choice made, so readiness stands, and nothing
@@ -3965,7 +4494,7 @@ async fn coded(pool: &SqlitePool, under: &Path) -> i64 {
         .unwrap()
         .expect("nothing is registered at that path yet");
 
-    let conversation = store::start_conversation(pool, registered.id, "code-pane")
+    let conversation = store::start_conversation(pool, registered.id, "code-pane", THIS_DEVICE)
         .await
         .unwrap()
         .expect("the Repo was just registered");
@@ -4088,12 +4617,22 @@ fn git(dir: &Path, args: &[&str]) -> String {
     String::from_utf8(output.stdout).unwrap()
 }
 
+/// One Profile read as one whose account is where it was left and logged in.
+///
+/// **Both facts, because both are read off the machine writing this.** Whether
+/// the pair is there is what `broken` says of one of this device's own rows;
+/// whether the account holds a login file is `login`, and for a **mirror** it
+/// is the harness's presence on this box that decides `broken` — a `PATH` walk,
+/// which is a different answer on a developer's machine and on a runner with no
+/// `claude` installed. A fixture that moved with either would be a fixture the
+/// drift check failed on for nothing.
 fn mend(profile: &mut serde_json::Value) {
     assert!(
         profile.get("broken").is_some(),
         "no Profile here to pin:\n{profile}"
     );
     profile["broken"] = serde_json::Value::Null;
+    profile["login"] = true.into();
 }
 
 /// Pin the times a Conversation's Timeline carries, so the fixture does not

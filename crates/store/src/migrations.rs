@@ -25,16 +25,44 @@
 //! session ran under, so each table is rebuilt beside itself with the rows
 //! copied across.
 //!
-//! Eleven of them are a column arriving rather than rows moving between tables —
+//! And a third is a `UNIQUE` going the same way, for the same reason and by the
+//! same recipe: two devices of a cluster may call an account the same thing, so
+//! a Profile's name is unique among *this* device's own rows and the rule is a
+//! partial index, which a column constraint cannot be.
+//!
+//! Twelve of them are a column arriving rather than rows moving between tables —
 //! the Review role's Profile, the branch name somebody settled on, whether a
 //! branch is still waiting to be named, whether a session is idling on a stored
 //! ask, the branch a Conversation's base was resolved through, whether a commit
 //! is a merge, which Answer an attached file was put on, whether a Profile
 //! shares its account's memory, the question a half-written steer would open
-//! an investigation on, the branch a recorded pull request merges into, and
-//! which stage of its roadmap a stage Conversation is — which is the same kind
-//! of one-time rewrite: the rows already there are given the value that says
-//! what was true of them before the column existed.
+//! an investigation on, the branch a recorded pull request merges into,
+//! which stage of its roadmap a stage Conversation is, and where a Conversation
+//! sits in the sidebar — which is the same kind of one-time rewrite: the rows
+//! already there are given the value that says what was true of them before the
+//! column existed.
+//!
+//! **And one of the twelve is filled from outside this run**, which makes it the
+//! only rewrite here that is not finished by the time a database is open: a Rank
+//! carries the device that issued it (ADR-0020, *Ranks*), and the device
+//! identity is read out of the very pool this is running inside — so nothing in
+//! here can know the id. The column arrives empty at the open like any other,
+//! and [`rank_the_conversations`] is what fills it, taking the id and called by
+//! the serve once the identity is issued and before any route is answered.
+//!
+//! **And it is the one rewrite that takes a table away.** The places the sidebar
+//! used to be ordered by are what those ranks are computed from, so `placements`
+//! is dropped in the same transaction that reads it — which is why that drop
+//! lives over there rather than here: this module runs at the open and that one
+//! runs at the serve, so a drop here would be a drop before the read.
+//!
+//! **And one rewrite here is about no column of this module's at all.** The
+//! **birth key** every Conversation carries arrives as a table of its own, which
+//! a `CREATE TABLE IF NOT EXISTS` declares over in [`super::births`] — but the
+//! rows already there still have to be given the key that says what was true of
+//! them before it existed, and that key names a device. So
+//! [`stamp_the_births`] sits beside [`rank_the_conversations`] and is called the
+//! same way, for the same reason and at the same moment.
 //!
 //! Each is written to be safe against a database that has already had it, and
 //! what says whether there is anything to do is the presence of what it
@@ -63,6 +91,7 @@ pub(crate) async fn apply(pool: &SqlitePool) -> Result<()> {
     conversations_that_recorded_no_base_branch(pool).await?;
     commits_that_never_said_they_were_merges(pool).await?;
     attached_files_that_named_no_answer(pool).await?;
+    conversations_that_had_no_rank(pool).await?;
     profiles_that_had_to_be_named(pool).await?;
     sessions_that_had_to_name_a_profile(pool).await?;
     profiles_that_had_no_memory_switch(pool).await?;
@@ -74,7 +103,8 @@ pub(crate) async fn apply(pool: &SqlitePool) -> Result<()> {
     settlements_that_were_one_per_repository(pool).await?;
     fix_attempts_that_were_one_per_repository(pool).await?;
     pull_requests_that_named_no_base_branch(pool).await?;
-    stages_that_never_said_which_one_they_were(pool).await
+    stages_that_never_said_which_one_they_were(pool).await?;
+    profiles_whose_name_was_unique_everywhere(pool).await
 }
 
 /// Give every stage recorded before Verkstead wrote down *which* stage it was
@@ -155,6 +185,85 @@ async fn pull_requests_that_named_no_base_branch(pool: &SqlitePool) -> Result<()
     Ok(())
 }
 
+/// Let two devices call an account the same thing: rebuild `profiles` without
+/// the `UNIQUE` on the name column, the rule having become this device's own
+/// rows'.
+///
+/// A member's Profile is written down here as a **mirror** — an ordinary row
+/// marked with the device it is at home on — and two machines each holding an
+/// account called `work`, or each holding the one unnamed Claude account, are
+/// two rows this table has to take. So the rule is a partial index over the rows
+/// with no home device on them, which a column constraint cannot be; and SQLite
+/// cannot drop a column constraint in place, the index behind it being one it
+/// made rather than one anybody named.
+///
+/// The same recipe as [`profiles_that_had_to_be_named`], for the same reason and
+/// with the same care: foreign keys off on the one connection, the rebuild in a
+/// transaction, `foreign_key_check` before the commit, and the pragma back on
+/// however it went. The ids are copied rather than reassigned, so every row that
+/// named a Profile still names the same one.
+///
+/// **Every saved Profile keeps its name and stays this device's own.** Nothing
+/// here writes a home device: the rows come across as they stand, and what
+/// changes is only what the table is allowed to hold beside them from now on.
+///
+/// The partial indexes are made by [`super::profiles::apply_schema`], which runs
+/// before this and again on every start after it — so what is left here is the
+/// rebuild itself and putting the three of them back on the table it made.
+///
+/// Safe to run twice: what says whether there is anything to do is the table
+/// still carrying an index of SQLite's own making, and after the first run it
+/// carries none.
+async fn profiles_whose_name_was_unique_everywhere(pool: &SqlitePool) -> Result<()> {
+    // `origin = 'u'` is an index SQLite made for a `UNIQUE` on a column, which
+    // is the one thing this rewrite is about: the three partial rules are
+    // `origin = 'c'`, having been created by name.
+    let implicit: (i64,) =
+        sqlx::query_as("SELECT count(*) FROM pragma_index_list('profiles') WHERE origin = 'u'")
+            .fetch_one(pool)
+            .await
+            .context("looking at whether a Profile's name is unique across every device")?;
+
+    if implicit.0 == 0 {
+        return Ok(());
+    }
+
+    // And the three columns the rebuild carries across, which a database old
+    // enough to have needed the rewrite above no longer has: that one remade the
+    // table in the shape it had before any of them existed, undoing what
+    // `apply_schema` had just added. Asked for again here rather than once at
+    // the start, because this is the last hand the table passes through — so a
+    // column is added where it is missing and the rebuild below keeps it,
+    // rather than being dropped here and added again afterwards.
+    super::profiles::mirror_columns(pool).await?;
+    super::profiles::home_login_column(pool).await?;
+
+    let mut conn = pool
+        .acquire()
+        .await
+        .context("letting two devices call an account the same thing")?;
+
+    sqlx::query("PRAGMA foreign_keys = OFF")
+        .execute(&mut *conn)
+        .await
+        .context("holding the foreign keys off while the profiles table is rebuilt")?;
+
+    let rebuilt = rebuild_profiles_for_mirrors(&mut conn).await;
+
+    // However that went, for the reason the rebuild above puts it back: a
+    // connection handed to the pool with its foreign keys off would enforce
+    // nothing for the rest of the run.
+    let restored = sqlx::query("PRAGMA foreign_keys = ON")
+        .execute(&mut *conn)
+        .await
+        .context("putting the foreign keys back on");
+
+    rebuilt?;
+    restored?;
+
+    Ok(())
+}
+
 /// Give every half-written steer from before Investigating was a target the
 /// column that holds the question one would be opened on.
 ///
@@ -189,6 +298,116 @@ async fn pending_steers_that_had_no_investigation(pool: &SqlitePool) -> Result<(
         .context("settling the half-written steers from before Investigating was a target")?;
 
     Ok(())
+}
+
+/// That rebuild, in one transaction on the connection whose foreign keys are
+/// off.
+async fn rebuild_profiles_for_mirrors(conn: &mut sqlx::SqliteConnection) -> Result<()> {
+    use sqlx::Connection;
+
+    let mut tx = conn
+        .begin_with("BEGIN IMMEDIATE")
+        .await
+        .context("letting two devices call an account the same thing")?;
+
+    // The shape written out rather than borrowed from [`super::profiles`], which
+    // is the rule every rewrite here is written under: this is a shape rows are
+    // put into once and never again, and a rewrite that moved with the
+    // declaration would make a database opened after the next column arrives
+    // come out a different shape from one opened today.
+    //
+    // The three mirror columns are in it because the declaration has them by
+    // the time this runs — `apply_schema` adds them to an old table before the
+    // migrations are reached, and the caller above asks for them once more
+    // after the earlier rewrite stripped them — so leaving them out here would
+    // be taking them away again. And taking one away to add it back afterwards
+    // is not the same thing: the pool hands the two statements out to whichever
+    // connections are free, and one that has not caught up with the drop would
+    // refuse the column as one it already has.
+    sqlx::query(
+        "CREATE TABLE profiles_named_per_device (
+             id          INTEGER PRIMARY KEY AUTOINCREMENT,
+             name        TEXT,
+             claude_dir  TEXT NOT NULL,
+             config_file TEXT NOT NULL,
+             model       TEXT NOT NULL,
+             agent_type  TEXT NOT NULL,
+             memory      INTEGER NOT NULL DEFAULT 1,
+             home_device TEXT,
+             home_id     INTEGER,
+             home_login  INTEGER
+         ) STRICT",
+    )
+    .execute(&mut *tx)
+    .await
+    .context("making the profiles table over with a name two devices may share")?;
+
+    sqlx::query(
+        "INSERT INTO profiles_named_per_device
+             (id, name, claude_dir, config_file, model, agent_type, memory, home_device, home_id,
+              home_login)
+         SELECT id, name, claude_dir, config_file, model, agent_type, memory, home_device, home_id,
+                home_login
+         FROM profiles",
+    )
+    .execute(&mut *tx)
+    .await
+    .context("carrying the saved Profiles across")?;
+
+    sqlx::query("DROP TABLE profiles")
+        .execute(&mut *tx)
+        .await
+        .context("taking away the profiles table as it was")?;
+
+    sqlx::query("ALTER TABLE profiles_named_per_device RENAME TO profiles")
+        .execute(&mut *tx)
+        .await
+        .context("putting the rebuilt profiles table where the old one was")?;
+
+    // The drop took the partial indexes with it, and the table it replaced them
+    // on is gone. They are made again here rather than waited for, because
+    // `apply_schema` has already run this start: a server that opened a database
+    // needing this rewrite would otherwise enforce neither rule until it was
+    // restarted.
+    for (index, over) in [
+        ("profiles_named_here", "(name) WHERE home_device IS NULL"),
+        (
+            "profiles_one_unnamed_here_per_agent",
+            "(agent_type) WHERE name IS NULL AND home_device IS NULL",
+        ),
+        (
+            "profiles_one_mirror_per_home",
+            "(home_device, home_id) WHERE home_device IS NOT NULL",
+        ),
+    ] {
+        sqlx::query(&format!(
+            "CREATE UNIQUE INDEX IF NOT EXISTS {index} ON profiles {over}",
+        ))
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("putting the {index} index back on the rebuilt table"))?;
+    }
+
+    // Nothing was left pointing at a Profile that is not there, which is what
+    // the pragma above stopped SQLite from checking as it went. The ids were
+    // copied, so there is nothing to find — and a rewrite that had lost one
+    // would otherwise be a database that opened fine and refused to remove a
+    // Profile months later.
+    let dangling: (i64,) = sqlx::query_as("SELECT count(*) FROM pragma_foreign_key_check")
+        .fetch_one(&mut *tx)
+        .await
+        .context("checking that nothing was left naming a Profile that is not there")?;
+
+    if dangling.0 != 0 {
+        bail!(
+            "the rebuilt profiles table left {} rows naming a Profile that is not there",
+            dangling.0
+        );
+    }
+
+    tx.commit()
+        .await
+        .context("letting two devices call an account the same thing")
 }
 
 /// Let a Profile go unnamed: rebuild `profiles` with a nullable name, and put
@@ -516,6 +735,177 @@ async fn attached_files_that_named_no_answer(pool: &SqlitePool) -> Result<()> {
         .execute(pool)
         .await
         .context("giving the files attached before this a Question to have been put under")?;
+
+    Ok(())
+}
+
+/// Give every Conversation written before the sidebar was ordered by a Rank the
+/// column that holds one.
+///
+/// Empty for every row it adds, which is the one thing this half of the arrival
+/// can do: a rank carries the device that issued it and the identity is read out
+/// of this very pool, so the id is not something an open can know — see this
+/// module's own docs. What fills it is [`rank_the_conversations`], at the first
+/// start that has an identity in hand.
+///
+/// Safe to run twice: what says whether there is anything to do is the column
+/// being absent, and after the first run it is there.
+async fn conversations_that_had_no_rank(pool: &SqlitePool) -> Result<()> {
+    let there: Option<(String,)> =
+        sqlx::query_as("SELECT name FROM pragma_table_info('conversations') WHERE name = ?")
+            .bind("rank")
+            .fetch_optional(pool)
+            .await
+            .context("looking for where a Conversation sits in the sidebar")?;
+
+    if there.is_some() {
+        return Ok(());
+    }
+
+    sqlx::query("ALTER TABLE conversations ADD COLUMN rank TEXT")
+        .execute(pool)
+        .await
+        .context("giving the Conversations written before this somewhere to hold a rank")?;
+
+    Ok(())
+}
+
+/// Rank every Conversation that has no rank, in the order the sidebar has been
+/// showing them in, each one suffixed with `device` (ADR-0020, *Ranks*) — and
+/// then take away the table that order was kept in.
+///
+/// **The other half of the arrival above**, and the one that needs something an
+/// open cannot have: this device's id. So it is not in [`apply`] at all — the
+/// serve calls it once the identity is issued and before any route is answered,
+/// which is the first moment both the pool and the id are in hand.
+///
+/// **The order is exactly what the sidebar drew before ranks existed**: what the
+/// human placed by dragging, in their place order, with what nobody had placed
+/// above it newest first. That rule is what a rank replaces, so this is the one
+/// place it is still written down — and a database that opens in some other
+/// order would be a human's own list rearranged by an upgrade. Archived rows are
+/// ranked along with the rest, in the same order the join would have put them in:
+/// they are hidden rather than unordered, and a row with no rank is a row a drag
+/// could not move.
+///
+/// **What is already ranked is left exactly as it is, and the rest goes below
+/// it.** In practice there is nothing already ranked — the column arrives empty
+/// and this runs before a route can answer, so every row it finds is one from
+/// before. Where a start did get in first, its Conversation was ranked above
+/// everything a moment ago and the rows from before belong under it, which is
+/// what walking on from the foot of the list produces.
+///
+/// **Then the places themselves go**, in the same transaction: they have become
+/// ranks, and a table nothing reads any more is one to be rid of rather than one
+/// to leave standing. Which is why the drop is here rather than in [`apply`]
+/// with the rest of the schema — [`apply`] runs at the open and this runs at the
+/// serve, so a drop over there would be a drop before this read.
+///
+/// **And a database with no such table is nothing to rewrite.** One made fresh
+/// after that drop never had one: every row was ranked as it was started, so
+/// there is no unranked row to find and nothing left that could have ordered it.
+/// So the table being there is what says there is anything to do here at all,
+/// and a missing one leaves before any query rather than failing over a join to
+/// a table that has done its job.
+///
+/// All of it in one transaction: a sidebar read halfway through a ranking would
+/// be a list half in one order and half in the other.
+///
+/// Safe to run twice, and it runs at every start: the first run is the one that
+/// finds the table, and after it there is none to find.
+pub async fn rank_the_conversations(pool: &SqlitePool, device: &str) -> Result<()> {
+    let places: Option<(String,)> =
+        sqlx::query_as("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
+            .bind("placements")
+            .fetch_optional(pool)
+            .await
+            .context("looking for the places the sidebar used to be ordered by")?;
+
+    if places.is_none() {
+        return Ok(());
+    }
+
+    let mut tx = super::writing(pool, "ranking the Conversations").await?;
+
+    // The order the sidebar was drawn in before there were ranks: what the human
+    // placed, in their place order, with what nobody had placed above it newest
+    // first. Minus the archive filter — every row is ranked, drawn or not.
+    let unranked: Vec<(i64,)> = sqlx::query_as(
+        "SELECT c.id
+         FROM conversations c
+         LEFT JOIN placements m ON m.conversation_id = c.id
+         WHERE c.rank IS NULL
+         ORDER BY m.place IS NULL DESC, m.place, c.id DESC",
+    )
+    .fetch_all(&mut *tx)
+    .await
+    .context("listing the Conversations that have no rank")?;
+
+    // Where the walk starts: the foot of what is already ranked, so the rows
+    // from before go under it. On every database this really finds there is
+    // nothing ranked at all, and the walk starts from the first key there is.
+    let mut last: Option<String> = sqlx::query_scalar(
+        "SELECT rank FROM conversations WHERE rank IS NOT NULL ORDER BY rank DESC LIMIT 1",
+    )
+    .fetch_optional(&mut *tx)
+    .await
+    .context("reading the rank at the foot of the sidebar")?;
+
+    for (id,) in unranked {
+        let rank = super::ranks::between(last.as_deref(), None, device)?;
+
+        sqlx::query("UPDATE conversations SET rank = ? WHERE id = ?")
+            .bind(&rank)
+            .bind(id)
+            .execute(&mut *tx)
+            .await
+            .with_context(|| format!("ranking Conversation {id}"))?;
+
+        last = Some(rank);
+    }
+
+    // And the table those places were kept in, every row of which is now a rank
+    // on the Conversation itself.
+    sqlx::query("DROP TABLE placements")
+        .execute(&mut *tx)
+        .await
+        .context("taking away the places the sidebar used to be ordered by")?;
+
+    tx.commit().await.context("ranking the Conversations")
+}
+
+/// Stamp every Conversation that has no **birth key** with one naming this
+/// device and its own local id (ADR-0020, *Transfer*) — which is exactly what a
+/// Conversation that has never moved has.
+///
+/// **The same shape as [`rank_the_conversations`], and for the same reason**: the
+/// key names a device, and the identity is read out of the very pool an open
+/// runs on — so nothing in [`apply`] can fill it. The table arrives empty there
+/// and this is called by the serve, once the identity is issued and before any
+/// route is answered: a sidebar answered ahead of it would be a merged list with
+/// rows that could not be told from a copy of somebody else's work.
+///
+/// **Every row this reaches was drafted here.** Nothing has been transferred to
+/// this device before this lands — there was no transfer to make — so the device
+/// half is this one's id and the id half is the row's own, with nothing to read
+/// off anything and no order to walk in.
+///
+/// One statement, and it is safe to run twice: what says whether there is
+/// anything to do is a row having no key, and after the first run there is none
+/// without one. So it runs at every start and finds nothing at all but the first
+/// time, and again after a database is opened by a Verkstead too old to stamp
+/// what it started.
+pub async fn stamp_the_births(pool: &SqlitePool, device: &str) -> Result<()> {
+    sqlx::query(
+        "INSERT INTO births (conversation_id, device, born_as)
+         SELECT c.id, ?, c.id
+         FROM conversations c
+         WHERE NOT EXISTS (SELECT 1 FROM births b WHERE b.conversation_id = c.id)",
+    )
+    .bind(device)
+    .execute(pool)
+    .await
+    .context("stamping the Conversations of a database written before there were birth keys")?;
 
     Ok(())
 }

@@ -26,6 +26,10 @@ use verkstead_server::key::{WorkbenchKey, login_link};
 use verkstead_server::settings::Settings;
 use verkstead_server::{Embed, open_database, router_keyed_with_viewer, store};
 
+/// The device every Conversation started here is ranked by, named the way a
+/// cluster names one (ADR-0020, *Ranks*).
+const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
+
 /// A site shaped like the one vite builds, which is what the workbench's own
 /// pages are answered out of.
 #[derive(Embed)]
@@ -59,7 +63,7 @@ async fn keyed() -> (tempfile::TempDir, SqlitePool, WorkbenchKey, Router, i64) {
         .unwrap()
         .expect("nothing is registered at that path yet");
 
-    let conversation = store::start_conversation(&pool, repo.id, "workbench-key")
+    let conversation = store::start_conversation(&pool, repo.id, "workbench-key", THIS_DEVICE)
         .await
         .unwrap()
         .expect("the Repo was just registered");
@@ -112,8 +116,15 @@ async fn nothing_without_the_key_reaches_the_namespace_or_a_page() {
     let (_dir, _pool, _key, app, conversation) = keyed().await;
 
     // The viewer's own namespace, which is the half a session sharing the
-    // host's loopback could otherwise ask everything of.
-    for path in ["/api/ui/repos", "/api/ui/settings", "/api/ui/conversations"] {
+    // host's loopback could otherwise ask everything of — the relay to a
+    // member's workbench among it, that being the same namespace again on
+    // every other device in this one's cluster.
+    for path in [
+        "/api/ui/repos",
+        "/api/ui/settings",
+        "/api/ui/conversations",
+        "/api/ui/members/0011223344556677889900aabbccddee/conversations",
+    ] {
         let response = get(&app, path).await;
 
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED, "GET {path}");

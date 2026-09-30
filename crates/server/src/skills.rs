@@ -1274,6 +1274,176 @@ pub(crate) fn naming(prompt: &str, naming: bool) -> String {
     )
 }
 
+/// The same prompt again, with the devices this session may move its work onto
+/// named under it (ADR-0020, *The agent's call*).
+///
+/// `devices` is the list as it stands **from this device's side** — the ones the
+/// human ticked and the drafting device, less the one the session is running on
+/// — see [`crate::transfers::may_go_to`]. Each is named with its id as well as
+/// its name, because a name is a hostname and two devices can share one, and
+/// with the word for its OS the device select draws, a WSL being *Linux (WSL)*
+/// rather than the Windows machine it shares a hostname with: the OS is the
+/// whole reason a session reaches for this.
+///
+/// **Said, rather than left neutral like the listings above it**, because what
+/// the call is for is not in the Brief: the human ticked the devices so that
+/// the agent could reach for one when the work needs a platform this is not, and
+/// a list with no word on when to use it is one no session would think to.
+///
+/// Applied at the launch point to the fresh prompt and the carried note alike,
+/// so a session carried on at the far end is told where it may go from *there*.
+///
+/// **Nothing where the list is empty**, which is every Conversation nobody
+/// ticked a device on that is still where it was drafted: a heading over
+/// nothing, or a sentence about a verb it may not use, would tell a session
+/// that moving was on the table.
+pub(crate) fn transferable(prompt: &str, devices: &[store::Member]) -> String {
+    if devices.is_empty() {
+        return prompt.to_owned();
+    }
+
+    let listed: Vec<String> = devices
+        .iter()
+        .map(|device| {
+            format!(
+                "- **{}** (id `{}`), {}.",
+                device.name, device.device, device.os
+            )
+        })
+        .collect();
+
+    format!(
+        "{}\n\n# Devices this work may move to\n\nThe human has said this Conversation's \
+         work may be moved onto another device of their cluster:\n\n{}\n\nWhen the work \
+         needs something this platform cannot do — building or testing for another \
+         operating system, say — run `verkstead transfer <device>`, naming one of these \
+         by its name or its id. Accepted, this session is ended once the turn is over \
+         and the work carries on over there: the same conversation, the branch and \
+         the Worktree with it. Refused, it exits non-zero and says why, and nothing \
+         moves — pick another device or ask the human. `verkstead guide` says more.\n",
+        prompt.trim_end(),
+        listed.join("\n"),
+    )
+}
+
+/// The whole of what a **resumed** session is primed with: the note saying the
+/// work has been moved onto this machine (ADR-0020, *Transfer*).
+///
+/// **The note alone, rather than the note over the ordinary re-prime.** This
+/// session is the one that was running on the other device, carried on: it has its
+/// own context, it is part way through its own turn, and the Brief, the handoff and
+/// the digest of what has been settled are all already in it. Being told again what
+/// it already knows is worse than being told nothing — so what it is sent is the
+/// one thing it cannot know, which is that the ground has moved under it.
+///
+/// **Two facts, and they are the two that changed.** The `machine` the work now
+/// runs on, and the `worktree` it is now checked out at — the directory the agent
+/// has been editing all along, at a path that is this device's rather than the
+/// other one's. Everything else about the work is what it was.
+///
+/// **And `attachments` where there are any**, which is the same fact about the
+/// other directory a session is given. The files the human attached are read at a
+/// path made of the Data Directory and the Conversation's id, and a landing gives
+/// the Conversation an id of this device's inside a Data Directory of this
+/// device's — so on the platforms that bind them where they really are, the path
+/// in the agent's context is the sending machine's. `None` is a Conversation with
+/// nothing attached, which is told nothing about attachments at all, exactly as an
+/// ordinary session's prompt tells it nothing — see [`attached`]. On Linux the
+/// mount makes one path of it everywhere and this says what it already knew,
+/// which is worth more than a rule about platforms that the note would have to
+/// carry.
+///
+/// **And the third thing, where there is one: the Question Sets it was idling
+/// on.** A blocking ask is a wait held open by a shell command, and that command
+/// died with the process on the other machine — so the session comes back to a
+/// question it asked, no wait in front of it, and an id that is not the id the Set
+/// has here. Each of them is named both ways round and with the line that fetches
+/// the Answers, which is the one `verkstead ask` itself points a session at when a
+/// wait is killed. `sets` is empty for a session that was idling on nothing, which
+/// is most of them, and nothing is said about them at all.
+///
+/// Written as a statement rather than an instruction. There is nothing for the
+/// session to do about a move, and a prompt that told it to start again would be
+/// undoing the whole point of resuming it. The Sets are the one place that bends,
+/// because a wait that has gone is something to do again rather than something to
+/// know.
+pub(crate) fn moved(
+    machine: &str,
+    worktree: &Path,
+    attachments: Option<&Path>,
+    sets: &[CarriedSet],
+) -> String {
+    let mut note = format!(
+        "This Conversation has been moved onto another machine and you are running on it \
+         now: **{machine}**. Nothing about the work has changed — this is the \
+         conversation above carried on rather than a new one.\n\nWhat has changed is \
+         where the work sits on disk: your worktree is at `{}` now, the same checkout \
+         at a path of this machine's. Carry on from where you were.\n",
+        worktree.display(),
+    );
+
+    if let Some(attachments) = attachments {
+        note.push_str(&format!(
+            "\nThe files attached to this Conversation moved with it and are at `{}` now, \
+             for the same reason: that path is made of this machine's own directories and \
+             this machine's own id for the Conversation, so it is not the one you have been \
+             reading them at.\n",
+            attachments.display(),
+        ));
+    }
+
+    if sets.is_empty() {
+        return note;
+    }
+
+    note.push_str(
+        "\nAnd the Question Sets you were waiting on came across under new ids, every id \
+         of a moved record being renumbered as it lands. The waits themselves are gone — \
+         each was a command running on the other machine — but the Sets are still open \
+         and still the human's to answer, so come back for the Answers by the id each has \
+         here:\n\n",
+    );
+
+    for set in sets {
+        match set.was {
+            Some(was) => note.push_str(&format!(
+                "- The Set you asked as {was} is Set {now} here: `verkstead answers {now}`\n",
+                now = set.now,
+            )),
+            None => note.push_str(&format!(
+                "- Set {now} is still open here: `verkstead answers {now}`\n",
+                now = set.now,
+            )),
+        }
+    }
+
+    note.push_str(
+        "\nA Set nobody has answered yet refuses that command rather than waiting on the \
+         door, so ask again when the nudge lands.\n",
+    );
+
+    note
+}
+
+/// One Question Set a resumed session was idling on, said both ways round.
+///
+/// **The id it has here is what a session does anything with**, and the id it had
+/// is what it knows the question by: the agent asked it on the other machine and
+/// has that number in its own context, so a note naming only the new one would
+/// leave it to guess which of its questions had become which.
+///
+/// `was` is `None` for a Set the landing's own map has nothing to say about,
+/// which is not a case a move makes — every Set of an arriving record is
+/// renumbered by that map — but is one a reader of the note can still act on. The
+/// new id is the load-bearing half.
+pub(crate) struct CarriedSet {
+    /// What the Set was asked under, on the machine the work came from.
+    pub(crate) was: Option<i64>,
+
+    /// And what it landed as here, which is what `verkstead answers` takes.
+    pub(crate) now: i64,
+}
+
 /// The opening line and the one thing said beside it wherever a session is
 /// started: how to reach the human.
 ///
@@ -4534,6 +4704,62 @@ mod tests {
         );
     }
 
+    fn member(device: &str, name: &str, os: &str) -> store::Member {
+        store::Member {
+            device: device.to_owned(),
+            name: name.to_owned(),
+            os: os.to_owned(),
+            addresses: vec!["192.168.1.24".to_owned()],
+            fingerprint: format!("{device}-print"),
+            last_seen: "2026-09-26T00:00:00Z".to_owned(),
+            reachable: true,
+            renewing_from: None,
+            acknowledged: None,
+        }
+    }
+
+    /// A Conversation with devices to move to is told each by name, id and OS
+    /// — a WSL as the OS it reports — and when to reach for the call.
+    #[test]
+    fn a_session_is_told_each_device_it_may_move_to_and_when() {
+        let prompt = transferable(
+            &implementing(&mounted(), "# Fix the Windows build\n", None),
+            &[
+                member("22222222222222222222222222222222", "winvm", "Windows"),
+                member("33333333333333333333333333333333", "winvm", "Linux (WSL)"),
+            ],
+        );
+
+        assert!(
+            prompt.contains("- **winvm** (id `22222222222222222222222222222222`), Windows."),
+            "{prompt}"
+        );
+        assert!(
+            prompt.contains("- **winvm** (id `33333333333333333333333333333333`), Linux (WSL)."),
+            "{prompt}"
+        );
+
+        let said = prompt.split_whitespace().collect::<Vec<_>>().join(" ");
+        for phrase in [
+            "verkstead transfer <device>",
+            "something this platform cannot do",
+            "by its name or its id",
+            "ended once the turn is over",
+            "pick another device or ask the human",
+        ] {
+            assert!(said.contains(phrase), "should say {phrase:?}: {said}");
+        }
+    }
+
+    /// And one with nowhere to go says nothing about moving at all.
+    #[test]
+    fn a_session_with_nowhere_to_move_is_told_nothing_about_transfer() {
+        let built = implementing(&mounted(), "# Rate limiting\n", None);
+
+        assert_eq!(transferable(&built, &[]), built);
+        assert!(!built.contains("transfer"), "{built}");
+    }
+
     /// The listing says what is there and nothing about what to do with it. What
     /// the work is, is the Brief's to say — a prompt that told a session to go
     /// and use a repository would be Verkstead deciding the work off a
@@ -5193,6 +5419,57 @@ mod tests {
             !stale.exists(),
             "a withdrawn skill is still installed: {}",
             stale.display()
+        );
+    }
+
+    /// The note a carried conversation is primed with names the two directories a
+    /// landing moves and nothing else: the Worktree, and the attached files.
+    ///
+    /// A resumed session is the one session that never gets the ordinary
+    /// listing — see [`attached`] — so the path it is carrying for those files is
+    /// the sending machine's, made of that machine's Data Directory and that
+    /// machine's id for the Conversation.
+    #[test]
+    fn the_move_note_names_where_the_attached_files_are_now() {
+        let note = moved(
+            "askance",
+            Path::new("/var/lib/verkstead/worktrees/verkstead-rate-limiting"),
+            Some(Path::new("/state/attachments/41")),
+            &[],
+        );
+
+        assert!(
+            note.contains("askance"),
+            "the machine the work runs on now: {note:?}",
+        );
+        assert!(
+            note.contains("/var/lib/verkstead/worktrees/verkstead-rate-limiting"),
+            "and the Worktree at a path of its own: {note:?}",
+        );
+        assert!(
+            note.contains("/state/attachments/41"),
+            "and the attached files at one: {note:?}",
+        );
+    }
+
+    /// And a Conversation with nothing attached is told nothing about
+    /// attachments, which is what its ordinary prompt would have said too.
+    ///
+    /// The note is what a session cannot know rather than everything that is
+    /// true, and a heading over no files is a session told something had been
+    /// configured.
+    #[test]
+    fn the_move_note_says_nothing_about_files_a_conversation_has_none_of() {
+        let note = moved(
+            "askance",
+            Path::new("/var/lib/verkstead/worktrees/verkstead-rate-limiting"),
+            None,
+            &[],
+        );
+
+        assert!(
+            !note.to_lowercase().contains("attach"),
+            "nothing is said about attachments: {note:?}",
         );
     }
 

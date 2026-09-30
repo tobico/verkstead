@@ -30,7 +30,7 @@ import { For, Show, type JSX } from "solid-js";
 
 import type { TakenUp, Uncommitted } from "../api/types";
 import { pathOf } from "./openings";
-import { companionRefusal } from "./Timeline";
+import { companionRefusal, profileRefusal } from "./Timeline";
 
 /// Each way of being refused a take-up, in the words of what to go and do about
 /// it — for the conversation's own repo.
@@ -39,19 +39,7 @@ import { companionRefusal } from "./Timeline";
 /// adoption's own list is one line each: a profile to choose, a branch somebody
 /// has pushed to and a branch somebody is standing on are three different jobs,
 /// and only the human can tell which they are looking at.
-export const TAKE_UP_REFUSAL: Record<
-  Exclude<
-    TakenUp,
-    | { Companion: unknown }
-    | { CheckedOutElsewhere: unknown }
-    | { AnotherRepository: unknown }
-    | { NoSuchPullRequest: unknown }
-    | { GitHubRefused: unknown }
-    | { AlreadyHeld: unknown }
-    | { WouldDiscard: unknown }
-  >,
-  string
-> = {
+export const TAKE_UP_REFUSAL: Record<Extract<TakenUp, string>, string> = {
   TakenUp: "",
   NoSuchConversation: "This conversation is gone.",
   NotDrafting: "This conversation has already been started.",
@@ -64,8 +52,6 @@ export const TAKE_UP_REFUSAL: Record<
   NoImplementationProfile:
     "Choose an implementation profile and model first, on the brief.",
   NoReviewProfile: "Choose a review profile and model first, on the brief.",
-  ProfileBroken:
-    "A chosen profile's claude pair is not where it was left, so there is no account to run under.",
   FetchFailed:
     "Git could not fetch from the repo's remote, so nothing was started. The server log says why.",
   NoHeadBranch:
@@ -114,6 +100,10 @@ export function takeUpRefusal(outcome: TakenUp): string {
 
     if ("WouldDiscard" in outcome) {
       return `${held(outcome.WouldDiscard.uncommitted)} ${closingThem(outcome.WouldDiscard.uncommitted.length)}`;
+    }
+
+    if ("ProfileBroken" in outcome) {
+      return profileRefusal(outcome.ProfileBroken);
     }
 
     return `That branch is already checked out at ${outcome.CheckedOutElsewhere.at}, and git holds one checkout per branch.`;
