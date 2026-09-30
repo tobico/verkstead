@@ -143,7 +143,7 @@
    row being the one that would otherwise drop its rows off the right. A rule in
    a sheet cannot pull back a coordinate written as a style, so this file asks
    for the width and leaves the placing where the placing is done. */
-.optionPick > [role="listbox"] {
+.optionPick > [data-drop] {
   min-width: 30rem;
   max-width: min(40rem, calc(100vw - 2.5rem));
 }
@@ -151,7 +151,7 @@
 /* And the Process control, whose rows are one word apiece: it asks for the
    readable width the repo names do rather than the pairings' double one, which
    is a width measured for "Claude Code Fable 5 — Work". */
-.processPick > [role="listbox"] {
+.processPick > [data-drop] {
   min-width: 12rem;
   max-width: min(20rem, calc(100vw - 2.5rem));
 }
@@ -160,8 +160,8 @@
    one is a panel: its rows are repository names and nothing else, so it asks
    for a readable width rather than the pairings' double one. And the device
    select beside it the same way, its rows being machine names. */
-.repoSelectPick > [role="listbox"],
-.deviceSelectPick > [role="listbox"] {
+.repoSelectPick > [data-drop],
+.deviceSelectPick > [data-drop] {
   min-width: 12rem;
   max-width: min(20rem, calc(100vw - 2.5rem));
 }
@@ -491,4 +491,37 @@
   border-radius: 0.6rem;
   font-size: 0.85rem;
   color: var(--ink-soft);
+}
+
+/* The ticks under *May be transferred to*, at the foot of the device select's
+   rows: a heading in the dimmed voice the option labels use, and one tick per
+   other device of the cluster, each wearing its operating system's mark the way
+   its row above does. A fieldset for the name the heading gives the group, with
+   none of the border and padding one is drawn with. */
+.ticks {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0.35rem 0.5rem 0.4rem;
+  border: 0;
+}
+
+.ticksHeading {
+  padding: 0 0 0.2rem;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+}
+
+.tickMark {
+  color: var(--ink-soft);
+}
+
+.tickNote {
+  color: var(--ink-soft);
+  font-size: 0.85rem;
+}
+
+.ticks .failure {
+  margin: 0.2rem 0 0;
+  font-size: 0.85rem;
 }

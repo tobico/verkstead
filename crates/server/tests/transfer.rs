@@ -76,6 +76,10 @@ const A: &str = "aa00bb11cc22dd33ee44ff5566778899";
 /// And the device it is moved onto.
 const B: &str = "0011223344556677889900aabbccddee";
 
+/// And a third member of the cluster, which no test here dials: what a tick is
+/// about besides the device the work is moving to.
+const C: &str = "ffeeddccbbaa00998877665544332211";
+
 /// What B is written down as on A: the name the human gave the machine, which is
 /// what the Timeline says the work is going to rather than sixteen bytes of hex.
 const B_MACHINE: &str = "the-laptop";
@@ -964,6 +968,19 @@ impl Verkstead {
         press(
             &self.workbench,
             &format!("/api/ui/conversations/{conversation}/transfer/{device}"),
+            None,
+        )
+        .await
+    }
+
+    /// Tick `device` under *May be transferred to*, or untick it, and answer
+    /// with what the press said.
+    async fn permits(&self, conversation: i64, device: &str, permit: bool) -> String {
+        let untick = if permit { "" } else { "/remove" };
+
+        press(
+            &self.workbench,
+            &format!("/api/ui/conversations/{conversation}/permitted/{device}{untick}"),
             None,
         )
         .await
@@ -2346,6 +2363,87 @@ async fn the_conversation_arrives_in_the_state_it_was_in() {
         "and the key it was born under, which is what says the two copies are \
          one piece of work",
     );
+}
+
+/// **The ticks cross with the record** (ADR-0020, *The agent's call*): the list
+/// of devices the agent may move the work to is Device Ids, which name the same
+/// machines on every device of the cluster — so B reads the list A was holding,
+/// and the device the work was drafted on is still permitted there without a
+/// row, which is what lets a session that has moved go home.
+#[tokio::test]
+async fn the_ticks_arrive_with_the_record_and_the_drafting_device_stays_permitted() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = ready_to_move(&gate, spill.path()).await;
+
+    // A third machine of the cluster, which both of them hold as a member and
+    // nothing ever dials: ticking a device asks whether it is linked, not
+    // whether it is up.
+    let third = tempfile::tempdir().unwrap();
+    let c = Device::stated(third.path(), C).unwrap();
+    a.linked_to(&c, "the-vm", "Windows 11", Vec::new()).await;
+    b.linked_to(&c, "the-vm", "Windows 11", Vec::new()).await;
+
+    // Nothing is ticked to begin with, and the device it was drafted on reads as
+    // permitted all the same.
+    let drafting = a.view(conversation).await;
+    assert!(
+        drafting.permitted.is_empty(),
+        "nothing is ticked by default"
+    );
+    assert_eq!(drafting.drafted_on.as_deref(), Some(A));
+
+    assert_eq!(a.permits(conversation, C, true).await, "\"Recorded\"");
+    assert_eq!(a.permits(conversation, B, true).await, "\"Recorded\"");
+
+    // What cannot be a tick is refused by name: the drafting device is no row,
+    // and a device the cluster does not hold is nowhere to go.
+    assert_eq!(a.permits(conversation, A, true).await, "\"DraftedThere\"");
+    assert_eq!(
+        a.permits(conversation, "ffffffffffffffffffffffffffffffff", true)
+            .await,
+        "\"NotAMember\"",
+    );
+
+    // Unticked and ticked again is the list the human last left, in the order
+    // it was ticked.
+    assert_eq!(a.permits(conversation, C, false).await, "\"Recorded\"");
+    assert_eq!(a.permits(conversation, C, true).await, "\"Recorded\"");
+    assert_eq!(a.view(conversation).await.permitted, vec![B, C]);
+
+    a.printed(conversation, "grilling").await;
+    std::fs::write(&gate, "go").unwrap();
+    a.view_saying(conversation, |drawn| !drawn.working).await;
+
+    assert_eq!(a.transfers(conversation, B).await, "\"Transferring\"");
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    let arrived = b.view(there).await;
+
+    assert_eq!(
+        arrived.permitted,
+        vec![B, C],
+        "the same devices, by the same ids, on the far end",
+    );
+    assert_eq!(
+        arrived.drafted_on.as_deref(),
+        Some(A),
+        "and A still permitted without a tick, the birth key having crossed",
+    );
+
+    // Where the work is now is no place to move it to, and where it was drafted
+    // is permitted already.
+    assert_eq!(b.permits(there, B, true).await, "\"WorkIsHere\"");
+    assert_eq!(b.permits(there, A, true).await, "\"DraftedThere\"");
+
+    // And the copy left behind is not the list's any more: the live one is.
+    assert_eq!(a.permits(conversation, C, false).await, "\"Elsewhere\"",);
 }
 
 /// **The source is marked only once the far end has confirmed**, and what it

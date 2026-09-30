@@ -46,11 +46,11 @@ use verkstead_render::{
     GrillingStarted, HeaderEdit, IgnoreRule, IgnoredCommentsEdit, InstallPress, Lifecycle, Locked,
     McpHeader, McpServer, McpServerEdit, McpServersEdit, Merging, MissedOut, NewAdoption,
     NewCompanion, NewConversation, NewJoin, NewRank, PairingView, Parked, PendingSteerView,
-    Process, ProcessChoice, ProcessPicked, ProfileChoice, ProfileEdit, ProfileEntry, PushKey,
-    Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed,
-    RoleChoice, RuleField, RuleRefused, ServeEdit, ServePress, ServerAttached, ServerField,
-    ServerRefused, ServerRemoved, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView,
-    ShareCommented, SharePublished, SharedCommit, SharedConversation, ShowArchived,
+    Permitting, Process, ProcessChoice, ProcessPicked, ProfileChoice, ProfileEdit, ProfileEntry,
+    PushKey, Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved,
+    Resumed, RoleChoice, RuleField, RuleRefused, ServeEdit, ServePress, ServerAttached,
+    ServerField, ServerRefused, ServerRemoved, SetReading, SetView, SettingsEdit, SettingsSaved,
+    SettingsView, ShareCommented, SharePublished, SharedCommit, SharedConversation, ShowArchived,
     ShowingArchived, Standing, SteerCancelled, SteerForm, SteerOpened, SteerPairingView,
     SteerSaved, SteerSubmission, Submitted, Subscribed, Subscription, TakenUp, TargetNamed,
     TargetRecorded, TerminalOpened, TimelineEvent, TokenEdit, TokenSaved, TransferredTo,
@@ -479,6 +479,17 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         .route(
             "/api/ui/conversations/{id}/transfer/{device}",
             post(transfer),
+        )
+        // And the ticks under *May be transferred to*: which other devices the
+        // agent doing this work may move it to itself. A Device Id in the path,
+        // and the untick named in it the way an MCP server's removal is.
+        .route(
+            "/api/ui/conversations/{id}/permitted/{device}",
+            post(permit_device),
+        )
+        .route(
+            "/api/ui/conversations/{id}/permitted/{device}/remove",
+            post(forbid_device),
         )
         // And the close a draft's work moving to another device ends with, which
         // carries the words that say where it went: the close above with a
@@ -2139,6 +2150,11 @@ pub(crate) async fn conversation_view(
         // what the head of the Timeline says between the press and the move —
         // see [`crate::transfers::transferring`].
         transferring: crate::transfers::transferring(state, id).await,
+        // And where its agent may take the work: the device it was drafted on,
+        // always, and whichever others the human ticked — see
+        // [`crate::transfers::permit`].
+        drafted_on: drafted_on(state, id).await,
+        permitted: conversation.permitted,
         // The same reading the Events above are drawn against, said as a fact
         // about the Conversation: the Timeline offers Force stop exactly where
         // something is running, and one Event of a session's is not the question
@@ -4718,6 +4734,41 @@ async fn transfer(
     }
 }
 
+/// `POST /api/ui/conversations/{id}/permitted/{device}` — tick a device under
+/// *May be transferred to*: the agent doing this work may move it there.
+///
+/// Moves nothing. What it writes down is the human's consent, which the agent's
+/// own `verkstead transfer` is refused without — see [`crate::transfers::permit`].
+async fn permit_device(
+    State(state): State<AppState>,
+    Path((id, device)): Path<(String, String)>,
+) -> HttpResponse {
+    permitting(state, id, device, true).await
+}
+
+/// `POST /api/ui/conversations/{id}/permitted/{device}/remove` — and untick it.
+async fn forbid_device(
+    State(state): State<AppState>,
+    Path((id, device)): Path<(String, String)>,
+) -> HttpResponse {
+    permitting(state, id, device, false).await
+}
+
+/// Either press, which are one decision with the answer written the other way.
+async fn permitting(state: AppState, id: String, device: String, permit: bool) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(Permitting::NoSuchConversation).into_response();
+    };
+
+    match crate::transfers::permit(&state, id, &device, permit).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, device = %device, permit, "changing where a Conversation may be moved to failed");
+            unavailable("the devices this work may move to could not be changed")
+        }
+    }
+}
+
 /// `POST /api/ui/conversations/{id}/close` — stop it wherever it has got to.
 ///
 /// The Nudge is [`crate::conversations::close`]'s own rather than this
@@ -5226,6 +5277,21 @@ fn merging(merges: store::Merging) -> Merging {
     match merges {
         store::Merging::Cleanly => Merging::Cleanly,
         store::Merging::Conflicting => Merging::Conflicting,
+    }
+}
+
+/// The device a Conversation was drafted on, off its birth key — which is
+/// always permitted as somewhere its agent may take the work.
+///
+/// A read that fails reads as *not known*, which draws no row for it rather
+/// than taking the pane down: the ticks beside it are still the human's.
+async fn drafted_on(state: &AppState, id: i64) -> Option<String> {
+    match store::birth(&state.pool, id).await {
+        Ok(born) => born.map(|born| born.device),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading where a Conversation was drafted failed");
+            None
+        }
     }
 }
 

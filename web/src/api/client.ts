@@ -117,6 +117,7 @@ import type {
   TerminalsView,
   TranscriptView,
   Transferring,
+  Permitting,
   UpdateNotice,
 } from "./types";
 import type { Device } from "../reaching";
@@ -1483,6 +1484,29 @@ export function transfer(
     on(
       device,
       `/api/ui/conversations/${id}/transfer/${encodeURIComponent(onto)}`,
+    ),
+    {},
+  );
+}
+
+/// Tick `device` under *May be transferred to*, or untick it: whether the agent
+/// doing this conversation's work may move it onto that device itself.
+///
+/// Moves nothing. Addressed to the device holding the work, like every other
+/// press about the conversation; the device being ticked is in the path because
+/// it is what the press is about.
+export function permitDevice(
+  device: Device,
+  id: number,
+  ticked: string,
+  permit: boolean,
+): Promise<Permitting> {
+  const untick = permit ? "" : "/remove";
+
+  return post<Permitting>(
+    on(
+      device,
+      `/api/ui/conversations/${id}/permitted/${encodeURIComponent(ticked)}${untick}`,
     ),
     {},
   );

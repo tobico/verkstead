@@ -54,7 +54,7 @@ import { useDevices } from "../devices";
 import { useReading } from "../freshness";
 import { ErrorLine } from "../notices";
 import { keyOf, useDevice, type Device } from "../reaching";
-import { DeviceSelect } from "./Setup";
+import { DeviceSelect, useConversationTicks } from "./Setup";
 import styles from "./Transfer.module.css";
 
 /// What each refusal of the press says, where it is a word rather than a
@@ -170,6 +170,10 @@ function Picking(props: {
   /// acts on the Conversation being read — or the card's own where the press
   /// came from the sidebar. See `reaching.ts`.
   const here = useDevice();
+
+  /// Where the agent may take the work itself, which the card changes without
+  /// moving anything.
+  const ticks = useConversationTicks(() => props.conversation);
 
   // This device's own reading of its cluster, for the one thing the select
   // cannot say: which Device Id *this* machine goes by, where the Conversation
@@ -296,6 +300,10 @@ function Picking(props: {
           setRefused(null);
           setPicked(() => chosen);
         }}
+        // The same ticks the draft was given, at the foot of the same rows:
+        // which devices the agent may move the work to itself. Ticking one
+        // moves nothing — see `Ticks` in `Setup.tsx`.
+        ticks={ticks}
       />
 
       <Show

@@ -72,6 +72,7 @@ import {
   chooseReviewPairing,
   draftMovedTo,
   nameTarget,
+  permitDevice,
   pickProcess,
   readAttachment,
   renameBranch,
@@ -110,6 +111,7 @@ import {
   PROCESS_REFUSAL,
   RULE,
   TARGET_REFUSAL,
+  TICK_REFUSAL,
 } from "./Setup";
 import { chosen } from "./naming";
 import { takeUpRefusal } from "./TakeUp";
@@ -239,6 +241,14 @@ export type Composed = {
   /// and the base under it are left exactly where they were — which is what
   /// clearing it restores.
   adopting: Adopting | null;
+
+  /// The devices ticked under *May be transferred to*, by Device Id: where the
+  /// agent may move the work itself once it is under way.
+  ///
+  /// **Kept across a change of device**, unlike the ids above it: a Device Id
+  /// names the same machine from every device of the cluster. The one the work
+  /// ends up on is not sent — see [`create`].
+  permitted: string[];
 };
 
 /// The box written into, with the Target filled out of it.
@@ -296,6 +306,7 @@ export function blank(): Composed {
     implementation: null,
     review: null,
     adopting: null,
+    permitted: [],
   };
 }
 
@@ -362,7 +373,8 @@ export function empty(state: Composed): boolean {
     state.grilling === null &&
     state.implementation === null &&
     state.review === null &&
-    state.adopting === null
+    state.adopting === null &&
+    state.permitted.length === 0
   );
 }
 
@@ -611,6 +623,11 @@ export async function create(
     }
   }
 
+  // And where the agent may move the work, ticked while nothing existed to tick
+  // it on — whatever kind of Conversation this is, the ticks being about
+  // machines rather than about the box.
+  await permit(to, id, state.permitted, refused);
+
   if (work && refused.length === 0) {
     if (held !== null) {
       const outcome = await adoptRoadmap(to, id);
@@ -664,6 +681,36 @@ async function opened(
   }
 
   return startConversation(device, state.repo!);
+}
+
+/// The ticks under *May be transferred to*, put on a Conversation that has just
+/// been made.
+///
+/// Two answers are no refusal here. **The drafting device** is permitted
+/// without a tick, so a tick of the machine the work was just made on — ticked
+/// before the select was pointed at it — is already what it asked for. **A
+/// device no longer linked** is one the ticks were never drawn for since it
+/// left, and a refusal naming it would be about a machine the human cannot see.
+async function permit(
+  device: Device,
+  id: number,
+  ticked: string[],
+  refused: string[],
+): Promise<void> {
+  for (const one of ticked) {
+    const outcome = await permitDevice(device, id, one, true);
+
+    if (
+      outcome !== "Recorded" &&
+      outcome !== "DraftedThere" &&
+      outcome !== "WorkIsHere" &&
+      outcome !== "NotAMember"
+    ) {
+      refused.push(
+        `Where the work may be moved could not be saved: ${TICK_REFUSAL[outcome]}`,
+      );
+    }
+  }
 }
 
 /// One companion, put on the Conversation and then configured: the add first,
@@ -850,6 +897,11 @@ export async function moveTo(
     await carry(from, draft.id, to.reaching, id, attachment, refused);
   }
 
+  // And its ticks, which are Device Ids and so mean the same machines over
+  // there — less the one it is moving onto, which is where the new draft is
+  // drafted and so permitted without one.
+  await permit(to.reaching, id, draft.permitted, refused);
+
   // And the draft this came off, closed with the words that say where its work
   // went — last of all, and only where the whole of it landed: a move that left
   // something behind is a move the human finishes by hand, and a draft closed
@@ -998,7 +1050,13 @@ function parsed(body: string): Composed | null {
     !picked(held.grilling) ||
     !picked(held.implementation) ||
     !picked(held.review) ||
-    !loaded(held.adopting)
+    !loaded(held.adopting) ||
+    // A body from before the ticks has none, which is nothing ticked.
+    !(
+      held.permitted === undefined ||
+      (Array.isArray(held.permitted) &&
+        held.permitted.every((one) => typeof one === "string"))
+    )
   ) {
     return null;
   }
@@ -1041,6 +1099,7 @@ function parsed(body: string): Composed | null {
     implementation: held.implementation,
     review: held.review,
     adopting: held.adopting ?? null,
+    permitted: held.permitted ?? [],
   };
 }
 

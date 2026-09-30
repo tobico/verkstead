@@ -932,6 +932,22 @@ pub struct ConversationView {
     /// the press and the move: the session running now runs to its own end,
     /// nothing is started after it, and then the work goes.
     pub transferring: Option<String>,
+
+    /// The device this Conversation was drafted on — the device in its birth
+    /// key — which is always permitted as somewhere its agent may move the work
+    /// to, so a session that has moved can go home (ADR-0020, *The agent's
+    /// call*).
+    ///
+    /// `null` where the record has no birth key yet, which is a database the
+    /// start-up backfill has not reached.
+    pub drafted_on: Option<String>,
+
+    /// And the other devices the human has ticked under *May be transferred
+    /// to*, by Device Id, in the order they were ticked.
+    ///
+    /// Never the drafting device, which is implicit. Empty is the ordinary
+    /// Conversation, whose agent may go nowhere but home.
+    pub permitted: Vec<String>,
 }
 
 /// Which copy of a transferred Conversation is the live one: the device holding

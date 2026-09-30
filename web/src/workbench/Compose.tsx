@@ -776,6 +776,24 @@ function Compose(props: {
                 chosen={device()}
                 disabled={make.isPending || adopting() !== null}
                 pick={(picked) => onDevice(picked)}
+                // Held with the rest of the page and sent with it, there being
+                // nothing to save a tick on yet — see `permitted` in
+                // `composing.ts`. The device the page is drafting onto is the
+                // drafting device, and so is not offered.
+                ticks={{
+                  here: device(),
+                  drafted: null,
+                  ticked: state().permitted,
+                  tick: (one, permit) =>
+                    change({
+                      permitted: permit
+                        ? [
+                            ...state().permitted.filter((held) => held !== one),
+                            one,
+                          ]
+                        : state().permitted.filter((held) => held !== one),
+                    }),
+                }}
               />
 
               {/* The repository first, because everything under it is a fact

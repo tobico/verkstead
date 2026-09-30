@@ -50,6 +50,7 @@ mod migrations;
 mod pairings;
 mod pauses;
 mod pending_steers;
+mod permitted;
 mod profiles;
 mod pull_requests;
 mod push;
@@ -145,6 +146,7 @@ pub use pending_steers::{
     Pending, PendingAddition, PendingForm, PendingPairing, PendingSteer, PendingUpgrade,
     discard_pending_steer, open_pending_steer, pending_steer, save_pending_steer,
 };
+pub use permitted::{forbid_device, permit_device, permitted_devices};
 pub use profiles::{
     Account, AgentType, Channel, Clash, Deleting, Mirror, Pairing, Picked, Profile, ProfileFacts,
     Saving, create_profile, delete_profile, forget_mirrors_except, forget_mirrors_of_departed,
@@ -884,6 +886,11 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // declared in `config.yaml`, which this crate has never heard of — see
     // [`mcp_servers`].
     mcp_servers::apply_schema(pool).await?;
+
+    // And the devices each of them may be moved to by the agent doing its work,
+    // which hang off the Conversations beside those names: the human's consent,
+    // by Device Id — see [`permitted`].
+    permitted::apply_schema(pool).await?;
 
     // And the devices this one is linked to, which hang off nothing on this
     // database at all: a cluster is other machines, and what is kept about each

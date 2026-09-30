@@ -155,6 +155,38 @@ pub enum Transferring {
     NoSuchConversation,
 }
 
+/// What became of ticking or unticking a device under *May be transferred to*
+/// (ADR-0020, *The agent's call*).
+///
+/// One answer for both presses, because they refuse for the same reasons: an
+/// untick of a device that was not ticked is the state it asked for, so there
+/// is no refusal only one of them could meet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum Permitting {
+    /// The list says what the press asked it to.
+    Recorded,
+
+    /// No device of that id is in the cluster — one unlinked between the
+    /// drawing and the press, which is the ordinary way here.
+    NotAMember,
+
+    /// It is the device the Conversation was drafted on, which is always
+    /// permitted and is no tick at all: a session that has moved can always go
+    /// home.
+    DraftedThere,
+
+    /// It is the device the work is on now, which is not a place to move it
+    /// to.
+    WorkIsHere,
+
+    /// This copy is not the live record: the ticks are the live copy's, on the
+    /// device the work was handed to.
+    Elsewhere,
+
+    NoSuchConversation,
+}
+
 /// A Conversation as it crosses the link: everything the far end writes its own
 /// row from, and nothing about the machine it came off.
 ///

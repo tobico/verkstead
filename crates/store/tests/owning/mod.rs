@@ -27,8 +27,8 @@ use verkstead_store::{
     Process, ProfileFacts, PullRequest, Rollup, Settlements, Standing, Summary, WaitingOn,
     add_companion, append_capture, append_transcript, archive_conversation, ask, ask_to_transfer,
     attach, attach_mcp_server, close_conversation, continue_on_arrival, create_profile,
-    end_session, lock_set, nothing_else, open_database, open_pending_steer, pick_direction,
-    record_addressed_comments, record_backlog, record_check_rollup, record_commit,
+    end_session, lock_set, nothing_else, open_database, open_pending_steer, permit_device,
+    pick_direction, record_addressed_comments, record_backlog, record_check_rollup, record_commit,
     record_conflict_fix_attempt, record_delivery, record_fix_attempt, record_merging,
     record_pull_request, record_share, record_share_comment, record_standing, register_repo,
     save_brief, save_pending_steer, set_grilling_pairing, set_process, set_target, settle_wrap_up,
@@ -433,6 +433,12 @@ pub async fn owning(pool: &SqlitePool, branch: &str) -> Worked {
     // And an MCP server it was given, which is the other thing attached at that
     // control: a name rather than a file, in a table of its own.
     attach_mcp_server(pool, id, "docs").await.unwrap();
+
+    // And a device its agent may move it to, by the Device Id a cluster names
+    // one by.
+    permit_device(pool, id, "22222222222222222222222222222222")
+        .await
+        .unwrap();
 
     stamp_unseen(pool, id).await.unwrap();
 

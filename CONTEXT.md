@@ -516,6 +516,27 @@ leave, or the far end would launch under a login the source had not finished
 returning.
 _Avoid_: migrate, hand off, sync, failover
 
+**Permitted Device**:
+A device of the cluster the agent doing a **Conversation**'s work may move it
+onto itself, ticked by the human under *May be transferred to* (ADR-0020, *The
+agent's call*). The ticks stand at the foot of the device select's rows: on the
+compose page, held with the rest of the page and sent with the draft; on a saved
+draft's composer; and in the *Transfer to…* dialog afterwards, where ticking one
+changes the list and moves nothing. Nothing is ticked by default.
+**The ticks are the consent.** Nothing asks the human again when the agent calls
+for a move, so the list is the whole of their say in one — and a **Transfer** the
+human presses ignores it entirely.
+**The drafting device is always permitted and is never a tick**: the device in
+the Conversation's **Birth Key**, so a session that has moved can always come
+home. The device the work is on now is not offered either, being where the work
+already is.
+**Device Ids rather than anything renumbered**, which is what lets the list cross
+with the record as it stands: an id names the same machine from every device of
+the cluster, so the far end reads the same list, and the drafting device is still
+implicit there because the birth key crossed too. A device that leaves the
+cluster is taken off every Conversation's list by the unlink itself.
+_Avoid_: allowed device, whitelist, target list
+
 **Carried Conversation**:
 The conversation a transferred agent was having, picked up on the device the work
 landed on (ADR-0020, *Transfer*). A **Transfer** runs at the turn's end, so the

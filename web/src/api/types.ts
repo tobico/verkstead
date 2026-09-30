@@ -1948,7 +1948,25 @@ transferred: TransferredTo | null,
  * the press and the move: the session running now runs to its own end,
  * nothing is started after it, and then the work goes.
  */
-transferring: string | null, };
+transferring: string | null, 
+/**
+ * The device this Conversation was drafted on — the device in its birth
+ * key — which is always permitted as somewhere its agent may move the work
+ * to, so a session that has moved can go home (ADR-0020, *The agent's
+ * call*).
+ *
+ * `null` where the record has no birth key yet, which is a database the
+ * start-up backfill has not reached.
+ */
+drafted_on: string | null, 
+/**
+ * And the other devices the human has ticked under *May be transferred
+ * to*, by Device Id, in the order they were ticked.
+ *
+ * Never the drafting device, which is implicit. Empty is the ordinary
+ * Conversation, whose agent may go nowhere but home.
+ */
+permitted: Array<string>, };
 
 /**
  * What became of a create.
@@ -3556,6 +3574,16 @@ at: string,
  * opens: no target picked, nothing written and nothing ticked.
  */
 form: SteerForm, };
+
+/**
+ * What became of ticking or unticking a device under *May be transferred to*
+ * (ADR-0020, *The agent's call*).
+ *
+ * One answer for both presses, because they refuse for the same reasons: an
+ * untick of a device that was not ticked is the state it asked for, so there
+ * is no refusal only one of them could meet.
+ */
+export type Permitting = "Recorded" | "NotAMember" | "DraftedThere" | "WorkIsHere" | "Elsewhere" | "NoSuchConversation";
 
 /**
  * What a Conversation has settled about one of its roles, as the page shows

@@ -406,6 +406,14 @@ pub struct Conversation {
     /// prompt they are started on.
     pub mcp_servers: Vec<String>,
 
+    /// The devices the agent may move this work to, by Device Id, in the order
+    /// they were ticked — see [`super::permitted`].
+    ///
+    /// The drafting device is never among them: it is always permitted, and
+    /// implicit. Empty is the ordinary Conversation, whose agent may go nowhere
+    /// but home.
+    pub permitted: Vec<String>,
+
     /// Where the live record is, where this copy is not it — see
     /// [`super::transferred`].
     ///
@@ -2394,6 +2402,7 @@ pub async fn load_conversation(pool: &SqlitePool, id: i64) -> Result<Option<Conv
         target: target(pool, id).await?,
         companions: super::companions(pool, id).await?,
         mcp_servers: super::mcp_servers(pool, id).await?,
+        permitted: super::permitted_devices(pool, id).await?,
         // A read of its own beside the row for the worktree's reason: nearly
         // every Conversation has no mark at all, and a `LEFT JOIN`'s worth of
         // column would say nothing this does not — see [`super::births`].

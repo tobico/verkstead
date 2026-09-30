@@ -49,7 +49,7 @@ import { Reaching, keyOf, useDevice, type Device } from "../reaching";
 import { leaveRefusals, moveTo, type Target } from "./composing";
 import styles from "./Moving.module.css";
 import { pathOf } from "./openings";
-import { DeviceSelect, RepoSelect } from "./Setup";
+import { DeviceSelect, RepoSelect, useConversationTicks } from "./Setup";
 
 /// The device select on a saved draft's composer, and the move a pick makes.
 export function Moving(props: {
@@ -78,6 +78,8 @@ export function Moving(props: {
   /// a member's draft moved back to the machine this browser opened is a move,
   /// and one this select has to be able to hold.
   const [picked, setPicked] = createSignal<Device | undefined>(undefined);
+
+  const ticks = useConversationTicks(() => props.conversation);
 
   /// And what that device is, off the membership — the name for the card and
   /// for the words left behind, and `null` while the reading has not landed or
@@ -113,6 +115,10 @@ export function Moving(props: {
         pick={(to) => {
           if (to !== device()) setPicked(to);
         }}
+        // And where its agent may take the work later, which is the human's
+        // to say while drafting — see `Ticks`. Saved as each is touched, like
+        // everything else on a draft's setup row.
+        ticks={ticks}
       />
 
       <Show when={target()}>

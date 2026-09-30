@@ -27,9 +27,9 @@ use crate::{
     FileDeleted, FileDeleting, FileListsView, FileMade, FileMaking, FileReading, FileRenamed,
     FileRenaming, FileRootsView, FileStatusView, FileWrite, FileWritten, FolderListing,
     GrillingStarted, InstallPress, LinkedDevice, Locked, NewAdoption, NewCompanion,
-    NewConversation, NewJoin, NewRank, OnboardingView, PendingJoin, PrefillView, Preflight,
-    ProcessChoice, ProcessPicked, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit,
-    ProfileEntry, ProfileSaved, PullRequestDetails, PushKey, Registered, Registration,
+    NewConversation, NewJoin, NewRank, OnboardingView, PendingJoin, Permitting, PrefillView,
+    Preflight, ProcessChoice, ProcessPicked, ProfileChoice, ProfileChosen, ProfileDeleted,
+    ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails, PushKey, Registered, Registration,
     RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoPairingsView, RepoRemoved, RepoSwitched,
     RepoView, Resolved, Resumed, RoadmapPane, RoleChoice, Screen, ServeEdit, ServePress,
     ServerAttached, ServerRemoved, SetReading, SettingsEdit, SettingsSaved, SettingsView,
@@ -466,6 +466,10 @@ fn the_viewers_types_are_written_from_these() {
     // And what became of pressing Go, which carries that same reading back where
     // the machine has gone off between the drawing and the press.
     Transferring::export_all(&config).unwrap();
+
+    // And the ticks under *May be transferred to*, which change the list the
+    // agent may move the work along and move nothing themselves.
+    Permitting::export_all(&config).unwrap();
 
     // And whether a fresh Verkstead can do anything yet: the mode the wizard
     // runs in, the machine it is standing on, and what is missing from it. It

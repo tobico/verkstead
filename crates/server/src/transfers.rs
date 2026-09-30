@@ -213,6 +213,72 @@ pub(crate) async fn transfer(
     Ok(Transferring::Transferring)
 }
 
+/// Tick a device under *May be transferred to*, or untick it (ADR-0020, *The
+/// agent's call*).
+///
+/// **The ticks are the consent**, so what is refused here is a tick that could
+/// not mean anything: a device the cluster does not hold, the device the work is
+/// on already, and the drafting device — which is always permitted and is never
+/// a row. An untick is refused only where there is no live record to change:
+/// taking a device off is always a list the human is allowed to hold.
+///
+/// Refused on a tombstone, whose list is the live copy's business on the device
+/// it went to. Any other state is fine, a Closed one included: the list is read
+/// only by a session's call, and changing it on work nobody is doing does
+/// nothing.
+pub(crate) async fn permit(
+    state: &AppState,
+    conversation_id: i64,
+    device: &str,
+    permit: bool,
+) -> anyhow::Result<verkstead_render::Permitting> {
+    use verkstead_render::Permitting;
+
+    let Some(conversation) = store::load_conversation(&state.pool, conversation_id).await? else {
+        return Ok(Permitting::NoSuchConversation);
+    };
+
+    if conversation.transferred.is_some() {
+        return Ok(Permitting::Elsewhere);
+    }
+
+    if !permit {
+        store::forbid_device(&state.pool, conversation_id, device).await?;
+        state.nudges.announce(Nudge::Conversation {
+            conversation: conversation_id,
+        });
+        return Ok(Permitting::Recorded);
+    }
+
+    let Some(devices) = state.devices.as_ref() else {
+        return Ok(Permitting::NotAMember);
+    };
+
+    // The drafting device first, because it is the more lasting of the two: a
+    // Conversation still on the device it was drafted on is on both.
+    let born = store::birth(&state.pool, conversation_id).await?;
+    if born.is_some_and(|born| born.device == device) {
+        return Ok(Permitting::DraftedThere);
+    }
+
+    if device == devices.id() {
+        return Ok(Permitting::WorkIsHere);
+    }
+
+    let members = devices.membership().rows().await?;
+    if !members.iter().any(|member| member.device == device) {
+        return Ok(Permitting::NotAMember);
+    }
+
+    store::permit_device(&state.pool, conversation_id, device).await?;
+
+    state.nudges.announce(Nudge::Conversation {
+        conversation: conversation_id,
+    });
+
+    Ok(Permitting::Recorded)
+}
+
 /// Which states a Conversation may be moved out of: every one but Draft and
 /// Closed.
 ///

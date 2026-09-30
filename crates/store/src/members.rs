@@ -960,6 +960,15 @@ pub async fn forget_member(pool: &SqlitePool, device: &str) -> Result<()> {
         .await
         .with_context(|| format!("forgetting the addresses device {device} advertised"))?;
 
+    // And every tick naming it: a device that has left the cluster is one no
+    // agent can be moved to, and a tick drawn for it would be consent to go
+    // nowhere — see [`super::permitted`].
+    sqlx::query("DELETE FROM permitted_devices WHERE device = ?")
+        .bind(device)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("taking device {device} off what the work may move to"))?;
+
     sqlx::query("DELETE FROM members WHERE device = ?")
         .bind(device)
         .execute(&mut *tx)
@@ -996,6 +1005,9 @@ pub async fn forget_every_member(pool: &SqlitePool) -> Result<()> {
         "DELETE FROM owed_announcements",
         "DELETE FROM member_addresses",
         "DELETE FROM members",
+        // And every tick, which named machines this one is no longer linked
+        // to — see [`forget_member`].
+        "DELETE FROM permitted_devices",
     ] {
         sqlx::query(statement)
             .execute(&mut *tx)

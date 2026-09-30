@@ -386,6 +386,17 @@ export function Listbox<T>(
     /// out. What the control *looks* like is this module's, all of them being
     /// one control in several places.
     class?: string;
+
+    /// Controls of the caller's own at the foot of the dropped rows, after
+    /// everything the list offers — the device select's ticks under *May be
+    /// transferred to*, and no other control's.
+    ///
+    /// **Beside the list rather than in it.** They are not rows: nothing the
+    /// keyboard walks reaches them, nothing here picks them, and a screen reader
+    /// sent into the list does not find them there — they are ordinary controls
+    /// in the box the rows came down in, reached by Tab like any other, and
+    /// pressing one leaves the rows down.
+    foot?: () => JSX.Element;
   },
 ): JSX.Element {
   const { offered, standing, shown } = showing(props);
@@ -556,67 +567,81 @@ export function Listbox<T>(
             .filter(Boolean)
             .join(" ")}
           style={placing()}
-          id={list}
-          role="listbox"
+          // What a caller's sheet sizes the dropped box by — the box rather
+          // than the list inside it, which is narrower by the foot's width.
+          data-drop
         >
-          <For each={props.options}>
-            {(option, index) => (
-              <div
-                id={rowId(index())}
-                class={[
-                  styles.row,
-                  index() === walking() ? styles.walked : undefined,
-                ]
-                  .filter(Boolean)
-                  .join(" ")}
-                role="option"
-                aria-selected={
-                  props.value(option) === shown() ? "true" : "false"
-                }
-                onClick={() => take(index())}
-              >
-                <Reading
-                  of={option}
-                  mark={props.mark}
-                  icon={props.icon}
-                  label={props.label}
-                />
-              </div>
-            )}
-          </For>
-
-          {/* And the rows that press, behind the rule that says they are not
-              more of the list. Inside it rather than beside it, because that is
-              where the keyboard is: `aria-activedescendant` names a row of the
-              list this control opened, and a row hung outside it would be one a
-              screen reader was sent to and could not find.
-
-              Never the choice, though the walk reaches them: they carry no
-              value, so `aria-selected` is false on them for as long as they are
-              drawn — a row that acts is not one the control could be showing. */}
-          <Show when={actions().length > 0}>
-            <div class={styles.rule} role="separator" />
-            <For each={actions()}>
-              {(action, index) => (
+          <div id={list} role="listbox">
+            <For each={props.options}>
+              {(option, index) => (
                 <div
-                  id={rowId(props.options.length + index())}
+                  id={rowId(index())}
                   class={[
                     styles.row,
-                    styles.action,
-                    props.options.length + index() === walking()
-                      ? styles.walked
-                      : undefined,
+                    index() === walking() ? styles.walked : undefined,
                   ]
                     .filter(Boolean)
                     .join(" ")}
                   role="option"
-                  aria-selected="false"
-                  onClick={() => take(props.options.length + index())}
+                  aria-selected={
+                    props.value(option) === shown() ? "true" : "false"
+                  }
+                  onClick={() => take(index())}
                 >
-                  <span class={styles.words}>{action.label}</span>
+                  <Reading
+                    of={option}
+                    mark={props.mark}
+                    icon={props.icon}
+                    label={props.label}
+                  />
                 </div>
               )}
             </For>
+
+            {/* And the rows that press, behind the rule that says they are not
+                more of the list. Inside it rather than beside it, because that is
+                where the keyboard is: `aria-activedescendant` names a row of the
+                list this control opened, and a row hung outside it would be one a
+                screen reader was sent to and could not find.
+
+                Never the choice, though the walk reaches them: they carry no
+                value, so `aria-selected` is false on them for as long as they are
+                drawn — a row that acts is not one the control could be showing. */}
+            <Show when={actions().length > 0}>
+              <div class={styles.rule} role="separator" />
+              <For each={actions()}>
+                {(action, index) => (
+                  <div
+                    id={rowId(props.options.length + index())}
+                    class={[
+                      styles.row,
+                      styles.action,
+                      props.options.length + index() === walking()
+                        ? styles.walked
+                        : undefined,
+                    ]
+                      .filter(Boolean)
+                      .join(" ")}
+                    role="option"
+                    aria-selected="false"
+                    onClick={() => take(props.options.length + index())}
+                  >
+                    <span class={styles.words}>{action.label}</span>
+                  </div>
+                )}
+              </For>
+            </Show>
+          </div>
+
+          {/* And the caller's own controls under it, behind the rule that says
+              they are not more of the list — see `foot` above. */}
+          <Show when={props.foot}>
+            {(foot) => (
+              <>
+                <div class={styles.rule} role="separator" />
+                {foot()()}
+              </>
+            )}
           </Show>
         </div>
       </Show>

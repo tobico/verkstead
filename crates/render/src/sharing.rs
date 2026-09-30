@@ -263,6 +263,12 @@ pub fn shared(
             // work might be going rather than where it went.
             pending_steer: None,
 
+            // And where its agent was allowed to take the work, which names the
+            // human's own machines — a share leaves the tailnet, and nothing on
+            // it could be moved anywhere.
+            drafted_on: None,
+            permitted: Vec::new(),
+
             // And where a share of this Conversation was last published, which
             // is the workbench's fact about the record rather than part of it:
             // a reader already holds a share, and one carrying the link to

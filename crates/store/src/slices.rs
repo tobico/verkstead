@@ -641,6 +641,18 @@ const CARRIED: &[Carried] = &[
             ("conversation_id", Holds::Conversation),
         ],
     },
+    // And the devices its agent may move it to, which travel as the Device Ids
+    // they are: an id names the same machine in every database of a cluster,
+    // so the far end reads the same list — and the drafting device, which is
+    // no row, is still implicit there because the birth key crosses too.
+    Carried {
+        table: "permitted_devices",
+        found: Found::ByConversation,
+        ids: &[
+            ("id", Holds::Mine(Remembered::Nothing)),
+            ("conversation_id", Holds::Conversation),
+        ],
+    },
     // And the files the human put on it. The rows here and the bytes beside them:
     // the files land in the far end's own attachments directory, under its own
     // Conversation id, so a session there is given the paths its own sandbox

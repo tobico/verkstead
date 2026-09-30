@@ -108,8 +108,8 @@ pub use transcript::{
 };
 pub use transfer::{
     Arrived, BirthKey, CameFrom, CheckoutAcross, CompanionCheckoutAcross, ConversationAcross,
-    HarnessThere, Lacking, PairingAcross, PairingRole, PickedAcross, Preflight, ProfileAcross,
-    TipsThere, Transferring, UntrackedFile,
+    HarnessThere, Lacking, PairingAcross, PairingRole, Permitting, PickedAcross, Preflight,
+    ProfileAcross, TipsThere, Transferring, UntrackedFile,
 };
 pub use update::UpdateNotice;
 pub use view::{

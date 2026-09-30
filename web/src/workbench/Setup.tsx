@@ -71,6 +71,7 @@ import {
 } from "solid-js";
 
 import { HarnessMark } from "../HarnessMark";
+import { Check } from "../Check";
 import { Icon } from "../Icon";
 import { Menu } from "../Menu";
 import { Switch as Toggle } from "../Switch";
@@ -92,6 +93,7 @@ import {
   setCompanionBase,
   setCompanionMode,
   nameTarget,
+  permitDevice,
   switchRepo,
 } from "../api/client";
 import type {
@@ -108,6 +110,7 @@ import type {
   ConversationView,
   DeviceIdentity,
   PairingView,
+  Permitting,
   Process,
   ProcessPicked,
   ProfileChosen,
@@ -568,6 +571,11 @@ export function DeviceSelect(props: {
   /// thing that moves it is a move.
   remembered?: boolean;
 
+  /// The ticks under *May be transferred to*, where the caller keeps a list —
+  /// see [`Ticks`], which is what they are drawn from. At the foot of the
+  /// rows, so a pick and the ticks are one control's panel.
+  ticks?: Ticks;
+
   pick: (device: Device) => void;
 }): JSX.Element {
   // This device's own, whichever machine the page is about: the membership is
@@ -640,11 +648,184 @@ export function DeviceSelect(props: {
           pick={(device) =>
             props.pick(device === devices.data?.this.device ? null : device)
           }
+          foot={
+            props.ticks === undefined
+              ? undefined
+              : () => <MayBeTransferredTo ticks={props.ticks!} />
+          }
         />
       </div>
     </Show>
   );
 }
+
+/// What the ticks under *May be transferred to* are drawn from (ADR-0020, *The
+/// agent's call*): which other devices of the cluster the agent doing this work
+/// may move it onto itself.
+///
+/// **The ticks are the consent**, so nothing asks again when the agent calls
+/// `verkstead transfer`. The device it was drafted on is always permitted, so a
+/// session that has moved can go home; it is never a tick.
+export type Ticks = {
+  /// Where the work is being done — the device the select is pointing at while
+  /// drafting, the one the Conversation is on in the Transfer dialog — which is
+  /// not offered: it is where the work already is. `null` for this device.
+  here: Device;
+
+  /// The device the Conversation was drafted on, by id, where that is not
+  /// [`Self.here`]: drawn as permitted with no tick to take away.
+  drafted: string | null;
+
+  /// The devices ticked, by id. One the cluster no longer holds is not drawn.
+  ticked: string[];
+
+  /// Tick one, or untick it — the caller's to write down.
+  tick: (device: string, permit: boolean) => void;
+
+  /// Why the last tick was not taken, where it was not.
+  refused?: string;
+};
+
+/// The ticks themselves: one per device of the cluster but the one the work is
+/// on, under a heading that says what ticking one means.
+///
+/// Membership first, ticks second: a device is drawn because the cluster holds
+/// it, so a tick naming one that has been unlinked is never drawn, and the order
+/// is the select's own above it.
+function MayBeTransferredTo(props: { ticks: Ticks }): JSX.Element {
+  const devices = useDevices();
+
+  /// Every device but the one the work is on, in the select's order.
+  const others = (): DeviceIdentity[] => {
+    const view = devices.data;
+    if (view === undefined) return [];
+
+    const here = props.ticks.here ?? view.this.device;
+
+    return [view.this, ...view.members.map((member) => member.identity)].filter(
+      (device) => device.device !== here,
+    );
+  };
+
+  return (
+    <fieldset class={styles.ticks}>
+      <legend class={styles.ticksHeading}>May be transferred to</legend>
+
+      <For each={others()}>
+        {(device) => (
+          <Show
+            when={device.device !== props.ticks.drafted}
+            fallback={
+              // The drafting device, which reads as permitted and will not take
+              // an untick: a session that has moved can always go home.
+              <Check
+                label={
+                  <>
+                    <Icon of={osIcon(device.os)} class={styles.tickMark!} />{" "}
+                    {device.name}
+                    <span class={styles.tickNote}> — drafted here, always</span>
+                  </>
+                }
+                on
+                disabled
+                title="Where this work was drafted is always somewhere it may go back to."
+                flip={() => undefined}
+              />
+            }
+          >
+            <Check
+              label={
+                <>
+                  <Icon of={osIcon(device.os)} class={styles.tickMark!} />{" "}
+                  {device.name}
+                </>
+              }
+              on={props.ticks.ticked.includes(device.device)}
+              flip={(on) => props.ticks.tick(device.device, on)}
+            />
+          </Show>
+        )}
+      </For>
+
+      <Show when={props.ticks.refused}>
+        {(refused) => <ErrorLine class={styles.failure}>{refused()}</ErrorLine>}
+      </Show>
+    </fieldset>
+  );
+}
+
+/// The ticks of a Conversation that exists, each saved the moment it is
+/// touched — a saved draft's composer and the Transfer dialog.
+///
+/// **What the last answer left, over what the Conversation said.** The dialog is
+/// opened over the Conversation as it was read when the row was pressed, which
+/// nothing reads again while the card is up; so a tick the server took is held
+/// here as the list it now is, and a refused one leaves the list where it stood
+/// and says why under it. The record is invalidated all the same, for the pane
+/// behind the card.
+export function useConversationTicks(
+  conversation: () => ConversationView,
+): Ticks {
+  const queries = useQueryClient();
+  const device = useDevice();
+
+  const [answered, setAnswered] = createSignal<string[] | null>(null);
+  const [refused, setRefused] = createSignal<string | undefined>(undefined);
+
+  const ticked = (): string[] => answered() ?? conversation().permitted;
+
+  const save = useMutation(() => ({
+    mutationFn: (asked: { device: string; permit: boolean }) =>
+      permitDevice(device(), conversation().id, asked.device, asked.permit),
+
+    onSuccess: (outcome: Permitting, asked) => {
+      if (outcome !== "Recorded") {
+        setRefused(TICK_REFUSAL[outcome]);
+        return;
+      }
+
+      setRefused(undefined);
+      setAnswered(
+        asked.permit
+          ? [...ticked().filter((one) => one !== asked.device), asked.device]
+          : ticked().filter((one) => one !== asked.device),
+      );
+
+      void queries.invalidateQueries({
+        queryKey: keyOf(device(), "conversation"),
+      });
+    },
+
+    onError: (error: Error) =>
+      setRefused(`The tick could not be saved: ${error.message}`),
+  }));
+
+  return {
+    get here() {
+      return device();
+    },
+    get drafted() {
+      return conversation().drafted_on;
+    },
+    get ticked() {
+      return ticked();
+    },
+    tick: (ticking, permit) => save.mutate({ device: ticking, permit }),
+    get refused() {
+      return refused();
+    },
+  };
+}
+
+/// What a refused tick says, in the words the ticks are drawn beside.
+export const TICK_REFUSAL: Record<Permitting, string> = {
+  Recorded: "",
+  NotAMember: "That device is not linked to this one any more.",
+  DraftedThere: "Where the work was drafted is always permitted.",
+  WorkIsHere: "The work is on that device already.",
+  Elsewhere: "This work has moved to another device, where its ticks are kept.",
+  NoSuchConversation: "This conversation is gone.",
+};
 
 /// The Repo option before there is a repo to be about: the same label over the
 /// same kind of value as the three beside it, listing what is registered.

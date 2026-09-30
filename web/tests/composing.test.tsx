@@ -54,6 +54,7 @@ import {
   BRANCH_REFUSAL,
   TARGET,
   TARGET_REFUSAL,
+  TICK_REFUSAL,
 } from "../src/workbench/Setup";
 // The Processes the picker offers and the words they are said in, read rather
 // than spelled out again: what the row offers is that list and nothing else.
@@ -2567,6 +2568,9 @@ describe("starting the work on the picked device", () => {
     await waitFor(() =>
       expect(writes(fetching, uploadedThere("notes.md"))).toBe(1),
     );
+    await waitFor(() =>
+      expect(writes(fetching, at(`/conversations/${OPEN.id}/grill`))).toBe(1),
+    );
     expect(order(fetching, uploadedThere("notes.md"))).toBeLessThan(
       order(fetching, at(`/conversations/${OPEN.id}/grill`)),
     );
@@ -3151,6 +3155,137 @@ describe("moving a saved draft to another device", () => {
 
     expect(writes(fetching, moved)).toBe(0);
     expect(history.get().startsWith(`/conversations/${OPEN.id}`)).toBe(true);
+  });
+});
+
+/// The ticks under *May be transferred to*, at the foot of the device select's
+/// rows (ADR-0020, *The agent's call*): which other devices the agent doing the
+/// work may move it onto itself. Held with the page and sent with it on the
+/// compose page, and saved as each is touched on a saved draft.
+describe("the devices the agent may move the work to", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    leaveRefusals(null, 0, []);
+  });
+
+  /// The ticks, by what each reads as — only there while the rows are down,
+  /// which is where they live.
+  const ticks = (): HTMLInputElement[] => {
+    opened("Device");
+    return screen.getAllByRole("checkbox") as HTMLInputElement[];
+  };
+
+  const tick = (name: string): HTMLInputElement => {
+    opened("Device");
+    return screen.getByRole("checkbox", { name }) as HTMLInputElement;
+  };
+
+  it("offers every other device on the compose page, none ticked", async () => {
+    theCluster();
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await drawn(container, `.${setup.deviceSelect}`);
+    await waitFor(() => expect(showing("Device")).toBe(LINKED.this.name));
+
+    opened("Device");
+    expect(screen.getByText("May be transferred to")).toBeTruthy();
+
+    // The device the page is drafting onto is where the work will be drafted,
+    // which is permitted without a tick — so it is not offered.
+    expect(ticks().map((box) => box.labels?.[0]?.textContent?.trim())).toEqual([
+      MEMBER.name,
+      AWAY.name,
+    ]);
+    expect(ticks().every((box) => !box.checked && !box.disabled)).toBe(true);
+  });
+
+  it("holds a tick with the page and sends it with the draft", async () => {
+    const fetching = creating(
+      whenever("/api/ui/devices", json(LINKED)),
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/permitted/${MEMBER.device}`,
+        json("Recorded"),
+        "POST",
+      ),
+    );
+    const first = mount("/compose");
+
+    await composing(first.container);
+    await drawn(first.container, `.${setup.deviceSelect}`);
+    fireEvent.click(tick(MEMBER.name));
+    await waitFor(() => expect(tick(MEMBER.name).checked).toBe(true));
+
+    // Held on this device with the rest of the page, so a reload finds it.
+    cleanup();
+    const { container } = mount("/compose");
+    await composing(container);
+    await drawn(container, `.${setup.deviceSelect}`);
+    await waitFor(() => expect(tick(MEMBER.name).checked).toBe(true));
+    expect(tick(AWAY.name).checked).toBe(false);
+
+    fireEvent.input(await composing(container), {
+      target: { value: "Make the widget" },
+    });
+    await pickRepo(container, REPOS[1]!.id);
+    fireEvent.click(screen.getByRole("button", { name: "Save as draft" }));
+
+    await waitFor(() =>
+      expect(
+        writes(
+          fetching,
+          `/api/ui/conversations/${OPEN.id}/permitted/${MEMBER.device}`,
+        ),
+      ).toBe(1),
+    );
+    expect(
+      writes(fetching, `/api/ui/conversations/${OPEN.id}/permitted/${AWAY.device}`),
+    ).toBe(0);
+  });
+
+  it("draws a saved draft's ticks off the record and saves each as it is touched", async () => {
+    const draft: ConversationView = {
+      ...OPEN,
+      drafted_on: LINKED.this.device,
+      permitted: [AWAY.device],
+    };
+    const fetching = theCluster(
+      whenever(`/api/ui/conversations/${OPEN.id}`, json(draft)),
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/permitted/${MEMBER.device}`,
+        json("Recorded"),
+        "POST",
+      ),
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/permitted/${AWAY.device}/remove`,
+        json("NoSuchConversation"),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await drawn(container, `.${composer.box} textarea`);
+    await drawn(container, `.${setup.deviceSelect}`);
+    await waitFor(() => expect(tick(AWAY.name).checked).toBe(true));
+    expect(tick(MEMBER.name).checked).toBe(false);
+
+    fireEvent.click(tick(MEMBER.name));
+    await waitFor(() =>
+      expect(
+        writes(
+          fetching,
+          `/api/ui/conversations/${OPEN.id}/permitted/${MEMBER.device}`,
+        ),
+      ).toBe(1),
+    );
+    await waitFor(() => expect(tick(MEMBER.name).checked).toBe(true));
+
+    // And one the server will not take stays where it stood, saying why.
+    fireEvent.click(tick(AWAY.name));
+    await waitFor(() =>
+      expect(screen.getByText(TICK_REFUSAL.NoSuchConversation)).toBeTruthy(),
+    );
+    expect(tick(AWAY.name).checked).toBe(true);
   });
 });
 
@@ -4993,6 +5128,7 @@ describe("what a device holds between visits", () => {
       implementation: "2:fable",
       review: null,
       adopting: null,
+      permitted: ["0011223344556677889900aabbccddee"],
     };
 
     keep(held);
@@ -5005,6 +5141,15 @@ describe("what a device holds between visits", () => {
   /// absence a field-by-field check has to read rather than discard.
   it("reads a body from before the process as one nobody picked", () => {
     const { process: _, ...before } = { ...blank(), repo: 2 };
+    localStorage.setItem(COMPOSING, JSON.stringify(before));
+
+    expect(stored()).toEqual({ ...blank(), repo: 2 });
+  });
+
+  /// And a body from before the ticks has none, which is nothing ticked rather
+  /// than a draft to throw away.
+  it("reads a body from before the ticks as nothing ticked", () => {
+    const { permitted: _, ...before } = { ...blank(), repo: 2 };
     localStorage.setItem(COMPOSING, JSON.stringify(before));
 
     expect(stored()).toEqual({ ...blank(), repo: 2 });

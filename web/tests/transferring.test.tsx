@@ -36,8 +36,8 @@ import actions from "../src/workbench/Actions.module.css";
 import setup from "../src/workbench/Setup.module.css";
 import transfer from "../src/workbench/Transfer.module.css";
 import { OPEN, drawn, mount, theWorkbench } from "./bench";
-import { offered, pick, rows } from "./pickers";
-import { json, whenever } from "./serving";
+import { offered, pick, picker, rows } from "./pickers";
+import { askedFor, json, whenever } from "./serving";
 import grilling from "./fixtures/conversation-grilling.json" with { type: "json" };
 import linked from "./fixtures/devices-linked.json" with { type: "json" };
 
@@ -379,6 +379,64 @@ describe("transferring a conversation to another device", () => {
     for (const row of offered("Device")) {
       expect(row.querySelector(`.${chrome.mark}`)).toBeTruthy();
     }
+  });
+
+  /// And the ticks under *May be transferred to* stand at the foot of the same
+  /// rows (ADR-0020, *The agent's call*): every device but the one the work is
+  /// on, the one it was drafted on reading as permitted with nothing to untick,
+  /// and a tick saved the moment it is made — without moving anything.
+  it("ticks where the agent may move the work, without moving it", async () => {
+    const away = DEVICES.members[1]!.identity.device;
+    const fetching = theCluster(
+      whenever(
+        `/api/ui/conversations/${GRILLING.id}`,
+        json({
+          ...GRILLING,
+          drafted_on: LAPTOP,
+          permitted: [],
+        } satisfies ConversationView),
+      ),
+      whenever(
+        `/api/ui/conversations/${GRILLING.id}/permitted/${away}`,
+        json("Recorded"),
+        "POST",
+      ),
+    );
+
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+    const card = await transferring(container);
+
+    fireEvent.click(picker("Device"));
+    const boxes = (): HTMLInputElement[] => [
+      ...card.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'),
+    ];
+    await waitFor(() => expect(boxes()).toHaveLength(2));
+
+    const [drafted, other] = boxes() as [HTMLInputElement, HTMLInputElement];
+
+    // Where it was drafted: permitted, and not a tick anybody can take away.
+    expect(drafted.labels?.[0]?.textContent).toContain("laptop");
+    expect(drafted.labels?.[0]?.textContent).toContain("drafted here");
+    expect(drafted.checked).toBe(true);
+    expect(drafted.disabled).toBe(true);
+
+    expect(other.checked).toBe(false);
+    fireEvent.click(other);
+
+    await waitFor(() =>
+      expect(
+        askedFor(
+          fetching,
+          `/api/ui/conversations/${GRILLING.id}/permitted/${away}`,
+        ),
+      ).toBe(1),
+    );
+    await waitFor(() => expect(boxes()[1]!.checked).toBe(true));
+
+    // And nothing is moved by it: no transfer was pressed.
+    expect(
+      fetching.mock.calls.some(([asked]) => String(asked).includes("/transfer/")),
+    ).toBe(false);
   });
 
   /// And picking one sets the preflight going, which is what the dialog draws

@@ -3630,7 +3630,7 @@ describe("the composer pane", () => {
   /// The rows behind a pairing trigger are twice the width the trigger would
   /// give them, so a reading lands on one line rather than wrapping onto three.
   it("drops the pairing rows at twice the trigger's width", () => {
-    const list = rule(setupCss, '.optionPick > [role="listbox"]');
+    const list = rule(setupCss, '.optionPick > [data-drop]');
 
     expect(list).toContain("min-width: 30rem");
     // And still capped against the window, which is what wins on a phone.

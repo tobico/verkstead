@@ -451,6 +451,81 @@ async fn one_press_takes_a_device_off_every_list_including_its_own() {
     );
 }
 
+/// **And the device is off every Conversation's ticks** (ADR-0020, *The agent's
+/// call*): an agent may not be moved to a machine the cluster no longer holds,
+/// so a tick naming one would be consent to go nowhere. Everywhere the unlink
+/// reaches — the device pressed on, the member told about it, and the leaver,
+/// whose every tick named a machine it is no longer linked to.
+#[tokio::test]
+async fn an_unlinked_device_is_off_every_conversations_ticks() {
+    let a = Verkstead::answering(A).await;
+    let b = Verkstead::answering(B).await;
+    let c = Verkstead::answering(C).await;
+
+    linked(&a, &b).await;
+    linked(&c, &b).await;
+
+    /// A Conversation on `on` that its agent may move to each of `ticked`.
+    async fn ticking(on: &Verkstead, ticked: &[&str]) -> i64 {
+        let repo = verkstead_store::register_repo(
+            &on.pool,
+            std::path::Path::new("/srv/verkstead"),
+            "verkstead",
+            "main",
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        let id = verkstead_store::start_conversation(&on.pool, repo.id, "ticked", on.device.id())
+            .await
+            .unwrap()
+            .unwrap();
+
+        for device in ticked {
+            verkstead_store::permit_device(&on.pool, id, device)
+                .await
+                .unwrap();
+        }
+
+        id
+    }
+
+    let on_a = ticking(&a, &[B, C]).await;
+    let on_b = ticking(&b, &[C, A]).await;
+    let on_c = ticking(&c, &[A, B]).await;
+
+    unlink(&a.workbench(), C).await;
+
+    assert_eq!(
+        verkstead_store::permitted_devices(&a.pool, on_a)
+            .await
+            .unwrap(),
+        vec![B.to_owned()],
+        "the device pressed on lets go of C's tick",
+    );
+
+    // The broadcast is a dial, so B's half lands a moment after the press.
+    let until = tokio::time::Instant::now() + HEARING;
+    loop {
+        let b_ticks = verkstead_store::permitted_devices(&b.pool, on_b)
+            .await
+            .unwrap();
+        let c_ticks = verkstead_store::permitted_devices(&c.pool, on_c)
+            .await
+            .unwrap();
+
+        if b_ticks == vec![A.to_owned()] && c_ticks.is_empty() {
+            break;
+        }
+
+        assert!(
+            tokio::time::Instant::now() < until,
+            "B still ticks {b_ticks:?} and the leaver {c_ticks:?}",
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
 /// And the leaver's own list is empty but for itself, which is what its card's
 /// count reads off.
 #[tokio::test]

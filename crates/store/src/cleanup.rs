@@ -179,6 +179,9 @@ const CONVERSATION_KEYED: &[&str] = &[
     // names rather than anything of the installation's: what they referred to
     // stays declared in `config.yaml` after the Conversation is gone.
     "conversation_mcp_servers",
+    // And the devices its agent was permitted to move it to, which are Device
+    // Ids rather than anything of the machines': the machines stay linked.
+    "permitted_devices",
     // What was shared of it, which is the record of a share rather than the
     // share: the file itself was put somewhere on purpose and stays there.
     "shares",
