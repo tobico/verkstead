@@ -54,4 +54,4 @@ Maven 3.9.12 and OpenJDK 21 from nixpkgs.
 - [x] 02: Maven — [details](02-maven.md)
 - [x] 03: Gradle, daemon off — [details](03-gradle-daemon-off.md)
 - [x] 04: Gradle's build cache, where a Repo turns it on — [details](04-gradles-build-cache.md)
-- [ ] 05: The docs — [details](05-the-docs.md)
+- [x] 05: The docs — [details](05-the-docs.md)

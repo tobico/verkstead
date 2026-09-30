@@ -21,7 +21,9 @@ $ nix develop
 
 Everything below assumes this shell — it carries the Rust toolchain, `sqlite`,
 `git`, the `node` and `pnpm` the viewer is built with, and the Electron the
-desktop app runs on.
+desktop app runs on — and every tool the language descriptors' proofs in
+`crates/server/tests/package_stores.rs` install or build with, a JDK, Maven
+and Gradle among them.
 
 ### 2. Build the viewer and start the server (terminal 1)
 
@@ -181,12 +183,14 @@ settings page is where a language is switched off, or its compiled store given
 a size.
 
 **None of those variable names are Rust's by name in the server.** A language
-is a **descriptor** — data, in one grammar — and the six Verkstead ships are
+is a **descriptor** — data, in one grammar — and the seven Verkstead ships are
 `crates/server/languages.yaml`, embedded in the binary and read by
 `crates/server/src/languages.rs`, which is the module's documentation as well
-as its data: Rust and C/C++, which compile, and the four package stores — Go,
+as its data: Rust and C/C++, which compile, the four package stores — Go,
 Node, Python and .NET —
-whose eleven tools download into this directory the same way. What a session is
+whose eleven tools download into this directory the same way, and the JVM,
+whose `jvm` entry moves Maven's local repository and Gradle's whole home into it
+and runs Gradle with no daemon in a session. What a session is
 given is whatever the loaded descriptors say, with the `languages:` map in
 `config.yaml` merged over the built-ins key by key. `{cache}` in one of them is
 this directory; `{stores}` is a second one beside the worktrees, for a store
@@ -294,8 +298,8 @@ sandbox_binds:
 ```
 
 `languages` is one entry per language, merged key by key over the descriptors
-embedded in the binary — the six Verkstead ships are Rust, C/C++ and the four
-package stores, and a save from the settings page writes an entry for each: `enabled`
+embedded in the binary — the seven Verkstead ships are Rust, C/C++, the four
+package stores and the JVM, and a save from the settings page writes an entry for each: `enabled`
 and `size` are the two the page writes, and everything else in an entry is the
 installer's. `dotnet: enabled: false` above is a machine that builds no .NET and
 would rather not have NuGet's three variables in every session. `gleam` is a
@@ -392,7 +396,7 @@ fine-grained one GitHub named no scopes for at all. `"github_token"` is
 `"Keep"` to leave the configured one alone, which is what a save of the author
 fields sends, and `"Clear"` to take it away.
 
-`"languages"` is one entry per **descriptor** the server loaded — the six
+`"languages"` is one entry per **descriptor** the server loaded — the seven
 Verkstead ships and whatever `config.yaml` added — sent as values rather than as
 an action, and the whole list every time, because a save writes the whole file.
 It carries the two keys the page draws, the switch and the size, where an empty

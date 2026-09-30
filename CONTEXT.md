@@ -515,19 +515,21 @@ _Avoid_: tool server, integration, plugin, extension, connector
 **Descriptor**:
 What a language *is* to Verkstead: **data**, in one grammar, saying a label for
 the settings page, the manifests that detect it in a Repo, the variables a
-session is given, and the **capabilities** it names. Six ship — Rust and
-C/C++, which compile, and the four **package stores**, Go, Node, Python and
-.NET — and there is nothing special about any of them: the built-ins are a YAML file embedded in the
+session is given, and the **capabilities** it names. Seven ship — Rust and
+C/C++, which compile, the four **package stores**, Go, Node, Python and
+.NET, and the JVM, whose one entry is Maven and Gradle — and there is nothing special about any of them: the built-ins are a YAML file embedded in the
 binary, written the way an installer writes one, so they are the grammar's own
 worked examples rather than a second shape nobody ever sees. **One entry per
-ecosystem rather than per tool**, which is what makes Node six tools and Python
-four: what one box on the settings page turns off is every tool that installs
+ecosystem rather than per tool**, which is what makes Node six tools, Python
+four and the JVM two: what one box on the settings page turns off is every tool that installs
 from one registry.
 **Data rather than behaviour.** A descriptor cannot say a command to run: a
 settings file that started programs would be one whose sandbox somebody then
 had to describe in YAML too. Behaviour is a **capability** built
 into the server and switched on by name — `sccache`, which is the **Compile
-Server**, and Rust's and C/C++'s descriptors both name it. A capability's variables are set only
+Server**, and Rust's and C/C++'s descriptors both name it. The JVM's names
+none: turning Gradle's daemon off and Maven's cross-process locking on both
+turned out to be variables. A capability's variables are set only
 where this server can offer it, so a language keeps its own on a machine that
 cannot and loses only the capability's; and a name this server has never heard
 of is a capability it cannot offer rather than a file it refuses, so a
@@ -549,7 +551,8 @@ be said, is still read as Rust's, and the map wins where both say something.
 **Placeholders are what only the server knows**, and there are four. `{cache}`
 is the **Build Cache**, where a store goes that nothing has to share a
 filesystem with — Rust's two are both there, and so are Go's, npm's, both
-yarns', pip's, poetry's, pipenv's and all three of NuGet's. `{stores}` is a
+yarns', pip's, poetry's, pipenv's, all three of NuGet's, Maven's local
+repository and Gradle's whole home. `{stores}` is a
 directory beside the **Worktrees**, for a store that does: pnpm, deno, bun and
 uv hardlink packages out of theirs into the project rather than copying them
 and fall back to copying the lot where the two are on different filesystems,
@@ -588,7 +591,10 @@ build downloads and compiles is fetched once for the machine rather than once
 per Conversation. What `{cache}` in a **Descriptor** stands for, and the place
 for a store nothing has to share a filesystem with: Rust's descriptor puts
 `CARGO_HOME` and the compiled objects in it, the four **package stores** put
-everything of theirs that nothing hardlinks out of there too, and a language
+everything of theirs that nothing hardlinks out of there too, the JVM puts
+Maven's repository and Gradle's home there — with Gradle's daemon off in a
+session, a daemon registered in one shared home being one another Sandbox's
+build could run inside — and a language
 added after them reaches the same directory by writing the same placeholder.
 **Writable is the point and the cost of it**: a store two Conversations share
 is one either of them can plant a package in for the other to install, which is

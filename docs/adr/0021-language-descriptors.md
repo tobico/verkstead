@@ -31,7 +31,11 @@ languages:
 
 It cannot say a command to run. Anything that is behaviour — the sccache
 **Compile Server**, and whatever Gradle comes to need — is a capability built
-into the server, which a descriptor switches on by name. Rejected: descriptors
+into the server, which a descriptor switches on by name. *(Amended by stage 04:
+Gradle turned out to need none. Its daemon is switched off, and Maven's
+cross-process locking on, with variables alone — see [Gradle's daemon is off in
+a session](#gradles-daemon-is-off-in-a-session) — so `sccache` is still the one
+capability there is.)* Rejected: descriptors
 that name commands, which would make `config.yaml` a place programs are
 started from, in a Sandbox somebody would then have to describe in YAML too.
 Rejected as well: descriptors compiled into the server, and a Rust trait with a
@@ -143,6 +147,40 @@ JVM arguments and starts its own where none matches; the build runs where the
 daemon is, without the session's `HOME` or its Conversation's binds; and each
 daemon holds memory for hours. That stage may end with the daemon staying off.
 
+**Amended by stage 04, with what was measured** — against Gradle 8.14.4, Maven
+3.9.12 and OpenJDK 21, in two Sandboxes built with Verkstead's own flags:
+
+- **The hazard is real.** With one shared home, the second session's build
+  attached to the first session's daemon and failed with *could not setcwd()*
+  into a Worktree that Sandbox does not bind.
+- **Daemon off is a variable.** `GRADLE_OPTS=-Dorg.gradle.daemon=false` beats
+  `org.gradle.daemon=true` in a Repo's `gradle.properties` and in the shared
+  home's, with `org.gradle.jvmargs` beside it or not. Gradle then runs a
+  single-use daemon inside the session's own Sandbox and registers nothing in
+  the shared home. So the `jvm` descriptor names no capability.
+- **Maven's locking is a variable too.** `MAVEN_OPTS` carries
+  `-Dmaven.repo.local` and Resolver's
+  `-Daether.syncContext.named.factory=file-lock` with
+  `-Daether.syncContext.named.nameMapper=file-gav`, which Maven 3.9 reads and
+  Maven 4 makes the default. Maven 3.8 has no named locks and ignores them.
+- **An explicit `--daemon` on the command line still wins**, and registers in
+  the shared home again, where the next session's build can attach to it. That
+  hole is **accepted and documented** rather than closed: the failure it causes
+  is loud, and a daemon of Verkstead's own is what would close it for good.
+  `-Dorg.gradle.daemon.registry.base` pointed at a directory per Sandbox was
+  tried and does close it, and was **turned down**: it is undocumented, so it
+  may go in any release, and the obvious value — a literal `/tmp` — is only per
+  Sandbox on Linux.
+- **The build cache is the Repo's to switch on.** Its local directory is under
+  the Gradle home, so a shared home shares it for every Repo with
+  `org.gradle.caching=true`. Switching it on from `GRADLE_OPTS` was turned
+  down: it would override a Repo that set `org.gradle.caching=false` on
+  purpose.
+- **A shared home shares its `gradle.properties` and `init.d/`**, so an init
+  script one session writes runs in the others' builds — the case under *What
+  is accepted* below, extended to build logic.
+- **Kotlin needs nothing of its own.** Kotlin/Native's `~/.konan` is left out.
+
 ## Eviction is by whole units
 
 Every store has a size — `10G` where nobody has said, Rust's sccache staying at
@@ -166,7 +204,10 @@ use beside its size, with a Clear.
 
 **One session can plant a package another installs.** A shared writable store
 is that by construction, it is already true of Rust's, and the machine is one
-person's. The documentation says so.
+person's. The documentation says so. A shared Gradle home extends it to init
+scripts and properties, which run in every session's Gradle builds; and an
+explicit `gradle --daemon` can still put one session's build in another's
+Sandbox, which fails loudly rather than quietly.
 
 ## How it is proven
 

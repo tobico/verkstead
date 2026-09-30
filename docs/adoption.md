@@ -879,13 +879,13 @@ directory — is [development.md](development.md#quickstart).
 ## Languages
 
 A language is a **descriptor**: data, in one grammar, saying what to call it,
-what says a checkout builds it, and what variables a session is given. Six
-ship — Rust, C/C++, Go, Node, Python and .NET — and there is nothing special
-about any of them: each is an entry in a YAML file embedded in the binary,
-written exactly the way you would write one. So the built-ins below are both
-what Verkstead does and the worked examples of the grammar. What C/C++ covers
-is [its own section](#cc-through-the-compile-server), and what each of the
-other four shares, tool by tool, is [at the end of this
+what says a checkout builds it, and what variables a session is given. Seven
+ship — Rust, C/C++, Go, Node, Python, .NET and the JVM — and there is nothing
+special about any of them: each is an entry in a YAML file embedded in the
+binary, written exactly the way you would write one. So the built-ins below are
+both what Verkstead does and the worked examples of the grammar. What C/C++
+covers is [its own section](#cc-through-the-compile-server), and what each of
+the other five shares, tool by tool, is [at the end of this
 section](#what-each-language-shares).
 
 This is the whole of Rust's, as it ships:
@@ -1129,8 +1129,9 @@ system, and nothing else:
 
 ### What each language shares
 
-Rust's descriptor is above, and C/C++'s is the section before this one. The
-other four are the **package stores**: every
+Rust's descriptor is above, and C/C++'s is the section before this one. Four
+of the other five are the **package stores**, and the JVM, whose builds share
+more than downloads, is [at the end](#the-jvm). In all five, every
 tool that installs from one ecosystem's registry is in that ecosystem's entry
 rather than one of its own, so one box on the **Language support** pane turns
 the lot of them on or off, and a session gets every variable of a language that
@@ -1252,6 +1253,97 @@ without Verkstead. `YARN_ENABLE_GLOBAL_CACHE` would settle it either way and is
 deliberately not set: moving a store is what a descriptor is for, and overriding
 a Repo's policy switch is not. A Repo that has to have the vendored cache turns
 **Node** off on the settings page.
+
+### The JVM
+
+**One `jvm` entry covers Maven and Gradle**, detected by `pom.xml`,
+`build.gradle`, `build.gradle.kts`, `settings.gradle` or `settings.gradle.kts`,
+with one box on the **Language support** pane — a Repo on the JVM picks one
+build tool or the other. Neither needed anything but variables: turning
+Gradle's daemon off and Maven's locking on are both said in the environment, so
+there is no capability of the server's own behind this entry.
+
+| Variable | Where | What moves there |
+| --- | --- | --- |
+| `MAVEN_OPTS` | `{cache}` | Maven's **local repository**, by `-Dmaven.repo.local`: everything a build downloaded, plugins included, and what `mvn -o` builds out of. And **file locks on it** — see below |
+| `GRADLE_USER_HOME` | `{cache}` | **Gradle's whole home**: the dependency caches under `caches/modules-2`, the distributions `gradlew` downloads under `wrapper/dists`, toolchain JDKs under `jdks/`, and the local build cache under `caches/build-cache-1` |
+| `GRADLE_OPTS` | — | `-Dorg.gradle.daemon=false`, and no directory at all: **no daemon in a session** — see below |
+
+**Maven's repository is locked with files every session sees.** Maven 3.9's
+resolver guards its local repository only inside one JVM unless it is told
+otherwise, so two sessions building at once would each take a lock the other
+cannot see. `MAVEN_OPTS` also carries
+`-Daether.syncContext.named.factory=file-lock` and
+`-Daether.syncContext.named.nameMapper=file-gav`, which put one lock file per
+artifact under `.locks` in the repository itself — the setting the resolver's
+own documentation names for a repository shared between processes. Maven 4
+locks with files already; **Maven 3.8 and older have no such locks and ignore
+the properties**, so two sessions on a 3.8 share the repository with nothing
+guarding it. These are system properties, so a Repo's own
+`.mvn/maven.config` naming a `-Dmaven.repo.local` of its own keeps it, and a
+`-s` settings file is still read. **A Build Cache whose path has a space in it
+gets no shared repository**: Maven 3 splits `MAVEN_OPTS` on whitespace, Maven 4
+`eval`s it, and no quoting survives both — so where the path has a space the
+whole line is left out, and each session builds with a repository of its own.
+`settings.xml`, where a server's password goes, stays in the session's own
+`~/.m2`: moving the repository does not move it. **Nor are `mvnw`'s
+distributions shared**: the wrapper unpacks a Maven release into the session's
+own `/tmp` and moves it into place, and across two mounts that is a copy a
+second session could find half-done, so `MAVEN_USER_HOME` is left alone and a
+wrapper downloads its Maven once per session.
+
+**Gradle's daemon is off in a session, and that is the price of sharing its
+home.** Gradle has no way to move only its caches out of its home, so the home
+is shared whole — and a Gradle daemon registers itself under that home and is
+reached over the loopback, which every Sandbox shares. With a daemon allowed, a
+second session's `gradle` would find the first session's idle daemon and run
+its build *there*, inside the first session's Sandbox, where the second one's
+Worktree is not bound: it fails with `Could not set process working directory
+… could not setcwd()`. That was observed before any of this was built, and it
+is the hazard the **Compile Server** exists to remove for sccache. So every
+session is given `-Dorg.gradle.daemon=false`, which beats
+`org.gradle.daemon=true` in a Repo's own `gradle.properties` or in the shared
+home's. Gradle then runs each build in a single-use daemon inside the session's
+own Sandbox, gone when the build ends and registered nowhere. **Every Gradle
+invocation pays for a JVM starting up**, which is what this costs. [Stage 06 of
+the language caches
+roadmap](roadmaps/language-caches/06-a-gradle-daemon-of-verksteads-own.md) — a
+Gradle daemon Verkstead runs in a Sandbox of its own — is where that may change,
+and it may end with the daemon staying off.
+
+**An explicit `gradle --daemon` still gets a daemon.** The command line beats
+the environment, so a build started that way registers in the shared home
+again, and the *next* session's Gradle build — any session's, `--daemon` or not
+— can attach to it and fail with the `setcwd()` error above. That is accepted
+rather than worked around: the failure is loud rather than a build quietly
+running in the wrong place, and `gradle --stop` in any session, or the daemon's
+own idle timeout, puts it right. Leave
+`--daemon` out of a session's commands and out of a Repo's scripts.
+
+**Gradle's build cache is shared only for Repos that switch it on.** Its local
+directory is inside the shared home, so every Repo with
+`org.gradle.caching=true` shares one build cache for the machine, and a task
+one Conversation built comes `FROM-CACHE` in another. Verkstead does not switch
+caching on for a Repo that did not ask: that changes how a build behaves, not
+only where it writes, and a system property would beat a Repo that wrote
+`org.gradle.caching=false` on purpose. A Repo whose `settings.gradle` points
+`buildCache.local` somewhere of its own keeps that too.
+
+**A shared Gradle home shares its `gradle.properties` and `init.d/` as well.**
+An init script one session writes into `init.d/` runs in every other session's
+Gradle builds, and a property written there applies to all of them. This is
+the [writable store's bargain](#what-each-language-shares) — one session can
+plant a package another installs — extended from packages to build logic, and
+it is accepted on the same terms. A Gradle login in `gradle.properties` is
+shared with it, so a credential belongs in the Repo's own configuration or in
+the environment rather than in the Gradle home.
+
+**Kotlin needs nothing of its own.** It builds through Gradle or Maven and
+resolves out of the same stores. The Kotlin compile daemon outlives a build
+too, but it finds itself through `~/.kotlin/daemon` under the account's real
+home, which no Sandbox binds, so each Sandbox's is its own. **Kotlin/Native's
+`~/.konan`**, where it downloads its compilers and platform libraries, is not
+in the Build Cache, so it is not shared between Conversations.
 
 ## A day's work
 
