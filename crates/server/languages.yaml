@@ -50,6 +50,10 @@
 # A placeholder's directory is made, and granted writable to a session, only
 # where a loaded descriptor names it. With Rust alone, nothing names `{stores}`
 # and no session is opened onto one.
+#
+# **Write `/` between the placeholder and what is under it, on every platform.**
+# A descriptor is one file read on three, so the grammar has one separator: what
+# a Windows session is handed is the path its own tools compose, `\` and all.
 
 languages:
   rust:

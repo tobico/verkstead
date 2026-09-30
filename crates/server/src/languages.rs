@@ -765,8 +765,31 @@ impl Machine {
     /// A variable that cannot be filled is left out rather than written with the
     /// placeholder still in it: what a `RUSTC_WRAPPER` naming `{sccache}`
     /// literally would do is fail every build inside.
+    ///
+    /// **And a value that named a directory is composed the way this platform
+    /// composes a path.** The grammar has one spelling of a separator, because a
+    /// descriptor is written once and read on three platforms — so `{cache}/go`
+    /// is what an installer writes everywhere, and what a Windows session is
+    /// handed is the path its own tools would have built. Which is what keeps a
+    /// session's `CARGO_HOME` on that platform byte for byte the
+    /// `dir.join("cargo")` it was before a descriptor said it.
+    ///
+    /// Said of what the **file** wrote and before anything is put in its place,
+    /// so that every path this machine hands over keeps its own spelling: a
+    /// cache directory an installer passed as `C:/builds` is written into a
+    /// session exactly as they gave it, and only the `/` the descriptor itself
+    /// holds becomes a `\`.
+    ///
+    /// Safe to say of the whole of what the file wrote, because naming one of
+    /// the two directories is what makes a value a path: the grammar has no
+    /// other reason to reach for one — see the embedded file, where each
+    /// placeholder says what it stands for. A flag with a path in it comes out
+    /// right for the same reason, its only separators being that path's.
     fn filled(&self, value: &str, size: &str, used: &mut Used) -> Option<String> {
-        let mut filled = value.to_owned();
+        let mut filled = match value.contains(CACHE) || value.contains(STORES) {
+            true => separated(value),
+            false => value.to_owned(),
+        };
 
         if filled.contains(CACHE) {
             used.cache = true;
@@ -787,6 +810,25 @@ impl Machine {
         }
 
         Some(filled)
+    }
+}
+
+/// `written` with the grammar's separator said the way this platform says one.
+///
+/// Nothing at all on the two Unixes, where the two are the same character. On
+/// Windows it is what keeps a descriptor one file: an installer writes
+/// `{cache}/go` once and every platform hands a session the path its own tools
+/// compose — which is what a Windows session's `CARGO_HOME` was before a
+/// descriptor said it, that having been a `Path::join`.
+///
+/// A forward slash would have worked there, every Win32 call reading both — and
+/// a path spelled two ways in one string is a path two naive readers can
+/// disagree about, which is a worse thing to hand a build tool than a separator
+/// it has to convert.
+fn separated(written: &str) -> String {
+    match std::path::MAIN_SEPARATOR {
+        '/' => written.to_owned(),
+        _ => written.replace('/', std::path::MAIN_SEPARATOR_STR),
     }
 }
 
@@ -1177,6 +1219,28 @@ mod tests {
         Languages::read(yaml).expect("a descriptor an installer could have written")
     }
 
+    /// A path under that machine's Build Cache, composed the way this platform
+    /// composes one — which is what a descriptor's `{cache}/…` comes to.
+    ///
+    /// Said rather than spelled, because the grammar has one separator and the
+    /// three platforms do not: a descriptor writes `/` everywhere and a Windows
+    /// session is handed the path its own tools would have built, so a test that
+    /// spelled the answer out would be a test that only held on two of them.
+    fn cached(rest: &str) -> String {
+        Path::new("/var/cache/verkstead")
+            .join(rest)
+            .display()
+            .to_string()
+    }
+
+    /// And one under the directory beside the Worktrees, for the same reason.
+    fn stored(rest: &str) -> String {
+        stores(Path::new("/var/lib/verkstead"))
+            .join(rest)
+            .display()
+            .to_string()
+    }
+
     /// The built-ins parse, and what Rust's says is what a session gets today.
     ///
     /// The file is the documentation's worked example as well as the data, so
@@ -1207,18 +1271,12 @@ mod tests {
         assert_eq!(
             given.env(),
             [
-                (
-                    String::from("CARGO_HOME"),
-                    String::from("/var/cache/verkstead/cargo")
-                ),
+                (String::from("CARGO_HOME"), cached("cargo")),
                 (
                     String::from("RUSTC_WRAPPER"),
                     String::from("/verkstead/bin/sccache")
                 ),
-                (
-                    String::from("SCCACHE_DIR"),
-                    String::from("/var/cache/verkstead/sccache")
-                ),
+                (String::from("SCCACHE_DIR"), cached("sccache")),
                 (String::from("SCCACHE_CACHE_SIZE"), String::from("30G")),
             ],
         );
@@ -1237,13 +1295,7 @@ mod tests {
     fn without_an_sccache_the_capabilitys_variables_are_left_out() {
         let given = built_in().given(&machine(false));
 
-        assert_eq!(
-            given.env(),
-            [(
-                String::from("CARGO_HOME"),
-                String::from("/var/cache/verkstead/cargo")
-            )],
-        );
+        assert_eq!(given.env(), [(String::from("CARGO_HOME"), cached("cargo"))],);
         assert_eq!(given.dirs(), [PathBuf::from("/var/cache/verkstead")]);
         assert!(!given.sccache());
     }
@@ -1302,18 +1354,90 @@ mod tests {
 
         let given = hardlinking.given(&machine(true));
 
-        assert_eq!(
-            given.env(),
-            [(
-                String::from("PNPM_HOME"),
-                String::from("/var/lib/verkstead/stores/pnpm")
-            )],
-        );
+        assert_eq!(given.env(), [(String::from("PNPM_HOME"), stored("pnpm"))],);
         assert_eq!(
             given.dirs(),
             [PathBuf::from("/var/lib/verkstead/stores")],
             "beside the Worktrees, because a hardlink out of a store does not \
              cross a filesystem"
+        );
+    }
+
+    /// A value naming a directory is composed the way this platform composes a
+    /// path, which is what the grammar having one separator costs and the whole
+    /// of what it costs.
+    ///
+    /// Said as a `join` rather than as a spelling, because a `join` is what this
+    /// has to go on agreeing with: a session's `CARGO_HOME` was
+    /// `cache.join("cargo")` before a descriptor said it, and the stage this
+    /// module landed in promised the environment byte for byte. On the two
+    /// Unixes the two are the same string whatever this does; on Windows they
+    /// are the same only because the separators the file wrote are turned into
+    /// that platform's before anything is put in their place — which is the one
+    /// thing here no Unix run can fail over, so it is said in a form that holds
+    /// on all three.
+    #[test]
+    fn a_value_naming_a_directory_is_the_path_this_platform_would_have_joined() {
+        let given = built_in().given(&machine(true));
+
+        let joined = |name: &str, dir: &Path, rest: &str| {
+            assert_eq!(
+                given
+                    .env()
+                    .iter()
+                    .find_map(|(named, value)| (named == name).then_some(value.as_str())),
+                Some(dir.join(rest).display().to_string().as_str()),
+                "{name} is the path this platform joins, not the grammar's spelling of it",
+            );
+        };
+
+        let cache = Path::new("/var/cache/verkstead");
+
+        joined("CARGO_HOME", cache, "cargo");
+        joined("SCCACHE_DIR", cache, "sccache");
+
+        // And a descriptor of an installer's, pointed at the other directory,
+        // because the two are made different ways — one is the cache as it was
+        // handed over and the other is a `join` of this crate's own.
+        let hardlinking =
+            written("languages:\n  node:\n    env:\n      PNPM_HOME: \"{stores}/pnpm\"\n");
+
+        assert_eq!(
+            hardlinking.given(&machine(true)).env(),
+            [(
+                String::from("PNPM_HOME"),
+                stores(Path::new("/var/lib/verkstead"))
+                    .join("pnpm")
+                    .display()
+                    .to_string()
+            )],
+        );
+    }
+
+    /// And a value naming none of them is left exactly as the file wrote it,
+    /// separators and all: what makes a value a path is naming a directory, and
+    /// a size is not one.
+    #[test]
+    fn a_value_naming_no_directory_is_left_as_the_file_wrote_it() {
+        let flagged = written(
+            "languages:\n  java:\n    env:\n      JAVA_TOOL_OPTIONS: \"-Dhttp.proxy=http://x/y\"\n      \
+             JAVA_LIMIT: \"{size}\"\n",
+        );
+
+        assert_eq!(
+            flagged.given(&machine(true)).env(),
+            [
+                (
+                    String::from("JAVA_TOOL_OPTIONS"),
+                    String::from("-Dhttp.proxy=http://x/y")
+                ),
+                (
+                    String::from("JAVA_LIMIT"),
+                    String::from(crate::build_cache::SIZE)
+                ),
+            ],
+            "a value with no directory in it is text, and nothing here reads it \
+             as a path",
         );
     }
 
@@ -1349,10 +1473,7 @@ mod tests {
 
         assert_eq!(
             given.env(),
-            [(
-                String::from("GRADLE_USER_HOME"),
-                String::from("/var/cache/verkstead/gradle")
-            )],
+            [(String::from("GRADLE_USER_HOME"), cached("gradle"))],
         );
         assert!(
             languages.wanting(SCCACHE).is_none(),
@@ -1414,10 +1535,7 @@ mod tests {
         );
         assert_eq!(
             gleams,
-            [(
-                String::from("GLEAM_CACHE"),
-                String::from("/var/cache/verkstead/gleam")
-            )],
+            [(String::from("GLEAM_CACHE"), cached("gleam"))],
             "while the language beside it is given what its own entry says",
         );
         assert!(

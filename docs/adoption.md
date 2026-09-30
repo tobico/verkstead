@@ -984,6 +984,10 @@ languages:
       PNPM_HOME: "{stores}/pnpm"
 ```
 
+Write `/` after a placeholder whatever platform you are on. A descriptor is one
+file read on three, so the grammar has one separator, and a Windows session is
+handed the path its own tools would have composed.
+
 The other two are not a choice. `{size}` is that entry's own `size` key, and
 `{sccache}` is where a session reaches the sccache this server found — it only
 means anything inside the `sccache` capability, which is what says there is one

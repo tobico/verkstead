@@ -1161,6 +1161,17 @@ mod tests {
         Config::default()
     }
 
+    /// A path under the Build Cache every test here is composed against, the
+    /// way this platform composes one — which is what a descriptor's `{cache}/…`
+    /// comes to, and what keeps these holding on the platform whose separator is
+    /// not the grammar's.
+    fn cached(rest: &str) -> String {
+        Path::new("/var/cache/verkstead")
+            .join(rest)
+            .display()
+            .to_string()
+    }
+
     /// What a variable holds, or `None` where the session is not set it.
     fn variable<'a>(shared: &'a Shared, name: &str) -> Option<&'a str> {
         shared
@@ -1208,12 +1219,12 @@ mod tests {
         );
         assert_eq!(
             variable(&shared, "CARGO_HOME"),
-            Some("/var/cache/verkstead/cargo"),
+            Some(cached("cargo").as_str()),
             "the registry every session downloads into"
         );
         assert_eq!(
             variable(&shared, "SCCACHE_DIR"),
-            Some("/var/cache/verkstead/sccache"),
+            Some(cached("sccache").as_str()),
             "and the compiled objects beside it"
         );
         assert_eq!(
@@ -1262,12 +1273,12 @@ mod tests {
 
         assert_eq!(
             variable(&shared, "CARGO_HOME"),
-            Some("/var/cache/verkstead/crates"),
+            Some(cached("crates").as_str()),
             "the one the file wrote",
         );
         assert_eq!(
             variable(&shared, "SCCACHE_DIR"),
-            Some("/var/cache/verkstead/sccache"),
+            Some(cached("sccache").as_str()),
             "and the ones it did not, exactly as the built-in has them",
         );
         assert_eq!(variable(&shared, "SCCACHE_CACHE_SIZE"), Some(SIZE));
@@ -1291,7 +1302,7 @@ mod tests {
         );
         assert_eq!(
             variable(&shared, "SCCACHE_DIR"),
-            Some("/var/cache/verkstead/sccache"),
+            Some(cached("sccache").as_str()),
             "and nothing else went with it",
         );
     }
@@ -1314,7 +1325,7 @@ mod tests {
 
         assert_eq!(
             variable(&shared, "GLEAM_CACHE"),
-            Some("/var/cache/verkstead/gleam"),
+            Some(cached("gleam").as_str()),
             "the placeholders are filled for an installer's descriptor exactly \
              as they are for a built-in",
         );
@@ -1325,7 +1336,7 @@ mod tests {
         );
         assert_eq!(
             variable(&shared, "CARGO_HOME"),
-            Some("/var/cache/verkstead/cargo"),
+            Some(cached("cargo").as_str()),
             "beside Rust's, which is untouched by a language beside it",
         );
     }
@@ -1418,7 +1429,7 @@ mod tests {
         assert_eq!(shared.sccache(), None);
         assert_eq!(
             variable(&shared, "CARGO_HOME"),
-            Some("/var/cache/verkstead/cargo")
+            Some(cached("cargo").as_str())
         );
         assert_eq!(
             variable(&shared, "RUSTC_WRAPPER"),
