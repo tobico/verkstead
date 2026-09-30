@@ -37,6 +37,46 @@ pub struct RepoEntry {
     pub default_branch: String,
 }
 
+/// One registered Repo as a member across the link is told of it: the row, and
+/// the `origin` remote's URL git gives for it.
+///
+/// **The origin is asked of git rather than read off the registration**, which
+/// records a path, a name and a default branch and no origin at all. A remote is
+/// added, changed and taken away without Verkstead hearing about it, and a kept
+/// copy would be a second opinion about the one fact two devices have to agree
+/// on — so both ends ask the repository itself, which is how everything else
+/// here reads one.
+///
+/// **And it travels as git spelled it.** A trailing `.git`, a trailing slash and
+/// the `scp`-style spelling of an SSH URL are differences between spellings
+/// rather than between repositories, and they are taken out where the two are
+/// compared rather than on the way out — one rule applied to both ends' answers
+/// at once, instead of two machines each tidying their own and having to agree
+/// about how.
+///
+/// The path is here because it is what the answer is *for*: a device that has
+/// settled which of a member's Repos is this repository is about to rewrite a
+/// path against it. Not a [`RepoEntry`], which is the viewer's row and carries
+/// the default branch instead — this is nobody's list.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RepoAcross {
+    /// The Repo's id **on the device that answered**, which is what addresses it
+    /// there and names nothing here.
+    pub id: i64,
+
+    /// What that device calls it, which is its directory's own name — and what
+    /// the match falls back to where neither end has an origin.
+    pub name: String,
+
+    /// And where it is on that machine, which is the path a rewrite lands on.
+    pub path: String,
+
+    /// The `origin` remote's URL as git gave it there, or nothing where that
+    /// repository has no origin — which is a repository that matches by name or
+    /// not at all.
+    pub origin: Option<String>,
+}
+
 /// A repository the human is asking Verkstead to take on, named by its absolute
 /// path.
 ///
@@ -167,9 +207,9 @@ pub struct RepoView {
     /// this Repo now, and what has been.
     pub finished: i64,
 
-    /// The roadmaps in it that nothing is driving, as the notice under the
-    /// new-conversation box finds them. Empty where there are none, which is
-    /// most repositories most days.
+    /// The roadmaps in it with a stage that could be started now, as the notice
+    /// under the new-conversation box finds them. Empty where there are none,
+    /// which is most repositories most days.
     pub roadmaps: Vec<AbandonedRoadmap>,
 }
 

@@ -135,8 +135,10 @@ pub(crate) async fn watch(state: AppState, conversation_id: i64) {
                 // And the devices are told: nobody pressed anything to get here
                 // and nobody was watching it happen, which is exactly what a
                 // milestone notification is for. Behind the move, which the
-                // store has already made.
-                crate::push::told(&state.pool, conversation_id, crate::push::News::Done);
+                // store has already made — and in a cluster the members are told
+                // the same thing, so that a phone installed from any device in it
+                // hears this one (ADR-0020) — see [`crate::push`].
+                crate::push::the_work_is_done(&state.pool, conversation_id);
 
                 // And the record is handed to whoever is reviewing the work,
                 // where the human has asked for that to happen by itself. This

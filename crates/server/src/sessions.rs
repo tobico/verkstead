@@ -17,6 +17,20 @@
 //! The session is interactive and never `-p`: it idles when it has nothing to
 //! do, which is what a blocking ask depends on (ADR 0001 in tobico-skills).
 //!
+//! **And one session is not a session of its own**: the one launched for a
+//! Conversation that has just been moved onto this device carries on the
+//! conversation the agent was having on the other machine, where its harness has
+//! a resume of its own and the log the memory sync brought over is really here
+//! (ADR-0020, *Transfer*). Which is the same launch throughout but for three
+//! things — the line says *resume* where it would have said the session's name,
+//! the prompt is the note and nothing else, and the Transcript opens at the end
+//! of what crossed. See [`continuing`], where the decision is made and where each
+//! way of answering no leaves Verkstead's own Resume exactly as it was — and
+//! [`crate::carrying`], which is what both answers are said with, the human having
+//! pressed one thing and being able to see two outcomes from it. The one answer
+//! that is not [`continuing`]'s is the harness refusing a resume it was given,
+//! which is read off the ending instead — see [`Resuming`].
+//!
 //! Whether a session is running is held here and nowhere else. A running session
 //! is a process, and no table can hold one — a restarted server has no sessions
 //! at all, and that is exactly what a Conversation should then say rather than
@@ -262,6 +276,14 @@ impl Agents {
         &self.config
     }
 
+    /// And the homes it hands out, for the one thing that has to be settled
+    /// before a sandbox is built rather than while it is: where the mirror of a
+    /// member's account goes, which is under the Data Directory these are named
+    /// off — see [`crate::mirroring::account`].
+    pub(crate) fn homes(&self) -> &Homes {
+        &self.homes
+    }
+
     /// The Sandbox a Conversation's work runs in, under the account `profile`
     /// names, with `argv` as it will be run inside it.
     ///
@@ -431,6 +453,14 @@ impl Agents {
     /// told anything picks its own. A backend that takes no session id at all is
     /// told none whatever Verkstead named it — see [`Line::names_the_session`].
     ///
+    /// **And in that same place, where `named` says the session is being
+    /// continued rather than opened, goes the backend's resume instead** — see
+    /// [`Line::resume`]. The two are mutually exclusive by construction: a
+    /// session cannot be both named and resumed, so a resumed launch names none
+    /// and the conversation keeps the id it already had. Which is the id
+    /// `session` carries here, this launch running under the name of the session
+    /// it is carrying on from.
+    ///
     /// Last of all comes the tail the backend itself needs — see [`Line::tail`]
     /// — which with the two above is the whole of what reads differently for one
     /// agent type than for another.
@@ -462,6 +492,7 @@ impl Agents {
         pairing: &store::Pairing,
         prompt: &str,
         session: Option<&str>,
+        named: Named,
         worktree: Option<&Path>,
     ) -> Option<Vec<String>> {
         let agent_type = pairing.profile.agent_type();
@@ -472,9 +503,33 @@ impl Agents {
             None => vec![binary(agent_type).to_owned()],
         };
 
+        // Which resume this launch is, where it is one at all: `None` is every
+        // ordinary launch and every backend Verkstead does not carry a conversation
+        // on from. Read before anything is written, because the shape of the whole
+        // line turns on it — see [`Resume`].
+        let resuming = match named {
+            Named::Continuing => line.resume.as_ref().zip(session),
+            Named::Opening => None,
+        };
+
+        // A resume that is a subcommand is the first word after the binary, ahead
+        // of the options it takes: what follows is that subcommand's line rather
+        // than the ordinary one.
+        if let Some((Resume::Subcommand { word, .. }, _)) = resuming {
+            argv.push((*word).to_owned());
+        }
+
         if let Some(model) = pairing.runs_on() {
             argv.push(line.model.to_owned());
             argv.push(model.to_owned());
+        }
+
+        // And the session it is resuming, where that subcommand takes it as the
+        // positional in front of the prompt. Here rather than in the one slot
+        // below, because a positional's place on the line is the whole of what
+        // says which argument it is.
+        if let Some((Resume::Subcommand { .. }, session)) = resuming {
+            argv.push(session.to_owned());
         }
 
         if let Some(flag) = line.prompt {
@@ -490,12 +545,40 @@ impl Agents {
             Platform::Linux | Platform::MacOs => prompt.to_owned(),
         });
 
-        if let Some(session) = session.filter(|_| line.names_the_session) {
-            argv.push("--session-id".to_owned());
-            argv.push(session.to_owned());
+        // The session's name, or the resume that stands in its place: one slot,
+        // because a session cannot be both named and resumed. A launch that is
+        // continuing a conversation is told to resume the name it carries, and a
+        // launch opening one is told to run under it. The subcommand shape has
+        // said both of its halves already, and says neither again.
+        match resuming {
+            Some((Resume::Flag(flag), session)) => {
+                argv.push((*flag).to_owned());
+                argv.push(session.to_owned());
+            }
+
+            Some((Resume::Subcommand { .. }, _)) => {}
+
+            // Either an ordinary launch, which names the session it is opening, or
+            // a continuation with no resume to say — and that one is told nothing
+            // at all: the name belongs to a session it is not opening.
+            None => {
+                if let (Named::Opening, Some(session)) =
+                    (named, session.filter(|_| line.names_the_session))
+                {
+                    argv.push("--session-id".to_owned());
+                    argv.push(session.to_owned());
+                }
+            }
         }
 
         argv.extend(line.tail);
+
+        // And what the continuation itself needs said, which the ordinary line has
+        // no business carrying: a setting about how a resume is resolved means
+        // nothing to a launch that is opening a conversation.
+        if let Some((Resume::Subcommand { also, .. }, _)) = resuming {
+            argv.extend(also.iter().cloned());
+        }
 
         Some(argv)
     }
@@ -609,11 +692,90 @@ struct Line {
     /// therefore found rather than named — see [`crate::transcript`].
     names_the_session: bool,
 
+    /// And the other line this same backend has: the one that **continues** a
+    /// conversation instead of opening one, under the id of the session that was
+    /// having it.
+    ///
+    /// Mutually exclusive with [`Line::names_the_session`] wherever both could
+    /// be said, and that is a fact about what a session is rather than a
+    /// convention: a conversation carried on keeps the id it already had, so
+    /// there is nothing left to name it.
+    ///
+    /// And it is not always a flag — see [`Resume`]: codex's is a subcommand, and
+    /// what a subcommand changes is the shape of the whole line rather than what
+    /// is on the end of it.
+    ///
+    /// `None` where Verkstead does not carry a conversation on from a session of
+    /// this backend, which is now no backend at all: all four have a resume, and
+    /// what separated them was never that but whether Verkstead knew the id to
+    /// resume by and whether their store had to be put right first. It stays an
+    /// `Option` because a fifth backend lands here before either of those is
+    /// answered for it, and until they are a launch under it opens a session of
+    /// its own, which is Verkstead's own Resume and nothing lost.
+    resume: Option<Resume>,
+
     /// The flags and configuration overrides that go last, after the prompt.
     ///
     /// Owned rather than borrowed, because the trust pre-seed below names the
     /// Worktree this session is being launched in.
     tail: Vec<String>,
+}
+
+/// How a backend is told to carry a conversation on rather than open one — see
+/// [`Line::resume`].
+///
+/// **Two shapes rather than one spelling**, because the backends do not agree on
+/// what a resume *is*. For three of them it is another option on the same line,
+/// and the id goes where the id would have gone. For codex it is a subcommand:
+/// the line is `codex resume <session-id> <prompt>`, so the word comes ahead of
+/// everything the ordinary line says and the id is a positional in front of the
+/// prompt rather than a value after a flag.
+///
+/// What does *not* change with the shape is the rest of the line. A resumed
+/// session is the same session under the same account in the same Worktree, so the
+/// model, the approval bypass and every configuration override the ordinary line
+/// carries come across onto the subcommand — a resume that dropped them would come
+/// up logged out and sitting on a trust prompt.
+enum Resume {
+    /// A flag and the id, written where the session id it is mutually exclusive
+    /// with would have gone. Claude's and Grok Build's, both spelled `--resume`,
+    /// and OpenCode's, spelled `--session`.
+    Flag(&'static str),
+
+    /// A subcommand and the id, written in front of the line rather than on the
+    /// end of it. Codex's.
+    Subcommand {
+        /// The word itself, straight after the binary.
+        word: &'static str,
+
+        /// And what the continuation needs said that the ordinary line does not,
+        /// which goes on the end with the tail.
+        ///
+        /// Here rather than in [`Line::tail`] because it is about resuming: a
+        /// launch opening a conversation would be carrying a setting for a
+        /// question it is not asking.
+        also: Vec<String>,
+    },
+}
+
+/// Whether the session Verkstead named is one this launch is **opening** or one
+/// it is **continuing** — see [`Line::resume`], which is what a continuation is
+/// said with.
+///
+/// A value rather than an `Option` of the id, because the id is the same either
+/// way: what differs is whether the harness is being told to start a conversation
+/// under that name or to pick up the one already under it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Named {
+    /// A conversation of its own, under a name Verkstead has just chosen. Every
+    /// launch but the one after an arrival.
+    Opening,
+
+    /// The conversation an earlier session of this Conversation was having,
+    /// under the name that session ran under — which is what a Conversation that
+    /// has just been moved onto this device is started with (ADR-0020,
+    /// *Transfer*).
+    Continuing,
 }
 
 /// Which line `agent_type` takes, for a session working in `worktree`.
@@ -641,6 +803,60 @@ struct Line {
 /// draws from. `--mini` — the minimal interface, which draws inline and carries
 /// the same at-work label — is what to reach for the day the Capture has to be
 /// that record instead.
+///
+/// **And every one of the four is a backend Verkstead continues a conversation
+/// on.** Claude's resume is `--resume <session-id>`, written where the session id it
+/// is mutually exclusive with would have gone — after the prompt, which stays
+/// exactly where it already is, and which claude takes alongside the flag as the
+/// first message of the conversation it picks up (checked against claude 2.1.278:
+/// the log it resumed carries the prompt as its own last one, under the same session
+/// id and in the same file). A session id it holds no log for is refused by name
+/// rather than opened, which is why the log is proved to be there before the line is
+/// built at all — see [`crate::transcript::carried`].
+///
+/// **Grok Build's is the same shape under the same spelling**, and the exclusion is
+/// the backend's own rather than Verkstead's reading of it: grok 1.0.34 says of
+/// `--session-id` that it names a **new** conversation, that it must not already
+/// exist, and that with `--resume` it is only valid alongside `--fork-session` —
+/// which a conversation carried on is the opposite of. So `--resume <session-id>`
+/// stands where the name would have been, the prompt stays positional, and a
+/// UUID-shaped value is always read as an id rather than matched against session
+/// titles. Its log is proved to be there for Claude's reason and one more: grok
+/// resolves a resume against the directory it was started in, so the log has to have
+/// been moved under this device's own name for this Worktree first — see
+/// [`crate::transcript::relocated`], and the one left on [`Line::resume`]'s `None`.
+///
+/// **Codex's is a subcommand rather than a flag**, which is the one line in this
+/// table whose shape changes rather than growing an argument: `codex resume
+/// <session-id> <prompt>`, the word straight after the binary and both of the
+/// others its positionals (codex 0.155.1's own help, and driven to prove it). The
+/// model flag and every override the ordinary line carries come across onto it —
+/// a resume without them comes up logged out and sitting on the trust prompt —
+/// and one more goes on that the ordinary line has no business with:
+/// [`CODEX_RESUME_CWD`].
+///
+/// **And nothing of codex's store has to be put right, which is why it is asked
+/// this way.** Codex files its rollouts by the date they were written rather than
+/// by the directory they were written in, so what the memory sync carries lands at
+/// the same relative path it left. A resume by an explicit id is resolved against
+/// the whole store and not against the directory codex was started in — driven
+/// against 0.155.1, which resumed a rollout recording a directory that machine
+/// never had — so where Grok needs its log moved, Codex needs nothing moved at
+/// all. Which is the answer worth having: the relocation writes into somebody
+/// else's store, and this does not.
+///
+/// **What it has instead is a prompt about which directory to resume in.** Where a
+/// rollout records a directory other than the one codex is started in — which a
+/// carried one always does — 0.155.1 asks the human to choose between them, and a
+/// session stopped at a prompt is a run waiting on nobody. [`CODEX_RESUME_CWD`] is
+/// that choice made: this device's Worktree, which is where the work now is.
+///
+/// **Its id is the one Verkstead did not pick.** Codex takes no session id at
+/// launch, so what goes after the subcommand is the id the rollout gives itself —
+/// read out of the log as the Transcript search finds it and written onto the
+/// record there, which is what leaves a device that never ran the session able to
+/// resume it. See [`crate::transcript::names_itself`] and
+/// [`crate::transcript::in_the_store`].
 ///
 /// **Grok Build is the one backend after Claude that takes the session id.** It
 /// takes it under the spelling [`Agents::argv`] writes, it insists on a valid
@@ -673,12 +889,40 @@ struct Line {
 /// session named — which is why its log is found rather than named, as codex's
 /// is. Everything else about the account is in the directories the Profile
 /// named — see [`crate::sandbox`].
+///
+/// **And that same flag is its resume**, the shortest line here staying the
+/// shortest: `--session <session-id>` where the name a session that took one
+/// would have gone, the prompt under its own flag exactly where it already is,
+/// and the model and the approvals unchanged. Nothing is added and nothing comes
+/// off — opencode has no equivalent of codex's question about which directory to
+/// resume in, because it does not ask: it resumes in the directory the session's
+/// own row records, which is why that row is what has to be put right. `--fork`
+/// beside the flag is what would make it a conversation branched rather than
+/// carried on, and it is never passed (opencode 1.18.31's own help, and driven to
+/// prove the rest of this).
+///
+/// **Its id is the store's own, as Codex's is.** opencode names no session on the
+/// line, so what goes after the flag is the id the row in its store turned out to
+/// be under — read as the records reader finds that row and written onto the
+/// record there, which is what leaves a device that never ran the session able to
+/// resume it. See [`crate::transcript::found_in_the_store`].
+///
+/// **And its store is the one that has to be written into rather than moved
+/// about.** opencode keeps a row per session in one database and the memory sync
+/// carries the file whole, so the row of a carried session lands still recording
+/// the *sending* device's Worktree — and a resume against it would open in a
+/// directory this machine has not got, the row's own directory being where
+/// opencode resumes. So that one column is brought onto this device's Worktree
+/// before the line is built at all, and a store this build cannot write leaves
+/// the row alone and falls through to Verkstead's own Resume. See
+/// [`crate::records::carried`].
 fn line(agent_type: store::AgentType, worktree: Option<&Path>) -> Line {
     match agent_type {
         store::AgentType::Claude => Line {
             model: "--model",
             prompt: None,
             names_the_session: true,
+            resume: Some(Resume::Flag("--resume")),
             tail: vec!["--dangerously-skip-permissions".to_owned()],
         },
         store::AgentType::Codex => {
@@ -712,6 +956,10 @@ fn line(agent_type: store::AgentType, worktree: Option<&Path>) -> Line {
                 model: "-m",
                 prompt: None,
                 names_the_session: false,
+                resume: Some(Resume::Subcommand {
+                    word: "resume",
+                    also: vec!["-c".to_owned(), format!("{CODEX_RESUME_CWD}=\"current\"")],
+                }),
                 tail,
             }
         }
@@ -719,6 +967,7 @@ fn line(agent_type: store::AgentType, worktree: Option<&Path>) -> Line {
             model: "-m",
             prompt: None,
             names_the_session: true,
+            resume: Some(Resume::Flag("--resume")),
             tail: vec![
                 "--always-approve".to_owned(),
                 "--sandbox".to_owned(),
@@ -730,6 +979,7 @@ fn line(agent_type: store::AgentType, worktree: Option<&Path>) -> Line {
             model: "-m",
             prompt: Some("--prompt"),
             names_the_session: false,
+            resume: Some(Resume::Flag("--session")),
             tail: vec!["--auto".to_owned()],
         },
     }
@@ -742,6 +992,26 @@ fn line(agent_type: store::AgentType, worktree: Option<&Path>) -> Line {
 /// usage-limit phrase and the idle signature make: one place to edit when it
 /// moves.
 const CODEX_CREDENTIAL_STORE: &str = "cli_auth_credentials_store";
+
+/// And which directory codex resumes a session **in**, which for a conversation
+/// carried across a cluster is this device's rather than the one the rollout
+/// records.
+///
+/// A rollout records the directory its session ran in, and a carried one records
+/// the *sending* device's Worktree — a path that does not exist here. Codex
+/// 0.155.1 puts the two side by side and asks the human to pick, which is a
+/// session stopped in front of nobody; this setting is that choice made once, and
+/// the choice is the directory codex was started in, which is where the work now
+/// is. Its other value would resume into the path the work has left.
+///
+/// Said on the line rather than written into the account's configuration, for the
+/// reason [`CODEX_CREDENTIAL_STORE`] is: the home belongs to the human's account.
+/// And on the resume alone — see [`Resume::Subcommand`] — because an ordinary
+/// launch resumes nothing.
+///
+/// Named for the reason the spelling above it is, and it is the same bargain: the
+/// key is codex's and it will move, and moving it costs one edit here.
+const CODEX_RESUME_CWD: &str = "tui.resume_cwd";
 
 /// What codex has on its Screen while it is working, and nothing of what it has
 /// there when it is waiting for a human — see [`Signature::AtWork`].
@@ -966,9 +1236,10 @@ pub(crate) enum Ended {
     Badly(String),
 
     /// Verkstead ended it, however it came to: it had said it was done and gone
-    /// quiet since, the human closed the Conversation or pressed Force stop out
-    /// from under it, or the account it was spending ran out of window and the
-    /// stop written for that ended it — see [`crate::limits`].
+    /// quiet since, it had asked for the work to be moved and gone quiet since,
+    /// the human closed the Conversation or pressed Force stop out from under
+    /// it, or the account it was spending ran out of window and the stop written
+    /// for that ended it — see [`crate::limits`].
     Stopped,
 
     /// It is over and nothing can say how — the relay itself failed, or could not
@@ -1001,10 +1272,12 @@ impl Ended {
     /// tell them driving had stopped about the thing they just stopped, or
     /// write a second stop behind one already on the record.
     ///
-    /// Three ways in, and the driver treats them alike. The step landed and the
-    /// session went quiet, so there is nothing to tell. The human closed the
-    /// Conversation or pressed Force stop, and the stop their press wrote is
-    /// already there. Or the account ran out of window, and the stop
+    /// Four ways in, and the driver treats them alike. The step landed and the
+    /// session went quiet, so there is nothing to tell. The session asked for the
+    /// work to be moved and its turn is over, so the work carries on at the far
+    /// end and nothing here is to be launched after it — see
+    /// [`crate::transfers`]. The human closed the Conversation or pressed Force
+    /// stop, and the stop their press wrote is already there. Or the account ran out of window, and the stop
     /// [`crate::limits`] wrote before killing the sandbox is already there too —
     /// which is what this has to be read as for, because a driver reading it as
     /// the human's act alone would advance a run that has stopped.
@@ -1938,6 +2211,28 @@ impl Sessions {
             })
     }
 
+    /// Whether this Conversation has a session on its way up: one decided on and
+    /// not yet on the register.
+    ///
+    /// **The one question about a launch that the register cannot answer.** A
+    /// session is written down once its relay is up, and in front of that there
+    /// is a prompt to build and a sandbox to make — on the platform whose
+    /// boundary is written rather than wrapped, minutes of it. So a Conversation
+    /// with nothing *running* may still be a Conversation about to have an agent
+    /// in its Worktree, and something that has to know whether the Worktree is
+    /// about to be busy asks this beside [`Sessions::following`].
+    ///
+    /// What asks is the mover: a move that ran while a session was starting
+    /// would carry the work away from under it, and away from the write-back
+    /// that session's ending owes the device its account is at home on. See
+    /// [`crate::transfers`].
+    pub(crate) fn starting(&self, conversation_id: i64) -> bool {
+        self.launching
+            .lock()
+            .expect("the launching registry is not poisoned")
+            .contains_key(&conversation_id)
+    }
+
     /// Which Conversations have a session running right now.
     ///
     /// The whole set at once rather than a question per Conversation, because
@@ -2033,7 +2328,7 @@ impl Sessions {
 
     /// Whether this server can launch an agent at all.
     ///
-    /// The served router always can — see [`crate::router_with_ui`] — so this
+    /// The served router always can — see [`crate::routers_with_ui`] — so this
     /// is only ever false for a router built without [`Agents`], which is every
     /// test about something other than sessions. What such a server cannot do
     /// is take a Conversation up: nothing is driving one, nothing ever will,
@@ -2138,13 +2433,31 @@ impl Sessions {
     /// Event comes first and what a launch has to say goes into its Capture —
     /// the boundary being written, and the reason where a launch fails, which
     /// used to reach the log and nowhere else.
+    ///
+    /// **And where the Pairing's Profile is a member's, the account is mirrored
+    /// here first.** `devices` is the cluster handle a launch fetches it over —
+    /// `None` on a Verkstead that is linked to nothing, which has no mirror to
+    /// launch under either. An account that could not be fetched starts no
+    /// session, for the reason a sandbox that could not be built starts none: a
+    /// session under a Profile with no account is one that comes up logged out
+    /// with nothing saying why. See [`crate::mirroring::account`].
+    ///
+    /// **And `held` is the one thing a launch settles that is not about the
+    /// launch**: the Question Sets the caller left open rather than locking,
+    /// because a conversation was standing to be carried on here and a resume
+    /// brings the reader that asked them back. Whether it really can be made is not
+    /// known until this has run the memory sync, so where it cannot the Sets are
+    /// locked here instead — see [`Held`] and [`continuing`].
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn start(
         &self,
         pool: &SqlitePool,
         nudges: &Nudges,
+        devices: Option<&crate::device::Devices>,
         conversation: &store::Conversation,
         pairing: &store::Pairing,
         prompt: &str,
+        held: Held<'_>,
     ) -> Result<Option<Session>> {
         let Some(agents) = self.agents.clone() else {
             tracing::warn!(
@@ -2327,6 +2640,149 @@ impl Sessions {
             return Ok(None);
         }
 
+        // And where the Profile is a member's, the account it names is on that
+        // machine: the login and the configuration a root is made from are
+        // fetched into this device's own mirror of that account before anything
+        // is built out of it, fresh at every launch so that a login refreshed at
+        // home reaches this session. One of this device's own rows is the
+        // ordinary case and answers nothing, the Pairing standing as it is.
+        //
+        // Refused rather than launched around, for the reason the desktop app
+        // above is: what a session under an account nothing fetched comes up as
+        // is logged out, with a Timeline row saying nothing whatever. See
+        // [`crate::mirroring::account`].
+        let mirrored = match crate::mirroring::account::fetched(
+            devices,
+            &agents.homes,
+            &pairing.profile,
+        )
+        .await
+        {
+            Ok(mirrored) => mirrored,
+
+            Err(why) => {
+                tracing::error!(
+                    conversation_id,
+                    profile = pairing.profile.id,
+                    "the account of the Profile this session runs under is on another device \
+                     and could not be fetched, so no session was started: {}",
+                    why.saying,
+                );
+
+                verkstead_says(
+                    pool,
+                    nudges,
+                    printing,
+                    &mut reading,
+                    &format!(
+                        "Verkstead did not start a session: this Profile's account is on \
+                         another device of the cluster, and the account could not be fetched \
+                         — {}.",
+                        why.saying,
+                    ),
+                )
+                .await;
+
+                return Ok(None);
+            }
+        };
+
+        // Which the rest of the launch reads in the Profile's place: the same row
+        // by the same local id, naming the mirror as its account. So the root,
+        // the Tail that follows the session's log and everything the ending
+        // writes back are what they are for an account on this machine.
+        //
+        // And beside it what the *ending* writes back over the link: the login is
+        // the one file of a root a session genuinely changes, so what it leaves in
+        // the mirror's own goes into the account at home once the profile has been
+        // seen to. Carried into the relay below, which is the thing that knows when
+        // the session is over — with the store and the cluster handle it needs
+        // there, this call's own being borrowed. See
+        // [`crate::mirroring::account::Lending`].
+        //
+        // And the **memory store** with it, where the Profile's memory switch is
+        // on: what that account remembers of this Repo, and of this Conversation,
+        // comes over into the mirror before anything is built out of it and goes
+        // back as the session ends — the switch holding away from home exactly as
+        // it holds at home. Best effort rather than a gate, unlike the account: a
+        // session with no memory starts new, where a session with no login comes
+        // up logged out, and only the second is worth refusing a launch over. See
+        // [`crate::mirroring::memory`], which says on the Timeline what it did not
+        // carry.
+        let (launching_under, lending, syncing) = match mirrored {
+            Some(crate::mirroring::account::Mirrored { profile, lent }) => {
+                let syncing = match pairing.profile.mirror.as_ref() {
+                    Some(at) => {
+                        crate::mirroring::memory::pulled(pool, devices, conversation, at, &profile)
+                            .await
+                    }
+
+                    None => None,
+                };
+
+                (
+                    Some(store::Pairing {
+                        profile,
+                        model: pairing.model.clone(),
+                    }),
+                    Some(crate::mirroring::account::Lending::of(pool, devices, lent)),
+                    syncing,
+                )
+            }
+
+            None => (None, None, None),
+        };
+
+        let pairing = launching_under.as_ref().unwrap_or(pairing);
+
+        // And whether this session **continues** the conversation an earlier one
+        // was having rather than opening one of its own, which is what a
+        // Conversation moved onto this device is started with — see
+        // [`continuing`]. Asked here rather than before the Capture was opened
+        // because the answer turns on the harness's own log being on this machine,
+        // and for a Profile whose account is a member's that is what the memory
+        // sync above has just carried over.
+        let continuing = continuing(
+            pool,
+            nudges,
+            conversation,
+            pairing,
+            &agents.homes.for_conversation(conversation_id),
+            &agents.attachments,
+            held,
+        )
+        .await;
+
+        let (session, named, prompt, carried) = match continuing {
+            Some(continuing) => {
+                // The Capture was opened under the name a fresh session would
+                // have run under, this not having been knowable then; the name it
+                // is really running under goes over it, before there is a process
+                // for the row to be wrong about. See [`store::continued_as`].
+                store::continued_as(pool, event_id, &continuing.session).await?;
+
+                (
+                    Some(continuing.session),
+                    Named::Continuing,
+                    continuing.note,
+                    Some(continuing.carried),
+                )
+            }
+
+            None => (session, Named::Opening, prompt, None),
+        };
+
+        // And the devices it may move the work onto, under whichever of the two
+        // it is primed with — the carried note too, because a session carried on
+        // here is told where it may go from here rather than from where it came.
+        // Here for the listings above's reason, and read from this device's side:
+        // see [`crate::transfers::may_go_to`], and [`skills::transferable`],
+        // which says nothing where the list is empty.
+        let prompt = skills::transferable(
+            &prompt,
+            &crate::transfers::may_go_to(pool, devices, conversation_id).await,
+        );
+
         // The sandbox asks git where the worktree's object database is, and the
         // dev-shell question is a `nix eval` or two. The line itself blocks on
         // the platform that writes the prompt to a file — see [`Agents::argv`].
@@ -2343,6 +2799,7 @@ impl Sessions {
                     &pairing,
                     &prompt,
                     session.as_deref(),
+                    named,
                     conversation.worktree.as_deref(),
                 )?;
 
@@ -2538,6 +2995,11 @@ impl Sessions {
         // session on a backend that takes one, and by the Worktree it opened in
         // and the moment it started on a backend that does not. A session with
         // no name has no log to look for — see [`crate::transcript`].
+        //
+        // And a session that is carrying a conversation on is followed from where
+        // the session on the other machine left off: the log is the one the launch
+        // proved was there, and its length then is where this Event's Transcript
+        // opens. Each Event holds its own session's words.
         let tail = session.as_deref().map(|session| {
             Tail::of(
                 conversation_id,
@@ -2546,8 +3008,53 @@ impl Sessions {
                 conversation.worktree.as_deref(),
                 at_launch,
                 &agents.homes.for_conversation(conversation_id),
+                carried,
             )
         });
+
+        // And, where this session *is* that resume, what the relay owes the
+        // record if the harness turns out not to have it. Which is the one reason
+        // a carried conversation can fail to be carried on that nothing knows
+        // before the launch: the log was proved to be there and the line was
+        // written, and the harness still said no. See [`relay`], which reads it
+        // off the ending, and [`crate::carrying`].
+        //
+        // The channel travels with it for [`Held`]'s reason: the Sets this launch
+        // left open were left open for a reader that then never came back, and
+        // shutting one takes the channel besides the store.
+        let resuming = match (named, session.as_deref()) {
+            (Named::Continuing, Some(carrying)) => Some(Resuming {
+                why: crate::carrying::Instead::Refused {
+                    harness: pairing.profile.agent_type(),
+                    session: carrying.to_owned(),
+                },
+                settlements: held.settlements.clone(),
+            }),
+
+            _ => None,
+        };
+
+        // And, now that there is a process, the Timeline told that this session is
+        // that conversation carried on rather than a session of its own. Which is
+        // what the human has no other way to tell: they pressed one thing, and a
+        // resumed agent picking up mid-sentence and a re-primed one starting the
+        // state again from the record are both a session appearing. See
+        // [`crate::carrying`], which says the other outcome too.
+        //
+        // **Here rather than where the decision was made**, which is a whole
+        // launch earlier: everything between the two can still refuse a session,
+        // and a Notice in front of them would claim a conversation picked up where
+        // nothing ever ran.
+        if let (Named::Continuing, Some(carrying)) = (named, session.as_deref()) {
+            crate::carrying::carried_on(
+                pool,
+                nudges,
+                conversation_id,
+                pairing.profile.agent_type(),
+                carrying,
+            )
+            .await;
+        }
 
         // And the same output watched for the one thing a session says that is
         // about the account rather than about the work: that its window is
@@ -2640,6 +3147,7 @@ impl Sessions {
                         reading,
                         &idle,
                         tail,
+                        resuming,
                         limits,
                         stopping,
                     )
@@ -2670,6 +3178,40 @@ impl Sessions {
                             conversation_id,
                             "seeing to what a session wrote to its account ended badly"
                         );
+                    }
+
+                    // And where that account was a **mirror**, the login it now
+                    // holds goes into the account on the device it is at home on:
+                    // a harness refreshes its OAuth pair as it works, and an
+                    // account lent out and never written back would be one
+                    // signing itself out a session at a time. After the close
+                    // rather than before it, because the close is what puts a
+                    // login the session replaced rather than wrote through back
+                    // over the mirror's own file — and before the word that the
+                    // session is over, for the reason the close itself is: the
+                    // next launch fetches the account again, and one made before
+                    // this had landed would be given the login this session
+                    // refreshed away from. See
+                    // [`crate::mirroring::account::Lending::written_home`], which
+                    // says nothing where the login is still what came down and
+                    // puts a sentence on the Timeline where the home has gone
+                    // away.
+                    // What the session wrote to the account's **memory store**
+                    // first: its memory of the Repo, and the transcript of this
+                    // session, put back under the entries the home device names
+                    // for them — which is what makes a session run here readable
+                    // there. Before the login, so that the login has the last word
+                    // over the one file both of them can name: an OpenCode account
+                    // keeps its login inside the data directory the memory sync
+                    // carries whole. Only what the session changed travels, and
+                    // nothing at home is deleted — see
+                    // [`crate::mirroring::memory::Syncing::written_home`].
+                    if let Some(syncing) = syncing {
+                        syncing.written_home(conversation_id).await;
+                    }
+
+                    if let Some(lending) = lending {
+                        lending.written_home(conversation_id).await;
                     }
 
                     // The session is over, so the branches are finished moving.
@@ -2810,6 +3352,399 @@ impl Sessions {
     }
 }
 
+/// What a relaunch has **held** for a resume that may not happen, handed to the
+/// launch that makes the holding good (ADR-0020, *Transfer*).
+///
+/// A relaunch locks every Question Set it orphans, because the session that asked
+/// has gone and the human would be answering into nothing — and it holds off where
+/// a conversation is standing to be carried on here, a resume bringing that reader
+/// back on another machine. Which of the two it is turns on the log having come
+/// across with the memory sync, and that is not settled until the launch has run
+/// the sync: so the holding is handed over and settled there. See [`continuing`].
+///
+/// **The channel travels with the Sets** because it is what shutting one takes
+/// besides the store, and it has no other business in a launch: the one thing a
+/// session's start settles is what somebody else held for it.
+#[derive(Clone, Copy)]
+pub(crate) struct Held<'a> {
+    /// The Sets left open rather than locked. Empty from every caller that held
+    /// nothing, which is every launch but a grilling relaunched over an arrival —
+    /// and a launch handed none locks none, whatever else it finds open.
+    pub(crate) sets: &'a [i64],
+
+    /// And the channel a settlement is announced on, so a wait held here on one of
+    /// them ends rather than sitting out its window.
+    pub(crate) settlements: &'a store::Settlements,
+}
+
+impl<'a> Held<'a> {
+    /// Nothing held, which is what every launch but one hands over.
+    pub(crate) fn nothing(settlements: &'a store::Settlements) -> Held<'a> {
+        Held {
+            sets: &[],
+            settlements,
+        }
+    }
+}
+
+/// A session launched as the harness's own **resume** of an earlier one: what it
+/// is told to carry on from, what it is primed with, and the record it is already
+/// part way through.
+struct Continuing {
+    /// The session the harness is told to resume, which is the name the Capture of
+    /// this one is written down under too — a conversation carried on keeps the id
+    /// it already had.
+    session: String,
+
+    /// And the whole of what it is primed with, which is the note and nothing
+    /// else — see [`skills::moved`].
+    note: String,
+
+    /// And the record it will go on adding to, with how much of it the session on
+    /// the other machine wrote.
+    carried: crate::transcript::Carried,
+}
+
+/// Whether a launch for `conversation` under `pairing` carries on the conversation
+/// an earlier session was having, and what it takes to do so (ADR-0020,
+/// *Transfer*).
+///
+/// **Five things have to hold, and each of them is a way this answers no** —
+/// which is Verkstead's own Resume, unchanged, and nothing lost. **Each of them
+/// but the first is said on the Timeline too**, because the human pressed one
+/// thing and can see two outcomes from it and has no way to tell which happened:
+/// see [`crate::carrying`], and [`Carrying`], which is what this answers in. The
+/// *yes* is said by the launch once there is a process rather than here, there
+/// being a whole launch between this and a session.
+///
+/// - **The record says a session is to be carried on from here.** A Conversation
+///   that has just been moved onto this device is one whose agent was part way
+///   through a turn somewhere else, and the arrival writes that down — see
+///   [`store::take_up_the_conversation`], which is read and spent in one step. No
+///   row is every ordinary launch, and the launch after this one is ordinary too:
+///   the one answer here that is nothing to tell anybody about, nothing having
+///   arrived for it to be a fallback from. A Conversation that arrived with no
+///   session on its record is told about at the arrival instead, where that is
+///   known — see [`crate::peer::transfers`].
+/// - **The Pairing about to run is the harness that session ran on.** A
+///   Conversation whose Profile was changed under it has a log no other backend
+///   could read.
+/// - **That harness has a resume line at all** — see [`Line::resume`], which is
+///   now every one of the four, and is still asked because a fifth backend lands
+///   without one.
+/// - **The Profile shares its account's memory.** A session under one that does
+///   not gets a store of its own and empty, at home as much as away — so nothing
+///   of the conversation travelled and there is nothing here to resume against.
+///   Asked ahead of the looking so that the reason names the switch rather than
+///   the record it is the reason for.
+/// - **And the record is really on this machine, where the harness will look for
+///   it.**
+///   Claude's store crosses with the memory sync as a labelled part each machine
+///   names its own path for, so it should land under this device's own encoding of
+///   this device's Worktree path with nothing further to do — but a claude told to
+///   resume a session it holds no log for refuses to start rather than opening one,
+///   so it is proved rather than assumed. Grok's store crosses keyed by the
+///   *sending* device's name for the sending device's Worktree, so the same call
+///   files it under this one's first, and answers no where it cannot — a device
+///   that has never run grok in this Worktree being the plain case of that. Codex's
+///   crosses to the path it left and needs nothing moved, but nothing names it
+///   either: the rollout the id belongs to is searched for in the store, and a
+///   rollout that never crossed is a no like the rest. And OpenCode's crosses
+///   as one database with a row per session, so the same call looks for the row
+///   and brings the directory it records onto this device's Worktree — a store
+///   that did not cross, a row of that id that is not in it and a shape this
+///   build cannot write each being a no with nothing written. See
+///   [`crate::transcript::carried`].
+///
+/// **And a sixth is known only after the launch**, so it is not here: a harness
+/// that is asked to resume and will not. That is the relay's to read, off a
+/// resumed session that ended badly having never added a line to the record it
+/// was resuming — see [`relay`].
+///
+/// `home` is the Conversation's own, which is where the log of a session whose
+/// Profile shares no memory is.
+///
+/// **Asked after the memory sync, and the sync asked for more than this session.**
+/// The pull composes its question out of every name this Conversation's sessions
+/// have had — see [`crate::mirroring::memory`] — which on this device is the crossed
+/// Event's name as well as the one the Capture was just opened under. So a store
+/// keyed by the session's own name is asked for the session being carried on
+/// whatever this launch then turns out to run as: Grok Build's is, a directory per
+/// session inside the directory per working directory, and what the name the Capture
+/// opened with buys is nothing, there being no session of that name anywhere. Nothing
+/// to Claude's either way, whose parts are the two `projects/` entries, and nothing
+/// to Codex's, whose rollouts are picked out by the Worktree they name rather than
+/// by any id at all — nor to OpenCode's, which crosses as the one database and has
+/// no part narrower than that to ask for.
+///
+/// **And this is where a relaunch's holding off is made good**, which is the one
+/// thing a launch does that is not about the launch. A relaunch locks every
+/// Question Set it orphans, because the session that asked has gone and the human
+/// would be answering into nothing — and it holds off where a conversation is
+/// standing to be carried on, because a resume brings that very reader back on
+/// another machine. Which of the two it turns out to be is not settled until the
+/// memory sync above has run, so it is settled here: a resume names those Sets in
+/// its note and leaves them open, and every way of answering no locks them exactly
+/// as the relaunch would have. See [`crate::grillings`], where the holding off is.
+///
+/// `held` is what that caller held and nothing more. A relaunch that locks nothing
+/// hands over nothing and nothing is locked here either — an arrival into
+/// Implementing leaves an open Set exactly where its relaunch leaves one, and this
+/// is not the moment to change that. The **note** is the other way about: it reads
+/// what is open off the record, so a session resumed by any of the relaunches is
+/// told about the questions it was idling on.
+async fn continuing(
+    pool: &SqlitePool,
+    nudges: &Nudges,
+    conversation: &store::Conversation,
+    pairing: &store::Pairing,
+    home: &crate::sandbox::Home,
+    attachments: &crate::attachments::Attachments,
+    held: Held<'_>,
+) -> Option<Continuing> {
+    match carried_on(pool, conversation, pairing, home, attachments).await {
+        // Said on the Timeline by the launch rather than here — see
+        // [`Sessions::start`], which writes it once there is a process. This is a
+        // whole launch in front of that, and a sandbox that cannot be built, a
+        // terminal that will not open and a spawn that fails each refuse a session
+        // between the two: a Notice written here would have said a conversation
+        // was picked up where nothing was ever started.
+        Carrying::On(continuing) => Some(continuing),
+
+        // The resume is not going to happen, so the reader really has gone, and
+        // whatever the caller held for it goes the way a relaunch has always sent
+        // it — a launch later than it would otherwise have gone. `held` rather
+        // than the record's own reading of what is open: what is made good here
+        // is exactly what somebody held off locking, and a relaunch that locks
+        // nothing hands over nothing for this to lock.
+        //
+        // Every way of answering no, the two in front of the decision included: a
+        // steer that spent the row between the caller's reading and this one is
+        // the human replacing the session, which is the case the caller would
+        // have locked for.
+        carrying => {
+            crate::sets::locking(
+                pool,
+                held.settlements,
+                nudges,
+                conversation.id,
+                held.sets,
+                "the session that asked it is on the machine the work has left",
+            )
+            .await;
+
+            // And where there was a conversation standing to be carried on, why
+            // it was not — which is the whole of what tells the two outcomes
+            // apart. [`Carrying::Nothing`] is every ordinary launch and says
+            // nothing: no Conversation arrived, so nothing about this session is
+            // a fallback from anything.
+            if let Carrying::Instead(why) = carrying {
+                crate::carrying::instead(pool, nudges, conversation.id, &why).await;
+            }
+
+            None
+        }
+    }
+}
+
+/// What a launch made of the conversation that was standing to be carried on:
+/// the three answers [`continuing`] has to tell apart.
+///
+/// Parted from the two things that hang off the answer — the holding a relaunch
+/// left for it, and the Notice — so that each way of answering no is one return
+/// rather than five each having to remember what the fallback owes.
+enum Carrying {
+    /// Nothing was standing, which is every ordinary launch there is: no
+    /// Conversation arrived, or what arrived has already been carried on from.
+    /// Nothing to say and nothing to make good.
+    Nothing,
+
+    /// It is being carried on, and this is what that takes.
+    On(Continuing),
+
+    /// One was standing and it cannot be, which is Verkstead's own Resume —
+    /// unchanged, and nothing lost — with the reason to put on the Timeline.
+    Instead(crate::carrying::Instead),
+}
+
+/// The decision itself — [`continuing`]'s middle, with nothing to say about what a
+/// caller is holding or about what the Timeline is told.
+///
+/// What each of its answers means is written up there.
+async fn carried_on(
+    pool: &SqlitePool,
+    conversation: &store::Conversation,
+    pairing: &store::Pairing,
+    home: &crate::sandbox::Home,
+    attachments: &crate::attachments::Attachments,
+) -> Carrying {
+    // Spent whichever way this comes out, and that is the point of reading it
+    // here: the session launched in the moment after an arrival is the one with a
+    // conversation to carry on, and the next session of the work is not — so a
+    // row left standing because the log had not come across would prime a task
+    // session with a note about a move it had already been told about.
+    let continued = match store::take_up_the_conversation(pool, conversation.id).await {
+        Ok(Some(continued)) => continued,
+
+        // Nothing arrived, or what arrived has been carried on from already.
+        Ok(None) => return Carrying::Nothing,
+
+        // And a row that could not be read is the same answer as one that is not
+        // there, for want of anything better to say: what a Notice would name is
+        // the reason, and the reason is that the reading failed. Said in the log,
+        // which is where a store that will not answer belongs.
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = conversation.id, "reading whether this session carries an earlier one's conversation on failed, so it opens one of its own");
+            return Carrying::Nothing;
+        }
+    };
+
+    let running = pairing.profile.agent_type();
+
+    if continued.agent_type != running {
+        return Carrying::Instead(crate::carrying::Instead::AnotherHarness {
+            ran: continued.agent_type,
+            running,
+        });
+    }
+
+    if line(continued.agent_type, conversation.worktree.as_deref())
+        .resume
+        .is_none()
+    {
+        return Carrying::Instead(crate::carrying::Instead::NoResumeLine(continued.agent_type));
+    }
+
+    // The switch, ahead of the looking rather than left to come out as a record
+    // that is not there. A Profile that shares no memory gives every session a
+    // store of its own and empty — which is the rule at home as much as away, so
+    // an arrival under one is a session starting new exactly as the last one did,
+    // and saying *the record is not here* about it would name the symptom.
+    if !pairing.profile.memory {
+        return Carrying::Instead(crate::carrying::Instead::MemoryOff(continued.agent_type));
+    }
+
+    // The Worktree is what the note says has moved, and what the harness whose
+    // store is keyed by it has its log filed under. A Conversation with none never
+    // reaches a launch at all — see [`Sessions::start`], whose sandbox cannot be
+    // built without one — so this is a case that cannot happen rather than one
+    // guessed at, and where it did happen it is a device with nowhere for the
+    // record to be, which is what the reason beside it says.
+    let Some(worktree) = conversation.worktree.as_deref() else {
+        return Carrying::Instead(crate::carrying::Instead::NoRecord(continued.agent_type));
+    };
+
+    let Some(carried) =
+        crate::transcript::carried(&pairing.profile, &continued.session_id, worktree, home).await
+    else {
+        return Carrying::Instead(crate::carrying::Instead::NoRecord(continued.agent_type));
+    };
+
+    Carrying::On(Continuing {
+        session: continued.session_id,
+        note: skills::moved(
+            &crate::platform::hostname(),
+            worktree,
+            attached(pool, conversation.id, attachments)
+                .await
+                .as_deref(),
+            &idling_on(pool, conversation.id).await,
+        ),
+        carried,
+    })
+}
+
+/// Where this device's sessions read the files the human attached, said only
+/// where there are files to read (ADR-0020, *Transfer*).
+///
+/// **The other directory a landing moves.** A Conversation's attachments are at a
+/// path made of the Data Directory and the Conversation's id, and a record that
+/// lands takes an id of this device's inside a Data Directory of this device's —
+/// so on the platforms that give a session that directory where it really is, the
+/// path a resumed agent is carrying is the sending machine's. An ordinary session
+/// is told the right one by [`skills::attached`], which is the listing a resumed
+/// one is the single session never to get.
+///
+/// `None` for a Conversation with nothing attached, which is most of them and
+/// which the note says nothing to at all — and for a read that failed, that being
+/// a note without one line rather than a resume that did not happen. Said in the
+/// log.
+async fn attached(
+    pool: &SqlitePool,
+    conversation_id: i64,
+    attachments: &crate::attachments::Attachments,
+) -> Option<PathBuf> {
+    match store::attachments(pool, conversation_id).await {
+        Ok(files) if files.is_empty() => None,
+
+        Ok(_) => Some(attachments.inside(Platform::HERE, conversation_id)),
+
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading whether a carried conversation has files attached failed, so the note it is primed with says nothing about where they are now");
+            None
+        }
+    }
+}
+
+/// And each of the Question Sets the resumed session was idling on, said the way
+/// the note says it: by the id it has here, and by the id it was asked under
+/// (ADR-0020, *Transfer*).
+///
+/// **Both, because each is a name in a different place.** The landing numbered
+/// every Set of the arriving Conversation afresh, so the ids on this Timeline are
+/// this device's; the ids the agent has in its own context are the other device's,
+/// and they are the only names it knows its questions by. The landing wrote the map
+/// between them down as it walked — see [`store::sets_as_they_landed`] — and this
+/// reads it back.
+///
+/// **Which is read off the record rather than taken from what a relaunch held**,
+/// unlike the locking: a relaunch that locks nothing still leaves an agent coming
+/// back to a question with no wait in front of it, and that is a session to tell.
+/// The reading is [`crate::sets::open`]'s narrow one — a Set the human answered
+/// before the move is one the agent has already read, and a Deferred Ask never had
+/// anybody waiting on it.
+///
+/// A map that cannot be read leaves every line naming the id the Set has here and
+/// nothing else, which is the half that does the work: it is what `verkstead
+/// answers` takes. A Timeline that cannot be read leaves the note without its Set
+/// lines, which is worth more than a resume that did not happen — both said in the
+/// log.
+async fn idling_on(pool: &SqlitePool, conversation_id: i64) -> Vec<skills::CarriedSet> {
+    let open = match store::timeline(pool, conversation_id).await {
+        Ok(timeline) => crate::sets::open(&timeline, crate::sets::Open::Idled),
+
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading what a carried conversation was idling on failed, so the note it is primed with says nothing about its Question Sets");
+            return Vec::new();
+        }
+    };
+
+    if open.is_empty() {
+        return Vec::new();
+    }
+
+    let landed = match store::sets_as_they_landed(pool, conversation_id).await {
+        Ok(landed) => landed,
+
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading what the Question Sets of a carried conversation landed as failed, so the note names them by the ids they have here alone");
+            HashMap::new()
+        }
+    };
+
+    // Inverted, because the map is written the way the landing built it — what a
+    // Set was, against what it became — and what is in hand here is what it
+    // became.
+    let was: HashMap<i64, i64> = landed.into_iter().map(|(was, now)| (now, was)).collect();
+
+    open.into_iter()
+        .map(|now| skills::CarriedSet {
+            was: was.get(&now).copied(),
+            now,
+        })
+        .collect()
+}
+
 /// A name for a session about to be started: a version 4 UUID, which is what
 /// claude will take as a session id and nothing else is.
 ///
@@ -2921,6 +3856,7 @@ async fn relay(
     mut reading: Reading,
     idle: &Idle,
     mut tail: Option<Tail>,
+    resuming: Option<Resuming>,
     mut limits: crate::limits::Watch,
     mut stopping: oneshot::Receiver<()>,
 ) -> Ended {
@@ -3173,7 +4109,87 @@ async fn relay(
         summarise(pool, nudges, printing, &reading, told(&tail)).await;
     }
 
+    // And where this session was the harness's own resume and the harness would
+    // not have it, the one reason a carried conversation falls through that
+    // nothing could know before the launch — see [`Resuming`], where what says so
+    // is argued.
+    //
+    // Last, and after the final poll above rather than before it: what it turns
+    // on is whether anything was ever added to the record being resumed, and the
+    // lines an agent writes on its way out arrive at exactly that poll.
+    if let Some(resuming) = resuming
+        && matches!(ended, Ended::Badly(_))
+        && tail.as_ref().and_then(Tail::turns).is_none()
+    {
+        refused(pool, nudges, printing.conversation_id, resuming).await;
+    }
+
     ended
+}
+
+/// A session launched as the harness's resume of an earlier one, as the relay
+/// holds one: what to say if the harness would not have it, and what to settle.
+///
+/// **`None` is every session but one**, and the one is the launch after an
+/// arrival that found everything it needed — see [`continuing`]. So the reading
+/// below costs an ordinary session nothing at all.
+struct Resuming {
+    /// Which harness was asked and what it was asked to resume, already worded:
+    /// the refusal is the one [`crate::carrying::Instead`] the launch cannot
+    /// write for itself.
+    why: crate::carrying::Instead,
+
+    /// And the channel a Set settled is announced on, so that a wait held on one
+    /// of the Sets this launch left open ends rather than sitting out its window.
+    /// [`Held`]'s own, carried this far for the same reason it was carried there.
+    settlements: store::Settlements,
+}
+
+/// What a refused resume owes the record: the Notice saying the session in front
+/// of the human is Verkstead's own Resume after all, and the Question Sets that
+/// were held open for a reader who never came back.
+///
+/// **Read off the ending rather than off anything the harness said**, because
+/// what a harness prints when it will not resume is that harness's wording and
+/// free to change under us — see ADR 0006. What is read instead is the shape:
+/// the session ended badly, and nothing was ever added to the record it was
+/// launched to carry on. A resume that took would have written into that record
+/// as it worked; one that never started wrote nothing, which is the same thing
+/// said about the file rather than about the screen.
+///
+/// **The Sets are the reversal put back.** A relaunch locks every Set it orphans
+/// and this launch held them open, the resume being about to bring that reader
+/// back on this machine — and it did not, so they are locked exactly as the
+/// relaunch would have locked them. Read off the record here rather than taken
+/// from what was held: this is a moment later than the launch, and what is open
+/// now is what is open now.
+///
+/// **And Verkstead's own Resume is what takes the work up from here**, by the
+/// standing route rather than a new one: the row that said a conversation was to
+/// be carried on was spent by the launch that has just failed, so the next
+/// session started for this Conversation is a session of its own, primed from
+/// the record. Which is what the Notice says has happened.
+async fn refused(pool: &SqlitePool, nudges: &Nudges, conversation_id: i64, resuming: Resuming) {
+    crate::carrying::instead(pool, nudges, conversation_id, &resuming.why).await;
+
+    let open = match store::timeline(pool, conversation_id).await {
+        Ok(timeline) => crate::sets::open(&timeline, crate::sets::Open::Idled),
+
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading what a refused resume had been holding open failed, so nothing was locked");
+            return;
+        }
+    };
+
+    crate::sets::locking(
+        pool,
+        &resuming.settlements,
+        nudges,
+        conversation_id,
+        &open,
+        "the harness would not resume the session that asked it",
+    )
+    .await;
 }
 
 /// End the sandbox a session runs in, which is what reaches the session itself:
@@ -3348,7 +4364,31 @@ mod tests {
             session: Option<&str>,
             worktree: Option<&Path>,
         ) -> Vec<String> {
-            self.argv(CONVERSATION, pairing, prompt, session, worktree)
+            self.told(pairing, prompt, session, Named::Opening, worktree)
+        }
+
+        /// And the same line where the session named is one this launch is
+        /// **continuing** rather than opening — see [`Named`].
+        fn resumed(
+            &self,
+            pairing: &store::Pairing,
+            prompt: &str,
+            session: Option<&str>,
+            worktree: Option<&Path>,
+        ) -> Vec<String> {
+            self.told(pairing, prompt, session, Named::Continuing, worktree)
+        }
+
+        /// Both of them, and the one thing that differs between them.
+        fn told(
+            &self,
+            pairing: &store::Pairing,
+            prompt: &str,
+            session: Option<&str>,
+            named: Named,
+            worktree: Option<&Path>,
+        ) -> Vec<String> {
+            self.argv(CONVERSATION, pairing, prompt, session, named, worktree)
                 .expect("a prompt that stays on the command line is always a line")
         }
     }
@@ -3363,6 +4403,7 @@ mod tests {
             },
             models: vec!["claude-fable-5".to_owned(), "claude-opus-5".to_owned()],
             memory: true,
+            mirror: None,
         }
     }
 
@@ -3387,6 +4428,7 @@ mod tests {
                 },
                 models: vec!["gpt-5-codex".to_owned()],
                 memory: true,
+                mirror: None,
             },
             model: Some("gpt-5-codex".to_owned()),
         }
@@ -3403,6 +4445,7 @@ mod tests {
                 },
                 models: vec!["grok-4.6".to_owned()],
                 memory: true,
+                mirror: None,
             },
             model: Some("grok-4.6".to_owned()),
         }
@@ -3421,6 +4464,7 @@ mod tests {
                 },
                 models: vec!["opencode/big-pickle".to_owned()],
                 memory: true,
+                mirror: None,
             },
             model: Some("opencode/big-pickle".to_owned()),
         }
@@ -3552,6 +4596,205 @@ mod tests {
                 "d3b07384-d9a0-4c9b-8f2a-1b7c5e6f0a12".to_owned(),
                 "--dangerously-skip-permissions".to_owned(),
             ]
+        );
+    }
+
+    /// And a session **continuing** that same conversation is told to resume it
+    /// instead, in the very place the name would have gone — the two being
+    /// mutually exclusive, a conversation carried on keeping the id it already
+    /// had.
+    ///
+    /// The prompt stays exactly where it already was, which is what claude takes
+    /// as the first message of the conversation it picks up.
+    #[test]
+    fn a_continued_session_is_told_to_resume_the_one_it_carries_on() {
+        let state = tempfile::tempdir().unwrap();
+        let argv = agents(vec!["claude".to_owned()], state.path()).resumed(
+            &pairing(),
+            "This Conversation has been moved onto another machine\n",
+            Some("d3b07384-d9a0-4c9b-8f2a-1b7c5e6f0a12"),
+            worktree(),
+        );
+
+        assert_eq!(
+            argv,
+            vec![
+                "claude".to_owned(),
+                "--model".to_owned(),
+                "claude-opus-5".to_owned(),
+                "This Conversation has been moved onto another machine\n".to_owned(),
+                "--resume".to_owned(),
+                "d3b07384-d9a0-4c9b-8f2a-1b7c5e6f0a12".to_owned(),
+                "--dangerously-skip-permissions".to_owned(),
+            ],
+            "the resume stands where the session id would have: {argv:?}",
+        );
+        assert!(
+            !argv.iter().any(|argument| argument == "--session-id"),
+            "and the name is not said as well: {argv:?}",
+        );
+    }
+
+    /// And a continued **Grok** session is told the same thing under the same
+    /// spelling, its own line's shape being Claude's: the flag and the id where the
+    /// name would have gone, and the prompt left positional in front of them.
+    ///
+    /// The exclusion is grok's own rather than Verkstead's reading of it — grok
+    /// 1.0.34 takes `--session-id` for a *new* conversation, refuses one it already
+    /// has a session for, and allows it alongside `--resume` only with
+    /// `--fork-session`, which a conversation carried on is the opposite of.
+    #[test]
+    fn a_continued_grok_session_is_told_to_resume_the_one_it_carries_on() {
+        let state = tempfile::tempdir().unwrap();
+        let argv = agents(vec!["grok".to_owned()], state.path()).resumed(
+            &grok_pairing(),
+            "This Conversation has been moved onto another machine\n",
+            Some("d3b07384-d9a0-4c9b-8f2a-1b7c5e6f0a12"),
+            worktree(),
+        );
+
+        assert_eq!(
+            argv,
+            vec![
+                "grok".to_owned(),
+                "-m".to_owned(),
+                "grok-4.6".to_owned(),
+                "This Conversation has been moved onto another machine\n".to_owned(),
+                "--resume".to_owned(),
+                "d3b07384-d9a0-4c9b-8f2a-1b7c5e6f0a12".to_owned(),
+                "--always-approve".to_owned(),
+                "--sandbox".to_owned(),
+                "off".to_owned(),
+                "--no-alt-screen".to_owned(),
+            ],
+            "the resume stands where the session id would have: {argv:?}",
+        );
+        assert!(
+            !argv.iter().any(|argument| argument == "--session-id"),
+            "and the name is not said as well: {argv:?}",
+        );
+    }
+
+    /// And a continued **Codex** session is told it by a **subcommand**, which is
+    /// the one line in the table whose shape changes rather than growing an
+    /// argument: `resume` straight after the binary, the session id and the prompt
+    /// as its positionals in that order, and the ordinary line's whole tail after
+    /// them.
+    ///
+    /// **The tail is the point of the assertion as much as the subcommand is.** A
+    /// resumed session is the same session under the same account in the same
+    /// Worktree, so the model, the bypass, the file-backed credential store and the
+    /// trust pre-seed all come across — a resume without them would come up logged
+    /// out and sitting on a trust prompt, which is a run waiting on nobody.
+    ///
+    /// And one override the ordinary line does not carry: which directory codex
+    /// resumes *in*. A carried rollout records the sending device's Worktree, and
+    /// codex 0.155.1 stops to ask which of the two directories to use — see
+    /// [`CODEX_RESUME_CWD`], which is that question answered with the one the work
+    /// is now in.
+    #[test]
+    fn a_continued_codex_session_is_told_to_resume_by_a_subcommand() {
+        let state = tempfile::tempdir().unwrap();
+        let argv = agents(vec!["codex".to_owned()], state.path()).resumed(
+            &codex_pairing(),
+            "This Conversation has been moved onto another machine\n",
+            Some("01a0f0e9-3280-7900-9dda-c7d0920b0735"),
+            worktree(),
+        );
+
+        assert_eq!(
+            argv,
+            vec![
+                "codex".to_owned(),
+                "resume".to_owned(),
+                "-m".to_owned(),
+                "gpt-5-codex".to_owned(),
+                "01a0f0e9-3280-7900-9dda-c7d0920b0735".to_owned(),
+                "This Conversation has been moved onto another machine\n".to_owned(),
+                "--dangerously-bypass-approvals-and-sandbox".to_owned(),
+                "--no-alt-screen".to_owned(),
+                "-c".to_owned(),
+                "cli_auth_credentials_store=\"file\"".to_owned(),
+                "-c".to_owned(),
+                format!("projects={{\"{WORKTREE}\"={{trust_level=\"trusted\"}}}}"),
+                "-c".to_owned(),
+                "tui.resume_cwd=\"current\"".to_owned(),
+            ],
+            "the subcommand leads and the id is the positional in front of the \
+             prompt: {argv:?}",
+        );
+    }
+
+    /// And an ordinary Codex launch carries none of the resume's own half: the
+    /// subcommand is not there, and neither is the setting that says which
+    /// directory a resume resolves in.
+    ///
+    /// Which is the whole of why that setting is on the resume rather than in the
+    /// line's tail: a launch opening a conversation would be answering a question
+    /// nobody had asked it.
+    #[test]
+    fn an_opening_codex_session_carries_nothing_of_the_resume() {
+        let state = tempfile::tempdir().unwrap();
+        let argv = agents(vec!["codex".to_owned()], state.path()).launched(
+            &codex_pairing(),
+            "# Rate limiting\n",
+            Some("d3b07384-d9a0-4c9b-8f2a-1b7c5e6f0a12"),
+            worktree(),
+        );
+
+        assert!(
+            !argv.iter().any(|argument| argument == "resume"),
+            "nothing on an opening line says resume: {argv:?}",
+        );
+        assert!(
+            !argv.iter().any(|argument| argument.contains("resume_cwd")),
+            "and nothing on it answers a question about resuming: {argv:?}",
+        );
+    }
+
+    /// And a continued **OpenCode** session is told it by that backend's own
+    /// spelling of the flag, on the shortest line here staying the shortest: the
+    /// model, the note under the prompt flag, the session flag with the id where
+    /// the name would have gone, and the approvals.
+    ///
+    /// **Nothing is added and nothing comes off**, which is what separates this
+    /// resume from Codex's. opencode does not ask which directory to resume in: it
+    /// resumes in the one its own row records, so what is put right is that row
+    /// rather than the line — see [`crate::records::carried`]. And `--fork` beside
+    /// the flag is never passed, that being a conversation branched rather than
+    /// one carried on.
+    ///
+    /// The id is the store's own here, as Codex's is: opencode names no session at
+    /// launch, so what goes after the flag is what its row turned out to be under.
+    #[test]
+    fn a_continued_opencode_session_is_told_to_continue_the_one_it_carries_on() {
+        let state = tempfile::tempdir().unwrap();
+        let argv = agents(vec!["opencode".to_owned()], state.path()).resumed(
+            &opencode_pairing(),
+            "This Conversation has been moved onto another machine\n",
+            Some("ses_f0ef23221ffeeSzlvZxHdDFSqE"),
+            worktree(),
+        );
+
+        assert_eq!(
+            argv,
+            vec![
+                "opencode".to_owned(),
+                "-m".to_owned(),
+                "opencode/big-pickle".to_owned(),
+                "--prompt".to_owned(),
+                "This Conversation has been moved onto another machine\n".to_owned(),
+                "--session".to_owned(),
+                "ses_f0ef23221ffeeSzlvZxHdDFSqE".to_owned(),
+                "--auto".to_owned(),
+            ],
+            "the session flag stands where a name would have, and the rest of the \
+             line is the one an opening launch gets: {argv:?}",
+        );
+        assert!(
+            !argv.iter().any(|argument| argument == "--fork"),
+            "and nothing branches the conversation rather than carrying it on: \
+             {argv:?}",
         );
     }
 
@@ -3779,7 +5022,14 @@ mod tests {
         let prompt = built_prompt();
 
         let argv = on(Platform::Windows, state.path())
-            .argv(CONVERSATION, &pairing(), &prompt, None, worktree())
+            .argv(
+                CONVERSATION,
+                &pairing(),
+                &prompt,
+                None,
+                Named::Opening,
+                worktree(),
+            )
             .expect("a prompt that could be written down");
 
         assert_eq!(
@@ -3829,7 +5079,14 @@ mod tests {
         assert!(prompt.len() > LIMIT, "the prompt is longer than a line");
 
         let argv = on(Platform::Windows, state.path())
-            .argv(CONVERSATION, &pairing(), &prompt, None, worktree())
+            .argv(
+                CONVERSATION,
+                &pairing(),
+                &prompt,
+                None,
+                Named::Opening,
+                worktree(),
+            )
             .expect("a prompt that could be written down");
 
         // The line as the machine measures it: every argument, and a space and
@@ -3860,6 +5117,7 @@ mod tests {
                     &pairing(),
                     "# Rate limiting\n",
                     None,
+                    Named::Opening,
                     worktree(),
                 )
                 .expect("a prompt that stays on the command line");
@@ -3915,7 +5173,14 @@ exit 1
         let prompt = built_prompt();
 
         let argv = on(Platform::Windows, state.path())
-            .argv(CONVERSATION, &pairing(), &prompt, None, worktree())
+            .argv(
+                CONVERSATION,
+                &pairing(),
+                &prompt,
+                None,
+                Named::Opening,
+                worktree(),
+            )
             .expect("a prompt that could be written down");
 
         let opened = opened_at(state.path());
@@ -4131,6 +5396,46 @@ exit 1
         idle.arrived(true);
 
         assert!(idle.idling());
+    }
+
+    /// And a launch in flight is one the register cannot answer for, so it is
+    /// asked after in its own right.
+    ///
+    /// **What asks is the mover** (ADR-0020, *Transfer*): a Conversation with
+    /// nothing *running* may still be one about to have an agent in its Worktree,
+    /// and a move that ran in that window would carry the work away from under a
+    /// session starting — and away from the write-back that session's ending owes
+    /// the device its account is at home on. From before the Capture is open,
+    /// because that is where the window begins.
+    #[test]
+    fn a_launch_in_flight_is_a_session_on_its_way_up() {
+        let sessions = Sessions::none();
+
+        assert!(
+            !sessions.starting(CONVERSATION),
+            "nothing is starting before a launch has begun",
+        );
+
+        {
+            let launching = sessions.launching(CONVERSATION, store::AgentType::Claude);
+
+            assert!(
+                sessions.starting(CONVERSATION),
+                "a launch is in flight from before it has a Capture to write into",
+            );
+
+            launching.printing_into(31);
+
+            assert!(
+                sessions.starting(CONVERSATION),
+                "and still, with one open and no session on the register yet",
+            );
+        }
+
+        assert!(
+            !sessions.starting(CONVERSATION),
+            "and no launch is in flight once it is over, whatever it left",
+        );
     }
 
     /// A launch names the Event it is writing into from the moment the Capture

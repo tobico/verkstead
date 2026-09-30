@@ -13,11 +13,20 @@
 //! of the backend, the model and the profile's name. What is here is the pairing
 //! vocabulary — the rows, and the string one travels as.
 //!
+//! And two things that reading has no way to say, because they are about the
+//! account rather than about what it runs: which machine the account is on, and
+//! whether anything can be launched under it from here. Every device of a
+//! cluster offers every member's accounts, so a row says the machine where that
+//! is not this one — and a row nothing can be run under says so and stays where
+//! it is rather than quietly going. See [`on`], which is the one rule for all
+//! four places a pairing is read.
+//!
 //! There is no default model anywhere, which is why nothing here invents one: a
 //! profile with no model beside it is not a pairing, and the pickers draw it as
 //! nothing chosen.
 
 import { briefly, reading } from "./agents";
+import { brokenBriefly } from "./broken";
 import type {
   PairingView,
   PickedView,
@@ -60,17 +69,26 @@ export function value(pairing: Pairing): string {
 /// `saved` is the profiles as they stand, which decides whether the profile's
 /// own name is said at all — and a profile nobody named reads as *Default* where
 /// it has to be said. See [`reading`](./agents.ts).
+///
+/// And the machine on the end of it where the account is on another one, which
+/// is what makes a cluster-wide list readable: every device lists every member's
+/// accounts, so two rows called "work" are two machines' and the name alone
+/// would not say which. Nothing at all for this device's own, which is every row
+/// on a Verkstead that is linked to nothing.
 export function label(
   pairing: { profile: ProfileEntry; model: string | null },
   saved: ProfileEntry[] | undefined,
 ): string {
-  return reading(
-    {
-      agent: pairing.profile.account.agent_type,
-      model: pairing.model,
-      profile: pairing.profile.name,
-    },
-    saved,
+  return on(
+    reading(
+      {
+        agent: pairing.profile.account.agent_type,
+        model: pairing.model,
+        profile: pairing.profile.name,
+      },
+      saved,
+    ),
+    pairing.profile,
   );
 }
 
@@ -82,14 +100,46 @@ export function shown(
   pairing: { profile: ProfileEntry; model: string | null },
   saved: ProfileEntry[] | undefined,
 ): string {
-  return briefly(
-    {
-      agent: pairing.profile.account.agent_type,
-      model: pairing.model,
-      profile: pairing.profile.name,
-    },
-    saved,
+  return on(
+    briefly(
+      {
+        agent: pairing.profile.account.agent_type,
+        model: pairing.model,
+        profile: pairing.profile.name,
+      },
+      saved,
+    ),
+    pairing.profile,
   );
+}
+
+/// One reading with the machine the account is at home on after it, where that
+/// is not this device.
+///
+/// Said once here rather than at each of the four places a pairing is read,
+/// because it is one rule: which machine an account sits on is a fact on the
+/// row, and a row that said it in one list and not in the next would be two
+/// answers to *whose account is this*.
+///
+/// A middle dot rather than the em dash the profile's own name hangs off, so
+/// that "Claude Code Fable 5 — Work · the-laptop" reads as an account and then
+/// a machine rather than as a name with a machine in it.
+///
+/// **And why it cannot be run, where it cannot.** A profile nothing can be
+/// launched under stays in every picker — a row saying why is something to go
+/// and put right, and a row quietly missing is a human looking for a profile
+/// they know they saved — so the row has to carry the why, and it carries it
+/// after the machine because that is what most of the findings are about. The
+/// words are [`brokenBriefly`](./broken.ts), which is the short form of the
+/// sentence the card and the chosen row say in full.
+function on(words: string, profile: ProfileEntry): string {
+  return [
+    words,
+    profile.device?.name ?? null,
+    profile.broken === null ? null : brokenBriefly(profile.broken),
+  ]
+    .filter((part) => part !== null)
+    .join(" · ");
 }
 
 /// What is chosen now, as [`value`] would have written it.

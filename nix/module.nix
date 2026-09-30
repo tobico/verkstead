@@ -34,6 +34,25 @@ let
   # is: systemd creates it and hands it over. Anywhere else it is the human's,
   # and something that already exists.
   homeIsOurs = lib.hasPrefix "${stateDir}/" "${cfg.home}";
+
+  # The port out of `peerListen`, which is the whole of what the firewall rule
+  # below is made of: the address half says which interfaces the server binds
+  # and means nothing to a firewall, and moving the listener has to move the
+  # rule with it rather than leaving 8423 open onto nothing.
+  #
+  # Split from the right, so that an IPv6 address written `[::]:8423` gives up
+  # its port rather than its first colon.
+  peerPort = lib.toInt (lib.last (lib.splitString ":" cfg.peerListen));
+
+  # And the port mDNS is spoken on, which is nobody's to choose: RFC 6762 says
+  # 5353, so this is a constant rather than an option — a discovery on the port
+  # next door would be heard by nothing.
+  #
+  # The other half of the rule below. Verkstead advertises itself there so that
+  # a Verkstead on the same LAN can find it without anybody typing an address,
+  # and a host that firewalled the multicast would be one that advertised into a
+  # wall.
+  mdnsPort = 5353;
 in
 
 {
@@ -43,7 +62,9 @@ in
         Whether to run the Verkstead server as a system service, with the CLI on
         every user's `PATH`.
 
-        The server binds the loopback interface and speaks plain HTTP.
+        The workbench listener binds the loopback interface and speaks plain
+        HTTP — the peer listener beside it is another matter, and has
+        {option}`peerListen` and {option}`openFirewall` below to itself.
         Reaching the web UI from a phone means HTTPS, which is
         `tailscale serve --bg 8422`'s job in front of it — and that is the
         **Remote access** section of the workbench settings rather than a
@@ -90,6 +111,86 @@ in
 
         The CLI's own default is `http://127.0.0.1:8422`, so a host that changes
         the port here has to set `VERKSTEAD_SERVER` for the agents alongside it.
+      '';
+    };
+
+    peerListen = lib.mkOption {
+      type = lib.types.str;
+      default = "0.0.0.0:8423";
+      example = "[::]:8423";
+      description = ''
+        Address and port the peer listener binds, as `--peer-listen` — the
+        second listener, and the one other devices dial.
+
+        Every interface by default, where {option}`listen` above is the
+        loopback: the device calling this one may be on the LAN or on the
+        tailnet, and neither of those is the loopback. What stands in front of
+        it is not the address but the handshake — it presents this device's own
+        certificate, asks the caller for one, and answers nothing but the
+        identity endpoint to a caller this device's cluster does not hold.
+
+        Two Verksteads on one machine want a port each here, as they want a
+        {option}`listen` each: an address somebody else is already on refuses
+        the start rather than coming up with half a server. Moving it moves the
+        firewall rule below with it.
+      '';
+    };
+
+    advertising = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      example = false;
+      description = ''
+        Whether this host says what it is on the LAN, so that another Verkstead
+        on the same one finds it without anybody typing an address.
+
+        What it puts on the wire is an mDNS advertisement of
+        `_verkstead._tcp.local`, carrying this device's id, the machine's
+        hostname, the word for its operating system and the port
+        {option}`peerListen` named — which is the whole of what the other
+        machine needs to reach this one. Turning it off passes
+        `--no-advertising`, and then no other Verkstead can find this host and
+        it is linked only by an address somebody types.
+
+        On, for the reason {option}`openFirewall` below is on: a discovery
+        nothing can hear is a feature that silently does not work, with nothing
+        on either machine saying why. Off is for a LAN that is not the human's
+        alone — a hostname, an operating system and a device id is more than
+        some networks are worth telling.
+
+        It is the advertising half: what it turns off is what other machines
+        hear of this one, and not this one's own listening. Opening the Remote
+        access pane on a host with it off still puts a query for
+        `_verkstead._tcp.local` on the LAN, which says that something here is
+        looking for Verksteads and nothing about what it is.
+      '';
+    };
+
+    openFirewall = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      example = false;
+      description = ''
+        Whether to open {option}`peerListen`'s port on this host's firewall,
+        and UDP 5353 beside it.
+
+        On, because a peer listener nothing can reach is a linking that cannot
+        happen. A NixOS host firewalls by default, so a module that left this
+        shut would ship a feature that silently does not work: the device
+        dialling in would time out, and nothing on either machine would say
+        why.
+
+        5353 is mDNS, which is how the two machines find each other in the
+        first place — see {option}`advertising`. It is opened whether or not
+        this host advertises, because the answers to this host's *own* browsing
+        arrive there too: a host that only listens still has to be able to hear.
+
+        Those two and nothing else. The workbench's own port stays shut — what
+        reaches it from another device is `tailscale serve` on the tailnet
+        rather than anything arriving on this machine's LAN.
+
+        Turn it off on a host that says its open ports somewhere of its own,
+        and open the peer port there instead.
       '';
     };
 
@@ -292,6 +393,27 @@ in
       "--operator=verkstead"
     ];
 
+    # The one port this host has to answer on for another device to reach it.
+    # A rule rather than an instruction in a manual: a NixOS host firewalls by
+    # default, and a linking that times out on a shut port looks from both ends
+    # like a Verkstead that is simply not there.
+    #
+    # A list option, so this is merged with what the host and every other
+    # module say rather than replacing it; `optionals` is what leaves a host
+    # that turned the option off with nothing of ours in that list at all.
+    #
+    # The workbench's own port is not here and is not to be added: what reaches
+    # it from another device is `tailscale serve` on the tailnet, and its socket
+    # speaks plain HTTP to whoever opens it.
+    networking.firewall.allowedTCPPorts = lib.optionals cfg.openFirewall [ peerPort ];
+
+    # And the multicast the two machines find each other over, which is UDP and
+    # is a port of nobody's choosing — see `mdnsPort` above. Opened with the peer
+    # port rather than with `advertising`: what arrives here is an answer to this
+    # host's own browsing as much as a query about its advertisement, so a host
+    # that says nothing about itself and only looks for others still needs it.
+    networking.firewall.allowedUDPPorts = lib.optionals cfg.openFirewall [ mdnsPort ];
+
     users.users.verkstead = {
       isSystemUser = true;
       group = "verkstead";
@@ -359,6 +481,8 @@ in
             "serve"
             "--listen"
             cfg.listen
+            "--peer-listen"
+            cfg.peerListen
             "--data-dir"
             stateDir
             "--build-cache-dir"
@@ -373,6 +497,7 @@ in
             bind
           ]) cfg.sandboxBinds
           ++ lib.optional (!cfg.updateCheck) "--no-update-check"
+          ++ lib.optional (!cfg.advertising) "--no-advertising"
         );
 
         User = "verkstead";

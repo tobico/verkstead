@@ -1,0 +1,6338 @@
+//! **The move itself**: a Conversation pressed onto another device of the
+//! cluster, and what each end holds afterwards (ADR-0020, *Transfer*).
+//!
+//! **Two Verksteads, a real dial and a real session.** `tests/preflight.rs` is
+//! the reading that says whether the press can be made; this is the press, the
+//! wait for the turn to end, and the record crossing the link. So nothing here
+//! is stood in for but the agent: the repositories are repositories, the
+//! session is a real session in a real sandbox, and the Conversation lands on B
+//! through the Peer Listener behind the Member Gate.
+//!
+//! **What stands where claude goes is a shell script that waits at a gate the
+//! test opens**, which is `tests/sessions.rs`'s way of holding a turn open: the
+//! press has to arrive while a session is genuinely part way through one, and
+//! what the press promises is that nothing is cut short.
+//!
+//! **What crosses is the Conversation, its whole record and its work** — the
+//! row first, carrying the Repo the matching settled, the branch, the lifecycle,
+//! the Pairings as B's own Profile ids, the Rank verbatim and the birth key;
+//! then the **slice**, which is the Timeline and everything hanging off it,
+//! every id renumbered as it lands; then the **checkout**, which is the branch
+//! as a bundle and the Worktree's working changes beside it.
+//!
+//! **And the repositories are two ways round.** The tests about the record hold
+//! two repositories made separately, sharing a name and nothing else, which is
+//! the match doing its work; the tests about the git leg hold a clone of A's on
+//! B, which is what a cluster holding one repository actually looks like — a
+//! bundle packed against a history the far end already has is the whole point of
+//! that leg. See `Repositories`.
+//!
+//! **On the machine this suite is about**: the sandbox is bwrap and the
+//! terminal is a real pseudo-terminal, which is what `tests/sessions.rs` and
+//! `tests/accounts.rs` are written for and the reason this file is Unix-only
+//! too.
+#![cfg(unix)]
+
+use std::net::SocketAddr;
+use std::os::unix::fs::PermissionsExt;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
+
+use axum::Router;
+use axum::body::Body;
+use axum::http::header::CONTENT_TYPE;
+use axum::http::{Request, StatusCode};
+use http_body_util::BodyExt;
+use sqlx::SqlitePool;
+use tokio::task::JoinHandle;
+use tower::ServiceExt;
+use verkstead_render::{
+    ConversationEntry, ConversationView, Lifecycle, ProfileEntry, Standing, Started, TimelineEvent,
+};
+use verkstead_schema::Direction;
+use verkstead_server::attachments::Attachments;
+use verkstead_server::build_cache::BuildCache;
+use verkstead_server::device::reading::Reading;
+use verkstead_server::device::{Device, Devices};
+use verkstead_server::handoffs::Handoffs;
+use verkstead_server::nudge::Nudges;
+use verkstead_server::onboarding::Machine;
+use verkstead_server::peer::joining::Joins;
+use verkstead_server::peer::{self, Members};
+use verkstead_server::platform::{self, Environment, Platform};
+use verkstead_server::remote::Tailscale;
+use verkstead_server::sandbox::{Executable, Homes, Reachable, SandboxConfig};
+use verkstead_server::settings::Settings;
+use verkstead_server::skills::Skills;
+use verkstead_server::{
+    Agents, Gh, Pace, Routers, open_database, routers_answering_devices_telling,
+    routers_running_sessions_answering_devices, store,
+};
+use verkstead_store::{Linking, record_member};
+
+/// The device the work is on, where every press is made.
+const A: &str = "aa00bb11cc22dd33ee44ff5566778899";
+
+/// And the device it is moved onto.
+const B: &str = "0011223344556677889900aabbccddee";
+
+/// And a third member of the cluster, which no test here dials: what a tick is
+/// about besides the device the work is moving to.
+const C: &str = "ffeeddccbbaa00998877665544332211";
+
+/// What B is written down as on A: the name the human gave the machine, which is
+/// what the Timeline says the work is going to rather than sixteen bytes of hex.
+const B_MACHINE: &str = "the-laptop";
+const B_OS: &str = "macOS 15.1";
+
+/// The Profiles section, which is where an account is saved and where a mirror
+/// of a member's turns up.
+const PROFILES: &str = "/api/ui/profiles";
+
+/// The sidebar, which is where a **Rank** and a **birth key** are read off a row.
+const SIDEBAR: &str = "/api/ui/conversations";
+
+/// The account the work runs under, and the model it lists.
+const ACCOUNT: &str = "work";
+const MODEL: &str = "claude-opus-5";
+
+/// And the model a **Grok Build** account of the same name lists, for the one test
+/// that runs on the other harness a conversation is carried on from.
+const GROK_MODEL: &str = "grok-4.6";
+
+/// And a **Codex** account's, for the tests that run on the harness Verkstead
+/// cannot name.
+const CODEX_MODEL: &str = "gpt-5-codex";
+
+/// And an **OpenCode** account's, for the tests that run on the harness whose
+/// store is a database rather than a tree. The whole string is what the human
+/// typed on the Profile, provider and all.
+const OPENCODE_MODEL: &str = "opencode/big-pickle";
+
+/// The one database an OpenCode account keeps every session it runs in, said
+/// from the home the account is: opencode's own data directory under it, and
+/// inside that the name the sandbox pinned.
+const OPENCODE_STORE: &str = ".local/share/opencode/opencode.db";
+
+/// What every repository in this suite is called. Neither end has an origin, so
+/// the match is by name — which is the ordinary case for two clones nobody has
+/// pushed anywhere.
+const REPOSITORY: &str = "verkstead";
+
+/// And the **Companion Repo** beside it, where a Conversation's work is in more
+/// than one repository.
+const COMPANION: &str = "askance";
+
+/// The Brief every Conversation here is started from.
+const BRIEF: &str = "# Rate limiting\n\nThe API has none.\n";
+
+/// A `gh` that answers nothing: nothing here reaches GitHub, and the real one
+/// would need an account.
+const NO_GITHUB: &str = "exit 1";
+
+/// How long one address has to answer here, rather than the two seconds a
+/// running server gives one.
+const PATIENCE: Duration = Duration::from_millis(300);
+
+/// How long a test waits for something two hops away: a session starting in a
+/// real sandbox, a mirror written off a member's list, a record crossing a link.
+const WAITING: Duration = Duration::from_secs(30);
+
+/// And how often it looks while it waits.
+const LOOKING: Duration = Duration::from_millis(50);
+
+/// Where the server these sessions belong to would be listening. Nothing dials
+/// it: a router driven by `oneshot` has no socket, and what this is for is the
+/// `VERKSTEAD_SERVER` a session inside is told.
+const LISTENING: SocketAddr =
+    SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST), 8422);
+
+/// One Verkstead: its store, its identity, its Peer Listener up behind the
+/// Member Gate, and the router its own browser presses.
+struct Verkstead {
+    device: Device,
+    pool: SqlitePool,
+    nudges: Nudges,
+    cluster: Devices,
+    workbench: Router,
+    address: SocketAddr,
+
+    /// The listener, held so that a test can switch this machine off part way
+    /// through — which is what a move that fails between the press and the
+    /// crossing is made of.
+    listening: JoinHandle<anyhow::Result<()>>,
+
+    /// The Data Directory: the identity, the database, every session's own
+    /// profile and the attached files are in it. Held for the length of the test
+    /// so that none of it is swept out from under a running session — and read
+    /// for the one thing a test looks at directly, which is where an Attachment
+    /// landed.
+    _dir: tempfile::TempDir,
+
+    /// And what `~` is for a session on this device, held for the same reason.
+    _home: tempfile::TempDir,
+
+    /// And where this device's repositories and accounts are, away from the Data
+    /// Directory so that nothing confuses a repository with a Worktree.
+    elsewhere: tempfile::TempDir,
+}
+
+impl Verkstead {
+    /// A Verkstead equipped the way a served one is: its sessions run on `stub`,
+    /// with `spill` bound into the sandbox so one can see the gate the test
+    /// opens.
+    ///
+    /// **Both machines, though only A ever runs anything.** Nothing starts a
+    /// session on the far end in this stage — that is Resume, and it is stage
+    /// 07's — but a device taking work in needs what a served one has: a Data
+    /// Directory, which is where an arriving Conversation's attached files land.
+    async fn running(id: &str, stub: &str, spill: &Path) -> Verkstead {
+        Verkstead::standing(id, Some(stub), spill, Pace::default()).await
+    }
+
+    /// The same at `pace`, for the one test that needs a session spoken to
+    /// sooner than a server would.
+    async fn running_at(id: &str, stub: &str, spill: &Path, pace: Pace) -> Verkstead {
+        Verkstead::standing(id, Some(stub), spill, pace).await
+    }
+
+    async fn standing(id: &str, stub: Option<&str>, spill: &Path, pace: Pace) -> Verkstead {
+        let dir = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let elsewhere = tempfile::tempdir().unwrap();
+
+        // Who a session commits as, which every sandbox is configured out of.
+        std::fs::write(
+            dir.path().join("config.yaml"),
+            "git_author:\n  name: Verkstead Test\n  email: test@verkstead.invalid\n",
+        )
+        .unwrap();
+
+        let pool = open_database(&dir.path().join("verkstead.db"))
+            .await
+            .unwrap();
+
+        let device = Device::stated(dir.path(), id).unwrap();
+        let members = Members::recorded(pool.clone());
+        let nudges = Nudges::new();
+
+        let listener = peer::Listener::bound("127.0.0.1:0".parse().unwrap(), &device)
+            .expect("the loopback on a port the machine picked is free");
+        let address = listener.address();
+
+        let reading = Reading::advertising(
+            no_tailscale(),
+            Platform::Linux,
+            None,
+            vec![format!("127.0.0.1:{}", address.port())],
+        );
+
+        let cluster = Devices::of(
+            device.clone(),
+            reading.clone(),
+            members.clone(),
+            Joins::none(),
+        )
+        .waiting(PATIENCE);
+
+        let Routers {
+            workbench,
+            over_the_link,
+        } = match stub {
+            None => routers_answering_devices_telling(
+                pool.clone(),
+                cluster.clone(),
+                nudges.clone(),
+                probing(dir.path()),
+            ),
+
+            Some(stub) => routers_running_sessions_answering_devices(
+                pool.clone(),
+                dir.path().to_owned(),
+                agents(stub, home.path(), dir.path(), spill).at_pace(pace),
+                gh_stub(NO_GITHUB),
+                cluster.clone(),
+                nudges.clone(),
+                probing(dir.path()),
+            ),
+        };
+
+        let listening = tokio::spawn(listener.serving(peer::router(
+            device.clone(),
+            reading,
+            members,
+            Joins::none(),
+            nudges.clone(),
+            over_the_link,
+        )));
+
+        Verkstead {
+            device,
+            pool,
+            nudges,
+            cluster,
+            workbench,
+            address,
+            listening,
+            _dir: dir,
+            _home: home,
+            elsewhere,
+        }
+    }
+
+    /// Hold a Nudge stream to every member, which is what a running server
+    /// spawns at the start: it is what refreshes this device's mirrors of a
+    /// member's Profiles and what keeps its merged sidebar fresh.
+    fn holding(&self) -> Holding {
+        let cluster = self.cluster.clone();
+        let nudges = self.nudges.clone();
+
+        Holding(tokio::spawn(async move {
+            cluster.stay_fresh(nudges).await;
+        }))
+    }
+
+    /// The one address it advertises.
+    fn at(&self) -> String {
+        format!("127.0.0.1:{}", self.address.port())
+    }
+
+    /// The machine switched off: the listener stops answering, and every dial at
+    /// it from here on is a device that is not there.
+    fn stops_answering(&self) {
+        self.listening.abort();
+    }
+
+    /// Write `other` down as one of this device's members.
+    async fn linked_to(&self, other: &Device, name: &str, os: &str, addresses: Vec<String>) {
+        record_member(
+            &self.pool,
+            &Linking {
+                device: other.id().to_owned(),
+                name: name.to_owned(),
+                os: os.to_owned(),
+                addresses,
+                fingerprint: other.fingerprint().to_owned(),
+            },
+        )
+        .await
+        .unwrap();
+    }
+
+    /// A repository of this device's own, really made and really registered.
+    ///
+    /// Two of these, one per device, are what the match settles between: neither
+    /// has an origin, so what says they are one repository is the directory's own
+    /// name.
+    async fn repo(&self) -> PathBuf {
+        self.repo_called(REPOSITORY).await
+    }
+
+    /// The same again under a name of its own, which is what a **Companion Repo**
+    /// is: a second registered repository beside the Conversation's own.
+    async fn repo_called(&self, name: &str) -> PathBuf {
+        let path = repository(self.elsewhere.path().join(name));
+
+        let registered = press(
+            &self.workbench,
+            "/api/ui/repos",
+            Some(&serde_json::json!({ "path": path }).to_string()),
+        )
+        .await;
+
+        assert!(registered.contains("Added"), "registering {name}");
+
+        path
+    }
+
+    /// The same repository again as a **clone** of `from`, registered here.
+    ///
+    /// Which is the ordinary shape of a cluster: two machines holding the same
+    /// repository, with history in common. What that history is for is the
+    /// bundle — a branch packed against the tips the far end already holds is
+    /// the branch and not the history under it.
+    ///
+    /// **And the clone's `origin` is taken off it**, because a clone has one and
+    /// the machine it was cloned from has none: a Repo with an origin never
+    /// matches one without, so the two would be two repositories. What is left
+    /// is two clones nobody has pushed anywhere, matched by name — which is
+    /// what `Self::repo` sets up on both sides, with the history added.
+    async fn cloned_from(&self, from: &Path) -> PathBuf {
+        self.cloned_from_called(from, REPOSITORY).await
+    }
+
+    /// And a clone under a name of its own, for a **Companion Repo**: a
+    /// Companion's branch is bundled against what the far end holds of *that*
+    /// repository, so the two ends need a history in common there too.
+    async fn cloned_from_called(&self, from: &Path, name: &str) -> PathBuf {
+        let path = self.elsewhere.path().join(name);
+
+        git(
+            self.elsewhere.path(),
+            &["clone", &from.display().to_string(), name],
+        );
+        git(&path, &["remote", "remove", "origin"]);
+        git(&path, &["config", "user.email", "test@verkstead.invalid"]);
+        git(&path, &["config", "user.name", "Verkstead Test"]);
+
+        let registered = press(
+            &self.workbench,
+            "/api/ui/repos",
+            Some(&serde_json::json!({ "path": path }).to_string()),
+        )
+        .await;
+
+        assert!(registered.contains("Added"), "registering the clone");
+
+        path
+    }
+
+    /// Where that Conversation's work is checked out, as this device's own
+    /// record has it.
+    async fn worktree(&self, conversation: i64) -> PathBuf {
+        store::load_conversation(&self.pool, conversation)
+            .await
+            .unwrap()
+            .expect("the Conversation is on this device")
+            .worktree
+            .expect("work past drafting has a Worktree")
+    }
+
+    /// And where its **Companion** in the Repo called `name` is checked out, as
+    /// this device's own record has it.
+    async fn companion_worktree(&self, conversation: i64, name: &str) -> PathBuf {
+        self.companion_row(conversation, name)
+            .await
+            .worktree
+            .unwrap_or_else(|| panic!("the companion {name} has a checkout"))
+    }
+
+    /// The Companion row itself, which is what says the mode a sandbox would bind
+    /// its directory under.
+    async fn companion_row(&self, conversation: i64, name: &str) -> store::Companion {
+        store::companions(&self.pool, conversation)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|companion| companion.repo.name == name)
+            .unwrap_or_else(|| panic!("{name} is a companion of this Conversation"))
+    }
+
+    /// And where it is on this machine, which is where its own `git config` is.
+    fn repo_path(&self, name: &str) -> PathBuf {
+        self.elsewhere.path().join(name)
+    }
+
+    /// The id this device's registry gave the Repo called `name`.
+    async fn repo_row(&self, name: &str) -> i64 {
+        let repos: Vec<verkstead_render::RepoEntry> =
+            reading(&self.workbench, "/api/ui/repos").await;
+
+        repos
+            .iter()
+            .find(|repo| repo.name == name)
+            .unwrap_or_else(|| panic!("{name} is registered here: {repos:#?}"))
+            .id
+    }
+
+    /// An account of this device's own, really on disk, with a Profile saved over
+    /// it the way the form saves one.
+    async fn account(&self) -> i64 {
+        self.account_keeping(true).await
+    }
+
+    /// The same with the **memory switch** put where `memory` says, which is what
+    /// decides whether a session under it is given the account's store or one of
+    /// its own and empty — and so, across a move, whether there is anything of the
+    /// harness's record on the far end to carry a conversation on from.
+    async fn account_keeping(&self, memory: bool) -> i64 {
+        let under = self.elsewhere.path().join(ACCOUNT);
+        let claude_dir = under.join(".claude");
+        let config_file = under.join(".claude.json");
+
+        std::fs::create_dir_all(&claude_dir).unwrap();
+        std::fs::write(&config_file, "{}\n").unwrap();
+        std::fs::write(
+            claude_dir.join(".credentials.json"),
+            "{\"claudeAiOauth\":{\"accessToken\":\"sk-ant-oat01-the-desk\"}}",
+        )
+        .unwrap();
+
+        let said = press(
+            &self.workbench,
+            PROFILES,
+            Some(
+                &serde_json::json!({
+                    "name": ACCOUNT,
+                    "account": {
+                        "agent_type": "Claude",
+                        "claude_dir": claude_dir,
+                        "config_file": config_file,
+                    },
+                    "models": [MODEL],
+                    "memory": memory,
+                })
+                .to_string(),
+            ),
+        )
+        .await;
+
+        assert_eq!(said, "\"Saved\"", "saving the account");
+
+        self.profile_called(ACCOUNT).await.id
+    }
+
+    /// And a **Grok Build** account of this device's own, saved the same way over
+    /// the one directory that harness keeps an account in.
+    ///
+    /// Here because Grok is the second harness a conversation is carried on from,
+    /// and the one whose store is keyed by the directory a session ran in: what it
+    /// takes to resume one is a store put right rather than a store that crossed,
+    /// so a test about it has to run on a Grok Profile rather than on a Claude one
+    /// under another name.
+    async fn grok_account(&self) -> i64 {
+        let home = self.elsewhere.path().join(ACCOUNT).join(".grok");
+
+        std::fs::create_dir_all(home.join("sessions")).unwrap();
+        std::fs::write(home.join("auth.json"), "{\"access\":\"the-desk\"}").unwrap();
+
+        let said = press(
+            &self.workbench,
+            PROFILES,
+            Some(
+                &serde_json::json!({
+                    "name": ACCOUNT,
+                    "account": { "agent_type": "Grok", "home": home },
+                    "models": [GROK_MODEL],
+                    "memory": true,
+                })
+                .to_string(),
+            ),
+        )
+        .await;
+
+        assert_eq!(said, "\"Saved\"", "saving the Grok account");
+
+        self.profile_called(ACCOUNT).await.id
+    }
+
+    /// And a **Codex** account of this device's own, saved over the one directory
+    /// that harness keeps an account in.
+    ///
+    /// Here because Codex is the harness Verkstead cannot name: it takes no session
+    /// id at launch, so what a carried conversation is resumed by is an id read out
+    /// of the log the session wrote. Which is a thing only a Codex Profile can be
+    /// tested on.
+    async fn codex_account(&self) -> i64 {
+        let home = self.elsewhere.path().join(ACCOUNT).join(".codex");
+
+        std::fs::create_dir_all(home.join("sessions")).unwrap();
+        std::fs::write(home.join("auth.json"), "{\"access\":\"the-desk\"}").unwrap();
+
+        let said = press(
+            &self.workbench,
+            PROFILES,
+            Some(
+                &serde_json::json!({
+                    "name": ACCOUNT,
+                    "account": { "agent_type": "Codex", "home": home },
+                    "models": [CODEX_MODEL],
+                    "memory": true,
+                })
+                .to_string(),
+            ),
+        )
+        .await;
+
+        assert_eq!(said, "\"Saved\"", "saving the Codex account");
+
+        self.profile_called(ACCOUNT).await.id
+    }
+
+    /// And an **OpenCode** account of this device's own, saved over the home
+    /// opencode resolves its two XDG directories inside.
+    ///
+    /// Here because OpenCode is the harness whose store is one database rather
+    /// than a tree: what it takes to resume one is a row brought onto this
+    /// device's Worktree inside a file that crossed whole, which is a thing only
+    /// an OpenCode Profile can be tested on.
+    async fn opencode_account(&self) -> i64 {
+        let home = self.elsewhere.path().join(ACCOUNT).join("opencode");
+
+        // The two directories that *are* the account, which is what a Profile of
+        // this type is judged by — a home that has never had opencode run in it
+        // has neither.
+        std::fs::create_dir_all(home.join(".config/opencode")).unwrap();
+        std::fs::create_dir_all(home.join(".local/share/opencode")).unwrap();
+        std::fs::write(
+            home.join(".local/share/opencode/auth.json"),
+            "{\"access\":\"the-desk\"}",
+        )
+        .unwrap();
+
+        let said = press(
+            &self.workbench,
+            PROFILES,
+            Some(
+                &serde_json::json!({
+                    "name": ACCOUNT,
+                    "account": { "agent_type": "OpenCode", "home": home },
+                    "models": [OPENCODE_MODEL],
+                    "memory": true,
+                })
+                .to_string(),
+            ),
+        )
+        .await;
+
+        assert_eq!(said, "\"Saved\"", "saving the OpenCode account");
+
+        self.profile_called(ACCOUNT).await.id
+    }
+
+    /// Where this device's Grok account keeps its sessions, which is the store the
+    /// relocation files a carried one into.
+    fn grok_sessions(&self) -> PathBuf {
+        self.elsewhere
+            .path()
+            .join(ACCOUNT)
+            .join(".grok")
+            .join("sessions")
+    }
+
+    /// And where this device's own OpenCode account keeps the one database every
+    /// session it runs is written into.
+    fn opencode_at_home(&self) -> PathBuf {
+        self.elsewhere
+            .path()
+            .join(ACCOUNT)
+            .join("opencode")
+            .join(OPENCODE_STORE)
+    }
+
+    /// And where the **mirror** of a member's OpenCode account keeps it on this
+    /// device, which is where the memory sync lands a carried store: a home of
+    /// this device's own per Profile, under the Data Directory.
+    ///
+    /// Which is the one path in this suite read off the server's own arithmetic
+    /// rather than off a directory the test made — because the store a resume is
+    /// resolved against is the one that arrived, and nothing about the arrival is
+    /// the test's to place.
+    fn opencode_mirrored(&self, profile_id: i64) -> PathBuf {
+        self._dir
+            .path()
+            .join("accounts")
+            .join(profile_id.to_string())
+            .join(OPENCODE_STORE)
+    }
+
+    /// The row of this device's Profiles with that name, once there is one —
+    /// which on B is the **mirror** its refresher writes off A's list.
+    async fn profile_called(&self, name: &str) -> ProfileEntry {
+        let mut last = Vec::new();
+
+        let waited = tokio::time::timeout(WAITING, async {
+            loop {
+                last = reading(&self.workbench, PROFILES).await;
+
+                if let Some(row) = last
+                    .iter()
+                    .find(|row: &&ProfileEntry| row.name.as_deref() == Some(name))
+                {
+                    return row.clone();
+                }
+
+                tokio::time::sleep(LOOKING).await;
+            }
+        })
+        .await;
+
+        waited.unwrap_or_else(|_| panic!("no Profile called {name} was ever listed: {last:#?}"))
+    }
+
+    /// A Conversation of this device's, written the way the composer writes one
+    /// and left a draft — which is where a file is put on one: a Conversation
+    /// takes attachments while it is drafting and no longer.
+    ///
+    /// What starts it is [`Self::grills`], one press along.
+    async fn drafting_under(&self, profile: i64) -> i64 {
+        self.drafting_under_on(profile, MODEL).await
+    }
+
+    /// The same over a Profile whose models are another harness's, which is the one
+    /// thing a Pairing has to agree with the account about.
+    async fn drafting_under_on(&self, profile: i64, model: &str) -> i64 {
+        let repos: Vec<verkstead_render::RepoEntry> =
+            reading(&self.workbench, "/api/ui/repos").await;
+
+        let started = press(
+            &self.workbench,
+            SIDEBAR,
+            Some(&serde_json::json!({ "repo_id": repos[0].id }).to_string()),
+        )
+        .await;
+
+        let Started::Started {
+            id: conversation, ..
+        } = serde_json::from_str(&started).unwrap()
+        else {
+            panic!("the Conversation was not started: {started}")
+        };
+
+        let pairing = serde_json::json!({ "profile_id": profile, "model": model });
+        let role = serde_json::json!({ "pairing": pairing });
+
+        for (path, saying) in [
+            ("grilling-pairing", &pairing),
+            ("implementation-pairing", &pairing),
+            ("review-pairing", &role),
+        ] {
+            let said = press(
+                &self.workbench,
+                &format!("/api/ui/conversations/{conversation}/{path}"),
+                Some(&saying.to_string()),
+            )
+            .await;
+
+            assert_eq!(said, "\"Chosen\"", "picking {path}");
+        }
+
+        let saved = press(
+            &self.workbench,
+            &format!("/api/ui/conversations/{conversation}/brief"),
+            Some(&serde_json::json!({ "markdown": BRIEF }).to_string()),
+        )
+        .await;
+
+        assert_eq!(saved, "\"Saved\"", "writing the Brief");
+
+        conversation
+    }
+
+    /// And the press that starts it, which is where the draft stops being one.
+    async fn grills(&self, conversation: i64) {
+        let grilling = press(
+            &self.workbench,
+            &format!("/api/ui/conversations/{conversation}/grill"),
+            None,
+        )
+        .await;
+
+        assert_eq!(grilling, "\"Started\"", "starting the grilling");
+    }
+
+    /// Put a file on a drafting Conversation, the way the paperclip does, and
+    /// answer with the id the record gave it.
+    async fn attaches(&self, conversation: i64, name: &str, bytes: &[u8]) -> i64 {
+        let attached = self
+            .workbench
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!(
+                        "/api/ui/conversations/{conversation}/attachments/{name}"
+                    ))
+                    .body(Body::from(bytes.to_vec()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let status = attached.status();
+        let body = attached.into_body().collect().await.unwrap().to_bytes();
+        let said = String::from_utf8_lossy(&body).into_owned();
+
+        assert_eq!(status, StatusCode::OK, "attaching {name}: {said}");
+        assert!(said.contains("Attached"), "attaching {name}: {said}");
+
+        self.view(conversation)
+            .await
+            .attachments
+            .iter()
+            .find(|attachment| attachment.name == name)
+            .expect("the file is on the record")
+            .id
+    }
+
+    /// The bytes of one of its files, read the way the browser downloads one.
+    async fn attached_bytes(&self, conversation: i64, attachment: i64) -> Vec<u8> {
+        let read = self
+            .workbench
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!(
+                        "/api/ui/conversations/{conversation}/attachments/{attachment}/bytes"
+                    ))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            read.status(),
+            StatusCode::OK,
+            "reading attachment {attachment}"
+        );
+
+        read.into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes()
+            .to_vec()
+    }
+
+    /// Ask a Question Set the way a session's CLI does: to the base URL its
+    /// sandbox was given, which is this Conversation's own.
+    async fn asks(&self, conversation: i64, yaml: &str) -> i64 {
+        self.asking(conversation, yaml, false).await
+    }
+
+    /// And a **Deferred Ask**: the same Set, with nothing waiting on the Answer.
+    ///
+    /// Which is the one kind that survives its session. A relaunch locks every
+    /// Set the gone session was idling on — the human would be answering into
+    /// nothing — and leaves a Deferred Ask exactly where it stands, nobody having
+    /// been behind it to begin with. See `server::sets::Open`.
+    async fn defers(&self, conversation: i64, yaml: &str) -> i64 {
+        self.asking(conversation, yaml, true).await
+    }
+
+    /// Both, and the query the CLI spells the difference with.
+    async fn asking(&self, conversation: i64, yaml: &str, deferred: bool) -> i64 {
+        let query = if deferred { "?deferred=true" } else { "" };
+
+        let asked = self
+            .workbench
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/conversations/{conversation}/api/v1/sets{query}"))
+                    .header(CONTENT_TYPE, "application/yaml")
+                    .body(Body::from(yaml.to_owned()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let status = asked.status();
+        let body = asked.into_body().collect().await.unwrap().to_bytes();
+        let said = String::from_utf8_lossy(&body).into_owned();
+
+        assert_eq!(status, StatusCode::CREATED, "asking a Set: {said}");
+
+        let created: verkstead_schema::SetCreated = serde_saphyr::from_str(&said).unwrap();
+
+        created.id
+    }
+
+    /// Answer one of its Question Sets the way the human's own device does, over
+    /// the endpoint a session's CLI is waiting on.
+    ///
+    /// What it is for is the **digest**: a grilling started again is primed with
+    /// what has already been settled, and nothing is settled until a Set has an
+    /// Answer.
+    async fn answers(&self, conversation: i64, set: i64, yaml: &str) {
+        let answered = self
+            .workbench
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!(
+                        "/conversations/{conversation}/api/v1/sets/{set}/response"
+                    ))
+                    .header(CONTENT_TYPE, "application/yaml")
+                    .body(Body::from(yaml.to_owned()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let status = answered.status();
+        let bytes = answered.into_body().collect().await.unwrap().to_bytes();
+        let said = String::from_utf8_lossy(&bytes).into_owned();
+
+        assert!(status.is_success(), "answering Set {set}: {status} {said}");
+    }
+
+    /// Wait until that Conversation's Timeline reads Set `set` as **locked
+    /// unanswered**, and say whether it ever did.
+    ///
+    /// **Read rather than pressed, which is the whole point of it.** The other way
+    /// to find out is to try to answer and be refused — and trying to answer a Set
+    /// that is still open *answers* it, which settles the very question this is
+    /// asking. Verkstead's locking of a Set whose reader has gone comes a launch
+    /// after the arrival now, because whether that reader is coming back on this
+    /// machine is not settled until the launch has run the memory sync (see
+    /// `server::sessions::continuing`), so a poll that pressed would win that race
+    /// and prove nothing.
+    async fn locked(&self, conversation: i64, set: i64) -> bool {
+        let deadline = Instant::now() + WAITING;
+
+        loop {
+            let standing = self
+                .view(conversation)
+                .await
+                .timeline
+                .into_iter()
+                .find_map(|event| match event {
+                    TimelineEvent::QuestionSet(asked) if asked.set_id == set => {
+                        Some(asked.standing)
+                    }
+                    _ => None,
+                });
+
+            if matches!(standing, Some(Standing::LockedUnanswered(_))) {
+                return true;
+            }
+
+            if Instant::now() >= deadline {
+                return false;
+            }
+
+            tokio::time::sleep(LOOKING).await;
+        }
+    }
+
+    /// Come back for a Set's Answers the way `verkstead answers` does: one fetch
+    /// over the endpoint the CLI fetches on, **holding for nothing**.
+    ///
+    /// Which is the line a resumed session is given for every Set it was idling
+    /// on: the wait it had was a command running on the machine the work came
+    /// from, and it died with the process. `hold=0` is the whole of what parts a
+    /// fetch from a wait, and it is what `cli::answers` sends — a Set nobody has
+    /// answered yet is *nothing yet* rather than something to idle on. Left off,
+    /// the same route holds the connection open for half a minute, which is the
+    /// blocking ask.
+    async fn fetches(&self, conversation: i64, set: i64) -> (StatusCode, String) {
+        let fetched = self
+            .workbench
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!(
+                        "/conversations/{conversation}/api/v1/sets/{set}/response?hold=0"
+                    ))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let status = fetched.status();
+        let bytes = fetched.into_body().collect().await.unwrap().to_bytes();
+
+        (status, String::from_utf8_lossy(&bytes).into_owned())
+    }
+
+    /// The same over the raw status, for the times a refusal is the answer being
+    /// asked after.
+    async fn answering(&self, conversation: i64, set: i64, yaml: &str) -> StatusCode {
+        self.workbench
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!(
+                        "/conversations/{conversation}/api/v1/sets/{set}/response"
+                    ))
+                    .header(CONTENT_TYPE, "application/yaml")
+                    .body(Body::from(yaml.to_owned()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+            .status()
+    }
+
+    /// running.
+    ///
+    /// The press that writes the stop rather than asking for one — an ordinary
+    /// Stop is a request the next launch answers, and a grilling seen out has no
+    /// next launch to answer it. What it is here for is the arrival: a stop
+    /// somebody *decided on* crosses with the record and is left exactly where it
+    /// stands over there, so nothing is started on the far end and nothing locks
+    /// what the human has still to answer.
+    async fn stops_at_once(&self, conversation: i64) {
+        let said = press(
+            &self.workbench,
+            &format!("/api/ui/conversations/{conversation}/force-stop"),
+            None,
+        )
+        .await;
+
+        assert_eq!(said, "\"Stopped\"", "pressing Force stop");
+    }
+
+    /// Press *Transfer to…* for `device`, and answer with what it said.
+    async fn transfers(&self, conversation: i64, device: &str) -> String {
+        press(
+            &self.workbench,
+            &format!("/api/ui/conversations/{conversation}/transfer/{device}"),
+            None,
+        )
+        .await
+    }
+
+    /// Tick `device` under *May be transferred to*, or untick it, and answer
+    /// with what the press said.
+    async fn permits(&self, conversation: i64, device: &str, permit: bool) -> String {
+        let untick = if permit { "" } else { "/remove" };
+
+        press(
+            &self.workbench,
+            &format!("/api/ui/conversations/{conversation}/permitted/{device}{untick}"),
+            None,
+        )
+        .await
+    }
+
+    /// Run `verkstead transfer <device>` from the session running in that
+    /// Conversation, and answer with the status and what the server said.
+    ///
+    /// Made the way the CLI makes it, over the agent API, for the reason every
+    /// stand-in for a verb here is: the router is driven by `oneshot` and has no
+    /// socket a session inside a sandbox could reach. The CLI's own end of it is
+    /// `crates/cli/tests/transfer.rs`.
+    async fn calls(&self, conversation: i64, device: &str) -> (StatusCode, String) {
+        let answered = self
+            .workbench
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/conversations/{conversation}/api/v1/transfer"))
+                    .body(Body::from(device.to_owned()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let status = answered.status();
+        let bytes = answered.into_body().collect().await.unwrap().to_bytes();
+
+        (status, String::from_utf8_lossy(&bytes).into_owned())
+    }
+
+    /// The same, refused: a 409, and the reason, which must say `saying` — and
+    /// nothing written down, so the Conversation is going nowhere.
+    async fn refused(&self, conversation: i64, device: &str, saying: &[&str]) {
+        let (status, said) = self.calls(conversation, device).await;
+
+        assert_eq!(
+            status,
+            StatusCode::CONFLICT,
+            "`verkstead transfer {device}` is refused: {said}",
+        );
+
+        for words in saying {
+            assert!(
+                said.contains(words),
+                "`verkstead transfer {device}` says {words:?}: {said}",
+            );
+        }
+
+        assert_eq!(
+            store::transfer_asked(&self.pool, conversation)
+                .await
+                .unwrap(),
+            None,
+            "and a refused call leaves no request behind: {said}",
+        );
+    }
+
+    /// One of its Conversations as its own browser reads it.
+    async fn view(&self, conversation: i64) -> ConversationView {
+        reading(
+            &self.workbench,
+            &format!("/api/ui/conversations/{conversation}"),
+        )
+        .await
+    }
+
+    /// The same, polled until it says what the test is waiting for — or a panic
+    /// saying what it says instead.
+    async fn view_saying(
+        &self,
+        conversation: i64,
+        what: impl Fn(&ConversationView) -> bool,
+    ) -> ConversationView {
+        let deadline = Instant::now() + WAITING;
+
+        loop {
+            let drawn = self.view(conversation).await;
+
+            if what(&drawn) {
+                return drawn;
+            }
+
+            assert!(
+                Instant::now() < deadline,
+                "Conversation {conversation} never said it. It says: \
+                 state {:?}, working {}, transferring {:?}, transferred {:?}, stopped {:?}",
+                drawn.state,
+                drawn.working,
+                drawn.transferring,
+                drawn.transferred,
+                drawn.blocked_on,
+            );
+
+            tokio::time::sleep(LOOKING).await;
+        }
+    }
+
+    /// The Conversations this device holds rows for of its own, which is a
+    /// different question from its sidebar: that one is the cluster's merged
+    /// list, and what is asked here is whether anything was written *here*.
+    async fn own_rows(&self) -> Vec<verkstead_store::ConversationRow> {
+        store::conversations(&self.pool, true).await.unwrap()
+    }
+
+    /// The sidebar as this device's own browser reads it, which is where a Rank
+    /// and a birth key ride out.
+    async fn sidebar(&self) -> Vec<ConversationEntry> {
+        reading(&self.workbench, SIDEBAR).await
+    }
+
+    /// The same, polled until it says it — a merged list being two hops from
+    /// whatever changed on the far end.
+    async fn sidebar_saying(
+        &self,
+        what: impl Fn(&[ConversationEntry]) -> bool,
+    ) -> Vec<ConversationEntry> {
+        let mut last = Vec::new();
+
+        let waited = tokio::time::timeout(WAITING, async {
+            loop {
+                last = self.sidebar().await;
+
+                if what(&last) {
+                    return last.clone();
+                }
+
+                tokio::time::sleep(LOOKING).await;
+            }
+        })
+        .await;
+
+        waited.unwrap_or_else(|_| panic!("the sidebar never said it: {last:#?}"))
+    }
+
+    /// Wait until a session is running on that Conversation and has printed
+    /// `saying`, which is what says a turn is genuinely in flight.
+    async fn printed(&self, conversation: i64, saying: &str) {
+        let deadline = Instant::now() + WAITING;
+        let mut said = String::new();
+
+        loop {
+            if let Some(text) = self.capture(conversation).await {
+                said = text;
+            }
+
+            if said.contains(saying) {
+                return;
+            }
+
+            assert!(
+                Instant::now() < deadline,
+                "the session never printed {saying:?}. It printed: {said:?}",
+            );
+
+            tokio::time::sleep(LOOKING).await;
+        }
+    }
+
+    /// The whole of what the session on that Conversation has said, as the
+    /// details pane fetches it.
+    async fn capture(&self, conversation: i64) -> Option<String> {
+        let drawn = self.view(conversation).await;
+
+        let event = drawn.timeline.iter().find_map(|event| match event {
+            TimelineEvent::AgentOutput(output) => Some(output.id),
+            _ => None,
+        })?;
+
+        let capture: verkstead_render::Capture = reading(
+            &self.workbench,
+            &format!("/api/ui/conversations/{conversation}/capture/{event}"),
+        )
+        .await;
+
+        Some(capture.text)
+    }
+
+    /// Every Question Set on its Timeline, by the id **this** device numbered
+    /// each, in the order they were asked.
+    ///
+    /// Which is the whole point of reading them off the Timeline rather than
+    /// remembering what they were called on the machine they came from: every
+    /// Verkstead issues its own, and a wait is opened on the one it has here.
+    async fn sets_on(&self, conversation: i64) -> Vec<i64> {
+        self.view(conversation)
+            .await
+            .timeline
+            .iter()
+            .filter_map(|event| match event {
+                TimelineEvent::QuestionSet(asked) => Some(asked.set_id),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Where this device keeps that Conversation's attached files, which is the
+    /// directory its own sessions are given — see the server's `attachments`.
+    /// Where this device keeps that Conversation's attached files, which is the
+    /// directory its own sessions are given — see the server's `attachments`.
+    fn attachments_directory(&self, conversation: i64) -> PathBuf {
+        self._dir
+            .path()
+            .join("attachments")
+            .join(conversation.to_string())
+    }
+
+    /// Every session on that Conversation's Timeline, by the Event each printed
+    /// into.
+    ///
+    /// In Timeline order, so the last of them is the newest: what a Conversation
+    /// that has arrived here grows is a second one, started by this device's own
+    /// Resume beside the one that crossed with the record.
+    async fn sessions_on(&self, conversation: i64) -> Vec<i64> {
+        self.view(conversation)
+            .await
+            .timeline
+            .iter()
+            .filter_map(|event| match event {
+                TimelineEvent::AgentOutput(output) => Some(output.id),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// What one of them printed, by the Event it printed into.
+    async fn capture_of(&self, conversation: i64, event: i64) -> String {
+        let capture: verkstead_render::Capture = reading(
+            &self.workbench,
+            &format!("/api/ui/conversations/{conversation}/capture/{event}"),
+        )
+        .await;
+
+        capture.text
+    }
+
+    /// The newest session's Capture, once it says `saying` — or a panic saying
+    /// what it says instead.
+    ///
+    /// The newest rather than the first, which is what [`Self::capture`] reads:
+    /// on the far end of a move the first is the session that crossed with the
+    /// record, and what this device started for itself is the one after it.
+    async fn latest_capture_saying(&self, conversation: i64, saying: &str) -> String {
+        let deadline = Instant::now() + WAITING;
+        let mut said = String::new();
+
+        loop {
+            if let Some(event) = self.sessions_on(conversation).await.last().copied() {
+                said = self.capture_of(conversation, event).await;
+            }
+
+            if said.contains(saying) {
+                return said;
+            }
+
+            assert!(
+                Instant::now() < deadline,
+                "no session on Conversation {conversation} ever printed {saying:?}. \
+                 The newest printed: {said:?}",
+            );
+
+            tokio::time::sleep(LOOKING).await;
+        }
+    }
+
+    /// The **Transcript** of the session at `at` on that Conversation's Timeline,
+    /// once it holds anything — which is the record read out of the log the
+    /// backend itself wrote, rather than out of what it printed.
+    ///
+    /// By its place on the Timeline rather than by an Event id, because that is
+    /// what a test about two sessions has to say: on the far end of a move the
+    /// first is the session that crossed with the record and the second is the one
+    /// this device started.
+    ///
+    /// Waited for, because a log is followed on the relay's own cadence rather
+    /// than as it is written.
+    async fn transcript_of(&self, conversation: i64, at: usize) -> Vec<String> {
+        let deadline = Instant::now() + WAITING;
+        let mut held = Vec::new();
+
+        loop {
+            if let Some(event) = self.sessions_on(conversation).await.get(at).copied() {
+                held = lines_of(&self.pool, event).await;
+            }
+
+            if !held.is_empty() {
+                return held;
+            }
+
+            assert!(
+                Instant::now() < deadline,
+                "session {at} of Conversation {conversation} never wrote a Transcript. \
+                 The whole store holds: {:?}",
+                transcripts(&self.pool).await,
+            );
+
+            tokio::time::sleep(LOOKING).await;
+        }
+    }
+
+    /// Where the account called `name` keeps its login on this device, which is a
+    /// real file under a real account directory.
+    fn login_of(&self, name: &str) -> PathBuf {
+        self.elsewhere
+            .path()
+            .join(name)
+            .join(".claude/.credentials.json")
+    }
+
+    /// And what it holds, where the account is at home here.
+    fn login_at_home(&self, name: &str) -> String {
+        std::fs::read_to_string(self.login_of(name)).unwrap_or_default()
+    }
+
+    /// And every Notice on its Timeline, which is where Verkstead says what it
+    /// did on its own account — a move that failed among them.
+    async fn notices(&self, conversation: i64) -> Vec<String> {
+        self.view(conversation)
+            .await
+            .timeline
+            .iter()
+            .filter_map(|event| match event {
+                TimelineEvent::Notice(notice) => Some(notice.html.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The Notice that says `saying`, once one does — or a panic listing every
+    /// Notice there is instead.
+    ///
+    /// Waited for, because the two Notices a move writes about the resume are
+    /// written a launch apart: the arrival puts down where the work came from,
+    /// and which resume it was taken up with is not settled until the launch has
+    /// run the memory sync.
+    async fn notice_saying(&self, conversation: i64, saying: &str) -> String {
+        let deadline = Instant::now() + WAITING;
+
+        loop {
+            let notices = self.notices(conversation).await;
+
+            if let Some(found) = notices.iter().find(|notice| notice.contains(saying)) {
+                return found.clone();
+            }
+
+            assert!(
+                Instant::now() < deadline,
+                "no Notice on Conversation {conversation} ever said {saying:?}. \
+                 The Timeline holds: {notices:#?}",
+            );
+
+            tokio::time::sleep(LOOKING).await;
+        }
+    }
+}
+
+/// The streams one device is holding, given back when the test drops it.
+struct Holding(JoinHandle<()>);
+
+impl Drop for Holding {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+/// What stands where claude goes: a session that says it is grilling, waits at
+/// the gate the test opens, and stops.
+///
+/// The wait is the whole of what this suite needs of an agent. A press that
+/// arrived after the session had gone would prove nothing about the promise the
+/// press makes, which is that a turn part way through runs to its own end.
+fn waits_at(gate: &Path) -> String {
+    format!(
+        r#"
+printf 'grilling\r\n'
+while [ ! -f {gate} ]; do sleep 0.05; done
+printf 'the turn is over\r\n'
+"#,
+        gate = quoted(gate),
+    )
+}
+
+/// The same again with a login refreshed before the wait, which is the one thing
+/// a harness does to the account it is running as.
+///
+/// What it is for is the **ordering**: a session away from home writes the login
+/// it now holds back to the device that account is at home on as it ends, and a
+/// move that overtook that write-back would leave the far end launching under a
+/// login this machine had not finished returning. So the session changes one, and
+/// the far end is asked what it is running under.
+fn refreshes_its_login_at(gate: &Path, token: &str) -> String {
+    format!(
+        "printf '{{\"claudeAiOauth\":{{\"accessToken\":\"%s\"}}}}' '{token}' \
+> \"$HOME/.claude/.credentials.json\"\nprintf 'refreshed the login\\r\\n'\n{}",
+        waits_at(gate),
+    )
+}
+
+/// And what stands where claude goes **on the far end**: the session that device's
+/// own Resume starts once the work has arrived.
+///
+/// It says three things, and each is something only the arrival could have given
+/// it. That it is running at all, which is the Resume; the **prompt** it was
+/// launched on, which is the record re-read on this machine — a grilling again
+/// carries the Brief and what has already been settled; and the **login** it is
+/// running under, which is the account the source was using, written home as that
+/// session ended.
+fn re_primed() -> String {
+    r#"
+printf 're-primed\r\n'
+printf 'prompt=%s\r\n' "$2"
+printf 'login=%s\r\n' "$(cat "$HOME/.claude/.credentials.json" 2>/dev/null)"
+"#
+    .to_owned()
+}
+
+/// The line claude writes into a session's log as it opens one, which stands here
+/// for the interview the session on A is part way through.
+///
+/// Shaped the way claude's own lines are — one JSON object per line, the agent's
+/// own words inside — because what reads it back is the Transcript, which keeps a
+/// line exactly as the backend wrote it.
+const THE_QUESTION_IT_WAS_ON: &str = r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Where should the counter live?"}]}}"#;
+
+/// And the line the session on B writes into the same log, which is the one thing
+/// only a session that really resumed could have written.
+const CARRYING_ON: &str = r#"{"type":"assistant","message":{"content":[{"type":"text","text":"So, back to the counter."}]}}"#;
+
+/// What stands where claude goes on **A** when the question is the resume: a
+/// session that writes the log claude would have written of the conversation it is
+/// having, and then waits at the gate the test opens.
+///
+/// **The log is written where claude would have written it and named what claude
+/// would have named it**: under the `projects/` entry for the directory the session
+/// was started in, by the harness's own rule — every character outside
+/// `[a-zA-Z0-9]` a hyphen — and called after the session id Verkstead told it to
+/// run under, which it reads off its own command line. So what crosses with the
+/// memory sync is a store of the shape the far end has to find a log in, and
+/// nothing here is told where to put one.
+fn writes_a_log_and_waits_at(gate: &Path) -> String {
+    writes_a_log_then(&waits_at(gate))
+}
+
+/// The same log, and then whatever the session does next.
+fn writes_a_log_then(next: &str) -> String {
+    format!(
+        r#"
+entry=$(printf '%s' "$PWD" | tr -c 'a-zA-Z0-9' '-')
+session=
+take=
+for word in "$@"; do
+  if [ -n "$take" ]; then session=$word; take=; fi
+  if [ "$word" = "--session-id" ]; then take=yes; fi
+done
+
+mkdir -p "$HOME/.claude/projects/$entry"
+printf '%s\n' '{asked}' > "$HOME/.claude/projects/$entry/$session.jsonl"
+
+{next}
+"#,
+        asked = THE_QUESTION_IT_WAS_ON,
+    )
+}
+
+/// What an agent says once `verkstead transfer` has come back to it: its last
+/// words on this machine, which must reach the Transcript before the session is
+/// ended for the move.
+const CLOSING: &str = "over to the laptop now";
+
+/// What stands where claude goes for **the agent's call**: a session at work —
+/// printing, so that nothing reads it as idle — until the gate the test opens
+/// once the call is made, and then its closing line and an idle that never ends.
+///
+/// Which is the shape a real interactive agent has after its call: it says what
+/// it has left to say and sits at its prompt. It never exits, so a move that
+/// waited for it to would never run.
+fn calls_then_idles_at(gate: &Path) -> String {
+    format!(
+        r#"
+printf 'grilling\r\n'
+while [ ! -f {gate} ]; do printf '.'; sleep 0.2; done
+printf '\r\n{CLOSING}\r\n'
+sleep 300
+"#,
+        gate = quoted(gate),
+    )
+}
+
+/// And the same inside **a backlog**: the grilling commits a one-task backlog
+/// and exits, and the session sent to work its step makes the call the way the
+/// one above does.
+fn works_a_step_then_idles_at(gate: &Path) -> String {
+    format!(
+        r#"
+case "$2" in
+*next-task/SKILL.md*)
+    printf 'working the step\r\n'
+    while [ ! -f {gate} ]; do printf '.'; sleep 0.2; done
+    printf '\r\n{CLOSING}\r\n'
+    sleep 300
+    ;;
+*)
+    mkdir -p .tasks
+    printf '# Rate limiting\n\n## Tasks\n\n- [ ] 01: count the requests\n' > .tasks/TODO.md
+    printf '# 01. Count the requests\n' > .tasks/01-count.md
+    git add .tasks
+    git commit --quiet -m 'chore: plan the rate limiter'
+    printf 'grilling\r\n'
+    ;;
+esac
+"#,
+        gate = quoted(gate),
+    )
+}
+
+/// And what stands where claude goes on **B** for the backlog: a session that
+/// says what it was launched on and stays up, so that the step it carries on is
+/// one still being worked when the test reads it.
+fn carries_the_step_on() -> String {
+    r#"
+printf 'carrying the step on\r\n'
+printf 'prompt=%s\r\n' "$2"
+sleep 300
+"#
+    .to_owned()
+}
+
+/// And what stands where claude goes on **B** when the question is the resume: a
+/// session that says what it was launched with, and appends to the log it was told
+/// to carry on.
+///
+/// **Every word of its own line, one per line**, because what is being asked of
+/// this end is the line rather than anything the agent did with it: whether the
+/// session was told to resume, and under which name.
+///
+/// And the append, which is what a resumed claude does — it goes on writing the
+/// log it resumed, under the same name and in the same file. What that proves is
+/// the other half: the Transcript of this session holds this line and not the one
+/// the session on A wrote into the same file.
+fn carries_on() -> String {
+    format!(
+        r#"
+printf 'carried on\r\n'
+for word in "$@"; do printf 'arg=%s\r\n' "$word"; done
+
+entry=$(printf '%s' "$PWD" | tr -c 'a-zA-Z0-9' '-')
+session=
+take=
+for word in "$@"; do
+  if [ -n "$take" ]; then session=$word; take=; fi
+  if [ "$word" = "--resume" ]; then take=yes; fi
+done
+
+if [ -n "$session" ]; then
+  printf '%s\n' '{carrying}' >> "$HOME/.claude/projects/$entry/$session.jsonl"
+fi
+"#,
+        carrying = CARRYING_ON,
+    )
+}
+
+/// And what stands where a claude that **will not take the session id it is given**
+/// goes: it says so and exits non-zero, having written nothing anywhere.
+///
+/// Which is the one way a carried conversation falls through that nothing can know
+/// before the launch — the log was proved to be there and the line was written, and
+/// the harness said no anyway. What Verkstead reads it off is the shape rather than
+/// the words: a session that ended badly having never added a line to the record it
+/// was launched to carry on. So the sentence here is claude's as a reminder of what
+/// the real one looks like, and nothing whatever is read off it.
+fn refuses_to_resume() -> String {
+    r#"
+printf 'No conversation found with session ID\r\n'
+exit 1
+"#
+    .to_owned()
+}
+
+/// And what stands where **grok** goes, on either machine: one script for both of
+/// the launches a device makes, because a device has one harness on its `PATH` and
+/// whether a launch opens a conversation or carries one on is what the line says.
+///
+/// **Its store is written where grok writes one and named what grok names it**: a
+/// directory per working directory, under grok's own URL-encoding of the path, with
+/// a directory per session inside it and the conversation in `updates.jsonl` — see
+/// grok 1.0.34's own account of its store. So what crosses with the memory sync is a
+/// store of the shape the far end has to put right, and nothing here is told where
+/// to put one.
+///
+/// **A launch it was named for** writes the question it is on and waits at the gate,
+/// which is the turn in flight a move has to run to the end of. **A launch it was
+/// told to resume** says every word of its own line, one per line, and appends to
+/// the log it was told to carry on — which is what only a session that really
+/// resumed could have written, and what says the relocation put the log where grok
+/// looks for it.
+///
+/// `opening` is the word the first of those prints, and it is a different one on
+/// each machine for [`drafted_running`]'s reason: a suite whose two devices printed
+/// the same words could not say which of them had run.
+fn grok_that_carries_on_at(gate: &Path, opening: &str) -> String {
+    format!(
+        r#"
+session=
+resuming=
+take=
+for word in "$@"; do
+  case "$take" in
+    id) session=$word; take= ;;
+    resume) session=$word; resuming=yes; take= ;;
+  esac
+  case "$word" in
+    --session-id) take=id ;;
+    --resume) take=resume ;;
+  esac
+done
+
+group=$(printf '%s' "$PWD" | sed -e 's|/|%2F|g')
+kept="$HOME/.grok/sessions/$group/$session"
+mkdir -p "$kept"
+
+if [ -n "$resuming" ]; then
+  printf 'carried on\r\n'
+  for word in "$@"; do printf 'arg=%s\r\n' "$word"; done
+  printf '%s\n' '{carrying}' >> "$kept/updates.jsonl"
+  exit 0
+fi
+
+printf '{opening}\r\n'
+printf 'prompt=%s\r\n' "$2"
+printf '%s\n' '{asked}' > "$kept/updates.jsonl"
+
+{waiting}
+"#,
+        carrying = CARRYING_ON,
+        asked = THE_QUESTION_IT_WAS_ON,
+        waiting = waits_at(gate),
+    )
+}
+
+/// What A's grok says as it opens a conversation, and what B's says as it re-primes
+/// one — the two halves of [`grok_that_carries_on_at`]'s `opening`.
+const OPENED_HERE: &str = "opened";
+const RE_PRIMED_THERE: &str = "re-primed";
+
+/// The session id **codex chooses for itself**, which is the whole difficulty of
+/// this harness: Verkstead names no Codex session, so the only place this string
+/// exists before the session runs is inside the stub that is about to write it.
+///
+/// Shaped as codex shapes one, and nothing here depends on the shape: what
+/// matters is that it is not a name anything on either machine could have known.
+const CODEX_CHOSE: &str = "01a0f0e9-3280-7900-9dda-c7d0920b0735";
+
+/// And what stands where **codex** goes, on either machine: one script for both of
+/// the launches a device makes, because whether a launch opens a conversation or
+/// carries one on is what the line says.
+///
+/// **Its store is written where codex writes one and named what codex names it**:
+/// a rollout under `sessions/YYYY/MM/DD`, called after the session id, opening
+/// with the `session_meta` line that says which session it is and which directory
+/// it was launched in. So what crosses with the memory sync is a store of the
+/// shape the far end has to find a log in, and what the far end has to find it
+/// *by* is a name only this file holds.
+///
+/// **A launch it was not told to resume** — codex's resume is a subcommand, so
+/// `$0` is the word that says which this is — writes the question it is on and
+/// waits at the gate, which is the turn in flight a move has to run to the end of.
+///
+/// **A launch it was told to resume** says every word of its own line, one per
+/// line, and appends to the rollout **named by the id it was handed**: it globs
+/// the store for it rather than assuming where it landed, so an append is proof
+/// both that the log crossed and that the line named the right session. A resume
+/// handed an id nothing answers to writes nowhere, which is the shape of the
+/// failure rather than a green test.
+///
+/// `opening` is the word the first of those prints, and it is a different one on
+/// each machine for [`drafted_running`]'s reason: a suite whose two devices
+/// printed the same words could not say which of them had run.
+///
+/// `names_itself` is whether the rollout carries the `session_id` a real one
+/// does — false being the log Verkstead can read nothing out of, which is the
+/// fallback.
+fn codex_that_carries_on_at(gate: &Path, opening: &str, names_itself: bool) -> String {
+    let says = match names_itself {
+        true => format!(r#""session_id":"{CODEX_CHOSE}","#),
+        false => String::new(),
+    };
+
+    format!(
+        r#"
+store="$HOME/.codex/sessions"
+
+if [ "$0" = resume ]; then
+  printf 'carried on\r\n'
+  printf 'arg=%s\r\n' "$0"
+  for word in "$@"; do printf 'arg=%s\r\n' "$word"; done
+
+  for found in "$store"/*/*/*/rollout-*-"$3".jsonl; do
+    if [ -f "$found" ]; then printf '%s\n' '{carrying}' >> "$found"; fi
+  done
+
+  exit 0
+fi
+
+printf '{opening}\r\n'
+printf 'prompt=%s\r\n' "$2"
+
+day="$store/2026/09/30"
+mkdir -p "$day"
+log="$day/rollout-2026-09-30T17-47-00-{chose}.jsonl"
+
+printf '{{"type":"session_meta","payload":{{{says}"cwd":"%s"}}}}\n' "$PWD" > "$log"
+printf '%s\n' '{asked}' >> "$log"
+
+{waiting}
+"#,
+        chose = CODEX_CHOSE,
+        carrying = CARRYING_ON,
+        asked = THE_QUESTION_IT_WAS_ON,
+        waiting = waits_at(gate),
+    )
+}
+
+/// And what stands where **opencode** goes, on either machine: one script for
+/// both of the launches a device makes, because whether a launch opens a
+/// conversation or carries one on is what the line says.
+///
+/// **It writes no store**, which is the one way this stub differs from the three
+/// before it: opencode's store is a database, and there is no `sqlite3` on the
+/// system profile for a shell script to write one with. So the store is written
+/// from outside the sandbox by the test, the way `tests/sessions.rs` writes one
+/// for the reader that follows it — and what the stub is left saying is the half
+/// only it can say, which is the line it was launched on.
+///
+/// **A launch it was told to resume** says every word of that line, one per line.
+/// Its `--session` is the whole of what this suite is asking after: the flag, and
+/// the id nothing on either machine chose.
+///
+/// **A launch it was not told to resume** says what it was primed with instead.
+///
+/// **And either way it waits at the gate**, which is the one thing this stub
+/// needs that the three before it did not: what a continued session adds to its
+/// conversation is written into the store from outside, so the session it is
+/// written of has to still be running to follow it. For the opening launch the
+/// wait is the ordinary one — the turn in flight a move has to run to the end of.
+///
+/// `opening` is the word the second of those prints, and it is a different one on
+/// each machine for [`drafted_running`]'s reason: a suite whose two devices
+/// printed the same words could not say which of them had run. Its prompt is `$3`
+/// rather than `$2` — opencode is the one backend that takes its Brief under a
+/// flag, so everything after the model is one place along.
+fn opencode_that_carries_on_at(gate: &Path, opening: &str) -> String {
+    format!(
+        r#"
+session=
+take=
+for word in "$@"; do
+  if [ -n "$take" ]; then session=$word; take=; fi
+  if [ "$word" = "--session" ]; then take=yes; fi
+done
+
+if [ -n "$session" ]; then
+  printf 'carried on\r\n'
+  printf 'arg=%s\r\n' "$0"
+  for word in "$@"; do printf 'arg=%s\r\n' "$word"; done
+else
+  printf '{opening}\r\n'
+  printf 'prompt=%s\r\n' "$3"
+fi
+
+{waiting}
+"#,
+        waiting = waits_at(gate),
+    )
+}
+
+/// Set `core.autocrlf` on a repository, the way the machine it is on would have
+/// it — and respell whatever is checked out of it so the trees agree with the
+/// switch.
+///
+/// **Which is what an operating system amounts to here.** A Windows checkout
+/// keeps CRLF in the working tree and LF in the index; a Unix one keeps LF in
+/// both. So two repositories set opposite ways are the two machines as far as
+/// anything about a patch can tell, and the crossing can be made on one of them.
+fn keeping_endings(repo: &Path, autocrlf: &str, worktrees: &[&Path]) {
+    git(repo, &["config", "core.autocrlf", autocrlf]);
+
+    for worktree in worktrees {
+        git(worktree, &["checkout", "HEAD", "--", "."]);
+    }
+}
+
+/// A path as a shell script can carry it.
+fn quoted(path: &Path) -> String {
+    format!("'{}'", path.display().to_string().replace('\'', r"'\''"))
+}
+
+/// The agent a session on this device runs, and everything else a launch is
+/// equipped out of.
+fn agents(stub: &str, home: &Path, data_dir: &Path, spill: &Path) -> Agents {
+    Agents::running(
+        vec!["/bin/sh".to_owned(), "-c".to_owned(), stub.to_owned()],
+        Homes::on(Platform::HERE, home.to_owned(), data_dir),
+        Reachable::at(LISTENING),
+        // The gate the stub waits at is outside the Worktree, so the sandbox has
+        // to be able to see it.
+        SandboxConfig::resolve(&[spill.display().to_string()]).unwrap(),
+        // Nothing here builds anything: what runs where claude goes is a shell
+        // script.
+        BuildCache::none(),
+        Skills::installed(Platform::HERE, data_dir).expect("this binary carries skills"),
+        Executable::of_the_server(data_dir),
+        Handoffs::under(data_dir),
+        Attachments::under(data_dir),
+        Settings::in_data_dir(data_dir),
+    )
+}
+
+/// A `gh` that is a shell script, so nothing here reaches GitHub.
+fn gh_stub(script: &str) -> Gh {
+    Gh::running(vec![
+        "/bin/sh".to_owned(),
+        "-c".to_owned(),
+        script.to_owned(),
+        "gh".to_owned(),
+    ])
+}
+
+/// A machine with no Tailscale on it: `verkstead-no-such-tailscale` is a program
+/// that is not there, which is what having none *is*.
+fn no_tailscale() -> Tailscale {
+    Tailscale::running(vec!["verkstead-no-such-tailscale".to_owned()], 8422)
+}
+
+/// The machine a device here is judged on: one directory on the `PATH` a session
+/// would search, holding a program for every harness.
+///
+/// **Stated rather than read off the runner**, as the suites beside this one
+/// state theirs: whether a harness is on the far end is what `tests/preflight.rs`
+/// is about, and here it must not be what decides whether a press can be made.
+fn probing(dir: &Path) -> Machine {
+    let bin = dir.join("probed");
+    std::fs::create_dir_all(&bin).unwrap();
+
+    for harness in ["claude", "codex", "grok", "opencode"] {
+        let at = bin.join(harness);
+
+        std::fs::write(&at, "#!/bin/sh\nexit 0\n").unwrap();
+        std::fs::set_permissions(&at, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    Machine::stated(
+        Platform::Linux,
+        bin.as_os_str().to_owned(),
+        bin.as_os_str().to_owned(),
+        None,
+        None,
+        &Environment {
+            home: Some(dir.to_owned()),
+            ..Environment::default()
+        },
+    )
+}
+
+/// A and B, linked both ways, each with the repository registered — and B
+/// holding the streams that write its mirror of A's account, which is what a
+/// Pairing arriving there resolves against.
+///
+/// The Conversation is grilling on A under that account, with its session
+/// waiting at `gate`.
+async fn ready_to_move(gate: &Path, spill: &Path) -> (Verkstead, Verkstead, Holding, i64) {
+    let (a, b, holding, conversation) = ready_to_draft(gate, spill).await;
+
+    a.grills(conversation).await;
+
+    (a, b, holding, conversation)
+}
+
+/// The same again with B's repository a **clone** of A's, which is what the git
+/// leg is about: two machines with history in common, so that what crosses is
+/// the branch rather than everything under it.
+///
+/// Every test about the branch and the working changes starts here.
+async fn ready_to_move_from_a_clone(
+    gate: &Path,
+    spill: &Path,
+) -> (Verkstead, Verkstead, Holding, i64) {
+    let (a, b, holding, conversation) = drafted(gate, spill, Repositories::Cloned).await;
+
+    a.grills(conversation).await;
+
+    (a, b, holding, conversation)
+}
+
+/// The same again with a **Companion Repo** beside the Conversation's own, in
+/// `mode`, and a clone of it on B.
+///
+/// Every test about a Companion over the link starts here: the second repository
+/// is registered on both machines with a history in common, the Companion is put
+/// on the Conversation while it is still drafting — which is the only time a
+/// Companion may be added — and the grill start is what cuts its checkout beside
+/// the Conversation's own.
+async fn ready_to_move_alongside(
+    gate: &Path,
+    spill: &Path,
+    mode: store::CompanionMode,
+) -> (Verkstead, Verkstead, Holding, i64) {
+    let (a, b, holding, conversation) = drafted(gate, spill, Repositories::Cloned).await;
+
+    let theirs = a.repo_called(COMPANION).await;
+    b.cloned_from_called(&theirs, COMPANION).await;
+
+    let beside = a.repo_row(COMPANION).await;
+
+    assert_eq!(
+        store::add_companion(&a.pool, conversation, beside)
+            .await
+            .unwrap(),
+        store::Adding::Added,
+        "putting the companion on the draft",
+    );
+
+    // Read-only is what a companion starts as, so only the other way needs
+    // saying — and saying it is what makes a branch be cut for it at all.
+    if mode == store::CompanionMode::ReadWrite {
+        assert_eq!(
+            store::configure_companion(&a.pool, conversation, beside, store::Change::Mode(mode))
+                .await
+                .unwrap(),
+            store::Configured::Saved,
+            "setting the companion read-write",
+        );
+    }
+
+    a.grills(conversation).await;
+
+    (a, b, holding, conversation)
+}
+
+/// Whether the two machines' repositories share a history.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Repositories {
+    /// Two repositories made separately, sharing a name and nothing else —
+    /// which is every test about the record, where the history is beside the
+    /// point.
+    Apart,
+
+    /// B's is a clone of A's, which is what a cluster holding one repository
+    /// looks like.
+    Cloned,
+}
+
+/// The same, stopped at the draft: the two machines linked and the Conversation
+/// written, with the press that starts it still to come.
+///
+/// Which is where a file is put on one — a Conversation takes attachments while
+/// it is drafting and no longer — and so is where the test about an Attachment
+/// crossing begins.
+async fn ready_to_draft(gate: &Path, spill: &Path) -> (Verkstead, Verkstead, Holding, i64) {
+    drafted(gate, spill, Repositories::Apart).await
+}
+
+/// Both of the above, and the one thing that differs between them.
+async fn drafted(
+    gate: &Path,
+    spill: &Path,
+    repositories: Repositories,
+) -> (Verkstead, Verkstead, Holding, i64) {
+    drafted_running(&waits_at(gate), &re_primed(), spill, repositories).await
+}
+
+/// And the same again with both machines' sessions doing what a **resume** needs
+/// of them: A's writing the log claude would have written of the interview it is
+/// part way through, and B's saying what it was launched with and appending to the
+/// log it was told to carry on.
+///
+/// Every test about carrying a conversation on starts here.
+async fn ready_to_carry_on(gate: &Path, spill: &Path) -> (Verkstead, Verkstead, Holding, i64) {
+    let (a, b, holding, conversation) = drafted_running(
+        &writes_a_log_and_waits_at(gate),
+        &carries_on(),
+        spill,
+        Repositories::Apart,
+    )
+    .await;
+
+    a.grills(conversation).await;
+
+    (a, b, holding, conversation)
+}
+
+/// And the same with the Profile sharing no memory, which is what one of the
+/// reasons an arrival falls back to Verkstead's own Resume looks like from the
+/// outside: A's session writes its log into a store of its own, nothing of it
+/// travels, and B has nothing to carry a conversation on from.
+///
+/// B's script is the one that *would* carry on, deliberately: what is being read
+/// is that it was never asked to.
+async fn ready_to_carry_on_sharing_no_memory(
+    gate: &Path,
+    spill: &Path,
+) -> (Verkstead, Verkstead, Holding, i64) {
+    let (a, b, holding, conversation) = drafted_remembering(
+        &writes_a_log_and_waits_at(gate),
+        &carries_on(),
+        spill,
+        Repositories::Apart,
+        false,
+    )
+    .await;
+
+    a.grills(conversation).await;
+
+    (a, b, holding, conversation)
+}
+
+/// And the same with B's harness **refusing the resume it is given**, which is the
+/// one reason a carried conversation falls through that nothing knows before the
+/// launch: the log crossed, the line was written, and the harness said no anyway.
+///
+/// What stands for the refusal is what a claude does with a session id it will not
+/// take — it says so and exits non-zero, having touched no log — and what says it
+/// really was the resume being refused rather than a session that merely failed is
+/// that nothing was ever added to the record it was launched to carry on.
+async fn ready_for_a_harness_that_will_not_resume(
+    gate: &Path,
+    spill: &Path,
+) -> (Verkstead, Verkstead, Holding, i64) {
+    let (a, b, holding, conversation) = drafted_running(
+        &writes_a_log_and_waits_at(gate),
+        &refuses_to_resume(),
+        spill,
+        Repositories::Apart,
+    )
+    .await;
+
+    a.grills(conversation).await;
+
+    (a, b, holding, conversation)
+}
+
+/// And the same again on **Grok Build**, whose store is keyed by the directory a
+/// session ran in: both machines run the one script that opens a conversation or
+/// carries one on as its line says, each waiting at a gate of its own so that either
+/// leg of a round trip can be pressed with a turn in flight.
+///
+/// Every test about carrying a Grok conversation on starts here.
+async fn ready_to_carry_grok_on(
+    here: &Path,
+    there: &Path,
+    spill: &Path,
+) -> (Verkstead, Verkstead, Holding, i64) {
+    let a = Verkstead::running(A, &grok_that_carries_on_at(here, OPENED_HERE), spill).await;
+    let b = Verkstead::running(B, &grok_that_carries_on_at(there, RE_PRIMED_THERE), spill).await;
+
+    a.linked_to(&b.device, B_MACHINE, B_OS, vec![b.at()]).await;
+
+    let (machine, os) = this_machine();
+    b.linked_to(&a.device, &machine, &os, vec![a.at()]).await;
+
+    let theirs = a.repo().await;
+    b.cloned_from(&theirs).await;
+
+    let account = a.grok_account().await;
+
+    let holding = b.holding();
+    b.profile_called(ACCOUNT).await;
+
+    let conversation = a.drafting_under_on(account, GROK_MODEL).await;
+
+    a.grills(conversation).await;
+
+    (a, b, holding, conversation)
+}
+
+/// And the same again on **Codex**, the harness Verkstead cannot name: both
+/// machines run the one script that opens a conversation or carries one on as its
+/// line says, each waiting at a gate of its own.
+///
+/// `names_itself` is whether A's rollout says which session it is of — see
+/// [`codex_that_carries_on_at`]. True is the ordinary case, and false is the log
+/// nothing can be read out of, which is the fallback.
+///
+/// Every test about carrying a Codex conversation on starts here.
+async fn ready_to_carry_codex_on(
+    here: &Path,
+    there: &Path,
+    spill: &Path,
+    names_itself: bool,
+) -> (Verkstead, Verkstead, Holding, i64) {
+    let a = Verkstead::running(
+        A,
+        &codex_that_carries_on_at(here, OPENED_HERE, names_itself),
+        spill,
+    )
+    .await;
+    let b = Verkstead::running(
+        B,
+        &codex_that_carries_on_at(there, RE_PRIMED_THERE, names_itself),
+        spill,
+    )
+    .await;
+
+    a.linked_to(&b.device, B_MACHINE, B_OS, vec![b.at()]).await;
+
+    let (machine, os) = this_machine();
+    b.linked_to(&a.device, &machine, &os, vec![a.at()]).await;
+
+    let theirs = a.repo().await;
+    b.cloned_from(&theirs).await;
+
+    let account = a.codex_account().await;
+
+    let holding = b.holding();
+    b.profile_called(ACCOUNT).await;
+
+    let conversation = a.drafting_under_on(account, CODEX_MODEL).await;
+
+    a.grills(conversation).await;
+
+    (a, b, holding, conversation)
+}
+
+/// And the same again on **OpenCode**, the harness whose store is one database:
+/// both machines run the one script that opens a conversation or carries one on
+/// as its line says, each waiting at a gate of its own.
+///
+/// What the store holds is the test's to write — see
+/// [`opencode_that_carries_on_at`] — so this hands back the Profile A's account
+/// is, which is where A's store goes, and B's mirror of it, which is where the
+/// carried one lands.
+///
+/// Every test about carrying an OpenCode conversation on starts here.
+async fn ready_to_carry_opencode_on(
+    here: &Path,
+    there: &Path,
+    spill: &Path,
+) -> (Verkstead, Verkstead, Holding, i64, i64) {
+    let a = Verkstead::running(A, &opencode_that_carries_on_at(here, OPENED_HERE), spill).await;
+    let b = Verkstead::running(
+        B,
+        &opencode_that_carries_on_at(there, RE_PRIMED_THERE),
+        spill,
+    )
+    .await;
+
+    a.linked_to(&b.device, B_MACHINE, B_OS, vec![b.at()]).await;
+
+    let (machine, os) = this_machine();
+    b.linked_to(&a.device, &machine, &os, vec![a.at()]).await;
+
+    let theirs = a.repo().await;
+    b.cloned_from(&theirs).await;
+
+    let account = a.opencode_account().await;
+
+    let holding = b.holding();
+    let mirror = b.profile_called(ACCOUNT).await.id;
+
+    let conversation = a.drafting_under_on(account, OPENCODE_MODEL).await;
+
+    a.grills(conversation).await;
+
+    (a, b, holding, conversation, mirror)
+}
+
+/// The same with each machine's session saying what this test needs of it, which
+/// is the one thing that differs between the setups.
+///
+/// **B's is never the same script as A's.** Nothing was ever launched on the far
+/// end before this stage; now its own Resume starts a session the moment the work
+/// lands, and a suite whose two machines printed the same words could not say
+/// which of them had run. See [`re_primed`], which is B's in every setup but the
+/// one about carrying a conversation on — see [`carries_on`].
+async fn drafted_running(
+    on_a: &str,
+    on_b: &str,
+    spill: &Path,
+    repositories: Repositories,
+) -> (Verkstead, Verkstead, Holding, i64) {
+    drafted_remembering(on_a, on_b, spill, repositories, true).await
+}
+
+/// The same with the Profile's **memory switch** put where `memory` says.
+///
+/// One setup takes it off, and it is the one about what the switch means to an
+/// arrival: a session under a Profile that shares no memory gets a store of its
+/// own and empty, so nothing of the harness's record travels with the work and
+/// there is nothing on the far end to carry a conversation on from.
+async fn drafted_remembering(
+    on_a: &str,
+    on_b: &str,
+    spill: &Path,
+    repositories: Repositories,
+    memory: bool,
+) -> (Verkstead, Verkstead, Holding, i64) {
+    drafted_at(on_a, on_b, spill, repositories, memory, Pace::default()).await
+}
+
+/// And the same with A's sessions seen along at `pace`.
+async fn drafted_at(
+    on_a: &str,
+    on_b: &str,
+    spill: &Path,
+    repositories: Repositories,
+    memory: bool,
+    pace: Pace,
+) -> (Verkstead, Verkstead, Holding, i64) {
+    let a = Verkstead::running_at(A, on_a, spill, pace).await;
+    let b = Verkstead::running(B, on_b, spill).await;
+
+    a.linked_to(&b.device, B_MACHINE, B_OS, vec![b.at()]).await;
+
+    let (machine, os) = this_machine();
+    b.linked_to(&a.device, &machine, &os, vec![a.at()]).await;
+
+    let theirs = a.repo().await;
+
+    match repositories {
+        Repositories::Apart => b.repo().await,
+        Repositories::Cloned => b.cloned_from(&theirs).await,
+    };
+
+    let account = a.account_keeping(memory).await;
+
+    // B's mirror of that account, which is stage 08's machinery and what the
+    // Pairings arriving there are resolved against: a Profile is named across a
+    // cluster by the device it is at home on and its id there.
+    let holding = b.holding();
+    b.profile_called(ACCOUNT).await;
+
+    let conversation = a.drafting_under(account).await;
+
+    (a, b, holding, conversation)
+}
+
+/// What a device says about the machine it is on, read the way the server reads
+/// it.
+fn this_machine() -> (String, String) {
+    (
+        platform::hostname(),
+        platform::os_word(Platform::Linux, None),
+    )
+}
+
+/// A git repository at `path`, with one commit on `main` so there is a branch to
+/// cut a worktree off.
+fn repository(path: PathBuf) -> PathBuf {
+    std::fs::create_dir_all(&path).unwrap();
+    git(&path, &["init", "--initial-branch", "main"]);
+    git(&path, &["config", "user.email", "test@verkstead.invalid"]);
+    git(&path, &["config", "user.name", "Verkstead Test"]);
+    std::fs::write(path.join("README.md"), "# a repository\n").unwrap();
+    git(&path, &["add", "README.md"]);
+    git(&path, &["commit", "-m", "first"]);
+
+    path
+}
+
+/// Run git in `dir`, and fail the test where it does not.
+fn git(dir: &Path, args: &[&str]) {
+    let status = Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .expect("git should be on the PATH for these tests");
+
+    assert!(status.success(), "git {args:?} failed in {}", dir.display());
+}
+
+/// Whether the checkout at `dir` holds no branch at all, which is the shape a
+/// read-only Companion is given: `git symbolic-ref HEAD` answers with nothing and
+/// fails, there being no name for it to answer with.
+fn detached(dir: &Path) -> bool {
+    !Command::new("git")
+        .args(["symbolic-ref", "--quiet", "HEAD"])
+        .current_dir(dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .expect("git should be on the PATH for these tests")
+        .success()
+}
+
+/// And run git in `dir` for what it says, which is how this suite reads a
+/// repository back: where a branch stands, and what a checkout is on.
+fn git_says(dir: &Path, args: &[&str]) -> String {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .expect("git should be on the PATH for these tests");
+
+    assert!(
+        output.status.success(),
+        "git {args:?} failed in {}",
+        dir.display(),
+    );
+
+    String::from_utf8_lossy(&output.stdout).trim().to_owned()
+}
+
+/// Whether a row of a merged list is this device's own copy of Conversation
+/// `id`.
+///
+/// Every row of a merged list says whose it is, and this device's own say so by
+/// naming no device inside — see `RowDevice`, whose `null` id is the reading
+/// device itself.
+fn ours(row: &ConversationEntry, id: i64) -> bool {
+    row.id == id && row.device.as_ref().is_none_or(|whose| whose.id.is_none())
+}
+
+/// A read of whatever `path` answers, made the way the browser makes one.
+async fn reading<T: serde::de::DeserializeOwned>(app: &Router, path: &str) -> T {
+    let answered = app
+        .clone()
+        .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+
+    let status = answered.status();
+    let bytes = answered.into_body().collect().await.unwrap().to_bytes();
+    let said = String::from_utf8_lossy(&bytes).into_owned();
+
+    assert_eq!(status, StatusCode::OK, "GET {path}: {said}");
+
+    serde_json::from_str(&said).unwrap_or_else(|why| panic!("GET {path} answered {said}: {why}"))
+}
+
+/// And a press on `path`, with a body where the endpoint takes one.
+async fn press(app: &Router, path: &str, saying: Option<&str>) -> String {
+    let asking = Request::builder().method("POST").uri(path);
+
+    let asking = match saying {
+        Some(body) => asking
+            .header(CONTENT_TYPE, "application/json")
+            .body(Body::from(body.to_owned())),
+        None => asking.body(Body::empty()),
+    };
+
+    let answered = app.clone().oneshot(asking.unwrap()).await.unwrap();
+
+    let status = answered.status();
+    let bytes = answered.into_body().collect().await.unwrap().to_bytes();
+    let said = String::from_utf8_lossy(&bytes).into_owned();
+
+    assert!(status.is_success(), "POST {path}: {status} {said}");
+
+    said
+}
+
+/// **The press waits for the turn to end**, which is the whole of what it
+/// promises: the session running when it is made runs to its own end, nothing is
+/// started after it, and the work goes once there is nothing left running.
+///
+/// And from the press until it lands the Conversation says where it is going,
+/// which is what the head of its Timeline reads.
+#[tokio::test]
+async fn a_press_over_a_running_session_waits_for_the_turn_to_end() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = ready_to_move(&gate, spill.path()).await;
+
+    // A turn genuinely in flight: the session is up, in a real sandbox, part way
+    // through what it was launched for.
+    a.printed(conversation, "grilling").await;
+
+    assert_eq!(
+        a.transfers(conversation, B).await,
+        "\"Transferring\"",
+        "the press is taken",
+    );
+
+    // What the head of the Timeline reads from here: the machine the work is
+    // going to, by the name the human gave it.
+    let going = a.view(conversation).await;
+    assert_eq!(going.transferring.as_deref(), Some(B_MACHINE));
+    assert!(
+        going.transferred.is_none(),
+        "and nothing has moved: this copy is still the record",
+    );
+
+    // Nothing is cut short. The session is still running and still printing,
+    // because what the press asked for is the turn's end rather than the
+    // session's.
+    assert!(
+        going.working,
+        "the session the press arrived over is running"
+    );
+    assert!(
+        b.own_rows().await.is_empty(),
+        "and nothing has reached the far end while it is",
+    );
+
+    // The turn ends.
+    std::fs::write(&gate, "go").unwrap();
+
+    // And the move runs: B holds the work, and A's copy says where it went.
+    let handed = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await;
+
+    let there = handed.transferred.expect("the mark the move wrote");
+    assert_eq!(there.device, B, "the work is on B");
+
+    assert_eq!(
+        handed.transferring, None,
+        "and the Conversation is no longer going anywhere: it has gone",
+    );
+
+    let arrived = b.view(there.id).await;
+    assert_eq!(
+        arrived.branch, handed.branch,
+        "the branch the work is on crossed with it",
+    );
+}
+
+/// **What arrives is the Conversation**: the state it was in, the Repo the
+/// matching settled, its Pairings as B's own ids, and the two things that are
+/// the cluster's rather than either machine's — the Rank and the birth key.
+#[tokio::test]
+async fn the_conversation_arrives_in_the_state_it_was_in() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = ready_to_move(&gate, spill.path()).await;
+
+    // The turn is over before the press is made, which is the other way one
+    // arrives: there is nothing to see out, and the move runs where it stands.
+    a.printed(conversation, "grilling").await;
+    std::fs::write(&gate, "go").unwrap();
+    a.view_saying(conversation, |drawn| !drawn.working).await;
+
+    // What the work was, before it went: the row's Rank and the key it was born
+    // under, read off this device's own store.
+    let rank = store::conversation_rank(&a.pool, conversation)
+        .await
+        .unwrap()
+        .expect("every Conversation is ranked as it is started");
+    let born = store::birth(&a.pool, conversation)
+        .await
+        .unwrap()
+        .expect("every Conversation is stamped as it is started");
+
+    let branch = a.view(conversation).await.branch;
+
+    assert_eq!(a.transfers(conversation, B).await, "\"Transferring\"");
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    let arrived = b.view(there).await;
+
+    assert_eq!(
+        arrived.state,
+        Lifecycle::Grilling,
+        "it arrives in the state it was in",
+    );
+    assert_eq!(arrived.branch, branch, "on the branch the work is on");
+    assert_eq!(
+        arrived.repo.path,
+        b.elsewhere.path().join(REPOSITORY).display().to_string(),
+        "under B's own Repo, which is the one the matching settled — and not a \
+         path of A's",
+    );
+
+    // The Pairings are ids of B's own: the account is at home on A, so what B
+    // holds is a mirror of it, and that is what the row names.
+    let mirror = b.profile_called(ACCOUNT).await;
+    let pairing = arrived
+        .grilling_pairing
+        .as_ref()
+        .expect("the grilling Pairing crossed with it");
+
+    assert_eq!(pairing.profile.id, mirror.id, "B's own id for that account");
+    assert_eq!(
+        pairing.model.as_deref(),
+        Some(MODEL),
+        "and the model with it"
+    );
+    assert_eq!(
+        arrived
+            .implementation_pairing
+            .as_ref()
+            .map(|pairing| pairing.profile.id),
+        Some(mirror.id),
+        "and the implementation's, which is the same account here",
+    );
+
+    // And the two the cluster names it by, verbatim: the Rank carries the device
+    // that issued it and the birth key says where the work was drafted, so
+    // neither is B's to invent.
+    let row = b
+        .sidebar_saying(|rows| rows.iter().any(|row| ours(row, there)))
+        .await
+        .into_iter()
+        .find(|row| ours(row, there))
+        .expect("B's own row for the work that arrived");
+
+    assert_eq!(row.rank, rank, "it keeps its place in the merged order");
+    assert_eq!(
+        row.born,
+        born.key(),
+        "and the key it was born under, which is what says the two copies are \
+         one piece of work",
+    );
+}
+
+/// **The ticks cross with the record** (ADR-0020, *The agent's call*): the list
+/// of devices the agent may move the work to is Device Ids, which name the same
+/// machines on every device of the cluster — so B reads the list A was holding,
+/// and the device the work was drafted on is still permitted there without a
+/// row, which is what lets a session that has moved go home.
+#[tokio::test]
+async fn the_ticks_arrive_with_the_record_and_the_drafting_device_stays_permitted() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = ready_to_move(&gate, spill.path()).await;
+
+    // A third machine of the cluster, which both of them hold as a member and
+    // nothing ever dials: ticking a device asks whether it is linked, not
+    // whether it is up.
+    let third = tempfile::tempdir().unwrap();
+    let c = Device::stated(third.path(), C).unwrap();
+    a.linked_to(&c, "the-vm", "Windows 11", Vec::new()).await;
+    b.linked_to(&c, "the-vm", "Windows 11", Vec::new()).await;
+
+    // Nothing is ticked to begin with, and the device it was drafted on reads as
+    // permitted all the same.
+    let drafting = a.view(conversation).await;
+    assert!(
+        drafting.permitted.is_empty(),
+        "nothing is ticked by default"
+    );
+    assert_eq!(drafting.drafted_on.as_deref(), Some(A));
+
+    assert_eq!(a.permits(conversation, C, true).await, "\"Recorded\"");
+    assert_eq!(a.permits(conversation, B, true).await, "\"Recorded\"");
+
+    // What cannot be a tick is refused by name: the drafting device is no row,
+    // and a device the cluster does not hold is nowhere to go.
+    assert_eq!(a.permits(conversation, A, true).await, "\"DraftedThere\"");
+    assert_eq!(
+        a.permits(conversation, "ffffffffffffffffffffffffffffffff", true)
+            .await,
+        "\"NotAMember\"",
+    );
+
+    // Unticked and ticked again is the list the human last left, in the order
+    // it was ticked.
+    assert_eq!(a.permits(conversation, C, false).await, "\"Recorded\"");
+    assert_eq!(a.permits(conversation, C, true).await, "\"Recorded\"");
+    assert_eq!(a.view(conversation).await.permitted, vec![B, C]);
+
+    a.printed(conversation, "grilling").await;
+    std::fs::write(&gate, "go").unwrap();
+    a.view_saying(conversation, |drawn| !drawn.working).await;
+
+    assert_eq!(a.transfers(conversation, B).await, "\"Transferring\"");
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    let arrived = b.view(there).await;
+
+    assert_eq!(
+        arrived.permitted,
+        vec![B, C],
+        "the same devices, by the same ids, on the far end",
+    );
+    assert_eq!(
+        arrived.drafted_on.as_deref(),
+        Some(A),
+        "and A still permitted without a tick, the birth key having crossed",
+    );
+
+    // Where the work is now is no place to move it to, and where it was drafted
+    // is permitted already.
+    assert_eq!(b.permits(there, B, true).await, "\"WorkIsHere\"");
+    assert_eq!(b.permits(there, A, true).await, "\"DraftedThere\"");
+
+    // And the copy left behind is not the list's any more: the live one is.
+    assert_eq!(a.permits(conversation, C, false).await, "\"Elsewhere\"",);
+}
+
+/// **The agent moves the work itself** (ADR-0020, *The agent's call*): a session
+/// on A that runs `verkstead transfer` with B's name, to a device the human
+/// ticked, and then ends is moved to B and carried on there — and B's Timeline
+/// says whose request that was.
+#[tokio::test]
+async fn a_session_that_asks_for_a_ticked_device_by_name_is_moved_there_and_carried_on() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = ready_to_carry_on(&gate, spill.path()).await;
+
+    // A third machine both hold as a member, ticked too, so the list B's session
+    // is told has something on it beyond the way home.
+    let third = tempfile::tempdir().unwrap();
+    let c = Device::stated(third.path(), C).unwrap();
+    a.linked_to(&c, "the-vm", "Windows 11", Vec::new()).await;
+    b.linked_to(&c, "the-vm", "Windows 11", Vec::new()).await;
+
+    a.printed(conversation, "grilling").await;
+
+    assert_eq!(a.permits(conversation, B, true).await, "\"Recorded\"");
+    assert_eq!(a.permits(conversation, C, true).await, "\"Recorded\"");
+
+    let (status, said) = a.calls(conversation, B_MACHINE).await;
+    assert_eq!(status, StatusCode::OK, "the call is taken: {said}");
+    assert_eq!(said.trim(), B_MACHINE, "naming the machine it is going to");
+
+    let going = a.view(conversation).await;
+    assert_eq!(
+        going.transferring.as_deref(),
+        Some(B_MACHINE),
+        "the Conversation is on its way from the call",
+    );
+    assert!(
+        going.working,
+        "and the session that made it is not cut short",
+    );
+
+    // The session ends, which is when the move is made.
+    std::fs::write(&gate, "go").unwrap();
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    let arrived = b.notice_saying(there, "at the session").await;
+    assert!(
+        arrived.starts_with("<p>Transferred to"),
+        "B's Timeline says the work was transferred to it at the session's request: {arrived}",
+    );
+
+    let left = a.notice_saying(conversation, "at the session").await;
+    assert!(
+        left.contains(B_MACHINE),
+        "and the copy left on A says the same, naming B: {left}",
+    );
+
+    // And the conversation is carried on over there.
+    let resumed = b.latest_capture_saying(there, "carried on").await;
+    assert!(
+        resumed.contains("arg=--resume"),
+        "B's session carries on the conversation A's was having: {resumed:?}",
+    );
+
+    // And it is told where it may go from B: home to A, which drafted the work,
+    // and on to the VM that was ticked — each by name, id and OS — and not to B,
+    // which is where it is.
+    let (machine, os) = this_machine();
+    assert!(
+        resumed.contains(&format!("**{machine}** (id `{A}`), {os}.")),
+        "B's session is told it may go home to A: {resumed:?}",
+    );
+    assert!(
+        resumed.contains(&format!("**the-vm** (id `{C}`), Windows 11.")),
+        "and on to the ticked VM: {resumed:?}",
+    );
+    assert!(
+        !resumed.contains(&format!("(id `{B}`)")),
+        "and not to B, where it is: {resumed:?}",
+    );
+    assert!(
+        resumed.contains("verkstead transfer <device>"),
+        "{resumed:?}"
+    );
+}
+
+/// **By its id as well as its name**, which is what an agent retries with when
+/// two machines share a name.
+#[tokio::test]
+async fn a_session_may_name_the_device_by_its_id() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = ready_to_move(&gate, spill.path()).await;
+
+    a.printed(conversation, "grilling").await;
+    assert_eq!(a.permits(conversation, B, true).await, "\"Recorded\"");
+
+    let (status, said) = a.calls(conversation, B).await;
+    assert_eq!(status, StatusCode::OK, "the call is taken: {said}");
+    assert_eq!(said.trim(), B_MACHINE);
+
+    std::fs::write(&gate, "go").unwrap();
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    b.notice_saying(there, "at the session").await;
+}
+
+/// **What the call refuses, each by name, and nothing written down for any of
+/// them**: a device the human did not tick, a name two machines share, the
+/// device the work is on, a machine that does not answer, and one without a
+/// repository the work is in.
+#[tokio::test]
+async fn a_call_the_device_cannot_take_is_refused_saying_why_and_records_nothing() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = ready_to_draft(&gate, spill.path()).await;
+
+    // A Companion B has never heard of, which is the repository a move would
+    // find nowhere to land.
+    a.repo_called(COMPANION).await;
+    let beside = a.repo_row(COMPANION).await;
+    assert_eq!(
+        store::add_companion(&a.pool, conversation, beside)
+            .await
+            .unwrap(),
+        store::Adding::Added,
+    );
+
+    a.grills(conversation).await;
+    a.printed(conversation, "grilling").await;
+
+    // Two more machines of the cluster: one nothing answers at, and one that
+    // shares B's name.
+    let third = tempfile::tempdir().unwrap();
+    let c = Device::stated(third.path(), C).unwrap();
+    a.linked_to(&c, "the-vm", "Windows 11", Vec::new()).await;
+
+    let fourth = tempfile::tempdir().unwrap();
+    let twin = "1234567890abcdef1234567890abcdef";
+    let d = Device::stated(fourth.path(), twin).unwrap();
+    a.linked_to(&d, B_MACHINE, "Linux", Vec::new()).await;
+
+    // Off the list: nobody ticked the VM.
+    a.refused(
+        conversation,
+        "the-vm",
+        &["not a device the human has said", C],
+    )
+    .await;
+
+    // Two machines by that name, both named with their ids.
+    a.refused(conversation, B_MACHINE, &[B, twin]).await;
+
+    // The machine the work is on already.
+    a.refused(conversation, A, &["already on"]).await;
+
+    // A name that is nobody's.
+    a.refused(conversation, "the-toaster", &["no device of this cluster"])
+        .await;
+
+    // Ticked, and asleep: the preflight's finding in the dialog's words.
+    assert_eq!(a.permits(conversation, C, true).await, "\"Recorded\"");
+    a.refused(conversation, C, &["the-vm is unreachable"]).await;
+
+    // Ticked, awake, and without the Companion.
+    assert_eq!(a.permits(conversation, B, true).await, "\"Recorded\"");
+    a.refused(
+        conversation,
+        B,
+        &[&format!(
+            "The companion repo {COMPANION} is not on {B_MACHINE}"
+        )],
+    )
+    .await;
+
+    let drawn = a.view(conversation).await;
+    assert_eq!(
+        drawn.transferring, None,
+        "the Conversation is going nowhere"
+    );
+    assert!(drawn.working, "and the session is left running");
+    assert!(b.own_rows().await.is_empty());
+}
+
+/// **The later request wins, whoever made it**, and the Timeline names whoever
+/// that was: a press after the session's call is the human's move, and a call
+/// after the press is the session's.
+#[tokio::test]
+async fn a_press_after_the_sessions_call_is_the_one_that_moves() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = ready_to_move(&gate, spill.path()).await;
+
+    a.printed(conversation, "grilling").await;
+    assert_eq!(a.permits(conversation, B, true).await, "\"Recorded\"");
+
+    assert_eq!(a.calls(conversation, B_MACHINE).await.0, StatusCode::OK);
+    assert_eq!(a.transfers(conversation, B).await, "\"Transferring\"");
+
+    std::fs::write(&gate, "go").unwrap();
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    let arrived = b.notice_saying(there, "Transferred to").await;
+    assert!(
+        arrived.contains("at the human"),
+        "the press came last, so the move is the human's: {arrived}",
+    );
+}
+
+#[tokio::test]
+async fn a_call_after_the_press_is_the_one_that_moves() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = ready_to_move(&gate, spill.path()).await;
+
+    a.printed(conversation, "grilling").await;
+    assert_eq!(a.permits(conversation, B, true).await, "\"Recorded\"");
+
+    assert_eq!(a.transfers(conversation, B).await, "\"Transferring\"");
+    assert_eq!(a.calls(conversation, B).await.0, StatusCode::OK);
+
+    std::fs::write(&gate, "go").unwrap();
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    let arrived = b.notice_saying(there, "Transferred to").await;
+    assert!(
+        arrived.contains("at the session"),
+        "the call came last, so the move is the session's: {arrived}",
+    );
+}
+
+/// **A session that made the call is ended once its turn is over**: an
+/// interactive agent idles rather than exits, so a call waited out the way a
+/// press is would never move anything. Its closing words reach the Transcript,
+/// and they precede *Transferred to B at the session's request* on the Timeline
+/// the work carries on under.
+#[tokio::test]
+async fn a_session_idling_after_its_call_is_ended_moved_and_carried_on() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = drafted_running(
+        &writes_a_log_then(&calls_then_idles_at(&gate)),
+        &carries_on(),
+        spill.path(),
+        Repositories::Apart,
+    )
+    .await;
+
+    a.grills(conversation).await;
+    a.printed(conversation, "grilling").await;
+
+    assert_eq!(a.permits(conversation, B, true).await, "\"Recorded\"");
+    assert_eq!(a.calls(conversation, B_MACHINE).await.0, StatusCode::OK);
+
+    // The agent says its last words and goes idle, and never exits.
+    std::fs::write(&gate, "go").unwrap();
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    let session = a.sessions_on(conversation).await[0];
+    assert!(
+        a.capture_of(conversation, session).await.contains(CLOSING),
+        "the closing words reached A's record before the session was ended",
+    );
+
+    // On the Timeline the work carries on under: the session that crossed,
+    // closing words and all, and after it the move.
+    let notice = b.notice_saying(there, "at the session").await;
+    let timeline = b.view(there).await.timeline;
+
+    let spoke = timeline
+        .iter()
+        .position(|event| matches!(event, TimelineEvent::AgentOutput(_)))
+        .expect("the session on A crossed with the record");
+    let told = timeline
+        .iter()
+        .position(|event| matches!(event, TimelineEvent::Notice(said) if said.html == notice))
+        .expect("the Notice saying the move");
+
+    assert!(
+        spoke < told,
+        "the agent's last words on A precede the move: {timeline:#?}"
+    );
+
+    let crossed = b.sessions_on(there).await[0];
+    assert!(
+        b.capture_of(there, crossed).await.contains(CLOSING),
+        "and they are the closing words, on B as on A",
+    );
+
+    let resumed = b.latest_capture_saying(there, "carried on").await;
+    assert!(
+        resumed.contains("arg=--resume"),
+        "B's session carries on the conversation A's was having: {resumed:?}",
+    );
+}
+
+/// The pace A runs the backlog below at: the rescue's grace well inside the
+/// ending's, so that a session idling behind its call is one the rescue would
+/// have spoken to long before the mover ended it, were it going to.
+fn rescuing() -> Pace {
+    Pace {
+        poll: Duration::from_millis(100),
+        grace: Duration::from_secs(3),
+        proposing: Duration::from_millis(500),
+        waking: Duration::from_secs(1),
+        ..Pace::default()
+    }
+}
+
+/// The words the rescue types into a session, the start of them.
+const RESCUED: &str = "If you have your next step";
+
+/// **A backlog step whose session made the call stands down quietly**: no stop,
+/// no Notice about a step that failed to land, and no rescue typed into the
+/// session idling behind the call. The work carries on at the far end, where
+/// B's session is sent for the same step.
+#[tokio::test]
+async fn a_backlog_step_that_made_the_call_stands_down_and_carries_on_over_there() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = drafted_at(
+        &works_a_step_then_idles_at(&gate),
+        &carries_the_step_on(),
+        spill.path(),
+        Repositories::Apart,
+        true,
+        rescuing(),
+    )
+    .await;
+
+    // The grilling commits its backlog and exits, and the pick that would have
+    // followed is written the way the record takes one.
+    a.grills(conversation).await;
+    a.printed(conversation, "grilling").await;
+    a.view_saying(conversation, |drawn| !drawn.working).await;
+
+    assert!(matches!(
+        store::pick_direction(&a.pool, conversation, Direction::TaskList)
+            .await
+            .unwrap(),
+        store::Directing::Writing,
+    ));
+    store::start_implementing(&a.pool, conversation)
+        .await
+        .unwrap();
+
+    let resumed = press(
+        &a.workbench,
+        &format!("/api/ui/conversations/{conversation}/resume"),
+        None,
+    )
+    .await;
+    assert_eq!(resumed, "\"Resumed\"", "the backlog is worked");
+
+    a.latest_capture_saying(conversation, "working the step")
+        .await;
+
+    assert_eq!(a.permits(conversation, B, true).await, "\"Recorded\"");
+
+    let before = a.notices(conversation).await;
+
+    assert_eq!(a.calls(conversation, B_MACHINE).await.0, StatusCode::OK);
+    std::fs::write(&gate, "go").unwrap();
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    let last = a.latest_capture_saying(conversation, CLOSING).await;
+    assert!(
+        !last.contains(RESCUED),
+        "nothing was typed into the session idling behind its call: {last:?}",
+    );
+
+    for notice in a.notices(conversation).await {
+        assert!(
+            before.contains(&notice) || notice.contains("Transferred to"),
+            "the move is the one thing A says about the step: {notice}",
+        );
+    }
+
+    let carried = b.latest_capture_saying(there, "carrying the step on").await;
+    assert!(
+        carried.contains("next-task/SKILL.md"),
+        "B's session is sent for the backlog: {carried:?}",
+    );
+
+    let worktree = b.worktree(there).await;
+    assert!(
+        std::fs::read_to_string(worktree.join(".tasks/TODO.md"))
+            .unwrap()
+            .contains("- [ ] 01: count the requests"),
+        "and the step it carries on is the one A's session was working",
+    );
+}
+
+/// **The source is marked only once the far end has confirmed**, and what it
+/// keeps is a tombstone: the merged list draws the work once, and the copy's own
+/// URL leads to wherever the record is now.
+#[tokio::test]
+async fn the_source_keeps_a_copy_that_leads_to_the_live_record() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding_there, conversation) = ready_to_move(&gate, spill.path()).await;
+
+    // A holds its own streams too, so that its sidebar is the cluster's rather
+    // than its own rows alone — which is what a merged list is.
+    let _holding_here = a.holding();
+
+    a.printed(conversation, "grilling").await;
+    std::fs::write(&gate, "go").unwrap();
+    a.view_saying(conversation, |drawn| !drawn.working).await;
+
+    assert_eq!(
+        a.sidebar().await.len(),
+        1,
+        "one row before the move, which is A's own",
+    );
+
+    assert_eq!(a.transfers(conversation, B).await, "\"Transferring\"");
+
+    let handed = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await;
+
+    let there = handed.transferred.expect("the mark the move wrote");
+
+    assert_eq!(there.device, B);
+    assert_eq!(
+        b.view(there.id).await.transferred,
+        None,
+        "and B's copy is the record, wearing no mark of its own",
+    );
+
+    // One row, and it is B's: the tombstone comes off the merged list and the
+    // live copy stands in its place, at the rank the work has always sat at.
+    let drawn = a
+        .sidebar_saying(|rows| {
+            rows.iter().any(|row| {
+                row.id == there.id
+                    && row.device.as_ref().and_then(|whose| whose.id.as_deref()) == Some(B)
+            })
+        })
+        .await;
+
+    assert_eq!(drawn.len(), 1, "the work is drawn once: {drawn:#?}");
+    assert_eq!(drawn[0].id, there.id, "and the row drawn is B's copy");
+}
+
+/// **A move that fails leaves the source live and stopped**: nothing is marked,
+/// the Worktree is where it was, and the Notice names the machine and what went
+/// wrong.
+///
+/// The machine goes off between the press and the crossing, which is the
+/// ordinary way for this to happen: the preflight is a reading of a moment, and
+/// a laptop's lid shuts.
+#[tokio::test]
+async fn a_move_that_fails_leaves_the_source_live_and_stopped() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = ready_to_move(&gate, spill.path()).await;
+
+    a.printed(conversation, "grilling").await;
+
+    assert_eq!(a.transfers(conversation, B).await, "\"Transferring\"");
+
+    // The lid shuts while the turn is still running, so the press was made
+    // against a machine that answered and the move meets one that does not.
+    b.stops_answering();
+
+    let worktree = a
+        .view(conversation)
+        .await
+        .worktree
+        .expect("the grilling cut a Worktree")
+        .path;
+
+    std::fs::write(&gate, "go").unwrap();
+
+    let stopped = a
+        .view_saying(conversation, |drawn| drawn.blocked_on.is_some())
+        .await;
+
+    assert_eq!(
+        stopped.transferred, None,
+        "nothing was marked: this copy is still the record",
+    );
+    assert_eq!(
+        stopped.transferring, None,
+        "and it is not on its way anywhere any more",
+    );
+    assert!(
+        stopped.ready_to_resume,
+        "it is stopped, which is a press away from being driven again",
+    );
+
+    let notices = a.notices(conversation).await;
+    let said = notices
+        .last()
+        .expect("a stop writes a Notice saying what happened");
+
+    assert!(
+        said.contains(B_MACHINE),
+        "the Notice names the machine: {said}",
+    );
+
+    assert!(
+        std::path::Path::new(&worktree).is_dir(),
+        "and the Worktree is where it was: {worktree}",
+    );
+
+    assert!(
+        b.own_rows().await.is_empty(),
+        "and nothing was left on the far end",
+    );
+}
+
+/// **The Timeline on the far end reads as it read here**: the same Events in the
+/// same order, each drawing the card it drew, with the Captures and the session
+/// names behind them.
+///
+/// Read as the browser reads it, with the ids taken out — because the ids are the
+/// whole of what may differ. Every Verkstead numbers its own rows, so an Event on
+/// B is a different number from the Event on A it is a copy of; everything else
+/// on the card is the record, and any of it arriving changed would be the record
+/// changing as it moved.
+///
+/// And the rows keyed by an Event rather than by the Conversation are the ones
+/// worth naming: a Capture, a Transcript and a session's name each hang off one,
+/// so any of them left pointing at the number it had on A would be a card with
+/// nothing behind it.
+#[tokio::test]
+async fn the_timeline_on_the_far_end_reads_as_it_read_here() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = ready_to_move(&gate, spill.path()).await;
+
+    a.printed(conversation, "grilling").await;
+
+    // A Set on the way, so the Timeline has a card of every kind the grilling
+    // writes rather than only the ones a start does.
+    a.asks(conversation, ASKED).await;
+
+    std::fs::write(&gate, "go").unwrap();
+    a.view_saying(conversation, |drawn| !drawn.working).await;
+
+    let here = a.view(conversation).await;
+    let said = a.capture(conversation).await;
+    let names = session_names(&a.pool).await;
+
+    assert!(
+        here.timeline.len() >= 4,
+        "the Timeline this is read against has the Brief, the move, the session \
+         and the Set on it: {:#?}",
+        here.timeline,
+    );
+
+    assert_eq!(a.transfers(conversation, B).await, "\"Transferring\"");
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    // What crossed is the front of B's Timeline, and what B adds to it is its
+    // own: the Notice saying where the work came from, and the session its Resume
+    // started. So the wait is for that Notice — the first thing written here that
+    // was not carried — and what is read against A's is everything in front of
+    // it.
+    let arrived = b
+        .view_saying(there, |drawn| drawn.timeline.len() > here.timeline.len())
+        .await;
+
+    assert_eq!(
+        cards(&arrived.timeline[..here.timeline.len()]),
+        cards(&here.timeline),
+        "the Timeline reads as it did, card for card",
+    );
+
+    assert_eq!(
+        b.capture(there).await,
+        said,
+        "and what the session printed is behind the Event it printed into",
+    );
+
+    let named = session_names(&b.pool).await;
+
+    assert_eq!(
+        &named[..names.len()],
+        &names[..],
+        "as is the name Verkstead ran that session under: {named:#?}",
+    );
+
+    let here_lines = transcripts(&a.pool).await;
+    let there_lines = transcripts(&b.pool).await;
+
+    assert_eq!(
+        &there_lines[..here_lines.len()],
+        &here_lines[..],
+        "and the log the session kept of itself, line for line",
+    );
+}
+
+/// **A Question Set left open is answerable where the work now is**, and its
+/// Answers reach whatever is waiting there.
+///
+/// The wait is opened on B through the very endpoint a session's CLI opens one
+/// on, over B's own Conversation id and B's own Set id — which is what the whole
+/// renumbering is for. A Set whose id had not moved with it would be a wait
+/// nothing could open, and one answered into A would be an Answer reaching a
+/// machine the work has left.
+///
+/// **Stopped before it is moved**, which is the shape in which a Set really
+/// outlives a move. The run is stopped by a press, that stop crosses with the
+/// record, and the far end leaves a stop somebody decided on exactly where it
+/// stands — so nothing is started over there and nothing locks what the human
+/// has still to answer. A grilling the far end *does* start again is the other
+/// half of the same rule, and it is
+/// `the_set_a_gone_session_was_waiting_on_is_locked_where_the_work_lands`'s.
+#[tokio::test]
+async fn a_set_left_open_is_answerable_where_the_work_now_is() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = ready_to_move(&gate, spill.path()).await;
+
+    a.printed(conversation, "grilling").await;
+    a.asks(conversation, ASKED).await;
+
+    // The human pulling the brake, which is what makes the question theirs to
+    // answer wherever the work goes: a stop somebody decided on waits for a
+    // press, and an arrival is not somebody deciding differently about it.
+    a.stops_at_once(conversation).await;
+
+    std::fs::write(&gate, "go").unwrap();
+    a.view_saying(conversation, |drawn| !drawn.working).await;
+
+    assert_eq!(a.transfers(conversation, B).await, "\"Transferring\"");
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    let set = *b
+        .sets_on(there)
+        .await
+        .first()
+        .expect("the Set crossed with the work, under an id of B's own");
+
+    // A session on B waiting for its Answers, which is what the endpoint is:
+    // held open until the Set is settled. Opened before anything answers, so
+    // what ends it is the answering rather than a read that was already true.
+    let waiting = tokio::spawn({
+        let workbench = b.workbench.clone();
+
+        async move {
+            let answered = workbench
+                .oneshot(
+                    Request::builder()
+                        .uri(format!(
+                            "/conversations/{there}/api/v1/sets/{set}/response?hold=20"
+                        ))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+
+            let status = answered.status();
+            let bytes = answered.into_body().collect().await.unwrap().to_bytes();
+
+            (status, String::from_utf8_lossy(&bytes).into_owned())
+        }
+    });
+
+    // And the human answering it on the machine the work is on now.
+    let taken = b
+        .workbench
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/conversations/{there}/api/v1/sets/{set}/response"))
+                .header(CONTENT_TYPE, "application/yaml")
+                .body(Body::from(ANSWERED))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let status = taken.status();
+    let bytes = taken.into_body().collect().await.unwrap().to_bytes();
+    let said = String::from_utf8_lossy(&bytes).into_owned();
+
+    assert!(status.is_success(), "answering it on B: {status} {said}");
+
+    let (status, handed) = tokio::time::timeout(WAITING, waiting)
+        .await
+        .expect("the wait on B ended once the Set was answered")
+        .unwrap();
+
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "the wait was handed a Response: {handed}"
+    );
+    assert!(
+        handed.contains("shared between instances"),
+        "and it is the Answer that was given: {handed}",
+    );
+}
+
+/// **And the Set a session that has gone was waiting on is locked where the work
+/// lands**, by the very Resume that starts the work again there.
+///
+/// Which is the other side of the rule above, and it is not about the move at
+/// all: a grilling started again locks every Set the dead session was *idling
+/// on*, because the reader has gone and the human would be answering into
+/// nothing — and after a move the reader has gone in the most literal way there
+/// is, the machine it was on having handed the work over. The session the far end
+/// starts is primed with what was answered and asks again what it still needs.
+///
+/// **The reader really has gone here, which is what makes this the fallback.** The
+/// session on A wrote no log, so there is nothing for the far end to resume
+/// against, and the Sets its relaunch held off locking are locked by the launch
+/// that finds that out — the same locking a launch later. Where the resume *is*
+/// made they stay open, and that is
+/// `the_set_a_resumed_session_was_idling_on_stays_open_under_the_id_the_note_gives`.
+///
+/// **And the Deferred Ask beside it is left where it stands**, nobody having been
+/// behind it to begin with: it crosses, it lands open, and its Answers go into the
+/// prompt of a later session of this Conversation — which is now a session on
+/// another machine.
+#[tokio::test]
+async fn the_set_a_gone_session_was_waiting_on_is_locked_where_the_work_lands() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = ready_to_move(&gate, spill.path()).await;
+
+    a.printed(conversation, "grilling").await;
+
+    let idled = a.asks(conversation, ASKED).await;
+    a.defers(conversation, ASKED).await;
+
+    std::fs::write(&gate, "go").unwrap();
+    a.view_saying(conversation, |drawn| !drawn.working).await;
+
+    assert_eq!(a.transfers(conversation, B).await, "\"Transferring\"");
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    let crossed = b.sets_on(there).await;
+
+    assert_eq!(
+        crossed.len(),
+        2,
+        "both Sets crossed with the work, under ids of B's own",
+    );
+
+    // The blocking one, once the arrival's Resume has been over it: the session
+    // that asked is on a machine the work has left, so it is locked unanswered
+    // rather than left for the human to write into.
+    //
+    // Watched rather than pressed at — see [`Verkstead::locked`]. The locking
+    // comes a launch after the arrival, that being when the far end finds out
+    // whether the reader is coming back on it, and a poll that tried to answer
+    // would answer the Set before the launch had decided.
+    assert!(
+        b.locked(there, crossed[0]).await,
+        "the Set the gone session was idling on is locked unanswered here: \
+         {idled} on A, {} on B",
+        crossed[0],
+    );
+
+    assert_eq!(
+        b.answering(there, crossed[0], ANSWERED).await,
+        StatusCode::GONE,
+        "and it takes no Answer, which is what locked unanswered means to the \
+         human on the machine the work is on now",
+    );
+
+    // And the Deferred Ask, which the relaunch leaves exactly where it stands:
+    // still open on the machine the work is on now, and still the human's to
+    // answer there.
+    assert!(
+        b.answering(there, crossed[1], ANSWERED).await.is_success(),
+        "the Deferred Ask is answerable where the work now is",
+    );
+}
+
+/// **An Attachment opens on the far end**, at a path that device's own sessions
+/// are given, with the file's bytes unchanged.
+///
+/// Rows and bytes both, and the bytes are the half nothing else carries: the row
+/// travels in the slice and the file travels beside it, landing in B's own
+/// attachments directory under B's own Conversation id. Which is what makes the
+/// path one B's sandboxes can mount — a file left under A's id would be a
+/// listing in a prompt naming a directory that is not there.
+#[tokio::test]
+async fn an_attachment_opens_on_the_far_end_with_its_bytes_unchanged() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = ready_to_draft(&gate, spill.path()).await;
+
+    // Bytes rather than text, because what a human has to hand is a screenshot:
+    // a file that crossed as anything but itself is the failure to catch.
+    let bytes: Vec<u8> = (0u8..=255).cycle().take(4096).collect();
+    let attached = a.attaches(conversation, "burst.bin", &bytes).await;
+
+    assert_eq!(
+        a.attached_bytes(conversation, attached).await,
+        bytes,
+        "it is on the record here to begin with",
+    );
+
+    a.grills(conversation).await;
+    a.printed(conversation, "grilling").await;
+    std::fs::write(&gate, "go").unwrap();
+    a.view_saying(conversation, |drawn| !drawn.working).await;
+
+    assert_eq!(a.transfers(conversation, B).await, "\"Transferring\"");
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    let row = b
+        .view(there)
+        .await
+        .attachments
+        .into_iter()
+        .find(|attachment| attachment.name == "burst.bin")
+        .expect("the file's row crossed with the work");
+
+    assert_eq!(
+        row.bytes,
+        bytes.len() as i64,
+        "the row says how large the file is",
+    );
+
+    assert_eq!(
+        b.attached_bytes(there, row.id).await,
+        bytes,
+        "and the file opens over there, byte for byte",
+    );
+
+    // And where it opens from: B's own attachments directory, under the
+    // Conversation id B gave it, which is the path B's sessions are handed.
+    assert!(
+        b.attachments_directory(there).join("burst.bin").is_file(),
+        "the file is in B's own directory for that Conversation",
+    );
+}
+
+/// **Nothing of the source machine crosses.** B's Repos, its Agent Profiles, its
+/// Members and what it remembers of a Repo's Pairings are exactly what they were
+/// before the work arrived.
+///
+/// Which is the other half of what a slice is: a Conversation's record is a fact
+/// about a piece of work, and a Repo, an account and a membership are facts about
+/// a machine. A move that carried any of them would be one device quietly
+/// registering things on another.
+#[tokio::test]
+async fn nothing_of_the_source_machine_crosses() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = ready_to_move(&gate, spill.path()).await;
+
+    a.printed(conversation, "grilling").await;
+    a.asks(conversation, ASKED).await;
+    std::fs::write(&gate, "go").unwrap();
+    a.view_saying(conversation, |drawn| !drawn.working).await;
+
+    let repos: Vec<verkstead_render::RepoEntry> = reading(&b.workbench, "/api/ui/repos").await;
+    let profiles: Vec<ProfileEntry> = reading(&b.workbench, PROFILES).await;
+    let members = store::members(&b.pool).await.unwrap();
+    let pairings = store::remembered_pairings(&b.pool, repos[0].id)
+        .await
+        .unwrap();
+
+    assert_eq!(a.transfers(conversation, B).await, "\"Transferring\"");
+
+    a.view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await;
+
+    assert_eq!(
+        reading::<Vec<verkstead_render::RepoEntry>>(&b.workbench, "/api/ui/repos").await,
+        repos,
+        "B's Repos are what they were: a registration is a directory on a \
+         machine, and nothing about a piece of work registers one",
+    );
+    assert_eq!(
+        reading::<Vec<ProfileEntry>>(&b.workbench, PROFILES).await,
+        profiles,
+        "and its Agent Profiles, the mirror among them",
+    );
+    assert_eq!(
+        store::members(&b.pool).await.unwrap(),
+        members,
+        "and the cluster it is part of",
+    );
+    assert_eq!(
+        store::remembered_pairings(&b.pool, repos[0].id)
+            .await
+            .unwrap(),
+        pairings,
+        "and what it remembers of that Repo's Pairings, which is a fact about \
+         the machine's own last grilling",
+    );
+}
+
+/// **The branch arrives at the commit it was on**, cut into a Worktree of B's
+/// own — and the bundle that carried it was packed against what B said it held
+/// rather than against nothing.
+///
+/// B's repository is a clone of A's here, which is what a cluster holding one
+/// repository looks like: the history under the branch is already over there,
+/// and what has to cross is the commit the session made. That the bundle leaves
+/// the history behind is `transfers::checkouts`'s own test; what this one is
+/// about is the branch landing where it stood.
+#[tokio::test]
+async fn the_branch_arrives_at_the_commit_it_was_on() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = ready_to_move_from_a_clone(&gate, spill.path()).await;
+
+    a.printed(conversation, "grilling").await;
+    std::fs::write(&gate, "go").unwrap();
+    a.view_saying(conversation, |drawn| !drawn.working).await;
+
+    // What the session committed, which is the one thing B has not got: the
+    // base under it came with the clone.
+    let worktree = a.worktree(conversation).await;
+
+    std::fs::write(worktree.join("limits.md"), "# Rate limiting\n").unwrap();
+    git(&worktree, &["add", "-A"]);
+    git(&worktree, &["commit", "-m", "the work so far"]);
+
+    let branch = a.view(conversation).await.branch;
+    let at = git_says(&worktree, &["rev-parse", "HEAD"]);
+
+    assert_eq!(a.transfers(conversation, B).await, "\"Transferring\"");
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    let theirs = b.elsewhere.path().join(REPOSITORY);
+
+    assert_eq!(
+        git_says(&theirs, &["rev-parse", &format!("refs/heads/{branch}")]),
+        at,
+        "the branch is at the same commit on both machines",
+    );
+
+    // And it is checked out, at a path B named for itself under its own Data
+    // Directory — never one of A's, which would mean nothing here.
+    let landed = b.worktree(there).await;
+
+    assert!(
+        landed.starts_with(b._dir.path().join("worktrees")),
+        "B cut the Worktree under its own Data Directory: {}",
+        landed.display(),
+    );
+    assert_ne!(landed, worktree, "and at a path of its own choosing");
+
+    assert_eq!(
+        git_says(&landed, &["symbolic-ref", "--short", "HEAD"]),
+        branch,
+        "the checkout is on the branch the work is on",
+    );
+    assert_eq!(
+        std::fs::read_to_string(landed.join("limits.md")).unwrap(),
+        "# Rate limiting\n",
+        "and it holds what the session committed",
+    );
+}
+
+/// **Uncommitted changes on A are uncommitted changes on B**, a changed binary
+/// among them, and an untracked file arrives with its bytes unchanged.
+///
+/// Which is why the patch is a binary one: the Diff a Question Set carries is
+/// prose for a human and leaves a changed image out by design, and a move that
+/// carried that diff would land a Worktree missing whatever the session had
+/// done to a fixture.
+#[tokio::test]
+async fn the_uncommitted_changes_arrive_as_they_were() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = ready_to_move_from_a_clone(&gate, spill.path()).await;
+
+    a.printed(conversation, "grilling").await;
+    std::fs::write(&gate, "go").unwrap();
+    a.view_saying(conversation, |drawn| !drawn.working).await;
+
+    let worktree = a.worktree(conversation).await;
+
+    // Committed on the branch first, so that there is something for the changes
+    // below to be changes *to*.
+    std::fs::write(worktree.join("notes.md"), "as committed\n").unwrap();
+    std::fs::write(worktree.join("fixture.bin"), COMMITTED_BYTES).unwrap();
+    git(&worktree, &["add", "-A"]);
+    git(&worktree, &["commit", "-m", "the work so far"]);
+
+    // And left uncommitted on top of it, which is what a turn ends with: an
+    // edit, a rewritten binary and a file git has never heard of.
+    std::fs::write(worktree.join("notes.md"), "as the session left it\n").unwrap();
+    std::fs::write(worktree.join("fixture.bin"), LEFT_BYTES).unwrap();
+    std::fs::write(worktree.join("scratch.txt"), "never committed\n").unwrap();
+
+    assert_eq!(a.transfers(conversation, B).await, "\"Transferring\"");
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    let landed = b.worktree(there).await;
+
+    assert_eq!(
+        std::fs::read_to_string(landed.join("notes.md")).unwrap(),
+        "as the session left it\n",
+        "the tracked change crossed",
+    );
+    assert_eq!(
+        std::fs::read(landed.join("fixture.bin")).unwrap(),
+        LEFT_BYTES,
+        "and so did the changed binary, byte for byte",
+    );
+    assert_eq!(
+        std::fs::read_to_string(landed.join("scratch.txt")).unwrap(),
+        "never committed\n",
+        "and the untracked file arrived with its bytes unchanged",
+    );
+
+    // And they are uncommitted over there too, which is what they were: a move
+    // that committed them would be a move that changed the work.
+    assert!(
+        !git_says(&landed, &["status", "--porcelain"]).is_empty(),
+        "the far end's tree has uncommitted changes in it, as this one's had",
+    );
+}
+
+/// **The whole of a move crosses what an operating system brings with it**, and
+/// is read back on the far end: the Timeline, the Worktree and the working
+/// changes.
+///
+/// **Which is what makes the stage demonstrable across two of them.** Three
+/// things stand between a move and an OS boundary, and none of them needs a
+/// second machine to be wrong:
+///
+/// - the **line endings**, which is the repositories' own `core.autocrlf` — set
+///   here the way a Windows checkout has it on the sending side and the way a
+///   Unix one has it on the receiving side, so the tracked change is read out of
+///   a tree spelled with CRLF and lands in a tree that keeps LF. That it lands in
+///   the receiving tree's convention either way round is
+///   `peer::checkouts`'s own pair of tests, which run on both platforms in CI;
+///   this is the same crossing with the whole move behind it;
+/// - the **path separators**, which is why an untracked file's path is spelled
+///   git's way on the wire — a nested one, so that there is a separator in it to
+///   get wrong;
+/// - and the **Worktree's new path**, which the far end names off its own Data
+///   Directory rather than joining anything that arrived onto a directory of its
+///   own.
+///
+/// What is left of a two-OS run after all three is the run itself, which is a
+/// human with two machines.
+#[tokio::test]
+async fn the_move_crosses_what_an_operating_system_brings() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = ready_to_move_from_a_clone(&gate, spill.path()).await;
+
+    a.printed(conversation, "grilling").await;
+    std::fs::write(&gate, "go").unwrap();
+    a.view_saying(conversation, |drawn| !drawn.working).await;
+
+    let worktree = a.worktree(conversation).await;
+
+    // A is the Windows side and B is the Unix one, which between two repositories
+    // is the whole of what the difference comes to.
+    keeping_endings(&a.repo_path(REPOSITORY), "true", &[&worktree]);
+    keeping_endings(&b.repo_path(REPOSITORY), "false", &[]);
+
+    // Committed first, so the changes below are changes *to* something — written
+    // with CRLF, the way an editor on that machine writes a file, and stored with
+    // LF, the way git stores one.
+    std::fs::write(worktree.join("notes.md"), COMMITTED.replace('\n', "\r\n")).unwrap();
+    std::fs::write(worktree.join("fixture.bin"), COMMITTED_BYTES).unwrap();
+    git(&worktree, &["add", "-A"]);
+    git(&worktree, &["commit", "-m", "the work so far"]);
+
+    // And left uncommitted on top of it: the tracked text spelled that machine's
+    // way, a rewritten binary, and an untracked file down a path with a separator
+    // in it.
+    std::fs::write(worktree.join("notes.md"), LEFT.replace('\n', "\r\n")).unwrap();
+    std::fs::write(worktree.join("fixture.bin"), LEFT_BYTES).unwrap();
+    std::fs::create_dir_all(worktree.join("docs/reading")).unwrap();
+    std::fs::write(worktree.join("docs/reading/limits.md"), "not committed\n").unwrap();
+
+    assert_eq!(a.transfers(conversation, B).await, "\"Transferring\"");
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    // The Worktree, read back: B's own path under B's own Data Directory, on the
+    // branch the work is on.
+    let landed = b.worktree(there).await;
+
+    assert_ne!(landed, worktree, "the Worktree is B's own, at its own path");
+    assert!(
+        landed.starts_with(b._dir.path()),
+        "under B's own Data Directory: {}",
+        landed.display(),
+    );
+
+    // The working changes, read back: the text in B's convention, the binary byte
+    // for byte, and the nested untracked file where its path said.
+    assert_eq!(
+        std::fs::read_to_string(landed.join("notes.md")).unwrap(),
+        LEFT,
+        "the tracked change landed in B's own line endings",
+    );
+    assert_eq!(
+        std::fs::read(landed.join("fixture.bin")).unwrap(),
+        LEFT_BYTES,
+        "and the changed binary landed byte for byte, which is what a binary \
+         patch is for",
+    );
+    assert_eq!(
+        std::fs::read_to_string(landed.join("docs/reading/limits.md")).unwrap(),
+        "not committed\n",
+        "and the untracked file landed down the path it was spelled with",
+    );
+
+    // Uncommitted over there too, which is what they were.
+    assert!(
+        !git_says(&landed, &["status", "--porcelain"]).is_empty(),
+        "the far end's tree has uncommitted changes in it, as this one's had",
+    );
+
+    // And the Timeline, read back: the session that ran on A, and the Notice
+    // saying which machine the work came from.
+    let (machine, _) = this_machine();
+
+    let arrived = b
+        .view_saying(there, |drawn| {
+            drawn
+                .timeline
+                .iter()
+                .any(|event| matches!(event, TimelineEvent::Notice(_)))
+        })
+        .await;
+
+    assert!(
+        arrived
+            .timeline
+            .iter()
+            .any(|event| matches!(event, TimelineEvent::AgentOutput(_))),
+        "the session that ran on A is on the far end's Timeline: {:#?}",
+        arrived.timeline,
+    );
+
+    let came = b.notices(there).await;
+
+    assert!(
+        came.iter().any(|notice| notice.contains(&machine)),
+        "and a Notice says which machine it came from: {came:#?}",
+    );
+}
+
+/// **A file the far end's own ignore rules cover is not carried.** A `target/`
+/// is the far end's to build, and on the other side of a move it may not even
+/// be the same operating system.
+/// **A file the far end's own ignore rules cover is not carried.** A `target/`
+/// is the far end's to build, and on the other side of a move it may not even
+/// be the same operating system.
+#[tokio::test]
+async fn a_file_the_far_end_ignores_is_not_carried() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = ready_to_move_from_a_clone(&gate, spill.path()).await;
+
+    a.printed(conversation, "grilling").await;
+    std::fs::write(&gate, "go").unwrap();
+    a.view_saying(conversation, |drawn| !drawn.working).await;
+
+    let worktree = a.worktree(conversation).await;
+
+    std::fs::write(worktree.join(".gitignore"), "build/\n").unwrap();
+    git(&worktree, &["add", "-A"]);
+    git(&worktree, &["commit", "-m", "ignore what is built"]);
+
+    std::fs::create_dir_all(worktree.join("build")).unwrap();
+    std::fs::write(worktree.join("build").join("out"), "a build\n").unwrap();
+    std::fs::write(worktree.join("kept.txt"), "somebody wrote this\n").unwrap();
+
+    assert_eq!(a.transfers(conversation, B).await, "\"Transferring\"");
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    let landed = b.worktree(there).await;
+
+    assert!(
+        !landed.join("build").exists(),
+        "the build stayed behind: {}",
+        landed.display(),
+    );
+    assert_eq!(
+        std::fs::read_to_string(landed.join("kept.txt")).unwrap(),
+        "somebody wrote this\n",
+        "and the untracked file beside it did not",
+    );
+}
+
+/// **A branch a session renamed arrives under the name the checkout is on.**
+///
+/// Nothing tells Verkstead a session renamed its branch — it is read off the
+/// checkout — and the sweep that ordinarily follows one runs only while a
+/// session does. A move runs at the end of a turn, which is exactly when that
+/// sweep has stopped, so a rename in the last turn is a record one name behind
+/// at precisely the moment the work goes.
+#[tokio::test]
+async fn a_renamed_branch_arrives_under_the_name_the_checkout_is_on() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = ready_to_move_from_a_clone(&gate, spill.path()).await;
+
+    a.printed(conversation, "grilling").await;
+    std::fs::write(&gate, "go").unwrap();
+    a.view_saying(conversation, |drawn| !drawn.working).await;
+
+    let worktree = a.worktree(conversation).await;
+    let invented = a.view(conversation).await.branch;
+
+    // What the naming instruction asks of a first session, done the way a
+    // session does it: in its own checkout, telling nobody.
+    git(&worktree, &["branch", "-m", RENAMED]);
+
+    assert_eq!(a.transfers(conversation, B).await, "\"Transferring\"");
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    assert_ne!(
+        invented, RENAMED,
+        "the name Verkstead invented is not this one"
+    );
+    assert_eq!(
+        b.view(there).await.branch,
+        RENAMED,
+        "B's copy is on the name the checkout is on",
+    );
+
+    let theirs = b.elsewhere.path().join(REPOSITORY);
+
+    assert_eq!(
+        git_says(&theirs, &["rev-parse", &format!("refs/heads/{RENAMED}")]),
+        git_says(&worktree, &["rev-parse", "HEAD"]),
+        "and the branch over there is that one, at the commit the work is at",
+    );
+    assert_eq!(
+        git_says(
+            &b.worktree(there).await,
+            &["symbolic-ref", "--short", "HEAD"]
+        ),
+        RENAMED,
+        "and so is the checkout B cut",
+    );
+}
+
+/// **A read-write Companion arrives with both trees as they were**: both
+/// branches at their commits, both sets of uncommitted changes applied.
+///
+/// Which is the whole of the previous leg said again about another repository.
+/// What a read-write Companion is, is a repository a session commits in and
+/// leaves uncommitted work in, so nothing about it may be left behind — a
+/// Conversation whose own tree crossed and whose Companion's did not is one the
+/// work cannot go on in.
+#[tokio::test]
+async fn a_read_write_companion_arrives_with_both_trees_as_they_were() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) =
+        ready_to_move_alongside(&gate, spill.path(), store::CompanionMode::ReadWrite).await;
+
+    a.printed(conversation, "grilling").await;
+    std::fs::write(&gate, "go").unwrap();
+    a.view_saying(conversation, |drawn| !drawn.working).await;
+
+    let own = a.worktree(conversation).await;
+    let beside = a.companion_worktree(conversation, COMPANION).await;
+
+    // A commit in each, and then a change left uncommitted on top of it — which
+    // is what a turn ends with in both repositories.
+    for (worktree, said) in [(&own, "the server's work\n"), (&beside, "the library's\n")] {
+        std::fs::write(worktree.join("limits.md"), said).unwrap();
+        git(worktree, &["add", "-A"]);
+        git(worktree, &["commit", "-m", "the work so far"]);
+
+        std::fs::write(worktree.join("limits.md"), format!("{said}and more\n")).unwrap();
+        std::fs::write(worktree.join("scratch.txt"), "never committed\n").unwrap();
+    }
+
+    let branch = a.view(conversation).await.branch;
+    let ours = git_says(&own, &["rev-parse", "HEAD"]);
+    let theirs = git_says(&beside, &["rev-parse", "HEAD"]);
+
+    assert_eq!(a.transfers(conversation, B).await, "\"Transferring\"");
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    // The branch of each repository on B, at the commit it is at on A.
+    for (name, at) in [(REPOSITORY, &ours), (COMPANION, &theirs)] {
+        assert_eq!(
+            &git_says(
+                &b.elsewhere.path().join(name),
+                &["rev-parse", &format!("refs/heads/{branch}")],
+            ),
+            at,
+            "{name}'s branch is at the same commit on both machines",
+        );
+    }
+
+    // And both checkouts, under B's own Data Directory and holding what each
+    // session left: what was committed, and what was not.
+    let landed = b.worktree(there).await;
+    let alongside = b.companion_worktree(there, COMPANION).await;
+
+    assert!(
+        alongside.starts_with(b._dir.path().join("worktrees")),
+        "B cut the companion's Worktree under its own Data Directory: {}",
+        alongside.display(),
+    );
+    assert_ne!(alongside, beside, "and at a path of its own choosing");
+    assert_ne!(
+        alongside, landed,
+        "and not the one it cut for the work's own"
+    );
+
+    for (worktree, said) in [
+        (&landed, "the server's work\n"),
+        (&alongside, "the library's\n"),
+    ] {
+        assert_eq!(
+            git_says(worktree, &["symbolic-ref", "--short", "HEAD"]),
+            branch,
+            "the checkout is on the branch the work is on: {}",
+            worktree.display(),
+        );
+        assert_eq!(
+            std::fs::read_to_string(worktree.join("limits.md")).unwrap(),
+            format!("{said}and more\n"),
+            "the tracked change crossed: {}",
+            worktree.display(),
+        );
+        assert_eq!(
+            std::fs::read_to_string(worktree.join("scratch.txt")).unwrap(),
+            "never committed\n",
+            "and so did the untracked file: {}",
+            worktree.display(),
+        );
+    }
+}
+
+/// **A read-only Companion arrives detached and bound read-only**, at the commit
+/// it was on, with no patch applied to it.
+///
+/// It has nothing to commit and so nothing uncommitted: carrying a patch to one
+/// would be carrying changes a session was never able to make. What says
+/// *read-only* on the far end is the Companion's own row, which crossed with the
+/// record a leg earlier and is what a sandbox binds the directory by.
+#[tokio::test]
+async fn a_read_only_companion_arrives_detached_and_bound_read_only() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) =
+        ready_to_move_alongside(&gate, spill.path(), store::CompanionMode::ReadOnly).await;
+
+    a.printed(conversation, "grilling").await;
+    std::fs::write(&gate, "go").unwrap();
+    a.view_saying(conversation, |drawn| !drawn.working).await;
+
+    let beside = a.companion_worktree(conversation, COMPANION).await;
+    let at = git_says(&beside, &["rev-parse", "HEAD"]);
+
+    assert!(
+        detached(&beside),
+        "a read-only companion is detached here, which is what it is to arrive as",
+    );
+
+    assert_eq!(a.transfers(conversation, B).await, "\"Transferring\"");
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    let alongside = b.companion_worktree(there, COMPANION).await;
+
+    assert_eq!(
+        git_says(&alongside, &["rev-parse", "HEAD"]),
+        at,
+        "it is at the commit it was at",
+    );
+
+    // Detached, which is what says no branch was taken in somebody's repository
+    // for a directory nothing will ever be committed in.
+    assert!(detached(&alongside), "the companion arrived detached");
+
+    // And nothing was applied to it: the tree is the commit, exactly.
+    assert!(
+        git_says(&alongside, &["status", "--porcelain"]).is_empty(),
+        "no patch was applied to a companion nothing could have written to",
+    );
+
+    assert_eq!(
+        b.companion_row(there, COMPANION).await.mode,
+        store::CompanionMode::ReadOnly,
+        "and the row over there binds it read-only, as the row here did",
+    );
+}
+
+/// **A Companion on the *mirroring* setting arrives under the name a rename gave
+/// it.** Its branch is the Conversation's own, followed as that one is renamed,
+/// so the act that moves the Conversation's name moves this one with it — and
+/// what goes over is the name each checkout is actually on.
+#[tokio::test]
+async fn a_mirroring_companion_arrives_under_the_name_a_rename_gave_it() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) =
+        ready_to_move_alongside(&gate, spill.path(), store::CompanionMode::ReadWrite).await;
+
+    a.printed(conversation, "grilling").await;
+    std::fs::write(&gate, "go").unwrap();
+    a.view_saying(conversation, |drawn| !drawn.working).await;
+
+    let invented = a.view(conversation).await.branch;
+    let own = a.worktree(conversation).await;
+
+    assert!(
+        a.companion_row(conversation, COMPANION)
+            .await
+            .branch
+            .is_empty(),
+        "the companion is on the mirroring setting, which is what it starts on",
+    );
+
+    // What a first session does when the naming instruction asks it to: rename
+    // its own branch, telling nobody.
+    git(&own, &["branch", "-m", RENAMED]);
+
+    assert_eq!(a.transfers(conversation, B).await, "\"Transferring\"");
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    assert_ne!(invented, RENAMED, "the invented name is not this one");
+    assert_eq!(
+        b.view(there).await.branch,
+        RENAMED,
+        "B's copy is on the name the checkout is on",
+    );
+    assert_eq!(
+        git_says(
+            &b.companion_worktree(there, COMPANION).await,
+            &["symbolic-ref", "--short", "HEAD"],
+        ),
+        RENAMED,
+        "and so is the companion, the mirror rule resolving to the new name",
+    );
+    assert_eq!(
+        git_says(
+            &b.elsewhere.path().join(COMPANION),
+            &["rev-parse", &format!("refs/heads/{RENAMED}")],
+        ),
+        git_says(
+            &a.companion_worktree(conversation, COMPANION).await,
+            &["rev-parse", "HEAD"],
+        ),
+        "at the commit the companion's work is at",
+    );
+}
+
+/// **Ignored files in a Companion stay behind**, as they do in the Conversation's
+/// own repository: a build is the far end's to make, and on the other side of a
+/// move it may not even be the same operating system.
+#[tokio::test]
+async fn an_ignored_file_in_a_companion_stays_behind() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) =
+        ready_to_move_alongside(&gate, spill.path(), store::CompanionMode::ReadWrite).await;
+
+    a.printed(conversation, "grilling").await;
+    std::fs::write(&gate, "go").unwrap();
+    a.view_saying(conversation, |drawn| !drawn.working).await;
+
+    let beside = a.companion_worktree(conversation, COMPANION).await;
+
+    std::fs::write(beside.join(".gitignore"), "build/\n").unwrap();
+    git(&beside, &["add", "-A"]);
+    git(&beside, &["commit", "-m", "ignore what is built"]);
+
+    std::fs::create_dir_all(beside.join("build")).unwrap();
+    std::fs::write(beside.join("build").join("out"), "a build\n").unwrap();
+    std::fs::write(beside.join("kept.txt"), "somebody wrote this\n").unwrap();
+
+    assert_eq!(a.transfers(conversation, B).await, "\"Transferring\"");
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    let alongside = b.companion_worktree(there, COMPANION).await;
+
+    assert!(
+        !alongside.join("build").exists(),
+        "the companion's build stayed behind: {}",
+        alongside.display(),
+    );
+    assert_eq!(
+        std::fs::read_to_string(alongside.join("kept.txt")).unwrap(),
+        "somebody wrote this\n",
+        "and the untracked file beside it did not",
+    );
+}
+
+/// The fixture as it was committed, and as the session left it — bytes rather
+/// than text, which is the whole point of them: a patch that was not a binary
+/// one would carry neither.
+const COMMITTED_BYTES: &[u8] = &[0x00, 0x01, 0x02, 0x03];
+const LEFT_BYTES: &[u8] = &[0xff, 0xfe, 0x00, 0x7f, 0x80];
+
+/// And the text file beside it, written with `\n` here and spelled each
+/// machine's own way by whoever writes it into a tree — which is what a
+/// line-ending convention is.
+const COMMITTED: &str = "one\ntwo\n";
+const LEFT: &str = "one\ntwo\nthree\n";
+
+/// And what a session renames its branch to, which is nothing Verkstead would
+/// have invented.
+const RENAMED: &str = "rate-limiting";
+
+/// The login a session on A refreshes inside itself, which is what a harness does
+/// to the account it is running as — see [`refreshes_its_login_at`].
+const REFRESHED: &str = "sk-ant-oat01-refreshed-mid-turn";
+
+/// **A grilling whose log did not cross comes up re-primed on the far end**,
+/// started by that device's own Resume.
+///
+/// Which is the fallback, and it is exactly what an arrival was before there was a
+/// resume to reach for: Resume is the one standing way in — it asks what *ought* to
+/// be running now, from the lifecycle the Conversation is in and what the branch
+/// has written — and a Conversation that has just landed poses exactly that
+/// question. What it gives is a fresh session primed from the record.
+///
+/// **And what makes it the fallback here is that the session on A wrote no log.**
+/// Nothing crossed for the far end to resume against, and a claude told to resume
+/// a session it holds no log for refuses to start rather than opening one — so the
+/// far end opens one of its own instead, which is this. The other way round is
+/// [`a_grilling_transferred_mid_interview_carries_on_from_the_question_it_was_on`].
+///
+/// Read off the session B started rather than off a flag: the prompt it was
+/// launched on carries the Brief and what the grilling has already settled, and
+/// neither of those was on this machine a moment ago.
+#[tokio::test]
+async fn a_grilling_whose_log_did_not_cross_comes_up_re_primed_over_there() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = ready_to_move(&gate, spill.path()).await;
+
+    // A turn genuinely in flight, with something settled in it: the digest a
+    // relaunch is primed with is made of Answers, so an Answer is what makes the
+    // prompt on the far end more than the Brief.
+    a.printed(conversation, "grilling").await;
+
+    let set = a.asks(conversation, ASKED).await;
+    a.answers(conversation, set, ANSWERED).await;
+
+    assert_eq!(a.transfers(conversation, B).await, "\"Transferring\"");
+
+    let crossed = a.sessions_on(conversation).await;
+
+    assert_eq!(
+        crossed.len(),
+        1,
+        "one session ran here, and it is the one that crosses",
+    );
+
+    // The turn ends, and the move follows it.
+    std::fs::write(&gate, "go").unwrap();
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    // B started a session of its own, which is the one thing nothing but its
+    // Resume could have done: nothing on A asked for it, and B had never heard of
+    // this work.
+    let said = b.latest_capture_saying(there, "re-primed").await;
+
+    assert_eq!(
+        b.sessions_on(there).await.len(),
+        2,
+        "two sessions on the far end's Timeline: the one that crossed, and the \
+         one this device started — it printed {said:?}",
+    );
+
+    assert!(
+        said.contains("Rate limiting"),
+        "the session was primed with the Brief: {said:?}",
+    );
+    assert!(
+        said.contains("In Redis"),
+        "and with what the grilling had already settled, which is the digest a \
+         relaunch carries: {said:?}",
+    );
+
+    assert_eq!(
+        b.view(there).await.state,
+        Lifecycle::Grilling,
+        "and it is still a grilling: what moved is where the work is being done \
+         rather than how far it has got",
+    );
+}
+
+/// **A grilling transferred mid-interview carries on from the question it was on**,
+/// as the harness's own resume of the very session that was running on A.
+///
+/// Which is the whole of the stage, end to end and on two machines: the session on
+/// A writes the log claude writes; the memory sync carries that log over as a
+/// labelled part each machine names its own path for; and the launch on B finds it
+/// there, tells claude to resume it, and primes it with the note and nothing else.
+///
+/// **Four things are read, and each is something only a resume could have left.**
+/// The line B's session was launched on names the resume and the id the session on
+/// A ran under — never a fresh one, a conversation carried on keeping the id it
+/// already had. Its prompt is the note alone: the machine and the Worktree's new
+/// path, and none of the Brief the session already has in its own context. The
+/// Capture of that session is written down under the old id too, or the log of the
+/// session actually running could not be found. And its Transcript holds what it
+/// said and not what the session on A had already written into the same file.
+#[tokio::test]
+async fn a_grilling_transferred_mid_interview_carries_on_from_the_question_it_was_on() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = ready_to_carry_on(&gate, spill.path()).await;
+
+    // A turn genuinely in flight, and a log with the interview in it: the session
+    // writes one as it starts, so waiting for it to say it is grilling is waiting
+    // for the log to be there.
+    a.printed(conversation, "grilling").await;
+
+    let running = session_names(&a.pool)
+        .await
+        .pop()
+        .expect("the name Verkstead gave the session on A")
+        .1;
+
+    assert_eq!(
+        a.transcript_of(conversation, 0).await,
+        vec![THE_QUESTION_IT_WAS_ON.to_owned()],
+        "the interview is on A's Transcript, read out of the log the session wrote",
+    );
+
+    assert_eq!(a.transfers(conversation, B).await, "\"Transferring\"");
+
+    // The turn ends, and the move follows it.
+    std::fs::write(&gate, "go").unwrap();
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    let said = b.latest_capture_saying(there, "carried on").await;
+
+    assert!(
+        said.contains("arg=--resume"),
+        "B's session was told to resume rather than to open one: {said:?}",
+    );
+    assert!(
+        said.contains(&format!("arg={running}")),
+        "and to resume the session that was running on A, which is {running}: {said:?}",
+    );
+    assert!(
+        !said.contains("arg=--session-id"),
+        "and it was not named as well, the two being mutually exclusive: {said:?}",
+    );
+
+    assert!(
+        said.contains(&b.worktree(there).await.display().to_string()),
+        "the note names the Worktree's new path: {said:?}",
+    );
+    assert!(
+        said.contains(&this_machine().0),
+        "and the machine the work now runs on: {said:?}",
+    );
+    assert!(
+        !said.contains("Rate limiting"),
+        "and nothing else: the Brief is already in the context this session kept, \
+         and being told it again would be worse than being told nothing: {said:?}",
+    );
+
+    assert_eq!(
+        session_names(&b.pool)
+            .await
+            .into_iter()
+            .map(|(_, name)| name)
+            .collect::<Vec<String>>(),
+        vec![running.clone(), running.clone()],
+        "both of B's Events name that session: the one that crossed, and the one \
+         resuming it — which is what leaves the log of the session actually \
+         running findable",
+    );
+
+    assert_eq!(
+        b.transcript_of(there, 1).await,
+        vec![CARRYING_ON.to_owned()],
+        "and the resumed session's Transcript holds what it said and not what the \
+         session on A had already written into the same log",
+    );
+
+    assert_eq!(
+        b.view(there).await.state,
+        Lifecycle::Grilling,
+        "and it is still a grilling: what moved is where the work is being done \
+         rather than how far it has got",
+    );
+}
+
+/// **And the Question Set it was idling on is still open where the work lands**,
+/// under the id the note gives it, answerable, and its Answers there to be come
+/// back for.
+///
+/// Which is the reversal this stage makes. A relaunched grilling locks every Set it
+/// orphans, because the session that asked has gone and the human would be
+/// answering into nothing — and a harness resume brings that very reader back on
+/// another machine, so the premise does not hold: the Set stays open, the answer
+/// reaches the session that asked, and nobody is asked the same question twice.
+/// The fallback still locks, and that is
+/// `the_set_a_gone_session_was_waiting_on_is_locked_where_the_work_lands`.
+///
+/// **And what the note has to tell it is the id.** The wait was a command running
+/// on the machine the work came from and it died with the process, so the session
+/// comes back to the Set by fetching it — and every id of a moved record is
+/// renumbered as it lands, so the number the agent has in its own context is not
+/// the number the Set has here. The landing wrote the map down and the note reads
+/// it back, both ways round.
+///
+/// **Three Sets, because only one of them is the note's.** The one the session was
+/// idling on; one the human answered before the move, which the agent has already
+/// read; and a Deferred Ask, which never had anybody waiting on it. The last two
+/// cross and stand exactly as they did, and neither is anything to say to a
+/// resumed session.
+#[tokio::test]
+async fn the_set_a_resumed_session_was_idling_on_stays_open_under_the_id_the_note_gives() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = ready_to_carry_on(&gate, spill.path()).await;
+
+    // A Set of B's own, asked before the work arrives. Both databases count their
+    // Sets from one, so without it the id the Set was asked under and the id it
+    // lands as would be the same number — and the note's two halves would prove
+    // nothing about either.
+    let mine = b.drafting_under(b.profile_called(ACCOUNT).await.id).await;
+    b.asks(mine, ASKED).await;
+
+    a.printed(conversation, "grilling").await;
+
+    // In this order, so that reading them off B's Timeline says which is which.
+    let settled = a.asks(conversation, ASKED).await;
+    a.answers(conversation, settled, ANSWERED).await;
+
+    let idled = a.asks(conversation, ASKED).await;
+    a.defers(conversation, ASKED).await;
+
+    std::fs::write(&gate, "go").unwrap();
+
+    assert_eq!(a.transfers(conversation, B).await, "\"Transferring\"");
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    let crossed = b.sets_on(there).await;
+
+    assert_eq!(crossed.len(), 3, "all three crossed: {crossed:?}");
+
+    let carried = crossed[1];
+
+    assert_ne!(
+        carried, idled,
+        "and the one the session was idling on landed under an id of B's own",
+    );
+
+    let said = b.latest_capture_saying(there, "carried on").await;
+
+    assert!(
+        said.contains(&format!(
+            "The Set you asked as {idled} is Set {carried} here: `verkstead answers {carried}`"
+        )),
+        "the note names it both ways round, with the line that fetches the \
+         Answers: {said:?}",
+    );
+
+    for other in [crossed[0], crossed[2]] {
+        assert!(
+            !said.contains(&format!("verkstead answers {other}")),
+            "and neither the Set the human answered before the move nor the \
+             Deferred Ask beside it is in the note: Set {other} in {said:?}",
+        );
+    }
+
+    // Nothing yet, which is what the note says to expect: a Set nobody has
+    // answered is not something to idle on.
+    assert_eq!(
+        b.fetches(there, carried).await.0,
+        StatusCode::NO_CONTENT,
+        "the Set is open and unanswered where the work now is",
+    );
+
+    // And the human answering it on the machine the work is on now, which is the
+    // press a locked Set would have refused.
+    assert!(
+        b.answering(there, carried, ANSWERED).await.is_success(),
+        "the Set the resumed session was idling on took the Answer: it was held \
+         open for a reader that came back rather than locked over one that had \
+         gone",
+    );
+
+    let (status, handed) = b.fetches(there, carried).await;
+
+    assert_eq!(status, StatusCode::OK, "coming back for it: {handed}");
+    assert!(
+        handed.contains("shared between instances"),
+        "and what `verkstead answers {carried}` hands the resumed session is the \
+         Answer to the Set it asked on the other machine: {handed}",
+    );
+
+    // The Deferred Ask, which the resume leaves where a relaunch leaves it:
+    // nobody was ever behind one, so nothing about it changed.
+    assert!(
+        b.answering(there, crossed[2], ANSWERED).await.is_success(),
+        "the Deferred Ask is answerable where the work now is",
+    );
+}
+
+/// **The arrival says which resume it was taken up with**, so that the two
+/// outcomes of one press can be told apart.
+///
+/// *Transfer to…* lands the work on another machine and something starts there,
+/// and what starts is either a resume of the conversation the agent was having or
+/// Verkstead's own Resume — a session picking up mid-sentence, or one starting the
+/// state again from the record. From the outside both are a session appearing on
+/// the Timeline, so each of them says which it was: here, that the conversation was
+/// carried on, by which harness and under which name.
+#[tokio::test]
+async fn an_arrival_that_carried_the_conversation_on_says_so_on_the_timeline() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = ready_to_carry_on(&gate, spill.path()).await;
+
+    a.printed(conversation, "grilling").await;
+
+    let running = session_names(&a.pool)
+        .await
+        .pop()
+        .expect("the name Verkstead gave the session on A")
+        .1;
+
+    std::fs::write(&gate, "go").unwrap();
+
+    let there = handed_on(&a, conversation, B).await;
+
+    let said = b
+        .notice_saying(there, "the session started here carries it on")
+        .await;
+
+    assert!(
+        said.contains("claude was told to resume session"),
+        "the Notice names the harness that was told to resume: {said:?}",
+    );
+    assert!(
+        said.contains(&running),
+        "and the session it was told to resume, which is {running}: {said:?}",
+    );
+
+    // And nothing said the fallback happened, which is the half that makes the
+    // telling apart worth anything.
+    let notices = b.notices(there).await;
+
+    assert!(
+        !notices
+            .iter()
+            .any(|notice| notice.contains("Verkstead") && notice.contains("own Resume")),
+        "and nothing on the Timeline says it was Verkstead's own Resume: \
+         {notices:#?}",
+    );
+}
+
+/// **And a Profile that shares no memory says so**, which is the first of the
+/// reasons an arrival comes up with Verkstead's own Resume instead.
+///
+/// A session under a Profile whose memory switch is off gets a store of its own
+/// and empty — the rule at home as much as away — so the log the session on A
+/// wrote went nowhere the memory sync could carry it, and B has nothing to resume
+/// against. Nothing about that is a failure and nothing about it is the human's to
+/// put right: it is the switch they set, reaching the arrival.
+#[tokio::test]
+async fn a_profile_that_shares_no_memory_says_why_the_conversation_was_not_carried_on() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) =
+        ready_to_carry_on_sharing_no_memory(&gate, spill.path()).await;
+
+    a.printed(conversation, "grilling").await;
+    std::fs::write(&gate, "go").unwrap();
+
+    let there = handed_on(&a, conversation, B).await;
+
+    let said = b.notice_saying(there, "travelled with the work").await;
+
+    assert!(
+        said.contains("memory"),
+        "the Notice names the switch that is off: {said:?}",
+    );
+    assert!(
+        said.contains("Resume"),
+        "and says what was started instead: {said:?}",
+    );
+
+    // And the session really was the fallback: B's script is the one that would
+    // have carried on, and it was never given a resume to make.
+    let capture = b.latest_capture_saying(there, "carried on").await;
+
+    assert!(
+        !capture.contains("arg=--resume"),
+        "B's session was launched as a session of its own: {capture:?}",
+    );
+}
+
+/// **And a log that never landed says that instead**, which is the reason the
+/// Notice exists to tell apart from the one above: the switch was on, the sync ran,
+/// and the record is still not where the harness will look for it.
+///
+/// `a_grilling_whose_log_did_not_cross_comes_up_re_primed_over_there` is the same
+/// move read for what the session was primed with; this is it read for what the
+/// human is told about why.
+#[tokio::test]
+async fn a_record_that_did_not_land_says_so_where_the_work_arrives() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = ready_to_move(&gate, spill.path()).await;
+
+    a.printed(conversation, "grilling").await;
+    std::fs::write(&gate, "go").unwrap();
+
+    let there = handed_on(&a, conversation, B).await;
+
+    let said = b
+        .notice_saying(there, "the memory sync carried none of it")
+        .await;
+
+    assert!(
+        said.contains("claude"),
+        "the record that is not here is named by the harness that keeps it: \
+         {said:?}",
+    );
+    assert!(
+        !said.contains("memory switch"),
+        "and it is not the switch being blamed for it, the switch being on: \
+         {said:?}",
+    );
+}
+
+/// **And a Conversation that arrived with no session on its record says that**,
+/// which is the one reason known at the arrival rather than at the launch: there
+/// is nothing whatever to carry on, so nothing is written down for a launch to
+/// read and the Notice goes in as the work lands.
+///
+/// **What it stands for is a Conversation that moved before anything named a
+/// session** — work started and moved in the same breath, a launch that never got
+/// as far as opening a Capture. Standing it up as it really happens would mean a
+/// device that cannot start a session, which is a device that cannot run the
+/// sending half of this either — so the names are taken off the record instead,
+/// which leaves exactly what crosses in that case: Events, and nothing saying
+/// which session wrote them.
+#[tokio::test]
+async fn a_conversation_with_no_session_on_its_record_says_there_was_nothing_to_carry_on() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = ready_to_carry_on(&gate, spill.path()).await;
+
+    a.printed(conversation, "grilling").await;
+    std::fs::write(&gate, "go").unwrap();
+    a.view_saying(conversation, |drawn| !drawn.working).await;
+
+    sqlx::query("DELETE FROM session_names")
+        .execute(&a.pool)
+        .await
+        .unwrap();
+
+    assert!(
+        session_names(&a.pool).await.is_empty(),
+        "nothing on A's record says which session wrote what",
+    );
+
+    let there = handed_on(&a, conversation, B).await;
+
+    let said = b
+        .notice_saying(there, "no session on its record to carry on from")
+        .await;
+
+    assert!(
+        said.contains("Resume"),
+        "and the Notice says what was started instead: {said:?}",
+    );
+
+    // Which it was: B's script would have carried on if it had been asked to.
+    let capture = b.latest_capture_saying(there, "carried on").await;
+
+    assert!(
+        !capture.contains("arg=--resume"),
+        "B's session was a session of its own: {capture:?}",
+    );
+}
+
+/// **And a Pairing on another harness than the record says that**, a Conversation
+/// whose Profile was changed under it having a record no other backend can read.
+///
+/// **The Profile change is stood in for rather than played out.** What names the
+/// harness a launch runs under is the Pairing, and a Pairing is resolved on the far
+/// end to the mirror of the very Profile the session ran on — so the two agree by
+/// construction until somebody edits the account, which is a change that reaches
+/// the far end when its next refresh gets there rather than at any moment a test
+/// can name. What the launch reads is the row the arrival writes, so the row is
+/// what this writes: the same session, said to have been had on another harness.
+/// Everything after it is the launch's own reading, which is the whole of what is
+/// under test.
+#[tokio::test]
+async fn a_pairing_on_another_harness_than_the_record_says_so_where_the_work_arrives() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = ready_to_carry_on(&gate, spill.path()).await;
+
+    a.printed(conversation, "grilling").await;
+
+    let running = session_names(&a.pool)
+        .await
+        .pop()
+        .expect("the name Verkstead gave the session on A")
+        .1;
+
+    std::fs::write(&gate, "go").unwrap();
+
+    let there = handed_on(&a, conversation, B).await;
+
+    // The arrival's own launch first, and out of the way: it spends the row the
+    // arrival wrote, and what this test is about is the row after it.
+    b.latest_capture_saying(there, "carried on").await;
+    b.view_saying(there, |drawn| !drawn.working).await;
+
+    store::continue_on_arrival(
+        &b.pool,
+        there,
+        &store::Continued {
+            session_id: running.clone(),
+            agent_type: store::AgentType::Grok,
+        },
+    )
+    .await
+    .unwrap();
+
+    let pressed = press(
+        &b.workbench,
+        &format!("/api/ui/conversations/{there}/resume"),
+        None,
+    )
+    .await;
+
+    assert_eq!(pressed, "\"Resumed\"", "Resume started something");
+
+    let said = b
+        .notice_saying(there, "a record one harness wrote is one no other can read")
+        .await;
+
+    assert!(
+        said.contains("grok") && said.contains("claude"),
+        "the Notice names both: the harness the conversation was had on, and the \
+         one this session runs: {said:?}",
+    );
+}
+
+/// **And a harness that will not resume says that**, which is the one reason
+/// nothing can know before the launch: the record crossed, the line was written,
+/// and the harness said no anyway.
+///
+/// **Read off the shape of the ending rather than off anything it printed.** What
+/// a harness says when it will not resume is that harness's wording and free to
+/// change under us, so what is read is that the session ended badly having never
+/// added a line to the record it was launched to carry on — a resume that took
+/// would have written into that record as it worked.
+///
+/// **And what was held open for it is locked**, which is the reversal put back. The
+/// relaunch held the Question Sets the gone session was idling on because a resume
+/// was about to bring that reader back on this machine; it did not, so they are
+/// locked exactly as the relaunch would have locked them.
+#[tokio::test]
+async fn a_harness_that_will_not_resume_says_so_and_locks_what_was_held_for_it() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) =
+        ready_for_a_harness_that_will_not_resume(&gate, spill.path()).await;
+
+    a.printed(conversation, "grilling").await;
+
+    let idled = a.asks(conversation, ASKED).await;
+
+    std::fs::write(&gate, "go").unwrap();
+
+    let there = handed_on(&a, conversation, B).await;
+
+    let said = b.notice_saying(there, "would not resume session").await;
+
+    assert!(
+        said.contains("claude"),
+        "the Notice names the harness that said no: {said:?}",
+    );
+
+    let crossed = b.sets_on(there).await;
+
+    assert_eq!(crossed.len(), 1, "the one Set crossed with the work");
+
+    assert!(
+        b.locked(there, crossed[0]).await,
+        "the Set held open for a reader that never came back is locked \
+         unanswered: {idled} on A, {} on B",
+        crossed[0],
+    );
+
+    assert_eq!(
+        b.answering(there, crossed[0], ANSWERED).await,
+        StatusCode::GONE,
+        "and it takes no Answer, which is what locked unanswered means to the \
+         human on the machine the work is on now",
+    );
+}
+
+/// **The stage, end to end and read back on both machines**: a grilling mid-
+/// interview on one device, moved, carrying on from the same question on the other
+/// — with a Question Set left open across the move, answered afterwards, and its
+/// Answer reaching the session that asked it.
+///
+/// Every part of this is proved somewhere above on its own. What this is for is the
+/// whole of it in one run, read from both ends the way the human reads it: what A
+/// holds after the work has gone, and what B holds now that it has it.
+///
+/// **What a run on two operating systems would add, and what stands for it here.**
+/// The three things an OS difference puts in the way of *this* feature are the
+/// Worktree's new path, which the far end names off its own Data Directory rather
+/// than joining anything that arrived onto a directory of its own; the harness's own
+/// encoding of a working directory, which is what its store is keyed by and which
+/// comes out differently on every machine; and the **stem** the memory sync names
+/// the Worktree's part by, which is what a store crossing as a labelled part is
+/// asked for. All three are exercised here — the two devices cut their Worktrees
+/// under Data Directories of their own, so the paths differ, the `projects/` entries
+/// the harness computes from them differ, and the part is asked for by a stem each
+/// machine names for itself. What is left of a two-OS run after that is the path
+/// separators and the run itself, which is a human with two machines — the same
+/// remainder `the_move_crosses_what_an_operating_system_brings` leaves.
+#[tokio::test]
+async fn a_grilling_carried_on_between_two_devices_reads_back_on_both_ends() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = ready_to_carry_on(&gate, spill.path()).await;
+
+    // The interview, mid-question, with the human's answer still to come.
+    a.printed(conversation, "grilling").await;
+
+    let running = session_names(&a.pool)
+        .await
+        .pop()
+        .expect("the name Verkstead gave the session on A")
+        .1;
+
+    let idled = a.asks(conversation, ASKED).await;
+
+    assert_eq!(
+        a.transcript_of(conversation, 0).await,
+        vec![THE_QUESTION_IT_WAS_ON.to_owned()],
+        "the question the session is on is on A's Transcript, read out of the \
+         log claude itself wrote",
+    );
+
+    let here = a.worktree(conversation).await;
+
+    // The turn ends, and the move follows it.
+    std::fs::write(&gate, "go").unwrap();
+
+    let there = handed_on(&a, conversation, B).await;
+
+    came_home(&b, there).await;
+
+    // **Read back on B.** The line, the note, the Transcript, the Timeline and
+    // the Worktree — each of them something only a resume on this machine could
+    // have left.
+    let said = b.latest_capture_saying(there, "carried on").await;
+
+    let landed = b.worktree(there).await;
+
+    assert_ne!(landed, here, "B cut a Worktree of its own for the work");
+    assert!(
+        landed.starts_with(b._dir.path()),
+        "under its own Data Directory: {}",
+        landed.display(),
+    );
+
+    assert!(
+        said.contains("arg=--resume") && said.contains(&format!("arg={running}")),
+        "B's session was told to resume the session that was running on A, which \
+         is {running}: {said:?}",
+    );
+    assert!(
+        said.contains(&landed.display().to_string()) && said.contains(&this_machine().0),
+        "and primed with the note, which names the machine the work now runs on \
+         and the Worktree's new path: {said:?}",
+    );
+    assert!(
+        !said.contains("Rate limiting"),
+        "and with nothing else: the Brief is already in the context this session \
+         kept: {said:?}",
+    );
+
+    assert_eq!(
+        b.transcript_of(there, 1).await,
+        vec![CARRYING_ON.to_owned()],
+        "and its Transcript opens where the carried log ended, rather than \
+         drawing what the session on A said into this Event too",
+    );
+
+    let carried_on = b
+        .notice_saying(there, "the session started here carries it on")
+        .await;
+
+    assert!(
+        carried_on.contains(&running),
+        "the Timeline says which resume this was, and under which name: \
+         {carried_on:?}",
+    );
+
+    let came = b.notice_saying(there, &this_machine().0).await;
+
+    assert!(
+        came.contains("moved onto this device"),
+        "and, above it, which machine the work came from: {came:?}",
+    );
+
+    // **And the Set the session was idling on**, which is the reversal: still
+    // open where the work is now, answerable, and its Answer reaching the very
+    // session that asked it on the other machine.
+    let crossed = b.sets_on(there).await;
+
+    assert_eq!(crossed.len(), 1, "the Set crossed with the work");
+
+    let carried = crossed[0];
+
+    assert!(
+        said.contains(&format!(
+            "The Set you asked as {idled} is Set {carried} here: `verkstead answers {carried}`"
+        )),
+        "the note names it by both ids, with the line that fetches the Answers: \
+         {said:?}",
+    );
+
+    assert!(
+        b.answering(there, carried, ANSWERED).await.is_success(),
+        "the human answers it on the machine the work is on now",
+    );
+
+    let (status, handed) = b.fetches(there, carried).await;
+
+    assert_eq!(status, StatusCode::OK, "coming back for it: {handed}");
+    assert!(
+        handed.contains("shared between instances"),
+        "and what the resumed session is handed is the Answer to the question it \
+         asked on the other machine: {handed}",
+    );
+
+    // **Read back on A.** The copy it kept leads to the live record, its Timeline
+    // still holds the interview that happened here, and the Worktree it cut is
+    // still its own.
+    let left = a.view(conversation).await;
+
+    assert_eq!(
+        left.transferred.expect("the mark the move wrote").id,
+        there,
+        "A's copy leads to the record on B",
+    );
+    assert!(
+        left.timeline
+            .iter()
+            .any(|event| matches!(event, TimelineEvent::AgentOutput(_))),
+        "and still holds the session that ran here: {:#?}",
+        left.timeline,
+    );
+    assert!(
+        here.is_dir(),
+        "and the Worktree A cut is where it was: {}",
+        here.display(),
+    );
+}
+
+/// **A Grok grilling transferred mid-interview carries on where the store has been
+/// put right, and re-primes where it has not** — which is one round trip, because
+/// the two are the two legs of it.
+///
+/// Grok files a session's directory under its own encoding of the working directory
+/// the session ran in, and the memory sync carries that directory verbatim. So a log
+/// arrives still filed under the *sending* device's name for the sending device's
+/// Worktree, and grok resolves a resume against the directory it is started in: what
+/// makes a resume possible is the arriving directory being moved under the name
+/// *this* store uses for this Worktree, and what names that is the store's own
+/// directories rather than grok's arithmetic reproduced.
+///
+/// **So the first leg falls through and the second carries on.** B has never had grok
+/// run in the Worktree the work lands in, so nothing there stands for it and B's
+/// Resume is Verkstead's own — the fallback, with the log left where the sync put it
+/// and a session re-primed off the record. B's own run leaves the directory behind.
+/// Then the work comes home, where A's store has stood for that Worktree since the
+/// grilling started: the session B was part way through is moved under it, and A's
+/// launch is the harness's own resume of it — told the id, primed with the note
+/// alone, and appending to the conversation rather than opening one.
+#[tokio::test]
+async fn a_grok_grilling_carries_on_where_the_store_has_a_name_for_the_worktree() {
+    let spill = tempfile::tempdir().unwrap();
+    let here = spill.path().join("go-here");
+    let there = spill.path().join("go-there");
+    let (a, b, _holding, conversation) = ready_to_carry_grok_on(&here, &there, spill.path()).await;
+
+    // A holds its own streams too, so the work can be sent back to it.
+    let _holding_here = a.holding();
+
+    a.printed(conversation, "grilling").await;
+
+    let worktree = a.worktree(conversation).await;
+
+    assert_eq!(
+        a.transcript_of(conversation, 0).await,
+        vec![THE_QUESTION_IT_WAS_ON.to_owned()],
+        "the interview is on A's Transcript, read out of the log grok wrote",
+    );
+
+    // The first leg. The turn ends, the move follows it, and the far end has
+    // nothing in its store that stands for the Worktree the work lands in.
+    std::fs::write(&here, "go").unwrap();
+
+    let over_there = handed_on(&a, conversation, B).await;
+
+    came_home(&b, over_there).await;
+
+    let re_primed = b.latest_capture_saying(over_there, RE_PRIMED_THERE).await;
+
+    assert!(
+        !re_primed.contains("arg=--resume"),
+        "B has never run grok in this Worktree, so there is nowhere in its store a \
+         carried session belongs and Verkstead's own Resume stands: {re_primed:?}",
+    );
+    assert!(
+        re_primed.contains("Rate limiting"),
+        "which means the session was primed off the record, Brief and all: \
+         {re_primed:?}",
+    );
+
+    // And the second. B's own session has left its store standing for the Worktree
+    // it ran in, and the log of that session is what comes home.
+    let running = session_names(&b.pool)
+        .await
+        .pop()
+        .expect("the name Verkstead gave the session on B")
+        .1;
+
+    std::fs::write(&there, "go").unwrap();
+
+    handed_on(&b, over_there, A).await;
+
+    came_home(&a, conversation).await;
+
+    let said = a.latest_capture_saying(conversation, "carried on").await;
+
+    assert!(
+        said.contains("arg=--resume"),
+        "A's session was told to resume rather than to open one: {said:?}",
+    );
+    assert!(
+        said.contains(&format!("arg={running}")),
+        "and to resume the session that was running on B, which is {running}: \
+         {said:?}",
+    );
+    assert!(
+        !said.contains("arg=--session-id"),
+        "and it was not named as well, the two being mutually exclusive: {said:?}",
+    );
+
+    assert!(
+        said.contains(&worktree.display().to_string()),
+        "the note names the Worktree's path here: {said:?}",
+    );
+    assert!(
+        !said.contains("Rate limiting"),
+        "and nothing else: the Brief is already in the context this session kept: \
+         {said:?}",
+    );
+
+    // Where the log is, which is the relocation itself: under the directory A's
+    // store already stood for this Worktree, rather than under B's name for B's.
+    let filed = a
+        .grok_sessions()
+        .join(encoded(&worktree))
+        .join(&running)
+        .join("updates.jsonl");
+
+    assert!(
+        filed.is_file(),
+        "the carried session is filed under A's own name for its own Worktree: \
+         {}",
+        filed.display(),
+    );
+    assert!(
+        !a.grok_sessions()
+            .join(encoded(&b.worktree(over_there).await))
+            .join(&running)
+            .exists(),
+        "and not under the name it arrived with, a log in two places being a \
+         conversation appended to in one of them",
+    );
+
+    assert_eq!(
+        a.transcript_of(conversation, 2).await,
+        vec![CARRYING_ON.to_owned()],
+        "and the resumed session's Transcript holds what it said and not what the \
+         session on B had already written into the same log",
+    );
+
+    assert_eq!(
+        a.view(conversation).await.state,
+        Lifecycle::Grilling,
+        "and it is still a grilling: what moved is where the work is being done \
+         rather than how far it has got",
+    );
+}
+
+/// The name grok's store gives the directory it groups a Worktree's sessions
+/// under, which is the URL-encoding of the path — the stub's own rule, so that a
+/// test can say where a log ought to be.
+fn encoded(worktree: &Path) -> String {
+    worktree.display().to_string().replace('/', "%2F")
+}
+
+/// **A Codex grilling transferred mid-interview carries on from the question it
+/// was on, under a name nobody gave it** — which is the harder half of resuming a
+/// harness, and this one's whole difficulty.
+///
+/// Codex takes no session id at launch, so nothing Verkstead knew before the
+/// session started names its log. What identifies a rollout is what the session
+/// wrote in it about itself, and among that is **its own session id** — the id
+/// `codex resume` takes. So the Transcript search that finds the log writes that
+/// id onto the record beside the session, exactly where the id Verkstead picked
+/// would have gone for the two backends that take one, and from there a device
+/// that never ran the session can resume it.
+///
+/// **And its store needs nothing put right.** Codex files its rollouts by the
+/// date they were written, so what the memory sync carries lands at the relative
+/// path it left; the resume is by id and is resolved against the whole store
+/// rather than against the directory codex was started in. What the line carries
+/// instead is the answer to the question codex would otherwise stop and ask —
+/// which of the two directories to resume in — and it answers the one the work is
+/// now in.
+///
+/// **Four things are read, and each is something only this could have left.** The
+/// name on A's record is the one the rollout gave itself rather than the one the
+/// Capture opened under. The line B's session was launched on is the subcommand,
+/// with that id as the positional in front of the prompt, and with the account's
+/// own half of the ordinary line come across onto it. Its prompt is the note
+/// alone. And its Transcript holds what it said and not what the session on A had
+/// already written into the same file — which it could only have appended to by
+/// finding the carried rollout under the id it was handed.
+#[tokio::test]
+async fn a_codex_grilling_transferred_mid_interview_carries_on_under_a_name_nobody_gave_it() {
+    let spill = tempfile::tempdir().unwrap();
+    let here = spill.path().join("go-here");
+    let there = spill.path().join("go-there");
+    let (a, b, _holding, conversation) =
+        ready_to_carry_codex_on(&here, &there, spill.path(), true).await;
+
+    // A turn genuinely in flight, and a rollout with the interview in it: the
+    // session writes one as it starts, so waiting for it to say it has opened the
+    // conversation is waiting for the log to be there.
+    a.printed(conversation, OPENED_HERE).await;
+
+    assert_eq!(
+        a.transcript_of(conversation, 0).await.pop(),
+        Some(THE_QUESTION_IT_WAS_ON.to_owned()),
+        "the interview is on A's Transcript, read out of the rollout codex wrote \
+         — under the opening line, which is a line of the log like any other",
+    );
+
+    assert_eq!(
+        session_names(&a.pool)
+            .await
+            .into_iter()
+            .map(|(_, name)| name)
+            .collect::<Vec<String>>(),
+        vec![CODEX_CHOSE.to_owned()],
+        "and A's record calls that session what the rollout calls it, which is \
+         the only name it has: the Capture was opened under one nothing uses",
+    );
+
+    // The turn ends, and the move follows it.
+    std::fs::write(&here, "go").unwrap();
+
+    let there_id = handed_on(&a, conversation, B).await;
+
+    came_home(&b, there_id).await;
+
+    let said = b.latest_capture_saying(there_id, "carried on").await;
+
+    assert!(
+        said.contains("arg=resume"),
+        "B's session was told to resume rather than to open one, and told by the \
+         subcommand codex takes: {said:?}",
+    );
+    assert!(
+        said.contains(&format!("arg={CODEX_CHOSE}")),
+        "and to resume the session the rollout named, which is {CODEX_CHOSE}: \
+         {said:?}",
+    );
+    assert!(
+        said.contains("arg=cli_auth_credentials_store=\"file\"")
+            && said.contains("trust_level=\"trusted\""),
+        "and the account's own half of the line came across onto the subcommand, \
+         or the resume would come up logged out on a trust prompt: {said:?}",
+    );
+    assert!(
+        said.contains("arg=tui.resume_cwd=\"current\""),
+        "and the answer to the question a carried rollout makes codex ask, which \
+         is the directory the work is now in: {said:?}",
+    );
+
+    let worktree = b.worktree(there_id).await;
+
+    assert!(
+        said.contains(&worktree.display().to_string()),
+        "the note names the Worktree's new path: {said:?}",
+    );
+    assert!(
+        !said.contains("Rate limiting"),
+        "and nothing else: the Brief is already in the context this session kept: \
+         {said:?}",
+    );
+
+    assert_eq!(
+        session_names(&b.pool)
+            .await
+            .into_iter()
+            .map(|(_, name)| name)
+            .collect::<Vec<String>>(),
+        vec![CODEX_CHOSE.to_owned(), CODEX_CHOSE.to_owned()],
+        "both of B's Events name that session: the one that crossed, and the one \
+         resuming it — which is what leaves the log of the session actually \
+         running findable",
+    );
+
+    assert_eq!(
+        b.transcript_of(there_id, 1).await,
+        vec![CARRYING_ON.to_owned()],
+        "and the resumed session's Transcript holds what it said and not what the \
+         session on A had already written into the same rollout — which is also \
+         what says the append landed in the carried rollout at all: the session \
+         found it by globbing the store for the id it was handed, and a glob that \
+         matched nothing would have written nowhere",
+    );
+
+    assert_eq!(
+        b.view(there_id).await.state,
+        Lifecycle::Grilling,
+        "and it is still a grilling: what moved is where the work is being done \
+         rather than how far it has got",
+    );
+}
+
+/// **And a rollout that never said which session it was of leaves Verkstead's own
+/// Resume doing exactly what it does today.**
+///
+/// Which is the fallback this harness needs most, because it is the one whose
+/// name is read rather than chosen: a rollout caught before its opening line was
+/// finished, one written by a codex that spells that line some other way, and one
+/// that never crossed at all, all come to the same place — no name on the record,
+/// so nothing for a resume to be asked by.
+///
+/// Nothing is lost by it. The far end re-primes off the record, Brief and all, the
+/// way stage 09 left it.
+#[tokio::test]
+async fn a_codex_rollout_that_named_no_session_falls_through_to_verksteads_resume() {
+    let spill = tempfile::tempdir().unwrap();
+    let here = spill.path().join("go-here");
+    let there = spill.path().join("go-there");
+    let (a, b, _holding, conversation) =
+        ready_to_carry_codex_on(&here, &there, spill.path(), false).await;
+
+    a.printed(conversation, OPENED_HERE).await;
+
+    assert_eq!(
+        a.transcript_of(conversation, 0).await.pop(),
+        Some(THE_QUESTION_IT_WAS_ON.to_owned()),
+        "the interview is on A's Transcript all the same: a log that says nothing \
+         about itself is still a log to follow",
+    );
+
+    std::fs::write(&here, "go").unwrap();
+
+    let there_id = handed_on(&a, conversation, B).await;
+
+    came_home(&b, there_id).await;
+
+    let re_primed = b.latest_capture_saying(there_id, RE_PRIMED_THERE).await;
+
+    assert!(
+        !re_primed.contains("arg=resume"),
+        "nothing on A's record named that session, so there is nothing for a \
+         resume to be asked by and Verkstead's own Resume stands: {re_primed:?}",
+    );
+    assert!(
+        re_primed.contains("Rate limiting"),
+        "which means the session was primed off the record, Brief and all: \
+         {re_primed:?}",
+    );
+
+    // And the human is told which of the two they are looking at, and why. A
+    // rollout that named no session leaves the row the Capture opened with, which
+    // is a name no codex answers to — so what the record holds is a session id
+    // that finds no rollout, and the reason is the rollout rather than the row.
+    let said = b
+        .notice_saying(there_id, "the memory sync carried none of it")
+        .await;
+
+    assert!(
+        said.contains("codex") && said.contains("Resume"),
+        "the Notice names the harness whose record could not be found, and what \
+         was started instead: {said:?}",
+    );
+}
+
+/// The kind of record opencode opens a session with, and the two this suite
+/// writes under it — the interview the session on A is part way through, and the
+/// one only a session that really carried on could have added.
+///
+/// Written as opencode writes them, which is a kind it filed the record under and
+/// the payload as JSON: what reads them back is the Transcript, which keeps a
+/// record exactly as the store held it with that kind and its place in the
+/// sequence around it.
+const OPENCODE_KIND: &str = "message.part.updated.1";
+const OPENCODE_ASKED: &str = r#"{"part":{"type":"text","text":"Where should the counter live?"}}"#;
+const OPENCODE_CARRYING_ON: &str = r#"{"part":{"type":"text","text":"So, back to the counter."}}"#;
+
+/// And how each of those reads once it is on the Transcript, which is the kind
+/// and the sequence Verkstead writes around what the store held.
+fn opencode_line(seq: i64, data: &str) -> String {
+    format!(r#"{{"kind":"{OPENCODE_KIND}","seq":{seq},"record":{data}}}"#)
+}
+
+/// The session id **opencode's store gives a session**, which is the difficulty
+/// this harness shares with Codex: Verkstead names no OpenCode session, so the
+/// only place this string exists before the store is written is here.
+///
+/// Shaped as opencode shapes one, and nothing depends on the shape: what matters
+/// is that it is not a name anything on either machine could have chosen.
+const OPENCODE_CHOSE: &str = "ses_f0ef23221ffeeSzlvZxHdDFSqE";
+
+/// An OpenCode store at `database`, made where opencode would have made one and
+/// holding only the columns Verkstead reads.
+///
+/// Its own file rather than the account's directory, because the two stores a
+/// test about a transfer touches are in two different places: A's account, and
+/// B's mirror of it under the Data Directory.
+async fn opencode_store(database: &Path) -> SqlitePool {
+    std::fs::create_dir_all(database.parent().unwrap()).unwrap();
+
+    let store = SqlitePool::connect_with(
+        sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(database)
+            .create_if_missing(true)
+            // The mode opencode keeps its own store in, which is what has to
+            // cross and what has to open on the machine it lands on.
+            .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal),
+    )
+    .await
+    .unwrap();
+
+    sqlx::Executor::execute(
+        &store,
+        "CREATE TABLE session (
+             id           TEXT PRIMARY KEY,
+             parent_id    TEXT,
+             directory    TEXT NOT NULL,
+             time_created INTEGER NOT NULL
+         );
+         CREATE TABLE event (
+             id           TEXT PRIMARY KEY,
+             aggregate_id TEXT NOT NULL,
+             seq          INTEGER NOT NULL,
+             type         TEXT NOT NULL,
+             data         TEXT NOT NULL
+         );",
+    )
+    .await
+    .unwrap();
+
+    store
+}
+
+/// A session in that store, opened in `directory` now.
+async fn opencode_session(store: &SqlitePool, session: &str, directory: &Path) {
+    let created = std::time::SystemTime::now()
+        .duration_since(std::time::SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64;
+
+    sqlx::query(
+        "INSERT INTO session (id, parent_id, directory, time_created) VALUES (?, NULL, ?, ?)",
+    )
+    .bind(session)
+    .bind(directory.display().to_string())
+    .bind(created)
+    .execute(store)
+    .await
+    .unwrap();
+}
+
+/// And a record it wrote inside one.
+async fn opencode_record(store: &SqlitePool, session: &str, seq: i64, data: &str) {
+    sqlx::query("INSERT INTO event (id, aggregate_id, seq, type, data) VALUES (?, ?, ?, ?, ?)")
+        .bind(format!("{session}-{seq}"))
+        .bind(session)
+        .bind(seq)
+        .bind(OPENCODE_KIND)
+        .bind(data)
+        .execute(store)
+        .await
+        .unwrap();
+}
+
+/// And which directory a store says one of its sessions is working in, which is
+/// the one column an arrival writes and the one a resume is resolved against.
+///
+/// Waited for, because the store it is asked of is one that crossed a link: the
+/// row is there once the memory sync has landed the file and the launch has
+/// brought it onto this device's Worktree.
+async fn opencode_directory_of(database: &Path, session: &str) -> String {
+    let deadline = Instant::now() + WAITING;
+    let mut last = None;
+
+    loop {
+        if database.is_file() {
+            let reading = SqlitePool::connect_with(
+                sqlx::sqlite::SqliteConnectOptions::new()
+                    .filename(database)
+                    .read_only(true)
+                    .create_if_missing(false),
+            )
+            .await;
+
+            if let Ok(reading) = reading {
+                let found: Option<(String,)> =
+                    sqlx::query_as("SELECT directory FROM session WHERE id = ?")
+                        .bind(session)
+                        .fetch_optional(&reading)
+                        .await
+                        .unwrap_or(None);
+
+                reading.close().await;
+
+                if let Some((directory,)) = found {
+                    return directory;
+                }
+
+                last = Some("no row of that id");
+            } else {
+                last = Some("the store would not open");
+            }
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "the store at {} never held a row for {session}: {last:?}",
+            database.display(),
+        );
+
+        tokio::time::sleep(LOOKING).await;
+    }
+}
+
+/// **An OpenCode grilling transferred mid-interview carries on in the row the
+/// carried store kept of it** — the last harness, and the one whose store is a
+/// database rather than a tree.
+///
+/// opencode takes no session id at launch either, so its name is the store's own:
+/// the reader that follows a session's records finds the row this Worktree's
+/// session wrote, and the id that row is under goes on the record beside the
+/// session, exactly where the id Verkstead picked would have gone for the two
+/// backends that take one. From there a device that never ran the session can
+/// resume it, and the resume is the shortest line here — the session flag, the
+/// id, and everything else about the launch unchanged.
+///
+/// **And its store is the one that has to be written into.** The memory sync
+/// carries the whole database, because narrowing further means writing rows of a
+/// schema that is opencode's own; what travels with it is the working directory
+/// recorded against the session, which is the sending device's. opencode resumes
+/// a session in the directory its row names, so that one column is brought onto
+/// this device's Worktree as the database lands, and nothing else in it is
+/// touched.
+///
+/// **Four things are read, and each is something only this could have left.** The
+/// name on A's record is the one the store gave the session rather than the one
+/// the Capture opened under. The line B's session was launched on carries that id
+/// under opencode's own session flag, with the model, the Brief's flag and the
+/// approvals all still on it. The row in the store that landed on B says B's
+/// Worktree. And B's Transcript holds what the session there added and not what
+/// the session on A had already written into the same session — which is the
+/// cursor having crossed with the row.
+#[tokio::test]
+async fn an_opencode_grilling_transferred_mid_interview_carries_on_in_the_row_the_store_kept() {
+    let spill = tempfile::tempdir().unwrap();
+    let here = spill.path().join("go-here");
+    let there = spill.path().join("go-there");
+    let (a, b, _holding, conversation, mirror) =
+        ready_to_carry_opencode_on(&here, &there, spill.path()).await;
+
+    // A turn genuinely in flight, and then the store the session would have been
+    // writing while it ran — from outside the sandbox, there being no sqlite3 in
+    // it for the stub to write one with.
+    a.printed(conversation, OPENED_HERE).await;
+
+    let worktree = a.worktree(conversation).await;
+    let writing = opencode_store(&a.opencode_at_home()).await;
+
+    opencode_session(&writing, OPENCODE_CHOSE, &worktree).await;
+    opencode_record(&writing, OPENCODE_CHOSE, 0, OPENCODE_ASKED).await;
+
+    // Let go of it before the work moves, so what crosses is a store nobody on
+    // this machine is holding open.
+    writing.close().await;
+
+    assert_eq!(
+        a.transcript_of(conversation, 0).await,
+        vec![opencode_line(0, OPENCODE_ASKED)],
+        "the interview is on A's Transcript, read out of the row opencode wrote — \
+         the record whole, with the kind it was filed under and its place in the \
+         sequence around it",
+    );
+
+    assert_eq!(
+        session_names(&a.pool)
+            .await
+            .into_iter()
+            .map(|(_, name)| name)
+            .collect::<Vec<String>>(),
+        vec![OPENCODE_CHOSE.to_owned()],
+        "and A's record calls that session what the store calls it, which is the \
+         only name it has: the Capture was opened under one nothing uses",
+    );
+
+    // The turn ends, and the move follows it.
+    std::fs::write(&here, "go").unwrap();
+
+    let there_id = handed_on(&a, conversation, B).await;
+
+    came_home(&b, there_id).await;
+
+    let said = b.latest_capture_saying(there_id, "carried on").await;
+
+    assert!(
+        said.contains("arg=--session"),
+        "B's session was told to continue one rather than to open one, and told \
+         by the flag opencode takes: {said:?}",
+    );
+    assert!(
+        said.contains(&format!("arg={OPENCODE_CHOSE}")),
+        "and to continue the session the store named, which is {OPENCODE_CHOSE}: \
+         {said:?}",
+    );
+    assert!(
+        !said.contains("arg=--fork"),
+        "and to continue it rather than branch off it, which is what the flag \
+         beside it would have meant: {said:?}",
+    );
+    assert!(
+        said.contains(&format!("arg={OPENCODE_MODEL}")) && said.contains("arg=--auto"),
+        "and the rest of the ordinary line came across onto it, model and \
+         approvals both: {said:?}",
+    );
+
+    let over_there = b.worktree(there_id).await;
+
+    assert!(
+        said.contains("arg=--prompt") && said.contains(&over_there.display().to_string()),
+        "the note goes under opencode's own prompt flag as the Brief does, and it \
+         names the Worktree's new path: {said:?}",
+    );
+    assert!(
+        !said.contains("Rate limiting"),
+        "and nothing else: the Brief is already in the context this session kept: \
+         {said:?}",
+    );
+
+    assert_eq!(
+        opencode_directory_of(&b.opencode_mirrored(mirror), OPENCODE_CHOSE).await,
+        over_there.display().to_string(),
+        "and the row in the store that landed here says the Worktree the work is \
+         now in rather than the one it left, which is where opencode resumes a \
+         session",
+    );
+
+    assert_eq!(
+        session_names(&b.pool)
+            .await
+            .into_iter()
+            .map(|(_, name)| name)
+            .collect::<Vec<String>>(),
+        vec![OPENCODE_CHOSE.to_owned(), OPENCODE_CHOSE.to_owned()],
+        "both of B's Events name that session: the one that crossed, and the one \
+         continuing it — which is what leaves the records of the session actually \
+         running findable",
+    );
+
+    // What the session on B added to the conversation it picked up, written the
+    // way A's was and into the store that arrived.
+    let adding = SqlitePool::connect_with(
+        sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(b.opencode_mirrored(mirror))
+            .create_if_missing(false),
+    )
+    .await
+    .expect("the store the memory sync landed on B opens");
+
+    opencode_record(&adding, OPENCODE_CHOSE, 1, OPENCODE_CARRYING_ON).await;
+    adding.close().await;
+
+    assert_eq!(
+        b.transcript_of(there_id, 1).await,
+        vec![opencode_line(1, OPENCODE_CARRYING_ON)],
+        "and the continued session's Transcript holds what it added and not what \
+         the session on A had already written into the same session — the cursor \
+         having crossed with the row, rather than this Event opening at the top of \
+         a conversation it did not have",
+    );
+
+    assert_eq!(
+        b.view(there_id).await.state,
+        Lifecycle::Grilling,
+        "and it is still a grilling: what moved is where the work is being done \
+         rather than how far it has got",
+    );
+}
+
+/// **And a store with no row for the session leaves Verkstead's own Resume doing
+/// exactly what it does today, with nothing written into it.**
+///
+/// Which is the fallback this harness needs both halves of, because its resume is
+/// the one that writes: a database this build cannot read refuses the write and a
+/// database holding no row of that id changes nothing, and neither may leave the
+/// store it was asked of any different from how it arrived.
+///
+/// The session here is one the reader never found — its row records some other
+/// Worktree, which is a session of another Conversation's — so nothing was ever
+/// written onto the record but the name the Capture opened under, and no store
+/// answers to that. Nothing is lost by it: the far end re-primes off the record,
+/// Brief and all, the way stage 09 left it.
+#[tokio::test]
+async fn an_opencode_store_with_no_row_for_the_session_falls_through_to_verksteads_resume() {
+    let spill = tempfile::tempdir().unwrap();
+    let here = spill.path().join("go-here");
+    let there = spill.path().join("go-there");
+    let (a, b, _holding, conversation, mirror) =
+        ready_to_carry_opencode_on(&here, &there, spill.path()).await;
+
+    a.printed(conversation, OPENED_HERE).await;
+
+    // A store with a session of another Conversation's in it and none of this
+    // one's, which is a Conversation whose own session was never found.
+    let elsewhere = PathBuf::from("/srv/worktrees/tables");
+    let writing = opencode_store(&a.opencode_at_home()).await;
+
+    opencode_session(&writing, "ses_elsewhere", &elsewhere).await;
+    writing.close().await;
+
+    std::fs::write(&here, "go").unwrap();
+
+    let there_id = handed_on(&a, conversation, B).await;
+
+    came_home(&b, there_id).await;
+
+    let re_primed = b.latest_capture_saying(there_id, RE_PRIMED_THERE).await;
+
+    assert!(
+        !re_primed.contains("arg=--session"),
+        "no row of A's store was ever this session's, so there is nothing for a \
+         resume to be asked by and Verkstead's own Resume stands: {re_primed:?}",
+    );
+    assert!(
+        re_primed.contains("Rate limiting"),
+        "which means the session was primed off the record, Brief and all: \
+         {re_primed:?}",
+    );
+
+    assert_eq!(
+        opencode_directory_of(&b.opencode_mirrored(mirror), "ses_elsewhere").await,
+        elsewhere.display().to_string(),
+        "and the store that landed here is as it arrived: a resume that found no \
+         row of its own leaves somebody else's alone rather than writing a guess \
+         over it",
+    );
+}
+
+/// **Each end's Timeline says what happened to it**: the far end's that the work
+/// came from that machine, and the source's that it went to the other one.
+///
+/// So the record reads as one story across the two databases rather than as a
+/// Conversation that appeared on one from nowhere and stopped on the other for no
+/// reason. By the name the human gave each machine, which is what every sentence
+/// about a member is written with.
+#[tokio::test]
+async fn each_end_says_where_the_work_came_from_and_went_to() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = ready_to_move(&gate, spill.path()).await;
+
+    a.printed(conversation, "grilling").await;
+    std::fs::write(&gate, "go").unwrap();
+    a.view_saying(conversation, |drawn| !drawn.working).await;
+
+    let (machine, _) = this_machine();
+
+    assert_eq!(a.transfers(conversation, B).await, "\"Transferring\"");
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    // The source's, which is on the copy it kept: the page redirects off a
+    // tombstone rather than drawing it, so what this is written on is the record
+    // — which is what a Share of it reads, and what a transfer back replaces.
+    let here = a.notices(conversation).await;
+    let went = here
+        .last()
+        .expect("the move puts a Notice on the copy it left behind");
+
+    assert!(
+        went.contains(B_MACHINE),
+        "the source's Notice names the machine the work went to: {went}",
+    );
+
+    // And the far end's, which is the first thing written on its copy that did
+    // not cross with the record.
+    let arrived = b
+        .view_saying(there, |drawn| {
+            drawn
+                .timeline
+                .iter()
+                .any(|event| matches!(event, TimelineEvent::Notice(_)))
+        })
+        .await;
+
+    let came = arrived
+        .timeline
+        .iter()
+        .filter_map(|event| match event {
+            TimelineEvent::Notice(notice) => Some(notice.html.clone()),
+            _ => None,
+        })
+        .next()
+        .expect("the arrival puts a Notice on the copy that landed");
+
+    assert!(
+        came.contains(&machine),
+        "and the far end's names the machine the work came from: {came}",
+    );
+}
+
+/// **The account goes home before the work leaves**, and the session the far end
+/// starts runs under it.
+///
+/// A session away from home keeps a mirror of its account and writes the login it
+/// now holds back to the device that account is at home on as it ends — stage
+/// 08's machinery, unchanged. The move runs at the turn's end, which is exactly
+/// when that write-back happens, so the ordering is the thing this is about: the
+/// account is home *before* the slice and the bundle leave, or the far end would
+/// launch under a login the source had not finished returning.
+///
+/// The work runs on A under an account at home on **B**, which is the way round
+/// that makes the question askable at all: the write-back's destination is the
+/// machine the work is about to move to, so a move that overtook it would be
+/// visible on the far end as a session running signed in as somebody else.
+///
+/// Read at the moment B's **row** lands, which is the first of the three legs: the
+/// slice and the bundle come after it, so a login already home by then is one
+/// that was written before any of the work left.
+///
+/// **The login stands for both halves of the write-back.** A session's ending
+/// puts the memory store back first and the login after it — the account keeping
+/// its login inside the very data directory the memory sync carries whole, so the
+/// login has to have the last word over it. A login that is home is therefore a
+/// memory that is home; the memory sync's own end-to-end proof is
+/// `tests/accounts.rs`.
+#[tokio::test]
+async fn the_account_is_home_before_the_work_leaves_and_the_far_end_runs_under_it() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+
+    let a = Verkstead::running(A, &refreshes_its_login_at(&gate, REFRESHED), spill.path()).await;
+    let b = Verkstead::running(B, &re_primed(), spill.path()).await;
+
+    a.linked_to(&b.device, B_MACHINE, B_OS, vec![b.at()]).await;
+
+    let (machine, os) = this_machine();
+    b.linked_to(&a.device, &machine, &os, vec![a.at()]).await;
+
+    a.repo().await;
+    b.repo().await;
+
+    // The account is B's, and what A holds is a mirror of it — the other way
+    // round from every other test here, which is the point.
+    b.account().await;
+
+    let _holding = a.holding();
+    let mirror = a.profile_called(ACCOUNT).await;
+
+    let conversation = a.drafting_under(mirror.id).await;
+    a.grills(conversation).await;
+
+    // The session is up, has been lent B's account, and has refreshed the login
+    // inside it — which is the one file of an account a harness really changes.
+    a.printed(conversation, "refreshed the login").await;
+
+    assert!(
+        !b.login_at_home(ACCOUNT).contains(REFRESHED),
+        "nothing has been written home while the turn is still running",
+    );
+
+    assert_eq!(a.transfers(conversation, B).await, "\"Transferring\"");
+
+    std::fs::write(&gate, "go").unwrap();
+
+    // The row is the first thing to cross, so this is the earliest moment the
+    // work can be said to have left at all.
+    let deadline = Instant::now() + WAITING;
+
+    let landed = loop {
+        let rows = b.own_rows().await;
+
+        if let Some(row) = rows.first() {
+            break row.id;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "nothing ever arrived on the far end",
+        );
+
+        tokio::time::sleep(LOOKING).await;
+    };
+
+    let held = b.login_at_home(ACCOUNT);
+
+    assert!(
+        held.contains(REFRESHED),
+        "the login the session refreshed was home before the work left: the \
+         account holds {held:?}",
+    );
+
+    // And the session B's own Resume starts is running as that account, with the
+    // login this turn left in it.
+    let said = b.latest_capture_saying(landed, "login=").await;
+
+    assert!(
+        said.contains(REFRESHED),
+        "the session on the far end runs under the account the source had, with \
+         the login it was left holding: {said:?}",
+    );
+}
+
+/// **A transfer back lands on the copy the source kept, under the id it already
+/// had** — which is the ordinary second move: drafted on one machine, worked on
+/// the other, and coming home.
+///
+/// So every link anybody kept goes on working. A bookmark, a Timeline reference,
+/// the URL in a Question Set answered months ago all name the id this device
+/// issued before the work ever left, and what comes back lands on it — carrying
+/// everything the other machine added while it held the work: its Timeline, the
+/// Sets asked from it, and the commits on the branch.
+///
+/// **And the merged list draws the work once the whole way through.** Sampled
+/// rather than read at the end, because that is what the promise is about: for
+/// the length of a return there is a row on each machine, and at no moment may
+/// both be drawn. Which of them stands in the instant between two writes is not
+/// worth a second opinion about — see `server::merging` — but two is the failure
+/// the birth key exists to prevent.
+#[tokio::test]
+async fn a_transfer_back_lands_on_the_id_the_work_left_under() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding_there, conversation) =
+        ready_to_move_from_a_clone(&gate, spill.path()).await;
+
+    // A holds its own streams too, so that its sidebar is the cluster's rather
+    // than its own rows alone — which is what the merged list is.
+    let _holding_here = a.holding();
+
+    a.printed(conversation, "grilling").await;
+    std::fs::write(&gate, "go").unwrap();
+    a.view_saying(conversation, |drawn| !drawn.working).await;
+
+    let worktree = a.worktree(conversation).await;
+    let was_saying = a.view(conversation).await.timeline.len();
+
+    let there = handed_on(&a, conversation, B).await;
+
+    // What B does with the work while it has it: a Question Set of its own, and a
+    // commit on the branch. Both are things A has never seen, and both are what
+    // the link to A's own id has to show once the work is home.
+    came_home(&b, there).await;
+
+    b.asks(there, ASKED).await;
+
+    let over_there = b.worktree(there).await;
+
+    std::fs::write(over_there.join("counter.md"), "in Redis\n").unwrap();
+    git(&over_there, &["add", "-A"]);
+    git(&over_there, &["commit", "-m", "the counter goes in Redis"]);
+
+    // And the list watched for the length of the return, which is the *whole* of
+    // it: the press, the three legs and the word that the move is over.
+    let most = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let watching = tokio::spawn({
+        let most = most.clone();
+        let sidebar = a.workbench.clone();
+
+        async move {
+            loop {
+                let rows: Vec<ConversationEntry> = reading(&sidebar, SIDEBAR).await;
+
+                most.fetch_max(rows.len(), std::sync::atomic::Ordering::Relaxed);
+
+                tokio::time::sleep(LOOKING).await;
+            }
+        }
+    });
+
+    assert_eq!(b.transfers(there, A).await, "\"Transferring\"");
+
+    let home = came_home(&a, conversation).await;
+
+    watching.abort();
+
+    assert!(
+        most.load(std::sync::atomic::Ordering::Relaxed) <= 1,
+        "the work was drawn twice at some point in the return: the merged list \
+         got to {} rows",
+        most.load(std::sync::atomic::Ordering::Relaxed),
+    );
+
+    // The id is the whole point: the row the links name is the row the work came
+    // back to, rather than a second Conversation beside it.
+    let rows = a.own_rows().await;
+
+    assert_eq!(
+        rows.iter().map(|row| row.id).collect::<Vec<_>>(),
+        vec![conversation],
+        "one Conversation on this device, which is the one that was always here",
+    );
+
+    assert!(
+        home.timeline.len() > was_saying,
+        "and it draws everything the other machine added: {} cards where it had \
+         {was_saying}",
+        home.timeline.len(),
+    );
+    assert_eq!(
+        a.sets_on(conversation).await.len(),
+        1,
+        "the Set asked over there is answerable here, under an id of this \
+         device's own",
+    );
+    assert_eq!(
+        git_says(&worktree, &["log", "-1", "--format=%s"]),
+        "the counter goes in Redis",
+        "and the commit made over there is on the branch in the checkout that \
+         was already here",
+    );
+    assert_eq!(
+        a.worktree(conversation).await,
+        worktree,
+        "which is the Worktree this device cut before the work ever left",
+    );
+
+    // And the direction is simply reversed: the machine the work left keeps the
+    // tombstone now, and its URL leads here.
+    let left = b.view(there).await.transferred.expect("B kept a copy");
+
+    assert_eq!(
+        left.device, A,
+        "B's copy says the record is on this machine"
+    );
+    assert_eq!(left.id, conversation, "under the id it has always had here");
+
+    let drawn = a
+        .sidebar_saying(|rows| rows.iter().any(|row| ours(row, conversation)))
+        .await;
+
+    assert_eq!(drawn.len(), 1, "the work is drawn once: {drawn:#?}");
+
+    let theirs = b
+        .sidebar_saying(|rows| {
+            rows.iter().any(|row| {
+                row.id == conversation
+                    && row.device.as_ref().and_then(|whose| whose.id.as_deref()) == Some(A)
+            })
+        })
+        .await;
+
+    assert_eq!(
+        theirs.len(),
+        1,
+        "and B draws it once too, as the row of the machine holding it: {theirs:#?}",
+    );
+}
+
+/// **A second round trip lands on the same two ids as the first**, and on the
+/// checkouts that were already cut at each end.
+///
+/// Which is what makes the pair of machines a pair rather than a chain: work
+/// moved four times has two rows in two databases, not four, and two directories,
+/// not four. What that buys the human is on the disk — the ignored files their
+/// machine built for itself never travel, so a checkout taken away and cut again
+/// would cost them an hour of compiling every time the work came home.
+#[tokio::test]
+async fn a_second_round_trip_lands_on_the_same_two_ids_and_the_checkouts_already_cut() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = ready_to_move_from_a_clone(&gate, spill.path()).await;
+
+    a.printed(conversation, "grilling").await;
+    std::fs::write(&gate, "go").unwrap();
+    a.view_saying(conversation, |drawn| !drawn.working).await;
+
+    let here = a.worktree(conversation).await;
+
+    // What this machine builds for itself, behind a rule that says so: an
+    // ignored file stays behind on a move in both directions, so what it is
+    // really a test of is the checkout not being taken away and made again.
+    std::fs::write(here.join(".gitignore"), "built/\n").unwrap();
+    git(&here, &["add", "-A"]);
+    git(&here, &["commit", "-m", "ignore what is built"]);
+
+    std::fs::create_dir_all(here.join("built")).unwrap();
+    std::fs::write(here.join("built/cache.bin"), "hours of compiling\n").unwrap();
+
+    let there = handed_on(&a, conversation, B).await;
+
+    came_home(&b, there).await;
+
+    let over_there = b.worktree(there).await;
+
+    // Home again, into the checkout that was here all along.
+    assert_eq!(b.transfers(there, A).await, "\"Transferring\"");
+    came_home(&a, conversation).await;
+
+    assert_eq!(
+        a.worktree(conversation).await,
+        here,
+        "the work comes back to the Worktree it left from",
+    );
+    assert_eq!(
+        std::fs::read_to_string(here.join("built/cache.bin")).unwrap(),
+        "hours of compiling\n",
+        "with everything this machine built for itself still in it, none of \
+         which ever travelled",
+    );
+
+    // And out again, which is the third leg: the same id over there and the same
+    // directory under it.
+    let again = handed_on(&a, conversation, B).await;
+
+    assert_eq!(
+        again, there,
+        "the far end's copy is the one it already had rather than a new one",
+    );
+
+    came_home(&b, again).await;
+
+    assert_eq!(
+        b.worktree(again).await,
+        over_there,
+        "and it is checked out where it was checked out the first time",
+    );
+    assert_eq!(
+        b.own_rows().await.len(),
+        1,
+        "one row over there through all of it",
+    );
+
+    // And home once more.
+    assert_eq!(b.transfers(again, A).await, "\"Transferring\"");
+    came_home(&a, conversation).await;
+
+    assert_eq!(
+        a.own_rows()
+            .await
+            .iter()
+            .map(|row| row.id)
+            .collect::<Vec<_>>(),
+        vec![conversation],
+        "one row here through all of it, under the id the work started on",
+    );
+    assert_eq!(
+        a.worktree(conversation).await,
+        here,
+        "in the Worktree it has always been worked in",
+    );
+}
+
+/// **A Companion comes home to the checkout beside the one the Conversation
+/// comes home to**, and the working changes made over there land in it.
+///
+/// Companions travel the way the Conversation's own work does, and they come back
+/// the same way: the directory this device cut for that repository is the one the
+/// branch goes back into, with everything the machine built for itself still in
+/// it.
+#[tokio::test]
+async fn a_companion_comes_home_to_the_checkout_it_left() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) =
+        ready_to_move_alongside(&gate, spill.path(), store::CompanionMode::ReadWrite).await;
+
+    a.printed(conversation, "grilling").await;
+    std::fs::write(&gate, "go").unwrap();
+    a.view_saying(conversation, |drawn| !drawn.working).await;
+
+    let beside = a.companion_worktree(conversation, COMPANION).await;
+
+    std::fs::write(beside.join(".gitignore"), "built/\n").unwrap();
+    git(&beside, &["add", "-A"]);
+    git(&beside, &["commit", "-m", "ignore what is built"]);
+
+    std::fs::create_dir_all(beside.join("built")).unwrap();
+    std::fs::write(beside.join("built/cache.bin"), "hours of compiling\n").unwrap();
+
+    let there = handed_on(&a, conversation, B).await;
+
+    came_home(&b, there).await;
+
+    // Work left in the companion over there, uncommitted, which is what a turn
+    // ends with in a repository a session commits in.
+    let alongside = b.companion_worktree(there, COMPANION).await;
+
+    std::fs::write(alongside.join("notes.md"), "from the other machine\n").unwrap();
+
+    assert_eq!(b.transfers(there, A).await, "\"Transferring\"");
+    came_home(&a, conversation).await;
+
+    assert_eq!(
+        a.companion_worktree(conversation, COMPANION).await,
+        beside,
+        "the companion comes back to the checkout it left from",
+    );
+    assert_eq!(
+        std::fs::read_to_string(beside.join("notes.md")).unwrap(),
+        "from the other machine\n",
+        "with what was left uncommitted in it over there",
+    );
+    assert_eq!(
+        std::fs::read_to_string(beside.join("built/cache.bin")).unwrap(),
+        "hours of compiling\n",
+        "and with everything this machine built for itself still in it",
+    );
+}
+
+/// **And a read-only Companion comes home detached at the commit it is standing
+/// at**, into the directory it left from.
+///
+/// It holds no branch, so there is nothing to fetch and nothing to apply: what
+/// the return does to it is put the checkout that is already there back to the
+/// commit the record says it is at.
+#[tokio::test]
+async fn a_read_only_companion_comes_home_detached_where_it_was() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) =
+        ready_to_move_alongside(&gate, spill.path(), store::CompanionMode::ReadOnly).await;
+
+    a.printed(conversation, "grilling").await;
+    std::fs::write(&gate, "go").unwrap();
+    a.view_saying(conversation, |drawn| !drawn.working).await;
+
+    let beside = a.companion_worktree(conversation, COMPANION).await;
+    let at = git_says(&beside, &["rev-parse", "HEAD"]);
+
+    let there = handed_on(&a, conversation, B).await;
+
+    came_home(&b, there).await;
+
+    assert_eq!(b.transfers(there, A).await, "\"Transferring\"");
+    came_home(&a, conversation).await;
+
+    assert_eq!(
+        a.companion_worktree(conversation, COMPANION).await,
+        beside,
+        "the read-only companion comes back to the directory it left from",
+    );
+    assert!(
+        detached(&beside),
+        "holding no branch, which is what a repository nothing commits in holds",
+    );
+    assert_eq!(
+        git_says(&beside, &["rev-parse", "HEAD"]),
+        at,
+        "at the commit the record says it stands at",
+    );
+    assert!(
+        git_says(&beside, &["status", "--porcelain"]).is_empty(),
+        "and with nothing applied to it, a patch to a read-only companion being \
+         changes no session could have made",
+    );
+}
+
+/// Press *Transfer to…* for `device` and wait for the mark that says the far end
+/// has it, answering with the id it goes by over there.
+async fn handed_on(from: &Verkstead, conversation: i64, device: &str) -> i64 {
+    assert_eq!(
+        from.transfers(conversation, device).await,
+        "\"Transferring\"",
+    );
+
+    from.view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id
+}
+
+/// And wait at the other end for the work to be *here*: the mark off, which is
+/// the last thing a move does and the one thing that says every leg of it landed.
+async fn came_home(to: &Verkstead, conversation: i64) -> ConversationView {
+    to.view_saying(conversation, |drawn| drawn.transferred.is_none())
+        .await
+}
+
+/// The Set every test here asks, which asks one thing so that there is an Answer
+/// to give it.
+const ASKED: &str = r#"
+title: Where the counter lives
+preface: The API has no rate limiting at all.
+questions:
+  - label: Q1
+    text: Where should the counter live?
+    options:
+      - n: 1
+        text: In Redis
+        recommended: true
+      - n: 2
+        text: In the process
+"#;
+
+/// And the Answer given on the far end, with a word about why so that what the
+/// wait is handed can be told apart from the Set it answers.
+const ANSWERED: &str = r#"
+answers:
+  - label: Q1
+    selected: 1
+    free_text: shared between instances
+"#;
+
+/// The Timeline as the record rather than as a set of row numbers.
+///
+/// Every id taken out, because the ids are the whole of what two copies of one
+/// Conversation are allowed to differ by — and the standing with them, which is
+/// a reading of a moment: whether a Set is being waited on is about the session
+/// running now rather than about the record.
+fn cards(timeline: &[TimelineEvent]) -> serde_json::Value {
+    let mut drawn = serde_json::to_value(timeline).unwrap();
+
+    plainly(&mut drawn);
+
+    drawn
+}
+
+/// Every `id`, `set_id` and `standing` taken out of a drawn Timeline, however
+/// deep it is.
+fn plainly(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(fields) => {
+            for named in ["id", "set_id", "standing"] {
+                fields.remove(named);
+            }
+
+            for (_, inside) in fields.iter_mut() {
+                plainly(inside);
+            }
+        }
+
+        serde_json::Value::Array(items) => {
+            for inside in items {
+                plainly(inside);
+            }
+        }
+
+        _ => {}
+    }
+}
+
+/// Every session name one device's store holds, in the order of the Events they
+/// hang off.
+async fn session_names(pool: &SqlitePool) -> Vec<(i64, String)> {
+    let rows: Vec<(String,)> = sqlx::query_as(
+        "SELECT session_id FROM session_names
+         JOIN timeline_events ON timeline_events.id = session_names.event_id
+         ORDER BY timeline_events.id",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap();
+
+    rows.into_iter()
+        .enumerate()
+        .map(|(at, (name,))| (at as i64, name))
+        .collect()
+}
+
+/// The Transcript of one session, by the Event it printed into.
+async fn lines_of(pool: &SqlitePool, event: i64) -> Vec<String> {
+    let rows: Vec<(String,)> =
+        sqlx::query_as("SELECT line FROM transcript_lines WHERE event_id = ? ORDER BY seq")
+            .bind(event)
+            .fetch_all(pool)
+            .await
+            .unwrap();
+
+    rows.into_iter().map(|(line,)| line).collect()
+}
+
+/// And every Transcript line, the same way.
+async fn transcripts(pool: &SqlitePool) -> Vec<String> {
+    let rows: Vec<(String,)> = sqlx::query_as(
+        "SELECT line FROM transcript_lines
+         JOIN timeline_events ON timeline_events.id = transcript_lines.event_id
+         ORDER BY timeline_events.id, transcript_lines.seq",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap();
+
+    rows.into_iter().map(|(line,)| line).collect()
+}

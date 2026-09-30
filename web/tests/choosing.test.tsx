@@ -23,6 +23,7 @@ import submitting from "../src/set/Answering.module.css";
 import { draftKey } from "../src/set/filling";
 import { answering, sent, texts } from "./reading";
 import { json, readable } from "./serving";
+import { slidPress } from "./sliding";
 import proposed from "./fixtures/set-proposed.json" with { type: "json" };
 import proposing from "./fixtures/set-proposing.json" with { type: "json" };
 import waiting from "./fixtures/set-answering.json" with { type: "json" };
@@ -173,6 +174,28 @@ describe("the chooser on a Set that carries a proposal", () => {
 });
 
 describe("picking a direction", () => {
+  /// A press on a direction's name that slid before it was let go — see
+  /// [`slidPress`](./sliding.ts), which says what is staged and why.
+  function slidName(page: ParentNode, direction: Direction): void {
+    slidPress(
+      offered(page, direction)
+        .closest("label")!
+        .querySelector(`.${sheet.directionName}`)!,
+    );
+  }
+
+  it("picks on a press that slid over the name, not only on a still one", async () => {
+    const { page } = await answering(PROPOSING);
+
+    slidName(page, "roadmap");
+    expect(offered(page, "roadmap").checked).toBe(true);
+
+    // And once: a gesture counted twice would pick the direction and un-pick it
+    // again, so this press would be picking rather than clearing.
+    slidName(page, "roadmap");
+    expect(offered(page, "roadmap").checked).toBe(false);
+  });
+
   it("picks on a click and clears on a second, as an Option does", async () => {
     const { page } = await answering(PROPOSING);
 

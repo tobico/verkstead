@@ -21,12 +21,17 @@ use verkstead_store::{
     AdoptedPullRequest, Entering, Event, Finished, Landing, Lifecycle, Merging, PullRequest,
     Rebuilding, Resolving, Rollup, Standing, Taking, WAITED_ON, WaitingOn, Wrapping, check_rollup,
     close_conversation, conversation_on_pull_request, finish_wrap_up, hold_pull_request,
-    implement_again, load_conversation, merges, merging, open_database, pick_direction,
-    pull_request, pull_request_repo, pull_requests, record_another_pull_request,
-    record_check_rollup, record_merging, record_pull_request, record_standing, register_repo,
-    resolve_conflicts, rollups, save_brief, settle_wrap_up, stack, standing, start_conversation,
-    start_grilling, start_tinkering, take_up, timeline, unfinished_pull_requests, wrap_up_settled,
+    implement_again, load_conversation, merges, merging, open_database,
+    other_conversation_on_pull_request, pick_direction, pull_request, pull_request_repo,
+    pull_requests, record_another_pull_request, record_check_rollup, record_merging,
+    record_pull_request, record_standing, register_repo, resolve_conflicts, rollups, save_brief,
+    settle_wrap_up, stack, standing, start_conversation, start_grilling, start_tinkering, take_up,
+    timeline, unfinished_pull_requests, wrap_up_settled,
 };
+
+/// The device every Conversation started here is ranked by, named the way a
+/// cluster names one (ADR-0020, *Ranks*).
+const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
 
 /// A pool over a fresh database, plus the directory keeping it alive.
 async fn fresh_pool() -> (tempfile::TempDir, SqlitePool) {
@@ -49,7 +54,7 @@ async fn grilling(pool: &SqlitePool) -> i64 {
         .unwrap()
         .expect("nothing is registered at that path yet");
 
-    let id = start_conversation(pool, repo.id, "rate-limiting")
+    let id = start_conversation(pool, repo.id, "rate-limiting", THIS_DEVICE)
         .await
         .unwrap()
         .expect("the Repo was just registered");
@@ -93,7 +98,7 @@ async fn tinkering(pool: &SqlitePool) -> i64 {
         .unwrap()
         .expect("nothing is registered at that path yet");
 
-    let id = start_conversation(pool, repo.id, "rate-limiting")
+    let id = start_conversation(pool, repo.id, "rate-limiting", THIS_DEVICE)
         .await
         .unwrap()
         .expect("the Repo was just registered");
@@ -318,7 +323,7 @@ async fn a_draft_holding_no_pull_request_is_not_moved_on_by_one() {
         .unwrap()
         .expect("nothing is registered at that path yet");
 
-    let id = start_conversation(&pool, repo.id, "rate-limiting")
+    let id = start_conversation(&pool, repo.id, "rate-limiting", THIS_DEVICE)
         .await
         .unwrap()
         .expect("the Repo was just registered");
@@ -346,7 +351,7 @@ async fn a_draft_holding_a_pull_request_is_moved_on_by_recording_it() {
         .unwrap()
         .expect("nothing is registered at that path yet");
 
-    let id = start_conversation(&pool, repo.id, "verkstead-1")
+    let id = start_conversation(&pool, repo.id, "verkstead-1", THIS_DEVICE)
         .await
         .unwrap()
         .expect("the Repo was just registered");
@@ -435,7 +440,7 @@ async fn a_take_up_can_enter_wrapping_with_the_review_and_the_comments_settled()
         .unwrap()
         .expect("nothing is registered at that path yet");
 
-    let id = start_conversation(&pool, repo.id, "verkstead-1")
+    let id = start_conversation(&pool, repo.id, "verkstead-1", THIS_DEVICE)
         .await
         .unwrap()
         .expect("the Repo was just registered");
@@ -1811,11 +1816,174 @@ async fn a_lone_pull_request_is_a_stack_of_one() {
     );
 }
 
+/// And where two Conversations have the same pull request, the one that is asked
+/// for is the open one — the newest where neither of them is open.
+///
+/// Which is what *one open Conversation per pull request* made worth asking. A
+/// take-up over a pull request whose holder has finished closes that holder and
+/// records the pull request again, so from then on it is on two records: the
+/// Conversation that had it and the Conversation that took it over. Whoever asks
+/// who has it means the one still at work — the take-up, which would otherwise
+/// offer a Closed Conversation as the way on, and the stack note that names a
+/// neighbour's holder.
+#[tokio::test]
+async fn the_conversation_a_pull_request_leads_to_is_the_open_one() {
+    let (_dir, pool) = fresh_pool().await;
+    let first = implementing(&pool).await;
+    let own = own(&pool, first).await;
+
+    record_pull_request(&pool, first, own, &link(41, "stage-01", "main"))
+        .await
+        .unwrap();
+
+    // The first has finished with it and been closed, which is what a take-up
+    // over somebody else's finished work leaves behind.
+    for waiting_on in waiting_on(&pool, first).await {
+        settle_wrap_up(&pool, first, waiting_on).await.unwrap();
+    }
+    assert_eq!(finish_wrap_up(&pool, first).await.unwrap(), Finished::Done);
+    close_conversation(&pool, first).await.unwrap();
+
+    // And the second took the same pull request up, which is the row that now
+    // matters: it is the one still at work on it.
+    let second = beside_it_in(&pool, own, "stage-01-again").await;
+
+    record_pull_request(&pool, second, own, &link(41, "stage-01", "main"))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        conversation_on_pull_request(&pool, own, 41).await.unwrap(),
+        Some(second),
+        "the open Conversation is the one on it, whatever was recorded first",
+    );
+
+    // And where neither is open, the newest: the one whose close the others are
+    // the history of.
+    for waiting_on in waiting_on(&pool, second).await {
+        settle_wrap_up(&pool, second, waiting_on).await.unwrap();
+    }
+    assert_eq!(finish_wrap_up(&pool, second).await.unwrap(), Finished::Done);
+
+    assert_eq!(
+        conversation_on_pull_request(&pool, own, 41).await.unwrap(),
+        Some(second),
+        "a Done one is still the newest of the two",
+    );
+
+    close_conversation(&pool, second).await.unwrap();
+
+    assert_eq!(
+        conversation_on_pull_request(&pool, own, 41).await.unwrap(),
+        Some(second),
+        "and Closed as well, it is the newest still",
+    );
+
+    // And asked who *else* is on it, the answer is the other one — which is the
+    // whole of why the leaving-out is the query's rather than the caller's: both
+    // are shut, so the newest wins, and the newest is the one asking.
+    assert_eq!(
+        other_conversation_on_pull_request(&pool, own, 41, second)
+            .await
+            .unwrap(),
+        Some(first),
+        "the Conversation steering back is never the answer to who else has it",
+    );
+    assert_eq!(
+        other_conversation_on_pull_request(&pool, own, 41, first)
+            .await
+            .unwrap(),
+        Some(second),
+        "and asked the other way round it is the one that took it over",
+    );
+}
+
+/// And a pull request only one Conversation ever had has nobody else on it.
+///
+/// Which is every Conversation that has not handed its work over, and so nearly
+/// all of them: a steer by one of those asks the question and finds nobody, and
+/// goes on being the steer it has always been.
+#[tokio::test]
+async fn a_pull_request_one_conversation_has_leads_to_nobody_else() {
+    let (_dir, pool) = fresh_pool().await;
+    let only = implementing(&pool).await;
+    let own = own(&pool, only).await;
+
+    record_pull_request(&pool, only, own, &link(41, "stage-01", "main"))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        conversation_on_pull_request(&pool, own, 41).await.unwrap(),
+        Some(only),
+    );
+    assert_eq!(
+        other_conversation_on_pull_request(&pool, own, 41, only)
+            .await
+            .unwrap(),
+        None,
+    );
+}
+
+/// And a Conversation whose column still holds the *old* word for Closed is shut
+/// as surely as one that holds the new one.
+///
+/// `aborted` is what Closed was called while the press was Abort. A migration
+/// rewrites every row it can reach, and the ones it never did — a database
+/// restored from a backup taken before it ran — still say it, which is why the
+/// store reads the word at all. The ordering here compares words rather than
+/// reading them, so a spelling it did not know would sort as though that
+/// Conversation were still at work: the take-up would be told about a record it
+/// then reads as having nothing to give up, and the second live wrap-up the whole
+/// rule is against would go straight through.
+/// The newer row is the one spelled the old way, because that is where it bites:
+/// the newest is what a tie between two open-looking rows falls back to, so an
+/// `aborted` one that sorted as open would win it.
+#[tokio::test]
+async fn the_old_word_for_closed_is_shut_in_the_ordering_too() {
+    let (_dir, pool) = fresh_pool().await;
+    let at_work = implementing(&pool).await;
+    let own = own(&pool, at_work).await;
+
+    record_pull_request(&pool, at_work, own, &link(41, "stage-01", "main"))
+        .await
+        .unwrap();
+
+    // The Conversation that took the pull request over and was shut afterwards,
+    // which is the newer of the two rows.
+    let shut = beside_it_in(&pool, own, "stage-01-again").await;
+
+    record_pull_request(&pool, shut, own, &link(41, "stage-01", "main"))
+        .await
+        .unwrap();
+
+    // Written by hand, because nothing in this Verkstead spells it any more: this
+    // is the row a restored backup leaves behind.
+    sqlx::query("UPDATE conversations SET state = 'aborted' WHERE id = ?")
+        .bind(shut)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        conversation_on_pull_request(&pool, own, 41).await.unwrap(),
+        Some(at_work),
+        "the older spelling of Closed is Closed, so the answer is the Conversation still at work",
+    );
+    assert_eq!(
+        other_conversation_on_pull_request(&pool, own, 41, shut)
+            .await
+            .unwrap(),
+        Some(at_work),
+        "and it is who else has it, asked by the row spelled the old way",
+    );
+}
+
 /// Another Conversation of the same Repo, carried to Implementing the way
 /// [`implementing`] carries the first: a stack in this workbench is a pull
 /// request per Conversation, so the neighbours have Conversations of their own.
 async fn beside_it_in(pool: &SqlitePool, repo: i64, branch: &str) -> i64 {
-    let id = start_conversation(pool, repo, branch)
+    let id = start_conversation(pool, repo, branch, THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();

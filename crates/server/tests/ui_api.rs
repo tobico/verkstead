@@ -26,6 +26,10 @@ use verkstead_render::{
 use verkstead_schema::{Answer, ApiError, Liveness, QuestionSet, Response, SetCreated};
 use verkstead_server::{open_database, router, store};
 
+/// The device every Conversation started here is ranked by, named the way a
+/// cluster names one (ADR-0020, *Ranks*).
+const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
+
 /// Two Questions, one with Sub-questions, so a Response has to account for
 /// `Q1`, `Q2`, `Q2a` and `Q2b`.
 const SET: &str = r#"
@@ -81,7 +85,7 @@ async fn fresh_app() -> (tempfile::TempDir, SqlitePool, Router) {
         .unwrap()
         .expect("nothing is registered at that path yet");
 
-    let conversation = store::start_conversation(&pool, repo.id, "solid-viewer")
+    let conversation = store::start_conversation(&pool, repo.id, "solid-viewer", THIS_DEVICE)
         .await
         .unwrap()
         .expect("the Repo was just registered");

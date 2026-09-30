@@ -10,9 +10,9 @@
 //! workbench is served on, and the one press that puts it there.
 //!
 //! **Three commands, and nothing else.** `tailscale status --json` says whether
-//! the daemon is answering and what this node is called; `tailscale serve
-//! status --json` says what is proxied where; and `tailscale serve` is the
-//! switch. There is no Tailscale library here and no socket opened by hand: the
+//! the daemon is answering, what this node is called and what it answers on;
+//! `tailscale serve status --json` says what is proxied where; and `tailscale
+//! serve` is the switch. There is no Tailscale library here and no socket opened by hand: the
 //! binary on the machine is the one thing that is certain to speak this
 //! machine's Tailscale, whatever version it happens to be.
 //!
@@ -54,6 +54,16 @@
 //! failure to report as one — the serve is off, which is the truth of the
 //! machine, and the line stands on the pane for whoever would rather type it.
 //!
+//! **And two readings here are not the pane's at all.** [`Tailscale::tailnet`]
+//! answers where this machine is reachable on the tailnet — the node name and
+//! its addresses — which is the tailnet half of what a device advertises to its
+//! peers (ADR-0020), and [`Tailscale::peers`] answers which *other* nodes of
+//! that tailnet are up, which is the list the tailnet half of a discovery goes
+//! and asks. The same command as the pane's reading and different questions of
+//! it: the pane has four things to say about a machine and tells every way of
+//! not knowing apart, where those two have a list to contribute to and nothing
+//! at all to contribute where there is no Tailscale.
+//!
 //! **And the one thing here that is not read off Tailscale at all**: the login
 //! link. A served address is where a phone would reach the workbench and the
 //! Workbench Key is what it would be let in by, so the two of them together are
@@ -64,6 +74,7 @@
 use std::collections::HashMap;
 use std::process::Output;
 use std::sync::Arc;
+use std::time::Duration;
 
 use serde::Deserialize;
 use tokio::process::Command;
@@ -184,6 +195,16 @@ const RUNNING: &str = "Running";
 /// HTTPS on the tailnet name. Taken off the address that is drawn, because a
 /// URL naming it is a URL saying what its scheme already said.
 const HTTPS: &str = "443";
+
+/// How long `tailscale` is given to answer the one reading a stranger can ask
+/// for — see [`Tailscale::tailnet`] and [`Tailscale::run_within`].
+///
+/// Five seconds, which is a hundred times what asking a daemon on the same
+/// machine what it is called actually takes, and short enough that a daemon
+/// which has wedged is a slow answer rather than a request that never ends. The
+/// pane's own readings have no deadline: those are the human's, behind the key
+/// on the loopback, and one of them may be waiting on a password dialog.
+const ANSWERING: Duration = Duration::from_secs(5);
 
 impl Tailscale {
     /// The real thing: whatever `tailscale` the host has on its PATH, in front
@@ -318,6 +339,108 @@ impl Tailscale {
                 }
             }
         }
+    }
+
+    /// Where this machine answers on the tailnet, in the order a peer should
+    /// try: the node's name first, then the addresses behind it.
+    ///
+    /// What the identity endpoint puts in front of this device's LAN addresses
+    /// (ADR-0020, *Addresses*) — the tailnet half of *every device advertises
+    /// all its addresses*. The name comes first because it is the one that
+    /// survives: a tailnet address is handed out by the coordination server and
+    /// a name is what the machine is known by whatever it is handed.
+    ///
+    /// **Nothing where there is no Tailscale, and nothing where it is not up.**
+    /// A machine with none of it contributes nothing to the list rather than
+    /// failing the answer it is part of: what a device is reachable on is
+    /// whatever it can say it is reachable on, and a LAN address is an answer.
+    /// So every way of not knowing comes to the same empty list, where
+    /// [`Tailscale::reading`] tells them apart — that one is a pane with four
+    /// things to say about this machine, and this is a list of addresses with
+    /// nothing to say about a machine that has none. A daemon that does not
+    /// answer within [`ANSWERING`] is one of those ways: this is the one
+    /// reading a stranger can ask for, so what a wedged daemon costs is bounded
+    /// here rather than left to whoever is asking.
+    ///
+    /// Read now rather than held from startup, for the reason the pane's own
+    /// reading is: a laptop moves between tailnets and DHCP moves everybody,
+    /// and an address remembered from a start weeks ago is an address a peer
+    /// would dial into nothing.
+    pub(crate) async fn tailnet(&self) -> Vec<String> {
+        let Some(node) = self.up().await.and_then(|status| status.this) else {
+            return Vec::new();
+        };
+
+        // The name as a DNS name arrives with the trailing dot one carries, and
+        // what goes in the list is what somebody would type — see
+        // [`Tailscale::reading`], which trims the same dot off the same field.
+        let name = node
+            .dns_name
+            .map(|name| name.trim_end_matches('.').to_owned())
+            .filter(|name| !name.is_empty());
+
+        name.into_iter()
+            .chain(node.tailscale_ips.unwrap_or_default())
+            .filter(|address| !address.trim().is_empty())
+            .collect()
+    }
+
+    /// And the other nodes of this machine's tailnet that are up, which is what
+    /// the tailnet half of a discovery has to ask (ADR-0020, *Discovery*).
+    ///
+    /// **A list to probe rather than a list of devices.** A tailnet carries no
+    /// multicast, so there is no advertisement to hear on one: what Tailscale
+    /// knows is that there are nodes and that some of them are online, and
+    /// whether any of them is a Verkstead is a question asked of each in turn —
+    /// see [`crate::discovery::Probe`], which asks it. Most of what comes back
+    /// here is a phone, a server or somebody's desktop with no Verkstead on it at
+    /// all.
+    ///
+    /// **Only the ones Tailscale says are online.** A tailnet remembers every
+    /// node that ever joined it, and a probe of a switched-off laptop is a
+    /// deadline spent to learn what the coordination server already said. A node
+    /// that says nothing about being online is taken as offline, that being the
+    /// answer that costs nothing.
+    ///
+    /// **And in a settled order**, which the peer list is not: it arrives as an
+    /// object keyed by node key, and a ceiling taken off a hash order would ask a
+    /// different handful of peers each time somebody opened the pane. Sorted by
+    /// the name a human would recognise, so the ceiling cuts the same place
+    /// twice.
+    ///
+    /// **Every way of not knowing is the empty list**, exactly as
+    /// [`Tailscale::tailnet`] answers: no `tailscale` on the machine, a daemon
+    /// that is down, a daemon that does not answer within [`ANSWERING`], a
+    /// tailnet nothing is logged in to, and a shape this build cannot read all
+    /// come to a discovery with only its LAN half. Which is the stance every
+    /// other reading of this daemon takes — there is nothing here for a human to
+    /// fix, and the typed address was always the answer to a machine this cannot
+    /// find.
+    pub(crate) async fn peers(&self) -> Vec<TailnetPeer> {
+        self.up().await.map(online).unwrap_or_default()
+    }
+
+    /// `tailscale status --json` where this machine is on a tailnet and its
+    /// daemon is answering, and nothing every other way.
+    ///
+    /// The half [`Tailscale::tailnet`] and [`Tailscale::peers`] share, which is
+    /// every step in front of the field each of them wants: the two ask one
+    /// command one question apiece, and every way of not knowing comes to the
+    /// same nothing for both. [`Tailscale::reading`] runs the same command and
+    /// tells those ways *apart*, which is why it is not this.
+    async fn up(&self) -> Option<Status> {
+        let told = self
+            .run_within(&["status", "--json"], ANSWERING)
+            .await
+            .ok()?;
+
+        if !told.status.success() {
+            return None;
+        }
+
+        let status: Status = serde_json::from_slice(&told.stdout).ok()?;
+
+        (status.backend_state.as_deref() == Some(RUNNING)).then_some(status)
     }
 
     /// The login link for whatever `serve` says the workbench answers on.
@@ -509,19 +632,95 @@ impl Tailscale {
     /// business writing on the server's own terminal, and both streams are what
     /// this module reads its answer out of.
     async fn run(&self, arguments: &[&str]) -> std::io::Result<Output> {
+        self.command(arguments).output().await
+    }
+
+    /// The same, given `within` to answer in — and killed where it does not.
+    ///
+    /// **For the readings a stranger can ask for.** [`Tailscale::tailnet`] is
+    /// behind the peer listener's identity endpoint, which anybody who can
+    /// reach the port may read, so a call to it is a process somebody else
+    /// started on this machine: without a deadline a daemon that has wedged
+    /// leaves every one of them standing, and they pile up as fast as the
+    /// requests arrive. The pane's own readings are behind the Workbench Key on
+    /// the loopback and go through [`Tailscale::run`] as they always did — a
+    /// serve press may be waiting on a password dialog, and a deadline over that
+    /// would be a grant cut off mid-answer.
+    ///
+    /// `kill_on_drop`, because a timeout that left the process running would be
+    /// this deadline saying the pile-up had stopped while it went on.
+    async fn run_within(&self, arguments: &[&str], within: Duration) -> std::io::Result<Output> {
+        match tokio::time::timeout(within, self.command(arguments).kill_on_drop(true).output())
+            .await
+        {
+            Ok(told) => told,
+            Err(_) => Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                format!("`tailscale` did not answer within {within:?}"),
+            )),
+        }
+    }
+
+    /// `tailscale` with `arguments`, built and not yet run.
+    ///
+    /// Apart from the running so that the two ways of running it — with a
+    /// deadline and without — are one command said once.
+    fn command(&self, arguments: &[&str]) -> Command {
         let (program, before) = self
             .program
             .split_first()
             .expect("a Tailscale is built with a program to run");
 
-        Command::new(program)
+        let mut command = Command::new(program);
+
+        command
             .args(before)
             .args(arguments)
             .unseen()
-            .stdin(std::process::Stdio::null())
-            .output()
-            .await
+            .stdin(std::process::Stdio::null());
+
+        command
     }
+}
+
+/// The nodes of `status`'s tailnet that are up, in the order a probe asks them —
+/// see [`Tailscale::peers`], whose whole answer this is.
+///
+/// Written apart from the running for [`proxied`]'s reason, and it is the same
+/// one: what has to be got right here is a JSON shape from another project, and
+/// the cases worth pinning are shapes rather than machines.
+fn online(status: Status) -> Vec<TailnetPeer> {
+    let mut peers: Vec<TailnetPeer> = status
+        .peers
+        .unwrap_or_default()
+        .into_values()
+        .filter(|peer| peer.online == Some(true))
+        .map(|peer| TailnetPeer {
+            name: peer
+                .dns_name
+                .map(|name| name.trim_end_matches('.').to_owned())
+                .unwrap_or_default(),
+
+            addresses: peer
+                .tailscale_ips
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|address| !address.trim().is_empty())
+                .collect(),
+        })
+        // A node with no address is one there is nowhere to ask: a peer list names
+        // an address apiece, and one that named none is a shape this build cannot
+        // make a dial out of.
+        .filter(|peer| !peer.addresses.is_empty())
+        .collect();
+
+    peers.sort_by(|one, other| {
+        one.name
+            .cmp(&other.name)
+            .then_with(|| one.addresses.cmp(&other.addresses))
+    });
+
+    peers
 }
 
 /// What a serve configuration says about `port`.
@@ -710,15 +909,67 @@ struct Status {
 
     #[serde(rename = "Self")]
     this: Option<Node>,
+
+    /// And the other nodes of the tailnet, keyed by node key — which is a key
+    /// nothing here reads, the list being read for what is *in* it. Absent on a
+    /// machine that has joined no tailnet, and an empty object on one whose
+    /// tailnet is this machine alone.
+    #[serde(rename = "Peer")]
+    peers: Option<HashMap<String, Node>>,
 }
 
-/// And the half of the node it names: what this machine is called on the
-/// tailnet.
+/// And the half of a node this reads: what a machine is called on the tailnet,
+/// what it answers on there, and — for a peer — whether it is up.
 #[derive(Debug, Deserialize)]
 struct Node {
     /// A DNS name, so it arrives with the trailing dot one carries.
     #[serde(rename = "DNSName")]
     dns_name: Option<String>,
+
+    /// And the addresses behind that name, which is what a peer dials when it
+    /// has one — see [`Tailscale::tailnet`]. Both families where the tailnet
+    /// has both, in the order Tailscale itself lists them.
+    #[serde(rename = "TailscaleIPs")]
+    tailscale_ips: Option<Vec<String>>,
+
+    /// Whether Tailscale believes this node is up, which is only ever asked of a
+    /// peer: this machine's own `Self` is online by virtue of answering.
+    ///
+    /// **Absent counts as offline** — see [`Tailscale::peers`]. A tailnet
+    /// remembers every node that ever joined it, so the ones that are not up are
+    /// most of a long-lived one, and a build that read a missing field as *up*
+    /// would spend a deadline apiece on laptops that have been shut for months.
+    #[serde(rename = "Online")]
+    online: Option<bool>,
+}
+
+/// One node of this machine's tailnet that is up: what it is called, and where
+/// to ask it what it is (ADR-0020, *Discovery*).
+///
+/// **Not a device**, and that is the whole point of the probe. What Tailscale
+/// knows is that something is at these addresses; whether it is a Verkstead is
+/// what asking on the peer port answers, and most of a tailnet is a phone or a
+/// server that answers nothing at all.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TailnetPeer {
+    /// What the tailnet calls it, with the trailing dot of its DNS name off.
+    ///
+    /// **For the log rather than for a dial.** A row draws what the device
+    /// *answered* with, and a name that came out of the peer list would be the
+    /// coordination server's word for a machine rather than the machine's own —
+    /// and MagicDNS is a thing a tailnet can have turned off, so it is not
+    /// certainly a name anything here could resolve either. Empty where the peer
+    /// list named none.
+    pub name: String,
+
+    /// And the tailnet addresses it answers on, in the order Tailscale lists
+    /// them: what the probe works down until one of them answers.
+    ///
+    /// Addresses rather than the name above, because an address behind a tailnet
+    /// needs nothing resolved to be dialled — the coordination server handed it
+    /// out, and it is the one thing about a peer that is certainly reachable from
+    /// here.
+    pub addresses: Vec<String>,
 }
 
 /// One host of a serve configuration's `Web` section, keyed by `host:port`.
@@ -751,6 +1002,102 @@ mod tests {
         }
       }
     }"#;
+
+    /// And what `tailscale status --json` prints on a machine whose tailnet holds
+    /// four other nodes: a laptop and a phone that are up, one that is down, and
+    /// one Tailscale named without an address.
+    ///
+    /// Keyed by node key, which is what the real thing keys them by and what
+    /// nothing here reads: the list is read for what is *in* it.
+    const A_TAILNET: &str = r#"{
+      "BackendState": "Running",
+      "Self": { "DNSName": "workbench.tailnet-name.ts.net." },
+      "Peer": {
+        "nodekey:2222": {
+          "DNSName": "phone.tailnet-name.ts.net.",
+          "TailscaleIPs": ["100.64.0.2"],
+          "Online": true
+        },
+        "nodekey:1111": {
+          "DNSName": "laptop.tailnet-name.ts.net.",
+          "TailscaleIPs": ["100.64.0.1", "fd7a:115c:a1e0::1"],
+          "Online": true
+        },
+        "nodekey:3333": {
+          "DNSName": "kitchen-mini.tailnet-name.ts.net.",
+          "TailscaleIPs": ["100.64.0.3"],
+          "Online": false
+        },
+        "nodekey:4444": {
+          "DNSName": "tablet.tailnet-name.ts.net.",
+          "Online": true
+        }
+      }
+    }"#;
+
+    /// What the peers of that tailnet are read as, which is the list a probe works
+    /// down.
+    fn peers_of(status: &str) -> Vec<TailnetPeer> {
+        online(serde_json::from_str(status).expect("a status a test wrote is readable"))
+    }
+
+    /// The peers that are up are the list, and the ones that are not cost nothing:
+    /// a tailnet remembers every node that ever joined it, and a probe of a
+    /// switched-off laptop is a deadline spent to learn what the coordination
+    /// server already said.
+    ///
+    /// **And a node with no address is nowhere to ask.** A peer list names an
+    /// address apiece, and one that named none is a shape no dial can be made out
+    /// of — whatever else is true of the machine behind it.
+    #[test]
+    fn only_the_peers_that_are_up_are_asked() {
+        assert_eq!(
+            peers_of(A_TAILNET)
+                .into_iter()
+                .map(|peer| peer.name)
+                .collect::<Vec<String>>(),
+            vec!["laptop.tailnet-name.ts.net", "phone.tailnet-name.ts.net"],
+            "the two that are up, without the one that is down or the one with \
+             nowhere to be asked",
+        );
+    }
+
+    /// And they are asked in a settled order, which the peer list is not in: it
+    /// arrives as an object keyed by node key, and a ceiling taken off a hash
+    /// order would ask a different handful of peers each time somebody opened the
+    /// pane.
+    #[test]
+    fn the_peers_are_asked_in_a_settled_order() {
+        let first = peers_of(A_TAILNET);
+
+        for _ in 0..8 {
+            assert_eq!(
+                peers_of(A_TAILNET),
+                first,
+                "the same status read twice is the same peers the same way round",
+            );
+        }
+
+        assert_eq!(
+            first.first().map(|peer| peer.addresses.clone()),
+            Some(vec![
+                "100.64.0.1".to_owned(),
+                "fd7a:115c:a1e0::1".to_owned()
+            ]),
+            "and each one's addresses stay in the order Tailscale listed them, \
+             which is the order a probe works down",
+        );
+    }
+
+    /// A machine whose tailnet is itself alone has nobody to ask, and neither has
+    /// one whose `tailscale` says nothing about peers at all — a release that
+    /// renamed that section is a discovery with only its LAN half rather than a
+    /// reading that fails.
+    #[test]
+    fn a_tailnet_of_one_names_nobody() {
+        assert!(peers_of(r#"{"BackendState":"Running","Peer":{}}"#).is_empty());
+        assert!(peers_of(r#"{"BackendState":"Running"}"#).is_empty());
+    }
 
     /// A machine that has never been served reads as off, and so does one every
     /// serve has been taken off again.

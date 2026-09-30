@@ -22,7 +22,9 @@
 mod answering;
 mod browsing;
 mod conversations;
+mod device;
 mod files;
+mod joining;
 mod onboarding;
 mod profiles;
 mod push;
@@ -31,6 +33,7 @@ mod repos;
 mod settings;
 mod sharing;
 mod transcript;
+mod transfer;
 mod update;
 mod view;
 
@@ -44,48 +47,57 @@ pub use conversations::{
     CheckRollup, Checked, Comment, CommitEvent, CommitPane, CommitRecord, CompanionAdded,
     CompanionAddition, CompanionBaseRecorded, CompanionBranchRenamed, CompanionMode,
     CompanionModeChoice, CompanionModeChosen, CompanionRefusal, CompanionRemoved, CompanionUpgrade,
-    CompanionView, ConversationArchived, ConversationClosed, ConversationEntry,
-    ConversationSteered, ConversationStopped, ConversationUnarchived, ConversationView,
-    GrillingStarted, HandoffEvent, Lifecycle, ManualTaskEvent, Merging, MovedEvent, NewAdoption,
-    NewCompanion, NewConversation, NewOrder, NoticeEvent, Parked, PendingSteerView, PinnedEvent,
-    Process, ProcessChoice, ProcessPicked, ProposalView, PullRequestCheck, PullRequestComment,
-    PullRequestCommit, PullRequestDetails, PullRequestEvent, PullRequestSummary, QuestionSetEvent,
-    RepoChoice, RepoSwitched, ResolveConflictsEvent, Resolved, Resumed, RoadmapPane, Screen,
-    ServerAttached, ServerRemoved, SetRow, ShareView, ShowArchived, ShowingArchived, Shown, Size,
-    StageDocument, StageEntry, StageListEvent, StageListReached, StageSource, Started,
+    CompanionView, Confirming, ConversationArchived, ConversationClosed, ConversationEntry,
+    ConversationMove, ConversationSteered, ConversationStopped, ConversationUnarchived,
+    ConversationView, DroppedRow, GrillingStarted, HandoffEvent, Lifecycle, ManualTaskEvent,
+    MergedRow, Merging, MovedEvent, NewAdoption, NewCompanion, NewConversation, NewRank,
+    NoticeEvent, Parked, PendingSteerView, PinnedEvent, Process, ProcessChoice, ProcessPicked,
+    ProposalView, PullRequestCheck, PullRequestComment, PullRequestCommit, PullRequestDetails,
+    PullRequestEvent, PullRequestSummary, QuestionSetEvent, RepoChoice, RepoSwitched,
+    ResolveConflictsEvent, Resolved, Resumed, RoadmapPane, RowDevice, Screen, ServerAttached,
+    ServerRemoved, SetRow, ShareView, ShowArchived, ShowingArchived, Shown, Size, StageDocument,
+    StageEntry, StageListEvent, StageListReached, StageSource, StageState, Started,
     SteerAdditionView, SteerCancelled, SteerCompanionRefusal, SteerEvent, SteerForm, SteerOpened,
     SteerPairingView, SteerRecordView, SteerSaved, SteerSubmission, SteerTarget, SteerUpgradeView,
     TakenUp, TargetNamed, TargetRecorded, TaskDocument, TaskEntry, TaskListEvent, TaskListReached,
     TaskSource, TerminalClosed, TerminalOpened, TerminalView, TerminalsView, TimelineEvent,
-    UnreadableSetEvent, Watching, Worktree, agent_output_event, agent_output_pinned, backlog_pane,
-    brief_event, commit_event, commit_pane, handoff_event, manual_task_event, moved_event,
-    notice_event, proposal_view, pull_request_details, pull_request_event, pull_request_reached,
-    question_set_event, resolve_conflicts_event, roadmap_pane, stage_list, stage_list_event,
-    stage_list_reached, steer_event, task_list, task_list_event, task_list_reached,
-    unreadable_set_event,
+    TransferredTo, Uncommitted, UnreadableSetEvent, Watching, Worktree, agent_output_event,
+    agent_output_pinned, backlog_pane, brief_event, commit_event, commit_pane, handoff_event,
+    manual_task_event, moved_event, notice_event, proposal_view, pull_request_details,
+    pull_request_event, pull_request_reached, question_set_event, resolve_conflicts_event,
+    roadmap_pane, stage_list, stage_list_event, stage_list_reached, steer_event, task_list,
+    task_list_event, task_list_reached, unreadable_set_event,
+};
+pub use device::{
+    DeviceIdentity, DevicesView, DiscoveredDevice, FoundOn, LinkedDevice, RenewedCertificate,
 };
 pub use files::{
     FileDeleted, FileDeleting, FileList, FileListsView, FileMade, FileMaking, FileMark,
     FileReading, FileRenamed, FileRenaming, FileRoot, FileRootsView, FileStatus, FileStatusView,
     FileWrite, FileWritten, FolderEntry, FolderListing, Marked,
 };
+pub use joining::{AskingDevice, JoinHeld, JoinSettled, NewJoin, PendingJoin};
 pub use onboarding::{
     AccountView, Dependency, DependencyState, DependencyView, Distro, InstallPress, InstallState,
     OnboardingView, Platform, PrefillView, Prefilled, RunPhase, RunView, Seen, Source, StepsView,
 };
 pub use profiles::{
-    AgentType, Broken, PairingView, PickedView, ProfileAccount, ProfileChoice, ProfileChosen,
-    ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, RepoPairingsView, RoleChoice,
+    AccountFile, AccountLogin, AgentType, Broken, MemoryFile, MemoryLeft, MemoryWanted,
+    PairingView, PickedView, ProfileAccount, ProfileChoice, ProfileChosen, ProfileDeleted,
+    ProfileEdit, ProfileEntry, ProfileSaved, ProfileTrouble, RepoPairingsView, RoleChoice,
 };
-pub use push::{PushKey, Subscribed, Subscription, Unsubscribe};
+pub use push::{PushKey, RelayedNews, Subscribed, Subscription, Unsubscribe};
 pub use remote::{RemoteBanner, RemoteView, ServeEdit, ServePress, ServeView};
-pub use repos::{Created, Creation, Registered, Registration, RepoEntry, RepoRemoved, RepoView};
+pub use repos::{
+    Created, Creation, Registered, Registration, RepoAcross, RepoEntry, RepoRemoved, RepoView,
+};
 pub use settings::{
-    Author, BindEntry, CleanupEdit, CleanupStepEdit, CleanupStepView, CleanupView, CompileCaching,
-    ConflictResolution, HeaderEdit, IgnoreRule, IgnoredCommentsEdit, LanguageEdit, LanguageView,
-    McpHeader, McpHeaderEdit, McpServer, McpServerEdit, McpServersEdit, PathResolution, PathSource,
-    PathsView, RuleField, RuleRefused, RunningOn, ServerField, ServerRefused, ServerTried,
-    SettingsEdit, SettingsSaved, SettingsView, TokenEdit, TokenSaved, Tried, UnreadEntry, Verified,
+    AtOnceEdit, AtOnceView, Author, BindEntry, CleanupEdit, CleanupStepEdit, CleanupStepView,
+    CleanupView, CompileCaching, ConflictResolution, HeaderEdit, IgnoreRule, IgnoredCommentsEdit,
+    LanguageEdit, LanguageView, McpHeader, McpHeaderEdit, McpServer, McpServerEdit, McpServersEdit,
+    PathResolution, PathSource, PathsView, RuleField, RuleRefused, RunningOn, ServerField,
+    ServerRefused, ServerTried, SettingsEdit, SettingsSaved, SettingsView, TokenEdit, TokenSaved,
+    Tried, UnreadEntry, Verified,
 };
 pub use sharing::{
     CommentedOn, MissedOut, SHARE_MARKER, ShareCommented, SharePublished, SharedCommit,
@@ -93,7 +105,12 @@ pub use sharing::{
 };
 pub use transcript::{
     Bookkeeping, Cursor, Prose, Put, Reasoning, ToolResult, ToolUse, TranscriptView, Turn, Unread,
-    rollout_cwd, statements, transcript_after, transcript_view, turns,
+    rollout_cwd, rollout_session, statements, transcript_after, transcript_view, turns,
+};
+pub use transfer::{
+    Arrived, BirthKey, CameFrom, CheckoutAcross, CompanionCheckoutAcross, ConversationAcross,
+    HarnessThere, Lacking, MovedFor, PairingAcross, PairingRole, Permitting, PickedAcross,
+    Preflight, ProfileAcross, TipsThere, Transferring, UntrackedFile,
 };
 pub use update::UpdateNotice;
 pub use view::{

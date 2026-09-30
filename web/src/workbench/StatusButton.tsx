@@ -46,8 +46,9 @@ import { faChevronDown } from "@fortawesome/free-solid-svg-icons";
 
 import { Icon } from "../Icon";
 import type { ConversationView } from "../api/types";
+import { useDevice } from "../reaching";
 import { Actions } from "./Actions";
-import { WAITING_ON_CHECKS, parked } from "./conditions";
+import { WAITING_ON_CHECKS, WAITING_TO_JOIN, parked } from "./conditions";
 import { pressed } from "./eager";
 import { ENDED, STATE } from "./states";
 import styles from "./StatusButton.module.css";
@@ -82,6 +83,20 @@ export type Status = {
 export function status(conversation: ConversationView): Status {
   const state = STATE[conversation.state];
 
+  // The work is on its way to another machine, which is the one thing that
+  // outranks everything below: from the press until it lands, what this
+  // conversation is doing is leaving. Said above the Draft and the ended states
+  // rather than under them, because a Done conversation moves like any other —
+  // and it is drawn in the ordinary colour, a move the human pressed themselves
+  // being news to nobody.
+  if (conversation.transferring !== null) {
+    return {
+      word: `Transferring to ${conversation.transferring}`,
+      state,
+      attention: false,
+    };
+  }
+
   if (conversation.state === "Draft" || ENDED.has(conversation.state)) {
     return { word: null, state, attention: false };
   }
@@ -112,6 +127,14 @@ export function status(conversation: ConversationView): Status {
   // waiting on GitHub, and there is nothing for anybody to do.
   if (conversation.waiting_on_checks) {
     return { word: WAITING_ON_CHECKS, state, attention: false };
+  }
+
+  // And a stage whose tasks are all done, waiting for the chain below it to
+  // settle before its finish joins it. The same shape one state earlier: not
+  // stopped, nothing running, and nothing for anybody here to do — what it is
+  // waiting on is another stage, and the Timeline says which.
+  if (conversation.waiting_to_join) {
+    return { word: WAITING_TO_JOIN, state, attention: false };
   }
 
   // A session in the worktree. A session between two lines of its own output
@@ -150,7 +173,9 @@ export function StatusButton(props: {
   // *Closed* at once, and the menu behind the button offering the rows a closed
   // Conversation has. See `eager.ts`, and `Actions.tsx`, where the rows do the
   // same to what they are handed.
-  const said = createMemo(() => status(pressed(props.conversation)));
+  const device = useDevice();
+
+  const said = createMemo(() => status(pressed(device(), props.conversation)));
 
   return (
     <Actions

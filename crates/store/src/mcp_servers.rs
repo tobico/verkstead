@@ -134,6 +134,10 @@ pub async fn mcp_servers(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<
 mod tests {
     use super::*;
 
+    /// The device every Conversation started here is ranked by, named the way a
+    /// cluster names one (ADR-0020, *Ranks*).
+    const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
+
     /// A Conversation to attach to, over a database with nothing else in it.
     async fn drafting() -> (tempfile::TempDir, SqlitePool, i64) {
         let dir = tempfile::tempdir().unwrap();
@@ -150,7 +154,7 @@ mod tests {
         .await
         .unwrap()
         .unwrap();
-        let id = crate::start_conversation(&pool, repo.id, "mcp-servers")
+        let id = crate::start_conversation(&pool, repo.id, "mcp-servers", THIS_DEVICE)
             .await
             .unwrap()
             .unwrap();
@@ -249,7 +253,7 @@ mod tests {
     async fn one_conversations_servers_are_not_anothers() {
         let (_dir, pool, mine) = drafting().await;
         let repo = crate::registered_repos(&pool).await.unwrap()[0].clone();
-        let theirs = crate::start_conversation(&pool, repo.id, "other")
+        let theirs = crate::start_conversation(&pool, repo.id, "other", THIS_DEVICE)
             .await
             .unwrap()
             .unwrap();

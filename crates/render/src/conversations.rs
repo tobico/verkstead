@@ -177,6 +177,20 @@ pub struct ConversationEntry {
     /// read aloud — *Waiting on checks* where the plain state word would be.
     pub waiting_on_checks: bool,
 
+    /// Whether this one is a roadmap stage whose tasks are all done and whose
+    /// finish is held until the chain below it settles.
+    ///
+    /// The same kind of thing `waiting_on_checks` above is, one state earlier: a
+    /// condition of Implementing rather than a state, nothing stored for it, and
+    /// read off the server's own register of the stages it is holding at the
+    /// moment the list is drawn. Which stage it is waiting on is on its Timeline
+    /// rather than here — the label says that something is being waited on, and
+    /// the line says what.
+    ///
+    /// So what this comes out as is the label read aloud, exactly as the one
+    /// above is: *Waiting to join* where the plain state word would be.
+    pub waiting_to_join: bool,
+
     /// The session on this row having gone quiet without asking — see
     /// [`Parked`] — or `null` where it has not.
     ///
@@ -202,6 +216,105 @@ pub struct ConversationEntry {
     /// *something wants you* against *there is news here*. Cleared by opening
     /// the Conversation, which the browser says in a call of its own.
     pub unseen: bool,
+
+    /// Where this row sits: its **Rank**, which is the whole of what the list
+    /// is ordered by (ADR-0020, *Ranks*).
+    ///
+    /// **It rides out on the row because the merge cannot be made without
+    /// it.** The device the browser opened holds each member's list and merges
+    /// it with its own, and what it merges by is this string — every rank
+    /// carries the device that issued it, so the keys are distinct
+    /// cluster-wide and the merged order is total with no tiebreaker of its
+    /// own. A hub holding the rows and not the keys could not put them in an
+    /// order at all.
+    ///
+    /// **And it is what one merged row is told apart from another by**, which
+    /// is the other thing it is read for: ids are each device's own and
+    /// collide by construction, and this is the one field on a merged list
+    /// that is nobody else's.
+    ///
+    /// Empty where the row has none, which is a database written before there
+    /// were ranks and not yet rewritten — it sorts first, exactly where the
+    /// list a device draws of its own rows puts it. No served answer carries
+    /// one: a serve ranks every Conversation before it answers anything.
+    pub rank: String,
+
+    /// The device this row belongs to, or `null` where there is no cluster and
+    /// nothing to say — a lone device draws no device on any row.
+    ///
+    /// **The server's call rather than the page's**, the membership being what
+    /// decides it: a Verkstead linked to nothing draws the sidebar it has
+    /// always drawn, and one that is linked says whose every row is — its own
+    /// included, so that the list reads as one list rather than as this
+    /// device's work with somebody else's mixed in.
+    pub device: Option<RowDevice>,
+
+    /// The key this Conversation was born under, as one string: the device it
+    /// was drafted on and the id it was given there (ADR-0020, *Transfer*).
+    ///
+    /// **What one row of a merged list is told apart from another by.** A piece
+    /// of work that has been transferred has a row in more than one database, and
+    /// every copy of it carries this same string — so the merge draws the work
+    /// once however many machines hold a copy of it. The rank tells one *row*
+    /// from another and this tells one piece of *work* from another, which is why
+    /// there are two: two copies of one Conversation carry two ranks and one
+    /// birth key.
+    ///
+    /// Opaque to everything that reads it: it is compared for equality and never
+    /// taken apart, exactly as a rank is. Empty where the row has none, which is
+    /// a database the backfill has not reached — and one that is empty stands on
+    /// its own rather than merging with every other empty one. No served answer
+    /// carries one: a serve stamps every Conversation before it answers
+    /// anything.
+    pub born: String,
+
+    /// Whether this row is a copy that has been transferred away, its live
+    /// record being on another device.
+    ///
+    /// **Which is the row the merged list drops.** A device that has handed its
+    /// Conversation on keeps the copy as a tombstone — it holds the id so that
+    /// old links still lead to the work — and what a tombstone is not is a
+    /// second row of the sidebar beside the copy doing the work.
+    ///
+    /// It rides out here because the dropping is the hub's: a member answers its
+    /// own rows and has no idea that the device asking is merging them with
+    /// anything. See the server's `merging`.
+    pub transferred: bool,
+}
+
+/// Which device a sidebar row belongs to, as the row itself says it.
+///
+/// **The name and the OS word are the hub's own**, answered on every row
+/// rather than left to be joined against another reading: the hub holds them
+/// for each member and reads its own machine for itself, so nothing in the
+/// viewer needs the Devices section in hand to draw a row.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct RowDevice {
+    /// The **Device Id**, or `null` for this device's own rows.
+    ///
+    /// Which is the shape the viewer already keys its queries and composes its
+    /// paths by — `null` is *this device*, and a local URL keeps the shape it
+    /// has always had. A row naming this device by its id would be a second
+    /// spelling of every local call.
+    pub id: Option<String>,
+
+    /// What it is shown as: the hostname of the machine, as that machine last
+    /// said it.
+    pub name: String,
+
+    /// And the word for its operating system, which is what draws the mark
+    /// beside the name. *Linux (WSL)* is the one that is not a bare platform
+    /// name, and it is the whole reason the word is carried rather than a
+    /// flag.
+    pub os: String,
+
+    /// And whether the device is answering. `false` is the row drawn dimmed,
+    /// from the last list this device held of that member.
+    ///
+    /// Always `true` on this device's own rows: a device that could not reach
+    /// itself would not be answering this call.
+    pub reachable: bool,
 }
 
 /// A running session that has gone quiet without asking: how long it has been
@@ -245,8 +358,14 @@ pub struct Parked {
     pub spoken_to: u32,
 }
 
-/// One Repo's notice under the new-conversation box: the roadmaps in it that
-/// nothing is driving.
+/// One Repo's notice under the new-conversation box: the roadmaps in it with a
+/// stage that could be started now.
+///
+/// Not the roadmaps nothing is driving, which is what this was while a roadmap ran
+/// its stages one at a time — a declaring roadmap with a ready stage beside the
+/// ones somebody is on is being driven and has work the press can pick up, and
+/// both of those are true at once. See the abandoned rule in the server's
+/// `stages` module.
 ///
 /// One notice per Repo with its roadmaps inside, rather than one per roadmap —
 /// what the human reads first is which repository has work left lying about,
@@ -270,11 +389,12 @@ pub struct AbandonedRepo {
     pub roadmaps: Vec<AbandonedRoadmap>,
 }
 
-/// One abandoned roadmap, named with the stage that would be adopted.
+/// One abandoned roadmap, named with the stages that would be adopted.
 ///
-/// The stage is the lowest-numbered unchecked one, which is the roadmap's own
-/// order rather than anybody's choice — see the abandoned rule in the server's
-/// `stages` module.
+/// The stage is the lowest-numbered one that may **start now**, which is the
+/// roadmap's own order rather than anybody's choice — see the abandoned rule in
+/// the server's `stages` module — and [`beside`](Self::beside) is the rest of
+/// what the press would start with it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct AbandonedRoadmap {
@@ -291,6 +411,16 @@ pub struct AbandonedRoadmap {
 
     /// And what that stage is called.
     pub stage_title: String,
+
+    /// The rest of the stages the press would start beside that one, in the
+    /// roadmap's own order and empty where there is only the one.
+    ///
+    /// A declaring roadmap has as many stages ready as it has lines standing on
+    /// work that has settled, and the press starts every one of them there is a
+    /// place for — so the row names them all. The first is the one the
+    /// Conversation being composed becomes; these are the ones started beside
+    /// it, each as a Conversation of its own.
+    pub beside: Vec<AdoptedStage>,
 
     /// The branch this reading came off, or empty where it came off the default
     /// branch.
@@ -327,13 +457,24 @@ pub struct AdoptionView {
     /// where it has none — and where the roadmap is not there to read.
     pub title: String,
 
-    /// The stage adopting would start: the lowest-numbered unchecked one, read
-    /// at the base commit.
+    /// The stage adopting would start: the lowest-numbered one that may start
+    /// now, read at the base commit.
     ///
     /// `null` where there is none to start there — the roadmap is finished, or
     /// gone, or its next stage is somebody else's already. The press says which
     /// of those it is; this is only what the page can name.
     pub stage: Option<AdoptedStage>,
+
+    /// And the rest of the stages the press would start beside it, in the
+    /// roadmap's own order.
+    ///
+    /// Empty where the roadmap has one stage ready, which is every roadmap that
+    /// declares nothing — and empty where it has none at all, there being no
+    /// press to name anything for. Each of these becomes a Conversation of its
+    /// own at the press, with this one's Pairings, its companions and its base:
+    /// the press is the one act that settles all of that, and a stage started
+    /// beside the first has no draft moment of its own either.
+    pub beside: Vec<AdoptedStage>,
 }
 
 /// The stage an adoption would start, named.
@@ -655,6 +796,24 @@ pub struct ConversationView {
     /// derived from and the only place it can hold.
     pub waiting_on_checks: bool,
 
+    /// Whether this is a roadmap stage with every task done, held before its
+    /// finish until every stage already in its roadmap's chain has settled.
+    ///
+    /// What the *Waiting to join* label is drawn from, and a condition of
+    /// Implementing rather than a state of its own — `waiting_on_checks` above
+    /// is the precedent, and this sits beside `state` for the same reason.
+    /// Nothing is stored for it either: it is the server's register of the
+    /// stages it is holding, read at the moment the page was.
+    ///
+    /// A flag rather than the stages it is waiting on, because those are on the
+    /// Timeline where the hold wrote them: the label says that the finish is
+    /// waiting, and the line beneath it says which stage of the roadmap it is
+    /// waiting on.
+    ///
+    /// `false` in every state but Implementing, which is where a backlog is
+    /// worked and the only place the condition can hold.
+    pub waiting_to_join: bool,
+
     /// The session running on this Conversation having gone quiet without
     /// asking — see [`Parked`] — or `null` where none is or none has.
     ///
@@ -804,6 +963,71 @@ pub struct ConversationView {
     /// has no place in the record and is drawn after everything that does — and
     /// a Share, which is the record, carries no trace of it.
     pub pending_steer: Option<PendingSteerView>,
+
+    /// Where the live record of this Conversation is, where this copy is not it
+    /// (ADR-0020, *Transfer*).
+    ///
+    /// `null` on every ordinary Conversation, which is nearly all of them: this
+    /// device's row *is* the record. Anything else is a tombstone — a copy this
+    /// device transferred away and keeps so that old links still lead to the
+    /// work — and what the page does about one is leave: the URL naming it
+    /// redirects to the device and the id inside, the way the Terminal pane's
+    /// old path redirects to Code.
+    ///
+    /// **And it redirects whether or not that device is answering.** The
+    /// redirect is about which copy is the record rather than about who can be
+    /// reached, and a tombstone drawn because the far end was asleep would be a
+    /// read-only copy of the work presented as the work.
+    pub transferred: Option<TransferredTo>,
+
+    /// And the machine it is on its way to, where a press has asked for it to be
+    /// moved and the move has not run yet (ADR-0020, *Transfer*).
+    ///
+    /// **The name the human gave that machine**, rather than the Device Id
+    /// beside it in [`Self::transferred`]: this one is drawn in a sentence at the
+    /// head of the Timeline — *Transferring to the-laptop* — where that one is
+    /// the address a redirect is built out of.
+    ///
+    /// `null` is every Conversation staying where it is. It is the state between
+    /// the press and the move: the session running now runs to its own end,
+    /// nothing is started after it, and then the work goes.
+    pub transferring: Option<String>,
+
+    /// The device this Conversation was drafted on — the device in its birth
+    /// key — which is always permitted as somewhere its agent may move the work
+    /// to, so a session that has moved can go home (ADR-0020, *The agent's
+    /// call*).
+    ///
+    /// `null` where the record has no birth key yet, which is a database the
+    /// start-up backfill has not reached.
+    pub drafted_on: Option<String>,
+
+    /// And the other devices the human has ticked under *May be transferred
+    /// to*, by Device Id, in the order they were ticked.
+    ///
+    /// Never the drafting device, which is implicit. Empty is the ordinary
+    /// Conversation, whose agent may go nowhere but home.
+    pub permitted: Vec<String>,
+}
+
+/// Which copy of a transferred Conversation is the live one: the device holding
+/// it, and the id it goes by there.
+///
+/// **The Device Id rather than `null` for this device**, unlike the block a
+/// sidebar row carries. A record is read through whichever device the browser
+/// opened — this one's own, or a member's over the Relay — so the answer is that
+/// machine's account of where the work went, and a `null` in it would mean
+/// *whoever answered* rather than *here*. What turns it back into a path is the
+/// page, which knows which device it is reading and what this one's id is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct TransferredTo {
+    /// The **Device Id** of the machine holding the live record.
+    pub device: String,
+
+    /// And the id that machine numbered its copy, which is the other half of
+    /// where the redirect goes.
+    pub id: i64,
 }
 
 /// A pending steer as the page receives it: when the press was made, and the
@@ -1435,7 +1659,7 @@ pub struct TaskDocument {
     /// still has one: its file stays in `.tasks/` until the feature is over, so
     /// the done state is something the section says about itself rather than the
     /// reason it is empty. The same way round as a stage's — see
-    /// [`StageDocument::done`].
+    /// [`StageDocument::state`].
     pub done: bool,
 
     /// The document rendered and sanitized, or `null` where there is nothing to
@@ -1505,12 +1729,37 @@ pub struct StageDocument {
 
     pub title: String,
 
-    /// Whether the stage is finished, which here is the checkbox — see
-    /// [`StageEntry::done`]. Carried on the document because a finished stage
-    /// still has one: a brief stays where it is for ever, so the done state is
+    /// Where the stage is — see [`StageEntry::state`], which is the same reading
+    /// said the same way. Carried on the document because a stage that is over
+    /// still has one: a brief stays where it is for ever, so the state is
     /// something the section says about itself rather than the reason it is
     /// empty.
-    pub done: bool,
+    pub state: StageState,
+
+    /// What the stage stands on, by the labels its line names — `["01", "03"]`
+    /// of `after 01, 03` — or `null` where nothing was declared, which is every
+    /// line of every roadmap written before any of this.
+    ///
+    /// Null on every line of a roadmap that declares on none of them, whatever
+    /// prose its tails hold: what a line says is only a declaration where the
+    /// whole file declares, so an old roadmap is drawn exactly as it always was.
+    ///
+    /// Empty is the root: `no dependencies`, the human's own wording. An `after`
+    /// naming nobody is the same empty list, and is a roadmap the judging
+    /// refuses rather than a shape the pane has to draw differently.
+    pub stands_on: Option<Vec<String>>,
+
+    /// The platform its line names, as the line names it — `windows` of `on
+    /// windows` — or `null` where it names none, and null throughout a roadmap
+    /// that declares on no line at all, for the reason above.
+    ///
+    /// Shown beside what the stage stands on and acted on by nothing: placing a
+    /// stage on a device that matches is a follow-up once cluster mode has
+    /// landed. Independent of the line above it — a line of a declaring roadmap
+    /// whose whole tail is a platform is undeclared with a platform, because a
+    /// forgotten declaration hiding behind one is what the all-or-nothing rule
+    /// is for.
+    pub platform: Option<String>,
 
     /// The brief rendered and sanitized, or `null` where there is nothing to
     /// render. Unlike a task's, that is not the ordinary end of a stage's life
@@ -1528,7 +1777,17 @@ pub struct StageDocument {
 pub struct StageSource {
     pub number: String,
     pub title: String,
-    pub done: bool,
+
+    /// Where the stage is, worked out by the caller: this crate has no record to
+    /// read it out of, any more than it has a filesystem.
+    pub state: StageState,
+
+    /// What its line declares it stands on, and the platform it names — read
+    /// the same way round as [`StageDocument::stands_on`] and
+    /// [`StageDocument::platform`], which is where what either of them means is
+    /// written down.
+    pub stands_on: Option<Vec<String>>,
+    pub platform: Option<String>,
 
     /// The markdown, or `None` where the brief the entry names is not there to
     /// read.
@@ -1561,8 +1820,8 @@ pub struct StageListEvent {
     pub stages: Vec<StageEntry>,
 }
 
-/// One stage of a roadmap: the number it answers to, what it is called, and
-/// whether it is done.
+/// One stage of a roadmap: the number it answers to, what it is called, where it
+/// is, and the Conversation working it where there is one.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct StageEntry {
@@ -1571,11 +1830,143 @@ pub struct StageEntry {
 
     pub title: String,
 
-    /// Whether the stage is finished, which here *is* the checkbox: a stage's
-    /// brief stays where it is for ever, being the record of what the stage was
-    /// for, so there is no file going away to read it off. The other way round
-    /// from a task — see [`TaskEntry::done`].
-    pub done: bool,
+    /// Where the stage is: the word the card's row says in place of the *done*
+    /// and *to do* it used to work out from the box.
+    ///
+    /// The server's answer rather than the viewer's — see [`StageState`] and the
+    /// server's `stages` module, which is where the record and the boxes are put
+    /// together. A task's box is still a box, there being no record beside a
+    /// backlog to say anything else about it: see [`TaskEntry::done`].
+    pub state: StageState,
+
+    /// **Which Conversation** the stage is, where Verkstead's record holds one —
+    /// which is what the card's row leads to, that Conversation being where the
+    /// stage is being worked and where its pull request and its review end up.
+    ///
+    /// Off the same row the state came from, so a row cannot lead to one
+    /// Conversation while saying where another had got to: where a stage was
+    /// attempted twice, this is the attempt whose standing is the one believed —
+    /// see the store's `StageStandings`, which answers both off the one row.
+    ///
+    /// `null` where the record holds no row for the stage, which is a row that
+    /// leads nowhere and reads as every row did before this. Two kinds of stage:
+    /// one nothing has started — every state but [`Done`](StageState::Done),
+    /// [`InProgress`](StageState::InProgress), [`WaitingToJoin`](StageState::WaitingToJoin)
+    /// and [`Halted`](StageState::Halted) — and one worked by hand or by the old
+    /// tools, whose box is the whole of what says it is over.
+    pub conversation: Option<i64>,
+}
+
+/// Where one stage of a roadmap is, as the card's row and the pane's heading say
+/// it.
+///
+/// The server's own reading, which is the whole point of it being a word on the
+/// wire rather than a box: with stages worked side by side, each branch carries a
+/// `ROADMAP.md` of its own and the boxes stop being one fact, while Verkstead's
+/// record of the stage Conversations is one — so the viewer is told where a stage
+/// is and never works it out. Two of these come off the running server rather
+/// than off the record alone — what it is holding before a finish, and how many
+/// places it has left — so each of them is what it was at the moment the page was
+/// drawn. See the server's `stages` module for the rule, and
+/// [ADR-0021](../../../docs/adr/0021-parallel-stages.md).
+///
+/// A roadmap the record holds no rows for — one worked by hand or by the old
+/// tools — comes out [`Done`](StageState::Done) or [`ToDo`](StageState::ToDo)
+/// throughout, off its boxes alone, which is exactly how it has always read.
+///
+/// Flat on the wire — `{"state": "WaitingOn", "stages": ["02"]}` — the way
+/// [`DependencyState`](crate::DependencyState) is, so the viewer
+/// narrows on a field rather than unwrapping a variant name. One of these states
+/// carries something beside its word, and a state said one way here and another
+/// way there would be two states to the person reading them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state")]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum StageState {
+    /// Its work is finished: the record says the stage settled, or it holds no
+    /// row for the stage and the box is ticked.
+    Done,
+
+    /// The record has it in flight and nothing else is true of it: somebody — or
+    /// some unattended run — is on it now.
+    InProgress,
+
+    /// Every task of it is done, and its finish is held until the stages already
+    /// in its roadmap's chain have settled — see the server's `joins` module, which
+    /// is the hold, and ADR-0021's *The chain*.
+    ///
+    /// The record has such a stage in flight, and this is the more particular thing
+    /// to say about it, so it wins over [`InProgress`](StageState::InProgress). It
+    /// loses to [`Halted`](StageState::Halted): a Conversation that has stopped is
+    /// being held by nothing.
+    ///
+    /// **Which stage it is waiting on is not said here.** The word says that the
+    /// finish is waiting; the Notice on that stage's own Timeline says which stage
+    /// of the roadmap it is behind and why, and a card's row has no room for the
+    /// second.
+    ///
+    /// Read off the running server's own register rather than off anything stored,
+    /// exactly as the sidebar's *Waiting to join* label is — see
+    /// [`ConversationEntry::waiting_to_join`] — so the two cannot disagree about one
+    /// stage. Which means a server that has just come back is holding nothing, and
+    /// such a stage reads *in progress* again until the resume takes it up and finds
+    /// it held a second time.
+    WaitingToJoin,
+
+    /// Its Conversation has stopped, or the record says it was abandoned: closed
+    /// without ever having wrapped up.
+    ///
+    /// One word for both, because what a reader does about either is the same —
+    /// go and look at that Conversation — and it is *not* in progress, which is
+    /// the distinction worth drawing. A halted stage holds up only the stages
+    /// that stand on it.
+    Halted,
+
+    /// Nothing has started it, and its own line says what it is standing behind:
+    /// the stages it declared it stands on that have not settled yet.
+    ///
+    /// A **declaring** roadmap's state and only one of those. A roadmap that
+    /// declares on no line is scheduled as each stage standing on the one before
+    /// it, but that is the scheduler's reading of silence rather than anything the
+    /// roadmap says, so saying this about a line that declares nothing would be
+    /// the viewer inventing a declaration. Such a stage reads
+    /// [`ToDo`](StageState::ToDo), exactly as it always has.
+    WaitingOn {
+        /// The ones that have not settled, by the labels the roadmap's own lines
+        /// carry — `["02"]` — zero-padding and all, because those are what the
+        /// human reads the lines by. Never empty: a stage whose every dependency
+        /// has settled is not waiting on any of them.
+        ///
+        /// A part of what the line declared rather than the whole of it — the
+        /// whole is [`StageDocument::stands_on`], which the pane says beside this
+        /// and which does not move as the roadmap runs.
+        stages: Vec<String>,
+    },
+
+    /// Nothing has started it and nothing about the roadmap is what holds it: it
+    /// is **ready** — every stage it stands on has settled — and there is nowhere
+    /// to run it.
+    ///
+    /// One word for the two limits there are: how many stages of its own roadmap
+    /// run at once, and how many Conversations the whole server runs at once. The
+    /// reader's next move differs between them — the first is waited out by a
+    /// stage of that roadmap settling and the second by anything anywhere coming
+    /// free — but a card's row has no room to say which, and the Timeline of the
+    /// Conversation that held it already does.
+    ///
+    /// Told apart from [`WaitingOn`](StageState::WaitingOn), which is the
+    /// distinction that earns this its own word: a stage waiting on a dependency
+    /// waits on work, and this one waits on the machine. A roadmap gone quiet with
+    /// ready work in it would otherwise read as a roadmap the scheduler forgot.
+    ///
+    /// Worked out afresh from the declarations, the record, the boxes and the two
+    /// limits every time it is asked, the way the look that spends freed places
+    /// works it out — so it is what it was at the moment the page was drawn, and
+    /// nothing about the waiting is stored.
+    WaitingForAPlace,
+
+    /// Everything else: nothing has started it and nothing says why.
+    ToDo,
 }
 
 /// The pull request as the Timeline shows it: what it is called and what number
@@ -1996,6 +2387,10 @@ pub struct SteerRecordView {
 /// nothing, and a steer whose account has been removed since picked something
 /// that is gone. A pane that drew them the same would say *nothing picked* over
 /// a choice the human made.
+///
+/// The size lint is left alone here for [`crate::PickedView`]'s reason, which is
+/// the same shape and the same Profile inside it.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum SteerPairingView {
@@ -2876,7 +3271,9 @@ pub fn roadmap_pane(name: String, title: String, read: Vec<StageSource>) -> Road
         .map(|stage| StageDocument {
             number: stage.number,
             title: stage.title,
-            done: stage.done,
+            state: stage.state,
+            stands_on: stage.stands_on,
+            platform: stage.platform,
             html: stage
                 .markdown
                 .as_deref()
@@ -3100,18 +3497,59 @@ pub struct NewAdoption {
     pub base: Option<String>,
 }
 
-/// The order the human has just dragged the sidebar into: every Conversation
-/// they can see, by id, top first.
+/// One row of the merged sidebar, as a caller names one: the device it lives on
+/// and the id that device numbered it.
 ///
-/// The whole list rather than the one row that moved, because the whole list is
-/// what a drag produces and what the human is looking at when they let go. A
-/// move said as *this one, to there* would have to be replayed against a list
-/// the server might have added to since; a list said whole is simply what they
-/// meant.
+/// **An id alone is not a row on a merged list.** Every Verkstead issues a
+/// Conversation 1, so the pair is the whole of what names one (ADR-0020, *The
+/// opened device relays*) — the same pair the viewer keys every row by. `null`
+/// is the device the browser opened, which is the one device a page never has an
+/// id for.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub struct NewOrder {
-    pub order: Vec<i64>,
+pub struct MergedRow {
+    pub device: Option<String>,
+    pub id: i64,
+}
+
+/// Where the human has just dropped one row of the merged sidebar: which row
+/// moved, and the row it now sits directly under — nothing at all being the top
+/// of the list.
+///
+/// One row rather than the whole list, because one row is what moved. The device
+/// the browser opened mints the key between that neighbour and whatever is next
+/// below it, out of the merged list it holds, so the arithmetic exists once, in
+/// one language, and the viewer never learns what a rank looks like (ADR-0020,
+/// *Ranks*).
+///
+/// **Both rows are named by device and id**, because either of them may belong
+/// to any device in the cluster: the hub has every rank in hand — its own in its
+/// store and each member's in the list it holds — so it mints the key itself and
+/// never asks a member what its neighbours are. What the owning device is told
+/// afterwards is the rank, which is [`NewRank`].
+///
+/// A neighbour that has gone since the list was drawn is not a refusal — see
+/// `server::ranking`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct DroppedRow {
+    pub row: MergedRow,
+    pub below: Option<MergedRow>,
+}
+
+/// And what the device that owns a moved row is told: its new **Rank**, minted
+/// by the device that merges the lists.
+///
+/// **The other sentence a drag is said in.** *This row, under that one* cannot
+/// cross a device boundary — the neighbour may be a row the far end has never
+/// heard of — so what travels is the key itself, which means the same thing on
+/// every machine in the cluster. Reached on a member through the Relay, and used
+/// by the hub on itself for its own rows too, so there is one way a rank is
+/// written.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct NewRank {
+    pub rank: String,
 }
 
 /// What became of starting one.
@@ -3186,6 +3624,34 @@ pub enum ProcessPicked {
     /// server's list; the rows the picker draws are the viewer's, and a stage
     /// that adds one adds the other.
     NotLanded,
+}
+
+/// Where a saved draft's work has gone: the device it was moved onto, and the
+/// Conversation it became there (ADR-0020, *Drafting on a device*).
+///
+/// What the compose page sends to finish a move — the Brief, the branch and the
+/// files having been replayed onto that other device already — so that the draft
+/// left here is closed with the words on its Timeline saying where to look.
+///
+/// **The name travels with the id.** A Device Id is what a record and a URL name
+/// a device by, and it is not what a human reads; and the machine that made the
+/// move is the only one that is certainly linked to both ends of it — a laptop
+/// moves a draft from the desktop to the WSL beside it, and the desktop need
+/// never have been linked to the WSL. So the name comes from the browser that
+/// knows it rather than being looked up at the end that cannot.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct ConversationMove {
+    /// The Device Id of the machine the work went to.
+    pub device: String,
+
+    /// And what that machine is shown as, for the sentence on the Timeline.
+    pub name: String,
+
+    /// The Conversation the work became there, which is a number on that
+    /// machine: every Verkstead issues a Conversation 1, so this is read with
+    /// the device beside it and never alone.
+    pub conversation: i64,
 }
 
 /// What the branch is to be called.
@@ -3622,9 +4088,11 @@ pub enum GrillingStarted {
     /// rather than swapped underneath it.
     NoReviewProfile,
 
-    /// A chosen Profile's pair is not where it was left, so there is no account
-    /// to run the session under.
-    ProfileBroken,
+    /// A chosen Profile cannot be run under as things stand — its account is
+    /// not where it was left, or it is a member's and something about this
+    /// device or that one is in the way. Which of them, said the way the
+    /// Profile's own row says it.
+    ProfileBroken(crate::ProfileTrouble),
 
     /// The Brief is empty, and the Brief is what the grilling starts from.
     /// Freezing an empty one would freeze nothing worth having.
@@ -4141,6 +4609,26 @@ pub struct SteerSubmission {
     /// nothing runs in has no sandbox to open up.
     #[serde(default)]
     pub upgraded: Vec<CompanionUpgrade>,
+
+    /// And the Conversation whose uncommitted changes may go with the close that
+    /// makes way for this steer, sent back by the submit that confirms it.
+    ///
+    /// **The take-up's [`Confirming::discarding`] on the other press** — see
+    /// ADR-0020. A steer back into a state something runs in closes the
+    /// Conversation that took this pull request over and has finished with it, and
+    /// a close takes the Worktree away with whatever was left uncommitted in it.
+    /// So a submit stopped over that comes back naming who would lose something —
+    /// [`ConversationSteered::WouldDiscard`] — and the submit after it names them
+    /// here, which is the human saying to go ahead.
+    ///
+    /// **What may be lost rather than what will be.** The server reads the
+    /// checkouts again on that submit, so a Conversation that is clean by then is
+    /// closed without this having meant anything, and one that is dirty and not
+    /// named here stops the submit all over again.
+    ///
+    /// Empty on a first submit, which is every submit that has not been stopped.
+    #[serde(default)]
+    pub discarding: Vec<i64>,
 }
 
 /// One registered Repo a steer puts on a Conversation, with everything a setup
@@ -4195,6 +4683,13 @@ pub struct CompanionUpgrade {
 /// where it goes, so the source is not something to be refused for. What is left
 /// to be wrong about is the *target* — a state whose work cannot be set going
 /// from what the record holds.
+///
+/// **Which one other Conversation's state is among**, and only one: a steer into
+/// a state something runs in wants the branch, and the pull request this
+/// Conversation is on may by now be somebody else's — see [`Self::AlreadyHeld`]
+/// and [`Self::WouldDiscard`], and ADR-0020. That is still a fact about whether
+/// the target's work can be set going rather than about where the work has got
+/// to here.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum ConversationSteered {
@@ -4266,6 +4761,48 @@ pub enum ConversationSteered {
 
     /// Or a model that Profile does not list, for the same reason.
     NoSuchModel,
+
+    /// Another Conversation is still at work on this Conversation's pull request,
+    /// and there is one *open* Conversation per pull request — see ADR-0020.
+    ///
+    /// The way back is the rule turned around. A Conversation closed to make way
+    /// for a take-up — or closed by hand long before — is steered back into work
+    /// on the pull request it is on, and the Conversation that took it over may
+    /// still be wrapping it up. Which one that is, is the whole of what the human
+    /// needs: two live wrap-ups pushing to one branch is what the rule is for, so
+    /// the way on is that Conversation rather than this one beside it.
+    ///
+    /// Only a holder that is still at work. One that has finished with the pull
+    /// request is closed to make way and the steer carries on, so a Done, Closed
+    /// or Archived Conversation on it is no refusal at all — and a steer into
+    /// Done, which runs nothing and needs no checkout, asks none of this.
+    AlreadyHeld {
+        /// The Conversation that has it, for the way there.
+        conversation: i64,
+    },
+
+    /// The Conversation this steer would close has uncommitted changes in a
+    /// checkout it may write in, so the submit stops and names it. Nothing is
+    /// closed and nothing is made, and the pending steer stands.
+    ///
+    /// **Which is the one thing a close is asked about**, here as at the take-up
+    /// — see [`TakenUp::WouldDiscard`], which is this outcome on the other press.
+    /// A close takes the Worktree away by force, so whatever was left uncommitted
+    /// in it goes with it, and that is the only part of making way that cannot be
+    /// undone.
+    ///
+    /// The submit that follows is the confirming one: it sends these Conversations
+    /// back as [`SteerSubmission::discarding`], and the server closes and steers.
+    /// The checkouts are read again on that submit rather than trusted from this
+    /// one, so a Conversation written in since stops it all over again.
+    WouldDiscard {
+        /// Every Conversation that would lose something.
+        ///
+        /// A list rather than one, for the shape's sake: a steer is about the
+        /// Conversation's own pull request and nobody else's, so there is one of
+        /// them here. Stacks are a Fix Merge Issues start's to clear.
+        uncommitted: Vec<Uncommitted>,
+    },
 
     /// The branch has never been made and nothing in the repository answers to
     /// what it would come off.
@@ -4405,9 +4942,11 @@ pub enum Adopted {
     /// which every stage after this one inherits along with the other two.
     NoReviewProfile,
 
-    /// A chosen Profile's pair is not where it was left, so there is no account
-    /// to run the session under.
-    ProfileBroken,
+    /// A chosen Profile cannot be run under as things stand — its account is
+    /// not where it was left, or it is a member's and something about this
+    /// device or that one is in the way. Which of them, said the way the
+    /// Profile's own row says it.
+    ProfileBroken(crate::ProfileTrouble),
 
     /// No git author is configured, so there is nobody for Verkstead to commit
     /// the clearing of an inherited task list as — see
@@ -4429,7 +4968,23 @@ pub enum Adopted {
     /// plans nothing.
     NoRoadmap,
 
-    /// Every stage of it is ticked. The roadmap finished — between the notice
+    /// The roadmap is there and declares badly, so nothing of it may start
+    /// anywhere — and this is the fault, in the words the judgement refuses it
+    /// in.
+    ///
+    /// The one refusal that carries a whole sentence, for
+    /// [`Adopted::BranchInTheWay`]'s reason: what there is to go and do about it
+    /// is in a line of `ROADMAP.md`, and no phrasing of *that roadmap cannot
+    /// start* could say which line or what is wrong with it. The same sentence a
+    /// running roadmap leaves on a Timeline and the roadmap's own session is
+    /// refused by at `verkstead done`, so one fault reads as one fault wherever
+    /// the human meets it.
+    Misdeclared {
+        /// Why, as the judgement put it.
+        why: String,
+    },
+
+    /// Every stage of it is done. The roadmap finished — between the notice
     /// being drawn and the button being pressed, if it had a stage a moment
     /// ago.
     RoadmapComplete,
@@ -4439,8 +4994,9 @@ pub enum Adopted {
     /// Verkstead deciding to skip work.
     NoBrief,
 
-    /// The next stage is annotated with a branch that still exists, so somebody
-    /// or something is already on it.
+    /// Somebody or something is already on the next stage: Verkstead's own record
+    /// says so, or — where it says nothing about that stage — the roadmap
+    /// annotates it with a branch that still exists.
     StageInFlight,
 
     /// The stage's own slug branch is already there. Verkstead did not make it
@@ -4557,13 +5113,41 @@ pub enum TakenUp {
     /// could be pushed to it — the fixes would have nowhere to go.
     Fork,
 
-    /// Another Conversation is already on that pull request, and there is one
-    /// Conversation per piece of work. Which one is the whole of what the
-    /// human needs: the way on is that Conversation rather than a second one
-    /// over the same branch.
+    /// Another Conversation is still at work on that pull request, and there is
+    /// one *open* Conversation per pull request — see ADR-0020. Which one is the
+    /// whole of what the human needs: the way on is that Conversation rather than
+    /// a second one over the same branch.
+    ///
+    /// Only a holder that is still at work. One that has finished with the pull
+    /// request is closed to make way and the take-up carries on, so a Done, Closed
+    /// or Archived Conversation on it is no refusal at all.
     AlreadyHeld {
         /// The Conversation that has it, for the way there.
         conversation: i64,
+    },
+
+    /// A Conversation this start would close has uncommitted changes in a
+    /// checkout it may write in, so the press stops and names it. Nothing is
+    /// closed and nothing is made: the Draft is still a Draft.
+    ///
+    /// **Which is the one thing a close is asked about** — see ADR-0020. A close
+    /// takes the Worktree away by force, so whatever was left uncommitted in it
+    /// goes with it, and that is the only part of making way that cannot be
+    /// undone. A holder whose checkouts are clean is closed with no question at
+    /// all.
+    ///
+    /// The press that follows is the confirming one: it sends these Conversations
+    /// back as [`Confirming::discarding`], and the server closes and takes up.
+    /// The checkouts are read again on that press rather than trusted from this
+    /// one, so a Conversation written in since stops it all over again.
+    WouldDiscard {
+        /// Every Conversation that would lose something, in the order they
+        /// would be closed in.
+        ///
+        /// A list rather than one: a stack is taken up a link at a time, and
+        /// every Conversation standing on a link of it is closed by the one
+        /// press.
+        uncommitted: Vec<Uncommitted>,
     },
 
     /// No Agent Profile is chosen for the implementation, which is what a red
@@ -4578,9 +5162,11 @@ pub enum TakenUp {
     /// said on it.
     NoReviewProfile,
 
-    /// A chosen Profile's pair is not where it was left, so there is no account
-    /// to run the session under.
-    ProfileBroken,
+    /// A chosen Profile cannot be run under as things stand — its account is
+    /// not where it was left, or it is a member's and something about this
+    /// device or that one is in the way. Which of them, said the way the
+    /// Profile's own row says it.
+    ProfileBroken(crate::ProfileTrouble),
 
     /// Git would not fetch from the Repo's remote, so what origin holds on the
     /// head branch cannot be known. Refused rather than taken up against refs
@@ -4634,6 +5220,42 @@ pub enum TakenUp {
 
         why: CompanionRefusal,
     },
+}
+
+/// A Conversation a take-up would close that has something uncommitted in it.
+///
+/// What [`TakenUp::WouldDiscard`] is made of, and what the composer draws under
+/// the press: the id is the way there, and the branch is what the human knows
+/// it by — a Conversation is called by its branch everywhere it is listed, once
+/// anybody has named one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct Uncommitted {
+    /// The Conversation, for the way there.
+    pub conversation: i64,
+
+    /// The branch it goes under.
+    pub branch: String,
+}
+
+/// What a take-up's press says beyond which Draft is making it.
+///
+/// Empty on a first press, which is every press that has not been stopped — so
+/// this is a body of nothing until a [`TakenUp::WouldDiscard`] gives it
+/// something to carry.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct Confirming {
+    /// The Conversations whose uncommitted changes may go: the ones a
+    /// [`TakenUp::WouldDiscard`] named, sent back by the press that confirms
+    /// them.
+    ///
+    /// **What may be lost rather than what will be.** The server reads every
+    /// checkout again on this press, so a Conversation that is clean by then is
+    /// closed without this having meant anything, and one that is dirty and not
+    /// named here stops the press all over again.
+    #[serde(default)]
+    pub discarding: Vec<i64>,
 }
 
 /// What became of pressing Stop or Force stop.
@@ -4741,6 +5363,10 @@ pub enum ConversationUnarchived {
 /// [`ShowArchived`] rather than this — a position, and nothing about what is
 /// behind it, that half being the server's own fact.
 ///
+/// **One switch for the whole merged list**, which is the device the browser
+/// opened's: every member of its cluster is asked for its rows at this position
+/// rather than filtering by its own (ADR-0020, *The opened device relays*).
+///
 /// Two answers in one payload because the page has one question. The sidebar's
 /// list is filtered by the switch in SQL, so an empty list says nothing about
 /// which of the two empties it is — nothing archived, or everything archived
@@ -4756,6 +5382,10 @@ pub struct ShowingArchived {
     /// And whether there is anything archived at all, whichever position the
     /// switch is in. False is a switch with nothing behind it, which is a
     /// switch not worth drawing.
+    ///
+    /// **Anything archived anywhere in the cluster**, this being the switch for
+    /// the merged list: a device with nothing of its own still draws it while a
+    /// member has something behind it.
     pub any: bool,
 }
 

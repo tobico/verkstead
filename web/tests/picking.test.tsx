@@ -118,6 +118,10 @@ function pressing(at = ""): {
 /// The one picker every test here drives.
 const UNDER = "Run it under";
 
+/// And the box the rows come down in, which is what is placed: the list is
+/// inside it, beside whatever a caller hangs at its foot.
+const dropped = (): HTMLElement => opened(UNDER).parentElement!;
+
 /// And the control itself, for the attributes a screen reader reads it by.
 const control = () => picker(UNDER);
 
@@ -580,14 +584,14 @@ describe("which way the rows come down", () => {
     laid({ control: 100, rows: 250 });
     picking();
 
-    expect(opened(UNDER).classList.contains(styles.above!)).toBe(false);
+    expect(dropped().classList.contains(styles.above!)).toBe(false);
   });
 
   it("comes down over the control where there is not", () => {
     laid({ control: 800, rows: 250 });
     picking();
 
-    expect(opened(UNDER).classList.contains(styles.above!)).toBe(true);
+    expect(dropped().classList.contains(styles.above!)).toBe(true);
   });
 
   /// Against the window rather than against the box the control stands in: the
@@ -599,7 +603,7 @@ describe("which way the rows come down", () => {
     laid({ control: 400, rows: 250, clip: { top: 200, bottom: 500 } });
     picking();
 
-    expect(opened(UNDER).classList.contains(styles.above!)).toBe(false);
+    expect(dropped().classList.contains(styles.above!)).toBe(false);
   });
 
   /// And where they go is the control's own box, read off the window: a fixed
@@ -608,7 +612,7 @@ describe("which way the rows come down", () => {
     laid({ control: 100, rows: 250 });
     picking();
 
-    const rows = opened(UNDER);
+    const rows = dropped();
 
     expect(rows.style.left).toBe("24px");
     expect(rows.style.width).toBe("300px");
@@ -625,7 +629,7 @@ describe("which way the rows come down", () => {
     laid({ control: 800, rows: 250 });
     picking();
 
-    const rows = opened(UNDER);
+    const rows = dropped();
 
     expect(rows.style.bottom).toBe("200px");
     expect(rows.style.top).toBe("");
@@ -642,7 +646,7 @@ describe("which way the rows come down", () => {
 
     // Eight off the far edge: 1000 less the 480 the rows stand at, less the gap
     // they keep so the shadow under them has somewhere to sit.
-    expect(opened(UNDER).style.left).toBe("512px");
+    expect(dropped().style.left).toBe("512px");
   });
 
   /// And left where it is where it fits, which is every list the width of the
@@ -651,7 +655,7 @@ describe("which way the rows come down", () => {
     laid({ control: 100, rows: 250, across: 600 });
     picking();
 
-    expect(opened(UNDER).style.left).toBe("600px");
+    expect(dropped().style.left).toBe("600px");
   });
 
   /// Measured again while they are down, because a fixed box does not move with
@@ -661,12 +665,12 @@ describe("which way the rows come down", () => {
     laid({ control: 100, rows: 250 });
     picking();
 
-    expect(opened(UNDER).style.top).toBe("140px");
+    expect(dropped().style.top).toBe("140px");
 
     laid({ control: 40, rows: 250 });
     fireEvent.scroll(window);
 
-    expect(opened(UNDER).style.top).toBe("80px");
+    expect(dropped().style.top).toBe("80px");
   });
 
   /// And where it fits neither side, the side that shows more of it — which is
@@ -676,7 +680,7 @@ describe("which way the rows come down", () => {
     laid({ control: 500, rows: 2000 });
     picking();
 
-    expect(opened(UNDER).classList.contains(styles.above!)).toBe(true);
+    expect(dropped().classList.contains(styles.above!)).toBe(true);
   });
 
   /// Under it all the same where under it is the roomier side: the ordinary way
@@ -685,7 +689,7 @@ describe("which way the rows come down", () => {
     laid({ control: 300, rows: 2000 });
     picking();
 
-    expect(opened(UNDER).classList.contains(styles.above!)).toBe(false);
+    expect(dropped().classList.contains(styles.above!)).toBe(false);
   });
 
   /// And it is measured again each time, rather than settled on the first: the
@@ -694,12 +698,12 @@ describe("which way the rows come down", () => {
     laid({ control: 800, rows: 250 });
     picking();
 
-    expect(opened(UNDER).classList.contains(styles.above!)).toBe(true);
+    expect(dropped().classList.contains(styles.above!)).toBe(true);
 
     fireEvent.click(control());
     laid({ control: 100, rows: 250 });
 
-    expect(opened(UNDER).classList.contains(styles.above!)).toBe(false);
+    expect(dropped().classList.contains(styles.above!)).toBe(false);
   });
 });
 

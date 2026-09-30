@@ -28,7 +28,7 @@ desktop app runs on.
 ```console
 $ (cd web && pnpm install && pnpm build)
 $ cargo run -p verkstead-cli -- serve --data-dir .
-  INFO verkstead_server: verkstead is listening listen=127.0.0.1:8422 workbench=http://127.0.0.1:8422/?key=… data_dir=. home=/home/you sandbox_binds=0 build_cache=Some("/home/you/.cache/verkstead") skills=./skills
+  INFO verkstead_server: verkstead is listening listen=127.0.0.1:8422 peer_listen=0.0.0.0:8423 workbench=http://127.0.0.1:8422/?key=… data_dir=. device=86f1933fecb070cbee865fbb84819d14 fingerprint=3F:0A:… home=/home/you sandbox_binds=0 build_cache=Some("/home/you/.cache/verkstead") skills=./skills
 ```
 
 **`workbench=` is how you get in.** Every page of the workbench and the viewer's
@@ -36,6 +36,276 @@ own `/api/ui/` namespace answer 401 without the **Workbench Key**, and that link
 is the address with the key on it: paste it once and the browser holds the
 cookie from then on. The key is `workbench.key` in the Data Directory, made at
 the first start and read back at every one after it.
+
+**`device=` and `fingerprint=` are what this install *is*.** The id is invented
+at the first start and read back at every one after it, and it is what every
+record and URL naming a device will name this one by; the fingerprint is its
+self-signed certificate's, in the spelling two people compare one in. Both are
+in the Data Directory beside the key, as `device.id` and `device.pem`. The
+certificate is good for ninety days and the first start with fewer than thirty
+of them left makes another ([ADR 0020](adr/0020-cluster-mode.md)) — an expired
+one is refused at the handshake, so a certificate issued once and read back for
+ever would be the day every link in a cluster went down together. The id is
+untouched by that: it is the certificate that is renewed.
+
+While the new certificate is waiting on members to acknowledge it, a line of
+its own says so and names both fingerprints — the one still going out and the
+one coming in. On a checkout nothing has been linked to, what that line says is
+that there was nobody to announce to and the changeover is already over:
+
+```console
+  INFO verkstead_server: this device's certificate was near its expiry and has been made again, and there was no member to announce the new fingerprint to fingerprint=9C:4B:…
+```
+
+Once something *is* linked — which is further down this step — that start
+announces the new fingerprint to every member instead, over the link it already
+holds and still presenting the outgoing certificate, that being the only one any
+of them holds. The changeover ends at the last acknowledgement; a member that
+was switched off is told by the next call that gets through to it, and one that
+never answers is a member the human unlinks.
+
+**`peer_listen=` is where another Verkstead reaches this one.** A second
+listener, TLS on every interface at port 8423, presenting the certificate
+above and asking a caller for one without insisting on it — `--peer-listen` or
+`VERKSTEAD_PEER_LISTEN` moves it, and a second Verkstead on this machine needs
+its own the way it needs its own `--listen`. The one route on it anybody at all
+may read is the identity endpoint —
+
+```console
+$ curl -k https://127.0.0.1:8423/api/peer/v1/identity
+{"device":"86f1933fecb070cbee865fbb84819d14","fingerprint":"3F:0A:…","name":"workbench",
+ "os":"Linux","addresses":["workbench.tailnet-name.ts.net","100.64.0.1","192.168.1.24"]}
+```
+
+`-k` because the certificate is self-signed and made out to the device id
+rather than to an address: in a cluster what proves the far end is that
+fingerprint compared against the one the other machine printed, and there is no
+certificate authority anywhere in it to check a chain against.
+
+The three after the fingerprint are read off the machine as that request is
+answered rather than configured anywhere: `name` is the hostname, `os` is the
+platform's own word — a WSL reads `Linux (WSL)`, a Windows machine and the WSL
+on it sharing a hostname — and `addresses` is everywhere a peer could reach this
+device, the tailnet name and address first where Tailscale is up and the LAN
+behind them. Ask it again from another machine on the same tailnet and it says
+the same thing; ask it off a laptop that has moved and the addresses have
+moved with it.
+
+**And the same device says so on the LAN, so that nobody has to type any of
+that.** A start advertises `_verkstead._tcp.local` over mDNS — in this process,
+with no avahi or Bonjour to install — carrying the device id, the hostname, the
+OS word and the port the peer listener really landed on. Anything that browses
+mDNS reads it back:
+
+```console
+$ avahi-browse -rt _verkstead._tcp
+= enp10s0 IPv4 86f1933fecb070cbee865fbb84819d14  _verkstead._tcp  local
+  hostname = [86f1933fecb070cbee865fbb84819d14.local]
+  address = [192.168.1.24]
+  port = [8423]
+  txt = ["port=8423" "os=Linux" "name=workbench" "id=86f1933fecb070cbee865fbb84819d14"]
+```
+
+The instance is named by the device id rather than by the hostname, because two
+Verksteads on one machine are two devices and a hostname cannot tell them apart —
+start the second one below and this lists two, each naming its own peer port.
+`--no-advertising` or `VERKSTEAD_NO_ADVERTISING=1` turns it off, and on NixOS
+`services.verkstead.advertising = false;` does: what goes out is a hostname, an
+operating system and a device id, on a LAN that may not be yours. A server
+*asked* to stop — a `SIGTERM`, or a `^C` — withdraws the advertisement on its way
+out, which is the one ordered stop this server has; a killed one leaves the row
+on the other machine to run out on its own TTL, the way a shut lid does.
+
+**And the other half of it is what the pane draws under those rows.** The same
+service browsed rather than advertised, which is the **Discovered** list: every
+device this one has found and is not already in a cluster with, each with every
+address it was found at and an **Add** on the row.
+
+```console
+$ curl http://127.0.0.1:8422/api/ui/devices/discovered
+[{"device":"0011223344556677889900aabbccddee","name":"kitchen-mini","os":"macOS",
+  "addresses":["192.168.1.31:8423","100.64.0.9:8423"],"found":["Lan","Tailscale"]}]
+```
+
+**The browse runs while that list is being read and not otherwise.** It starts on
+the first read of it and stops once nothing has read it for five minutes — a phone
+that closes a tab says nothing, so the reading being read is the whole of what
+governs it. Which means the first read is empty or short however many machines are
+out there: a browse is cold when it starts, and the rows arrive over the seconds
+after it, each as a `discovered` nudge that an open pane redraws on.
+
+The rows are the Nudge's and nothing polls for them. The one interval in the
+viewer is on this read alone, once a minute while the pane is open, and what it is
+for is the spell above rather than the rows: a browse that has heard nothing new
+announces nothing, so without it the server would stop browsing five minutes into
+a pane somebody was still watching, and a second Verkstead started after that
+would never be heard. A test reads the list again itself, which renews the spell
+the same way.
+
+**And `found` is a list because there are two ways of being found.** A tailnet
+carries no multicast, so there is nothing to hear on one: the tailnet half asks
+instead, reading the online peers out of `tailscale status --json` and putting the
+identity endpoint's question to each of them on port 8423 as the list is read. So
+the tailnet rows are in the first answer where the LAN rows arrive after it, and a
+machine on this network *and* this tailnet is one row that says `Lan` and
+`Tailscale` both, its LAN address first. Bounded, because how many nodes a tailnet
+has is nobody here's decision: sixty-four peers at most, sixteen at a time, three
+seconds apiece. `RUST_LOG=verkstead_server::discovery=debug` says which peers were
+asked and what each of them answered — a phone or a server with nothing on that
+port is a debug line and no row.
+
+Three kinds of device are left out of the merged list — a member, this device, and
+one a join is already pending for — so what the list holds is only what there is
+anything to press. Start the second Verkstead below with a data directory of its
+own and this lists it; link the two and it is a member above instead.
+
+**Three routes stand outside the member gate and they are the whole of the
+un-gated surface**: that identity endpoint, the join post, and the cancel and
+the dial-back a join is settled through. Every other path on that port answers
+`403` and says so — *you are not a member of this verkstead's cluster* —
+whatever you present and whether or not a route answers it, so a stranger is
+told it is a membership they are missing rather than a path that is not there.
+Behind the gate is one membership said three ways: a device put on this one's
+list, a device taken off it, and the certificate one of them stands under
+changed.
+
+**Seeing a link made takes a second Verkstead**, which on one machine means a
+second of everything: its own Data Directory, its own workbench port and its own
+peer port. In a terminal of its own —
+
+```console
+$ mkdir -p /tmp/other
+$ cargo run -p verkstead-cli -- serve --data-dir /tmp/other \
+    --listen 127.0.0.1:8522 --peer-listen 0.0.0.0:8523
+```
+
+Two installs, two device ids, two certificates. Open the **Remote access** pane
+on the first one's workbench: its **Devices** section holds one row, marked *this
+device*, and under **Discovered** the second install appears within a second or
+two of the pane being opened — heard over the multicast, drawn with the port its
+listener bound, and with an **Add** on the row. It reads *LAN* and not *Tailscale*
+however much Tailscale is on this machine: the tailnet half asks this machine's
+*peers*, and the second install is on this machine. Two machines on one tailnet are
+the case that reads *Tailscale*, and *LAN and Tailscale* where they share a network
+too.
+
+**Press that Add and nothing is typed anywhere.** The press names the device
+rather than one of its addresses, a discovery having found a list of them: the
+server dials every address on the row in the order it found them — the LAN's
+first, that being the shorter road — and posts the join at the first that answers.
+The box under the list is what is left for the devices neither half reaches, and
+it takes the one address it always did: `127.0.0.1:8523` for the second install,
+the port being needed only because both are on this machine.
+
+What happens then is the whole of the stage, and the two presses are one act from
+here on. The first device dials that address, takes whatever certificate it
+presents for the one call, and posts what it is; the second writes the question
+down, holds it ten minutes, and raises a
+modal in every workbench it has open with a push to any phone subscribed to it.
+The first draws a pending row, *Waiting for confirmation on …*, with **its own**
+fingerprint under it — the same string the modal over there is drawing, for two
+people at two screens to compare by eye — and a **Cancel**.
+
+Press **Allow** on the second one's modal and nothing else is pressed anywhere.
+The second dials the first back, checks the certificate it meets is the one the
+request pinned, and hands over itself and every member it holds; the first
+checks that certificate against the one it met when it asked. Both lists now
+read the same, and a third Verkstead joining through either of them lands on all
+three.
+
+The pending row and the discovered row are never both drawn: a device a join is
+pending for is one the Discovered list leaves out, so the press moves a row from
+under the list to above it. And a row that went stale between being drawn and
+being pressed — the machine switched off in between, so nothing answers at any of
+the addresses it was found at — is refused naming the device and dropped from the
+list, rather than sitting there refusing again. A far end that *answered* and said
+no keeps its row, being exactly where the row said it was: only a press that
+reached nobody says the row was wrong.
+
+Through the API rather than the pane, which is what a test does — the discovered
+press first, then the typed one:
+
+```console
+$ curl -X POST http://127.0.0.1:8422/api/ui/devices/discovered/0011…ee/add
+$ curl -X POST -H 'Content-Type: application/json' \
+    -d '{"address":"127.0.0.1:8523"}' http://127.0.0.1:8422/api/ui/devices/joins
+$ curl http://127.0.0.1:8522/api/ui/devices/asking
+[{"request":"5b1f…","identity":{"device":"86f1933f…","fingerprint":"3F:0A:…",
+  "name":"workbench","os":"Linux","addresses":["192.168.1.24"]}}]
+$ curl -X POST http://127.0.0.1:8522/api/ui/devices/asking/5b1f…/allow
+$ curl http://127.0.0.1:8422/api/ui/devices
+```
+
+**Unlink** is the row's other press, and it takes that device out of the cluster
+for everybody rather than cutting this device's own half of a link: every member
+drops it and the device itself is told to forget the rest. It is asked once,
+over the page, as Remove on a Repo is — and it works on a member that is not
+answering, which is most of what it is for. A member the last dial found nothing
+at stays on the list, dimmed, reading *unreachable*.
+
+A device asking to link is the one thing a stranger writes into this machine, so
+it is bounded at both ends: a post saying more about itself than is kept is
+refused, and so is one that would take this device past sixteen questions held
+at once.
+
+**Once two devices are linked, either one's whole workbench is reachable through
+the other.** A member serves `/api/ui/` over its peer listener behind the member
+gate, and the device the browser opened relays for the rest: everything under
+`/api/ui/members/{device}/…` is put to that device verbatim — method, path,
+query, body and the headers that matter — and its answer comes back untouched,
+status and body and all. The prefix takes the place of `/api/ui`, so
+`/api/ui/members/0011…ee/conversations/4` is that device's own
+`/api/ui/conversations/4` and nothing else. The browser stays same-origin
+throughout and a device's workbench key never leaves it: what admits the hop at
+the far end is this device's certificate, and the cookie is not passed on.
+
+```console
+$ curl http://127.0.0.1:8422/api/ui/members/0011…ee/conversations
+$ curl -X POST -H 'Content-Type: application/octet-stream' --data-binary @notes.md \
+    http://127.0.0.1:8422/api/ui/members/0011…ee/conversations/4/attachments/notes.md
+```
+
+The body is streamed rather than held, in both directions, so an attachment is
+an ordinary post here and the limit that refuses an oversized one is the far
+end's own `413` rather than a judgement made after buffering the file. Three
+Device Ids are refused by name instead of dialled: one that is no member's, this
+device's own — local URLs keep their shape, so nothing should ask — and a member
+that answered at none of the addresses it advertised, which is the row the pane
+is already drawing dimmed.
+
+**And the news comes back the same way.** This device holds one Nudge stream to
+each of its members — that member's own `/api/ui/nudges`, read over the peer
+listener — and announces everything down it on the stream its own pages are
+listening to, under the Device Id it came from. So a page drawn on a member's
+Conversation stays fresh without a poll and without a reload, and a phone on the
+tailnet hears about that machine at all. The streams are the server's rather than
+the browser's: one per member serves every page this device has open.
+
+```console
+$ curl -N http://127.0.0.1:8422/api/ui/nudges
+event: nudge
+data: {"kind":"set","conversation":4}
+
+event: nudge
+data: {"kind":"set","conversation":7,"device":"0011…ee"}
+
+event: nudge
+data: {"kind":"everything","device":"0011…ee"}
+```
+
+A Nudge with no device is this device's own and is the frame it always was; one
+with a device is that member's news, and the viewer's own table keys the reads it
+makes by it. The `everything` kind is the stream itself rather than anything in
+the world: a member's stream that has just been taken up knows nothing about what
+it missed, so it says *read back whatever of this device is on screen*. Nothing at
+all is announced for a member that is not answering: the page keeps what it last
+read and goes stale, exactly as it does when its own stream is down. A stream that
+ends is taken up again five seconds later, and while nothing answers at all that
+wait doubles to a minute — a laptop that is shut for a fortnight is worth a dial a
+minute rather than one every five seconds. What goes over the
+peer listener is this device's own news alone: in a cluster everybody holds a
+stream to everybody, so a device passing on what a third one told it would be
+saying that news was its own.
 
 **That is the whole of it — there is no boundary flag to say.** A repo is
 registered from anywhere the server can read, an **Agent Profile** names an
@@ -55,13 +325,13 @@ rather than fatal.
 
 Everything Verkstead makes goes in one place, the **Data Directory**: the
 database at `verkstead.db`, the worktrees, the installed skills, the handoff
-directories and the settings files. `--data-dir` says where, or
-`VERKSTEAD_DATA_DIR`. Said nothing, it is the platform's own place for it —
-`~/.local/share/verkstead` on Linux, `~/Library/Application Support/Verkstead`
-on macOS — which is what an installed Verkstead wants and not what a dev run
-out of a checkout does: `--data-dir .` is why every command here says it, and
-it keeps the database, the worktrees and the settings beside the checkout where
-they can be deleted with it.
+directories, the files this device is, and the settings files. `--data-dir`
+says where, or `VERKSTEAD_DATA_DIR`. Said nothing, it is the platform's own
+place for it — `~/.local/share/verkstead` on Linux, `~/Library/Application
+Support/Verkstead` on macOS — which is what an installed Verkstead wants and
+not what a dev run out of a checkout does: `--data-dir .` is why every command
+here says it, and it keeps the database, the worktrees and the settings beside
+the checkout where they can be deleted with it.
 
 The desktop app is the Electron project in [`desktop/`](../desktop), started
 with `pnpm start` from this shell ([ADR 0020](adr/0020-electron-desktop.md),
@@ -116,6 +386,18 @@ which is the default, ask before quitting, or quit — while the server ending i
 still the app quitting. The sidecar's stdout and the app's own lines both go to
 `verkstead.log` under the **Log Directory**, which the app names on the terminal
 as it opens it and which both **View Logs** open.
+
+**And a held middle button scrolls the pane under it**, on Linux as on Windows.
+Chromium has middle-click autoscroll already and enables it on Windows alone, so
+the app asks Blink for it by name — `--enable-blink-features=MiddleClickAutoscroll`,
+appended before there is a renderer to read it. Asked for on every platform
+rather than on the one that needed it: a gesture is the same gesture wherever
+there is a middle button to hold, so it is one switch and no platform branch —
+Windows is told what is already true there, and a Mac with a three-button mouse
+plugged into it gets the same gesture as everywhere else. It takes nothing away
+from the other thing a middle button does on Linux, a middle click in a text
+field still pasting the X primary selection, and a middle press on a link still
+scrolling nothing. `autoscroll.ts` is the switch and the whole of it.
 
 **And the window has no title bar of its own.** What stands at its top-right
 corner on Linux and Windows is the platform's own controls overlay, drawn on the
@@ -423,6 +705,31 @@ because SQLite frees the pages a delete emptied inside the file and leaves the
 file the size it was; a pass that found nothing does not. And it touches nothing
 outside Verkstead's own record: the git branch stays, and a published share
 stays published.
+
+`"at_once"` is how much Verkstead runs at once, which is two numbers and two
+limits, both in force. `"roadmap_stages"` is how many stages of one roadmap may
+be under way together, three where nobody has said, and a place there is held by
+every stage that is under way whatever it is doing, a stage waiting on an answer
+included. `"conversations"` is how many Conversations take a place across the
+**whole server**, whatever roadmap or Process they belong to, four where nobody
+has said — so one roadmap cannot take the whole server by default — and a place
+there is held by every Conversation with a session running or a driver
+registered: a grilling, a Review, a Tinker, another roadmap's stage alike. For
+either, an absent key, an absent file and one nothing can parse all mean the
+default. Both are read afresh at every start and at every look for a stage
+waiting on a place — which is a look made as a place comes free, with a slow one
+behind it for the ways one can come free unannounced — so a change is in force at
+the next start without a restart and stops nothing already running;
+`"roadmap_stages_configured"` and `"conversations_configured"` beside them are
+what say whether a number is one somebody typed, and the settings
+page draws a default as a placeholder. They are the one pair of fields on that
+page with a floor under them: a limit below one is a roadmap — or a server — that
+would never start anything, so the page refuses one rather than sending it, and a
+save carrying one anyway configures nothing. `"places_taken"` rides back beside
+them and is nothing a save sets: how many of the server's places are held as of
+the read, off the same two registers, so that a server holding every place reads
+as held rather than as stalled. It can stand above the limit, a press going ahead
+over it and being counted from then on. Its own card, under the instructions.
 
 `"conflict_resolution"` is what a session sent at a pull request that will not
 merge is told to do about it: `"Merge"`, which merges the base branch into the

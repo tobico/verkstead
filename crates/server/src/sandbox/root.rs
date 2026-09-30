@@ -341,11 +341,22 @@ enum Harness {
     /// Claude Code: `.credentials.json` linked, two entries under `projects/`
     /// as its memory, and a `settings.json` written.
     Claude {
-        /// The `projects/` entries joined, in the order they are said: the
-        /// Repo's main checkout's first, which holds Claude's per-Repo memory,
-        /// and the Worktree's after it, where the session's transcript is
-        /// written. One where the two are the same name.
-        entries: Vec<String>,
+        /// The `projects/` entry of the Repo's main checkout, which holds
+        /// Claude's memory of the Repo.
+        repo: String,
+
+        /// And the Worktree's, where the session's transcript is written — the
+        /// same name as `repo` where the session works in the main checkout
+        /// itself.
+        ///
+        /// **Two names rather than the joined list**, because the two are two
+        /// different things wherever the machine at the other end of a link is
+        /// concerned: the memory sync carries each to the entry *that* machine
+        /// names for the same thing, and a list with the repeat already taken
+        /// out would have nothing left to say which was which — see
+        /// [`Root::synced`]. What is joined is [`Root::entries`], which is
+        /// these two with a repeat taken out.
+        worktree: String,
 
         /// The same two paths as `.claude.json` keys its `projects` entries:
         /// the plain path, with forward slashes on Windows. One where the two
@@ -394,16 +405,13 @@ impl Root {
             Platform::MacOs | Platform::Windows => resolved(worktree),
         };
 
-        let mut entries = Vec::new();
+        let mut named = Vec::new();
         let mut trusted = Vec::new();
 
         for path in [main_checkout(git_dir), worktree] {
             let plain = super::plainly(&path);
-            let entry = entry_named(&plain);
 
-            if !entries.contains(&entry) {
-                entries.push(entry);
-            }
+            named.push(entry_named(&plain));
 
             let key = match platform {
                 Platform::Windows => plain.to_string_lossy().replace('\\', "/"),
@@ -415,9 +423,17 @@ impl Root {
             }
         }
 
+        let [repo, worktree] = named
+            .try_into()
+            .expect("one name apiece, and there are two paths");
+
         Root {
             account: account.to_owned(),
-            harness: Harness::Claude { entries, trusted },
+            harness: Harness::Claude {
+                repo,
+                worktree,
+                trusted,
+            },
             memory: true,
         }
     }
@@ -546,11 +562,8 @@ impl Root {
     /// the data directory joined whole — see [`Root::login_alone`].
     pub(crate) fn login_of(account: &crate::store::Account, memory: bool) -> Option<PathBuf> {
         match account {
-            crate::store::Account::Claude { claude_dir, .. } => Some(claude_dir.join(CREDENTIALS)),
-            crate::store::Account::Codex { home } | crate::store::Account::Grok { home } => {
-                Some(home.join(AUTH))
-            }
-            crate::store::Account::OpenCode { home } => (!memory).then(|| home.join(OPENCODE_AUTH)),
+            crate::store::Account::OpenCode { .. } if memory => None,
+            account => Some(login_at(account)),
         }
     }
 
@@ -813,8 +826,9 @@ impl Root {
         }
 
         match &self.harness {
-            Harness::Claude { entries, .. } => entries
-                .iter()
+            Harness::Claude { .. } => self
+                .entries()
+                .into_iter()
                 .map(|entry| Path::new(PROJECTS).join(entry))
                 .collect(),
             Harness::Codex => CODEX_MEMORY.iter().map(PathBuf::from).collect(),
@@ -822,6 +836,390 @@ impl Root {
             Harness::OpenCode => vec![PathBuf::from(OPENCODE_DATA)],
         }
     }
+
+    /// The `projects/` entries a Claude root joins, in the order they are said
+    /// and with a repeat taken out: the Repo's main checkout's first, which
+    /// holds Claude's memory of the Repo, and the Worktree's after it, where
+    /// the session's transcript is written. One where the session is working in
+    /// the main checkout itself.
+    ///
+    /// None for every other harness, none of which keys its store by the
+    /// directory a session runs in.
+    fn entries(&self) -> Vec<&str> {
+        match &self.harness {
+            Harness::Claude { repo, worktree, .. } if repo == worktree => vec![repo],
+            Harness::Claude { repo, worktree, .. } => vec![repo, worktree],
+            Harness::Codex | Harness::Grok | Harness::OpenCode => Vec::new(),
+        }
+    }
+
+    /// The **parts of the memory store** a session away from home syncs, each
+    /// said from the account's directory as *this* machine names it — see
+    /// [`Part`] and [`crate::mirroring::memory`].
+    ///
+    /// **A label apiece, and each machine names its own path for it.** Which
+    /// directory holds Claude's memory of this Repo is a different name on
+    /// every machine, the name being the path's; so what crosses the link is
+    /// the label and the files under it, and the device that writes them down
+    /// joins them onto the path *it* names. Which is the whole of the path
+    /// rewrite, done twice rather than sent: a name computed any way but the
+    /// harness's own is a second entry rather than the same memory.
+    ///
+    /// **The unit is the smallest one each harness's store has**, because only
+    /// one of the four keys its store by path:
+    ///
+    /// - **Claude** — the two entries a root already names, one for the Repo and
+    ///   one for the Worktree.
+    /// - **Codex** — the memory files whole, and out of the one flat directory
+    ///   of rollouts the ones this Conversation's sessions wrote, which is what
+    ///   `worktree` picks out: the store is filed by date and holds every
+    ///   repository the human has ever worked in, and none of the rest of it is
+    ///   this Repo's anything.
+    /// - **Grok Build** — the same, its sessions picked out by the ids Verkstead
+    ///   named them with, which is what its store files a session's directory
+    ///   under. Not `session_search.sqlite` at the top of it, which is the
+    ///   human's index of the whole store: a copy of a mirror's partial one
+    ///   written over it at home would be a search that had lost the rest.
+    /// - **OpenCode** — the one database Verkstead pins every session it runs
+    ///   onto, and the two siblings SQLite keeps beside it: the store runs in
+    ///   write-ahead-log mode, and a database carried without its `-wal` and
+    ///   `-shm` will not open. Not the data directory whole, which also holds
+    ///   the login the account mirror carries and whatever other channel of
+    ///   opencode the host has installed — see [`super::OPENCODE_DB_FILE`].
+    ///
+    ///   **And this is the one harness whose unit is not this Repo's.** opencode
+    ///   keeps a row per session in that one database rather than a directory
+    ///   per working directory, so the sessions of every repository the human
+    ///   has run it in are inside the file, and the file is the smallest thing
+    ///   there is to carry. Narrowing further means reading and writing rows of
+    ///   a schema that is opencode's own and moves between releases — which is
+    ///   the dependency [`crate::records`] deliberately does not take, it being
+    ///   allowed to stop reading where this would have to keep writing. So what
+    ///   crosses is narrower than it was and is still the whole store, and the
+    ///   bound in [`crate::mirroring::memory::MOST_A_STORE_IS`] is what stands
+    ///   in front of a big one.
+    ///
+    /// **Nothing at all where the memory switch is off**, which is the reading
+    /// [`Root::joined_store`] makes of the same switch: a session away from home
+    /// starts on an empty store exactly as it does at home, and neither
+    /// direction carries anything.
+    ///
+    /// `worktree` is the name this Conversation's Worktree directory carries —
+    /// the stem both machines name theirs with — and `sessions` is every session
+    /// id Verkstead has given this Conversation. Each is what one harness's
+    /// store is asked by, and nothing to the other three.
+    pub(crate) fn synced(&self, worktree: Option<&str>, sessions: &[String]) -> Vec<Part> {
+        if !self.memory {
+            return Vec::new();
+        }
+
+        let part = |label: &'static str, inside: PathBuf, whose: Whose| Part {
+            label,
+            inside,
+            whose,
+        };
+
+        match &self.harness {
+            Harness::Claude {
+                repo,
+                worktree: written,
+                ..
+            } => vec![
+                part(REPO, Path::new(PROJECTS).join(repo), Whose::Everything),
+                part(
+                    WORKTREE,
+                    Path::new(PROJECTS).join(written),
+                    Whose::Everything,
+                ),
+            ],
+
+            Harness::Codex => vec![
+                part(MEMORY, PathBuf::from(CODEX_MEMORY[1]), Whose::Everything),
+                part(
+                    SESSIONS_PART,
+                    PathBuf::from(SESSIONS),
+                    Whose::Naming(worktree.unwrap_or_default().to_owned()),
+                ),
+            ],
+
+            Harness::Grok => vec![
+                part(MEMORY, PathBuf::from(GROK_MEMORY[1]), Whose::Everything),
+                part(
+                    SESSIONS_PART,
+                    PathBuf::from(SESSIONS),
+                    Whose::Called(sessions.to_vec()),
+                ),
+            ],
+
+            Harness::OpenCode => vec![part(
+                DATA,
+                PathBuf::from(OPENCODE_DATA),
+                Whose::Database(super::OPENCODE_DB_FILE),
+            )],
+        }
+    }
+}
+
+/// What a part of a memory store is called on the link, which is the one thing
+/// about it both machines hold to: each of them names a path of its own for it.
+///
+/// Spelled out rather than taken off the path, for the reason the account
+/// mirror's allowlist is a list rather than whatever arrived: a device that
+/// wrote down a name the other end chose would be writing wherever that end
+/// said.
+pub(crate) const REPO: &str = "repo";
+pub(crate) const WORKTREE: &str = "worktree";
+pub(crate) const SESSIONS_PART: &str = "sessions";
+pub(crate) const MEMORY: &str = "memory";
+pub(crate) const DATA: &str = "data";
+
+/// One part of a memory store, as the device it is on names it.
+///
+/// See [`Root::synced`], which is the list of them per harness, and
+/// [`crate::mirroring::memory`], which carries what is under each.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Part {
+    /// What it is called on the link — [`REPO`] and the four beside it.
+    pub(crate) label: &'static str,
+
+    /// And where it is inside the account's own directory on this machine.
+    pub(crate) inside: PathBuf,
+
+    /// And which of the files under it are this Conversation's.
+    pub(crate) whose: Whose,
+}
+
+/// Which files under a part of a store this Conversation's sync carries.
+///
+/// **A rule rather than a list**, because the two ends apply it to two different
+/// stores: the home device picks out what this Conversation left there and the
+/// device away from home picks out what it is about to send back, and each of
+/// them is looking at files the other has never seen.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Whose {
+    /// Every file under it. What a part keyed by this Repo or this Worktree
+    /// holds is this Conversation's by construction — and so is what an
+    /// account's memory files hold, which is the account's rather than any
+    /// Repo's and belongs on whichever machine the session is running on.
+    Everything,
+
+    /// The rollouts whose session was working in a Worktree of this name: the
+    /// rule for the one store filed by date rather than by anything a
+    /// Conversation could look itself up under.
+    ///
+    /// **The name rather than the path**, because the path is a different one on
+    /// every machine and the name is the same on all of them — the Worktree
+    /// directory is named for the Repo and the branch, and that is what makes it
+    /// this Conversation's on both ends.
+    Naming(String),
+
+    /// And the session directories called one of these, which is what the store
+    /// that files a session under the id Verkstead gave it is asked by.
+    Called(Vec<String>),
+
+    /// The database of this name directly under the part, and the two siblings
+    /// SQLite keeps beside it — `-wal` and `-shm` — and nothing else there.
+    ///
+    /// **The one store that is a file rather than a tree.** opencode keeps a
+    /// database per account, in write-ahead-log mode, and Verkstead pins the name
+    /// every session it runs writes into it under — see
+    /// [`super::OPENCODE_DB_FILE`]. So the three go together or the database will
+    /// not open on the machine they land on, and nothing else in that directory
+    /// goes at all: the login is the account mirror's to carry, and another
+    /// channel's store is another channel's.
+    ///
+    /// A sibling that is not there is nothing to carry rather than a failure,
+    /// which is a database whose log has been folded back into it.
+    Database(&'static str),
+}
+
+/// Where an account keeps its login, whatever else is true of it.
+///
+/// **The path rather than the file**, and asked of the account rather than of a
+/// root: the login is the one file of an account a session genuinely changes, so
+/// it is named in three places that are not a launch — the mirror a session away
+/// from home is given, the write-back that puts what the session left into the
+/// account at home, and the reading that says an account has no login to lend at
+/// all. See [`crate::mirroring::account`] and [`login_inside`].
+///
+/// [`Root::login_of`] is the same path where a session is given the file as one of
+/// its own, which is every root but an OpenCode one sharing its memory — there
+/// the login is inside the data directory joined whole, and this is still where it
+/// is.
+pub(crate) fn login_at(account: &crate::store::Account) -> PathBuf {
+    match account {
+        crate::store::Account::Claude { claude_dir, .. } => claude_dir.join(CREDENTIALS),
+        crate::store::Account::Codex { home } | crate::store::Account::Grok { home } => {
+            home.join(AUTH)
+        }
+        crate::store::Account::OpenCode { home } => home.join(OPENCODE_AUTH),
+    }
+}
+
+/// And where a **mirror** of an account of `agent_type` keeps its login, said from
+/// the home the mirror is — which is the first path of [`mirrored_of`].
+///
+/// What both ends of the write-back hold to: the device away from home reads the
+/// login off its mirror at this path, and the home device writes what arrives into
+/// its own account's own — see [`login_at`], which is the same file said of a real
+/// account.
+pub(crate) fn login_inside(agent_type: crate::store::AgentType) -> PathBuf {
+    login_at(&super::kept_in(agent_type, Path::new("")))
+}
+
+/// Every path a **mirror** of an account of `agent_type` holds, each said from
+/// the home an account of that harness is kept in.
+///
+/// **The allowlist a root is made of, and nothing else of an account.** A device
+/// launching under a Profile whose account is on another machine keeps a mirror
+/// of that account under its own Data Directory and builds the root out of it
+/// exactly as it builds one out of a local account — so what a mirror holds is
+/// what a root is made *from*: the login, and the file the written configuration
+/// is composed from. Everything this module leaves out of a root is left out of a
+/// mirror too, plugins and hooks and every other repository's transcripts with
+/// it; and the memory store is not here, being joined rather than composed and
+/// synced entry by entry on its own terms.
+///
+/// **The paths, whether or not the account has the file.** What is at each of
+/// them is [`mirrored`]'s answer; this is the list both ends hold to — the device
+/// that reads an account into one, and the device that writes one down and takes
+/// away whatever did not arrive.
+///
+/// Said from the home rather than from the account's own directory, because that
+/// is the shape a mirror is made in: a directory of this device's own with the
+/// harness's account inside it, which is what [`super::kept_in`] builds and what
+/// a root is then built out of.
+pub(crate) fn mirrored_of(agent_type: crate::store::AgentType) -> Vec<PathBuf> {
+    // The login first, by the one name both ends of the write-back hold to — see
+    // [`login_inside`] — and the configuration after it.
+    let login = login_inside(agent_type);
+
+    match agent_type {
+        crate::store::AgentType::Claude => {
+            let claude = Path::new(super::CLAUDE_DIR_INSIDE_HOME);
+
+            vec![
+                login,
+                claude.join(SETTINGS),
+                PathBuf::from(super::CLAUDE_CONFIG_INSIDE_HOME),
+            ]
+        }
+
+        crate::store::AgentType::Codex => {
+            vec![
+                login,
+                Path::new(super::CODEX_INSIDE_HOME).join(CODEX_CONFIG),
+            ]
+        }
+
+        crate::store::AgentType::Grok => {
+            vec![login, Path::new(super::GROK_INSIDE_HOME).join(GROK_CONFIG)]
+        }
+
+        crate::store::AgentType::OpenCode => {
+            vec![login, Path::new(OPENCODE_CONFIG).join(OPENCODE_CONFIGS[0])]
+        }
+    }
+}
+
+/// And what a mirror of `account` holds at each of them, read off the account as
+/// it is at this moment: each path of [`mirrored_of`], and the bytes to write
+/// there or nothing where the account has no such file.
+///
+/// **The login travels as it is.** It is the one file a session genuinely
+/// changes, and what the harness wrote is what the harness has to be given back
+/// — so nothing is read out of it, nothing is composed, and an account with no
+/// login file answers nothing rather than an empty one. That absence is the
+/// answer, and it is what takes a login off a mirror that was holding one.
+///
+/// **The configuration travels composed**, exactly as [`Root::written`] composes
+/// it: the account's own settings file carries how the human works — hooks,
+/// plugins, permissions, a status line — and none of that is a session's, so what
+/// crosses the link is the allowlist's worth of it and no more. Composing it
+/// twice changes nothing: the file a mirror holds is one this wrote, and reading
+/// the same keys out of it again answers the same file.
+///
+/// **And Claude's `.claude.json` travels without its `projects`**, along with the
+/// MCP servers a root's copy never carries either. Those entries are every
+/// repository the human has run claude in — their paths, their history and what
+/// they were last asked — and none of it is this session's; a root seeds the
+/// trust it needs for the Repo and the Worktree it is about to run in, on the
+/// device it is running on. What is left is what says the account is signed in.
+///
+/// Blocking: one read per path.
+pub(crate) fn mirrored(account: &crate::store::Account) -> Vec<(PathBuf, Option<Vec<u8>>)> {
+    let read = |path: PathBuf| std::fs::read(path).ok();
+    let text = |path: PathBuf| std::fs::read_to_string(path).ok();
+
+    let composed = match account {
+        crate::store::Account::Claude {
+            claude_dir,
+            config_file,
+        } => vec![
+            read(claude_dir.join(CREDENTIALS)),
+            Some(settings(read(claude_dir.join(SETTINGS)).as_deref())),
+            Some(mirrored_config(read(config_file.clone()).as_deref())),
+        ],
+
+        crate::store::Account::Codex { home } => vec![
+            read(home.join(AUTH)),
+            Some(toml_carrying(
+                text(home.join(CODEX_CONFIG)).as_deref(),
+                &CODEX_CARRIED,
+                &[],
+                CODEX_HEADERS,
+            )),
+        ],
+
+        crate::store::Account::Grok { home } => vec![
+            read(home.join(AUTH)),
+            Some(toml_carrying(
+                text(home.join(GROK_CONFIG)).as_deref(),
+                &GROK_CARRIED,
+                &[],
+                HEADERS,
+            )),
+        ],
+
+        crate::store::Account::OpenCode { home } => vec![
+            read(home.join(OPENCODE_AUTH)),
+            Some(opencode_config(
+                OPENCODE_CONFIGS.map(|file| text(home.join(OPENCODE_CONFIG).join(file))),
+                &[],
+            )),
+        ],
+    };
+
+    mirrored_of(account.agent_type())
+        .into_iter()
+        .zip(composed)
+        .collect()
+}
+
+/// The `.claude.json` a mirror of an account holds: the account's own with its
+/// MCP servers and its `projects` entries taken out.
+///
+/// [`config`]'s counterpart for a file that is about to cross a link rather than
+/// go into a root: the servers come out for that one's reason — they are the
+/// human's own, and the same leak plugins would be — and the entries come out
+/// because they are every repository the human has run claude in. The trust a
+/// session needs is seeded into the root's copy afterwards, against the paths on
+/// the machine the session runs on, so nothing about the home device's
+/// directories is of any use to it.
+///
+/// An account whose file is not there, or does not read as a JSON object, is a
+/// mirror holding an empty one — which is what a root built from it would be
+/// given anyway.
+fn mirrored_config(account: Option<&[u8]>) -> Vec<u8> {
+    let mut copy = match account.and_then(|bytes| serde_json::from_slice(bytes).ok()) {
+        Some(serde_json::Value::Object(own)) => own,
+        _ => Object::new(),
+    };
+
+    copy.remove(MCP_SERVERS);
+    copy.remove(PROJECTS_CONFIG);
+
+    written(&serde_json::Value::Object(copy))
 }
 
 /// The `opencode.json` an OpenCode root is given, out of the account's own
@@ -1480,7 +1878,7 @@ mod tests {
     /// A Claude root's `projects/` entries.
     fn entries(root: &Root) -> Vec<String> {
         match &root.harness {
-            Harness::Claude { entries, .. } => entries.clone(),
+            Harness::Claude { .. } => root.entries().into_iter().map(str::to_owned).collect(),
             Harness::Codex | Harness::Grok | Harness::OpenCode => {
                 panic!("only a Claude root has `projects/` entries")
             }
@@ -2741,5 +3139,196 @@ mod tests {
             read(&opencode_config([None, Some("[1, 2]".to_owned())], NONE)),
             empty
         );
+    }
+
+    /// What a **mirror** of a Claude account holds: the login as it is, the
+    /// settings the allowlist's worth of, and a `.claude.json` with nothing of
+    /// the human's own in it — and nothing else of an account that has plenty
+    /// else in it.
+    #[test]
+    fn a_mirror_of_an_account_holds_the_files_a_root_is_made_of_and_no_others() {
+        let dir = tempfile::tempdir().unwrap();
+        let claude_dir = dir.path().join(".claude");
+        let config_file = dir.path().join(".claude.json");
+
+        std::fs::create_dir_all(claude_dir.join("plugins/repos/someone")).unwrap();
+        std::fs::create_dir_all(claude_dir.join("projects/-home-you-src-secrets")).unwrap();
+        std::fs::write(
+            claude_dir.join("projects/-home-you-src-secrets/one.jsonl"),
+            "{}\n",
+        )
+        .unwrap();
+        std::fs::write(claude_dir.join("CLAUDE.md"), "How I work.\n").unwrap();
+        std::fs::write(claude_dir.join(CREDENTIALS), r#"{"token":"opus"}"#).unwrap();
+        std::fs::write(
+            claude_dir.join(SETTINGS),
+            serde_json::json!({
+                "env": { "ANTHROPIC_API_KEY": "sk-secret" },
+                "hooks": { "PreToolUse": [{ "command": "curl somewhere" }] },
+                "enabledPlugins": ["someone/thing"],
+            })
+            .to_string(),
+        )
+        .unwrap();
+        std::fs::write(
+            &config_file,
+            serde_json::json!({
+                "oauthAccount": { "emailAddress": "you@example.com" },
+                "mcpServers": { "theirs": { "command": "serve" } },
+                "projects": {
+                    "/home/you/src/secrets": {
+                        "hasTrustDialogAccepted": true,
+                        "history": [{ "display": "what they asked last" }],
+                    },
+                },
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let account = crate::store::Account::Claude {
+            claude_dir: claude_dir.clone(),
+            config_file,
+        };
+
+        let held = mirrored(&account);
+
+        assert_eq!(
+            held.iter().map(|(inside, _)| inside).collect::<Vec<_>>(),
+            vec![
+                &PathBuf::from(".claude/.credentials.json"),
+                &PathBuf::from(".claude/settings.json"),
+                &PathBuf::from(".claude.json"),
+            ],
+            "the allowlist and nothing else: no plugins, no global instructions \
+             file, and no other repository's transcripts",
+        );
+        assert_eq!(
+            held.iter()
+                .map(|(inside, _)| inside.clone())
+                .collect::<Vec<_>>(),
+            mirrored_of(crate::store::AgentType::Claude),
+            "the paths are the one list both ends hold to",
+        );
+
+        let (_, login) = &held[0];
+
+        assert_eq!(
+            login.as_deref(),
+            Some(br#"{"token":"opus"}"#.as_slice()),
+            "the login travels as the harness wrote it",
+        );
+
+        let (_, settings) = &held[1];
+        let settings = read(
+            settings
+                .as_deref()
+                .expect("a root is always given settings"),
+        );
+
+        assert_eq!(
+            settings["env"],
+            serde_json::json!({ "ANTHROPIC_API_KEY": "sk-secret" }),
+            "how the account reaches a model comes over",
+        );
+        assert_eq!(settings["skipDangerousModePermissionPrompt"], true);
+        assert!(
+            settings.get("hooks").is_none() && settings.get("enabledPlugins").is_none(),
+            "and how the human works does not: {settings}",
+        );
+
+        let (_, config) = &held[2];
+        let config = read(config.as_deref().expect("a root is always given a config"));
+
+        assert_eq!(
+            config["oauthAccount"],
+            serde_json::json!({ "emailAddress": "you@example.com" }),
+            "what says the account is signed in comes over",
+        );
+        assert!(
+            config.get("mcpServers").is_none() && config.get("projects").is_none(),
+            "and the human's own servers and every repository they have run \
+             claude in do not — the trust a session needs is seeded into the \
+             root's copy against the paths it is about to run in: {config}",
+        );
+    }
+
+    /// And an account with no login file at all says so, which is what takes a
+    /// login off a mirror that was holding one.
+    #[test]
+    fn an_account_with_no_login_mirrors_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join(".codex");
+        std::fs::create_dir_all(&home).unwrap();
+
+        let held = mirrored(&crate::store::Account::Codex { home });
+
+        assert_eq!(held[0].0, PathBuf::from(".codex/auth.json"));
+        assert_eq!(held[0].1, None, "there is no login to hand over");
+        assert!(
+            held[1].1.is_some(),
+            "and the configuration is composed either way, an account on the \
+             vendor's own provider needing nothing said",
+        );
+    }
+
+    /// And every harness's mirror is the list both ends hold to, path for path:
+    /// one this answered bytes for and the other did not would be a file a launch
+    /// never writes and the device that wrote it takes away again.
+    #[test]
+    fn every_harness_mirrors_exactly_the_paths_both_ends_hold_to() {
+        let home = Path::new("/home/you");
+
+        for agent_type in [
+            crate::store::AgentType::Claude,
+            crate::store::AgentType::Codex,
+            crate::store::AgentType::Grok,
+            crate::store::AgentType::OpenCode,
+        ] {
+            let held = mirrored(&crate::sandbox::kept_in(agent_type, home));
+
+            assert_eq!(
+                held.iter()
+                    .map(|(inside, _)| inside.clone())
+                    .collect::<Vec<_>>(),
+                mirrored_of(agent_type),
+                "{agent_type:?}",
+            );
+
+            // The login first and the configuration after it, which is the order
+            // the two halves of the list are read in.
+            assert!(
+                held.len() >= 2,
+                "{agent_type:?} mirrors its login and its \
+                 configuration: {held:?}"
+            );
+        }
+    }
+
+    /// And the login is the one path both ends of the write-back hold to: the
+    /// device away from home reads what its session left off the mirror there, and
+    /// the home device writes it into the account's own file.
+    #[test]
+    fn a_mirrors_login_is_that_accounts_login_under_the_mirror() {
+        let under = Path::new("/var/lib/verkstead/accounts/7");
+
+        for agent_type in [
+            crate::store::AgentType::Claude,
+            crate::store::AgentType::Codex,
+            crate::store::AgentType::Grok,
+            crate::store::AgentType::OpenCode,
+        ] {
+            assert_eq!(
+                mirrored_of(agent_type).first(),
+                Some(&login_inside(agent_type)),
+                "{agent_type:?} mirrors its login first",
+            );
+            assert_eq!(
+                under.join(login_inside(agent_type)),
+                login_at(&crate::sandbox::kept_in(agent_type, under)),
+                "{agent_type:?}: a mirror is a home, so the login in it is the \
+                 login of the account that home holds",
+            );
+        }
     }
 }

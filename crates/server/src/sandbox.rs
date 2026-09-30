@@ -129,7 +129,7 @@ mod surface;
 // And what a session is given of its account: a `.claude`, a `.codex`, a `.grok`
 // or OpenCode's two directories of Verkstead's own, built out of an allowlist —
 // see [`root`].
-mod root;
+pub(crate) mod root;
 mod sharing;
 
 // And what a rendering cannot say on the platform it is for: how long what it
@@ -344,6 +344,10 @@ pub(crate) fn under(directory: &Path, name: &str) -> PathBuf {
 /// the one executable the server put there and nothing else.
 const BIN: &str = "bin";
 const VERKSTEAD: &str = "verkstead";
+
+/// And where the mirrored accounts of members' Profiles are kept, one directory
+/// per Profile under it — see [`Homes::account_mirror`].
+const ACCOUNTS: &str = "accounts";
 
 /// And the verb the server runs its own image with before it equips anybody
 /// with it — see [`Executable::probe`], which is where the choice of this one
@@ -2329,7 +2333,13 @@ pub(crate) fn account_in_home(agent_type: store::AgentType, home: &Path) -> Opti
 /// `~/.claude`, the one dot-directory each of the two after it, and, for
 /// opencode, the home its XDG defaults resolve inside, which is the home
 /// itself.
-fn kept_in(agent_type: store::AgentType, home: &Path) -> store::Account {
+///
+/// **And the shape a mirror of a member's account is written in**, under a home
+/// of this device's own: the row travels and the account does not, so a device
+/// launching under a Profile that lives elsewhere fetches the files a root is
+/// made of into a directory under its Data Directory and this is the account
+/// they go in — see [`Homes::account_mirror`] and [`root::mirrored_of`].
+pub(crate) fn kept_in(agent_type: store::AgentType, home: &Path) -> store::Account {
     match agent_type {
         store::AgentType::Claude => store::Account::Claude {
             claude_dir: home.join(CLAUDE_DIR_INSIDE_HOME),
@@ -2839,6 +2849,28 @@ impl Homes {
             built,
             sharing: self.sharing.clone(),
         }
+    }
+
+    /// And where the account of a **mirror** Profile is kept on this device: a
+    /// home of its own per Profile, under the Data Directory.
+    ///
+    /// **Under the Data Directory, which is what makes the Windows rule hold by
+    /// construction.** A session's own profile is made under that same directory
+    /// and the login is joined into it by a hard link, which one volume is the
+    /// whole of what it needs — so an account that is a mirror is on the
+    /// profile's volume by arithmetic rather than by luck, and the check that
+    /// refuses an account elsewhere cannot fire for one. See [`across_volumes`].
+    ///
+    /// **Per Profile rather than per session**, because that is what it is a
+    /// mirror *of*: two Conversations grilling under one member's account share
+    /// the one copy of it, exactly as two sessions under a local Profile share
+    /// the one account. It is written fresh from the home device before each
+    /// launch — see [`crate::mirroring::account`].
+    ///
+    /// Named by the **local** Profile id, which is the id a mirror keeps across
+    /// every refresh of the row.
+    pub(crate) fn account_mirror(&self, profile_id: i64) -> PathBuf {
+        self.data.join(ACCOUNTS).join(profile_id.to_string())
     }
 }
 
@@ -7100,6 +7132,49 @@ mod tests {
             "and the two platforms that mount or symlink a path in ask this of \
              nobody"
         );
+    }
+
+    /// And a **mirror** of a member's account is never the account elsewhere,
+    /// whatever drive that member keeps its own on: the mirror is under the Data
+    /// Directory, which is the directory a session's profile is under too, so the
+    /// hard link that joins the login in never leaves the volume and this cannot
+    /// fire for one — see [`Homes::account_mirror`], where that is the point.
+    #[test]
+    fn a_mirrored_account_is_on_the_data_directorys_volume() {
+        let data = Path::new(r"C:\ProgramData\Verkstead");
+        let homes = Homes::on(Platform::Windows, PathBuf::from(r"C:\Users\someone"), data);
+
+        // Whatever the home device's own Profile names, which is a path on that
+        // machine and may be any drive at all — the thing a mirror exists so that
+        // this device never has to join in.
+        for elsewhere in [store::AgentType::Claude, store::AgentType::Codex] {
+            let at_home = kept_in(elsewhere, Path::new(r"Z:\accounts\someone"));
+
+            assert!(
+                across_volumes(
+                    Platform::Windows,
+                    homes.for_conversation(7).path(),
+                    &at_home,
+                    true
+                )
+                .is_some(),
+                "the account as the home device keeps it is on another drive",
+            );
+
+            let mirrored = kept_in(elsewhere, &homes.account_mirror(11));
+
+            assert_eq!(
+                across_volumes(
+                    Platform::Windows,
+                    homes.for_conversation(7).path(),
+                    &mirrored,
+                    true
+                ),
+                None,
+                "and the mirror of it is under the Data Directory, with the \
+                 profile it is joined into",
+            );
+        }
     }
 
     /// A Conversation's HOME is the server's own where a mount can be made

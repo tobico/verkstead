@@ -29,34 +29,49 @@ use tokio::sync::broadcast;
 use verkstead_schema::{QuestionSet, Response, ResponseAccepted, ValidationError};
 
 mod archives;
+mod arrivals;
 mod attachments;
 mod banners;
+mod births;
 mod captures;
 mod cleanup;
 mod commits;
 mod companions;
+mod continuations;
 mod conversations;
 mod deferrals;
 mod deliveries;
 mod endings;
 mod escalations;
+mod joins;
 mod mcp_servers;
+mod members;
 mod migrations;
 mod pairings;
 mod pauses;
 mod pending_steers;
-mod placements;
+mod permitted;
 mod profiles;
 mod pull_requests;
 mod push;
+/// The arithmetic the sidebar's order is made of: a **Rank** strictly between
+/// two others.
+///
+/// Public because the mint is no longer this crate's. The device the browser
+/// opened mints between two rows of a list merged from the whole cluster, and
+/// hands the answer to whichever device owns the row that moved — see
+/// `server::ranking`. What is written down here is the key and nothing else.
+pub mod ranks;
 mod repos;
 mod session_endings;
 mod session_names;
 mod session_pairings;
 mod shares;
+mod slices;
 mod steers;
 mod stops;
 mod transcripts;
+mod transfers;
 mod unseen;
 mod waits;
 mod wrap_up;
@@ -65,15 +80,19 @@ pub use archives::{
     Archiving, Unarchiving, any_archived, archive_conversation, archived, show_archived,
     showing_archived, unarchive_conversation,
 };
+pub use arrivals::{Arrival, ArrivingPicked, Replacing, arrive, arrived_checkout, replace};
 pub use attachments::{
     Attachment, Origin, attach, attached_sets, attachment, attachments, detach, detach_from_set,
     set_attachment, set_attachments,
 };
 pub use banners::{dismiss_remote_banner, remote_banner_dismissed};
+pub use births::{
+    Birth, Transferred, birth, born_as, live_here, record_birth, transfer_away, transferred,
+};
 pub use captures::{Summary, append_capture, capture, start_capture, summarise_capture};
 pub use cleanup::{
-    Deletion, Trimming, deletable, delete_conversation, deleted_tables, reclaim, trim_conversation,
-    trimmable, trimmed,
+    Deletion, Trimming, cleared_tables, deletable, delete_conversation, deleted_tables, reclaim,
+    sweep_arrival, trim_conversation, trimmable, trimmed,
 };
 pub use commits::{
     Commit, commit, commit_repo, commits_landed, forget_commit, record_commit, recorded_commits,
@@ -82,45 +101,65 @@ pub use companions::{
     Adding, Change, Companion, CompanionMode, CompanionWorktree, Configured, Joining, Opening,
     Removing, add_companion, companions, configure_companion, remove_companion,
 };
+pub use continuations::{
+    Continued, carrying_a_conversation, continue_on_arrival, sets_as_they_landed,
+    take_up_the_conversation, the_last_session,
+};
 pub use conversations::{
     AdoptedPullRequest, Base, Chosen, Closable, ClosableCompanion, Closing, Conversation,
-    ConversationRow, Directing, Edited, Ending, Entering, Event, Grilling, Implementing,
-    Investigated, Landed, Landing, Lifecycle, Process, Rebuilding, Resolving, Role, RowState,
-    SetOnTimeline, Settling, Staged, Steer, Steering, Switched, Taking, TimelineEvent, Work,
+    ConversationRow, Directing, Driven, Edited, Ending, Entering, Event, Grilling, Implementing,
+    Investigated, Joined, Landed, Landing, Lifecycle, Planned, Process, Queued, Rebuilding,
+    Resolving, RoadmapStage, Role, RowState, SetOnTimeline, Settling, StageOf, StageStanding,
+    StageStandings, Staged, Steer, Steering, Switched, Taking, TimelineEvent, Work,
     adopted_pull_request, adopting, ask, asked_from, closable, close_conversation,
-    conversation_branch, conversations, fill_target, follow_branch, follow_up_done, follow_up_over,
-    hold_pull_request, implement_again, investigation_over, last_batch_proposal, last_proposal,
-    load_conversation, note, open_set, opened_at, pick_direction, picked_direction, process,
-    record_backlog, record_handoff, record_roadmap, recorded_conversations, recorded_worktrees,
-    reinvent_branch, rename_branch, resolve_conflicts, save_brief, set_asked_from, set_base_commit,
-    set_grilling_pairing, set_implementation_pairing, set_process, set_review_pairing, set_state,
-    set_target, settle_naming, skip_review, stacks_on, stage_roadmap, start_adoption,
-    start_conversation, start_grilling, start_implementing, start_investigating, start_stage,
-    start_tinkering, start_unnamed_conversation, state, steer_conversation, switch_repo, take_up,
-    target, timeline, unfinished_conversations, waiting, work_on_repo,
+    conversation_at_worktree, conversation_branch, conversation_rank, conversation_ranks,
+    conversations, driven_roadmaps, fill_target, follow_branch, follow_up_done, follow_up_over,
+    hold_pull_request, implement_again, investigation_over, join_queue, last_batch_proposal,
+    last_proposal, load_conversation, note, open_set, opened_at, pick_direction, picked_direction,
+    process, queue_to_join, rank_conversation, record_backlog, record_handoff, record_roadmap,
+    recorded_conversations, recorded_worktrees, reinvent_branch, rename_branch, resolve_conflicts,
+    roadmap_planner, save_brief, set_asked_from, set_base_commit, set_grilling_pairing,
+    set_implementation_pairing, set_process, set_review_pairing, set_state, set_target,
+    settle_naming, skip_review, stacks_on, stage_chain, stage_roadmap, stage_standings,
+    start_adoption, start_conversation, start_grilling, start_implementing, start_investigating,
+    start_stage, start_tinkering, start_unnamed_conversation, state, steer_conversation,
+    switch_repo, take_up, target, timeline, unfinished_conversations, waiting, work_on_repo,
 };
 pub use deferrals::{Ask, Unfolded, asked_as, record_folded, stored_on_timeline, unfolded};
 pub use deliveries::{delivered, record_delivery};
 pub use endings::{ended_on, nothing_else};
 pub use escalations::{escalate, escalated, settle_escalation};
+pub use joins::{
+    AskedJoin, HeldJoin, ask_join, asked_join, asked_joins, forget_asked_join, held_join,
+    held_join_count, held_joins, hold_join, let_go_of_expired_joins, let_go_of_join,
+    refuse_asked_join,
+};
 pub use mcp_servers::{attach_mcp_server, detach_mcp_server, mcp_servers};
+pub use members::{
+    Linking, Member, Renewal, Telling, announcement_made, announcements_owed,
+    announcements_owed_to, changeover_over, forget_every_member, forget_member, member_count,
+    member_holding, member_unreachable, members, members_yet_to_acknowledge, owe_announcement,
+    record_member, record_renewal, renewal_acknowledged,
+};
+pub use migrations::{rank_the_conversations, stamp_the_births};
 pub use pairings::{RepoPairings, last_started_pairings, remembered_pairings};
 pub use pauses::Pause;
 pub use pending_steers::{
     Pending, PendingAddition, PendingForm, PendingPairing, PendingSteer, PendingUpgrade,
     discard_pending_steer, open_pending_steer, pending_steer, save_pending_steer,
 };
-pub use placements::place_conversations;
+pub use permitted::{forbid_device, permit_device, permitted_devices};
 pub use profiles::{
-    Account, AgentType, Channel, Clash, Deleting, Pairing, Picked, Profile, ProfileFacts, Saving,
-    create_profile, delete_profile, load_profile, profiles, update_profile,
+    Account, AgentType, Channel, Clash, Deleting, Mirror, Pairing, Picked, Profile, ProfileFacts,
+    Saving, create_profile, delete_profile, forget_mirrors_except, forget_mirrors_of_departed,
+    load_profile, profiles, record_mirror, update_profile,
 };
 pub use pull_requests::{
     Merging, PullRequest, Rollup, Standing, Unfinished, Wrapping, check_rollup,
-    conversation_on_pull_request, merges, merging, pull_request, pull_request_numbered,
-    pull_request_repo, pull_requests, record_another_pull_request, record_check_rollup,
-    record_merging, record_pull_request, record_standing, rollups, stack, standing,
-    unfinished_pull_requests,
+    conversation_on_pull_request, merges, merging, other_conversation_on_pull_request,
+    pull_request, pull_request_numbered, pull_request_repo, pull_requests,
+    record_another_pull_request, record_check_rollup, record_merging, record_pull_request,
+    record_standing, rollups, stack, standing, unfinished_pull_requests,
 };
 pub use push::{
     PushSubscription, Subscribing, VapidKeys, forget_subscription, push_subscriptions,
@@ -131,9 +170,12 @@ pub use repos::{
     registered_repo, registered_repo_at, registered_repos, unregister_repo,
 };
 pub use session_endings::{Ended, end_session, session_ending};
-pub use session_names::session_id;
+pub use session_names::{continued_as, found_as, session_id, session_ids};
 pub use session_pairings::RanUnder;
 pub use shares::{Share, record_share, record_share_comment, share, share_commented};
+pub use slices::{
+    Cell, MOST_A_SLICE_IS, Marks, Renaming, Rows, STAYS_BEHIND, Slice, carried_tables, land, slice,
+};
 pub use steers::{
     PickedPairing, Recorded, RecordedPairing, Scratch, SteerAddition, SteerRecord, SteerUpgrade,
     scratch,
@@ -143,6 +185,10 @@ pub use stops::{
     stop_as_asked, stopped,
 };
 pub use transcripts::{append_transcript, transcript, transcript_after};
+pub use transfers::{
+    AskedBy, Marked, ask_to_transfer, forget_transfer, transfer_asked, transfer_asked_by,
+    transfer_made,
+};
 pub use unseen::{see_conversation, stamp_unseen};
 pub use waits::{WaitHeld, Waits};
 pub use wrap_up::{
@@ -721,6 +767,15 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // references one of each.
     companions::apply_schema(pool).await?;
 
+    // And the key each of them was born under, with the mark saying which copies
+    // of one are not the live record beside it. After the Conversations, because
+    // both hang off one — see [`births`].
+    births::apply_schema(pool).await?;
+
+    // And the move somebody has pressed for and nothing has made yet, which
+    // hangs off a Conversation the same way — see [`transfers`].
+    transfers::apply_schema(pool).await?;
+
     // And what each Repo was last grilled with, so a Conversation started on
     // it arrives with every picker filled. After the Conversations only for
     // reading order — what it references is the Repos and the Profiles.
@@ -742,6 +797,11 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // And how each of them ended — what it exited with and how long it lived —
     // which hangs off the same Event once more, one session ending once.
     session_endings::apply_schema(pool).await?;
+
+    // And which of those sessions a launch on this device carries on from, which
+    // hangs off the Conversation and names a session by the name above — see
+    // [`continuations`]. After the names, so the two read in that order.
+    continuations::apply_schema(pool).await?;
 
     // And the record those sessions kept of themselves, which hangs off the
     // same Event again — one session is one Event, and one Event is one
@@ -794,14 +854,11 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // none of it is an Event.
     wrap_up::apply_schema(pool).await?;
 
-    // And where the human put each Conversation in the sidebar, which hangs off
-    // the Conversations alone for that reason too — an order is a fact about the
-    // list rather than a thing that happened to the work.
-    placements::apply_schema(pool).await?;
-
     // And which of them the human has put away, which the sidebar reads the
-    // same way and for the same reason: what a list draws is not a fact about
-    // the work either.
+    // same way it reads the order it draws them in: what a list shows is not a
+    // fact about the work, any more than the order is. There is no table here
+    // for that order — it is a column on the Conversation itself, its **Rank**,
+    // see [`ranks`].
     archives::apply_schema(pool).await?;
 
     // And what a Cleanup has since taken back out of the ones that were put away
@@ -834,6 +891,26 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // declared in `config.yaml`, which this crate has never heard of — see
     // [`mcp_servers`].
     mcp_servers::apply_schema(pool).await?;
+
+    // And the devices each of them may be moved to by the agent doing its work,
+    // which hang off the Conversations beside those names: the human's consent,
+    // by Device Id — see [`permitted`].
+    permitted::apply_schema(pool).await?;
+
+    // And the devices this one is linked to, which hang off nothing on this
+    // database at all: a cluster is other machines, and what is kept about each
+    // is what that machine said about itself — see [`members`]. The member gate
+    // on the peer listener reads it at every call, the Devices section of the
+    // Remote access pane draws a row per member, and a changeover asks it how
+    // many are owed an announcement of a new fingerprint.
+    members::apply_schema(pool).await?;
+
+    // And the joins in flight, which are what puts a row in that table: a link
+    // asked for and not yet settled, kept on both sides of the asking because
+    // neither side's record is the other's — see [`joins`]. After the members
+    // because what a join becomes is one of those, and hanging off nothing all
+    // the same: a join arrives from a device this one has not met.
+    joins::apply_schema(pool).await?;
 
     // And the one flag on this database that is about nothing on it: whether the
     // human is done with the banner pointing at Remote access. It hangs off

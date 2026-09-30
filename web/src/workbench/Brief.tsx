@@ -50,6 +50,7 @@ import { useReading } from "../freshness";
 import { HarnessMark } from "../HarnessMark";
 import { PaneSticky } from "../Panes";
 import { Empty } from "../notices";
+import { keyOf, useDevice } from "../reaching";
 import * as pairing from "../pairing";
 import styles from "./Brief.module.css";
 import { chosen } from "./naming";
@@ -276,9 +277,11 @@ function Configuration(props: {
 /// pane naming who runs a session that will not exist, beside a composer that
 /// has stopped asking.
 function Machine(props: { conversation: ConversationView }): JSX.Element {
+  const device = useDevice();
+
   const profiles = useReading(() => ({
-    queryKey: ["profiles"],
-    queryFn: listProfiles,
+    queryKey: keyOf(device(), "profiles"),
+    queryFn: () => listProfiles(device()),
     freshness: { reconcile: "id" },
   }));
 

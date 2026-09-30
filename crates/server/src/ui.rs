@@ -22,40 +22,46 @@
 
 use std::collections::HashMap;
 
+use axum::Extension;
 use axum::Json;
+use axum::body::Body;
 use axum::extract::{DefaultBodyLimit, Path, Query, State};
 use axum::http::StatusCode;
 use axum::http::header::{CONTENT_DISPOSITION, CONTENT_TYPE, SET_COOKIE};
 use axum::response::{IntoResponse, Response as HttpResponse};
-use axum::routing::{delete, get, post};
+use axum::routing::{delete, get, post, put};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
+use tokio_util::io::ReaderStream;
 use verkstead_render::{
-    Adopted, AnswerAttached, AnswerAttachmentRemoved, Attached, AttachmentRemoved, Author,
-    BaseBranchChoice, BranchRename, BriefEdit, CheckRollup, CleanupStepView, CleanupView,
-    CommentedOn, CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed,
-    CompanionModeChoice, CompanionModeChosen, CompanionRemoved, CompanionView, CompileCaching,
-    ConflictResolution, ConversationArchived, ConversationClosed, ConversationEntry,
-    ConversationSteered, ConversationStopped, ConversationUnarchived, ConversationView, Creation,
-    Cursor, FileDeleted, FileDeleting, FileListsView, FileMade, FileMaking, FileReading,
+    Adopted, AnswerAttached, AnswerAttachmentRemoved, AskingDevice, AtOnceView, Attached,
+    AttachmentRemoved, Author, BaseBranchChoice, BranchRename, BriefEdit, CheckRollup,
+    CleanupStepView, CleanupView, CommentedOn, CompanionAdded, CompanionBaseRecorded,
+    CompanionBranchRenamed, CompanionModeChoice, CompanionModeChosen, CompanionRemoved,
+    CompanionView, CompileCaching, Confirming, ConflictResolution, ConversationArchived,
+    ConversationClosed, ConversationEntry, ConversationMove, ConversationSteered,
+    ConversationStopped, ConversationUnarchived, ConversationView, Creation, Cursor, DevicesView,
+    DroppedRow, FileDeleted, FileDeleting, FileListsView, FileMade, FileMaking, FileReading,
     FileRenamed, FileRenaming, FileRootsView, FileStatusView, FileWrite, FileWritten,
     FolderListing, GrillingStarted, HeaderEdit, IgnoreRule, IgnoredCommentsEdit, InstallPress,
     LanguageView, Lifecycle, Locked, McpHeader, McpServer, McpServerEdit, McpServersEdit, Merging,
-    MissedOut, NewAdoption, NewCompanion, NewConversation, NewOrder, PairingView, Parked,
-    PendingSteerView, Process, ProcessChoice, ProcessPicked, ProfileChoice, ProfileEdit,
-    ProfileEntry, PushKey, Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry,
-    RepoSwitched, Resolved, Resumed, RoleChoice, RuleField, RuleRefused, RunningOn, ServeEdit,
-    ServePress, ServerAttached, ServerField, ServerRefused, ServerRemoved, SetReading, SetView,
-    SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedCommit,
-    SharedConversation, ShowArchived, ShowingArchived, Standing, SteerCancelled, SteerForm,
-    SteerOpened, SteerPairingView, SteerSaved, SteerSubmission, Submitted, Subscribed,
+    MissedOut, NewAdoption, NewCompanion, NewConversation, NewJoin, NewRank, PairingView, Parked,
+    PendingSteerView, Permitting, Process, ProcessChoice, ProcessPicked, ProfileChoice,
+    ProfileEdit, ProfileEntry, PushKey, Registration, RemoteBanner, RemoteView, RepoChoice,
+    RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice, RuleField, RuleRefused, RunningOn,
+    ServeEdit, ServePress, ServerAttached, ServerField, ServerRefused, ServerRemoved, SetReading,
+    SetView, SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished,
+    SharedCommit, SharedConversation, ShowArchived, ShowingArchived, Standing, SteerCancelled,
+    SteerForm, SteerOpened, SteerPairingView, SteerSaved, SteerSubmission, Submitted, Subscribed,
     Subscription, TakenUp, TargetNamed, TargetRecorded, TerminalOpened, TimelineEvent, TokenEdit,
-    TokenSaved, UnreadEntry, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
+    TokenSaved, TransferredTo, Transferring, UnreadEntry, UnreadableSet, Unsubscribe, UpdateNotice,
+    Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
 use crate::onboarding::Refusal;
-use crate::settings::{Cleanup, CleanupStep, Config, GitAuthor, RuleTrouble};
+use crate::peer::workbench::OverTheLink;
+use crate::settings::{AtOnce, Cleanup, CleanupStep, Config, GitAuthor, RuleTrouble};
 use crate::{AppState, store};
 
 /// The viewer's routes, over the state the agent API is already holding: a
@@ -119,11 +125,19 @@ pub(crate) fn routes() -> axum::Router<AppState> {
             "/api/ui/conversations",
             get(conversations).post(start_conversation),
         )
-        // The order the human dragged that list into. A path of its own under
-        // the list rather than a field on anything in it: what it says is about
-        // the sidebar rather than about any one Conversation, and the whole
-        // order is what a drag produces.
-        .route("/api/ui/conversations/order", post(place_conversations))
+        // And where one row of that list has just been dropped, which is the
+        // whole of what letting go of a card says. Under the list rather than
+        // under a Conversation, because the list is the cluster's: both the row
+        // that moved and the row it landed under are named by device *and* id,
+        // an id alone naming a row on no particular machine — see
+        // [`crate::ranking`], which mints the key between them.
+        .route("/api/ui/conversations/rank", put(rank_dropped_row))
+        // And the other half of that sentence, said to the device that owns the
+        // row: its new **Rank**, minted by whichever device merged the lists.
+        // Under the Conversation because it is one row's own field, and reached
+        // over the Relay for a member's row exactly as every other call is
+        // (ADR-0020, *Ranks*).
+        .route("/api/ui/conversations/{id}/rank", put(rank_conversation))
         // And whether that list is drawing what has been archived, which is
         // about the sidebar in exactly the same way — the human's standing
         // choice rather than this device's, so it is read back here on every
@@ -350,6 +364,21 @@ pub(crate) fn routes() -> axum::Router<AppState> {
             "/api/ui/conversations/{id}/attachments/{name}",
             post(attach).layer(DefaultBodyLimit::max(crate::attachments::MAX_BYTES + 1)),
         )
+        // And reading one back, by the row's own id: the one read of an
+        // attachment there is, and the compose page's when a saved draft moves to
+        // another device — the file is read off the device it is on and put on
+        // the new Conversation through the route above.
+        //
+        // Under the row and named for what it hands over, the way the removal
+        // beside it is named for what it does: the upload above stands at the
+        // *name* the file is being given, so the id could not simply take its
+        // place. The bytes, named by what the record says they were stored
+        // under — which is the other half of what an attachment is, in the
+        // words `crate::attachments` uses for the two.
+        .route(
+            "/api/ui/conversations/{id}/attachments/{attachment}/bytes",
+            get(read_attachment),
+        )
         // And taking one off, by the row's own id rather than by its name: two
         // files on one Conversation may share a name, and neither of them is a
         // key. Named in the path rather than in the verb, as a companion's
@@ -430,6 +459,44 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         .route("/api/ui/conversations/{id}/adopt", post(adopt))
         .route("/api/ui/conversations/{id}/take-up", post(take_up))
         .route("/api/ui/conversations/{id}/close", post(close))
+        // And what one of this device's members lacks before the work could be
+        // moved onto it, which is the reading the Transfer dialog draws under
+        // its device select — see [`crate::preflight`]. A GET, because nothing
+        // is being decided: the press that moves the work is the next one, and
+        // this is what says whether it can be made at all.
+        //
+        // Answered by the device the Conversation is *on*, whichever device the
+        // browser opened: the Repo match runs on the end that is going to act on
+        // the answer, and that end is the one holding the work.
+        .route(
+            "/api/ui/conversations/{id}/preflight/{device}",
+            get(preflight),
+        )
+        // And the press behind that reading: **Go**, which writes down that the
+        // work is going to that device and nothing else — the move runs once the
+        // turn the session is part way through has ended. A POST to the same two
+        // devices the reading names, and answered by the one holding the work.
+        // See [`crate::transfers`].
+        .route(
+            "/api/ui/conversations/{id}/transfer/{device}",
+            post(transfer),
+        )
+        // And the ticks under *May be transferred to*: which other devices the
+        // agent doing this work may move it to itself. A Device Id in the path,
+        // and the untick named in it the way an MCP server's removal is.
+        .route(
+            "/api/ui/conversations/{id}/permitted/{device}",
+            post(permit_device),
+        )
+        .route(
+            "/api/ui/conversations/{id}/permitted/{device}/remove",
+            post(forbid_device),
+        )
+        // And the close a draft's work moving to another device ends with, which
+        // carries the words that say where it went: the close above with a
+        // notice over it rather than a second way of closing — see
+        // [`crate::conversations::moved`], where the two are one act.
+        .route("/api/ui/conversations/{id}/moved", post(draft_moved))
         // And the two of those joined, which is one row of the menu rather than
         // two pressed in turn: the close and the archive are one intention often
         // enough to be worth a press of their own.
@@ -603,6 +670,68 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         .route(
             "/api/ui/remote/banner",
             get(remote_banner).post(dismiss_remote_banner),
+        )
+        // And what this machine *is*, which is the third section of that same
+        // pane: this device and how many others are linked to it. A read of its
+        // own beside the one above for the one above's reason — nothing about a
+        // device is configured either, and what it answers changes without
+        // anybody having been to this page.
+        //
+        // Named for devices rather than filed under `remote`, because a device
+        // is what it is about wherever it is drawn: the pane is where the list
+        // happens to live, and everything a cluster relays later stands under
+        // this same segment.
+        .route("/api/ui/devices", get(devices))
+        // And the devices nobody has typed an address for, which is the
+        // Discovered list under those rows. A read of its own beside the one
+        // above rather than a field of it, and that is the point of it: a browse
+        // hears something every few seconds, and a list that arrived on the same
+        // answer as the membership would put the rows the pane had already drawn
+        // at the mercy of the LAN. Reading it is also what holds the browse open
+        // — see [`crate::discovery::Browse`].
+        .route("/api/ui/devices/discovered", get(discovered))
+        // And the one press on a row of that list, which is an Add with nothing
+        // typed: the row names a device, and what is dialled is every address the
+        // discovery found for it. Under the row rather than beside the typed
+        // press, because what it takes is a Device Id where that one takes an
+        // address — and a discovery found a list of addresses rather than one, so
+        // there is nothing for the browser to choose between.
+        .route("/api/ui/devices/discovered/{device}/add", post(add_found))
+        // And the one thing in that section that is pressed rather than read:
+        // Add, against an address somebody typed. A route of its own beside the
+        // read for the serve switch's reason — it is the half of the section
+        // that changes something, and what it changes is on another machine
+        // entirely — and it answers with that read, made again.
+        //
+        // Under the devices rather than under `remote`, because what it is about
+        // is a device: the pane is where the section happens to live.
+        .route("/api/ui/devices/joins", post(add_device))
+        // And taking one of those back, which is Cancel on a pending row and
+        // Dismiss on one that has run out. One route, because they are one act
+        // seen at two moments — see [`crate::device::Devices::take_back`].
+        .route("/api/ui/devices/joins/{request}/cancel", post(cancel_join))
+        // And the other side of a join: the devices asking to be let into *this*
+        // one's cluster, which is what the modal in every open workbench is
+        // drawn from. A read of its own beside the section above rather than a
+        // field of it, because the modal belongs to no page — a join has to be
+        // raised whatever the human happens to be looking at, so it is drawn in
+        // the shell every page sits inside and reads this for itself.
+        .route("/api/ui/devices/asking", get(asking))
+        // And the press that settles one, which is the whole of what this task
+        // delivers on this side. Two routes rather than one with a verdict in
+        // the body: they are two different acts — one writes a member and the
+        // other writes nothing — and a body that said which would be the same
+        // fact in a worse place.
+        .route("/api/ui/devices/asking/{request}/allow", post(allow_join))
+        .route("/api/ui/devices/asking/{request}/deny", post(deny_join))
+        // And the other press on a row, which is the one that undoes: Unlink,
+        // asked once over the page as Remove on a Repo is. Spelled the way
+        // that one is — the thing, and what is being done to it — rather than
+        // as a `DELETE` on the row, because that is how every press in this
+        // API is spelled and a second spelling would be a second convention.
+        .route(
+            "/api/ui/devices/members/{device}/unlink",
+            post(unlink_device),
         )
 }
 
@@ -976,6 +1105,9 @@ async fn create_repo(
         &creation.parent,
         &creation.name,
         creation.github,
+        // What the Repo pane this comes back with says is waiting in it, which is
+        // bounded by the same setting the notice is — see [`crate::stages::waiting`].
+        author.at_once().roadmap_stages(),
     )
     .await
     {
@@ -1029,10 +1161,15 @@ async fn abandoned_roadmaps(State(state): State<AppState>) -> HttpResponse {
         }
     };
 
-    Json(crate::stages::abandoned(repos).await).into_response()
+    // And how many stages of one roadmap run at once, which is what bounds the
+    // stages each row names: the press starts every ready stage there is a place
+    // for, so the row offers every ready stage there is a place for.
+    let at_once = state.settings.config().at_once().roadmap_stages();
+
+    Json(crate::stages::abandoned(&state.pool, repos, at_once).await).into_response()
 }
 
-/// `GET /api/ui/conversations` — the sidebar, newest first.
+/// `GET /api/ui/conversations` — the sidebar, in the order the human put it in.
 ///
 /// Three facts ride out on every row beyond what the store holds: whether a
 /// session is running on it, whether that session has gone quiet, and whether
@@ -1042,8 +1179,48 @@ async fn abandoned_roadmaps(State(state): State<AppState>) -> HttpResponse {
 /// what is waiting is an `OR` the store computes over rows that move on their
 /// own. Which mark they come out as is the viewer's, and the rule there is one
 /// line: waiting wins over both of the others.
-async fn conversations(State(state): State<AppState>) -> HttpResponse {
-    let conversations = match store::conversations(&state.pool).await {
+///
+/// **And this is where the cluster's one sidebar is answered**: every member's
+/// list, held in this device's memory, merged with the rows below by **Rank**,
+/// each row saying which device owns it (ADR-0020, *The opened device relays*)
+/// — see [`crate::merging`], which holds the lists and does the merging.
+///
+/// **Except over the Peer Listener, where it is this device's own rows alone.**
+/// The viewer's namespace is one router mounted twice, so a member reading this
+/// endpoint would otherwise be handed a merge of merges — and two hubs would
+/// each claim the other's rows as their own, every row of the answer carrying a
+/// device that means something else on the machine reading it. Which listener
+/// this is, is [`OverTheLink`], the same extension the Nudge stream tells the
+/// two apart by and for the same kind of reason: a filter over what an answer
+/// holds rather than a second route to keep.
+///
+/// **And `?archived=` is what a hub asks a member's rows with.** *Show archived
+/// conversations* is one switch for the whole merged list and it is the opened
+/// device's — the human's standing choice about a list, and the list they are
+/// looking at is the cluster's — so a member is asked with that position rather
+/// than left to filter by its own. Read off this device's own switch where
+/// nothing says otherwise, which is every call a browser makes; read off the
+/// query where the call came over the link, which is the hub saying where its
+/// own switch stands. Nothing here writes the member's row — see
+/// [`store::showing_archived`], and [`crate::merging`] on the asking end.
+async fn conversations(
+    State(state): State<AppState>,
+    over_the_link: Option<Extension<OverTheLink>>,
+    Query(asked): Query<AskedArchived>,
+) -> HttpResponse {
+    let showing = match asked.archived.filter(|_| over_the_link.is_some()) {
+        Some(asked) => asked,
+
+        None => match store::showing_archived(&state.pool).await {
+            Ok(showing) => showing,
+            Err(error) => {
+                tracing::error!(error = ?error, "reading whether the archived Conversations are shown failed");
+                return unavailable("the Conversations could not be read");
+            }
+        },
+    };
+
+    let conversations = match store::conversations(&state.pool, showing).await {
         Ok(conversations) => conversations,
         Err(error) => {
             tracing::error!(error = ?error, "reading the Conversations failed");
@@ -1071,6 +1248,11 @@ async fn conversations(State(state): State<AppState>) -> HttpResponse {
     // [`crate::sessions::Sessions::all_parked`].
     let sitting = state.sessions.all_parked();
 
+    // And which of them are stages held before their finish, read once for the
+    // whole list for the reason the three above are — one lock rather than one
+    // per row, over an answer that cannot meaningfully change between them.
+    let held = state.joins.all_waiting();
+
     let rows: Vec<ConversationEntry> = conversations
         .into_iter()
         .map(|conversation| {
@@ -1095,6 +1277,11 @@ async fn conversations(State(state): State<AppState>) -> HttpResponse {
                 // say. A fix session working a red check draws as plain
                 // Wrapping — waiting is what a wrap-up with nobody in it does.
                 waiting_on_checks: conversation.narrowed_to_checks && !working,
+                // And the condition one state earlier, which is the run's own
+                // register rather than the record: a stage whose tasks are all
+                // done and whose finish is held until the chain below it settles
+                // — see [`crate::joins`].
+                waiting_to_join: held.contains(&conversation.id),
                 // And the rescue's own reading of the session, paired with
                 // `working` for the reason `idle` above is: the two reads are a
                 // moment apart, and a row saying a session that has gone is
@@ -1114,11 +1301,48 @@ async fn conversations(State(state): State<AppState>) -> HttpResponse {
                 // written down rather than read off anything here, being a fact
                 // about the person rather than about the work.
                 unseen: conversation.unseen,
+                // And where the row sits, which rides out because the device
+                // that merges the lists cannot order them without it — see
+                // [`ConversationEntry::rank`].
+                rank: conversation.rank,
+                // And the key it was born under, which is what the merge tells
+                // two copies of one piece of work apart by — see
+                // [`ConversationEntry::born`].
+                born: conversation.born,
+                // And whether this copy has been handed on, which is what the
+                // merge drops it for. Nothing here does the dropping: a member
+                // asked this endpoint over the link gets its own rows as they
+                // stand, and the hub is where the cluster's one sidebar is made.
+                transferred: conversation.transferred,
+                // And whose the row is, which the merge below says: nothing
+                // here, because this half of the answer is this device's own
+                // work and a row over the link says no device at all.
+                device: None,
             }
         })
         .collect();
 
-    Json(rows).into_response()
+    // A member asked, so what it gets is this device's own rows exactly as they
+    // stand — see this function's own documentation.
+    if over_the_link.is_some() {
+        return Json(rows).into_response();
+    }
+
+    Json(crate::merging::merged(&state, rows).await).into_response()
+}
+
+/// Where the caller's own **Show archived conversations** switch stands, where a
+/// caller said.
+///
+/// A hub reading a member's rows for the merged list is the one caller that
+/// says: the position is its own switch's, and what it is asking for is that
+/// member's list drawn at it. A browser says nothing and is answered at the
+/// switch of the device it opened, which is the same fact read off the store.
+#[derive(Debug, serde::Deserialize)]
+struct AskedArchived {
+    /// Absent on every call but a hub's read over the link — see
+    /// [`conversations`].
+    archived: Option<bool>,
 }
 
 /// `POST /api/ui/conversations` — start one against a registered Repo.
@@ -1135,27 +1359,72 @@ async fn start_conversation(
     }
 }
 
-/// `POST /api/ui/conversations/order` — the sidebar, in the order the human just
-/// dragged it into.
+/// `PUT /api/ui/conversations/rank` — where the human just dropped one row of
+/// the merged sidebar.
 ///
-/// Refused for nothing. Every id is either a Conversation, which is placed, or
-/// not one, which is passed over — a viewer sends the list it drew, and by the
-/// time it lands a row may have been started or closed. There is nothing to
-/// answer with beyond that it was taken, so it answers with nothing.
+/// `row` is the Conversation that moved and `below` is the row it now sits
+/// directly under, each named by **device and id** because an id alone is not a
+/// row on a list merged from the whole cluster; nothing at all is the top of the
+/// list. The key between that neighbour's rank and the rank under the gap is
+/// minted here rather than in the browser, so the arithmetic exists once and in
+/// one language — see [`crate::ranking`], which does the reading, the minting
+/// and the writing, and holds two drops apart while it does.
 ///
-/// The Nudge is what carries it to the other devices: an order is the list
-/// having moved, which is the one thing every open sidebar has to read again.
-async fn place_conversations(
+/// **This device mints and the owner writes.** The rank carries the Device Id of
+/// the row that moved, whoever its neighbours belong to, and it is written
+/// through the route below — on a member over the Relay, and on this device by
+/// the very function that route's handler calls.
+///
+/// Refused for a member that could not be told, and for nothing else. A
+/// neighbour that has gone since the list was drawn leaves the order where the
+/// rest of the list puts it, and an id naming no Conversation writes nothing: a
+/// viewer sends what it drew, and by the time it lands a row may have been closed
+/// and swept.
+///
+/// The Nudge is what carries it to the other devices: a row that moved is the
+/// one thing every open sidebar has to read again.
+async fn rank_dropped_row(
     State(state): State<AppState>,
-    Json(placed): Json<NewOrder>,
+    Json(moved): Json<DroppedRow>,
 ) -> HttpResponse {
-    match store::place_conversations(&state.pool, &placed.order).await {
-        Ok(()) => {
-            state.nudges.announce(Nudge::Conversations);
-            StatusCode::NO_CONTENT.into_response()
+    match crate::ranking::dropped(&state, moved).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(refusal) => {
+            tracing::warn!("a drag was not saved: {}", refusal.saying);
+            refused(refusal.status, ApiError::new(refusal.saying))
         }
+    }
+}
+
+/// `PUT /api/ui/conversations/{id}/rank` — this row's **Rank** is now this.
+///
+/// The sentence the device that merged the lists says to the device that owns a
+/// row it has just minted a key for: the key itself, which means the same thing
+/// on every machine in the cluster where *this row, under that one* would not —
+/// ids are numbered per device, so a neighbour named to the wrong machine names
+/// somebody else's work.
+///
+/// **Reached two ways and written one way.** A member's row comes here over the
+/// Relay, at `/api/ui/members/{device}/conversations/{id}/rank`, and one of this
+/// device's own comes through [`crate::ranking::stated`] — which is the function
+/// this handler calls, so the local case is not a second way of writing a rank.
+///
+/// An id naming no Conversation writes nothing and is not a refusal: a viewer
+/// sends the list it drew, and by the time a rank lands a row may have been
+/// closed and swept.
+async fn rank_conversation(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(ranked): Json<NewRank>,
+) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+
+    match crate::ranking::stated(&state, id, &ranked.rank).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(error) => {
-            tracing::error!(error = ?error, "placing the Conversations failed");
+            tracing::error!(error = ?error, conversation_id = id, "ranking a Conversation failed");
             unavailable("the order could not be saved")
         }
     }
@@ -1299,7 +1568,9 @@ pub(crate) async fn conversation_view(
     // The Pairings are read as rows rather than as ids: what the pane says
     // about a Profile, and whether it can still be run under, is the same
     // reading the Profile list gets.
-    let grilling_pairing = match crate::profiles::pairing(conversation.grilling_pairing).await {
+    let grilling_pairing = match crate::profiles::pairing(state, conversation.grilling_pairing)
+        .await
+    {
         Ok(pairing) => pairing,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "reading a grilling Pairing failed");
@@ -1307,8 +1578,11 @@ pub(crate) async fn conversation_view(
         }
     };
 
-    let implementation_pairing = match crate::profiles::pairing(conversation.implementation_pairing)
-        .await
+    let implementation_pairing = match crate::profiles::pairing(
+        state,
+        conversation.implementation_pairing,
+    )
+    .await
     {
         Ok(pairing) => pairing,
         Err(error) => {
@@ -1317,7 +1591,7 @@ pub(crate) async fn conversation_view(
         }
     };
 
-    let review_pairing = match crate::profiles::picked(conversation.review_pairing).await {
+    let review_pairing = match crate::profiles::picked(state, conversation.review_pairing).await {
         Ok(pairing) => pairing,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "reading a review Pairing failed");
@@ -1337,9 +1611,45 @@ pub(crate) async fn conversation_view(
     // roadmaps is this one's is asked of git against the base commit: a
     // repository keeps its finished roadmaps, and a Conversation is about the
     // one its branch has written to. See [`crate::stages`].
+    //
+    // Where each of its stages *is* is the one thing that does not come off the
+    // files: the boxes are one branch's and Verkstead's record of the stage
+    // Conversations is the Repo's, so the record is read here — where the pool is
+    // — and handed to the reading. A record that would not read leaves the card
+    // to its boxes, which is a roadmap drawn the way one nothing knows about is:
+    // a page with a card an hour behind is better than a Conversation that will
+    // not open.
+    let record = match store::stage_standings(&state.pool, conversation.repo.id).await {
+        Ok(record) => record,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading what a Repo's roadmap stages have got to failed");
+            store::StageStandings::default()
+        }
+    };
+
+    // And the register beside it, which is the other half of where a stage is:
+    // which Conversations are stages this server is holding before their finish —
+    // see [`crate::joins`]. Read here for the reason the sidebar's own *Waiting to
+    // join* label is read where the rows are drawn: the hold is a task of this
+    // process rather than anything stored, so the card's word and the label are the
+    // one register read at the one moment and cannot disagree about a stage.
+    let held = state.joins.all_waiting();
+
+    // And the places, which is the third thing a stage's state comes off and the
+    // one that is neither the record nor a register: both limits off Settings as
+    // they stand and how many places the server has given away this moment — see
+    // [`crate::stages::Places`]. Read here rather than in the reading for the
+    // reason the two above are, and read afresh for the reason the look that
+    // spends freed places reads them afresh: a limit raised on the settings page
+    // is in force at the next draw.
+    let places = crate::stages::Places::now(state);
+
     let roadmaps = crate::stages::showing(
         conversation.worktree.clone(),
         conversation.base_commit.clone(),
+        record,
+        held,
+        places,
     )
     .await;
 
@@ -1566,9 +1876,11 @@ pub(crate) async fn conversation_view(
     let adopting = match conversation.adopting.clone() {
         Some(roadmap) if worktree.is_none() => Some(
             crate::stages::adopting(
+                &state.pool,
                 conversation.repo.clone(),
                 conversation.base_commit.clone(),
                 roadmap,
+                state.settings.config().at_once().roadmap_stages(),
             )
             .await,
         ),
@@ -1829,7 +2141,7 @@ pub(crate) async fn conversation_view(
     // A read that fails leaves the steers to draw without their Pairing rather
     // than taking the Conversation down with it: everything else about the
     // record is in hand, and a pane short one line is better than no pane.
-    let steer_pairings = match crate::profiles::keyed(steered(&timeline)).await {
+    let steer_pairings = match crate::profiles::keyed(state, steered(&timeline)).await {
         Ok(pairings) => pairings,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "reading what a steer picked failed");
@@ -1880,6 +2192,11 @@ pub(crate) async fn conversation_view(
         // with it, so the label is drawn only where nothing is running — the
         // same reading `working` below is.
         waiting_on_checks: narrowed_to_checks && writing.is_none() && writing_now.is_none(),
+        // And the condition one state earlier, off the register the run holding
+        // the stage put it on — see [`crate::joins`]. No pairing with what is
+        // running is wanted here, unlike the label above: the hold stands in
+        // front of the launch, so a held stage is one with no session at all.
+        waiting_to_join: state.joins.waiting(id),
         // And the other condition, which is the one a running session can be in:
         // idle past the grace with the rescue watching it, said in the same
         // numbers the sidebar row carries — and not while anything is waiting on
@@ -1892,6 +2209,22 @@ pub(crate) async fn conversation_view(
         attachments: attached,
         mcp_servers: servers,
         pending_steer,
+        // And where the live record is, where this copy is not it: what takes
+        // the page off a tombstone and onto the device doing the work — see
+        // [`ConversationView::transferred`].
+        transferred: conversation.transferred.map(|to| TransferredTo {
+            device: to.device,
+            id: to.id,
+        }),
+        // And the machine it is on its way to, by the name the human gave it:
+        // what the head of the Timeline says between the press and the move —
+        // see [`crate::transfers::transferring`].
+        transferring: crate::transfers::transferring(state, id).await,
+        // And where its agent may take the work: the device it was drafted on,
+        // always, and whichever others the human ticked — see
+        // [`crate::transfers::permit`].
+        drafted_on: drafted_on(state, id).await,
+        permitted: conversation.permitted,
         // The same reading the Events above are drawn against, said as a fact
         // about the Conversation: the Timeline offers Force stop exactly where
         // something is running, and one Event of a session's is not the question
@@ -3534,8 +3867,12 @@ async fn roadmap(
         return no_such_roadmap();
     };
 
-    let (worktree, base) = match store::load_conversation(&state.pool, id).await {
-        Ok(Some(conversation)) => (conversation.worktree, conversation.base_commit),
+    let (worktree, base, repo_id) = match store::load_conversation(&state.pool, id).await {
+        Ok(Some(conversation)) => (
+            conversation.worktree,
+            conversation.base_commit,
+            conversation.repo.id,
+        ),
         Ok(None) => return no_such_roadmap(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "loading a Conversation failed");
@@ -3543,7 +3880,34 @@ async fn roadmap(
         }
     };
 
-    match crate::stages::documents(worktree, base, name).await {
+    // The same record the card was drawn against, read here for the reason it is
+    // read there: where a stage is comes off Verkstead's own rows rather than off
+    // the boxes in this branch's `ROADMAP.md`. One that would not read leaves the
+    // pane to its boxes, as the card's does. The joins register goes with it, and
+    // is read at this moment for the same reason it is read at that one — a pane
+    // saying a stage was in progress while the card that opened it said the stage
+    // was waiting to join would be two readings of one hold. And the places go
+    // with the two of them, read at the same moment for the same reason again.
+    let record = match store::stage_standings(&state.pool, repo_id).await {
+        Ok(record) => record,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading what a Repo's roadmap stages have got to failed");
+            store::StageStandings::default()
+        }
+    };
+
+    let places = crate::stages::Places::now(&state);
+
+    match crate::stages::documents(
+        worktree,
+        base,
+        name,
+        record,
+        state.joins.all_waiting(),
+        places,
+    )
+    .await
+    {
         Some(pane) => Json(pane).into_response(),
         None => no_such_roadmap(),
     }
@@ -3703,6 +4067,136 @@ async fn attach(
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, name = %name, "attaching a file failed");
             unavailable("the file could not be attached")
+        }
+    }
+}
+
+/// `GET /api/ui/conversations/{id}/attachments/{attachment}/bytes` — read one
+/// back.
+///
+/// **The one read of an attachment there is**, and what it is for is the compose
+/// page moving a saved draft onto another device: the files on a draft are bytes
+/// under this device's Data Directory, and a move reads each back off here and
+/// puts it on the new Conversation over there through the paperclip's own route
+/// (ADR-0020, *Drafting on a device*).
+///
+/// **Streamed rather than read into memory**, a file here being as much as
+/// thirty-two megabytes: the browser is written to as the disk is read, and a
+/// member's file relayed through the device the browser opened is carried through
+/// the same way — see [`crate::relaying`], which hands a member's answer back as
+/// its stream rather than its bytes.
+///
+/// **Named by what it was stored under**, which is the name on the row rather
+/// than the name it was sent as: a name already taken is counted up when the file
+/// lands, so `notes-2.md` is what this is called and what a move puts on the far
+/// end. In a `Content-Disposition`, so that the same address a browser is pointed
+/// at downloads under that name — see [`disposition`], which writes a name that
+/// is the human's rather than the server's.
+///
+/// A pair naming no row is a 404 — and so is a row whose file has gone from the
+/// directory, which is nothing a human did: the two are one thing to say, there
+/// being no file to read either way.
+async fn read_attachment(
+    State(state): State<AppState>,
+    Path((id, attachment)): Path<(String, String)>,
+) -> HttpResponse {
+    let (Ok(id), Ok(attachment)) = (id.parse::<i64>(), attachment.parse::<i64>()) else {
+        return no_such_attachment();
+    };
+
+    let found = match crate::conversations::attached_file(&state, id, attachment).await {
+        Ok(found) => found,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, attachment, "reading an attached file failed");
+            return unavailable("the file could not be read");
+        }
+    };
+
+    let Some((name, path)) = found else {
+        return no_such_attachment();
+    };
+
+    let file = match tokio::fs::File::open(&path).await {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return no_such_attachment(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, attachment, path = %path.display(), "opening an attached file failed");
+            return unavailable("the file could not be read");
+        }
+    };
+
+    (
+        [
+            // The bytes as they were written and nothing said about what is in
+            // them: what the record keeps is a name and a size, and a type
+            // guessed from the name here would be a guess the upload never made.
+            (CONTENT_TYPE, "application/octet-stream".to_owned()),
+            (CONTENT_DISPOSITION, disposition(&name)),
+        ],
+        Body::from_stream(ReaderStream::new(file)),
+    )
+        .into_response()
+}
+
+/// How an attached file's name is written into its `Content-Disposition`.
+///
+/// **Two spellings of the one name, which is what RFC 6266 asks for**: a quoted
+/// `filename` for anything that reads only the old form, and a `filename*`
+/// carrying the name as it really is. An attachment keeps the human's own base
+/// name — see [`crate::attachments::plain`], which refuses a separator, a
+/// leading dot and a control character and nothing else — so a name may hold a
+/// quote or be written in any script at all. Pasted straight in, the first would
+/// end the quoted string early and the second would not be a header value this
+/// server could build, which is a 500 over a file that is perfectly fine.
+///
+/// So the quoted half is ASCII with the two characters that cannot be in one
+/// stood in for, and the starred half is the name's own bytes percent-encoded
+/// down to the set RFC 8187 allows unescaped. A reader that understands the
+/// second prefers it, which every browser of the last decade does.
+fn disposition(name: &str) -> String {
+    let plain: String = name
+        .chars()
+        .map(|char| match char {
+            '"' | '\\' => '_',
+            other if other.is_ascii_graphic() || other == ' ' => other,
+            _ => '_',
+        })
+        .collect();
+
+    let mut encoded = String::new();
+    for byte in name.bytes() {
+        // The attr-char set: the unreserved characters, and the punctuation RFC
+        // 8187 lists beside them. Everything else goes over as its bytes.
+        if byte.is_ascii_alphanumeric() || b"!#$&+-.^_`|~".contains(&byte) {
+            encoded.push(byte as char);
+        } else {
+            encoded.push_str(&format!("%{byte:02X}"));
+        }
+    }
+
+    format!("attachment; filename=\"{plain}\"; filename*=UTF-8''{encoded}")
+}
+
+/// `POST /api/ui/conversations/{id}/moved` — a draft's work has moved to another
+/// device, so say where it went and close it.
+///
+/// The last request of a move, made once the new Conversation is real and holding
+/// everything the far end would take — see [`crate::conversations::moved`], where
+/// the notice and the close are one act and in that order.
+async fn draft_moved(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(to): Json<ConversationMove>,
+) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(ConversationClosed::NoSuchConversation).into_response();
+    };
+
+    match crate::conversations::moved(&state, id, &to).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "recording where a draft moved to failed");
+            unavailable("the move could not be recorded")
         }
     }
 }
@@ -4082,12 +4576,23 @@ async fn adopt(State(state): State<AppState>, Path(id): Path<String>) -> HttpRes
 /// checked the same way: what the page named was read off GitHub a moment ago,
 /// and a branch somebody has pushed to, taken or checked out since is answered
 /// here rather than there.
-async fn take_up(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+///
+/// **And the one press of the three that takes a body**: a take-up may close the
+/// Conversation that had the pull request, and a close takes its Worktree with
+/// whatever was left uncommitted in it. So a press that was stopped over that
+/// comes back naming what the human is agreeing to lose — see
+/// [`verkstead_render::Confirming`], which is empty on every press that was not
+/// stopped.
+async fn take_up(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(confirming): Json<Confirming>,
+) -> HttpResponse {
     let Ok(id) = id.parse::<i64>() else {
         return Json(TakenUp::NoSuchConversation).into_response();
     };
 
-    match crate::conversations::take_up(&state, id).await {
+    match crate::conversations::take_up(&state, id, &confirming.discarding).await {
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "taking a pull request up failed");
@@ -4275,6 +4780,107 @@ async fn steer_submit(
     }
 }
 
+/// `GET /api/ui/conversations/{id}/preflight/{device}` — what that device lacks
+/// before this Conversation could be moved onto it.
+///
+/// **Answered by the device the Conversation is on**, which a browser reaches
+/// through the Relay like every other reading of a member's: the Repo match runs
+/// on the end that is going to act on the answer, and the registry it is applied
+/// to is the *target's*. So the path names two devices — one in the Relay's own
+/// prefix, and one here — and they are never the same machine.
+///
+/// A device that did not answer is not a refusal: it is a finding on the reading,
+/// named. See [`crate::preflight`], where that distinction is the whole point.
+async fn preflight(
+    State(state): State<AppState>,
+    Path((id, device)): Path<(String, String)>,
+) -> HttpResponse {
+    // An id that is not a number cannot name a Conversation, so it gets the same
+    // answer as one that names none — the id comes out of a URL.
+    let Ok(id) = id.parse::<i64>() else {
+        return no_such_conversation(&id);
+    };
+
+    let conversation = match store::load_conversation(&state.pool, id).await {
+        Ok(Some(conversation)) => conversation,
+        Ok(None) => return no_such_conversation(&id.to_string()),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "loading a Conversation to preflight a transfer failed");
+            return unavailable("the Conversation could not be read");
+        }
+    };
+
+    match crate::preflight::of(state.devices.as_ref(), &state.pool, &conversation, &device).await {
+        Ok(reading) => Json(reading).into_response(),
+        Err(refusal) => {
+            tracing::warn!("a transfer could not be preflighted: {}", refusal.saying);
+            refused(refusal.status, ApiError::new(refusal.saying))
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/transfer/{device}` — move this Conversation
+/// onto that device.
+///
+/// **Two devices in the path again**, for the reading's reason: the press is
+/// answered by the machine holding the work, whichever one the browser opened,
+/// and the machine being named is the one it is going to.
+///
+/// **And the press does not wait for the move.** What it writes down is that the
+/// work is going: whatever is running runs to its own end, nothing is started
+/// after it, and the move follows. See [`crate::transfers`].
+async fn transfer(
+    State(state): State<AppState>,
+    Path((id, device)): Path<(String, String)>,
+) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(Transferring::NoSuchConversation).into_response();
+    };
+
+    match crate::transfers::transfer(&state, id, &device).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(refusal) => {
+            tracing::warn!("a transfer could not be pressed: {}", refusal.saying);
+            refused(refusal.status, ApiError::new(refusal.saying))
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/permitted/{device}` — tick a device under
+/// *May be transferred to*: the agent doing this work may move it there.
+///
+/// Moves nothing. What it writes down is the human's consent, which the agent's
+/// own `verkstead transfer` is refused without — see [`crate::transfers::permit`].
+async fn permit_device(
+    State(state): State<AppState>,
+    Path((id, device)): Path<(String, String)>,
+) -> HttpResponse {
+    permitting(state, id, device, true).await
+}
+
+/// `POST /api/ui/conversations/{id}/permitted/{device}/remove` — and untick it.
+async fn forbid_device(
+    State(state): State<AppState>,
+    Path((id, device)): Path<(String, String)>,
+) -> HttpResponse {
+    permitting(state, id, device, false).await
+}
+
+/// Either press, which are one decision with the answer written the other way.
+async fn permitting(state: AppState, id: String, device: String, permit: bool) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(Permitting::NoSuchConversation).into_response();
+    };
+
+    match crate::transfers::permit(&state, id, &device, permit).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, device = %device, permit, "changing where a Conversation may be moved to failed");
+            unavailable("the devices this work may move to could not be changed")
+        }
+    }
+}
+
 /// `POST /api/ui/conversations/{id}/close` — stop it wherever it has got to.
 ///
 /// The Nudge is [`crate::conversations::close`]'s own rather than this
@@ -4440,10 +5046,30 @@ async fn seen(State(state): State<AppState>, Path(id): Path<String>) -> HttpResp
 /// has been put away, and whether anything has been.
 ///
 /// Two facts about one switch, in one payload: the list above is filtered by
-/// the setting in SQL, so an empty list cannot say whether there is anything
-/// behind the switch — and that is what decides whether a page with no sidebar
-/// draws the switch at all. Read together so that the page reads once.
-async fn showing_archived(State(state): State<AppState>) -> HttpResponse {
+/// the position it is drawn at, so an empty list cannot say whether there is
+/// anything behind the switch — and that is what decides whether a page with no
+/// sidebar draws the switch at all. Read together so that the page reads once.
+///
+/// **And whether there is anything archived folds across the cluster**, because
+/// the list this switch governs is the merged one: a device with nothing of its
+/// own still draws the switch while a member has something behind it, and a
+/// switch that hid a member's rows with no way of bringing them back would be
+/// the one press the merged list could not undo. Each member's answer is held
+/// beside the list held of it, so this costs no dial — see
+/// [`crate::merging::anything_archived`].
+///
+/// **The position itself is this device's own either way.** It is where the
+/// human put the switch on the device they opened, and a member is asked with it
+/// rather than told to move its own.
+///
+/// **Over the Peer Listener it is this device's own answer alone**, for the
+/// merged list's reason and one of its own: a member folding its own members in
+/// would be folding the hub that asked, and the two would read each other round
+/// for ever.
+async fn showing_archived(
+    State(state): State<AppState>,
+    over_the_link: Option<Extension<OverTheLink>>,
+) -> HttpResponse {
     let showing = match store::showing_archived(&state.pool).await {
         Ok(showing) => showing,
         Err(error) => {
@@ -4452,13 +5078,20 @@ async fn showing_archived(State(state): State<AppState>) -> HttpResponse {
         }
     };
 
-    match store::any_archived(&state.pool).await {
-        Ok(any) => Json(ShowingArchived { showing, any }).into_response(),
+    let own = match store::any_archived(&state.pool).await {
+        Ok(any) => any,
         Err(error) => {
             tracing::error!(error = ?error, "reading whether anything is archived failed");
-            unavailable("the setting could not be read")
+            return unavailable("the setting could not be read");
         }
-    }
+    };
+
+    let any = match over_the_link.is_some() {
+        true => own,
+        false => crate::merging::anything_archived(&state, own).await,
+    };
+
+    Json(ShowingArchived { showing, any }).into_response()
 }
 
 /// `POST /api/ui/conversations/archived` — and saying that it is, or is not.
@@ -4467,12 +5100,20 @@ async fn showing_archived(State(state): State<AppState>) -> HttpResponse {
 /// pressing at once land on a state one of them asked for rather than on
 /// whichever order they arrived in. Refused for nothing, and there is nothing
 /// to answer with beyond that it was taken.
+///
+/// **And every member's held list is read again**, because each of them was
+/// asked with the position the switch was in before this press: the lists this
+/// device holds are what the merged list is drawn out of, and one fetched under
+/// the old position is a member's rows filtered by a choice the human has just
+/// changed. Nothing waits on that — the read is a dial per member, and the
+/// sidebar re-reads on the Nudge below whether it has landed or not.
 async fn show_archived(
     State(state): State<AppState>,
     Json(showing): Json<ShowArchived>,
 ) -> HttpResponse {
     match store::show_archived(&state.pool, showing.showing).await {
         Ok(()) => {
+            crate::merging::afresh(&state);
             state.nudges.announce(Nudge::Conversations);
             StatusCode::NO_CONTENT.into_response()
         }
@@ -4547,7 +5188,7 @@ async fn choose_review_pairing(
 /// `GET /api/ui/profiles` — the Agent Profiles, by name, each saying whether its
 /// pair is still where it was left.
 async fn profiles(State(state): State<AppState>) -> HttpResponse {
-    match crate::profiles::listed(&state.pool).await {
+    match crate::profiles::listed(&state).await {
         Ok(rows) => Json::<Vec<ProfileEntry>>(rows).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, "reading the Agent Profiles failed");
@@ -4566,7 +5207,10 @@ async fn create_profile(
     Json(edit): Json<ProfileEdit>,
 ) -> HttpResponse {
     match crate::profiles::create(&state.pool, &edit).await {
-        Ok(outcome) => Json(outcome).into_response(),
+        Ok(outcome) => {
+            moved_profiles(&state, outcome == verkstead_render::ProfileSaved::Saved);
+            Json(outcome).into_response()
+        }
         Err(error) => {
             tracing::error!(error = ?error, "saving an Agent Profile failed");
             unavailable("the agent profile could not be saved")
@@ -4575,6 +5219,15 @@ async fn create_profile(
 }
 
 /// `POST /api/ui/profiles/{id}` — rewrite one, whole.
+///
+/// **Reached for a mirror too, and relayed home when it is one** (ADR-0020,
+/// *Shared Profiles*). Every device's Profiles section lists every member's
+/// accounts, so the form over one of those saves like any other — and the save is
+/// put to the device that Profile is at home on, as the ordinary edit of its own
+/// Profile it is. What comes back is that device's own word, so a name already
+/// taken there is said in the words a local clash is said in; a home that did not
+/// take it is named in the refusal and nothing here has moved. See
+/// [`crate::mirroring::edited`].
 async fn edit_profile(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -4584,8 +5237,35 @@ async fn edit_profile(
         return Json(verkstead_render::ProfileSaved::NoSuchProfile).into_response();
     };
 
+    match crate::mirroring::edited(&state, id, &edit).await {
+        // One of this device's own rows, which is every row where there is no
+        // cluster: the press falls through to the half below.
+        Ok(crate::mirroring::Pressed::Here) => {}
+
+        Ok(crate::mirroring::Pressed::Away(outcome)) => {
+            return Json(outcome).into_response();
+        }
+
+        Ok(crate::mirroring::Pressed::Refused(why)) => {
+            tracing::warn!("an Agent Profile was not saved at home: {}", why.saying);
+            return refused(why.status, ApiError::new(why.saying));
+        }
+
+        Err(error) => {
+            tracing::error!(
+                error = ?error,
+                profile_id = id,
+                "reading which device an Agent Profile is at home on failed",
+            );
+            return unavailable("the agent profile could not be saved");
+        }
+    }
+
     match crate::profiles::edit(&state.pool, id, &edit).await {
-        Ok(outcome) => Json(outcome).into_response(),
+        Ok(outcome) => {
+            moved_profiles(&state, outcome == verkstead_render::ProfileSaved::Saved);
+            Json(outcome).into_response()
+        }
         Err(error) => {
             tracing::error!(error = ?error, profile_id = id, "rewriting an Agent Profile failed");
             unavailable("the agent profile could not be saved")
@@ -4594,17 +5274,70 @@ async fn edit_profile(
 }
 
 /// `POST /api/ui/profiles/{id}/delete` — remove one, whoever had chosen it.
+///
+/// **The same hop for a mirror**: the removal is put to the device the Profile is
+/// at home on and takes it off that machine, and every device's mirror of it goes
+/// on its next refresh — so a Conversation on a third device that had picked it is
+/// left with an empty picker, exactly as a local removal leaves one. See
+/// [`crate::mirroring::removed`].
 async fn delete_profile(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
     let Ok(id) = id.parse::<i64>() else {
         return Json(verkstead_render::ProfileDeleted::NoSuchProfile).into_response();
     };
 
+    match crate::mirroring::removed(&state, id).await {
+        Ok(crate::mirroring::Pressed::Here) => {}
+
+        Ok(crate::mirroring::Pressed::Away(outcome)) => {
+            return Json(outcome).into_response();
+        }
+
+        Ok(crate::mirroring::Pressed::Refused(why)) => {
+            tracing::warn!("an Agent Profile was not removed at home: {}", why.saying);
+            return refused(why.status, ApiError::new(why.saying));
+        }
+
+        Err(error) => {
+            tracing::error!(
+                error = ?error,
+                profile_id = id,
+                "reading which device an Agent Profile is at home on failed",
+            );
+            return unavailable("the agent profile could not be removed");
+        }
+    }
+
     match crate::profiles::remove(&state.pool, id).await {
-        Ok(outcome) => Json(outcome).into_response(),
+        Ok(outcome) => {
+            moved_profiles(&state, outcome == verkstead_render::ProfileDeleted::Removed);
+            Json(outcome).into_response()
+        }
         Err(error) => {
             tracing::error!(error = ?error, profile_id = id, "removing an Agent Profile failed");
             unavailable("the agent profile could not be removed")
         }
+    }
+}
+
+/// Say that the Agent Profiles moved, where the press that just answered moved
+/// them.
+///
+/// **This is what a member watches.** Every device in a cluster lists every
+/// member's Profiles as mirror rows of its own, refreshed off the news that
+/// member sends (ADR-0020, *Shared Profiles*) — so a save, a rewrite or a
+/// removal pressed here is what tells the rest of the cluster to read this
+/// device's list again. See [`crate::mirroring`], which is the other end of it.
+///
+/// Ordinary news rather than [`crate::nudge::Nudges::announce_here`]: this is
+/// about the accounts this device holds, which is precisely what a member has a
+/// use for. The browser that pressed reads its own change back either way, which
+/// is why nothing announced this while a device was alone.
+///
+/// Nothing at all where the press was refused: a name that was taken is a list
+/// exactly as it was, and a page told to re-read it would read the same rows.
+fn moved_profiles(state: &AppState, moved: bool) {
+    if moved {
+        state.nudges.announce(Nudge::Profiles);
     }
 }
 
@@ -4656,6 +5389,21 @@ fn merging(merges: store::Merging) -> Merging {
     match merges {
         store::Merging::Cleanly => Merging::Cleanly,
         store::Merging::Conflicting => Merging::Conflicting,
+    }
+}
+
+/// The device a Conversation was drafted on, off its birth key — which is
+/// always permitted as somewhere its agent may take the work.
+///
+/// A read that fails reads as *not known*, which draws no row for it rather
+/// than taking the pane down: the ticks beside it are still the human's.
+async fn drafted_on(state: &AppState, id: i64) -> Option<String> {
+    match store::birth(&state.pool, id).await {
+        Ok(born) => born.map(|born| born.device),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading where a Conversation was drafted failed");
+            None
+        }
     }
 }
 
@@ -4816,7 +5564,7 @@ fn parked(sitting: &crate::sessions::Parked) -> Parked {
 
 /// The store's lifecycle state as the viewer receives it. One word either side,
 /// and this is where the two vocabularies are held to each other.
-fn lifecycle(state: store::Lifecycle) -> Lifecycle {
+pub(crate) fn lifecycle(state: store::Lifecycle) -> Lifecycle {
     match state {
         store::Lifecycle::Draft => Lifecycle::Draft,
         store::Lifecycle::Grilling => Lifecycle::Grilling,
@@ -4850,6 +5598,26 @@ pub(crate) fn picked_process(process: Process) -> store::Process {
         Process::Review => store::Process::Review,
         Process::Tinker => store::Process::Tinker,
         Process::FixMergeIssues => store::Process::FixMergeIssues,
+    }
+}
+
+/// And the same word read the other way, which is what a Conversation arriving
+/// from another device is written down as.
+///
+/// Beside its opposite number rather than where it is used, because the two
+/// vocabularies are held to each other in one place or in none: a state added to
+/// the ladder is two arms here, and a build that added one to only this one
+/// would land somebody's work in the wrong state.
+pub(crate) fn state_of(lifecycle: Lifecycle) -> store::Lifecycle {
+    match lifecycle {
+        Lifecycle::Draft => store::Lifecycle::Draft,
+        Lifecycle::Grilling => store::Lifecycle::Grilling,
+        Lifecycle::Implementing => store::Lifecycle::Implementing,
+        Lifecycle::Wrapping => store::Lifecycle::Wrapping,
+        Lifecycle::FollowUp => store::Lifecycle::FollowUp,
+        Lifecycle::Investigating => store::Lifecycle::Investigating,
+        Lifecycle::Done => store::Lifecycle::Done,
+        Lifecycle::Closed => store::Lifecycle::Closed,
     }
 }
 
@@ -4928,8 +5696,21 @@ async fn settings(State(state): State<AppState>) -> HttpResponse {
         &state.settings,
         state.sessions.caches_compiles(),
         &state.binds,
+        taken(&state),
     ))
     .into_response()
+}
+
+/// How many of the server's places are taken this moment — see
+/// [`crate::drivers::Drivers::taking`], which is the one place they are counted.
+///
+/// Read here rather than inside [`as_told`] because it is the one thing on that
+/// page which is not out of the files: two in-process registers, and the settings
+/// page draws them beside the limit they are measured against so that a server
+/// holding every place looks like a server holding every place rather than a
+/// stall.
+fn taken(state: &AppState) -> usize {
+    state.drivers.taking(&state.sessions.working()).len()
 }
 
 /// `POST /api/ui/settings` — write the author and the paths down, and set or
@@ -4977,6 +5758,11 @@ async fn save_settings(
     // the save: the page draws both sources, and this is not anything a save
     // can touch.
     let installed = state.binds.clone();
+
+    // And how many of the server's places are taken, for the same read — counted
+    // out here because it is two in-process registers rather than a file, and
+    // nothing a save touches either.
+    let taking = taken(&state);
 
     let saved = tokio::task::spawn_blocking(move || {
         // What the rules are to be afterwards, and what is wrong with them —
@@ -5038,7 +5824,7 @@ async fn save_settings(
                     // How things stand, which is how they stood: nothing was
                     // written, and the page draws the errors over what the human
                     // still has in front of them.
-                    settings: as_told(&settings, caches_compiles, &installed),
+                    settings: as_told(&settings, caches_compiles, &installed, taking),
                     verified: None,
                     refused,
                     refused_servers,
@@ -5072,6 +5858,17 @@ async fn save_settings(
                 Cleanup::of(
                     CleanupStep::of(edit.cleanup.trim.enabled, Some(edit.cleanup.trim.days)),
                     CleanupStep::of(edit.cleanup.delete.enabled, Some(edit.cleanup.delete.days)),
+                ),
+                // And how much Verkstead runs at once, as the two numbers were
+                // typed: an empty field is the default asked for back, and so is
+                // anything that is not a whole number of places. The page refuses
+                // a limit below one in either field rather than sending it — a
+                // roadmap with no places starts nothing and a server with none
+                // starts nothing at all — and a save carrying one anyway
+                // configures nothing, which is that default again.
+                AtOnce::of(
+                    Some(edit.at_once.roadmap_stages),
+                    Some(edit.at_once.conversations),
                 ),
                 // And how a conflict is resolved, in every Repo there is, which
                 // is one of two words and never absent: there is no third state
@@ -5192,7 +5989,7 @@ async fn save_settings(
 
         Ok::<_, std::io::Error>((
             SettingsSaved {
-                settings: as_told(&settings, caches_compiles, &installed),
+                settings: as_told(&settings, caches_compiles, &installed, taking),
                 verified,
                 // Nothing turned down: a save that got this far was one there was
                 // nothing wrong with — of either list.
@@ -5347,7 +6144,9 @@ fn stored(resolution: ConflictResolution) -> store::ConflictResolution {
     }
 }
 
-/// How the settings stand, read off the files.
+/// How the settings stand, read off the files — and, beside them, `taking`: how
+/// many of the server's places are held this moment, which is the one thing here
+/// no file says.
 ///
 /// The token comes back as its last four characters and the moment the file was
 /// written, and never as itself — see [`verkstead_render::SettingsView`]. A
@@ -5358,11 +6157,13 @@ fn as_told(
     settings: &crate::settings::Settings,
     caches_compiles: bool,
     binds: &crate::sandbox::SandboxConfig,
+    taking: usize,
 ) -> SettingsView {
     let secrets = settings.secrets();
     let config = settings.config();
     let author = config.git_author();
     let cleanup = config.cleanup();
+    let at_once = config.at_once();
 
     SettingsView {
         git_author: Author {
@@ -5392,6 +6193,20 @@ fn as_told(
                 days_configured: cleanup.delete_after_configured().is_some(),
             },
         },
+        // And how much Verkstead runs at once, both numbers read the way the
+        // Cleanup's durations are: the number either way, and the flag beside it
+        // saying whether it is one somebody chose.
+        at_once: AtOnceView {
+            roadmap_stages: at_once.roadmap_stages(),
+            roadmap_stages_configured: at_once.roadmap_stages_configured().is_some(),
+            conversations: at_once.conversations(),
+            conversations_configured: at_once.conversations_configured().is_some(),
+            // And the one thing on this page that is out of neither file: how many
+            // of those places are taken this moment, counted off the two registers
+            // a place is counted off — see [`taken`].
+            places_taken: taking,
+        },
+
         // Where the setting sits rather than whether anybody has been here:
         // nothing configured is a merge, and there is no third state to draw.
         conflict_resolution: resolution(config.conflict_resolution()),
@@ -5912,6 +6727,320 @@ async fn dismiss_remote_banner(State(state): State<AppState>) -> HttpResponse {
     }
 }
 
+/// `GET /api/ui/devices` — this device and every other in its cluster, which is
+/// the **Devices** section of the Remote access pane (ADR-0020).
+///
+/// **The same answer a peer reads, told to the browser instead.** A stranger
+/// asks the identity endpoint on the peer listener; the browser cannot, that
+/// listener presenting a certificate nothing but another Verkstead has a reason
+/// to trust — so the reading is assembled again over here rather than the
+/// workbench dialling its own peer port to ask itself who it is. See
+/// [`crate::device::Devices`].
+///
+/// Read off the machine on every request rather than held, exactly as the
+/// Tailscale reading above it is and for the same reason: a laptop moves
+/// between the LAN and the tailnet, and an address remembered from a start
+/// weeks ago is one a peer would dial into nothing.
+///
+/// Refused on a router that was never given an identity, which is every router
+/// but the served one — a device is invented in a Data Directory, and one with
+/// nowhere to have invented it has nothing to answer for. The same judgement
+/// **Reset key** makes about a router standing behind no gate: an answer about
+/// a device that does not exist is the one answer this must not give.
+async fn devices(State(state): State<AppState>) -> HttpResponse {
+    let Some(devices) = state.devices.clone() else {
+        return unavailable("this server holds no device identity to answer for");
+    };
+
+    listed(&devices).await
+}
+
+/// `GET /api/ui/devices/discovered` — the devices nobody has typed an address
+/// for, which is the **Discovered** list under those rows (ADR-0020,
+/// *Discovery*).
+///
+/// **A reading of its own rather than a field of the one above**, and that is
+/// what it is for: a browse hears something every few seconds, and a list
+/// arriving on the same answer as the membership would be the cluster's own rows
+/// replaced each time the LAN said anything. What a found device re-reads is
+/// this, and nothing else.
+///
+/// **And asking for it is what holds the browse open.** It starts on the first
+/// read and is dropped once nothing has read it for a spell — a phone that
+/// closes a tab says nothing, so the reading being read is the only thing there
+/// is to govern it by, and an open pane asks again on an interval inside that
+/// spell to say it is still there. Which also means the first read of a cold
+/// browse is empty or short: the rows arrive over the seconds after it, each
+/// announced as [`Nudge::Discovered`] — see [`crate::discovery::Browse`].
+///
+/// Refused where there is no identity, for [`devices`]'s reason: the three kinds
+/// of device this list leaves out include this device itself, and a server that
+/// cannot say which device it is cannot leave it out.
+async fn discovered(State(state): State<AppState>) -> HttpResponse {
+    let Some(devices) = state.devices.clone() else {
+        return unavailable("this server holds no device identity to answer for");
+    };
+
+    match devices.discovered().await {
+        Ok(found) => Json(found).into_response(),
+        Err(why) => unavailable(&format!(
+            "the devices this one has heard of could not be read: {why:#}"
+        )),
+    }
+}
+
+/// `POST /api/ui/devices/joins` — **Add**: ask the device at an address to let
+/// this one into its cluster (ADR-0020, *The join*).
+///
+/// **The one thing on the Remote access pane that is configured rather than
+/// read**, which is the departure Unlink makes beside it and Remove on a Repo
+/// made before either. Everything else on that pane is the machine read again.
+///
+/// A press rather than a save, like the serve switch above and for its reason:
+/// what it changes is not a setting on this machine but the state of another
+/// one — and what it answers with is the section read again, so the pending row
+/// it leaves behind arrives out of this answer rather than out of a second
+/// request.
+///
+/// **An address that answered nothing is not this server's failure**, so it is
+/// not said as one: a machine that is off, an address nobody is at, a Verkstead
+/// too old to have the route, a Verkstead that refused — all of them are the far
+/// end, and what the human can do about each of them is different. So the
+/// refusal carries what went wrong in the words the dial put it in, for the pane
+/// to draw under the box.
+async fn add_device(State(state): State<AppState>, Json(new): Json<NewJoin>) -> HttpResponse {
+    let Some(devices) = state.devices.clone() else {
+        return unavailable("this server holds no device identity to link with");
+    };
+
+    if new.address.trim().is_empty() {
+        return refused(
+            StatusCode::BAD_REQUEST,
+            ApiError::new("an address to ask at is the one thing Add takes"),
+        );
+    }
+
+    if let Err(why) = devices.add(&new.address).await {
+        tracing::info!(address = %new.address, %why, "a request to link was not made");
+
+        return refused(StatusCode::BAD_GATEWAY, ApiError::new(format!("{why:#}")));
+    }
+
+    moved(&state, &devices).await
+}
+
+/// `POST /api/ui/devices/discovered/{device}/add` — **Add** on a discovered row,
+/// which is the same **Join** with nothing typed (ADR-0020, *Discovery*).
+///
+/// **The device rather than an address**, because a discovery found a list of
+/// them: the server dials every address the row holds in the order it found them
+/// and posts the join at the first that answers — see
+/// [`crate::device::Devices::add_found`]. A browser that picked one of them would
+/// be choosing between addresses it knows nothing about.
+///
+/// **It answers with the Devices section read again**, the way the typed press
+/// above does, so the pending row it leaves arrives out of this answer. And the
+/// Discovered list is announced as moved either way: a device a join is pending
+/// for is one that list leaves out, and a device that answered nowhere is one it
+/// has forgotten — so the row goes from every open pane rather than only from the
+/// one that pressed.
+///
+/// **A press on a row whose device has gone is the far end's story rather than
+/// this server's**, so it is refused as the typed press is and in the words the
+/// dial put it in, naming the device the row drew.
+async fn add_found(State(state): State<AppState>, Path(device): Path<String>) -> HttpResponse {
+    let Some(devices) = state.devices.clone() else {
+        return unavailable("this server holds no device identity to link with");
+    };
+
+    let pressed = devices.add_found(&device).await;
+
+    // Announced here rather than by either half of the press, this being the one
+    // place that knows a press was made at all.
+    state.nudges.announce(Nudge::Discovered);
+
+    if let Err(why) = pressed {
+        tracing::info!(%device, %why, "a request to link with a device this one found was not made");
+
+        return refused(StatusCode::BAD_GATEWAY, ApiError::new(format!("{why:#}")));
+    }
+
+    moved(&state, &devices).await
+}
+
+/// `POST /api/ui/devices/joins/{request}/cancel` — **Cancel** on a pending row,
+/// and **Dismiss** on one whose ten minutes have run out.
+///
+/// One route for the two because they are one act at two moments — see
+/// [`crate::device::Devices::take_back`], which is also where a second press
+/// being nothing new is settled. It answers with the section read again, the way
+/// the press above does.
+async fn cancel_join(State(state): State<AppState>, Path(request): Path<String>) -> HttpResponse {
+    let Some(devices) = state.devices.clone() else {
+        return unavailable("this server holds no device identity to answer for");
+    };
+
+    if let Err(why) = devices.take_back(&request).await {
+        return unavailable(&format!("the request could not be taken back: {why:#}"));
+    }
+
+    moved(&state, &devices).await
+}
+
+/// `POST /api/ui/devices/members/{device}/unlink` — **Unlink**: take a device
+/// out of this cluster, for everybody (ADR-0020, *A cluster is a membership*).
+///
+/// **The second of the two departures the Remote access pane makes** from
+/// *nothing is confirmed twice, everything is read rather than configured* —
+/// Add above is the first — and it departs for the reason Remove on a Repo
+/// does: it cannot be taken back. The asking is the browser's, over the page,
+/// and by the time this is called the human has already said yes.
+///
+/// **Not a failure when the far ends cannot be reached.** The press is about
+/// this cluster rather than about a call: the device is dropped here, every
+/// member that answers is told, and the ones that do not are owed the telling
+/// — so this answers with the section read again rather than with what some
+/// third machine made of it. See [`crate::device::Devices::unlink`].
+async fn unlink_device(State(state): State<AppState>, Path(device): Path<String>) -> HttpResponse {
+    let Some(devices) = state.devices.clone() else {
+        return unavailable("this server holds no device identity to answer for");
+    };
+
+    if let Err(why) = devices.unlink(&device).await {
+        return unavailable(&format!("the device could not be unlinked: {why:#}"));
+    }
+
+    moved(&state, &devices).await
+}
+
+/// `GET /api/ui/devices/asking` — every device asking to be let into this one's
+/// cluster, which is what the confirmation modal is drawn from (ADR-0020, *The
+/// join*).
+///
+/// **Read by the shell rather than by a page.** A join arrives while somebody is
+/// reading a Transcript, and the question is theirs to answer wherever they are
+/// — so this is asked by the one thing that is drawn over every page, beside the
+/// toast layer, and the Nudge that says the joins moved is what makes it ask
+/// again.
+///
+/// A request whose ten minutes have run out is not in the answer. Which is what
+/// takes the modal down when nobody pressed anything: the page reads this again
+/// and the question it was holding open is not in it — see
+/// [`crate::peer::joining::Joins::asking`].
+async fn asking(State(state): State<AppState>) -> HttpResponse {
+    let Some(devices) = state.devices.clone() else {
+        return unavailable("this server holds no device identity to answer for");
+    };
+
+    are_asking(&devices).await
+}
+
+/// `POST /api/ui/devices/asking/{request}/allow` — **Allow**: let the device
+/// that asked into this one's cluster.
+///
+/// **One press, and the cluster is one device bigger everywhere.** It records
+/// the asker as a member, settles the request, dials the asker back with this
+/// device and every member it holds, and announces the asker to each of those
+/// members over the link it already has to them — so nobody anywhere else is
+/// asked to press anything. See [`crate::device::Devices::allow`], which is
+/// also where a second press being nothing new is settled, and where a far end
+/// that could not be reached is a line in this machine's log rather than a
+/// press that failed.
+async fn allow_join(State(state): State<AppState>, Path(request): Path<String>) -> HttpResponse {
+    let Some(devices) = state.devices.clone() else {
+        return unavailable("this server holds no device identity to link with");
+    };
+
+    if let Err(why) = devices.allow(&request).await {
+        return unavailable(&format!("the device could not be let in: {why:#}"));
+    }
+
+    settled(&state, &devices).await
+}
+
+/// `POST /api/ui/devices/asking/{request}/deny` — **Deny**: settle the request
+/// and record nothing.
+async fn deny_join(State(state): State<AppState>, Path(request): Path<String>) -> HttpResponse {
+    let Some(devices) = state.devices.clone() else {
+        return unavailable("this server holds no device identity to answer for");
+    };
+
+    if let Err(why) = devices.deny(&request).await {
+        return unavailable(&format!("the device could not be refused: {why:#}"));
+    }
+
+    settled(&state, &devices).await
+}
+
+/// What both presses answer with: the list read again, and every other open
+/// workbench told the joins moved.
+///
+/// **The answer is for the workbench that pressed and the Nudge is for the rest
+/// of them**, which is the arrangement every press on this pane makes — what
+/// differs here is that there is a rest of them to tell: two workbenches may
+/// both be showing the modal, and the one that did not press has to see it go.
+/// Which is the same word a join arriving sends, because it is the same fact:
+/// the joins moved, and a page reads them back.
+async fn settled(state: &AppState, devices: &crate::device::Devices) -> HttpResponse {
+    state.nudges.announce(Nudge::Joins);
+
+    are_asking(devices).await
+}
+
+/// The devices asking, as the modal reads them: one reading, made at the moment
+/// it is asked for.
+async fn are_asking(devices: &crate::device::Devices) -> HttpResponse {
+    let asking: Vec<AskingDevice> = match devices.asking().await {
+        Ok(asking) => asking,
+        Err(why) => {
+            return unavailable(&format!(
+                "the devices asking to link with this one could not be read: {why:#}"
+            ));
+        }
+    };
+
+    Json(asking).into_response()
+}
+
+/// What the three presses on the section answer with: the list read again, and
+/// every other open workbench told the cluster moved.
+///
+/// **The answer is for the workbench that pressed and the Nudge is for the rest
+/// of them**, which is the arrangement [`settled`] makes beside this and the one
+/// every other way this section moves already made: a member naming a newcomer,
+/// a member saying a device is out, and a member's renewed certificate each
+/// announce [`Nudge::Devices`] as they land. A press made over here is the same
+/// list moving, so it says the same word — and without it the one press that
+/// takes a row away would be the only change a second workbench of the pressing
+/// device went on drawing the old answer for, while every other device in the
+/// cluster had it right. Re-reads in the viewer are the Nudge and nothing else;
+/// nothing polls.
+///
+/// [`Nudge::Devices`] rather than [`Nudge::Joins`] for all three, Add and Cancel
+/// included: a pending row is part of the reading the Devices section is drawn
+/// from, and the joins this device is being *asked* — which is what the other
+/// word names — have not moved.
+async fn moved(state: &AppState, devices: &crate::device::Devices) -> HttpResponse {
+    state.nudges.announce(Nudge::Devices);
+
+    listed(devices).await
+}
+
+/// The Devices section as the pane reads it, which is what all of the above
+/// answer with: one reading, made at the moment it is asked for.
+async fn listed(devices: &crate::device::Devices) -> HttpResponse {
+    let view: DevicesView = match devices.listing().await {
+        Ok(view) => view,
+        Err(why) => {
+            return unavailable(&format!(
+                "the devices this one is linked to could not be read: {why:#}"
+            ));
+        }
+    };
+
+    Json(view).into_response()
+}
+
 /// `GET /api/ui/update` — whether a newer Verkstead has been released than
 /// the one serving this page.
 ///
@@ -5971,6 +7100,17 @@ fn no_such_transcript() -> HttpResponse {
     refused(
         StatusCode::NOT_FOUND,
         ApiError::new("there is no such Transcript on that Conversation"),
+    )
+}
+
+/// And no such attached file — the pair names no row, or the row names a file
+/// the directory no longer holds. Worded without either id for the Capture's
+/// reason, and without telling the two apart because there is nothing different
+/// for a reader to do about them.
+fn no_such_attachment() -> HttpResponse {
+    refused(
+        StatusCode::NOT_FOUND,
+        ApiError::new("there is no such file on that Conversation"),
     )
 }
 
@@ -6050,6 +7190,55 @@ pub(crate) fn unavailable(message: &str) -> HttpResponse {
 
 /// A refusal, in the same shape the agent API refuses in: the viewer's fetches
 /// then have one thing to read whichever half of the server answered.
-fn refused(status: StatusCode, error: ApiError) -> HttpResponse {
+pub(crate) fn refused(status: StatusCode, error: ApiError) -> HttpResponse {
     (status, Json(error)).into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A name a quoted ASCII string cannot hold goes over both ways: the two
+    /// characters stood in for in the old form, and the name itself in the other.
+    ///
+    /// Here rather than over a real attachment, because such a name is a file
+    /// that never lands on every platform this runs on: Windows reserves `"`
+    /// among nine others, so the upload refuses it there and the integration
+    /// test in `tests/attaching.rs` keeps to a name every filesystem can hold.
+    /// What the header does with one is this function's own business either way.
+    #[test]
+    fn a_name_a_quoted_string_cannot_hold_goes_over_both_ways() {
+        let said = disposition("résumé \"final\".pdf");
+
+        assert!(
+            said.contains(r#"filename="r_sum_ _final_.pdf""#),
+            "the ASCII fallback, with the quotes stood in for: {said}",
+        );
+        assert!(
+            said.contains("filename*=UTF-8''r%C3%A9sum%C3%A9%20%22final%22.pdf"),
+            "and the name as it really is: {said}",
+        );
+    }
+
+    /// And a backslash the same way, which is the other character a quoted
+    /// string gives a meaning of its own to.
+    #[test]
+    fn a_backslash_is_stood_in_for_too() {
+        let said = disposition(r"one\two.md");
+
+        assert!(said.contains(r#"filename="one_two.md""#), "{said}");
+        assert!(said.contains("filename*=UTF-8''one%5Ctwo.md"), "{said}");
+    }
+
+    /// A plain ASCII name is written once and percent-encoded the same, bar the
+    /// punctuation RFC 8187 does not let through unescaped.
+    #[test]
+    fn a_plain_name_reads_the_same_both_ways() {
+        let said = disposition("notes-2.md");
+
+        assert_eq!(
+            said,
+            "attachment; filename=\"notes-2.md\"; filename*=UTF-8''notes-2.md",
+        );
+    }
 }

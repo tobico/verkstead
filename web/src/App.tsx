@@ -6,6 +6,7 @@ import { Show, onCleanup, onMount, type JSX } from "solid-js";
 
 import styles from "./App.module.css";
 import { DragBar } from "./DragBar";
+import { Joining } from "./Joining";
 import { Toasts } from "./Toasts";
 import { loadOnboarding, retrying } from "./api/client";
 import { useReading } from "./freshness";
@@ -141,35 +142,20 @@ function Verkstead(): JSX.Element {
           record of which one is open rather than a document of its own — the
           same page draws both. */}
       <Route path="/" component={Workbench} />
-      {/* And each of that Conversation's details panes under it, so what is
-          open survives a reload and can be linked to. Nested rather than
-          written out as six routes of their own, because the workbench is
-          one page across all of them: a route the router swaps for another
-          takes its component down with it, and everything the middle pane was
-          holding — a Brief half typed into above all — would go every time a
-          card was pressed. A parent route stays up while the leaf under it
-          changes, and these leaves draw nothing: what they are is what the
-          path says, and the page reads that off the URL.
+      {conversationRoutes()}
+      {/* And the same Conversation on a member of this device's cluster, which
+          is that whole list again under one segment more (ADR-0020, *The opened
+          device relays*). A parent above a parent rather than a second list of
+          them: the device says which Verkstead the page is reading and the
+          leaves say which pane is open, and neither has anything to say about
+          the other — so the routes under it are the very routes above it, and a
+          pane added to one is added to both.
 
-          The `events/` segment keeps the ids apart from the panes named by a
-          word beside them — see `openings.ts`. */}
-      <Route path="/conversations/:id" component={Workbench}>
-        <Route path="/" />
-        <Route path="/events/:event" />
-        <Route path="/backlog" />
-        <Route path="/share" />
-        <Route path="/code" />
-        <Route path="/steer" />
-        <Route path="/roadmaps/:name" />
-      </Route>
-      {/* And where Code's pane stood while it was the Terminal pane, which is
-          a redirect rather than a page: a link somebody kept and a browser
-          that remembered the old path still land on the pane, under the same
-          Conversation. Outside the route above rather than another leaf of
-          it, because those leaves draw nothing — the page reads what is open
-          off the URL — so a redirect written as one of them would never be
-          rendered to do its redirecting. */}
-      <Route path="/conversations/:id/terminal" component={Moved} />
+          Local URLs keep their shape, which is why there are two branches here
+          rather than an optional segment on one: this device is where most of
+          the work is, and `/devices/…` in front of every path would say
+          nothing. */}
+      <Route path="/devices/:device">{conversationRoutes()}</Route>
       {/* And the composer before there is anything for it to be about: the
           same page, working what the device is holding rather than a record.
           A page of its own rather than a pane of the workbench, because there
@@ -201,6 +187,51 @@ function Verkstead(): JSX.Element {
   );
 }
 
+/// The Conversation and each of its details panes, which is one page across all
+/// of them.
+///
+/// Nested rather than written out as six routes of their own, because a route
+/// the router swaps for another takes its component down with it, and everything
+/// the middle pane was holding — a Brief half typed into above all — would go
+/// every time a card was pressed. A parent route stays up while the leaf under
+/// it changes, and these leaves draw nothing: what they are is what the path
+/// says, and the page reads that off the URL.
+///
+/// The `events/` segment keeps the ids apart from the panes named by a word
+/// beside them — see `openings.ts`.
+///
+/// A function rather than a constant, and used twice: once at the root and once
+/// under a device. Written out a second time it would be a second opinion about
+/// which panes a Conversation has, and the pane added without a line added there
+/// would be the one a member's Conversation had not got.
+///
+/// Exported for that same reason: a test that mounts the workbench mounts these
+/// routes rather than a copy of them, so what it is asking about is the table
+/// the app really builds.
+export function conversationRoutes(): JSX.Element {
+  return (
+    <>
+      <Route path="/conversations/:id" component={Workbench}>
+        <Route path="/" />
+        <Route path="/events/:event" />
+        <Route path="/backlog" />
+        <Route path="/share" />
+        <Route path="/code" />
+        <Route path="/steer" />
+        <Route path="/roadmaps/:name" />
+      </Route>
+      {/* And where Code's pane stood while it was the Terminal pane, which is
+          a redirect rather than a page: a link somebody kept and a browser
+          that remembered the old path still land on the pane, under the same
+          Conversation. Outside the route above rather than another leaf of
+          it, because those leaves draw nothing — the page reads what is open
+          off the URL — so a redirect written as one of them would never be
+          rendered to do its redirecting. */}
+      <Route path="/conversations/:id/terminal" component={Moved} />
+    </>
+  );
+}
+
 /// What every page sits in. The column the stylesheets set its width on: the
 /// measure every page but one is read at is `main`'s own in `styles/base.css`,
 /// and the workbench's exception to it is this shell's, in `App.module.css`.
@@ -209,6 +240,14 @@ function Verkstead(): JSX.Element {
 /// over is the page, so it belongs outside the column the page is read at — and
 /// it is here, once, because an outcome outlives the control that learned it and
 /// no page owns one. See [`Toasts`].
+///
+/// **And the join another device is asking about, beside that layer and for its
+/// reason.** A device asking to be let into this one's cluster raises a modal
+/// wherever the human happens to be looking — that is what a join *is*, a
+/// question from another machine rather than the end of a press somebody made —
+/// so it belongs to no page either, and this is the one place in the tree
+/// something is already drawn over every page and is there once. See
+/// [`Joining`].
 ///
 /// Exported so that a test mounting a page can mount the shell it really sits
 /// in: a press whose outcome is a toast has nowhere to say it otherwise, and a
@@ -224,6 +263,7 @@ export function Shell(props: { children?: JSX.Element }): JSX.Element {
     <>
       <main class={styles.shell}>{props.children}</main>
       <Toasts />
+      <Joining />
     </>
   );
 }
@@ -246,7 +286,9 @@ export function Shell(props: { children?: JSX.Element }): JSX.Element {
 export function Moved(): JSX.Element {
   const params = useParams();
 
-  return <Navigate href={pathTo(params.id!, "code")} />;
+  return (
+    <Navigate href={pathTo(params.id!, "code", params.device ?? null)} />
+  );
 }
 
 /// One line of notice, and — inside the app — the bar that moves the window: a

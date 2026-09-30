@@ -61,6 +61,36 @@
   font-weight: 600;
 }
 
+/* And which machine the account is on, under the reading, where it is not this
+   one. The sidebar row's own line — a mark and a name, dimmed, because it is
+   what a row is told apart by rather than what it says. */
+.profile .device {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  min-width: 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+/* The mark itself, sized against the line it stands in rather than in pixels:
+   this line is smaller than the card's own, and a mark written down in rem
+   would be the one thing on it that did not shrink with it. */
+.profile .os {
+  flex: none;
+  width: 1em;
+}
+
+/* And the same fact said in the pane, over the form: which machine the account is
+   on, and that a save or a removal here is put to it. A line of prose rather than
+   the card's mark and name, because what it is saying is where the press goes
+   rather than which row this is — the paths under it are that machine's. */
+.athome {
+  margin: 0 0 0.85rem;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
 /* A profile whose pair has gone. Said in the card's edge as well as in the words
    under it, because a list is scanned before it is read — and those words are
    the same class one level down, which is what tells the two rules apart.
@@ -186,6 +216,11 @@
   align-items: baseline;
   gap: 0.4rem;
   margin: 0;
+
+  /* And a row to press: the whole of it, taking no selection — see `rowPress` in
+     `src/rows.ts` for what a press that slid used to do instead. */
+  cursor: pointer;
+  user-select: none;
   font-size: inherit;
   color: inherit;
 }

@@ -197,6 +197,7 @@ fn the_guide_covers_every_core_area() {
         "## Reading the Response",
         "## Waiting in the background",
         "## Ending the session",
+        "## Moving the work to another device",
     ] {
         assert!(
             guide.contains(heading),
@@ -739,6 +740,7 @@ fn only_the_two_asking_sections_differ_between_the_backends() {
         "## Reading the Response",
         "## Waiting in the background",
         "## Ending the session",
+        "## Moving the work to another device",
     ] {
         assert_eq!(
             section(&blocking, heading),
@@ -904,6 +906,64 @@ fn the_guide_says_how_to_declare_a_wait() {
         assert!(
             waiting.contains(phrase),
             "the section on waiting should say {phrase:?}, got:\n{waiting}"
+        );
+    }
+}
+
+/// The agent's call (ADR-0020): a session may move its own work onto another
+/// device of the cluster, so the Guide says when to reach for it, how the device
+/// is named, what an accepted call does to the session and what a refusal asks
+/// of it — and that it is only there where the human ticked devices.
+#[test]
+fn the_guide_says_how_to_move_the_work_to_another_device() {
+    let guide = stdout(&run(&["guide"]));
+
+    let moving = section(&guide, "## Moving the work to another device")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    for phrase in [
+        "verkstead transfer <device>",
+        "Only where they have",
+        "may move nowhere",
+        "something this platform cannot do",
+        "by its name, or by its id",
+        "ended once this turn is over",
+        "exits non-zero",
+        "Pick another device",
+        "ask the human",
+    ] {
+        assert!(
+            moving.contains(phrase),
+            "the section on moving the work should say {phrase:?}, got:\n{moving}"
+        );
+    }
+}
+
+/// And the verb's own help says the same in brief, for an agent that starts at
+/// `--help` rather than at the Guide.
+#[test]
+fn the_transfer_help_says_when_and_what_it_does() {
+    let output = run(&["transfer", "--help"]);
+
+    assert!(output.status.success());
+
+    let help = stdout(&output)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    for phrase in [
+        "cannot do",
+        "ticked",
+        "exits non-zero",
+        "once this session has ended",
+        "verkstead guide",
+    ] {
+        assert!(
+            help.contains(phrase),
+            "`verkstead transfer --help` should say {phrase:?}, got:\n{help}"
         );
     }
 }
