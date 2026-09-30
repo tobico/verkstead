@@ -15,7 +15,11 @@ backlog being written when the roadmap was.
 
 You start in a worktree of the repository, on a branch of its own. The branch is
 already made and this is already the stage: there is nothing to create, nothing
-to switch to, and no other plan in flight to check for.
+to switch to, and no other plan in flight to check for. Sibling stages of this
+roadmap may well be being planned or built beside you right now, each in a
+worktree and on a branch of its own — none of it is in yours, none of it is
+yours to wait for, and what this stage stands on had settled before Verkstead
+started you.
 
 ## 1. Re-ground the brief in the code
 
@@ -70,23 +74,21 @@ Iterate until they approve the breakdown. Every round is an ordinary Set, and
 nothing you send ends anything. What ends this session is `verkstead done`,
 once the plan commit below is on the branch.
 
-## 4. Put the branch in the stack, if the prompt says it is stacked
+## 4. Note where the branch came from, and leave the stack alone
 
-The prompt says what this branch came off. Where it says the branch **stacks on**
-a named predecessor, the branch has the predecessor's commits under it already
-and what is left is registering it. Read the repository's
-`docs/agents/git-workflow.md` — its `## Review process`, and the
-`### Stacking roadmap stages` block inside it — and do what that block says
-about adding a branch that already exists to a stack.
+The prompt says what this branch was **cut from**: a named branch whose commits
+are under this one already, or the repository's default branch. Either way
+there is nothing to do about it here.
 
-That block is the repository's own mechanism, so what is written there is what to
-do. Do not invent one, do not rebase anything, and do not touch the predecessor's
-branch: it is finished work waiting on a human to merge it. If registering the
-stack fails, say so plainly and carry on with the rest — the plan matters more
-than the bookkeeping, and a stack can be registered afterwards.
+**The stack is not registered now.** Where this stage's branch goes in its
+roadmap's chain is settled at its *finish* — the branch is rebased onto the top
+of the chain, registered and pushed there, all in one step, by the repository's
+own `docs/agents/git-workflow.md` — and that is the only rebase it gets. A
+stack registered here would name a predecessor the finish is about to move this
+branch off, so registering one now is worse than registering none.
 
-Where the prompt says the branch is off the default branch, there is nothing to
-do here.
+Do not rebase anything, and do not touch the branch this one was cut from: it
+is finished work waiting on a human to merge it.
 
 ## 5. Write the task files
 
@@ -130,22 +132,35 @@ schema, a type shape), inline the decision-rich parts.
 The `Roadmap stage:` line is what says this backlog is a stage's rather than a
 feature's, and finishing the feature reads it back to tick the stage off.
 
-## 6. Bring the roadmap's own score up to date
+## 6. Say on the roadmap that this stage is being worked
 
-`ROADMAP.md` keeps the score of the whole effort, and it is one step behind by
-the time you are reading it. Two edits, both in the plan commit below:
+`ROADMAP.md` keeps the score of the whole effort, and one line of it is out of
+date: this stage's, which says nothing about being under way. One edit, in the
+plan commit below.
 
-- **Tick every stage above this one that is still annotated as in progress.**
-  Their work is finished — a stage is only started once the one before it has
-  settled, which is why this session is running at all. Change `- [ ]` to
-  `- [x]` and drop the `*(in progress: …)*` annotation.
-- **Annotate this stage as in progress**, with the branch you are on, after its
-  link:
+**Annotate this stage as in progress**, with the branch you are on, after its
+link and after whatever that line already said:
 
-      - [ ] NN: <title> — [brief](NN-<slug>.md) *(in progress: `<branch>`)*
+    - [ ] NN: <title> — [brief](NN-<slug>.md) — after 01 *(in progress: `<branch>`)*
 
-  Leave the box unticked: the stage is under way rather than done, and the
-  session that starts the stage after this one is what ticks it.
+**Leave the line's declaration where it is.** What a stage stands on and the
+platform it wants — `after 01`, `no dependencies`, `on windows` — is written
+after the link too, and Verkstead reads it off the line: the annotation goes
+beside it rather than over it. A roadmap that has lost one line's declaration
+declares on some lines and not others, which is refused. A line that declares
+nothing had none to keep, and gains none here.
+
+**Leave this stage's box unticked**, the stage being under way rather than done.
+Its own finish commit is what ticks it, once its tasks are worked — the way
+every stage's box is ticked.
+
+**And leave every other stage's line alone.** No other box is ticked here and no
+other annotation comes off, however finished the stage before this one looks:
+each stage ticks its own box at its own finish, and a stage annotated in
+progress beside this one may be a sibling somebody is working right now. What
+says a stage is done to Verkstead is its own record of that stage settling, with
+the boxes behind it where there is no record — so a box left unticked here holds
+nothing up.
 
 Do not renumber, reorder or reword anything else in the file.
 
@@ -158,8 +173,8 @@ the commit is how it gets written down.
     git add -A
     git commit -m "chore: plan <stage-name> tasks"
 
-The roadmap edits from step 6 ride in that commit: the score moves on the branch
-that earned it.
+The roadmap edit from step 6 rides in that commit: the annotation goes on the
+branch that is doing the work.
 
 If the re-grounding turned up changes to `CONTEXT.md`, the ADRs under
 `docs/adr/`, or other project documentation, include them too — they belong on

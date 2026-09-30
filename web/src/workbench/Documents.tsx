@@ -41,10 +41,17 @@ export type DocumentSection = {
   /// brief nobody wrote is not.
   missing: string;
 
-  /// Whatever else the heading carries, at the far end of it — a stage's done
-  /// state. Nothing on a task: its document being gone is what says it is done,
-  /// and the box below already says so.
+  /// Whatever else the heading carries, at the far end of it — where a stage is.
+  /// Nothing on a task: its document being gone is what says it is done, and the
+  /// box below already says so.
   mark?: JSX.Element;
+
+  /// What the entry's line declares, under the heading and above the box — a
+  /// stage's dependencies and the platform it wants. Nothing on a task: a
+  /// backlog has none, the order being the dependency, and nothing on a stage
+  /// whose line declares nothing either, which is every roadmap written before
+  /// there was anything to declare.
+  declares?: string;
 };
 
 export function Documents(props: {
@@ -90,6 +97,13 @@ export function Documents(props: {
                 {(mark) => <span class={styles.mark}>{mark()}</span>}
               </Show>
             </h2>
+            {/* What the line said about the thing, between its heading and its
+                document: read off the roadmap rather than out of the brief, so
+                it says what the roadmap has settled rather than what the brief
+                proposes. */}
+            <Show when={section.declares}>
+              {(declares) => <p class={styles.declares}>{declares()}</p>}
+            </Show>
             <Show
               when={section.html}
               fallback={<p class={styles.missing}>{section.missing}</p>}

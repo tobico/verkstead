@@ -1049,8 +1049,10 @@ against a repository would otherwise build without it. Read-only ones come
 across as they are; read-write ones cut a branch of their own per stage, named
 after the stage's own branch rather than carrying a name somebody typed while
 drafting the roadmap, because two stages sharing one companion branch would be
-two review units on one branch. Where the stage's own branch stacks on its
-predecessor's, its companion branches stack too.
+two review units on one branch. Where the stage's own branch is cut from
+another branch, its companion branches are cut from that branch's companions —
+the base rather than whatever the Stage ends up stacked on, that being settled
+at its finish.
 
 **Always a Worktree of Verkstead's own, never the human's checkout.** Whenever
 one is made — a grill start, an adopted stage, a steer, a stage a settling
@@ -1189,11 +1191,12 @@ pull request up is the **Review** Process now — named in the Brief or the
 **Target** field of a draft like any other, so nothing is loaded into the box
 and no list of open pull requests is read when the page opens. Picking a roadmap
 creates nothing: the roadmap is loaded into what the device is holding, the box
-locks to a card naming it and the Stage that would be started, the Repo and the
-base commit are the roadmap's own, and what is still the human's is the Process,
-the Pairings and the repos the work runs alongside. A clear control puts it down
-and gives the box back what was in it. **Start** then creates the adopting
-Conversation and adopts the Stage; **Save as draft** creates it and leaves the
+locks to a card naming it and **every Stage the press would start** — the lowest
+of them and, beside it, the rest — the Repo and the base commit are the
+roadmap's own, and what is still the human's is the Process, the Pairings and
+the repos the work runs alongside. A clear control puts it down and gives the
+box back what was in it. **Start** then creates the adopting
+Conversation and adopts the Stages; **Save as draft** creates it and leaves the
 adopting to the press on its own page.
 
 Every one of those freezes at the same moment the Brief does, so once the work
@@ -1530,20 +1533,31 @@ _Avoid_: commit message (the summary is its body, not the whole), description,
 gate summary (the gate is gone), changelog entry
 
 **Notice**:
-The one kind of Event Verkstead writes on its own account: which Stage it
-started and where that Stage's branch went, that a roadmap has no Stage left to
-run, that the roadmap on the record is not on the branch to read, that a branch
-wrote no single roadmap so no Stage was started, that a Stage predates the
-record of which roadmap it belongs to and is the human's to continue, that a
-wrap-up is down to its checks, or — as a **stop Notice** — what stopped driving,
-why, and what the evidence was. No agent wrote it and nobody pressed anything
-for it. It is what running unattended owes the human: a decision made while
-nobody was watching is one they have to be able to read afterwards.
+The one kind of Event Verkstead writes on its own account: which Stages it
+started and where each of their branches went, that a ready Stage waited for a
+place, that a roadmap has no Stage left to run, that the roadmap on the record
+is not on the branch to read, that a branch wrote no single roadmap so no Stage
+was started, that the roadmap declares badly so nothing of it was started, that
+a Stage predates the record of which roadmap it belongs to and is the human's to
+continue, that a wrap-up is down to its checks, or — as a **stop Notice** — what
+stopped driving, why, and what the evidence was. No agent wrote it and nobody
+pressed anything for it. It is what running unattended owes the human: a
+decision made while nobody was watching is one they have to be able to read
+afterwards.
 
-The three about a roadmap that was not carried on all report the same outcome:
+One Stage settling writes as many as the settle had things to say: a sentence
+naming each Stage that started, and a sentence for each ready Stage that did
+not — one that waited for a place, one whose brief was not there to prime it
+from, one git would not cut a branch or a companion checkout for. **A Stage's
+own trouble is no longer the roadmap's**, so what stopped one is said beside
+what started the others rather than instead of them.
+
+The four about a roadmap that was not carried on all report the same outcome:
 **nothing was started**, with the reason it was not. None of them is a thing to
 answer — the way a roadmap is picked up again is *Continue a roadmap*, which is
-the human's act, and Verkstead never picks one on their behalf.
+the human's act, and Verkstead never picks one on their behalf. A roadmap that
+declares badly is the one of them a press cannot get past either: it is refused
+at the press, in the same words.
 
 Nothing to do about one, however much it says. A Notice is written after the
 fact and stays on the record for ever; what a stopped run is waiting on is that
@@ -1768,6 +1782,9 @@ a session meant to end on a pull request, while the branch has none open, or any
 companion repo the work committed in has none, GitHub out of reach reading as
 accepted. The companions are asked about here rather than only by the wrap-up
 afterwards, so the session that could open the missing one is still there to.
+And a **roadmap**'s own session is refused while the roadmap it wrote declares
+badly, the same way it is refused while the roadmap is not committed — see
+**Stage**, which has the four faults.
 
 A Blocking Ask of the session's own still open does not refuse it: the Set is
 locked unanswered, nothing being left to read the Answer. An accepted signal
@@ -2208,12 +2225,83 @@ _Avoid_: job, iteration, unit of work, stage (that is a roadmap's)
 
 **Stage**:
 One numbered entry of a roadmap, and a Conversation of its own: one branch, one
-review unit, one pull request. Started by the Stage before it settling rather
-than by anybody pressing anything — against the same Repo, under the same
-Pairings, primed with the stage brief as its Brief, and Implementing from the
-first moment, because the grilling that would have settled the work wrote the
-brief. Its branch stacks on the unmerged predecessor where the target
-repository records how, and comes off the default branch where it does not.
+review unit, one pull request. Started **the moment every Stage it stands on has
+settled** rather than by anybody pressing anything — against the same Repo,
+under the same Pairings, primed with the stage brief as its Brief, and
+Implementing from the first moment, because the grilling that would have settled
+the work wrote the brief. Its branch is **cut from the highest settled Stage of
+its roadmap's chain** — the roadmap's own branch where no Stage of it has
+settled yet, and the default branch where that already holds everything the
+roadmap has finished, there being nothing unmerged left to stand on. What the
+branch ends up **stacked on** is a second fact and a later one, settled at the
+Stage's finish when it joins the chain; where the target repository records no
+way to stack a Stage for review the base is the same, and the pull request
+carries the branch below it until that one merges.
+
+**Its line in `ROADMAP.md` declares what it stands on**, after the link to the
+brief: `after 01, 03` names other stages of the same roadmap by their labels as
+the roadmap writes them, and `no dependencies` is a root. The line may name a
+**platform** as well, `on windows`. Verkstead reads all of it, and the roadmap's
+details pane says what each stage stands on and names its platform where it has
+one. **The roadmap is scheduled by what it declares** — the platform alone is
+read and shown and acted on by nothing, placing a Stage on a device that matches
+it being a follow-up once cluster mode has landed. Every line of a declaring
+roadmap carries a declaration, a bare line there being a root and a forgotten
+declaration at once — and **a roadmap declaring nothing at all is one run
+strictly in order**, which is every roadmap written before this and is read
+exactly as it was: each of its Stages standing on the one before it is what *in
+order* means to the scheduler, so there is one scheduler rather than two.
+
+**Every Stage whose dependencies have settled starts**, whenever a Stage of the
+roadmap settles or the human presses *Continue a roadmap*, and **up to two
+limits, both of them Settings'**: as many Stages of one roadmap at a time as it
+says — three where nobody has said otherwise — and as many Conversations across
+the whole server, whatever roadmap or Process those belong to, four where nobody
+has said otherwise. Both are in force and a Stage that starts spends one of
+each, so a roadmap under its own limit and over the server's starts nothing at
+all. Where more are ready than there are places, the lowest-numbered start and
+the rest wait for one, said on the Timeline as they wait and told which of the
+two they are waiting on — the roadmap's is waited out by a Stage of that roadmap
+settling and the server's by any Conversation anywhere on it coming free, so the
+two are not one sentence. The roadmap's order is still the roadmap's own. **A
+Stage waiting on the human or waiting to join takes a place** under both,
+whatever it is doing, which is the human's choice rather than a reading of what
+is running — see **Place on the server** for what takes one there, and for the
+press that goes ahead over that limit rather than waiting for one. And the
+declarations are **read afresh at every start, off the top of the chain**, so a
+hand edit committed to a running roadmap decides what starts next.
+
+**Waiting for a place is a third way a Stage is neither started nor halted**,
+beside waiting on a dependency that has not settled and **waiting to join** the
+chain. Nothing has gone wrong in any of the three and none of them is anybody's
+to fix, and what this one says for itself is a sentence on the Timeline naming
+the limit that holds it, and its own word on the roadmap's card and in the pane:
+a roadmap gone quiet with work left in it would otherwise read as a roadmap the
+scheduler forgot.
+
+**A Stage that halts before it has joined holds up only the Stages that stand on
+it.** A usage limit, a failed start, a question nobody answers: its siblings
+carry on, and it keeps its place under its own roadmap's limit until somebody
+Resumes it or closes it — and holds none on the server, nothing being left
+running or driving it. A Stage halted *after* it has joined holds up every later
+join instead — the joins are the one thing a roadmap does in single file, see
+**Chain** — while the waiting Stages' own work, checks and reviews wait on
+nobody. See ADR-0021, *What starts, and how many*.
+
+**And a roadmap that declares badly is refused**, in words a human can act on:
+a declaration on some lines and not others, an `after` naming no stage of the
+roadmap, a platform that is not one of `linux`, `macos` and `windows`, or a
+cycle. Judged over the whole file at once, because all-or-nothing is a fact
+about the file rather than about a line. **Refused in all three places it could
+be read**: the roadmap session's own **Done signal**, beside the two already
+there — that the branch wrote no roadmap, and that the roadmap is not committed;
+a roadmap already running, which starts nothing and says why on the Timeline as
+a **Notice**; and *Continue a roadmap*, which refuses at the press naming the
+same fault, the way it names a branch already taken. The press is the one path
+with somebody waiting on the answer, and a roadmap written by hand or by the old
+tools — which is what adopting is for — is the likeliest to declare badly.
+Nothing repairs a roadmap and nothing falls back to running it in order, which
+would run one in a way nobody wrote down. See ADR-0021.
 
 **Its branch is named for where the stage lives**: `roadmaps/`, then the
 roadmap's own directory name, then the stage brief's filename —
@@ -2238,10 +2326,144 @@ former `mvp/04-wrap-up` shape too, permanently: one already worked is on a
 branch of that shape until somebody deletes it, and its tick may never have
 reached the default branch.
 
-Done when its box in `ROADMAP.md` is ticked, which is the roadmap's own score
-and is kept one Stage behind: the tick rides in the plan commit of the Stage
-after it, so a Stage whose work has settled is still the box that says *in
-progress* on this branch.
+**Done when Verkstead's record says it settled**, and where the record says
+nothing about that Stage, when its box in `ROADMAP.md` is ticked. A Stage ticks
+its own box in its own finish commit, on its own branch, so with Stages worked
+side by side the boxes stop being one fact: the branch being read may never have
+seen the tick of a Stage that finished beside it. The record is what carries the
+answer across them, and the boxes are the score people read — and all there is
+to go on for a Stage worked by hand or by the old tools. Settled rather than
+merged: a Stage whose pull request is open and whose wrap-up reached **Done** is
+done, and a ticked box on its own says *its tasks are done* rather than *it
+settled*, the tick landing before that pull request has even opened. See
+ADR-0021.
+
+**And where it is, is a word the viewer is told.** The pinned stage card's row
+and the roadmap's details pane both say where each Stage of the roadmap has got
+to — *done*, *in progress*, *waiting to join*, *halted*, *waiting on* a named
+Stage, *waiting for a place* or *to do* — in place of the *done* and *to do*
+the card used to work out from the box. The words come off Verkstead's own
+reading, the same one above: *done* is a Stage that settled, or one the record
+holds nothing about whose box is ticked; *in progress* is one the record has
+in flight; *waiting to join* is one of those the server is **holding** before
+its finish, read off that register at the moment the page is drawn rather than
+off anything stored — the same register the sidebar's own label comes off,
+so a Stage cannot read one thing on its row there and another on the roadmap's
+card here, and a server that has just come back is holding nothing and says *in
+progress* again until its resume finds the Stage held a second time; *halted*
+is one whose Conversation has stopped or that was closed before it ever wrapped
+up, one word for the two because what a reader does about either is go and look
+at that Conversation — and it wins over the hold, a stopped Conversation
+being held by nothing; *waiting on* is a Stage of a declaring roadmap that
+nothing has started yet, naming the Stages its own line stands on that have
+not settled — only those, so what it says moves as the roadmap runs where
+what it *stands on* does not; *waiting for a place* is one that is **ready**
+— every Stage it stands on has settled — with nowhere to run, which is told
+apart from the one above it because a Stage waiting on a dependency waits on
+work and this one waits on the machine, and a roadmap gone quiet with ready
+work in it would otherwise read as a roadmap the scheduler forgot; and *to do*
+is everything else. The viewer works none of them out — a card that decided
+for itself whether a Stage was under way, or which of its neighbours it was
+behind, would be a second opinion about something the record already knows —
+and a roadmap the record holds nothing about reads *done* or *to do* throughout,
+off its boxes, exactly as it always has. **An undeclared roadmap's unstarted
+Stages read *to do*** whatever the record says: such a roadmap is scheduled as
+each Stage standing on the one before it, but the silence is the scheduler's
+reading rather than something the roadmap says, and *waiting on 03* about a line
+that declares nothing would be Verkstead putting a declaration in the human's
+mouth — an undeclared roadmap's ready Stage does read *waiting for a place*,
+that being the machine's fact rather than the roadmap's. **One word for both
+limits**, a roadmap's own and the server's: which of the two is holding a Stage
+is on the Timeline of the Conversation that held it, a row having no room for
+it, and where more Stages are ready than there are places the lowest-numbered
+take them, which is the scheduler's own order. Nothing about that waiting is
+stored — what is ready is worked out afresh from the declarations, the record,
+the boxes and the two limits as Settings has them every time it is asked,
+so raising one moves a Stage out of the state and a second record saying *this
+Stage is waiting* could only come to disagree. The pane says the state twice, on
+the Stage's section heading and on the line the table of contents reaches it by,
+beside what the Stage's line declares it stands on.
+
+**And every Stage in flight is a row on that card.** It draws five entries of a
+longer roadmap, and which five was the ones around the first Stage not ticked
+while that was *where the work has got to*; with Stages worked side by side
+it is every Stage the record has a Conversation on — *in progress*, *waiting
+to join* or *halted* — and none of them gives way to hold the card at five,
+three Stages running being what a reader came to it for. Neither of the two
+waits nothing has started is in flight, and for the one reason: what each of
+them waits for is somewhere else. A Stage *waiting on* another waits on the work
+the card is already showing; a Stage *waiting for a place* waits on the machine,
+and a wide roadmap on a busy server has as many of those as it has roots —
+a card keeping a row for each would grow with the queue and push the record
+it is pinned above off the screen, which is the one thing the window is there
+to stop. Both are drawn where the window reaches them, as the neighbours they
+are, and both say their own word when it does. What is left of the five goes on
+closing the gaps between them and then on their neighbours, so a roadmap running
+in one place reads as it always did, and Stages too far apart to join up are
+drawn as stretches of the roadmap with an ellipsis row saying what is out of
+sight between them as well as at the ends. The count beside the heading still
+counts the whole roadmap, and the details pane still holds every Stage.
+
+**And a Stage's row leads to the Conversation working it.** Which Conversation a
+Stage is, is Verkstead's own record — the same rows that say how far each Stage
+of a roadmap got — and it rides on the row beside the state that came off the
+same row of it, so a row cannot lead to one Conversation while saying where
+another had got to: where a Stage was attempted twice, the link follows the
+standing that is believed. Every standing keeps its link, a settled Stage's
+Conversation being where its pull request and its review still are, and a halted
+one's being what the reader has to go and look at. A Stage the record holds no
+row for is **not a press** — one nothing has started, and one worked by hand or
+by the old tools — and the card under it opens the roadmap from that row exactly
+as it does from its head and from everywhere else on it. Which is the one place
+a card in the workbench has a second target on it: everywhere else the whole
+surface is the one press, and what earns it here is that this card is a list of
+work rather than one thing.
+
+**And it joins its roadmap's chain at its finish, not before.** A roadmap is one
+chain of branches in the order its Stages finish, and a Stage joins it when its
+finish pushes its branch and opens its pull request — so the pull request
+recorded against a Stage is what says it has joined, and the Timeline Event that
+row hangs off is what says when. A Stage whose every box is ticked and that has
+a Stage in the chain which has not *settled* is **held before its finish**: no
+session is launched, the Timeline says which Stage it is waiting on, the
+Conversation wears the label for it and its row on the roadmap's card reads
+*waiting to join*, and it is released the moment that one settles. Nothing
+rebases onto a branch that is still moving, which is what buys the rest of it —
+a Stage is rebased once, before it has a pull request anybody has started
+reading. Two Stages finishing
+close together are let in **one at a time, in the order their tasks finished**,
+each waiting on the one in front of it joining *and* settling. In a roadmap run
+in order the Stage below has always settled first, so nothing is ever held. See
+ADR-0021, *The chain*, and **Waiting to join**.
+
+**And what it joins is carried in the finish session's prompt.** The chain is
+Verkstead's to say — it recorded which Stages joined and in what order, and no
+agent could read that off a branch — and the rebase is the session's to run,
+`gh stack` being a session's and never the server's. So the moment the hold lets
+a Stage in, the branches it goes on top of are read off the record, bottom to
+top, and said in a section of the finish prompt that no task session carries:
+the branch the Stage was cut from at the foot, every Stage that has joined above
+it, and the one instruction the list is for — **rebase onto the top before
+anything is pushed**, and open the pull request against it. How that is done is
+the target repository's own `docs/agents/git-workflow.md`; where it records no
+stacking mechanism the rebase happens all the same, and the pull request opens
+the way the unrecorded case opens one. A branch the default branch already holds
+is out of the chain, which is the reading a Stage's base is chosen by — so a
+roadmap whose Stages have all merged is a finish told no chain at all, and a
+Stage cut from what is still the top is told a chain ending exactly there, where
+the rebase moves no commit.
+
+**And a conflict on the way in is the joining session's to resolve.** A rebase
+that stops in one is two changes to reconcile rather than a reason to stop: the
+session resolves it, runs the repository's own checks over a tree neither branch
+ever had, pushes only once they are green, and asks the human — one Question
+Set — only where the two changes are two intentions and it cannot tell which is
+meant. Nothing below the branch is touched while it does: the resolution is in
+the joining branch, and the chain under it is where it stood. And it says on its
+way out that the join met a conflict either way, because a join that took a
+session an hour and a rebase that moved nothing should not read alike. Always
+stopping to ask was weighed and turned down — see ADR-0021, *The chain*, and the
+finish skill, which is where the words are.
 
 **Which roadmap it belongs to is written down** when the Stage starts, and it is
 the only roadmap its wrap-up ever reads. A Worktree may hold any number of
@@ -2252,6 +2474,110 @@ roadmap that runs out is the roadmap complete, whatever else is in the Worktree
 with work left in it; taking up another one is **Adopt**. See ADR-0017.
 _Avoid_: phase, milestone, epic, step (that is a backlog's)
 
+**Chain**:
+The one line of branches a roadmap's Stages are reviewed on, in the order they
+finished — one chain per roadmap, and Verkstead's own record of which Stage
+joined when rather than anything read back off git. Its bottom is the roadmap's
+own branch while that is unmerged, the Conversation that wrote the roadmap
+being what stage 01 is cut from because the default branch does not hold the
+roadmap the Stage is started from; and it is the default branch once nothing
+unmerged is left to stand on. Everything above that is a Stage that has joined,
+each on top of the one before it. A branch the default branch already holds is
+out of the chain, so a roadmap whose Stages have all merged is a chain of
+nothing.
+
+**A Stage joins at its finish**, one at a time, and not until every Stage
+already in it has settled — see **Waiting to join** for what a Stage does while
+it is not yet its turn. Joining is the rebase onto the top and the pull request
+opened against it, which is why the pull request recorded against a Stage is
+what says it has joined. So a Stage is rebased once, before it has a pull
+request anybody has started reading, and **a Stage that has joined is never
+rebased by a later one**: what moves it afterwards is the sync any stacked
+branch gets when the default branch moves or a pull request below it merges.
+
+**The joins are the one thing a roadmap does in single file**, and that is what
+the rest of it costs: a Stage whose wrap-up cannot finish holds up every later
+Stage's join, dependent on it or not. Only the join — the waiting Stages' own
+work, their checks and their reviews wait on nobody. A roadmap run in order
+builds the chain it always built, each Stage cut from what turns out to be the
+top and its rebase moving no commit. See ADR-0021, *The chain*.
+
+**One chain per roadmap per repository, and only the Conversation's own so
+far.** A **Companion** repository a Stage commits in has a chain of its own
+shape — a branch per Stage, each cut from the companion of whatever the Stage's
+own branch was cut from — and nothing joins it: the finish is told the chain in
+the Conversation's own repository, and a companion branch is left where
+`continuing` cut it. Which held while roadmaps ran their Stages one at a time,
+because there the base and the top of the chain are the same branch and the
+companion is already where the join would have put it. Two Stages side by side
+are where they part company, and a roadmap that declares now runs them that way:
+the Stage's own branch rebases onto the top of the chain at its join and its
+companion branch stays where it was cut, so a roadmap whose Stages commit in a
+Companion leaves that repository a chain the Conversation's own no longer
+mirrors. **Known and not yet done** — nothing in the `parallel-stages` roadmap
+closes it, and it costs nothing until a roadmap both declares and has a
+Companion its Stages commit in.
+_Avoid_: stack (that is `gh stack`'s word for how a target repository reviews
+one, and the chain is the record the rebase is read off), dependency order
+(the order is the order Stages finished, and what a Stage stands on is declared
+separately), queue (that is the waiting, not the chain)
+
+**Place on the server**:
+Room for one of the Conversations Verkstead runs at once, whatever roadmap or
+Process it belongs to: the second limit in front of a start, beside the
+roadmap's own, and **four of them where nobody has said otherwise**. How many is
+a setting on the Settings page beside the roadmap's limit, and the pane that
+sets it says how many were taken as it was read. There for the machine rather
+than for the human — a Stage may be a heavy build and a test run, and the
+hardware is shared by everything the server runs — and four beside the roadmap's
+three so that one roadmap cannot take the whole server by default.
+
+**Taken by a Conversation with a session running or a driver registered**, and
+by nothing else. Every kind is counted the same: a grilling, a Review, a Tinker,
+a Stage of another roadmap, an inline implementation. So a **Stage waiting on an
+answer** and a **Stage waiting to join** hold one apiece — the first has a
+session sitting in a blocking ask, the second is driven across the whole of its
+hold — which is the human's choice rather than a reading of what is running, and
+it means a server whose places are all held by Stages waiting on answers starts
+nothing more until one of them is answered. Both registers rather than either
+alone: a Conversation between two Steps has no session for a moment, and a
+grilling nobody has picked on yet has no driver.
+
+**Held by nothing that is Done, Draft or stopped**, a stopped Conversation's
+driver having let go as it stopped — **the halted Stage included**, which is
+where the two limits read one Stage differently. It keeps its place under its
+own roadmap's limit until somebody Resumes it or closes it, that limit being
+counted off the record of which Stages are in flight, and it holds none here,
+nothing being left running or driving it. Which is each limit doing what it is
+for: the roadmap's keeps the roadmap's own order, and this one is about the
+hardware, and a halted Stage is using none of that.
+
+**And only what Verkstead starts by itself is ever held back for one.** A Stage
+started by a settle waits; a press — Start, *Continue a roadmap*, Resume — goes
+ahead over the limit, and what it made is counted from then on. The limit is for
+work nobody asked for, and a human at the workbench has asked. Which is also why
+the reading can stand above the limit rather than only at it.
+
+**A place comes free when a Conversation of any kind finishes or stops**, and
+none of those is a settle — so what waited for one would never be started by the
+settles alone. Verkstead looks over the roadmaps it is driving **as a place comes
+free** instead and starts what the free places hold, oldest roadmap first and
+within a roadmap lowest-numbered first, with nobody pressing anything. A slow
+look behind that one catches the ways a place can come free that nothing
+announces — a limit the human raised while the machine was full — and a server
+where nothing is happening makes no look at all, a look costing a reading of
+every roadmap it has ever driven. **Nothing about the waiting is stored**: what
+is ready is read afresh at every look, so a restart loses nothing that was
+waiting. And the look is silent unless it starts something, beside the one thing
+it says about a Stage it did not start: that a Stage of this roadmap is waiting
+for a place another roadmap has just taken, said on each waiting roadmap's own
+Timeline, because a roadmap passed over in silence reads as a roadmap forgotten
+— and said only where the places really are all taken once the look has finished
+starting, a Stage that went up to start and was refused having spent a place on
+paper and taken none. See ADR-0021, *What starts, and how many*.
+_Avoid_: slot, seat, quota, capacity, concurrency limit, the roadmap's place
+(that is the other limit, counted off the record rather than off what runs)
+
 **Adopt**:
 Take work the Repo already holds — written by the old tools, by hand, by
 anything that was not this Verkstead — into the pipeline. One kind of work is
@@ -2261,20 +2587,37 @@ the other, under **Wrap up a pull request**, until 2026-09-25; that is the
 **Review** Process now, and the paragraph below is kept for what it settled
 about taking one up.
 
-**A roadmap is adopted** by starting its next Stage as a Conversation. The
-human's press stands in for the Stage before it that would otherwise have
-started it, so there is no grilling and no Brief to write: what they settle is
-the Pairings, the base commit and the repos the work runs alongside, and the
-stage brief becomes the Brief. The roadmap loads into the composer, and the
-press under it creates the Conversation and adopts the Stage together — the
+**A roadmap is adopted** by starting every Stage of it that is ready as a
+Conversation. The human's press stands in for whatever would otherwise have
+started them, so there is no grilling and no Brief to write: what they settle is
+the Pairings, the base commit and the repos the work runs alongside, and each
+stage brief becomes that Stage's Brief. The roadmap loads into the composer, and
+the press under it creates the Conversation and adopts the Stages together — the
 same two presses every other piece of work is composed with, the quieter of
-which stops at a draft, for the adopting to be pressed on its own pane. One
-Stage is the whole of what adopting starts, and all it has to start — that
-Stage's own plan commit writes to the roadmap, so when it settles the Stage
-after it begins the ordinary unattended way, and an adopted roadmap is a staged
-one from there on. Never stacks: there is no predecessor Conversation to stack
-on, and building on an unmerged branch is the human's move, made by picking
-that branch as the base.
+which stops at a draft, for the adopting to be pressed on its own pane.
+
+**The press starts every ready Stage**, up to the roadmap's limit and that one
+alone — of the two limits a Stage started by a settle is weighed against, the
+roadmap's is the only one a press waits on. A press is never held back for a
+**Place on the server**: it starts what it was going to start over that limit,
+and what it made is counted against it from then on. Which keeps the roadmap's
+own order the one thing standing between the human and the work they have just
+asked for. And what the press is offered as names them all: the notice under the
+new-conversation box, the roadmap's row on the compose page and the adopting
+Conversation's own pane are drawn off one reading, so what the human is offered
+is what pressing does. The lowest-numbered of them becomes the Conversation they
+composed and the rest start beside it as Conversations of their own, each under
+the same Pairings, the same companions and the same base commit, because the
+press is the one act that settles all of that and a Stage started beside the
+first has no draft moment of its own either. From there the roadmap carries
+itself on: each Stage settling starts whatever stood on it, the ordinary
+unattended way, and an adopted roadmap is a staged one from there on. **A
+roadmap that declares badly is refused at the press**, naming the fault the way
+a branch already taken is named — while the notice and the compose page offer
+nothing off such a roadmap at all, there being no Stage of it to start, which is
+what keeps the press off it. See **Stage** for what declaring badly is. Never
+stacks: there is no predecessor Conversation to stack on, and building on an
+unmerged branch is the human's move, made by picking that branch as the base.
 
 **A pull request is taken up** by a **Review** or **Fix Merge Issues**
 Conversation at Start, named in the Target field rather than picked off a list —
@@ -2390,17 +2733,29 @@ _Avoid_: import, attach, resume, take over, migrate, improve
 **Abandoned**:
 What a roadmap in a registered Repo is when it has a Stage startable right now
 and nothing driving it — the one state Adopt is offered for. Four things
-together, read at the Repo's default branch tip: an unchecked box, a readable
-brief for the lowest of them, no in-progress annotation naming a branch that
-still exists, and the Stage's own branch not taken. A roadmap that is
-finished, one already in flight and one whose next brief is missing are each not
-abandoned and each draw nothing, because what the human can do something about
-is the only thing worth saying. Read from the repositories every time it is
-drawn and never stored, like the pinned stage lists — and drawn where work is
-composed rather than anywhere waiting on the human, since taking one up is
-something to do rather than something to answer. With nothing to dismiss one by,
-a roadmap's score being the repository's to keep: an unwanted row is silenced in
-the repository, by ticking the box or annotating the stage.
+together: a Stage that is not done, a readable brief for the lowest of those,
+nobody on it, and the Stage's own branch not taken. A roadmap that is finished,
+one already in flight and one whose next brief is missing are each not abandoned
+and each draw nothing, because what the human can do something about is the only
+thing worth saying.
+
+**Done** and **nobody on it** are Verkstead's own record where it has a row for
+that Stage, and the repository's where it has none — the same rule the Stage that
+starts when one settles is chosen by, so what a roadmap has left is one answer
+whichever of the two readings asks. A Stage that settled is done however its box
+reads on the branch being read, which is what puts the roadmap whose first Stage
+finished on an unmerged branch back in the notice; a Stage the record says is in
+flight is refused as in flight, by the record rather than by an annotation that
+rides on the Stage's own branch; and a Stage the record knows nothing about — one
+worked by hand or by the old tools — is its box, its annotation and its branches,
+exactly as it always was.
+
+The repository's half is read from the repositories every time it is drawn and
+never stored, like the pinned stage lists — and drawn where work is composed
+rather than anywhere waiting on the human, since taking one up is something to do
+rather than something to answer. With nothing to dismiss one by, a roadmap's
+score being the repository's to keep: an unwanted row is silenced in the
+repository, by ticking the box or annotating the stage.
 _Avoid_: stale, orphaned, dormant, unmanaged, needs attention
 
 **Stopped**:
@@ -2836,6 +3191,44 @@ quietening again is a fresh Notice rather than a duplicate of the first or a
 silence.
 _Avoid_: blocked on you (that is about the human, this is about GitHub), CI
 (the word here is checks), pending, green, state
+
+**Waiting to join**:
+What a **Stage** whose every task is done is doing while it is not yet its turn
+to join its roadmap's chain. No finish session is launched: a **Notice** says so
+on the Timeline and names the Stage or Stages it is waiting on and why, the
+status button reads the words where its status word goes, the sidebar row reads
+them in place of the state word — Implementing being what has come down to this —
+and the Stage's row on its roadmap's card reads them where a Stage's state goes,
+off the same register at the same moment.
+
+Two things are waited on, and the second is what makes a queue of Stages read as
+a queue rather than as two stalls. A Stage **already in the chain that has not
+settled** is a branch still moving, and nothing rebases onto one. A Stage **whose
+tasks finished before this one's and which has not joined yet** has the next
+turn — and this one goes on waiting through its join, by the rule above, until it
+settles. So two Stages finishing close together are let in one at a time, in the
+order their tasks finished, and the first one *joining* releases nobody.
+
+A condition of Implementing rather than a state, drawn exactly as *Waiting on
+checks* is drawn one state later: the Lifecycle is untouched, nothing is pushed
+to any device, and the run holds its registration across the whole wait, so a
+held Stage is one being driven rather than one standing still. The hold itself is
+stored nowhere — it is a task of the running server, so a restart is holding
+nothing and the resume that takes the Stage up finds it held again. The **place
+in the queue** is stored, and written once, which is the one thing here that has
+to outlive the process: the wait may be long, and a restart that made the order
+afresh could let two Stages in the other way round.
+
+Only a Stage: an ordinary feature's backlog belongs to no roadmap and joins no
+chain. And only the join — a waiting Stage's own work, its checks and its review
+wait on nobody. **The joins are the one thing a roadmap does in single file**,
+so a Stage whose wrap-up cannot finish holds up every later Stage's join,
+dependent on it or not. That is the price of never rebasing a branch anybody is
+reading. See ADR-0021, *The chain*.
+_Avoid_: blocked, stalled (nothing has gone wrong and nothing is waiting on the
+human), queued (the order is the server's own bookkeeping; what the human is
+shown is which Stage is being waited on and why), stacking or rebasing (that is
+how the branch gets in, and it is the repository's business), state
 
 **Check rollup**:
 How a pull request's checks are getting on, taken all together and said in one

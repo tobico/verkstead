@@ -70,16 +70,19 @@
 //! it is created; this page has no draft yet, so it asks for the same answer and
 //! shows it — see `showing`, which is careful to show it rather than hold it.
 //!
-//! **And it is where a roadmap nothing is driving is picked up from**, that being
-//! the other way into the pipeline rather than another page for it: the *Other
-//! actions* menu under the box holds a nested level per way of doing it, and
-//! picking a row loads what it names into what this device is holding.
-//! *Continue a roadmap* is that level — the roadmaps nothing is driving, each
-//! named with its Repo and the stage a press would start. The box locks to a card
-//! naming the roadmap and that stage, the repo and the base are the roadmap's own,
-//! and the pairings and the repos alongside stay the human's to settle — which is
-//! the whole of what adopting asks for. Clearing it gives the box back whatever
-//! was typed in it.
+//! **And it is where a roadmap with work left lying about is picked up from**,
+//! that being the other way into the pipeline rather than another page for it: the
+//! *Other actions* menu under the box holds a nested level per way of doing it,
+//! and picking a row loads what it names into what this device is holding.
+//! *Continue a roadmap* is that level — the roadmaps with a stage that could be
+//! started now, each named with its Repo and the stages a press would start. Not
+//! only the roadmaps nothing is driving: a declaring roadmap runs its stages side
+//! by side, so one with a ready stage beside the ones somebody is on is being
+//! driven and has work to pick up at the same time. The box locks to a card naming
+//! the roadmap and those stages, the repo and the base are the roadmap's own, and
+//! the pairings and the repos alongside stay the human's to settle — which is the
+//! whole of what adopting asks for. Clearing it gives the box back whatever was
+//! typed in it.
 //!
 //! It is the only level, and the menu is drawn all the same: whenever the box is
 //! empty and nothing is loaded, with the level greyed rather than hidden while
@@ -286,11 +289,11 @@ function Compose(props: {
     freshness: { reconcile: "id" },
   }));
 
-  // And the roadmaps nothing is driving, which is the other way work gets into
-  // the pipeline: the rows behind Continue a roadmap under the box. Read under
-  // the key the rest of the app reads them under, and read again whenever the
-  // page looks again — a roadmap somebody has picked up since simply stops
-  // being on the list.
+  // And the roadmaps with a stage that could be started now, which is the other
+  // way work gets into the pipeline: the rows behind Continue a roadmap under the
+  // box. Read under the key the rest of the app reads them under, and read again
+  // whenever the page looks again — a roadmap whose last ready stage somebody has
+  // picked up since simply stops being on the list.
   const abandoned = useReading(() => ({
     queryKey: ["abandoned-roadmaps"],
     queryFn: listAbandonedRoadmaps,
@@ -316,6 +319,7 @@ function Compose(props: {
         title: roadmap.title,
         stage: roadmap.stage,
         stage_title: roadmap.stage_title,
+        beside: roadmap.beside,
         base: roadmap.base,
       })),
     );
@@ -1020,9 +1024,31 @@ function Loaded(props: {
         Stage {props.roadmap.stage}: {props.roadmap.stage_title}
       </p>
 
+      {/* And every stage the press would start beside it: a declaring roadmap
+          starts every stage whose dependencies have settled, so the card names
+          what pressing does rather than the lowest of it. */}
+      <Show when={props.roadmap.beside?.length}>
+        <p class={styles.stage}>
+          And beside it:{" "}
+          <For each={props.roadmap.beside}>
+            {(beside, at) => (
+              <>
+                {at() > 0 ? ", " : ""}
+                {beside.label}: {beside.title}
+              </>
+            )}
+          </For>
+        </p>
+      </Show>
+
       <Note>
         The stage's own brief becomes this conversation's brief when the stage is
         adopted, and the work is done on the branch the stage is named for.
+        <Show when={props.roadmap.beside?.length}>
+          {" "}
+          Each stage beside it starts as a conversation of its own, off the same
+          base and with the same profiles and repos alongside.
+        </Show>
       </Note>
     </div>
   );
@@ -1087,11 +1113,12 @@ function OtherActions(props: {
   );
 }
 
-/// The roadmaps nothing is driving, as the rows of the level that lists them.
+/// The roadmaps with a stage that could be started now, as the rows of the level
+/// that lists them.
 ///
 /// Each row is worded the way the sidebar's menu worded it, this being where
 /// those rows moved to: the roadmap, the Repo it is in — the list is flat, and
-/// two repositories may each hold an `mvp` — the stage that would be started,
+/// two repositories may each hold an `mvp` — the stages that would be started,
 /// and where the roadmap was found when that is somewhere other than the
 /// default branch.
 function RoadmapRows(props: {
@@ -1112,7 +1139,18 @@ function RoadmapRows(props: {
             <span class={styles.in}>in {held.repo}</span>
           </span>
           <span class={styles.next}>
-            next is stage {held.stage}: {held.stage_title}
+            {/* Every stage the press would start, rather than the lowest of
+                them: a declaring roadmap starts every one whose dependencies
+                have settled, and what the row offers is what pressing does. */}
+            {held.beside?.length ? "next are stages " : "next is stage "}
+            {held.stage}: {held.stage_title}
+            <For each={held.beside}>
+              {(beside) => (
+                <>
+                  , {beside.label}: {beside.title}
+                </>
+              )}
+            </For>
           </span>
           <Show when={held.base}>
             {(base) => (

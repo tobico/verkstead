@@ -74,7 +74,13 @@ import {
   startGrilling,
   takeUpPullRequest,
 } from "../api/client";
-import type { CompanionMode, Process, Started, TakenUp } from "../api/types";
+import type {
+  AdoptedStage,
+  CompanionMode,
+  Process,
+  Started,
+  TakenUp,
+} from "../api/types";
 import { forget, read, write } from "../device";
 import type { Holding } from "../holding";
 import * as pairing from "../pairing";
@@ -137,6 +143,14 @@ export type Adopting = {
   /// The next stage as the roadmap writes it, and what it is called.
   stage: string;
   stage_title: string;
+  /// And the stages the press would start beside it, where the roadmap declares
+  /// and has more than one ready — the first is the conversation this page is
+  /// about, and these are started as conversations of their own.
+  ///
+  /// Optional because a body this device wrote down before there were any has
+  /// none, which is no roadmap ready beside the one it named rather than a card
+  /// with a gap in it — see [`loaded`].
+  beside?: AdoptedStage[];
   /// The branch the roadmap was read off, empty being the repo's default branch
   /// — which is the base the adopting Conversation is started fixed to, a
   /// roadmap on an unmerged branch being only on that branch.
@@ -796,6 +810,11 @@ function loaded(value: unknown): value is Adopting | null | undefined {
     typeof roadmap.title === "string" &&
     typeof roadmap.stage === "string" &&
     typeof roadmap.stage_title === "string" &&
+    // A body from before the press started more than one stage has none, which
+    // is the same absence `adopting` itself is: it reads as nothing ready
+    // beside the stage the card names, and the press reads the roadmap again
+    // anyway.
+    (roadmap.beside === undefined || Array.isArray(roadmap.beside)) &&
     typeof roadmap.base === "string"
   );
 }

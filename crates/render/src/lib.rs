@@ -52,7 +52,7 @@ pub use conversations::{
     PullRequestCommit, PullRequestDetails, PullRequestEvent, PullRequestSummary, QuestionSetEvent,
     RepoChoice, RepoSwitched, ResolveConflictsEvent, Resolved, Resumed, RoadmapPane, Screen,
     ServerAttached, ServerRemoved, SetRow, ShareView, ShowArchived, ShowingArchived, Shown, Size,
-    StageDocument, StageEntry, StageListEvent, StageListReached, StageSource, Started,
+    StageDocument, StageEntry, StageListEvent, StageListReached, StageSource, StageState, Started,
     SteerAdditionView, SteerCancelled, SteerCompanionRefusal, SteerEvent, SteerForm, SteerOpened,
     SteerPairingView, SteerRecordView, SteerSaved, SteerSubmission, SteerTarget, SteerUpgradeView,
     TakenUp, TargetNamed, TargetRecorded, TaskDocument, TaskEntry, TaskListEvent, TaskListReached,
@@ -81,11 +81,12 @@ pub use push::{PushKey, Subscribed, Subscription, Unsubscribe};
 pub use remote::{RemoteBanner, RemoteView, ServeEdit, ServePress, ServeView};
 pub use repos::{Created, Creation, Registered, Registration, RepoEntry, RepoRemoved, RepoView};
 pub use settings::{
-    Author, BindEntry, BuildCacheEdit, BuildCacheView, CleanupEdit, CleanupStepEdit,
-    CleanupStepView, CleanupView, CompileCaching, ConflictResolution, HeaderEdit, IgnoreRule,
-    IgnoredCommentsEdit, McpHeader, McpHeaderEdit, McpServer, McpServerEdit, McpServersEdit,
-    PathResolution, PathSource, PathsView, RuleField, RuleRefused, ServerField, ServerRefused,
-    ServerTried, SettingsEdit, SettingsSaved, SettingsView, TokenEdit, TokenSaved, Tried, Verified,
+    AtOnceEdit, AtOnceView, Author, BindEntry, BuildCacheEdit, BuildCacheView, CleanupEdit,
+    CleanupStepEdit, CleanupStepView, CleanupView, CompileCaching, ConflictResolution, HeaderEdit,
+    IgnoreRule, IgnoredCommentsEdit, McpHeader, McpHeaderEdit, McpServer, McpServerEdit,
+    McpServersEdit, PathResolution, PathSource, PathsView, RuleField, RuleRefused, ServerField,
+    ServerRefused, ServerTried, SettingsEdit, SettingsSaved, SettingsView, TokenEdit, TokenSaved,
+    Tried, Verified,
 };
 pub use sharing::{
     CommentedOn, MissedOut, SHARE_MARKER, ShareCommented, SharePublished, SharedCommit,

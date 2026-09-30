@@ -1923,6 +1923,54 @@ impl Unmade {
             Unmade::Companion { repo, why } => TakenUp::Companion { repo, why },
         }
     }
+
+    /// And said on a Timeline, which is where the halt goes for a stage started
+    /// *beside* a press rather than by one: the press has already succeeded, so
+    /// there is nothing left to refuse and the human is owed a sentence instead.
+    ///
+    /// The repository named for a companion, for the reason the two answers above
+    /// name it: which of several repositories it was is the whole of what makes it
+    /// a different thing to go and look at.
+    fn said(&self) -> String {
+        match self {
+            Unmade::Own => "git would not make its worktree".to_owned(),
+            Unmade::Companion { repo, why } => format!(
+                "it works alongside `{repo}`, the companion repository it inherits from this \
+                 Conversation, and {}",
+                refusal(why),
+            ),
+        }
+    }
+}
+
+/// The clause that goes after a companion repository's name on a Timeline.
+///
+/// The same sentences `continuing`'s own halt says, the two refusals being the same
+/// five questions asked of the same repositories — what differs is only which
+/// press was standing behind them. Said rather than left to the server log for
+/// its reason too: a branch in the way is named, because which branch it is is
+/// the whole of what there is to go and move.
+fn refusal(why: &CompanionRefusal) -> String {
+    match why {
+        CompanionRefusal::FetchFailed => {
+            "git would not fetch from that repository's remote — so what its checkout would come \
+             off cannot be trusted to be what origin is holding, and the server log says why the \
+             fetch failed"
+                .to_owned()
+        }
+        CompanionRefusal::NoBaseCommit => {
+            "what its checkout comes off resolves to no commit there".to_owned()
+        }
+        CompanionRefusal::BranchExists => {
+            "the branch this stage would cut in it is already a branch of that repository"
+                .to_owned()
+        }
+        CompanionRefusal::BranchInTheWay { by } => format!(
+            "`{by}` is already a branch of that repository, which stands in the way of the branch \
+             this stage would cut in it"
+        ),
+        CompanionRefusal::WorktreeRefused => "git would not make its checkout".to_owned(),
+    }
 }
 
 /// Ask git everything one companion's checkout turns on, and come back with what
@@ -2131,9 +2179,19 @@ fn recorded(planned: &[Checkout]) -> Vec<store::CompanionWorktree> {
         .collect()
 }
 
-/// Take a roadmap Verkstead did not write and start its next stage: one press,
-/// and a drafting Conversation becomes the stage's own, on the stage's own
-/// branch, with a planning session running in it.
+/// Take a roadmap Verkstead did not write and start every stage of it that may
+/// start now: one press, and a drafting Conversation becomes the lowest of them,
+/// on that stage's own branch, with a planning session running in it — and each
+/// of the rest starts beside it as a Conversation of its own.
+///
+/// **Every** rather than the lowest, up to as many of one roadmap at a time as
+/// `at_once.roadmap_stages` says: the press stands in for whatever would
+/// otherwise have started them, so what it starts is what a settle would have.
+/// Which stages those are is [`crate::stages::startable`]'s answer, and it is the
+/// same answer the notice and the page were drawn by — so what the human was
+/// offered is what pressing does. The rest are [`alongside`]'s, each given the
+/// same Pairings, the same companions and the same base commit the human settled
+/// here, because the press is the one act that settles all of that.
 ///
 /// The human's press stands in for the settling predecessor that starts every
 /// other stage — see [`crate::continuing`], which does the same job at the other
@@ -2232,6 +2290,14 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
         return Ok(Adopted::NoGitAuthor);
     };
 
+    // And how many stages of one roadmap run side by side, off the same file and
+    // at the same moment: the press starts every ready stage there is a place for,
+    // so a limit changed from a phone is in force at this press. The same setting
+    // the carry-on reads at every settle — see [`crate::settings::AtOnce`] — and
+    // the same one the notice and the page were drawn by, so what was offered is
+    // what this starts.
+    let at_once = config.at_once().roadmap_stages();
+
     // Where the stage branches from. The override where the human fixed one —
     // which is how an unmerged predecessor is stacked on, that being their move
     // rather than Verkstead's — and the default branch as origin holds it where
@@ -2241,6 +2307,12 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
     let default = conversation.repo.default_branch.clone();
 
     let repo = conversation.repo.path.clone();
+
+    // And what Verkstead's record says about this Repo's stages, which is half of
+    // what says a stage is done — the boxes being the other half, and the two
+    // together being what the notice and the page were drawn by. Read out here
+    // because the reading below asks nothing of the database.
+    let record = store::stage_standings(pool, conversation.repo.id).await?;
 
     // The reading, off the runtime's threads: fetching, resolving a commit and
     // reading a roadmap out of a git directory are all blocking calls.
@@ -2280,13 +2352,14 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
             // taken from either, because a roadmap is a document anybody may
             // have moved since. Which clause refused it is the answer to the
             // button: each of them is a different thing to go and do about it.
-            match crate::stages::startable(&repo, &commit, &roadmap) {
+            match crate::stages::startable(&repo, &commit, &roadmap, &record, at_once) {
                 Startable::Stage(abandoned) => {
                     let stacks_on = predecessor(&repo, &commit, &named, &default);
 
-                    Ok((commit, named, abandoned.stage, stacks_on))
+                    Ok((commit, named, abandoned.stage, abandoned.beside, stacks_on))
                 }
                 Startable::NoRoadmap => Err(Adopted::NoRoadmap),
+                Startable::Misdeclared { why } => Err(Adopted::Misdeclared { why }),
                 Startable::Complete => Err(Adopted::RoadmapComplete),
                 Startable::InFlight => Err(Adopted::StageInFlight),
                 Startable::NoBrief => Err(Adopted::NoBrief),
@@ -2300,7 +2373,7 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
     // `named` comes back out rather than being worked out again up here: what an
     // unpicked base resolved through is decided inside, after the fetch, and the
     // Timeline is owed the name the branch actually came off.
-    let (commit, named, stage, stacks_on) = match read {
+    let (commit, named, stage, beside, stacks_on) = match read {
         Ok(read) => read,
         Err(refusal) => return Ok(refusal),
     };
@@ -2333,6 +2406,9 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
         let data_dir = state.data_dir.clone();
         let companions = conversation.companions.clone();
         let checkouts = state.checkouts.clone();
+        // Cloned rather than moved: the stages started beside this one clear the
+        // list their own branches inherit as the same person.
+        let author = author.clone();
 
         move || {
             let mut planned = vec![Checkout {
@@ -2390,16 +2466,19 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
         named: Some(&named),
     };
 
-    // The roadmap goes in with it, which is what makes this adoption stick: the
-    // human picked it here, and every wrap-up from here reads that name rather
-    // than working one out from the branch.
+    // The roadmap goes in with it, and which stage of it this is, which is what
+    // makes this adoption stick: the human picked it here, and every wrap-up from
+    // here reads those rather than working anything out from the branch.
     match store::start_stage(
         pool,
         id,
         base,
         &path,
         stacks_on.as_deref(),
-        &stage.roadmap,
+        store::RoadmapStage {
+            roadmap: &stage.roadmap,
+            label: &stage.label,
+        },
         &checkouts,
     )
     .await?
@@ -2467,11 +2546,397 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
     tokio::spawn(crate::runner::plan_stage(
         state.clone(),
         id,
-        stacks_on,
+        stacks_on.clone(),
         driving,
     ));
 
+    // And every stage the press starts beside this one, each as a Conversation of
+    // its own and each its own act: one that halts says so on this Timeline and
+    // the next is attempted anyway, which is the carry-on's rule and for the
+    // carry-on's reason. This one has started, and nothing here can undo that.
+    //
+    // After it rather than beside it, so that the Conversation the human composed
+    // is the one that starts first whatever the others come to — and so that each
+    // of these inherits a Conversation that is already a stage.
+    for stage in beside {
+        alongside(
+            state,
+            &conversation,
+            id,
+            stage,
+            &commit,
+            &named,
+            stacks_on.as_deref(),
+            &author,
+        )
+        .await;
+    }
+
     Ok(Adopted::Adopted)
+}
+
+/// Start one more ready stage of the adopted roadmap, as a Conversation of its
+/// own against the same Repo.
+///
+/// The other half of *Continue a roadmap starts every ready stage*: the press
+/// settles the Pairings, the companions and the base for all of them at once, so
+/// a stage started beside the first gets exactly what the first got — the same
+/// Pairings, the same companion rows, the same base commit and the same
+/// predecessor to stack on. It has no draft moment of its own, which is the one
+/// thing it shares with a stage an unattended settle starts.
+///
+/// [`crate::continuing::start`]'s order, for its reasons: the record, then git,
+/// then the store. What differs is where the branch comes from — that is settled
+/// by the press rather than worked out from a chain — and where a halt is said:
+/// there is a human at this button, but it is the press that has already
+/// succeeded, so what stops one of these is a notice on the Timeline of the
+/// Conversation they pressed it on rather than an answer to the press.
+///
+/// **Nothing left behind, and nothing left unsaid.** A halt at any point closes
+/// the half-made Conversation and unmakes whatever checkouts it got as far as,
+/// exactly as a refused press does — see [`make`], which unwinds its own, and
+/// [`unwind`], which is what takes them back once it has not. And every one of
+/// those halts says so on the pressed Timeline, through [`halted`]: a stage the
+/// pane named a moment ago is not something to let vanish into the server log.
+///
+/// The one halt that cannot promise the first half is the blocking task coming
+/// apart, there being no plan back out here to unwind — which says so in as many
+/// words rather than claiming otherwise.
+#[allow(clippy::too_many_arguments)]
+async fn alongside(
+    state: &AppState,
+    adopting: &store::Conversation,
+    pressed: i64,
+    stage: crate::stages::Stage,
+    commit: &str,
+    named: &str,
+    stacks_on: Option<&str>,
+    author: &Author,
+) {
+    let branch = stage.branch();
+
+    // The row first, because everything after it is written against the id — and
+    // a Repo taken off the registry between the press and here is the one thing
+    // that refuses it.
+    let started = store::start_conversation(&state.pool, adopting.repo.id, &branch).await;
+
+    let id = match started {
+        Ok(Some(id)) => id,
+        Ok(None) => {
+            tracing::error!(
+                pressed,
+                "the Repo the stage would be against has gone, so nothing was started"
+            );
+
+            return halted(
+                state,
+                pressed,
+                &stage,
+                "the Repo it would be against has been taken off the registry since the press",
+            )
+            .await;
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, pressed, "starting a stage beside the adopted one failed");
+
+            return halted(
+                state,
+                pressed,
+                &stage,
+                &format!("its own Conversation could not be started: {error}"),
+            )
+            .await;
+        }
+    };
+
+    // Everything the human settled on the composer, on the new row: the Pairings,
+    // the stage brief as its Brief, and the companions. The one inheritance
+    // funnel, shared with the stage an unattended settle starts — see
+    // [`crate::continuing::settle`].
+    if let Err(error) = crate::continuing::settle(state, id, adopting, &stage).await {
+        tracing::error!(error = ?error, pressed, stage = id, "preparing a stage beside the adopted one failed");
+
+        crate::continuing::gave_up(state, id).await;
+
+        return halted(
+            state,
+            pressed,
+            &stage,
+            &format!(
+                "it could not be given everything it inherits from this Conversation: {error}"
+            ),
+        )
+        .await;
+    }
+
+    // And the rows that inheritance wrote, read back rather than the ones they
+    // were copied from: what a stage works alongside is a companion **mirroring**
+    // its own branch, and a name the human typed on the composer is the first
+    // stage's alone — see [`crate::continuing::settle`], which is where the typed
+    // name is dropped. Planning off the draft's rows would cut one companion
+    // branch for every stage this press starts, which is two review units on one
+    // branch and git refusing the second of them.
+    let inherited = match store::load_conversation(&state.pool, id).await {
+        Ok(Some(inherited)) => inherited.companions,
+        Ok(None) => {
+            tracing::error!(
+                pressed,
+                stage = id,
+                "a stage started beside the adopted one has gone"
+            );
+
+            return halted(
+                state,
+                pressed,
+                &stage,
+                "the Conversation it had just been given has gone from the record",
+            )
+            .await;
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, pressed, stage = id, "reading back what a stage beside the adopted one inherited failed");
+
+            crate::continuing::gave_up(state, id).await;
+
+            return halted(
+                state,
+                pressed,
+                &stage,
+                &format!("what it inherits could not be read back: {error}"),
+            )
+            .await;
+        }
+    };
+
+    let path = worktrees::worktree_path(&state.data_dir, id, &adopting.repo.name, &branch);
+
+    // Every checkout it needs, planned before any of it is made and made under
+    // the same lock the press held for its own — see [`crate::AppState::checkouts`].
+    // Off the same base commit: what the human settled on the composer is the
+    // base of every stage this press starts.
+    let made = tokio::task::spawn_blocking({
+        let repo = adopting.repo.path.clone();
+        let path = path.clone();
+        let branch = branch.clone();
+        let commit = commit.to_owned();
+        let named = named.to_owned();
+        let data_dir = state.data_dir.clone();
+        let companions = inherited;
+        let checkouts = state.checkouts.clone();
+        let author = author.clone();
+
+        move || {
+            let mut planned = vec![Checkout {
+                companion: None,
+                repo,
+                path,
+                holds: Holds::Cut(branch.clone()),
+                commit,
+            }];
+
+            for companion in companions {
+                let beside = plan(&data_dir, id, &branch, companion, &planned)?;
+
+                planned.push(beside);
+            }
+
+            let making = checkouts.blocking_lock_owned();
+
+            make(&planned)?;
+
+            let cleared = clearing(&planned, &named, &author)?;
+
+            // The plan itself comes back out, which is what lets a halt below
+            // this take the checkouts back: everything above unwinds its own, and
+            // from here on they are made and nothing else knows what they are.
+            Ok::<_, Unmade>((planned, cleared, making))
+        }
+    })
+    .await;
+
+    let (planned, cleared, making) = match made {
+        Ok(Ok(made)) => made,
+        Ok(Err(unmade)) => {
+            crate::continuing::gave_up(state, id).await;
+
+            return halted(state, pressed, &stage, &unmade.said()).await;
+        }
+
+        // The one halt here that cannot promise nothing was left behind: a task
+        // that came apart got as far as whatever it got as far as, and there is no
+        // plan back out here to unwind. The Conversation is closed all the same,
+        // which is what leaves the directories to the sweep of orphaned worktrees.
+        Err(error) => {
+            tracing::error!(error = ?error, pressed, stage = id, "making a stage's worktrees beside the adopted one failed");
+
+            crate::continuing::say(
+                state,
+                pressed,
+                &format!(
+                    "Stage {} of the `{}` roadmap — *{}* — was ready to start beside this one, \
+                     and making its checkouts failed outright. Nothing was started for it and \
+                     the server log says what happened; a directory it got as far as making is \
+                     one the sweep of orphaned worktrees takes.",
+                    stage.label, stage.roadmap, stage.title,
+                ),
+            )
+            .await;
+
+            return crate::continuing::gave_up(state, id).await;
+        }
+    };
+
+    let checkouts = recorded(&planned);
+
+    let base = store::Base {
+        commit,
+        named: Some(named),
+    };
+
+    let staged = store::start_stage(
+        &state.pool,
+        id,
+        base,
+        &path,
+        stacks_on,
+        store::RoadmapStage {
+            roadmap: &stage.roadmap,
+            label: &stage.label,
+        },
+        &checkouts,
+    )
+    .await;
+
+    // And the last halt there is, which is the one the checkouts are already made
+    // for: taken back here rather than left standing, because a stage that never
+    // got set working is a Drafting row nothing would ever pick up and a pair of
+    // directories nothing would ever open. Still under `making`, so the sweep never
+    // sees them half-taken.
+    match staged {
+        Ok(store::Staged::Started) => {}
+        Ok(refused) => {
+            tracing::error!(
+                pressed,
+                stage = id,
+                refused = ?refused,
+                "a stage started beside the adopted one could not be set working",
+            );
+
+            unwind(state, id, planned).await;
+
+            return halted(
+                state,
+                pressed,
+                &stage,
+                "its Conversation could not be set working, the record having moved under the \
+                 press",
+            )
+            .await;
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, pressed, stage = id, "recording a stage beside the adopted one failed");
+
+            unwind(state, id, planned).await;
+
+            return halted(
+                state,
+                pressed,
+                &stage,
+                &format!("it could not be recorded as under way: {error}"),
+            )
+            .await;
+        }
+    }
+
+    // Recorded, so the sweep would keep them. What follows says so on two
+    // Timelines and launches a session, and none of it makes a directory.
+    drop(making);
+
+    if let Some(notice) = cleared.notice(named) {
+        crate::continuing::say(state, id, &notice).await;
+    }
+
+    // Both Timelines: its own, because the branch it is on was nobody's choice
+    // but this; and the pressed one, because that is where the human was standing
+    // when it happened.
+    crate::continuing::say(state, id, &adopted(&stage, &branch, stacks_on, named)).await;
+    crate::continuing::say(
+        state,
+        pressed,
+        &format!(
+            "Stage {} of the `{}` roadmap — *{}* — started beside it, as a Conversation of its \
+             own on `{branch}`.",
+            stage.label, stage.roadmap, stage.title,
+        ),
+    )
+    .await;
+
+    tracing::info!(
+        pressed,
+        stage = id,
+        branch,
+        label = stage.label,
+        roadmap = stage.roadmap,
+        "a stage of the roadmap started beside the adopted one",
+    );
+
+    state.nudges.announce(Nudge::Conversations);
+
+    let driving = state.drivers.driving(id);
+
+    tokio::spawn(crate::runner::plan_stage(
+        state.clone(),
+        id,
+        stacks_on.map(str::to_owned),
+        driving,
+    ));
+}
+
+/// Take a made stage back: its checkouts, and the half-made Conversation with
+/// them.
+///
+/// The unwind for a halt **after** [`make`] has succeeded, which is the one place
+/// nothing else does it — everything above that point unwinds its own, and from
+/// there the directories and their branches exist and only the plan knows where.
+/// Directory and branch together, for [`unmake`]'s reason: a branch cut moments
+/// ago by a start that then refused holds nothing worth keeping.
+///
+/// Off the runtime's threads, the way the making was — a `git worktree remove`
+/// and a branch delete apiece — and the Conversation closed after them, so that
+/// what the sweep of orphaned worktrees might read as nobody's is gone before the
+/// row that claimed it is.
+async fn unwind(state: &AppState, id: i64, planned: Vec<Checkout>) {
+    if let Err(error) = tokio::task::spawn_blocking(move || unmake(&planned)).await {
+        tracing::error!(error = ?error, stage = id, "taking a half-made stage's worktrees back failed");
+    }
+
+    crate::continuing::gave_up(state, id).await;
+}
+
+/// Say on the pressed Conversation's Timeline that a stage which would have
+/// started beside it did not, and why.
+///
+/// Where a halt goes for these: the press itself has already succeeded, so there
+/// is no answer left to refuse — and the Conversation the human pressed it on is
+/// the one they are looking at. The stage that would have carried it has been
+/// closed by the time this is said, so there is no Timeline of its own worth
+/// saying it on.
+///
+/// **Every path out of [`alongside`] that is not a start says this**, which is
+/// what the press owes a human who was shown *and beside it* a moment ago: a
+/// stage that simply never appeared, with the reason in the server log alone, is
+/// the one thing an offer that names its stages must never come to.
+async fn halted(state: &AppState, pressed: i64, stage: &crate::stages::Stage, why: &str) {
+    crate::continuing::say(
+        state,
+        pressed,
+        &format!(
+            "Stage {} of the `{}` roadmap — *{}* — was ready to start beside this one, and {why}. \
+             Nothing was started for it, and nothing was left behind.",
+            stage.label, stage.roadmap, stage.title,
+        ),
+    )
+    .await;
 }
 
 /// What an adopting Conversation's Timeline is told: which stage of which
@@ -2479,10 +2944,14 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
 ///
 /// [`crate::continuing::begun`]'s wording, with the two things adoption changes
 /// taken out of it. *With nobody asked* goes, because somebody did: a human
-/// pressed this. What stays is both halves: an adopted stage stacks on the base
-/// the human fixed it to, wherever that base is a predecessor there is anything
-/// left to stack on, and the half it did not take is as much worth saying as
-/// the half it did.
+/// pressed this. What stays is both halves: an adopted stage is cut from the
+/// base the human fixed it to, wherever that base is a predecessor there is
+/// anything left to stand on, and the half it did not take is as much worth
+/// saying as the half it did.
+///
+/// **Cut from** rather than *stacks on*, for [`crate::continuing::begun`]'s
+/// reason: where the stage ends up in its roadmap's chain is settled at its
+/// finish, when it joins — see [`crate::joins`].
 fn adopted(
     stage: &crate::stages::Stage,
     branch: &str,
@@ -2499,14 +2968,15 @@ fn adopted(
 
     match stacks_on {
         Some(predecessor) => format!(
-            "{started} Its branch `{branch}` stacks on `{predecessor}`, the base this \
-             Conversation was fixed to, the way this repository's `{}` records.",
+            "{started} Its branch `{branch}` was cut from `{predecessor}`, the base this \
+             Conversation was fixed to, and it joins its roadmap's chain at its finish the way \
+             this repository's `{}` records.",
             crate::stages::GIT_WORKFLOW,
         ),
         None => format!(
-            "{started} Its branch `{branch}` came off `{from}` and stacks on nothing: the base \
-             is the default branch, or work already in it, or this repository's `{}` records no \
-             way to stack a roadmap stage on the one before it.",
+            "{started} Its branch `{branch}` came off `{from}` and was cut from nothing else: \
+             the base is the default branch, or work already in it, or this repository's `{}` \
+             records no way to stack a roadmap stage on the one before it.",
             crate::stages::GIT_WORKFLOW,
         ),
     }

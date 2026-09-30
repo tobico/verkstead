@@ -72,7 +72,9 @@ import type {
   SharePublished,
   Shown,
   ShowingArchived,
+  StageEntry,
   StageListEvent,
+  StageState,
   SteerCancelled,
   SteerOpened,
   SteerSaved,
@@ -278,6 +280,9 @@ import { AUTOMATIC, DRAFT, titled } from "../src/workbench/naming";
 // The words a lifecycle state is said in, which the status button draws beside
 // the status and the sidebar's row reads aloud.
 import { STATE } from "../src/workbench/states";
+// And the words a roadmap stage's state is said in, which the card's row, the
+// pane's heading and the pane's nav line are all drawn with.
+import { stageState } from "../src/workbench/stages";
 // And the timeline, both ways again: it is the biggest of these, and a good
 // deal of what it says about a card is a rule rather than an element.
 // What is still the human's to settle on the brief card.
@@ -294,6 +299,7 @@ import statusButtonCss from "../src/workbench/StatusButton.module.css?raw";
 import banner from "../src/workbench/RemoteBanner.module.css";
 import timeline from "../src/workbench/Timeline.module.css";
 import timelineCss from "../src/workbench/Timeline.module.css?raw";
+import { WINDOW } from "../src/workbench/windowing";
 import truncatedCss from "../src/Truncated.module.css?raw";
 // And the frame the three panes stand in, both ways: it holds the layout rules
 // jsdom lays nothing out for, and the pane names everything else is found by.
@@ -2459,6 +2465,35 @@ describe("the adoption page", () => {
     expect(panel.textContent).toContain(ADOPTION.stage!.branch);
   });
 
+  /// And where the roadmap declares and has more than one stage ready, the page
+  /// names every one the press would start: the first becomes this conversation
+  /// and the rest start beside it, so what is offered is what pressing does.
+  it("names every stage the press would start", async () => {
+    const beside = [
+      {
+        label: "05",
+        title: "Packaging",
+        brief_path: "docs/roadmaps/mvp/05-packaging.md",
+        branch: "roadmaps/mvp/05-packaging",
+      },
+    ];
+
+    theAdoption(
+      whenever(
+        `/api/ui/conversations/${ADOPTING.id}`,
+        json({ ...ADOPTING, adopting: { ...ADOPTION, beside } }),
+      ),
+    );
+    const { container } = mount(`/conversations/${ADOPTING.id}`);
+
+    const panel = await drawn(container, `.${adoption.adoption}`);
+
+    expect(panel.textContent).toContain(ADOPTION.stage!.label);
+    expect(panel.textContent).toContain("05");
+    expect(panel.textContent).toContain("Packaging");
+    expect(panel.textContent).toContain("roadmaps/mvp/05-packaging");
+  });
+
   it("offers both profiles, the base commit and one continue press", async () => {
     theAdoption();
     const { container } = mount(`/conversations/${ADOPTING.id}`);
@@ -2662,6 +2697,40 @@ describe("the adoption page", () => {
         container.querySelector(`.${adoption.adoption} .${notices.error}`)!.textContent,
       ).toBe(
         "A branch named roadmaps stands in the way of the stage's own branch, and Verkstead did not make it.",
+      ),
+    );
+  });
+
+  /// And a roadmap that declares badly says what its lines got wrong, in the
+  /// server's own words.
+  ///
+  /// The other refusal that carries more than a name, and for the same reason:
+  /// what there is to go and do about it is in a line of `ROADMAP.md`, and no
+  /// phrasing here could say which line or what is wrong with it. The sentence is
+  /// the judgement's, so a roadmap refused at this press and the same roadmap
+  /// refused on a timeline read as one fault rather than two — which is why
+  /// nothing here rewords it.
+  it("says what a roadmap that declares badly got wrong", async () => {
+    theAdoption(
+      whenever(
+        `/api/ui/conversations/${ADOPTING.id}/adopt`,
+        json({
+          Misdeclared: {
+            why: "stage 04 of the mvp roadmap says `after 09`, and no stage of it is labelled 09",
+          },
+        } satisfies Adopted),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${ADOPTING.id}`);
+
+    fireEvent.click(await drawn(container, `.${adoption.adoption} .${adoption.adopt}`));
+
+    await waitFor(() =>
+      expect(
+        container.querySelector(`.${adoption.adoption} .${notices.error}`)!.textContent,
+      ).toBe(
+        "That roadmap declares badly, so nothing of it can start: stage 04 of the mvp roadmap says `after 09`, and no stage of it is labelled 09.",
       ),
     );
   });
@@ -14694,7 +14763,8 @@ describe("the pinned task list", () => {
     );
     expect(timelineCss).toContain(
       ".taskList .state,\n" +
-        ".stageList .state {\n" +
+        ".taskList .count,\n" +
+        ".stageList .count {\n" +
         "  position: absolute;",
     );
   });
@@ -15159,6 +15229,120 @@ const ROADMAP = (() => {
   return pinned.StageList;
 })();
 
+/// The same four stages with one line per state there is, which is what a
+/// roadmap of three in flight looks like once the record is speaking: one over,
+/// one somebody is on, one stopped, one nothing has started.
+///
+/// The fixture itself reads off its boxes — every roadmap does where Verkstead's
+/// record holds nothing about it — so the states that the record is the only
+/// possible source of are put in here.
+const STATED: StageEntry[] = stated([
+  { state: "Done" },
+  { state: "InProgress" },
+  { state: "Halted" },
+  { state: "ToDo" },
+]);
+
+/// And the same four stages as a **declaring** roadmap part-way through — the
+/// shape [`BEHIND_STANDS_ON`] declares: 01 is over, 02 is somebody's now, and the
+/// two that stand on stages say which of those they are still behind rather than
+/// reading *to do*.
+///
+/// One name and two of them, because what a stage is behind is a list: 03 stands
+/// on 02 alone, and 04 stands on 01, 02 and 03 with 01 settled out of the way.
+const BEHIND: StageEntry[] = stated([
+  { state: "Done" },
+  { state: "InProgress" },
+  { state: "WaitingOn", stages: ["02"] },
+  { state: "WaitingOn", stages: ["02", "03"] },
+]);
+
+/// What that roadmap's lines declare, which is what makes those four states the
+/// ones it would arrive with: two roots, 03 standing on 02, and 04 standing on all
+/// three of them.
+const BEHIND_STANDS_ON: string[][] = [[], [], ["02"], ["01", "02", "03"]];
+
+/// And the same four with the stage in flight **held** before its finish: every task
+/// of stage 02 is done and its join waits on the chain below it settling, which is
+/// the word that stands where *in progress* would.
+///
+/// A word and nothing else, unlike the one above it: which stage the join is waiting
+/// on is on that Conversation's own Timeline, where the hold wrote it, and a card's
+/// row has no room for it.
+const HELD: StageEntry[] = stated([
+  { state: "Done" },
+  { state: "WaitingToJoin" },
+  { state: "Halted" },
+  { state: "ToDo" },
+]);
+
+/// And the same four on a machine with nowhere to run them: 03 and 04 stand on
+/// nothing that has not settled and there is no place for either, which is a
+/// different thing from standing behind a stage — that waits on work, and this
+/// waits on the machine.
+///
+/// One word for the two limits there are, its roadmap's and the server's: which of
+/// them is holding a stage is on the Timeline of the Conversation that held it,
+/// and a card's row has no room for it.
+const PLACELESS: StageEntry[] = stated([
+  { state: "Done" },
+  { state: "InProgress" },
+  { state: "WaitingForAPlace" },
+  { state: "WaitingForAPlace" },
+]);
+
+/// The fixture's stages with one state each, in the roadmap's own order.
+function stated(states: StageState[]): StageEntry[] {
+  return ROADMAP.stages.map((stage, at) => ({ ...stage, state: states[at]! }));
+}
+
+/// And with the Conversations the record holds for them: the three stages
+/// anything of Verkstead's ever started, and the fourth — which nothing has —
+/// naming none.
+///
+/// Every standing rather than only the one in flight, because each of the three
+/// is a Conversation the reader can go and look at: the settled one's is where
+/// its pull request and its review are, and the stopped one's is what they have
+/// to do something about.
+const WORKING: (number | null)[] = [21, 22, 23, null];
+
+/// Those four stages as the record has them, states and Conversations both.
+const LED: StageEntry[] = stated([
+  { state: "Done" },
+  { state: "InProgress" },
+  { state: "Halted" },
+  { state: "ToDo" },
+]).map((stage, at) => ({ ...stage, conversation: WORKING[at]! }));
+
+/// The rows of one card, in the roadmap's own order: a button where the row leads
+/// to a Conversation and a plain span where it leads nowhere.
+function rowsOf(card: Element): HTMLElement[] {
+  return [
+    ...card.querySelectorAll<HTMLElement>(
+      `.${timeline.stages} li .${timeline.stage}`,
+    ),
+  ];
+}
+
+/// That roadmap in both of the places its card is drawn from — the pinned block
+/// and the row on the record where it landed — because the two are the one
+/// reading and so lead to the one set of Conversations.
+function ledBoth(stages: StageEntry[]): Partial<ConversationView> {
+  return {
+    pinned: [{ StageList: { ...ROADMAP, stages } }],
+    timeline: STAGED.timeline.map((event) =>
+      "StageList" in event
+        ? {
+            StageList: {
+              ...event.StageList,
+              roadmaps: [{ ...ROADMAP, stages }],
+            },
+          }
+        : event,
+    ),
+  };
+}
+
 /// The workbench with that conversation open.
 function theStaged(
   over: Partial<ConversationView> = {},
@@ -15193,7 +15377,14 @@ describe("the pinned stage list", () => {
     ).toEqual(ROADMAP.stages.map((stage) => [stage.number, stage.title]));
   });
 
-  /// The roadmap's rows read the way the backlog's do, number at the far end.
+  /// The roadmap's rows read the way the backlog's do, number at the far end —
+  /// with the state between the title and it, which is the one thing a stage's
+  /// row carries that a task's does not draw.
+  ///
+  /// One level inside the list item rather than on it, which is where a stage's
+  /// row parts company with a task's a second time: the row is the press that
+  /// leads to a stage's Conversation where there is one, so the parts hang off
+  /// the row rather than off the item it sits in.
   it("puts the number at the right edge of each row", async () => {
     theStaged();
     const { container } = mount(`/conversations/${STAGED.id}`);
@@ -15201,33 +15392,180 @@ describe("the pinned stage list", () => {
     const list = await drawn(container, `.${timeline.pinned} .${timeline.stageList}`);
 
     expect(
-      [...list.querySelectorAll(`.${timeline.stages} li`)].map((row) =>
-        [...row.children]
-          .map((part) => part.className)
-          .filter((name) => name !== timeline.state),
+      [...list.querySelectorAll(`.${timeline.stages} li .${timeline.stage}`)].map(
+        (row) => [...row.children].map((part) => part.className),
       ),
     ).toEqual(
-      ROADMAP.stages.map(() => [timeline.box, timeline.what, timeline.n]),
+      ROADMAP.stages.map(() => [
+        timeline.box,
+        timeline.what,
+        timeline.state,
+        timeline.n,
+      ]),
     );
   });
 
-  it("says which stages are checked", async () => {
-    theStaged();
+  /// Where each stage is, in the words the server's reading settled: the state
+  /// comes over as a word and the card says it — a box could say two of the four.
+  it("says where each stage is", async () => {
+    theStaged({
+      pinned: [
+        {
+          StageList: {
+            ...ROADMAP,
+            stages: STATED,
+          },
+        },
+      ],
+    });
     const { container } = mount(`/conversations/${STAGED.id}`);
 
     const list = await drawn(container, `.${timeline.pinned} .${timeline.stageList}`);
     const rows = [...list.querySelectorAll(`.${timeline.stages} li`)];
 
-    expect(rows.map((row) => row.classList.contains(timeline.done!))).toEqual(
-      ROADMAP.stages.map((stage) => stage.done),
-    );
+    expect(
+      rows.map((row) => row.querySelector(`.${timeline.state}`)!.textContent),
+    ).toEqual(["done", "in progress", "halted", "to do"]);
 
-    // Boxes and words both, as a task's row carries them.
-    expect(rows.map((row) => row.querySelector(`.${timeline.box}`)!.textContent)).toEqual(
-      ROADMAP.stages.map((stage) => (stage.done ? "☑" : "☐")),
-    );
-    expect(rows.map((row) => row.querySelector(`.${timeline.state}`)!.textContent)).toEqual(
-      ROADMAP.stages.map((stage) => (stage.done ? "done" : "to do")),
+    // And the one that is over is the one struck through and ticked: three of the
+    // four states are work that is not finished, however differently they read.
+    expect(rows.map((row) => row.classList.contains(timeline.done!))).toEqual([
+      true,
+      false,
+      false,
+      false,
+    ]);
+    expect(rows.map((row) => row.querySelector(`.${timeline.box}`)!.textContent)).toEqual([
+      "☑",
+      "☐",
+      "☐",
+      "☐",
+    ]);
+  });
+
+  /// And a stage of a declaring roadmap that has not started says which stages it
+  /// is standing behind, in place of the *to do* that says nothing: the ones the
+  /// server's reading found still unsettled, one name or several.
+  it("says which stages one that has not started is waiting on", async () => {
+    theStaged({
+      pinned: [
+        {
+          StageList: {
+            ...ROADMAP,
+            stages: BEHIND,
+          },
+        },
+      ],
+    });
+    const { container } = mount(`/conversations/${STAGED.id}`);
+
+    const list = await drawn(container, `.${timeline.pinned} .${timeline.stageList}`);
+    const rows = [...list.querySelectorAll(`.${timeline.stages} li`)];
+
+    expect(
+      rows.map((row) => row.querySelector(`.${timeline.state}`)!.textContent),
+    ).toEqual(["done", "in progress", "waiting on 02", "waiting on 02, 03"]);
+
+    // And a stage that is waiting is a stage whose work is not over, so only the
+    // one that settled is struck through and ticked.
+    expect(rows.map((row) => row.classList.contains(timeline.done!))).toEqual([
+      true,
+      false,
+      false,
+      false,
+    ]);
+  });
+
+  /// And a stage whose finish is held until the chain below it settles reads
+  /// *waiting to join*, where the record alone would have said *in progress*.
+  ///
+  /// The same register the sidebar row's own label is read off, at the same moment:
+  /// a stage cannot read one thing on its row over there and another on the
+  /// roadmap's card here.
+  it("says a stage whose finish is waiting is waiting to join", async () => {
+    theStaged({
+      pinned: [
+        {
+          StageList: {
+            ...ROADMAP,
+            stages: HELD,
+          },
+        },
+      ],
+    });
+    const { container } = mount(`/conversations/${STAGED.id}`);
+
+    const list = await drawn(container, `.${timeline.pinned} .${timeline.stageList}`);
+    const rows = [...list.querySelectorAll(`.${timeline.stages} li`)];
+
+    expect(
+      rows.map((row) => row.querySelector(`.${timeline.state}`)!.textContent),
+    ).toEqual(["done", "waiting to join", "halted", "to do"]);
+
+    // And its work is not over: what is waiting is the join, so the row is neither
+    // struck through nor ticked.
+    expect(rows.map((row) => row.classList.contains(timeline.done!))).toEqual([
+      true,
+      false,
+      false,
+      false,
+    ]);
+    expect(rows.map((row) => row.querySelector(`.${timeline.box}`)!.textContent)).toEqual([
+      "☑",
+      "☐",
+      "☐",
+      "☐",
+    ]);
+  });
+
+  /// And a stage that is ready with nowhere to run reads *waiting for a place*,
+  /// which is what keeps a roadmap gone quiet from reading as a roadmap the
+  /// scheduler forgot.
+  ///
+  /// The word the server sends and nothing the card works out: which of the two
+  /// limits is holding the stage, and how many places there are, are the running
+  /// server's own facts and a row would have no room for either.
+  it("says a stage that is ready with nowhere to run is waiting for a place", async () => {
+    theStaged({
+      pinned: [
+        {
+          StageList: {
+            ...ROADMAP,
+            stages: PLACELESS,
+          },
+        },
+      ],
+    });
+    const { container } = mount(`/conversations/${STAGED.id}`);
+
+    const list = await drawn(container, `.${timeline.pinned} .${timeline.stageList}`);
+    const rows = [...list.querySelectorAll(`.${timeline.stages} li`)];
+
+    expect(
+      rows.map((row) => row.querySelector(`.${timeline.state}`)!.textContent),
+    ).toEqual(["done", "in progress", "waiting for a place", "waiting for a place"]);
+
+    // And nothing about either of them is over: what is missing is a place, so the
+    // rows are neither struck through nor ticked.
+    expect(rows.map((row) => row.classList.contains(timeline.done!))).toEqual([
+      true,
+      false,
+      false,
+      false,
+    ]);
+  });
+
+  /// The word is drawn rather than kept for the readers that need words, which is
+  /// where this parts company with the backlog's card: a box can say two of the
+  /// states there are, and one of them names stages.
+  it("draws the state word rather than hiding it, unlike a task's", async () => {
+    expect(timelineCss).toContain(
+      ".stageList .state {\n" +
+        "  flex: none;\n" +
+        "  color: var(--ink-soft);\n" +
+        "  font-size: 0.8rem;\n" +
+        "  white-space: nowrap;\n" +
+        "}",
     );
   });
 
@@ -15255,8 +15593,12 @@ describe("the pinned stage list", () => {
 
   /// Pinned beside the backlog and the pull request, and drawn the same way:
   /// above the record and again on it, with nothing to pin or unpin. What it
-  /// does have is the one press its whole surface is — the briefs its stages
-  /// name, in the details pane.
+  /// does have is the press its whole surface is — the briefs its stages name,
+  /// in the details pane.
+  ///
+  /// And nothing else on a roadmap Verkstead's record holds nothing about, which
+  /// this fixture is: every row of it leads nowhere, so the surface is the whole
+  /// of what can be pressed, exactly as it was before any row led anywhere.
   it("is drawn above the record and is one press and nothing else", async () => {
     theStaged();
     const { container } = mount(`/conversations/${STAGED.id}`);
@@ -15264,10 +15606,132 @@ describe("the pinned stage list", () => {
     const list = await drawn(container, `.${timeline.pinned} .${timeline.stageList}`);
 
     expect(list.closest(`.${timeline.timeline}`)).toBeNull();
+    expect(ROADMAP.stages.every((stage) => stage.conversation === null)).toBe(
+      true,
+    );
     expect(list.querySelectorAll("button")).toHaveLength(0);
     expect(list.textContent).not.toContain("Pin");
     expect(list.getAttribute("role")).toBe("button");
     expect(list.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  /// And a row the record names a Conversation for goes there instead: a stage in
+  /// flight is a Conversation of its own, and that is where a reader following the
+  /// roadmap wants to be rather than at a brief they have already read.
+  ///
+  /// Which Conversation that is, is Verkstead's own record, arriving on the row
+  /// beside the state that came off the same row of it — the card works out
+  /// neither.
+  it("leads a stage's row to the conversation working it", async () => {
+    theStaged(ledBoth(LED));
+    const { container, history } = mount(`/conversations/${STAGED.id}`);
+
+    const list = await drawn(container, `.${timeline.pinned} .${timeline.stageList}`);
+
+    fireEvent.click(rowsOf(list)[1]!);
+
+    await waitFor(() => expect(history.get()).toBe("/conversations/22"));
+  });
+
+  /// And a stage that has **settled** keeps its link where the record has the
+  /// Conversation: the stage is over and that Conversation is still where its pull
+  /// request and its review are.
+  it("keeps the link on a stage that has settled", async () => {
+    theStaged(ledBoth(LED));
+    const { container, history } = mount(`/conversations/${STAGED.id}`);
+
+    const list = await drawn(container, `.${timeline.pinned} .${timeline.stageList}`);
+
+    fireEvent.click(rowsOf(list)[0]!);
+
+    await waitFor(() => expect(history.get()).toBe("/conversations/21"));
+  });
+
+  /// And a **halted** stage keeps it for the other reason: what a reader does about
+  /// one is go and look at that Conversation, which is the whole of why the word is
+  /// *halted* rather than anything about the work.
+  it("keeps the link on a stage that has stopped", async () => {
+    theStaged(ledBoth(LED));
+    const { container, history } = mount(`/conversations/${STAGED.id}`);
+
+    const list = await drawn(container, `.${timeline.pinned} .${timeline.stageList}`);
+
+    fireEvent.click(rowsOf(list)[2]!);
+
+    await waitFor(() => expect(history.get()).toBe("/conversations/23"));
+  });
+
+  /// And a stage the record holds no Conversation for is not a press at all — a
+  /// stage nothing has started, and one worked by hand or by the old tools. The
+  /// card under it goes on opening the roadmap from it, which is what every row of
+  /// this card did before any of them led anywhere.
+  it("makes no press of a stage the record holds no conversation for", async () => {
+    theStaged(ledBoth(LED), whenever(THE_ROADMAP, json(ROADMAP_PANE)));
+    const { container, history } = mount(`/conversations/${STAGED.id}`);
+
+    const list = await drawn(container, `.${timeline.pinned} .${timeline.stageList}`);
+
+    expect(rowsOf(list).map((row) => row.tagName)).toEqual([
+      "BUTTON",
+      "BUTTON",
+      "BUTTON",
+      "SPAN",
+    ]);
+
+    fireEvent.click(rowsOf(list)[3]!);
+
+    await waitFor(() =>
+      expect(history.get()).toBe(
+        `/conversations/${STAGED.id}/roadmaps/${ROADMAP.name}`,
+      ),
+    );
+  });
+
+  /// And the card's own head still opens the roadmap, whatever its rows lead to:
+  /// the surface is the press it always was, and the rows that lead somewhere are
+  /// what has been taken out of it.
+  it("opens the roadmap from the card's head all the same", async () => {
+    theStaged(ledBoth(LED), whenever(THE_ROADMAP, json(ROADMAP_PANE)));
+    const { container, history } = mount(`/conversations/${STAGED.id}`);
+
+    const head = await drawn(
+      container,
+      `.${timeline.pinned} .${timeline.stageList} .${timeline.eventHead}`,
+    );
+
+    fireEvent.click(head);
+
+    await waitFor(() =>
+      expect(history.get()).toBe(
+        `/conversations/${STAGED.id}/roadmaps/${ROADMAP.name}`,
+      ),
+    );
+  });
+
+  /// And the two cards one roadmap is drawn as — the pinned one and the one at the
+  /// row where it landed — lead to the same Conversations, being the one reading in
+  /// two places.
+  it("leads the copy on the record to the same conversations", async () => {
+    theStaged(ledBoth(LED));
+    const { container, history } = mount(`/conversations/${STAGED.id}`);
+
+    const listed = await drawn(
+      container,
+      `.${timeline.timeline} .${timeline.stageList}`,
+    );
+    const above = await drawn(
+      container,
+      `.${timeline.pinned} .${timeline.stageList}`,
+    );
+
+    // The same rows are presses on both of them, and say the same things.
+    expect(rowsOf(listed).map((row) => [row.tagName, row.textContent])).toEqual(
+      rowsOf(above).map((row) => [row.tagName, row.textContent]),
+    );
+
+    fireEvent.click(rowsOf(listed)[1]!);
+
+    await waitFor(() => expect(history.get()).toBe("/conversations/22"));
   });
 
   /// And on the record at the row that says the roadmap landed, drawn from the
@@ -15287,10 +15751,7 @@ describe("the pinned stage list", () => {
         row.querySelector(`.${timeline.state}`)!.textContent,
       ]),
     ).toEqual(
-      ROADMAP.stages.map((stage) => [
-        stage.title,
-        stage.done ? "done" : "to do",
-      ]),
+      ROADMAP.stages.map((stage) => [stage.title, stageState(stage.state)]),
     );
 
     expect(listed.querySelectorAll("button")).toHaveLength(0);
@@ -15384,7 +15845,11 @@ function stagesOfTen(done: number): StageListEvent {
     stages: ofTen(done).tasks.map((task) => ({
       number: task.number,
       title: task.title,
-      done: task.done,
+      state: task.done ? ({ state: "Done" } as const) : ({ state: "ToDo" } as const),
+      // Nothing of Verkstead's started any of these, which is what a roadmap
+      // whose window is the whole of what is being read wants: a row that leads
+      // nowhere is a row and nothing else.
+      conversation: null,
     })),
   };
 }
@@ -15458,7 +15923,7 @@ describe("a checklist longer than its card", () => {
     expect(
       [...card.querySelectorAll(`.${timeline.more}`)].map((row) => [
         row.querySelector("[aria-hidden]")!.textContent,
-        row.querySelector(`.${timeline.state}`)!.textContent,
+        row.querySelector(`.${timeline.count}`)!.textContent,
       ]),
     ).toEqual([
       ["…", "3 more"],
@@ -15576,6 +16041,276 @@ describe("a checklist longer than its card", () => {
   });
 });
 
+/// A roadmap of `states.length` stages, one state each and numbered from one:
+/// longer than the five a card draws, which is the only thing the window shows
+/// up on.
+function stagesOf(states: StageState[]): StageListEvent {
+  return {
+    name: ROADMAP.name,
+    title: ROADMAP.title,
+    stages: states.map((state, at) => ({
+      number: `${at + 1}`.padStart(2, "0"),
+      title: `Stage ${at + 1}`,
+      state,
+      conversation: null,
+    })),
+  };
+}
+
+/// A roadmap of `count` stages with the ones numbered `flight` running side by
+/// side: the stages the effort has gone past are over and the ones it has not
+/// reached are waiting, which is the shape a roadmap running in several places
+/// arrives in.
+function stagesRunning(count: number, ...flight: number[]): StageListEvent {
+  const furthest = Math.max(...flight);
+
+  return stagesOf(
+    Array.from({ length: count }, (_, at) =>
+      flight.includes(at + 1)
+        ? ({ state: "InProgress" } as const)
+        : at + 1 < furthest
+          ? ({ state: "Done" } as const)
+          : ({ state: "ToDo" } as const),
+    ),
+  );
+}
+
+/// What one card is showing, row by row down the list: a stage's number, or the
+/// count the ellipsis row standing in its place is hiding.
+function down(card: Element): string[] {
+  return [...card.querySelectorAll("ol > li")].map(
+    (row) =>
+      row.querySelector(
+        `.${row.classList.contains(timeline.more!) ? timeline.count : timeline.n}`,
+      )!.textContent!,
+  );
+}
+
+/// A roadmap's stages run side by side, so *where the work has got to* is as
+/// many places as it has stages in flight — and every one of them is a row on
+/// the card, whatever has to give way to fit it. The card is what a human looks
+/// at to see where the effort is, and a card that hid two of three running
+/// stages to stay five rows tall would be answering a different question.
+describe("a roadmap with more than one stage in flight", () => {
+  it("puts every stage in flight on the card, with the count over the whole roadmap", async () => {
+    theStaged({ pinned: [{ StageList: stagesRunning(10, 4, 5, 6) }] });
+    const { container } = mount(`/conversations/${STAGED.id}`);
+
+    const card = await drawn(
+      container,
+      `.${timeline.pinned} .${timeline.stageList}`,
+    );
+
+    // The three of them, with what the effort came out of and what it goes into
+    // either side — and the head still counting the roadmap rather than the
+    // window, which is what it is there for.
+    expect(down(card)).toEqual([
+      "2 more",
+      "03",
+      "04",
+      "05",
+      "06",
+      "07",
+      "3 more",
+    ]);
+    expect(card.querySelector(`.${timeline.progress}`)!.textContent).toBe(
+      "3 of 10 done",
+    );
+    expect(
+      [...card.querySelectorAll(`.${timeline.stages} li:not(.${timeline.more})`)]
+        .map((row) => row.querySelector(`.${timeline.state}`)!.textContent)
+        .filter((state) => state === "in progress"),
+    ).toHaveLength(3);
+  });
+
+  /// And each of those marks is a plain ellipsis, as the backlog's is. A
+  /// stage's row draws the word saying where the stage is, which is the one
+  /// thing this card says out loud that a task's does not — and the count of
+  /// what a mark is hiding is not that word: it rides in the class the
+  /// stylesheet keeps out of the layout on both cards, so a roadmap longer
+  /// than the window is still marked rather than tallied.
+  it("keeps the count on an ellipsis row out of the layout", async () => {
+    theStaged({ pinned: [{ StageList: stagesRunning(10, 4, 5, 6) }] });
+    const { container } = mount(`/conversations/${STAGED.id}`);
+
+    const card = await drawn(
+      container,
+      `.${timeline.pinned} .${timeline.stageList}`,
+    );
+
+    expect(
+      [...card.querySelectorAll(`.${timeline.more}`)].map((row) => [
+        row.querySelector("[aria-hidden]")!.textContent,
+        row.querySelector(`.${timeline.count}`)!.textContent,
+        row.querySelector(`.${timeline.state}`),
+      ]),
+    ).toEqual([
+      ["…", "2 more", null],
+      ["…", "3 more", null],
+    ]);
+
+    expect(timelineCss).toContain(
+      ".taskList .state,\n" +
+        ".taskList .count,\n" +
+        ".stageList .count {\n" +
+        "  position: absolute;",
+    );
+  });
+
+  /// Far apart is where the window stops being one slice of the list: the
+  /// stretches it can afford are drawn, and what is out of sight between them is
+  /// said the way what is out of sight at the ends is.
+  it("keeps stages in flight in view however far apart in the roadmap they sit", async () => {
+    theStaged({ pinned: [{ StageList: stagesRunning(20, 3, 10, 18) }] });
+    const { container } = mount(`/conversations/${STAGED.id}`);
+
+    const card = await drawn(
+      container,
+      `.${timeline.pinned} .${timeline.stageList}`,
+    );
+
+    expect(down(card)).toEqual([
+      "1 more",
+      "02",
+      "03",
+      "6 more",
+      "10",
+      "7 more",
+      "18",
+      "19",
+      "1 more",
+    ]);
+
+    // Five stages and four marks over a roadmap of twenty: the card is still a
+    // card, which is the whole reason it is windowed at all. Everything hidden
+    // is counted in one of the marks, so the rows add up to the roadmap.
+    expect(down(card).filter((row) => !row.endsWith("more"))).toHaveLength(
+      WINDOW,
+    );
+    expect(
+      down(card)
+        .filter((row) => row.endsWith("more"))
+        .map((row) => Number.parseInt(row, 10))
+        .reduce((all, hidden) => all + hidden, 0),
+    ).toBe(20 - WINDOW);
+  });
+
+  /// Which is the reading the one before it grew out of: a roadmap with one
+  /// place the work is at draws the five it always drew, and so do the two that
+  /// have no place at all.
+  it("draws one stage in flight, none, and a finished roadmap as it always did", async () => {
+    for (const [stages, entries] of [
+      [stagesRunning(10, 6), ["04", "05", "06", "07", "08"]],
+      [stagesOfTen(0), ["01", "02", "03", "04", "05"]],
+      [stagesOfTen(10), ["06", "07", "08", "09", "10"]],
+    ] as const) {
+      theStaged({ pinned: [{ StageList: stages }] });
+      const { container, unmount } = mount(`/conversations/${STAGED.id}`);
+
+      expect(
+        through(
+          await drawn(container, `.${timeline.pinned} .${timeline.stageList}`),
+        ),
+      ).toEqual({
+        entries,
+        above: entries[0] !== "01",
+        below: entries[4] !== "10",
+      });
+
+      unmount();
+    }
+  });
+
+  /// A stage nobody is working is in flight all the same where it has stopped:
+  /// a halted stage is the one somebody has to do something about, so it is the
+  /// last row worth hiding rather than the first. A stage waiting on another is
+  /// not — what that one is waiting for is the work the card is already showing.
+  it("counts a halted stage among them, and a stage waiting on one not at all", async () => {
+    theStaged({
+      pinned: [
+        {
+          StageList: stagesOf([
+            { state: "Done" },
+            { state: "Halted" },
+            { state: "Done" },
+            { state: "Done" },
+            { state: "Done" },
+            { state: "Done" },
+            { state: "InProgress" },
+            { state: "WaitingOn", stages: ["07"] },
+            { state: "ToDo" },
+            { state: "ToDo" },
+          ]),
+        },
+      ],
+    });
+    const { container } = mount(`/conversations/${STAGED.id}`);
+
+    const card = await drawn(
+      container,
+      `.${timeline.pinned} .${timeline.stageList}`,
+    );
+
+    // 02 stopped and 07 is somebody's now, so both are rows and what is left of
+    // the window goes either side of them rather than on the four stages between
+    // them — and 08, which is only waiting on 07, is a neighbour here rather
+    // than a place the work is.
+    expect(down(card)).toEqual([
+      "01",
+      "02",
+      "4 more",
+      "07",
+      "08",
+      "09",
+      "1 more",
+    ]);
+  });
+
+  /// And a stage waiting for a place is a neighbour too, which is what keeps the
+  /// card a card: a wide roadmap on a busy server has one of those per root past
+  /// the places there are, and a row kept for each of them would grow the card
+  /// with the queue rather than with the work.
+  it("draws a stage waiting for a place where the window reaches it, and no further", async () => {
+    theStaged({
+      pinned: [
+        {
+          StageList: stagesOf([
+            { state: "WaitingForAPlace" },
+            { state: "WaitingForAPlace" },
+            { state: "InProgress" },
+            { state: "WaitingForAPlace" },
+            { state: "WaitingForAPlace" },
+            { state: "WaitingForAPlace" },
+            { state: "WaitingForAPlace" },
+            { state: "WaitingForAPlace" },
+            { state: "WaitingForAPlace" },
+            { state: "WaitingForAPlace" },
+          ]),
+        },
+      ],
+    });
+    const { container } = mount(`/conversations/${STAGED.id}`);
+
+    const card = await drawn(
+      container,
+      `.${timeline.pinned} .${timeline.stageList}`,
+    );
+
+    // Nine of the ten are ready with nowhere to run, and the card is still five
+    // rows: the one stage anybody is on is the place the work is, and the rest
+    // are the neighbours around it.
+    expect(down(card)).toEqual(["01", "02", "03", "04", "05", "5 more"]);
+
+    // And each of the ones it did reach says what it is waiting for, which is
+    // the whole of what the word was added for.
+    expect(
+      [...card.querySelectorAll(`.${timeline.stages} li:not(.${timeline.more})`)]
+        .map((row) => row.querySelector(`.${timeline.state}`)!.textContent)
+        .filter((state) => state === "waiting for a place"),
+    ).toHaveLength(4);
+  });
+});
+
 /// The roadmap opened, as the details pane fetches it: one brief per stage, done
 /// or not — a stage's brief stays where it is for ever.
 ///
@@ -15589,12 +16324,80 @@ const ROADMAP_PANE: RoadmapPane = {
   stages: ROADMAP.stages.map((stage) => ({
     number: stage.number,
     title: stage.title,
-    done: stage.done,
+    state: stage.state,
+    // A roadmap written before there was anything to declare, which is what
+    // makes this the pane as it has always looked.
+    stands_on: null,
+    platform: null,
     html:
       stage.number === "04"
         ? null
         : `<h1>${stage.number}. ${stage.title}</h1>\n<h2>What to build</h2>\n` +
           `<p>The ${stage.title.toLowerCase()} of it.</p>`,
+  })),
+};
+
+/// And the same pane with one stage per state, as [`STATED`] is the card's.
+const STATED_PANE: RoadmapPane = {
+  ...ROADMAP_PANE,
+  stages: ROADMAP_PANE.stages.map((stage, at) => ({
+    ...stage,
+    state: STATED[at]!.state,
+  })),
+};
+
+/// And the same pane with stage 02 **held** before its finish, as [`HELD`] is the
+/// card of: the pane and the card are one Conversation's two views of one roadmap,
+/// read off the one register.
+const HELD_PANE: RoadmapPane = {
+  ...ROADMAP_PANE,
+  stages: ROADMAP_PANE.stages.map((stage, at) => ({
+    ...stage,
+    state: HELD[at]!.state,
+  })),
+};
+
+/// And the same pane with the two ready stages of [`PLACELESS`] having nowhere to
+/// run, which the pane says exactly where the card does.
+const PLACELESS_PANE: RoadmapPane = {
+  ...ROADMAP_PANE,
+  stages: ROADMAP_PANE.stages.map((stage, at) => ({
+    ...stage,
+    state: PLACELESS[at]!.state,
+  })),
+};
+
+/// And the same roadmap with every line declaring, which is what one written
+/// since ADR-0021 looks like: a root, two stages standing on others, and a
+/// platform on the last of them. The empty list is `no dependencies` on the
+/// line.
+const DECLARING: RoadmapPane = {
+  ...ROADMAP_PANE,
+  stages: ROADMAP_PANE.stages.map((stage, at) => ({
+    ...stage,
+    ...[
+      { stands_on: [], platform: null },
+      { stands_on: ["01"], platform: null },
+      { stands_on: ["01", "02"], platform: null },
+      { stands_on: ["03"], platform: "windows" },
+    ][at]!,
+  })),
+};
+
+/// And the same pane for the declaring roadmap part-way through that [`BEHIND`] is
+/// the card of: what each line stands on, and which of those the server's reading
+/// found it still behind.
+///
+/// The two side by side is the point of them being two things. What a stage stands
+/// on is its line and does not move; what it is waiting on is where the roadmap
+/// has got to, and stage 04 stands on all three of its neighbours while waiting on
+/// the two of them that have not settled.
+const BEHIND_PANE: RoadmapPane = {
+  ...ROADMAP_PANE,
+  stages: ROADMAP_PANE.stages.map((stage, at) => ({
+    ...stage,
+    state: BEHIND[at]!.state,
+    stands_on: BEHIND_STANDS_ON[at]!,
   })),
 };
 
@@ -15641,11 +16444,12 @@ describe("the stage list opened", () => {
     expect(askedFor(fetching, THE_ROADMAP)).toBeGreaterThan(0);
   });
 
-  /// A stage's brief stays where it is for ever, so a done stage has a document
-  /// like any other and the heading is where the done state goes — the backlog
-  /// pane's own arrangement, one level up.
-  it("marks the done stages on their own headings, briefs and all", async () => {
-    theStaged({}, whenever(THE_ROADMAP, json(ROADMAP_PANE)));
+  /// A stage's brief stays where it is for ever, so a stage that is over has a
+  /// document like any other and the heading is where its state goes — the
+  /// backlog pane's own arrangement, one level up, with four words where it has
+  /// two.
+  it("says where each stage is on its own heading, briefs and all", async () => {
+    theStaged({}, whenever(THE_ROADMAP, json(STATED_PANE)));
     const { container } = mount(`/conversations/${STAGED.id}`);
 
     fireEvent.click(
@@ -15660,14 +16464,227 @@ describe("the stage list opened", () => {
 
     expect(
       sections.map((section) => section.querySelector(`.${documents.mark}`)!.textContent),
-    ).toEqual(ROADMAP.stages.map((stage) => (stage.done ? "done" : "to do")));
+    ).toEqual(["done", "in progress", "halted", "to do"]);
 
-    // And the done ones are drawn with their briefs all the same.
+    // And the one that is over is drawn with its brief all the same.
     expect(
-      sections
-        .filter((_, at) => ROADMAP.stages[at]!.done)
-        .every((section) => section.querySelector(`.${documents.document}`) !== null),
-    ).toBe(true);
+      sections[0]!.querySelector(`.${documents.document}`),
+    ).not.toBeNull();
+  });
+
+  /// And the way around the roadmap says it too: one line per stage with where it
+  /// is under the name, so the nav answers the question the pane was opened with
+  /// before the reader has scrolled a brief.
+  it("says where each stage is on its table-of-contents line as well", async () => {
+    theStaged({}, whenever(THE_ROADMAP, json(STATED_PANE)));
+    const { container } = mount(`/conversations/${STAGED.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.pinned} .${timeline.stageList}`),
+    );
+
+    const nav = await drawn(container, `.${shell.detailsPane} .${contents.contents}`);
+
+    expect(
+      [...nav.querySelectorAll(`.${contents.sections} > li`)].map(
+        (line) => line.querySelector(`.${contents.mark}`)?.textContent,
+      ),
+    ).toEqual(["done", "in progress", "halted", "to do"]);
+
+    // Outside the link, which is what the line takes the reader to rather than
+    // what it says about where they would land.
+    const said = nav.querySelector(`.${contents.sections} > li .${contents.mark}`)!;
+
+    expect(said.closest(`.${contents.link}`)).toBeNull();
+    expect(said.previousElementSibling!.classList).toContain(contents.link!);
+  });
+
+  /// And a stage whose finish is held says *waiting to join* in both of the places
+  /// the pane says where a stage is, which is where the card says it too.
+  it("says a stage whose finish is waiting is waiting to join, in both places", async () => {
+    theStaged({}, whenever(THE_ROADMAP, json(HELD_PANE)));
+    const { container } = mount(`/conversations/${STAGED.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.pinned} .${timeline.stageList}`),
+    );
+
+    const nav = await drawn(container, `.${shell.detailsPane} .${contents.contents}`);
+
+    const said = ["done", "waiting to join", "halted", "to do"];
+
+    expect(
+      [...nav.querySelectorAll(`.${contents.sections} > li`)].map(
+        (line) => line.querySelector(`.${contents.mark}`)?.textContent,
+      ),
+    ).toEqual(said);
+
+    expect(
+      [...container.querySelectorAll(`.${shell.detailsPane} .${documents.section}`)].map(
+        (section) => section.querySelector(`.${documents.mark}`)!.textContent,
+      ),
+    ).toEqual(said);
+  });
+
+  /// And a stage that is ready with nowhere to run says *waiting for a place* in
+  /// both of those places too — told apart from the stages waiting on a stage,
+  /// which is the distinction the word is there for.
+  it("says a stage with nowhere to run is waiting for a place, in both places", async () => {
+    theStaged({}, whenever(THE_ROADMAP, json(PLACELESS_PANE)));
+    const { container } = mount(`/conversations/${STAGED.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.pinned} .${timeline.stageList}`),
+    );
+
+    const nav = await drawn(container, `.${shell.detailsPane} .${contents.contents}`);
+
+    const said = ["done", "in progress", "waiting for a place", "waiting for a place"];
+
+    expect(
+      [...nav.querySelectorAll(`.${contents.sections} > li`)].map(
+        (line) => line.querySelector(`.${contents.mark}`)?.textContent,
+      ),
+    ).toEqual(said);
+
+    expect(
+      [...container.querySelectorAll(`.${shell.detailsPane} .${documents.section}`)].map(
+        (section) => section.querySelector(`.${documents.mark}`)!.textContent,
+      ),
+    ).toEqual(said);
+  });
+
+  /// And a declaring roadmap's stages that have not started say which stages they
+  /// are standing behind, in both of the places the pane says where a stage is.
+  ///
+  /// Beside what each of them stands on rather than instead of it: the line is what
+  /// the roadmap says and does not move, and what a stage is still behind is where
+  /// the roadmap has got to — stage 04 stands on all three of its neighbours and
+  /// waits on the two of them that have not settled.
+  it("says which stages one that has not started is waiting on, in both places", async () => {
+    theStaged({}, whenever(THE_ROADMAP, json(BEHIND_PANE)));
+    const { container } = mount(`/conversations/${STAGED.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.pinned} .${timeline.stageList}`),
+    );
+
+    const nav = await drawn(container, `.${shell.detailsPane} .${contents.contents}`);
+
+    const said = ["done", "in progress", "waiting on 02", "waiting on 02, 03"];
+
+    expect(
+      [...nav.querySelectorAll(`.${contents.sections} > li`)].map(
+        (line) => line.querySelector(`.${contents.mark}`)?.textContent,
+      ),
+    ).toEqual(said);
+
+    const sections = [
+      ...container.querySelectorAll(`.${shell.detailsPane} .${documents.section}`),
+    ];
+
+    expect(
+      sections.map((section) => section.querySelector(`.${documents.mark}`)!.textContent),
+    ).toEqual(said);
+
+    // And what the line itself declared is still its own sentence under the
+    // heading, unmoved by where the roadmap has got to.
+    expect(
+      sections.map(
+        (section) => section.querySelector(`.${documents.declares}`)!.textContent,
+      ),
+    ).toEqual([
+      "Stands on nothing",
+      "Stands on nothing",
+      "Stands on 02",
+      "Stands on 01, 02, 03",
+    ]);
+  });
+
+  /// What each stage's line declared, said on the stage's own section: what it
+  /// stands on, and the platform it wants where it names one.
+  ///
+  /// Under the heading and above the box, because the box is the brief and this
+  /// came off the roadmap's own line.
+  it("says what each stage stands on and names its platform", async () => {
+    theStaged({}, whenever(THE_ROADMAP, json(DECLARING)));
+    const { container } = mount(`/conversations/${STAGED.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.pinned} .${timeline.stageList}`),
+    );
+
+    await drawn(container, `.${shell.detailsPane} .${documents.declares}`);
+
+    const sections = [
+      ...container.querySelectorAll(`.${shell.detailsPane} .${documents.section}`),
+    ];
+
+    expect(
+      sections.map(
+        (section) => section.querySelector(`.${documents.declares}`)!.textContent,
+      ),
+    ).toEqual([
+      // `no dependencies` on the line, which arrives as the empty list.
+      "Stands on nothing",
+      "Stands on 01",
+      "Stands on 01, 02",
+      "Stands on 03 · on windows",
+    ]);
+
+    // Between the heading and the brief, and outside the box the brief is in.
+    const said = sections[1]!.querySelector(`.${documents.declares}`)!;
+
+    expect(said.previousElementSibling!.tagName).toBe("H2");
+    expect(said.closest(`.${documents.document}`)).toBeNull();
+  });
+
+  /// And a roadmap whose lines declare nothing — which is every roadmap written
+  /// before there was anything to declare — reads exactly as it did.
+  it("says nothing of the kind where the roadmap declares nothing", async () => {
+    theStaged({}, whenever(THE_ROADMAP, json(ROADMAP_PANE)));
+    const { container } = mount(`/conversations/${STAGED.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.pinned} .${timeline.stageList}`),
+    );
+
+    await drawn(container, `.${shell.detailsPane} .${documents.section}`);
+
+    expect(
+      container.querySelectorAll(`.${shell.detailsPane} .${documents.declares}`),
+    ).toHaveLength(0);
+  });
+
+  /// A platform on its own does not declare anything, so the line reads as
+  /// undeclared — and the platform is still shown, that being what is on the
+  /// record.
+  it("names a platform on a line that declares nothing else", async () => {
+    theStaged(
+      {},
+      whenever(
+        THE_ROADMAP,
+        json({
+          ...ROADMAP_PANE,
+          stages: ROADMAP_PANE.stages.map((stage) => ({
+            ...stage,
+            platform: "macos",
+          })),
+        } satisfies RoadmapPane),
+      ),
+    );
+    const { container } = mount(`/conversations/${STAGED.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.pinned} .${timeline.stageList}`),
+    );
+
+    const said = await drawn(
+      container,
+      `.${shell.detailsPane} .${documents.declares}`,
+    );
+
+    expect(said.textContent).toBe("on macos");
   });
 
   /// The one thing a stage has no document for is a roadmap pointing at a brief
@@ -17460,6 +18477,66 @@ describe("a wrap-up waiting on its checks", () => {
     expect(
       narrowed!.querySelector("button")!.getAttribute("aria-label"),
     ).not.toContain("Wrapping");
+  });
+});
+
+/// And the same kind of condition one state earlier: a roadmap stage with every
+/// task done, held before its finish until every stage already in its roadmap's
+/// chain has settled.
+///
+/// A condition of implementing rather than a state, drawn the way the one above
+/// is — a flag beside the lifecycle, a label rather than a control. What it is
+/// waiting on is another stage, so there is nothing here to press either; which
+/// stage is on the timeline, where the hold wrote it.
+describe("a stage waiting to join its chain", () => {
+  it("says so where the conversation is named", async () => {
+    theBuilding({ waiting_to_join: true, ready_to_resume: false });
+    const { container } = mount(`/conversations/${BUILDING.id}`);
+
+    const line = await standing(container);
+
+    expect(line.word).toBe("Waiting to join");
+    expect(line.state).toBe("Implementing");
+
+    // A condition to read rather than one to do something about: the stage
+    // below is being got on with by whoever is on it.
+    expect(line.attention).toBe(false);
+  });
+
+  it("says nothing where the stage is getting on with its own work", async () => {
+    expect(BUILDING.waiting_to_join).toBe(false);
+
+    theBuilding();
+    const { container } = mount(`/conversations/${BUILDING.id}`);
+
+    expect((await standing(container)).word).not.toBe("Waiting to join");
+  });
+
+  /// And in the sidebar it is the label the row is read aloud by, in place of
+  /// the lifecycle word, exactly as a wrap-up down to its checks is.
+  it("is what the sidebar row says in place of its state", async () => {
+    theSidebar(
+      { state: "Implementing", working: false, waiting: false },
+      {
+        state: "Implementing",
+        working: false,
+        waiting: false,
+        waiting_to_join: true,
+      },
+    );
+    const { container } = mount();
+
+    const [working, held] = await cards(container);
+
+    expect(
+      working!.querySelector("button")!.getAttribute("aria-label"),
+    ).toContain("Implementing");
+    expect(held!.querySelector("button")!.getAttribute("aria-label")).toContain(
+      "Waiting to join",
+    );
+    expect(
+      held!.querySelector("button")!.getAttribute("aria-label"),
+    ).not.toContain("Implementing");
   });
 });
 

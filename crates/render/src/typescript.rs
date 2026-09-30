@@ -80,8 +80,8 @@ fn the_viewers_types_are_written_from_these() {
     // different sentence to put in front of the human.
     ConversationEntry::export_all(&config).unwrap();
 
-    // And what is offered beside the sidebar: the Repos holding roadmaps
-    // nothing is driving, which writes the roadmap inside it.
+    // And what is offered beside the sidebar: the Repos holding roadmaps with a
+    // stage that could be started, which writes the roadmap inside it.
     AbandonedRepo::export_all(&config).unwrap();
     ConversationView::export_all(&config).unwrap();
     NewConversation::export_all(&config).unwrap();

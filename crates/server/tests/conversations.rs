@@ -21,13 +21,13 @@ use serde::de::DeserializeOwned;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_render::{
-    Adopted, AgentType, BacklogPane, BaseRecorded, BranchRenamed, BriefSaved, CheckRollup,
-    CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed, CompanionMode,
+    AbandonedRepo, Adopted, AgentType, BacklogPane, BaseRecorded, BranchRenamed, BriefSaved,
+    CheckRollup, CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed, CompanionMode,
     CompanionModeChosen, CompanionRefusal, CompanionRemoved, ConversationArchived,
     ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
     ConversationUnarchived, ConversationView, GrillingStarted, Lifecycle, Merging, PickedView,
     PinnedEvent, Process, ProcessPicked, ProfileChosen, ProfileSaved, Registered, RepoEntry,
-    RepoSwitched, Resolved, Resumed, RoadmapPane, ShowingArchived, Standing, Started,
+    RepoSwitched, Resolved, Resumed, RoadmapPane, ShowingArchived, StageState, Standing, Started,
     SteerCancelled, SteerCompanionRefusal, SteerOpened, SteerPairingView, SteerSaved, TakenUp,
     TargetRecorded, TimelineEvent, Uncommitted,
 };
@@ -70,6 +70,20 @@ const CONFIG: &str = "config.yaml";
 /// And who that author is, on every workbench here but the one that takes it
 /// away.
 const THE_AUTHOR: &str = "git_author:\n  name: Verkstead Test\n  email: test@verkstead.invalid\n";
+
+/// How many stages of one roadmap this workbench runs side by side.
+///
+/// Written into the file rather than saved through the settings page, for the
+/// reason the author above is: what these tests are about is the press that reads
+/// it, and the page has a suite of its own. Read afresh at every press, so a
+/// number written between two of them is in force for the second.
+fn at_once(dir: &tempfile::TempDir, stages: usize) {
+    std::fs::write(
+        dir.path().join(CONFIG),
+        format!("{THE_AUTHOR}at_once:\n  roadmap_stages: {stages}\n"),
+    )
+    .unwrap();
+}
 
 /// Take the author back off a workbench, leaving one configured the way a
 /// machine that skipped the settings page is.
@@ -7156,15 +7170,20 @@ async fn the_stage_list_opens_as_every_stage_brief_it_names() {
     assert_eq!(
         pane.stages
             .iter()
-            .map(|stage| (stage.number.as_str(), stage.title.as_str(), stage.done))
+            .map(|stage| (
+                stage.number.as_str(),
+                stage.title.as_str(),
+                stage.state.clone()
+            ))
             .collect::<Vec<_>>(),
         [
-            ("01", "Workbench", true),
-            ("02", "Grilling", true),
-            ("03", "Implementation", false),
-            ("04", "Wrap-up", false),
+            ("01", "Workbench", StageState::Done),
+            ("02", "Grilling", StageState::Done),
+            ("03", "Implementation", StageState::ToDo),
+            ("04", "Wrap-up", StageState::ToDo),
         ],
-        "the roadmap's own order, which is the order they get worked in",
+        "the roadmap's own order, which is the order they get worked in — and off \
+         its boxes, nothing here having started a stage of it",
     );
 
     // A stage's brief stays where it is for ever, so a done stage has its
@@ -7190,6 +7209,55 @@ async fn the_stage_list_opens_as_every_stage_brief_it_names() {
     // says in words rather than drawing a gap.
     assert_eq!(pane.stages[1].html, None);
     assert_eq!(pane.stages[3].html, None);
+
+    // And nothing on any of them about what it stands on, this being a roadmap
+    // whose lines declare nothing — which is every roadmap written before there
+    // was anything to declare, and is a roadmap run in order.
+    assert!(
+        pane.stages
+            .iter()
+            .all(|stage| stage.stands_on.is_none() && stage.platform.is_none()),
+        "an undeclared roadmap reads exactly as it did: {:?}",
+        pane.stages,
+    );
+}
+
+/// And a roadmap that declares hands the pane what each stage stands on and the
+/// platform it wants, read off the line rather than out of the brief.
+///
+/// Every line of it declares, because a roadmap declaring on some lines and not
+/// others is one nothing will run — and stage 03's line declares beside the
+/// annotation saying whose it is, the two sharing one tail.
+#[tokio::test]
+async fn a_declaring_roadmap_says_what_each_stage_stands_on() {
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
+    grill(&app, id).await;
+
+    let worktree = PathBuf::from(opened(&app, id).await.worktree.unwrap().path);
+    staged(&worktree, "mvp", DECLARING, &[]);
+
+    let pane = roadmap_pane(&app, id, "mvp").await;
+
+    assert_eq!(
+        pane.stages
+            .iter()
+            .map(|stage| (
+                stage.number.as_str(),
+                stage.stands_on.clone(),
+                stage.platform.as_deref(),
+            ))
+            .collect::<Vec<_>>(),
+        [
+            // `no dependencies`: the root, which comes over as the empty list.
+            ("01", Some(Vec::new()), None),
+            ("02", Some(vec!["01".to_owned()]), None),
+            // Beside the annotation, which neither reading trips on.
+            ("03", Some(vec!["01".to_owned(), "02".to_owned()]), None),
+            ("04", Some(vec!["03".to_owned()]), Some("windows")),
+        ],
+        "the labels as the roadmap writes them, and the platform as it named it",
+    );
 }
 
 /// The ways there is nothing to open, refused the same way: what the human would
@@ -7304,6 +7372,78 @@ Turns this askance clone into Verkstead.
 - [x] 02: Grilling — [brief](02-grilling.md)
 - [ ] 03: Implementation — [brief](03-implementation.md)
 - [ ] 04: Wrap-up — [brief](04-wrap-up.md)
+";
+
+/// The same roadmap with every line declaring, which is what one written since
+/// ADR-0021 looks like: what each stage stands on, a platform where it wants
+/// one, and one line whose tail carries a declaration and the in-flight
+/// annotation at once.
+const DECLARING: &str = "\
+# MVP roadmap
+
+Turns this askance clone into Verkstead.
+
+## Stages
+
+- [x] 01: Workbench — [brief](01-workbench.md) — no dependencies
+- [x] 02: Grilling — [brief](02-grilling.md) — after 01
+- [ ] 03: Implementation — [brief](03-implementation.md) — after 01, 02 \
+*(in progress: `roadmaps/mvp/03-implementation`)*
+- [ ] 04: Wrap-up — [brief](04-wrap-up.md) — after 03 — on windows
+";
+
+/// And the same roadmap with nothing ticked at all, which is what a repository
+/// holds while the stage that would tick the first box is still on its own branch.
+///
+/// Verkstead's own record is the only thing that can say a stage of this one is
+/// done, which is what makes it the roadmap the record is read for.
+const NONE_TICKED: &str = "\
+# MVP roadmap
+
+Turns this askance clone into Verkstead.
+
+## Stages
+
+- [ ] 01: Workbench — [brief](01-workbench.md)
+- [ ] 02: Grilling — [brief](02-grilling.md)
+";
+
+/// And the same roadmap declaring badly: stage 04's line says nothing after its
+/// link while the three above it do.
+///
+/// The first of the judgement's four faults, and the one a human writing a
+/// roadmap by hand actually makes — a bare line is a root and a forgotten
+/// declaration at once, and there is no telling which. Which fault it is does not
+/// matter to anything here: what is being asked is whether a refusal reaches the
+/// press with its own words on it, and the judgement has already been tested on
+/// all four.
+const MISDECLARED: &str = "\
+# MVP roadmap
+
+Turns this askance clone into Verkstead.
+
+## Stages
+
+- [x] 01: Workbench — [brief](01-workbench.md) — no dependencies
+- [x] 02: Grilling — [brief](02-grilling.md) — after 01
+- [ ] 03: Implementation — [brief](03-implementation.md) — after 02
+- [ ] 04: Wrap-up — [brief](04-wrap-up.md)
+";
+
+/// And a declaring roadmap with two stages standing on nothing, which is the
+/// shape the scheduler is for: 01 and 02 are both ready from the start, 03 stands
+/// on 02 and 04 waits for both 01 and 03.
+const TWO_ROOTS: &str = "\
+# MVP roadmap
+
+Turns this askance clone into Verkstead.
+
+## Stages
+
+- [ ] 01: Workbench — [brief](01-workbench.md) — no dependencies
+- [ ] 02: Grilling — [brief](02-grilling.md) — no dependencies
+- [ ] 03: Implementation — [brief](03-implementation.md) — after 02
+- [ ] 04: Wrap-up — [brief](04-wrap-up.md) — after 01, 03
 ";
 
 /// And with that stage ticked off, which is what the stage after it leaves.
@@ -7598,6 +7738,28 @@ async fn ready_to_adopt(app: &Router, elsewhere: &Path, repo_id: i64, name: &str
     choose(app, id, "grilling", grilling).await;
     choose(app, id, "implementation", implementation).await;
     choose(app, id, "review", review).await;
+
+    id
+}
+
+/// The same for a second adoption on the same workbench: a Profile's name is
+/// taken once it is saved, so this one chooses the three that are already there.
+async fn ready_to_adopt_again(app: &Router, repo_id: i64, name: &str) -> i64 {
+    let id = adopting(app, repo_id, name).await;
+
+    let profiles: Vec<verkstead_render::ProfileEntry> = get(app, "/api/ui/profiles").await;
+
+    let saved = |wanted: &str| {
+        profiles
+            .iter()
+            .find(|profile| profile.name.as_deref() == Some(wanted))
+            .expect("the Profiles of the first adoption are still saved")
+            .id
+    };
+
+    choose(app, id, "grilling", saved("fable")).await;
+    choose(app, id, "implementation", saved("opus")).await;
+    choose(app, id, "review", saved("haiku")).await;
 
     id
 }
@@ -8490,7 +8652,8 @@ async fn steering_a_closed_conversation_checks_its_companions_out_again() {
 
 /// The whole of what pressing Adopt does: the stage's own branch off the base
 /// commit, a worktree with it, the stage brief as the Brief, and a Conversation
-/// that is implementing the stage.
+/// that is implementing the stage — with which stage of which roadmap it is on
+/// the record, which is the fact the human settled by pressing this.
 #[tokio::test]
 async fn adopting_starts_the_stage_on_its_own_branch_off_the_base_commit() {
     let (elsewhere, dir, app, repo, repo_id) = workbench().await;
@@ -8541,6 +8704,21 @@ async fn adopting_starts_the_stage_on_its_own_branch_off_the_base_commit() {
         worktree
             .join("docs/roadmaps/mvp/03-implementation.md")
             .exists()
+    );
+
+    // And the record says which stage of which roadmap this is — the label as
+    // the roadmap's own line writes it, rather than anything read back off the
+    // branch above.
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        store::stage_roadmap(&pool, id).await.unwrap(),
+        Some(store::StageOf {
+            roadmap: "mvp".to_owned(),
+            stage: Some("03".to_owned()),
+        }),
     );
 }
 
@@ -8674,6 +8852,294 @@ async fn a_companion_adoption_cannot_deliver_refuses_the_press_by_name() {
         worktrees(&askance).len(),
         1,
         "only the companion repository itself",
+    );
+}
+
+/// *Continue a roadmap* starts **every** stage of it that is ready, not the
+/// lowest of them: the first becomes the Conversation the human composed and the
+/// rest start beside it, each as a Conversation of its own.
+///
+/// The press stands in for whatever would otherwise have started them, so what it
+/// starts is what a settle would have — and everything the human settled on the
+/// composer is settled for all of them at once: the same Pairings, the same
+/// companions and the same base commit.
+#[tokio::test]
+async fn adopting_a_declaring_roadmap_starts_every_stage_that_is_ready() {
+    let (elsewhere, dir, app, repo, repo_id) = workbench().await;
+    roadmap(&repo, TWO_ROOTS, &["01-workbench.md", "02-grilling.md"]);
+    let tip = git(&repo, &["rev-parse", "HEAD"]).trim().to_owned();
+
+    let alongside = second_repo(&app, elsewhere.path(), "askance").await;
+    let id = ready_to_adopt(&app, elsewhere.path(), repo_id, "mvp").await;
+
+    add_companion(&app, id, alongside).await;
+
+    // The pane names both of them before the press, which is the whole of what
+    // makes the press honest: what is offered is what pressing does.
+    let pane = opened(&app, id)
+        .await
+        .adopting
+        .expect("this Conversation is adopting one");
+
+    assert_eq!(stage_of(&opened(&app, id).await).label, "01");
+    assert_eq!(
+        pane.beside
+            .iter()
+            .map(|stage| (stage.label.as_str(), stage.branch.as_str()))
+            .collect::<Vec<_>>(),
+        [("02", "roadmaps/mvp/02-grilling")],
+    );
+
+    assert_eq!(press_adopt(&app, id).await, Adopted::Adopted);
+
+    // The lowest is this Conversation, exactly as it has always been.
+    let first = opened(&app, id).await;
+
+    assert_eq!(first.branch, "roadmaps/mvp/01-workbench");
+    assert_eq!(first.state, Lifecycle::Implementing);
+
+    // And the other is a Conversation of its own, on its own branch.
+    let second = sidebar(&app)
+        .await
+        .into_iter()
+        .find(|entry| entry.branch == "roadmaps/mvp/02-grilling")
+        .expect("stage 02 started beside it");
+
+    let beside = opened(&app, second.id).await;
+
+    assert_eq!(beside.state, Lifecycle::Implementing);
+    assert_eq!(beside.repo.id, repo_id);
+
+    // The same base the human settled on the composer, which is the one act that
+    // settled it for both.
+    assert_eq!(beside.base_commit.as_deref(), Some(tip.as_str()));
+    assert_eq!(first.base_commit, beside.base_commit);
+    assert_eq!(
+        git(&repo, &["rev-parse", "refs/heads/roadmaps/mvp/02-grilling"]).trim(),
+        tip,
+    );
+
+    // The same Pairings, every one of them.
+    assert_eq!(beside.grilling_pairing, first.grilling_pairing);
+    assert_eq!(beside.implementation_pairing, first.implementation_pairing);
+    assert_eq!(beside.review_pairing, first.review_pairing);
+
+    // The same companions, checked out beside it rather than merely recorded.
+    assert_eq!(companions(&app, second.id).await, ["askance"]);
+    assert!(checked_out(&beside, "askance").starts_with(dir.path()));
+
+    // Its own Brief is its own stage's, read at the same commit.
+    assert!(brief(&beside).markdown.contains("02-grilling.md"));
+
+    // And the record says which stage of which roadmap each of them is.
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        store::stage_roadmap(&pool, second.id).await.unwrap(),
+        Some(store::StageOf {
+            roadmap: "mvp".to_owned(),
+            stage: Some("02".to_owned()),
+        }),
+    );
+
+    // The Conversation the human pressed on says so on its Timeline, that being
+    // where they were standing when it happened.
+    assert!(
+        notices(&opened(&app, id).await)
+            .iter()
+            .any(|notice| notice.contains("started beside it")),
+        "the press says what it started beside this one",
+    );
+}
+
+/// And a companion branch the human typed on the composer is the **first**
+/// stage's alone: the stages that start beside it mirror their own branches.
+///
+/// The rule a stage started by a settle has kept all along — two stages sharing
+/// one companion branch would be two review units on one branch with two pull
+/// requests fighting over it, and git would refuse the second checkout anyway. So
+/// what each of these is planned off is the row inheritance wrote for it rather
+/// than the row it was copied from.
+#[tokio::test]
+async fn a_typed_companion_branch_does_not_follow_the_stages_started_beside() {
+    let (elsewhere, _dir, app, repo, repo_id) = workbench().await;
+    roadmap(&repo, TWO_ROOTS, &["01-workbench.md", "02-grilling.md"]);
+
+    let writing = second_repo(&app, elsewhere.path(), "askance").await;
+    let id = ready_to_adopt(&app, elsewhere.path(), repo_id, "mvp").await;
+
+    add_companion(&app, id, writing).await;
+    companion_mode(&app, id, writing, CompanionMode::ReadWrite).await;
+    companion_branch(&app, id, writing, "alongside").await;
+
+    assert_eq!(press_adopt(&app, id).await, Adopted::Adopted);
+
+    // The stage the human composed gets the name they typed, as it always has.
+    let first = opened(&app, id).await;
+
+    assert_eq!(first.branch, "roadmaps/mvp/01-workbench");
+    assert_eq!(
+        git(
+            &checked_out(&first, "askance"),
+            &["symbolic-ref", "--short", "HEAD"]
+        )
+        .trim(),
+        "alongside",
+    );
+
+    // And the one started beside it mirrors its own, which is the only way both
+    // of them can have a companion checkout at all.
+    let second = sidebar(&app)
+        .await
+        .into_iter()
+        .find(|entry| entry.branch == "roadmaps/mvp/02-grilling")
+        .expect("stage 02 started beside it");
+
+    let beside = opened(&app, second.id).await;
+
+    assert_eq!(
+        git(
+            &checked_out(&beside, "askance"),
+            &["symbolic-ref", "--short", "HEAD"],
+        )
+        .trim(),
+        "roadmaps/mvp/02-grilling",
+    );
+    assert!(has_branch(
+        &elsewhere.path().join("askance"),
+        "roadmaps/mvp/02-grilling",
+    ));
+}
+
+/// A stage that cannot be started beside the adopted one is **said** on the
+/// Timeline the human pressed on, and leaves nothing behind.
+///
+/// Each start is its own act: the press has already succeeded for the stage they
+/// composed, so a sibling git will not cut a companion branch for halts itself
+/// and no more. And it is said, because the pane named it *and beside it* a
+/// moment ago — a stage that quietly never appeared, with the reason in the
+/// server log alone, is the one thing an offer that names its stages must not
+/// come to.
+#[tokio::test]
+async fn a_stage_that_cannot_start_beside_the_adopted_one_is_said_on_the_timeline() {
+    let (elsewhere, _dir, app, repo, repo_id) = workbench().await;
+    roadmap(&repo, TWO_ROOTS, &["01-workbench.md", "02-grilling.md"]);
+
+    let writing = second_repo(&app, elsewhere.path(), "askance").await;
+    let id = ready_to_adopt(&app, elsewhere.path(), repo_id, "mvp").await;
+
+    add_companion(&app, id, writing).await;
+    companion_mode(&app, id, writing, CompanionMode::ReadWrite).await;
+
+    // The branch stage 02 would mirror into the companion, already there. Stage
+    // 01's is free, so what this stops is the one start rather than the press.
+    let companion = elsewhere.path().join("askance");
+    git(&companion, &["branch", "roadmaps/mvp/02-grilling"]);
+
+    assert_eq!(press_adopt(&app, id).await, Adopted::Adopted);
+
+    // The stage the human composed started, its sibling's trouble being its own.
+    let first = opened(&app, id).await;
+
+    assert_eq!(first.branch, "roadmaps/mvp/01-workbench");
+    assert_eq!(first.state, Lifecycle::Implementing);
+
+    // And the halt is on the Timeline they were standing on, naming the stage,
+    // the repository it could not be given and what is in the way of it.
+    let said = notices(&first).join("\n");
+
+    assert!(
+        said.contains("Stage 02")
+            && said.contains("askance")
+            && said.contains("already a branch of that repository")
+            && said.contains("nothing was left behind"),
+        "which stage, which repository and what stopped it: {said:?}",
+    );
+
+    // Nothing left behind: the half-made row is closed rather than left drafting
+    // for somebody to find and wonder about — see `continuing::gave_up` — with
+    // nothing checked out under it, and no branch in the Repo the stage would
+    // have been worked in.
+    let halted = sidebar(&app)
+        .await
+        .into_iter()
+        .find(|entry| entry.branch == "roadmaps/mvp/02-grilling")
+        .expect("the half-made row is closed rather than gone");
+
+    let halted = opened(&app, halted.id).await;
+
+    assert_eq!(halted.state, Lifecycle::Closed);
+    assert_eq!(halted.worktree, None);
+    assert!(
+        !has_branch(&repo, "roadmaps/mvp/02-grilling"),
+        "and no branch in the Repo the stage would have been worked in",
+    );
+}
+
+/// And a roadmap with a stage in flight is continued for the ones that are
+/// ready: the guard that refused the whole roadmap for it has gone.
+///
+/// What that guard protected against — a second Conversation on a stage already
+/// under way — is still refused, by the record saying the stage is in flight and
+/// by its branch being taken.
+#[tokio::test]
+async fn a_roadmap_with_a_stage_in_flight_is_continued_for_the_one_that_is_ready() {
+    let (elsewhere, dir, app, repo, repo_id) = workbench().await;
+    roadmap(&repo, TWO_ROOTS, &["01-workbench.md", "02-grilling.md"]);
+
+    // One at a time to begin with, so the first press starts stage 01 and leaves
+    // 02 where it is — which is the roadmap this is about: one stage under way,
+    // and one standing on nothing beside it.
+    at_once(&dir, 1);
+
+    // Stage 01 under way: adopted a moment ago, which is the record saying so and
+    // its branch being cut in the one act.
+    let first = ready_to_adopt(&app, elsewhere.path(), repo_id, "mvp").await;
+    assert_eq!(press_adopt(&app, first).await, Adopted::Adopted);
+    assert_eq!(
+        opened(&app, first).await.branch,
+        "roadmaps/mvp/01-workbench"
+    );
+
+    // And the limit back to three, so that what holds 02 up now is only what the
+    // record says about 01 rather than the places the roadmap has.
+    at_once(&dir, 3);
+
+    // The roadmap is still offered, and for stage 02 alone — 01 is somebody's,
+    // and 03 and 04 stand on what has not settled.
+    let second = ready_to_adopt_again(&app, repo_id, "mvp").await;
+    let pane = opened(&app, second)
+        .await
+        .adopting
+        .expect("this Conversation is adopting one");
+
+    assert_eq!(
+        pane.stage.expect("stage 02 stands on nothing").label,
+        "02",
+        "the stage the press would start",
+    );
+    assert!(
+        pane.beside.is_empty(),
+        "and nothing beside it: 01 is under way and holding a place of its own",
+    );
+
+    assert_eq!(press_adopt(&app, second).await, Adopted::Adopted);
+
+    let view = opened(&app, second).await;
+
+    assert_eq!(view.branch, "roadmaps/mvp/02-grilling");
+    assert_eq!(view.state, Lifecycle::Implementing);
+
+    assert_eq!(
+        sidebar(&app)
+            .await
+            .iter()
+            .filter(|entry| entry.branch.starts_with("roadmaps/mvp/"))
+            .count(),
+        2,
+        "one Conversation per stage, and neither stage started twice",
     );
 }
 
@@ -9067,6 +9533,124 @@ async fn only_a_drafting_adopting_conversation_can_be_adopted() {
     assert_eq!(worktrees(&repo).len(), 2, "the repository and one worktree");
 }
 
+/// Which stage of a roadmap the adoption offers comes off Verkstead's own record
+/// where it has one, and off the boxes where it has none — the same rule the
+/// carry-on joins the two readings by, asked here of a Repo nothing is checked out
+/// of, and read by all three places at once.
+///
+/// Nothing in this roadmap is ticked and nothing in it is annotated, which is what
+/// a repository holds while the stage that would tick the first box is still on
+/// its own branch: a stage ticks its own box in its own finish commit, and that
+/// commit rides on the stage's branch until its pull request merges.
+///
+/// So off the boxes alone the reading finds stage 01 open, finds its branch — cut
+/// by the adoption below — and refuses the whole roadmap: the effort that most
+/// needs carrying on is the one that offers nothing. Which is exactly what the
+/// record is here to fix.
+#[tokio::test]
+async fn the_record_is_what_says_which_stage_a_roadmap_has_left_to_adopt() {
+    let (elsewhere, _dir, app, repo, repo_id) = workbench().await;
+    roadmap(&repo, NONE_TICKED, &["01-workbench.md", "02-grilling.md"]);
+
+    // Stage 01 is adopted, which is what puts its label on the record: a branch of
+    // its own in the Repo, and a Conversation implementing that stage.
+    let first = ready_to_adopt(&app, elsewhere.path(), repo_id, "mvp").await;
+
+    assert_eq!(press_adopt(&app, first).await, Adopted::Adopted);
+    assert_eq!(
+        opened(&app, first).await.branch,
+        "roadmaps/mvp/01-workbench",
+    );
+
+    // In flight, and refused as in flight by the record itself — the roadmap on
+    // the default branch says nothing at all about stage 01, no tick and no
+    // annotation, so the branch was the only thing that ever knew.
+    let second = ready_to_adopt_again(&app, repo_id, "mvp").await;
+
+    assert_eq!(adopted_stage(&app, second).await, None);
+    assert!(
+        waiting(&app).await.is_empty(),
+        "and the Repo is holding nothing to adopt while somebody is on it",
+    );
+    assert_eq!(press_adopt(&app, second).await, Adopted::StageInFlight);
+
+    // And settled, which is the human's own say: a Conversation in Done is a stage
+    // whose work is finished, whether or not anybody has merged its branch.
+    assert_eq!(steer(&app, first).await, SteerOpened::Opened);
+    assert_eq!(
+        steer_into(&app, first, "Done", false).await,
+        ConversationSteered::Steered,
+    );
+    assert_eq!(opened(&app, first).await.state, Lifecycle::Done);
+
+    // The notice, the page and the press, all three off the one rule and all three
+    // naming stage 02 — with stage 01's box still unticked on the branch every one
+    // of them is reading.
+    assert_eq!(
+        waiting(&app)
+            .await
+            .iter()
+            .flat_map(|repo| repo.roadmaps.iter())
+            .map(|roadmap| (roadmap.name.as_str(), roadmap.stage.as_str()))
+            .collect::<Vec<_>>(),
+        [("mvp", "02")],
+    );
+    assert_eq!(adopted_stage(&app, second).await.as_deref(), Some("02"));
+    assert_eq!(press_adopt(&app, second).await, Adopted::Adopted);
+    assert_eq!(
+        opened(&app, second).await.branch,
+        "roadmaps/mvp/02-grilling",
+        "which is the stage the press started",
+    );
+
+    assert_eq!(
+        git(&repo, &["show", "main:docs/roadmaps/mvp/ROADMAP.md"]),
+        NONE_TICKED,
+        "and the boxes on the default branch never said any of it",
+    );
+}
+
+/// And a stage whose Conversation was closed before it ever wrapped up did not
+/// settle: it is on the record as abandoned, which says nothing about whether the
+/// stage is done, and what refuses it is the branch it left behind — exactly as it
+/// did before there was a record. Reopening abandoned work is nobody's business
+/// here, and the branch is the human's to look at.
+#[tokio::test]
+async fn a_stage_abandoned_part_way_through_is_refused_by_its_branch() {
+    let (elsewhere, _dir, app, repo, repo_id) = workbench().await;
+    roadmap(&repo, NONE_TICKED, &["01-workbench.md", "02-grilling.md"]);
+
+    let first = ready_to_adopt(&app, elsewhere.path(), repo_id, "mvp").await;
+
+    assert_eq!(press_adopt(&app, first).await, Adopted::Adopted);
+    assert_eq!(close(&app, first).await, ConversationClosed::Closed);
+
+    let second = ready_to_adopt_again(&app, repo_id, "mvp").await;
+
+    assert_eq!(adopted_stage(&app, second).await, None);
+    assert_eq!(
+        press_adopt(&app, second).await,
+        Adopted::BranchExists,
+        "stage 01 is still what is next, and `roadmaps/mvp/01-workbench` is still there",
+    );
+}
+
+/// What stage an adopting Conversation's page names, where it names one.
+async fn adopted_stage(app: &Router, id: i64) -> Option<String> {
+    opened(app, id)
+        .await
+        .adopting
+        .expect("this Conversation is adopting a roadmap")
+        .stage
+        .map(|stage| stage.label)
+}
+
+/// And the notice under the new-conversation box: the registered Repos holding
+/// roadmaps nothing is driving.
+async fn waiting(app: &Router) -> Vec<AbandonedRepo> {
+    get(app, "/api/ui/abandoned-roadmaps").await
+}
+
 /// A branch that was there when the human picked it can be gone by the time the
 /// button is pressed, which is exactly why it is asked again.
 #[tokio::test]
@@ -9198,6 +9782,72 @@ async fn adopting_is_refused_by_name_for_each_way_the_stage_has_gone() {
     // And a note left over from an attempt that was abandoned too stops
     // nothing: the branch is the fact, and it is not there.
     git(&repo, &["branch", "-D", "someone-elses"]);
+
+    assert_eq!(press_adopt(&app, id).await, Adopted::Adopted);
+}
+
+/// A roadmap that declares badly is refused at all three doors of the adoption:
+/// the notice offers nothing, the page names no stage, and the press says which
+/// line to go and fix.
+///
+/// The press is the one of the three with a human waiting on an answer, and a
+/// roadmap written by hand or by the old tools — which is what adoption is for —
+/// is the likeliest to declare badly. So it names the fault where the press was
+/// made rather than leaving it on a Timeline nobody has opened, and the sentence
+/// it names it in is the judgement's own: the same words `verkstead done` refuses
+/// the roadmap's own session in, and the same words a running roadmap leaves on a
+/// Timeline. One fault reads as one fault wherever the human meets it.
+///
+/// Refused rather than repaired, and never run in order instead — which would
+/// run a roadmap in a way nobody wrote down.
+#[tokio::test]
+async fn adopting_a_roadmap_that_declares_badly_is_refused_with_the_fault_named() {
+    let (elsewhere, _dir, app, repo, repo_id) = workbench().await;
+    roadmap(
+        &repo,
+        MISDECLARED,
+        &["03-implementation.md", "04-wrap-up.md"],
+    );
+
+    // The notice under the new-conversation box has nothing to say about this
+    // Repo, and neither has the compose page beside it — they are one reading, so
+    // they offer the same nothing. The human cannot press what would be refused.
+    assert_eq!(
+        waiting(&app).await,
+        Vec::new(),
+        "nothing of a roadmap that declares badly is offered",
+    );
+
+    let id = ready_to_adopt(&app, elsewhere.path(), repo_id, "mvp").await;
+
+    // Nor does the page the press is actually on, which reads the roadmap afresh
+    // at this Conversation's own base.
+    assert_eq!(
+        opened(&app, id)
+            .await
+            .adopting
+            .expect("this Conversation is adopting a roadmap")
+            .stage,
+        None,
+        "the adopting page names no stage off it either",
+    );
+
+    let refused = press_adopt(&app, id).await;
+
+    let Adopted::Misdeclared { why } = &refused else {
+        panic!("the press is where the fault is worth wording, got {refused:?}");
+    };
+
+    assert!(
+        why.contains("mvp") && why.contains("04"),
+        "which roadmap, and which line to go and read: {why:?}",
+    );
+
+    nothing_adopted(&app, id, &repo).await;
+
+    // And the line put right is a roadmap the press starts, nothing here having
+    // refused a declaration for being one.
+    roadmap(&repo, DECLARING, &[]);
 
     assert_eq!(press_adopt(&app, id).await, Adopted::Adopted);
 }
