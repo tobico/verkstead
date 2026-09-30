@@ -148,9 +148,9 @@ jobs:
   # Node's six tools add one tarball, two archives and two `npm install -g`
   # runs to the setup below, and six installs of one package to the suite.
   # Python's four add one archive and one `pip install` — the runner's own
-  # interpreter carries pip already — and a proof apiece. Nothing here
-  # builds a project, so what each ecosystem costs this job is its toolchain's
-  # download rather than its proofs.
+  # interpreter carries pip already — and a proof apiece. Only C/C++'s proof
+  # builds a project, and that one is two source files, so what each ecosystem
+  # costs this job is its toolchain's download rather than its proofs.
   #
   # **And .NET, the last of them, costs this job no download at all**: the
   # runner image carries a .NET SDK under `/usr/lib/dotnet`, which is inside
@@ -317,6 +317,26 @@ jobs:
           sudo python3 -m pip install --break-system-packages --ignore-installed \
             poetry==2.4.1 pipenv==2026.5.1
 
+      # **And C/C++, whose proof is a build rather than an install**: a CMake
+      # project configured with Ninja and built twice in a session's Sandbox,
+      # every compile going through the Compile Server — so that one needs the
+      # sccache the server runs as well as the two build tools. The C and C++
+      # compilers are the runner image's own, under `/usr/bin`.
+      #
+      # CMake and Ninja from the distribution, into `/usr/bin`, which is inside
+      # every bind a session gets. sccache from its project's own release into
+      # `/usr/local/bin`, for the reason deno and bun are: the distribution's is
+      # several releases behind the one the dev shell's nixpkgs carries, and
+      # this is the release a developer ran the proof against.
+      - name: Install CMake, Ninja and sccache 0.15.0
+        run: |
+          sudo apt-get install -y cmake ninja-build
+
+          curl -sSfL -o "$RUNNER_TEMP/sccache.tar.gz" \
+            https://github.com/mozilla/sccache/releases/download/v0.15.0/sccache-v0.15.0-x86_64-unknown-linux-musl.tar.gz
+          tar -C "$RUNNER_TEMP" -xzf "$RUNNER_TEMP/sccache.tar.gz"
+          sudo install -m 0755 "$RUNNER_TEMP/sccache-v0.15.0-x86_64-unknown-linux-musl/sccache" /usr/local/bin/sccache
+
       # And the same question asked of every tool on the list, in a line naming
       # the one that fails it rather than as a test failure about a shell that
       # could not find a program — the reason the sandbox-surface step in the
@@ -330,7 +350,7 @@ jobs:
         run: |
           status=0
 
-          for tool in go zip node npm pnpm yarn yarn-berry deno bun python3 uv poetry pipenv dotnet tar sha1sum; do
+          for tool in go zip node npm pnpm yarn yarn-berry deno bun python3 uv poetry pipenv dotnet tar sha1sum sccache cmake ninja cc c++; do
             found=$(command -v "$tool" || true)
 
             if [ -z "$found" ]; then

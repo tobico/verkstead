@@ -25,6 +25,11 @@
 //!    branch that would pass whatever the tool did with its variable — a build
 //!    needing nothing looks exactly like a build served out of a store.
 //!
+//! **C/C++ is the one descriptor whose proof is a build instead**, because
+//! what it names is no store but the Compile Server: a CMake project built
+//! twice in one Sandbox, read off the server's own stats — see
+//! [`cmake_compiles_through_the_compile_server_and_a_clean_rebuild_is_all_hits`].
+//!
 //! *Found the store populated* is deliberately nowhere in that list. The store
 //! is populated because the first two installs populated it, whether or not the
 //! third read a byte of it.
@@ -193,6 +198,24 @@ impl Machine {
         std::fs::create_dir_all(&dir).expect("a Build Cache directory to hand out");
 
         let cache = BuildCache::at(dir, None, data_dir);
+        cache.opening(&self.settings.config());
+
+        cache
+    }
+
+    /// The one Build Cache again, this time **with the sccache the machine
+    /// has**, which is what a Compile Server is started from — the only proof
+    /// in this file that wants one. See the CMake proof at the foot of the file.
+    ///
+    /// Its Data Directory is the fixture's own rather than one beside it: the
+    /// Compile Server binds the Worktrees directory under it, and the Worktrees
+    /// the sandboxes build in are the ones [`machine`] made there.
+    fn compiling_cache(&self, sccache: &Path) -> BuildCache {
+        let dir = self.state.path().join("cache");
+
+        std::fs::create_dir_all(&dir).expect("a Build Cache directory to hand out");
+
+        let cache = BuildCache::at(dir, Some(sccache.to_owned()), self.state.path().to_owned());
         cache.opening(&self.settings.config());
 
         cache
@@ -3937,4 +3960,271 @@ fn listed(ran: &Ran, name: &str) -> String {
         })
         .trim()
         .to_owned()
+}
+
+// ---------------------------------------------------------------------------
+// C and C++: CMake, through the Compile Server.
+// ---------------------------------------------------------------------------
+
+/// The port an sccache client asks for its server on, which is sccache's own
+/// default: nothing Verkstead sets names another one, so it is the port the
+/// Compile Server listens on and the one a session's client dials.
+const SCCACHE_PORT: u16 = 4226;
+
+/// A small CMake project that is nonetheless a real one: a C source and a C++
+/// source, and a header under `include/` so that a `-I` is on every compile
+/// line. The minimum is the first release that reads the two launchers out of
+/// the environment, which is the whole of what the descriptor sets.
+fn cmake_project(at: &Path) {
+    std::fs::create_dir_all(at.join("include")).unwrap();
+
+    std::fs::write(
+        at.join("CMakeLists.txt"),
+        "cmake_minimum_required(VERSION 3.17)\n\
+         project(greeting C CXX)\n\
+         add_executable(greeting main.cpp greet.c)\n\
+         target_include_directories(greeting PRIVATE include)\n",
+    )
+    .unwrap();
+    std::fs::write(at.join("include/greet.h"), "int greet(void);\n").unwrap();
+    std::fs::write(
+        at.join("greet.c"),
+        "#include \"greet.h\"\nint greet(void) { return 42; }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        at.join("main.cpp"),
+        "extern \"C\" {\n#include \"greet.h\"\n}\n\
+         int main() { return greet() == 42 ? 0 : 1; }\n",
+    )
+    .unwrap();
+}
+
+/// What the Compile Server said about itself, read off the file a session's
+/// client wrote it into.
+fn stats(worktree: &Path, name: &str) -> serde_json::Value {
+    let written = std::fs::read_to_string(worktree.join(name))
+        .unwrap_or_else(|error| panic!("the session was supposed to write {name}: {error}"));
+
+    serde_json::from_str(&written)
+        .unwrap_or_else(|error| panic!("{name} is sccache's JSON ({error}): {written}"))
+}
+
+/// How many compiles of C or C++ one of those counted under `under` — the
+/// hits or the misses.
+fn c_family(stats: &serde_json::Value, under: &str) -> u64 {
+    stats["stats"][under]["counts"]["C/C++"]
+        .as_u64()
+        .unwrap_or(0)
+}
+
+/// Wait for the Compile Server to answer on its port, which is what a session
+/// starting any later than this would find.
+///
+/// Waited for rather than assumed, because a client that finds nothing
+/// listening starts a server of its own inside its Sandbox — which is the one
+/// thing this proof exists to see not happen, and a race here would be it
+/// happening for a reason that is the fixture's rather than the server's.
+fn answering() {
+    let began = std::time::Instant::now();
+
+    while std::net::TcpStream::connect((Ipv4Addr::LOCALHOST, SCCACHE_PORT)).is_err() {
+        assert!(
+            began.elapsed() < std::time::Duration::from_secs(30),
+            "the Compile Server never answered on {SCCACHE_PORT}: see the server's log above \
+             for why it would not start",
+        );
+
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
+/// **A real CMake build, compiled through Verkstead's Compile Server** — the
+/// C/C++ descriptor's proof, the way every other descriptor's is an install.
+///
+/// What the descriptor sets is `CMAKE_C_COMPILER_LAUNCHER` and
+/// `CMAKE_CXX_COMPILER_LAUNCHER` and nothing else, and what it cannot say is
+/// whether a compile put through them really reaches the server outside the
+/// Sandbox, and whether that server can really run the compiler it is handed.
+/// So a Worktree is configured with the Ninja generator and built, and then
+/// its build directory is taken away and it is configured and built again.
+///
+/// **Three things are read off the server rather than inferred**, all through
+/// the same client the build used:
+///
+/// 1. The first build's compiles were requests to it, and every one ran.
+/// 2. The clean rebuild was served entirely out of its cache: not one miss, and
+///    as many C/C++ hits as there were requests. Same Worktree, same paths —
+///    a second Conversation's Worktree is at a path of its own, which is a
+///    different question and a proof of its own.
+/// 3. And the server that answered is the one Verkstead started: it names the
+///    cache this proof handed it.
+///
+/// **And no sccache server was started inside the Sandbox.** An sccache client
+/// that finds no server starts one of its own, which would build perfectly
+/// well and prove nothing — so the Sandbox's own process namespace is searched
+/// for one after the build. The Compile Server is in no session's namespace, so
+/// anything of that name in there is a server the session started.
+///
+/// **The compiler is found the way a session finds one** — the machine's, off
+/// the `PATH` this suite runs on, which under the dev shell is a nix
+/// `cc-wrapper` in `/nix/store` and on a runner is `/usr/bin`. Both are inside
+/// what the Compile Server's own Sandbox stands on (see `compile_server` in
+/// `crates/server/src/build_cache.rs`), which is why nothing there needed
+/// widening for C.
+///
+/// **Skipped where the port is taken**, which is a machine already running an
+/// sccache server of its own: a Verkstead session building this checkout is
+/// one. The Compile Server this starts could not listen, the client would
+/// reach the other server instead, and the answer would be about that one.
+/// Run the suite in a network namespace of its own — `bwrap --dev-bind / /
+/// --unshare-net` — to prove it there.
+#[tokio::test]
+async fn cmake_compiles_through_the_compile_server_and_a_clean_rebuild_is_all_hits() {
+    let Some(found) = tools("CMake", &["sccache", "cmake", "ninja", "cc", "c++"]) else {
+        return;
+    };
+
+    let [sccache, cmake, ninja, cc, cxx] = &found[..] else {
+        unreachable!("five tools were asked for");
+    };
+
+    if std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, SCCACHE_PORT)).is_err() {
+        let missing = format!(
+            "port {SCCACHE_PORT} is already taken on this machine, which is another sccache \
+             server that a session's client would reach instead of the Compile Server"
+        );
+
+        println!("skipping the CMake Compile Server proof: {missing}");
+
+        assert!(
+            std::env::var_os(REQUIRED).is_none(),
+            "the CMake Compile Server proof was skipped — {missing} — and {REQUIRED} is set",
+        );
+
+        return;
+    }
+
+    let machine = machine(1).await;
+    let cache = machine.compiling_cache(sccache);
+
+    // What a session's spawn does before the session, on a machine where C/C++
+    // is on — which every built-in language is, left alone.
+    cache.compiling(&machine.settings.config(), None);
+    answering();
+
+    let worktree = machine.worktree(0);
+    cmake_project(&worktree.join("greeting"));
+
+    let sandbox = machine.sandbox(0, &cache, vec![]);
+
+    let built = installing(
+        &sandbox,
+        &format!(
+            r#"set -e
+            printf 'c-launcher=%s\n' "${{CMAKE_C_COMPILER_LAUNCHER-unset}}"
+            printf 'cxx-launcher=%s\n' "${{CMAKE_CXX_COMPILER_LAUNCHER-unset}}"
+
+            build() {{
+                '{cmake}' -S greeting -B greeting/build -G Ninja \
+                    -DCMAKE_MAKE_PROGRAM='{ninja}' \
+                    -DCMAKE_C_COMPILER='{cc}' -DCMAKE_CXX_COMPILER='{cxx}'
+                '{cmake}' --build greeting/build
+                ./greeting/build/greeting
+            }}
+
+            build
+            "$CMAKE_C_COMPILER_LAUNCHER" --show-stats --stats-format=json > first.json
+            "$CMAKE_C_COMPILER_LAUNCHER" --zero-stats
+
+            rm -rf greeting/build
+            build
+            "$CMAKE_C_COMPILER_LAUNCHER" --show-stats --stats-format=json > again.json
+
+            # Every sccache in this Sandbox's own process namespace, which the
+            # Compile Server is not in.
+            started=0
+            for comm in /proc/[0-9]*/comm; do
+                if [ "$(cat "$comm" 2>/dev/null)" = sccache ]; then
+                    started=$((started + 1))
+                fi
+            done
+            printf 'started-inside=%s\n' "$started"
+            "#,
+            cmake = cmake.display(),
+            ninja = ninja.display(),
+            cc = cc.display(),
+            cxx = cxx.display(),
+        ),
+    );
+
+    built.worked("a CMake project configures, builds and runs inside a session's Sandbox");
+
+    assert_eq!(
+        line(&built, "c-launcher"),
+        "/verkstead/bin/sccache",
+        "C is launched through the sccache the server resolved. It said:\n{}",
+        built.said,
+    );
+    assert_eq!(line(&built, "cxx-launcher"), "/verkstead/bin/sccache");
+
+    assert_eq!(
+        line(&built, "started-inside"),
+        "0",
+        "no sccache server was started inside the session's Sandbox: every compile \
+         was the Compile Server's. It said:\n{}",
+        built.said,
+    );
+
+    let first = stats(worktree, "first.json");
+
+    let requests = first["stats"]["compile_requests"].as_u64().unwrap_or(0);
+    let executed = first["stats"]["requests_executed"].as_u64().unwrap_or(0);
+
+    assert!(
+        requests >= 2,
+        "the C source and the C++ source were both requests to the Compile Server, \
+         and so is every compile CMake's configure makes of its own: {first}",
+    );
+    assert_eq!(
+        executed, requests,
+        "and it ran every one of them — which is the server reaching the compiler \
+         from its own Sandbox: {first}",
+    );
+    assert_eq!(
+        c_family(&first, "cache_misses"),
+        requests,
+        "into a cache nothing had compiled into, so every one was a miss: {first}",
+    );
+    assert_eq!(
+        first["cache_location"],
+        format!(
+            "Local disk: {:?}",
+            cache.dir().unwrap().join("sccache").display().to_string()
+        ),
+        "and the server that answered is the one Verkstead started, writing into \
+         the cache this proof handed it",
+    );
+    assert_eq!(
+        first["max_cache_size"].as_u64(),
+        Some(30 * 1024 * 1024 * 1024),
+        "at the size the Compile Server is started with",
+    );
+
+    let again = stats(worktree, "again.json");
+
+    assert!(
+        again["stats"]["compile_requests"].as_u64().unwrap_or(0) >= 2,
+        "the rebuild compiled through the Compile Server too: {again}",
+    );
+    assert_eq!(
+        c_family(&again, "cache_misses"),
+        0,
+        "the clean rebuild in the same Worktree missed nothing: {again}",
+    );
+    assert_eq!(
+        c_family(&again, "cache_hits"),
+        again["stats"]["compile_requests"].as_u64().unwrap_or(0),
+        "every one of its compiles was served from the cache: {again}",
+    );
 }

@@ -214,6 +214,13 @@
               # proof that passes in the shell is a proof of the SDK CI runs it
               # against.
               dotnet-sdk
+              # And C/C++'s, which is a build rather than an install: the
+              # proof configures a CMake project with Ninja and builds it in a
+              # session's Sandbox, every compile going through the Compile
+              # Server. The compilers are the shell's own `cc-wrapper`, which is
+              # what a nix dev shell hands a session anyway.
+              cmake
+              ninja
               # What a ticked `gh` row unpacks on an Intel Mac, which has no
               # Homebrew to install one with — see
               # `crates/server/src/onboarding/install.rs`'s `GH_RELEASE`. Both
