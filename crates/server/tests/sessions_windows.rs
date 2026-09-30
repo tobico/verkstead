@@ -2193,15 +2193,16 @@ fn whose(pid: u32) -> String {
 /// session started inside itself for want of it. That hazard is exactly the
 /// ordinary case, a manifest one directory down from the root.
 ///
-/// **And Go's two directories beside them, and Node's five**, which is this
+/// **And Go's two directories beside them, and Node's seven**, which is this
 /// platform's half of what the package stores promise: the same one grant, with
 /// every language's store under it, written the way Windows writes a path.
 ///
-/// Four of Node's five are under that one directory. The fifth — pnpm's store,
-/// which pnpm links a package out of into the project rather than copying —
-/// is under the directory beside the Worktrees, and is **a second grant this
-/// platform has to write**: a path a session cannot open is a store it installs
-/// past rather than out of, so it is written to as well as printed.
+/// Four of Node's seven are under that one directory. The other three — pnpm's,
+/// deno's and bun's stores, each of which links a package out into the project
+/// rather than copying — are under the directory beside the Worktrees, and that
+/// is **a second grant this platform has to write**: a path a session cannot
+/// open is a store it installs past rather than out of, so it is written to as
+/// well as printed.
 #[tokio::test]
 async fn a_session_gets_the_shared_cargo_home_and_the_compiler_wrapper() {
     // Held for as long as this fixture is up. A session handed a cache is a
@@ -2225,6 +2226,8 @@ async fn a_session_gets_the_shared_cargo_home_and_the_compiler_wrapper() {
         Note 'pnpm-metadata' $env:PNPM_CONFIG_CACHE_DIR
         Note 'yarn-cache' $env:YARN_CACHE_FOLDER
         Note 'yarn-global' $env:YARN_GLOBAL_FOLDER
+        Note 'deno-dir' $env:DENO_DIR
+        Note 'bun-cache' $env:BUN_INSTALL_CACHE_DIR
 
         # Run the thing it was pointed at, which is the only way to ask whether
         # the boundary really lets a session open it.
@@ -2237,10 +2240,13 @@ async fn a_session_gets_the_shared_cargo_home_and_the_compiler_wrapper() {
         [void][System.IO.Directory]::CreateDirectory($env:GOMODCACHE)
         [System.IO.File]::WriteAllText((Under $env:GOMODCACHE 'downloaded.zip'), 'here')
 
-        # And the one store that is not under the cache at all, which is the
-        # second grant rather than a name under the first.
-        [void][System.IO.Directory]::CreateDirectory($env:PNPM_CONFIG_STORE_DIR)
-        [System.IO.File]::WriteAllText((Under $env:PNPM_CONFIG_STORE_DIR 'downloaded.tgz'), 'here')
+        # And the stores that are not under the cache at all, which are the
+        # second grant rather than a name under the first. One file each, so
+        # that what is asserted is the grant rather than one name inside it.
+        foreach ($store in @($env:PNPM_CONFIG_STORE_DIR, $env:DENO_DIR, $env:BUN_INSTALL_CACHE_DIR)) {
+          [void][System.IO.Directory]::CreateDirectory($store)
+          [System.IO.File]::WriteAllText((Under $store 'downloaded.tgz'), 'here')
+        }
         "#,
         Some(cache.path()),
         Builds::Nothing,
@@ -2319,15 +2325,22 @@ async fn a_session_gets_the_shared_cargo_home_and_the_compiler_wrapper() {
         );
     }
 
-    // And the fifth, which is not under it: pnpm's store is beside the
-    // Worktrees, so this is the second directory a session is granted.
-    assert_eq!(
-        fixture.written("pnpm-store").await,
-        fixture.stores_dir().join("pnpm").display().to_string(),
-        "pnpm's store is beside the Worktrees rather than under the cache, \
-         which is what the second placeholder says on this platform as much as \
-         on the others",
-    );
+    // And the other three, which are not under it: pnpm's, deno's and bun's
+    // stores are beside the Worktrees, so that is the second directory a
+    // session is granted.
+    for (said, under) in [
+        ("pnpm-store", "pnpm"),
+        ("deno-dir", "deno"),
+        ("bun-cache", "bun"),
+    ] {
+        assert_eq!(
+            fixture.written(said).await,
+            fixture.stores_dir().join(under).display().to_string(),
+            "{said} is beside the Worktrees rather than under the cache, which \
+             is what the second placeholder says on this platform as much as on \
+             the others",
+        );
+    }
 
     let downloaded = cache.path().join("cargo").join("downloaded.crate");
 
@@ -2354,16 +2367,19 @@ async fn a_session_gets_the_shared_cargo_home_and_the_compiler_wrapper() {
     // And the second directory, which is a grant of its own rather than a name
     // under the first: a store a session cannot write in is a store it
     // installs past.
-    let package = fixture.stores_dir().join("pnpm").join("downloaded.tgz");
+    for under in ["pnpm", "deno", "bun"] {
+        let package = fixture.stores_dir().join(under).join("downloaded.tgz");
 
-    until_there(&package).await;
+        until_there(&package).await;
 
-    assert_eq!(
-        std::fs::read_to_string(&package).unwrap().trim(),
-        "here",
-        "so the directory beside the Worktrees is written for the session \
-         account too, wherever a descriptor points a store",
-    );
+        assert_eq!(
+            std::fs::read_to_string(&package).unwrap().trim(),
+            "here",
+            "so the directory beside the Worktrees is written for the session \
+             account too, wherever a descriptor points a store — {under} \
+             included",
+        );
+    }
 
     let started: Vec<u32> = servers().difference(&already).copied().collect();
 

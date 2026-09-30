@@ -164,7 +164,7 @@
               # the dev shell carries them so that the maintainer, who builds
               # only Rust, is not the one who never runs them.
               go
-              # And the JavaScript ecosystem's four, which are the `node`
+              # And the JavaScript ecosystem's six, which are the `node`
               # descriptor's. `nodejs` is what npm comes in and what the proofs
               # run an installed package with.
               nodejs
@@ -181,6 +181,14 @@
                 mkdir -p "$out/bin"
                 ln -s ${pkgs.lib.getExe' pkgs.yarn-berry "yarn"} "$out/bin/yarn-berry"
               '')
+              # And deno and bun, which are two more tools that install out of
+              # the npm registry rather than two more ecosystems — which is why
+              # they are under Node's one entry. Each reads a store variable of
+              # its own, and each hardlinks a package out of its store into the
+              # project, so a shell without them is a shell where neither the
+              # variable nor the link count is ever measured.
+              deno
+              bun
               # What a ticked `gh` row unpacks on an Intel Mac, which has no
               # Homebrew to install one with — see
               # `crates/server/src/onboarding/install.rs`'s `GH_RELEASE`. Both

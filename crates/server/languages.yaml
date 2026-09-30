@@ -34,11 +34,11 @@
 #              has to share a filesystem with.
 #
 #   {stores}   a directory beside the Worktrees, for a store that does. pnpm,
-#              bun and uv hardlink packages out of their store into the project
-#              rather than copying them, and fall back to copying the lot where
-#              the two are on different filesystems — and the Build Cache is
-#              free to be a disk of its own, which is what the packaged unit's
-#              separate `CacheDirectory` and `StateDirectory` are.
+#              deno, bun and uv hardlink packages out of their store into the
+#              project rather than copying them, and fall back to copying the
+#              lot where the two are on different filesystems — and the Build
+#              Cache is free to be a disk of its own, which is what the packaged
+#              unit's separate `CacheDirectory` and `StateDirectory` are.
 #
 #              **And on Linux they copy anyway**, which is a fact about the
 #              sandbox rather than about this placeholder: a Worktree and this
@@ -58,9 +58,10 @@
 #              says there is one at all.
 #
 # A placeholder's directory is made, and granted writable to a session, only
-# where a loaded descriptor names it. Node's pnpm store below names `{stores}`,
-# so every session with Node switched on is opened onto it; an installation with
-# every language that names it switched off is opened onto none.
+# where a loaded descriptor names it. Three of Node's stores below name
+# `{stores}`, so every session with Node switched on is opened onto it; an
+# installation with every language that names it switched off is opened onto
+# none.
 #
 # **Write `/` between the placeholder and what is under it, on every platform.**
 # A descriptor is one file read on three, so the grammar has one separator: what
@@ -138,9 +139,12 @@ languages:
 
   node:
     # The JavaScript ecosystem, and the second of the package stores. One entry
-    # for every tool that installs from the npm registry rather than one each:
-    # switching Node off switches the lot off, which is what one box on the
-    # settings page for an ecosystem means (ADR-0021).
+    # for every tool that installs from the npm registry rather than one each —
+    # npm, pnpm, both yarns, deno and bun: switching Node off switches the lot
+    # off, which is what one box on the settings page for an ecosystem means
+    # (ADR-0021). deno and bun are not runtimes with entries of their own for
+    # the same reason Berry is not: what they share is the npm registry's
+    # packages, and a box per tool would be five boxes saying one thing.
     label: Node
 
     # The manifest every one of them reads, at the root of a checkout — for the
@@ -148,10 +152,11 @@ languages:
     detect:
       - package.json
 
-    # Four tools and five variables between them, and **not one name shared**.
+    # Six tools and seven variables between them, and **not one name shared**.
     # Each was read out of the tool that reads it as this entry was written —
-    # `<tool> config get`, against the releases the dev shell and the CI job
-    # pin — rather than taken from a variable that looks like it ought to work:
+    # `<tool> config get`, `bun pm cache`, `deno info`, against the releases the
+    # dev shell and the CI job pin — rather than taken from a variable that
+    # looks like it ought to work:
     #
     #   NPM_CONFIG_CACHE          npm's `cache`, which holds the packages it has
     #                             downloaded (`_cacache`) and what `--offline`
@@ -201,15 +206,44 @@ languages:
     #                             business and overriding a Repo's policy switch
     #                             is not.
     #
-    # **pnpm's store is the one under `{stores}`**, and the first built-in to
-    # name that placeholder, because pnpm hardlinks a package out of its store
-    # into `node_modules` rather than copying it.
+    #   DENO_DIR                  deno's cache, which `deno --help` lists under
+    #                             exactly that description — "set the cache
+    #                             directory" — and `deno info` takes apart into
+    #                             the remote modules, the npm packages, the
+    #                             emitted ones and the language server's
+    #                             registries. **And the origin storage**, which
+    #                             is the one thing under any of these seven
+    #                             directories that is not a download; see below.
+    #                             deno has one variable for the lot rather than
+    #                             a store and a metadata directory the way pnpm
+    #                             does.
     #
-    # **And on Linux it copies anyway**, which this stage found rather than
+    #   BUN_INSTALL_CACHE_DIR     bun's cache, which `bun pm cache` prints.
+    #                             **Not `BUN_INSTALL`**, which is bun's install
+    #                             root: its `bin` is where a global install puts
+    #                             a program, and its `install/cache` is only the
+    #                             default this variable moves — a session given
+    #                             the root instead would be sharing a `bin` on
+    #                             its `PATH` between Conversations. Nor
+    #                             `BUN_INSTALL_GLOBAL_DIR`, which is the global
+    #                             packages themselves and holds nothing a
+    #                             project installs out of.
+    #
+    # **Three of the seven are under `{stores}`** — pnpm's store, deno's cache
+    # and bun's — because each of those three tools hardlinks a package out of
+    # its store into the project rather than copying it, and a link does not
+    # cross a filesystem. pnpm was the first built-in to name that placeholder.
+    #
+    # **deno was expected to be one of the others and is not**, which is a
+    # measurement rather than a reading: after `deno install`, the `index.js`
+    # under `node_modules/.deno/` and the one under `DENO_DIR/npm/` are the same
+    # inode. So deno is where pnpm and bun are, for the reason they are.
+    #
+    # **And on Linux all three copy anyway**, which this stage found rather than
     # assumed. A Worktree and this directory are two separate **bind mounts** in
     # a session's sandbox, and `link(2)` answers `EXDEV` across two mounts even
-    # where both are the same filesystem — so the fall-back pnpm documents for
-    # two filesystems is what a session gets whatever disk these are on. The
+    # where both are the same filesystem — so the fall-back these tools document
+    # for two filesystems is what a session gets whatever disk these are on. The
     # store still works: a copy out of it fetches nothing, which is the whole of
     # what the install proofs assert. What is gone is the disk space a hardlink
     # would have saved. Closing it means one mount holding both the Worktree and
@@ -219,34 +253,56 @@ languages:
     # still the right side of that line, and because it is where the fix would
     # land.
     #
+    # **And only pnpm says so.** pnpm prints that packages were copied from the
+    # store; deno and bun fall back without a word and exit zero, so the link
+    # count on a file in the project is the whole of the evidence for those two.
+    #
     # The other three copy out of their store, or in Berry's case read the zip
     # where it lies, so none of this costs them anything.
     #
-    # Every one of these is safe for two installs at once — npm's `_cacache` and
-    # pnpm's store are both content-addressed, and both yarns write a download
-    # to a temporary name and rename it into place — which is the other half of
-    # what a shared store has to be, and what two Sandboxes installing at the
-    # same time is there to say.
+    # Every one of these is safe for two installs at once — npm's `_cacache`,
+    # pnpm's store and deno's npm cache are content-addressed or keyed by
+    # version, and both yarns write a download to a temporary name and rename it
+    # into place — which is the other half of what a shared store has to be, and
+    # what two Sandboxes installing at the same time is there to say.
     #
-    # And none of them holds anything that is a session's own. A registry login
-    # is `.npmrc`'s `_authToken` or Berry's `npmAuthToken`, both in a file
-    # nothing here moves. What npm keeps under its cache besides the packages is
-    # `_logs`, which is its own account of a failed install rather than a
-    # secret, and Berry's `globalFolder` holds the cache, the metadata and an
-    # empty hardlink index and nothing else.
+    # And none of them holds a secret of a session's own. A registry login is
+    # `.npmrc`'s `_authToken` or Berry's `npmAuthToken`, both in a file nothing
+    # here moves, and deno's is `DENO_AUTH_TOKENS`, which is an environment
+    # variable rather than anything on disk. What npm keeps under its cache
+    # besides the packages is `_logs`, which is its own account of a failed
+    # install rather than a secret; Berry's `globalFolder` holds the cache, the
+    # metadata and an empty hardlink index and nothing else; and bun's cache
+    # holds tarballs and manifests, its global binaries being under `BUN_INSTALL`
+    # instead.
+    #
+    # **`DENO_DIR` is the one that holds more than downloads.** `deno info`
+    # names it *origin storage*: `localStorage` for a `--location`, and the
+    # database `Deno.openKv()` opens where it was given no path. That is a
+    # program's own state rather than a session's secret, and sharing it is the
+    # same bargain as sharing a store — two Conversations running one Repo's
+    # program see one `localStorage`. `DENO_KV_DEFAULT_PATH` would move half of
+    # it and is deliberately not set, for the reason `YARN_ENABLE_GLOBAL_CACHE`
+    # is not: a descriptor moves stores, and deciding where a Repo's program
+    # keeps its data is not that. The adoption doc is where a stranger reads it.
     #
     # **A Repo's own config does not win over these**, and it is worth knowing
-    # which way round that is: all four tools put the command line above the
-    # environment and the environment above their rc files, so a session's
-    # variable beats an `.npmrc`, a `pnpm-workspace.yaml` or a `.yarnrc`, and a
-    # Repo that must have its own store passes `--cache`, `--store-dir` or
-    # `--cache-folder` where it installs. Nothing a descriptor can do changes
-    # that: the grammar sets variables, and there is no rung below the
-    # environment to set one on. Both halves are asserted in
+    # which way round that is: the four tools with a config key for it put the
+    # command line above the environment and the environment above their rc
+    # files, so a session's variable beats an `.npmrc`, a `pnpm-workspace.yaml`
+    # or a `.yarnrc`, and a Repo that must have its own store passes `--cache`,
+    # `--store-dir` or `--cache-folder` where it installs. Nothing a descriptor
+    # can do changes that: the grammar sets variables, and there is no rung
+    # below the environment to set one on. Both halves are asserted in
     # `tests/package_stores.rs`, because a silent loss is the worse of the two.
+    # bun reads its cache out of `bunfig.toml`'s `install.cache.dir` and puts
+    # the environment above that too; deno documents no config key for
+    # `DENO_DIR` at all, so there is nothing for a Repo to lose.
     env:
       NPM_CONFIG_CACHE: "{cache}/npm"
       PNPM_CONFIG_STORE_DIR: "{stores}/pnpm"
       PNPM_CONFIG_CACHE_DIR: "{cache}/pnpm/metadata"
       YARN_CACHE_FOLDER: "{cache}/yarn/cache"
       YARN_GLOBAL_FOLDER: "{cache}/yarn/global"
+      DENO_DIR: "{stores}/deno"
+      BUN_INSTALL_CACHE_DIR: "{stores}/bun"

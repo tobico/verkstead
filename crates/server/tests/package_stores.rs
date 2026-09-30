@@ -15,7 +15,10 @@
 //! 2. A third Sandbox, on that same Build Cache, installing it again with the
 //!    tool **denied its registry** — the offline flag the tool documents, and
 //!    no bind of the registry either. An install that succeeds with nothing to
-//!    fetch from succeeded out of the store.
+//!    fetch from succeeded out of the store. **Where a tool documents no such
+//!    flag** — bun is the one so far — the third install is the second one word
+//!    for word, against a registry that has stopped answering, which is the
+//!    same proof by the other route.
 //! 3. And the control: a fourth Sandbox, denied its registry the same way, on a
 //!    Build Cache **nothing has filled**. It must fail. Without it, step 2 is a
 //!    branch that would pass whatever the tool did with its variable — a build
@@ -37,7 +40,9 @@
 //! - Nothing in the npm ecosystem reads a registry off the disk, so the
 //!   JavaScript proofs really serve one, over the loopback and out of this
 //!   process — see [`Registry`], whose `shut` is what denies it: the port stops
-//!   answering before the install that must not reach it starts.
+//!   answering before the install that must not reach it starts. deno and bun
+//!   install out of that same registry, which is what makes them Node's rather
+//!   than entries of their own.
 //!
 //! **A tool that is not installed is skipped in a line naming it**, so a
 //! checkout run on a machine that only builds Rust stays green. Set
@@ -1156,6 +1161,69 @@ async fn yarn_berry_fills_one_cache_and_a_third_install_reads_it() {
     .await;
 }
 
+/// deno: `DENO_DIR`, and `--cached-only`, which deno documents as "require that
+/// remote dependencies are already cached".
+///
+/// **One variable for the whole of deno's cache**, where pnpm needed two: the
+/// npm packages, the remote modules and the metadata are all directories under
+/// `DENO_DIR`, so an offline install cannot be given half of it.
+///
+/// `NPM_CONFIG_REGISTRY` is how deno is pointed at the registry this proof
+/// serves — deno's own documented name for it, and the only one of these six
+/// tools that has no `--registry` of its own. `DENO_NO_UPDATE_CHECK` beside it
+/// so that nothing here asks deno.com whether there is a newer deno.
+///
+/// It runs what it installed through `deno eval` rather than `node`: what is
+/// being asked is whether *deno* resolved out of the store it was pointed at,
+/// and `--cached-only` on the run says the answer was not fetched either.
+///
+/// The control fails `--cached-only is specified`, which is deno's own account
+/// of a package it was told to find in the cache and could not.
+#[tokio::test]
+async fn deno_fills_one_cache_and_a_third_install_reads_it() {
+    one_javascript_tools_store(Installs {
+        tool: "deno",
+        wants: &["deno", "tar", "sha1sum"],
+        lockfile: "deno.lock",
+        settings: "export DENO_NO_UPDATE_CHECK=1 NPM_CONFIG_REGISTRY={registry}",
+        filling: "{deno} install",
+        offline: "{deno} install --cached-only",
+        running: "{deno} eval --cached-only \
+                  \"import greeting from 'greet-from-the-store'; console.log(greeting)\"",
+        denied: "--cached-only is specified",
+    })
+    .await;
+}
+
+/// bun: `BUN_INSTALL_CACHE_DIR`, and **no offline flag at all**, which is the
+/// one way this proof is not like the five above it.
+///
+/// `bun install --help` lists `--no-cache`, which is the opposite of what is
+/// wanted, and nothing that says *cache only*. So the third install is the
+/// second install **word for word** — the same command line, the same registry
+/// URL — and the only thing that changed is that the registry has stopped
+/// answering. Which is the proof by the other route, and arguably the plainer
+/// one: there is no flag here that could be doing the work instead of the store.
+///
+/// That is also what makes the control carry more weight for bun than for the
+/// others. `ConnectionRefused` is what bun says when it had to fetch, and the
+/// control is the run that has to say it.
+#[tokio::test]
+async fn bun_fills_one_cache_and_a_third_install_reads_it() {
+    one_javascript_tools_store(Installs {
+        tool: "bun",
+        wants: &["bun", "tar", "sha1sum"],
+        lockfile: "bun.lock",
+        settings: "",
+        filling: "{bun} install --registry={registry}",
+        // The same line, against a registry that is no longer there.
+        offline: "{bun} install --registry={registry}",
+        running: "{bun} -e \"process.stdout.write(require('greet-from-the-store'))\"",
+        denied: "ConnectionRefused",
+    })
+    .await;
+}
+
 /// pnpm's store is the one beside the Worktrees — **and a session gets a copy
 /// out of it rather than a hardlink, whatever disk it is on.**
 ///
@@ -1260,6 +1328,154 @@ async fn pnpms_store_is_beside_the_worktrees_and_a_session_copies_out_of_it() {
          said:\n{}",
         installed.said,
     );
+}
+
+/// What a tool that links out of its store has to be asked, when the tool will
+/// not say for itself.
+struct Links {
+    tool: &'static str,
+    wants: &'static [&'static str],
+
+    /// The variable the descriptor sets for it, and what is under `{stores}`
+    /// that it should name.
+    variable: &'static str,
+    under: &'static str,
+
+    /// The install that fills it, with `{registry}` for the URL.
+    install: &'static str,
+
+    /// And where in the Worktree the installed file lands, which is the file the
+    /// link count is read of. Not the same shape for any two of these tools:
+    /// each lays `node_modules` out its own way.
+    inside: &'static str,
+}
+
+/// deno's and bun's stores are beside the Worktrees too — **and a session gets
+/// a copy out of each of them rather than a hardlink, exactly as it does out of
+/// pnpm's.**
+///
+/// The same finding as
+/// [`pnpms_store_is_beside_the_worktrees_and_a_session_copies_out_of_it`], one
+/// task later and for two more tools, and it lands the same way: the store
+/// works, a copy out of it fetches nothing, and what is gone is the disk space
+/// the link would have saved. Two Worktrees and this directory are separate
+/// **bind mounts** in a session's sandbox, and no placement a descriptor can
+/// name gets a link across two of those.
+///
+/// **What is worse here than for pnpm is that neither tool says so.** pnpm
+/// prints that packages were copied from the content-addressable store; deno
+/// and bun fall back without a word and exit zero. So the link count is the
+/// whole of the evidence, and a release that started linking again — which is
+/// what one mount holding both would buy — would be read off this number and
+/// nothing else.
+///
+/// **And it is a measurement rather than a reading for deno.** The task this
+/// landed under expected deno's cache to be a `{cache}` store, nothing having
+/// said deno links out of it. Outside a sandbox, on one filesystem, the
+/// `index.js` under `node_modules/.deno/` and the one under `DENO_DIR/npm/` are
+/// the same inode — so deno is where pnpm and bun are, and its store moved
+/// beside the Worktrees because of what was measured rather than what was
+/// assumed.
+#[tokio::test]
+async fn deno_and_bun_link_out_of_their_stores_too_and_so_copy_in_a_sandbox() {
+    for links in [
+        Links {
+            tool: "deno",
+            wants: &["deno", "tar", "sha1sum"],
+            variable: "DENO_DIR",
+            under: "deno",
+            install: "export DENO_NO_UPDATE_CHECK=1 NPM_CONFIG_REGISTRY={registry}\n\
+                      {deno} install",
+            // deno's own virtual store, with the package's real files in it and
+            // a symlink at the top of `node_modules` pointing down here.
+            inside: ".deno/greet-from-the-store@1.0.0/node_modules/\
+                     greet-from-the-store/index.js",
+        },
+        Links {
+            tool: "bun",
+            wants: &["bun", "tar", "sha1sum"],
+            variable: "BUN_INSTALL_CACHE_DIR",
+            under: "bun",
+            install: "{bun} install --registry={registry}",
+            // bun hoists, so the file is where `require` would look for it.
+            inside: "greet-from-the-store/index.js",
+        },
+    ] {
+        let Some(found_them) = tools(links.tool, links.wants) else {
+            continue;
+        };
+
+        let machine = machine(1).await;
+        let cache = machine.cache();
+
+        let registry = npm_registry(
+            &machine.registries.join(format!("{}-links", links.tool)),
+            &found_them[1],
+            &found_them[2],
+        );
+
+        npm_consumer(machine.worktree(0));
+
+        let mut script = format!(
+            "set -e\nprintf 'store=%s\\n' \"${{{variable}-unset}}\"\n{install}\n",
+            variable = links.variable,
+            install = links.install,
+        )
+        .replace("{registry}", &registry.url);
+
+        for (program, path) in links.wants.iter().zip(&found_them) {
+            script = script.replace(&format!("{{{program}}}"), &path.display().to_string());
+        }
+
+        let installed = installing(&machine.sandbox(0, &cache, vec![]), &script);
+
+        registry.shut();
+
+        installed.worked(&format!(
+            "a {} session installs the package the registry is serving",
+            links.tool,
+        ));
+
+        assert_eq!(
+            line(&installed, "store"),
+            machine
+                .stores_beside("shared")
+                .join(links.under)
+                .display()
+                .to_string(),
+            "{}'s store is under the directory beside the Worktrees rather \
+             than under the Build Cache, which is what {{stores}} means. The \
+             session said:\n{}",
+            links.tool,
+            installed.said,
+        );
+
+        let inside = machine.worktree(0).join("node_modules").join(links.inside);
+
+        let count = std::fs::metadata(&inside)
+            .unwrap_or_else(|error| {
+                panic!(
+                    "{} should be there after a {} install ({error}), and it said:\n{}",
+                    inside.display(),
+                    links.tool,
+                    installed.said,
+                )
+            })
+            .nlink();
+
+        assert_eq!(
+            count,
+            1,
+            "the file in the Worktree is a copy of what was in {}'s store \
+             rather than a link to it — which is what the two of them being two \
+             bind mounts comes to, and what would have to change for this to \
+             read above one is the sandbox rather than this descriptor. {} \
+             said:\n{}",
+            links.tool,
+            inside.display(),
+            installed.said,
+        );
+    }
 }
 
 /// And why, with no package manager anywhere in it: **a hardlink from one of a
@@ -1369,8 +1585,9 @@ struct WhoWins {
     config: &'static str,
     says: &'static str,
 
-    /// And the flag that says the same thing on the command line.
-    flag: &'static str,
+    /// And the flag that says the same thing on the command line, where this
+    /// tool has one that the question above answers to.
+    flag: Option<&'static str>,
 }
 
 /// Where a Repo asks for its own store, the session's variable wins and the
@@ -1378,9 +1595,9 @@ struct WhoWins {
 ///
 /// The task this landed under asked for the opposite — a Repo's own config
 /// winning over the variable a session was given — and the tools say otherwise.
-/// All three put the command line above the environment and the environment
-/// above their rc files, so a session's `NPM_CONFIG_CACHE` beats an `.npmrc`
-/// that a Repo committed, and so on for the other two. That is not a thing a
+/// Every one of them puts the environment above its rc file, so a session's
+/// `NPM_CONFIG_CACHE` beats an `.npmrc` that a Repo committed, and so on down
+/// the list — bun's `bunfig.toml` included. That is not a thing a
 /// descriptor can change: the grammar sets variables, and there is no lower
 /// rung than the environment to set one on. What there *is* is a way for a Repo
 /// to keep its own store all the same, and this is it — so what a Repo has to
@@ -1389,6 +1606,14 @@ struct WhoWins {
 /// Both halves are asserted, because a silent loss is the worse of the two: a
 /// Repo whose committed `.npmrc` stopped being read would otherwise be a thing
 /// nobody noticed until an install went somewhere unexpected.
+///
+/// **bun has only the first half here**, and that is bun rather than this test:
+/// `bun install --cache-dir` is documented, and `bun pm cache` — the only thing
+/// that prints where the cache is — disregards it. So what is asked of bun is
+/// what a Repo loses, which is the half that matters.
+///
+/// deno is not here at all: it documents no config key that moves `DENO_DIR`,
+/// so there is nothing for a Repo to have committed and nothing to lose.
 ///
 /// Yarn Berry is not here. It has no flag of its own for this, so its answer
 /// is a different one and has a proof of its own — see
@@ -1407,7 +1632,7 @@ async fn a_repos_config_loses_to_the_session_and_its_command_line_wins() {
             asking: "{npm} config get cache",
             config: ".npmrc",
             says: "cache=/the-repos-own-store",
-            flag: "--cache=/the-repos-own-store",
+            flag: Some("--cache=/the-repos-own-store"),
         },
         WhoWins {
             tool: "pnpm",
@@ -1419,7 +1644,7 @@ async fn a_repos_config_loses_to_the_session_and_its_command_line_wins() {
             // place to say it is the workspace file.
             config: "pnpm-workspace.yaml",
             says: "storeDir: /the-repos-own-store",
-            flag: "--store-dir=/the-repos-own-store",
+            flag: Some("--store-dir=/the-repos-own-store"),
         },
         WhoWins {
             tool: "yarn",
@@ -1428,7 +1653,22 @@ async fn a_repos_config_loses_to_the_session_and_its_command_line_wins() {
             asking: "{yarn} cache dir",
             config: ".yarnrc",
             says: "cache-folder \"/the-repos-own-store\"",
-            flag: "--cache-folder /the-repos-own-store",
+            flag: Some("--cache-folder /the-repos-own-store"),
+        },
+        WhoWins {
+            tool: "bun",
+            wants: &["bun"],
+            variable: "BUN_INSTALL_CACHE_DIR",
+            asking: "{bun} pm cache",
+            // TOML dotted keys, so that one line says what two would: bun's
+            // own place for this is `[install.cache]`'s `dir`.
+            config: "bunfig.toml",
+            says: "install.cache.dir = \"/the-repos-own-store\"",
+            // `bun install --cache-dir` is documented, and `bun pm cache`
+            // disregards it — so the flag is not askable the way the three
+            // above it are, and the half that is asked is the half a Repo
+            // loses.
+            flag: None,
         },
     ] {
         let Some(found_them) = tools(who.tool, who.wants) else {
@@ -1448,8 +1688,8 @@ async fn a_repos_config_loses_to_the_session_and_its_command_line_wins() {
         let machine = machine(1).await;
         let cache = machine.cache();
 
-        // A manifest, because two of the three will not answer without a
-        // project around them.
+        // A manifest, because most of these will not answer without a project
+        // around them.
         npm_consumer(machine.worktree(0));
 
         let asked = installing(
@@ -1460,12 +1700,15 @@ async fn a_repos_config_loses_to_the_session_and_its_command_line_wins() {
                  printf 'plain=%s\\n' \"$({asking})\"\n\
                  printf '%s\\n' '{says}' > {config}\n\
                  printf 'configured=%s\\n' \"$({asking})\"\n\
-                 printf 'flagged=%s\\n' \"$({asking} {flag})\"\n",
+                 {flagged}",
                 variable = who.variable,
                 asking = who.asking,
                 says = who.says,
                 config = who.config,
-                flag = who.flag,
+                flagged = who.flag.map_or_else(String::new, |flag| format!(
+                    "printf 'flagged=%s\\n' \"$({asking} {flag})\"\n",
+                    asking = who.asking,
+                )),
             )),
         );
 
@@ -1491,12 +1734,14 @@ async fn a_repos_config_loses_to_the_session_and_its_command_line_wins() {
             asked.said,
         );
 
-        assert!(
-            line(&asked, "flagged").starts_with(THE_REPOS_OWN),
-            "but the Repo's command line does move it, which is what a Repo \
-             that has to keep its own store passes. It said:\n{}",
-            asked.said,
-        );
+        if who.flag.is_some() {
+            assert!(
+                line(&asked, "flagged").starts_with(THE_REPOS_OWN),
+                "but the Repo's command line does move it, which is what a Repo \
+                 that has to keep its own store passes. It said:\n{}",
+                asked.said,
+            );
+        }
     }
 }
 
@@ -1578,17 +1823,18 @@ async fn a_repo_that_switches_berrys_global_cache_off_gets_a_shared_one_anyway()
     );
 }
 
-/// And the environment those installs ran in was the descriptor's: Node's five
-/// variables, four of them under the one Build Cache and pnpm's under the
-/// directory beside the Worktrees, and a session can write in both.
+/// And the environment those installs ran in was the descriptor's: Node's seven
+/// variables, four of them under the one Build Cache and pnpm's, deno's and
+/// bun's under the directory beside the Worktrees, and a session can write in
+/// both.
 ///
 /// Beside the proofs rather than inside them, for the reason Go's is: what a
 /// session is *told* is asserted on all three platforms in the sandbox suites,
 /// and what a tool *does* with it is what an install is for. This is here so
-/// that a run with none of the four tools installed still leaves something in
+/// that a run with none of the six tools installed still leaves something in
 /// this file that ran.
 #[tokio::test]
-async fn a_session_is_given_the_four_javascript_tools_stores() {
+async fn a_session_is_given_the_six_javascript_tools_stores() {
     let machine = machine(1).await;
     let cache = machine.cache();
     let sandbox = machine.sandbox(0, &cache, vec![]);
@@ -1600,7 +1846,8 @@ async fn a_session_is_given_the_four_javascript_tools_stores() {
         &sandbox,
         "set -e\n\
          for named in NPM_CONFIG_CACHE PNPM_CONFIG_STORE_DIR PNPM_CONFIG_CACHE_DIR \\\n\
-                      YARN_CACHE_FOLDER YARN_GLOBAL_FOLDER; do\n\
+                      YARN_CACHE_FOLDER YARN_GLOBAL_FOLDER DENO_DIR \\\n\
+                      BUN_INSTALL_CACHE_DIR; do\n\
            eval \"value=\\${$named-unset}\"\n\
            printf '%s=%s\\n' \"$named\" \"$value\"\n\
            mkdir -p \"$value\"\n\
@@ -1631,17 +1878,23 @@ async fn a_session_is_given_the_four_javascript_tools_stores() {
         );
     }
 
-    assert!(
-        reported.said.contains(&format!(
-            "PNPM_CONFIG_STORE_DIR={}\n",
-            beside.join("pnpm").display()
-        )),
-        "and pnpm's store is beside the Worktrees rather than in the cache, \
-         because pnpm hardlinks out of it. The session said:\n{}",
-        reported.said,
-    );
-    assert!(
-        beside.join("pnpm/written-from-inside").is_file(),
-        "which is the second bind a session now gets, and it is writable too"
-    );
+    for (name, under) in [
+        ("PNPM_CONFIG_STORE_DIR", "pnpm"),
+        ("DENO_DIR", "deno"),
+        ("BUN_INSTALL_CACHE_DIR", "bun"),
+    ] {
+        assert!(
+            reported
+                .said
+                .contains(&format!("{name}={}\n", beside.join(under).display())),
+            "and {name} is beside the Worktrees rather than in the cache, \
+             because that tool hardlinks out of it. The session said:\n{}",
+            reported.said,
+        );
+        assert!(
+            beside.join(under).join("written-from-inside").is_file(),
+            "which is the second bind a session now gets, and it is writable \
+             too — {under} included",
+        );
+    }
 }

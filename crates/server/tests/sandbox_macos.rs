@@ -3244,15 +3244,16 @@ async fn the_configured_binds_beside_a_read_only_companion_are_still_writable() 
 /// languages' stores point into it: `CARGO_HOME`, which is the half of Rust's
 /// cache that works with no sccache anywhere, Go's two — the downloads and the
 /// compiled objects, which for Go is a directory and nothing more — and four of
-/// Node's five.
+/// Node's seven.
 ///
 /// That is what stops two Conversations downloading one crate, one module or
 /// one package twice.
 ///
-/// **Node's fifth is somewhere else**, and it is the reason a session now gets
-/// a second grant: pnpm's store is under the directory beside the Worktrees,
-/// which is asserted here too — this platform's policy is one description of
-/// what a session may reach, so both of them belong in the one probe.
+/// **Node's other three are somewhere else**, and they are the reason a session
+/// now gets a second grant: pnpm's, deno's and bun's stores are under the
+/// directory beside the Worktrees, which is asserted here too — this platform's
+/// policy is one description of what a session may reach, so both directories
+/// belong in the one probe.
 #[tokio::test]
 #[cfg_attr(
     not(target_os = "macos"),
@@ -3277,6 +3278,8 @@ async fn the_build_cache_is_writable_inside_and_the_stores_are_in_it() {
             say pnpm-metadata "${{PNPM_CONFIG_CACHE_DIR-unset}}"
             say yarn-cache "${{YARN_CACHE_FOLDER-unset}}"
             say yarn-global "${{YARN_GLOBAL_FOLDER-unset}}"
+            say deno-dir "${{DENO_DIR-unset}}"
+            say bun-cache "${{BUN_INSTALL_CACHE_DIR-unset}}"
             dir {beside} stores
             "#,
             dir = quoted(&fixture.cache_dir()),
@@ -3329,19 +3332,27 @@ async fn the_build_cache_is_writable_inside_and_the_stores_are_in_it() {
         );
     }
 
-    // And the fifth, beside the Worktrees, which this platform has to grant as
-    // well — pnpm links a package out of its store into the project rather
-    // than copying it, and a link does not cross a filesystem.
+    // And the other three, beside the Worktrees, which this platform has to
+    // grant as well — pnpm, deno and bun each link a package out of their store
+    // into the project rather than copying it, and a link does not cross a
+    // filesystem.
     assert_eq!(
         reported["stores"], "write",
         "a store a session cannot write to is no store"
     );
-    assert_eq!(
-        reported["pnpm-store"],
-        fixture.stores_dir().join("pnpm").display().to_string(),
-        "and pnpm's store is inside it rather than under the Build Cache, \
-         which is the whole of what the second placeholder says",
-    );
+
+    for (said, under) in [
+        ("pnpm-store", "pnpm"),
+        ("deno-dir", "deno"),
+        ("bun-cache", "bun"),
+    ] {
+        assert_eq!(
+            reported[said],
+            fixture.stores_dir().join(under).display().to_string(),
+            "{said} is inside it rather than under the Build Cache, which is \
+             the whole of what the second placeholder says",
+        );
+    }
 }
 
 /// And with an sccache the server resolved: a session finds it beside the

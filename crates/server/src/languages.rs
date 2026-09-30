@@ -47,9 +47,9 @@
 //! **Placeholders are what only the server knows** — see [`Machine`], and the
 //! embedded file, which is where each of the four is spelled out. A
 //! placeholder's directory is granted to a session only where a loaded
-//! descriptor names it: the one beside the Worktrees is Node's pnpm store,
-//! and an installation with every language that names it switched off is
-//! opened onto none.
+//! descriptor names it: the one beside the Worktrees is where pnpm's, deno's
+//! and bun's stores are, and an installation with every language that names it
+//! switched off is opened onto none.
 //!
 //! **And an entry that will not load falls back to the built-in of that name.**
 //! Two ways one fails and one answer to both: an entry naming a variable the
@@ -97,8 +97,9 @@ pub const RUST: &str = "rust";
 pub const GO: &str = "go";
 
 /// And Node, which is one entry for every tool that installs out of the npm
-/// registry — and the first built-in to name the directory beside the
-/// Worktrees, pnpm hardlinking out of its store into the project.
+/// registry — six of them — and the only built-in to name the directory beside
+/// the Worktrees: pnpm, deno and bun all hardlink out of their store into the
+/// project.
 pub const NODE: &str = "node";
 
 /// The one capability this server has: the **Compile Server**, which is one
@@ -1297,8 +1298,8 @@ mod tests {
     }
 
     /// A session of a machine with an sccache: Rust's four variables, in the
-    /// order it has always had them, then Go's two and Node's five, and the two
-    /// directories they name open underneath.
+    /// order it has always had them, then Go's two and Node's seven, and the
+    /// two directories they name open underneath.
     ///
     /// Rust's four lead and are unchanged, which is the promise the descriptors
     /// landed on: a language added to the file is variables after the ones a
@@ -1327,6 +1328,8 @@ mod tests {
                 ),
                 (String::from("YARN_CACHE_FOLDER"), cached("yarn/cache")),
                 (String::from("YARN_GLOBAL_FOLDER"), cached("yarn/global")),
+                (String::from("DENO_DIR"), stored("deno")),
+                (String::from("BUN_INSTALL_CACHE_DIR"), stored("bun")),
             ],
         );
 
@@ -1363,8 +1366,10 @@ mod tests {
                 ),
                 (String::from("YARN_CACHE_FOLDER"), cached("yarn/cache")),
                 (String::from("YARN_GLOBAL_FOLDER"), cached("yarn/global")),
+                (String::from("DENO_DIR"), stored("deno")),
+                (String::from("BUN_INSTALL_CACHE_DIR"), stored("bun")),
             ],
-            "Go's two and Node's five are in no capability, so a machine with \
+            "Go's two and Node's seven are in no capability, so a machine with \
              no sccache gets the whole of what those descriptors say",
         );
         assert_eq!(
@@ -1392,8 +1397,8 @@ mod tests {
         );
         assert_eq!(
             given.env().len(),
-            7,
-            "which is Go's two and Node's five and nothing else"
+            9,
+            "which is Go's two and Node's seven and nothing else"
         );
         assert!(!given.sccache());
         assert!(
@@ -1443,13 +1448,13 @@ mod tests {
     }
 
     /// The second placeholder is granted only where a loaded descriptor names
-    /// it, and among the built-ins one does: pnpm's store, because a hardlink
-    /// out of a store does not cross a filesystem.
+    /// it, and among the built-ins three do: pnpm's store, deno's cache and
+    /// bun's, because a hardlink out of a store does not cross a filesystem.
     #[test]
     fn the_directory_beside_the_worktrees_is_granted_only_where_it_is_named() {
         assert!(
             built_in().names_stores(),
-            "Node's pnpm store is beside the Worktrees"
+            "pnpm's, deno's and bun's stores are beside the Worktrees"
         );
 
         // Rust and Go on their own name none of it: Rust's store is under the
@@ -1464,10 +1469,12 @@ mod tests {
         );
 
         // An installer's own descriptor naming it is granted it the same way,
-        // whatever the built-ins say.
+        // whatever the built-ins say. A language Verkstead ships nothing for,
+        // because what is being shown is the placeholder rather than a store
+        // this file already knows where to put.
         let hardlinking = written(
-            "languages:\n  bun:\n    label: Bun\n    env:\n      \
-             BUN_INSTALL_CACHE_DIR: \"{stores}/bun\"\n",
+            "languages:\n  zig:\n    label: Zig\n    env:\n      \
+             ZIG_GLOBAL_CACHE_DIR: \"{stores}/zig\"\n",
         );
 
         assert!(hardlinking.names_stores());
@@ -1476,7 +1483,7 @@ mod tests {
 
         assert_eq!(
             given.env(),
-            [(String::from("BUN_INSTALL_CACHE_DIR"), stored("bun"))],
+            [(String::from("ZIG_GLOBAL_CACHE_DIR"), stored("zig"))],
         );
         assert_eq!(
             given.dirs(),
@@ -1528,14 +1535,14 @@ mod tests {
         joined("PNPM_CONFIG_CACHE_DIR", &cache.join("pnpm"), "metadata");
         joined("YARN_CACHE_FOLDER", &cache.join("yarn"), "cache");
 
-        // And the one built-in pointed at the other directory, because the two
-        // are made different ways — one is the cache as it was handed over and
-        // the other is a `join` of this crate's own.
-        joined(
-            "PNPM_CONFIG_STORE_DIR",
-            &stores(Path::new("/var/lib/verkstead")),
-            "pnpm",
-        );
+        // And the three built-ins pointed at the other directory, because the
+        // two are made different ways — one is the cache as it was handed over
+        // and the other is a `join` of this crate's own.
+        let beside = stores(Path::new("/var/lib/verkstead"));
+
+        joined("PNPM_CONFIG_STORE_DIR", &beside, "pnpm");
+        joined("DENO_DIR", &beside, "deno");
+        joined("BUN_INSTALL_CACHE_DIR", &beside, "bun");
     }
 
     /// And a value naming none of them is left exactly as the file wrote it,

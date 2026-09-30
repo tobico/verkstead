@@ -5574,15 +5574,16 @@ async fn the_settings_held_binds_compose_the_way_the_installations_do() {
 /// languages' stores point into it: `CARGO_HOME`, which is the half of Rust's
 /// cache that works with no sccache anywhere, Go's two — the downloads and the
 /// compiled objects, which for Go is a directory and nothing more — and four of
-/// Node's five.
+/// Node's seven.
 ///
 /// That is what stops two Conversations downloading one crate, one module or
 /// one package twice.
 ///
-/// **Node's fifth is somewhere else**, and it is the reason a session now gets
-/// a second bind: pnpm's store is under the directory beside the Worktrees. See
-/// [`a_session_is_opened_onto_the_store_beside_the_worktrees_as_well`], which
-/// is that one on its own.
+/// **Node's other three are somewhere else**, and they are the reason a session
+/// now gets a second bind: pnpm's, deno's and bun's stores are under the
+/// directory beside the Worktrees. See
+/// [`a_session_is_opened_onto_the_store_beside_the_worktrees_as_well`], which is
+/// those on their own.
 #[tokio::test]
 async fn the_build_cache_is_writable_inside_and_the_stores_are_in_it() {
     let fixture = grilling().await;
@@ -5653,14 +5654,15 @@ async fn the_build_cache_is_writable_inside_and_the_stores_are_in_it() {
     }
 }
 
-/// And the store beside the Worktrees, which is the second bind a session gets
-/// now that a built-in descriptor names one.
+/// And the stores beside the Worktrees, which are the second bind a session
+/// gets now that a built-in descriptor names one.
 ///
-/// pnpm's is the only one of them there, and the reason is what pnpm does with
-/// its store rather than what is in it: it links a package out into the project
-/// instead of copying, and a link does not cross a filesystem — see
-/// `crates/server/languages.yaml`, and `tests/package_stores.rs`, where what
-/// really comes of that on this platform is proved.
+/// Three of Node's seven are there — pnpm's, deno's and bun's — and the reason
+/// is what those three do with their store rather than what is in it: each
+/// links a package out into the project instead of copying, and a link does not
+/// cross a filesystem. See `crates/server/languages.yaml`, and
+/// `tests/package_stores.rs`, where what really comes of that on this platform
+/// is proved.
 ///
 /// Writable, and at the same path inside, for the reason the Build Cache is:
 /// one store for the machine, and every Conversation's session writing the
@@ -5677,6 +5679,8 @@ async fn a_session_is_opened_onto_the_store_beside_the_worktrees_as_well() {
             r#"
             dir {beside} stores
             say pnpm-store "${{PNPM_CONFIG_STORE_DIR-unset}}"
+            say deno-dir "${{DENO_DIR-unset}}"
+            say bun-cache "${{BUN_INSTALL_CACHE_DIR-unset}}"
             "#,
             beside = quoted(&beside),
         ),
@@ -5686,12 +5690,19 @@ async fn a_session_is_opened_onto_the_store_beside_the_worktrees_as_well() {
         reported["stores"], "write",
         "a store a session cannot write to is no store"
     );
-    assert_eq!(
-        reported["pnpm-store"],
-        beside.join("pnpm").display().to_string(),
-        "and pnpm's store is inside it rather than under the Build Cache, \
-         which is the whole of what the second placeholder says",
-    );
+
+    for (said, under) in [
+        ("pnpm-store", "pnpm"),
+        ("deno-dir", "deno"),
+        ("bun-cache", "bun"),
+    ] {
+        assert_eq!(
+            reported[said],
+            beside.join(under).display().to_string(),
+            "{said} is inside it rather than under the Build Cache, which is \
+             the whole of what the second placeholder says",
+        );
+    }
 }
 
 /// And with an sccache the server resolved: it is mounted beside the
@@ -5777,6 +5788,8 @@ async fn a_build_cache_switched_off_is_no_bind_and_no_variables() {
             say gocache "${{GOCACHE-unset}}"
             say npm-cache "${{NPM_CONFIG_CACHE-unset}}"
             say pnpm-store "${{PNPM_CONFIG_STORE_DIR-unset}}"
+            say deno-dir "${{DENO_DIR-unset}}"
+            say bun-cache "${{BUN_INSTALL_CACHE_DIR-unset}}"
             dir {beside} stores
             file /verkstead/bin/sccache binary
             "#,
@@ -5797,6 +5810,8 @@ async fn a_build_cache_switched_off_is_no_bind_and_no_variables() {
     assert_eq!(reported["gocache"], "unset");
     assert_eq!(reported["npm-cache"], "unset");
     assert_eq!(reported["pnpm-store"], "unset");
+    assert_eq!(reported["deno-dir"], "unset");
+    assert_eq!(reported["bun-cache"], "unset");
     assert_eq!(
         reported["stores"], "absent",
         "and the directory beside the Worktrees closes with it, the only \

@@ -145,11 +145,11 @@ jobs:
   # handful of small installs does not come close. The measurement after it
   # landed is in this branch's pull request.
   #
-  # Node's four tools add one tarball and two `npm install -g` runs to the
-  # setup below, and four installs of one package to the suite. Nothing here
-  # builds a project, so what each ecosystem costs this job is its toolchain's
-  # download rather than its proofs — which is the shape to keep as the later
-  # stages add Python's four and NuGet.
+  # Node's six tools add one tarball, two archives and two `npm install -g`
+  # runs to the setup below, and six installs of one package to the suite.
+  # Nothing here builds a project, so what each ecosystem costs this job is its
+  # toolchain's download rather than its proofs — which is the shape to keep as
+  # the later stages add Python's four and NuGet.
   package-stores:
     name: Package stores
     runs-on: ubuntu-24.04
@@ -196,7 +196,7 @@ jobs:
           sudo tar -C /usr/local -xzf "$RUNNER_TEMP/go.tar.gz"
           echo /usr/local/go/bin >> "$GITHUB_PATH"
 
-      # **And the JavaScript ecosystem's four, every one of them reachable by a
+      # **And the JavaScript ecosystem's six, every one of them reachable by a
       # name on `/usr/local/bin`.** Not the runner image's own Node, which is
       # whatever the image pins, and not `actions/setup-node`, for the reason
       # Go is not `actions/setup-go`: the tool cache is outside every bind a
@@ -238,6 +238,30 @@ jobs:
             @yarnpkg/cli-dist@4.14.1
           sudo ln -sf /usr/local/yarn-berry/bin/yarn /usr/local/bin/yarn-berry
 
+      # **deno and bun, which are the other two of Node's six.** Neither is on
+      # the runner image, and neither needs the Node above: each ships one
+      # binary that is its own runtime, so a copy into `/usr/local/bin` is the
+      # whole of an installation.
+      #
+      # From each project's own release rather than a package manager, for the
+      # reason Go is: what a session may reach is `/nix`, `/usr`, `/bin`,
+      # `/lib`, `/lib64`, `/etc` and `/run/current-system`, and `snap` or the
+      # tool cache is outside all of it.
+      #
+      # The same releases the dev shell's nixpkgs carries, so that a proof that
+      # passes here is a proof of the versions a developer ran it against.
+      - name: Install deno 2.8.3 and bun 1.3.13
+        run: |
+          curl -sSfL -o "$RUNNER_TEMP/deno.zip" \
+            https://github.com/denoland/deno/releases/download/v2.8.3/deno-x86_64-unknown-linux-gnu.zip
+          sudo unzip -q -o "$RUNNER_TEMP/deno.zip" -d /usr/local/bin
+          sudo chmod 0755 /usr/local/bin/deno
+
+          curl -sSfL -o "$RUNNER_TEMP/bun.zip" \
+            https://github.com/oven-sh/bun/releases/download/bun-v1.3.13/bun-linux-x64.zip
+          unzip -q -o "$RUNNER_TEMP/bun.zip" -d "$RUNNER_TEMP/bun"
+          sudo install -m 0755 "$RUNNER_TEMP/bun/bun-linux-x64/bun" /usr/local/bin/bun
+
       # And the same question asked of every tool on the list, in a line naming
       # the one that fails it rather than as a test failure about a shell that
       # could not find a program — the reason the sandbox-surface step in the
@@ -251,7 +275,7 @@ jobs:
         run: |
           status=0
 
-          for tool in go zip node npm pnpm yarn yarn-berry tar sha1sum; do
+          for tool in go zip node npm pnpm yarn yarn-berry deno bun tar sha1sum; do
             found=$(command -v "$tool" || true)
 
             if [ -z "$found" ]; then
