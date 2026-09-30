@@ -53,6 +53,9 @@ mod commits;
 mod continuing;
 
 mod conversations;
+/// What a roadmap's stage line declares: the stages it stands on, and the
+/// platform it wants.
+mod declarations;
 mod deferrals;
 /// What this Verkstead is: the device id and the self-signed certificate made
 /// at its first start and read back at every one after (ADR-0020).
@@ -118,6 +121,7 @@ mod grillings;
 /// sessions means saying where they live.
 pub mod handoffs;
 mod investigations;
+mod joins;
 /// The Workbench Key: the secret the human's browser holds and a session cannot
 /// read, and the gate that answers 401 to everything which has not shown it.
 ///
@@ -183,6 +187,9 @@ pub mod peer;
 /// there is no pipe here and no Unix-socket twin beside it either.
 #[cfg(windows)]
 pub mod pipe;
+/// The look that starts a roadmap stage which waited for a place the whole
+/// server has, made as one comes free.
+mod places;
 /// Where a directory of Verkstead's own goes when nobody has said: the
 /// platform's own place for the Data Directory, and the environment values it
 /// is resolved out of.
@@ -400,6 +407,12 @@ pub(crate) struct AppState {
     /// keeps starting them — see [`drivers`].
     drivers: drivers::Drivers,
 
+    /// And which of them are stages held before their finish, waiting for the
+    /// chain below them to settle — see [`joins`]. Beside the drivers rather
+    /// than inside them, because a held stage is being driven: the run holding
+    /// it is the driver, and this is what it is holding it for.
+    joins: joins::Joins,
+
     /// And what each running session is to be ended on the Done signal for,
     /// where something is waiting on one — see [`done`].
     signals: done::Signals,
@@ -517,6 +530,23 @@ pub(crate) struct AppState {
     /// A rebuild does not take it. What that remakes is a directory the record
     /// already names, so the keep-set holds it whenever the sweep looks.
     checkouts: Arc<tokio::sync::Mutex<()>>,
+
+    /// And held across one unattended reading of a roadmap, from what it has
+    /// ready to the last stage of it started.
+    ///
+    /// Two things bring that reading about — a wrap-up settling and a look for a
+    /// free place — and they arrive on their own clocks, so the same roadmap can
+    /// be read twice at once. Each reading is a reading of the record, and a
+    /// stage is not in the record until it has started: two that overlapped
+    /// would find the same stage ready and start it twice, on one branch, in two
+    /// Conversations. So they take this and hold it to the end, and the second
+    /// reads what the first wrote.
+    ///
+    /// **The readings alone.** A press takes nothing — it is over the limit by
+    /// design and refused by the branch where it would collide — and neither
+    /// does anything else here: what this serialises is Verkstead starting work
+    /// nobody asked for. See [`continuing::reading`].
+    starting: Arc<tokio::sync::Mutex<()>>,
 }
 
 /// What a router stood up without a Data Directory calls itself where a record
@@ -1306,6 +1336,7 @@ fn standing(
         watchers: watchers::Watchers::new(),
         followers: followers::Followers::new(),
         drivers: drivers::Drivers::new(),
+        joins: joins::Joins::new(),
         signals: done::Signals::new(),
         updates,
 
@@ -1363,6 +1394,7 @@ fn standing(
 
         data_dir,
         checkouts: Arc::new(tokio::sync::Mutex::new(())),
+        starting: Arc::new(tokio::sync::Mutex::new(())),
     };
 
     // First of all, the worktrees directory swept of everything no Conversation
@@ -1390,13 +1422,23 @@ fn standing(
     // rather than about anything a request will start: every Conversation the
     // last server was driving is one nothing is driving now, and nobody but this
     // is going to look at any of them — see [`resume::at_startup`].
-    let resumed = vec![resume::at_startup(&state)];
+    //
+    // Turned into a signal rather than a handle, because two things below wait
+    // for it and a task can be awaited by one — see [`resume::taken_up`].
+    let resumed = resume::taken_up(resume::at_startup(&state));
 
     // And then, once that is done, the check for the Conversations it could not
     // take up: a restart holds no driver registrations at all, so what is still
     // undriven after everything that resumes has resumed is what genuinely has
     // nobody — see [`stalls`].
-    stalls::sweeping(&state, resumed);
+    stalls::sweeping(&state, resumed.clone());
+
+    // And the look for a stage that is waiting on a place the whole server has,
+    // which waits for the same signal and for the mirror image of the reason:
+    // the places are counted off those same registrations, so a look in front of
+    // the resume would find every one of them free. After that it is woken by a
+    // place coming free rather than by a clock — see [`places`].
+    places::looking(&state, resumed);
 
     // And the pull requests of everything that has already finished, which is a
     // sweep of its own at a pace of its own: a base goes on moving under a

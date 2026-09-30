@@ -208,6 +208,40 @@ export function withTable(set: SetView): SetView {
   };
 }
 
+/// The same Set with a link in the words of `Q1`'s first Option.
+///
+/// A link is one of the marks the server keeps when it renders an Option — see
+/// `to_inline_html` in `crates/render/src/markdown.rs` — and an agent pointing
+/// at the pull request it is asking about writes one. The row is a press, so
+/// what is asked of it is that the link still is not.
+///
+/// Written here rather than taken from a fixture for `withTable`'s reason: what
+/// the renderer emits is asked of the server, and what is asked here is what the
+/// page does with a row that holds one.
+export function withLink(set: SetView): SetView {
+  return {
+    ...set,
+    questions: set.questions.map((question) =>
+      question.ask.name === "Q1"
+        ? {
+            ...question,
+            ask: {
+              ...question.ask,
+              options: question.ask.options.map((option, at) =>
+                at === 0
+                  ? {
+                      ...option,
+                      text_html: `${option.text_html} — see <a href="https://example.com/pr">the pull request</a>`,
+                    }
+                  : option,
+              ),
+            },
+          }
+        : question,
+    ),
+  };
+}
+
 /// Everything the pane has *sent* — the submits and the locks, and never the
 /// reads it makes around them.
 ///

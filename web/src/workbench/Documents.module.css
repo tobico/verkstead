@@ -81,3 +81,13 @@
   color: var(--ink-soft);
   font-style: italic;
 }
+
+/* What the entry's own line declared, between the heading and the box: a
+   stage's dependencies and the platform it wants. The dim ink a size down that
+   a fact about the work is written in everywhere else here, and above the box
+   rather than in it, because the box is the document and this is the list. */
+.declares {
+  margin: 0 0 0.4rem;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+}

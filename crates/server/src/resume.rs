@@ -61,6 +61,7 @@
 use std::future::Future;
 use std::pin::Pin;
 
+use tokio::sync::watch;
 use verkstead_render::Resumed;
 use verkstead_schema::{Direction, Nudge};
 
@@ -644,11 +645,9 @@ async fn recompute(
 /// Conversation, so every take-up would refuse and every refusal would stop a
 /// Conversation to say the server has no agents. See [`crate::stalls::sweeping`].
 ///
-/// The task is handed back rather than let go, because the stall sweep waits for
-/// it: every Conversation here is undriven until this has taken it up, and a
-/// sweep that looked first would call each of them stalled. See
-/// [`crate::stalls::sweeping`].
-#[must_use = "the sweep waits for what a restart takes up before it judges \
+/// The task is handed back rather than let go, because two sweeps wait for it —
+/// see [`taken_up`], which is the one waiter both of them hear.
+#[must_use = "the sweeps wait for what a restart takes up before they judge \
               whether anything is driving it"]
 pub(crate) fn at_startup(state: &AppState) -> tokio::task::JoinHandle<()> {
     // Nothing to take up on a server that runs no sessions — see
@@ -723,6 +722,33 @@ pub(crate) fn at_startup(state: &AppState) -> tokio::task::JoinHandle<()> {
             }
         }
     })
+}
+
+/// Turn what the restart is taking up into a signal anything can wait on: `true`
+/// once [`at_startup`] is over, whichever way it went.
+///
+/// A [`watch`] rather than the task itself, because there are two waiters and a
+/// `JoinHandle` has one. Both of them ask the same question from the same end —
+/// *is what the last server was running being driven again yet* — and both would
+/// be wrong to ask it before: [`crate::stalls::sweeping`] would call every
+/// resumed Conversation stalled, and [`crate::places::looking`] would count the
+/// places they have not taken back yet and start over the top of them.
+pub(crate) fn taken_up(resuming: tokio::task::JoinHandle<()>) -> watch::Receiver<bool> {
+    let (told, resumed) = watch::channel(false);
+
+    tokio::spawn(async move {
+        if let Err(error) = resuming.await {
+            tracing::error!(error = ?error, "taking up what was left running failed, so the sweeps judge what they find");
+        }
+
+        // Sent whether the take-up finished or fell over, because what waits on
+        // it is waiting for the *attempt* to be over rather than for it to have
+        // worked: a sweep held back for ever by a panicked resume would be a
+        // server that never noticed anything again.
+        let _ = told.send(true);
+    });
+
+    resumed
 }
 
 /// Whether this Conversation is stopped in a way only the human can undo, which

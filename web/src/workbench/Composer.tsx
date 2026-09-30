@@ -129,11 +129,11 @@ import { Empty, ErrorLine } from "../notices";
 import { keyOf, useDevice } from "../reaching";
 import { Adoption } from "./Adoption";
 import styles from "./Composer.module.css";
-import { refusedOnCreate } from "./composing";
+import { refusedOnCreate, stoppedOnCreate } from "./composing";
 import { PaneHead } from "./PaneHead";
 import { DRAFT, chosen } from "./naming";
 import { Setup, SetupNotes } from "./Setup";
-import { TakeUpRefusal } from "./TakeUp";
+import { discarding, goingAhead, TakeUpRefusal } from "./TakeUp";
 import { needed, targeted } from "./processes";
 import { keeping } from "./settling";
 import { BRIEF_REFUSAL, grillRefusal } from "./Timeline";
@@ -526,6 +526,13 @@ function Starting(props: {
   /// What the press does, where the Conversation is ready for one.
   press: () => void;
 
+  /// What the button reads, where the press is no longer an ordinary start.
+  ///
+  /// The take-up's own: a start stopped over what closing another conversation
+  /// would discard is one press away from going ahead, and the button is what
+  /// says so. Left off everywhere else, which is every first press.
+  label?: string;
+
   /// What came back refused, drawn under the row — a node rather than a string,
   /// because one refusal has a way out of itself in it.
   refused?: JSX.Element;
@@ -554,7 +561,7 @@ function Starting(props: {
           title={ready() ? undefined : missing(props.conversation.process)}
           onClick={() => ready() && props.press()}
         >
-          {props.pending ? "Starting…" : "Start work"}
+          {props.pending ? "Starting…" : (props.label ?? "Start work")}
         </button>
       </div>
 
@@ -641,16 +648,28 @@ function StartTakeUp(props: {
   const queries = useQueryClient();
   const device = useDevice();
 
-  const [refused, setRefused] = createSignal<TakenUp | null>(null);
+  // Starting from whatever the create replay was stopped over, where this draft
+  // came off a compose page that was: the press on that page asked the question
+  // and nobody was here to answer it, so the press on this one is the answer. Left
+  // at null the question would be asked a second time, and the line under it would
+  // have said *press start again to go ahead* over a press that could only ask.
+  const [said, setSaid] = createSignal<TakenUp | null>(
+    stoppedOnCreate(device(), props.conversation.id),
+  );
 
   const start = useMutation(() => ({
-    mutationFn: () => takeUpPullRequest(device(), props.conversation.id),
+    // What the last press was stopped over, sent back: this press is the human
+    // saying to go ahead with it. Empty on every press the last one did not stop,
+    // which is every first press — and the server reads the worktrees again
+    // regardless, so a list that has moved since stops this press in its turn.
+    mutationFn: () =>
+      takeUpPullRequest(device(), props.conversation.id, discarding(said())),
     onSuccess: (outcome: TakenUp) => {
       // Whatever it came back with, the page is read again: what the take-up
       // did is a conversation that has moved, and what refused it is a
       // repository — or a GitHub — that has moved, and reading it again is the
       // correction either way.
-      setRefused(outcome === "TakenUp" ? null : outcome);
+      setSaid(outcome === "TakenUp" ? null : outcome);
 
       void queries.invalidateQueries({
         queryKey: keyOf(device(), "conversation"),
@@ -668,9 +687,10 @@ function StartTakeUp(props: {
       files={props.files}
       pending={start.isPending}
       press={() => start.mutate()}
+      label={goingAhead(said()) ? "Start anyway" : undefined}
       refused={
-        refused() === null ? undefined : (
-          <TakeUpRefusal outcome={refused() as TakenUp} />
+        said() === null ? undefined : (
+          <TakeUpRefusal outcome={said() as TakenUp} />
         )
       }
       failed={start.isError ? start.error?.message : undefined}

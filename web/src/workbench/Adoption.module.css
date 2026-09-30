@@ -59,3 +59,18 @@
     border-color: var(--accent-deep);
   }
 }
+
+/* The stages that start beside the one this conversation becomes. A list rather
+   than a line, because a roadmap with a wide fan has several of them and the
+   branch each is worked on is worth reading — and the heading above it is the
+   same `.stage` line the first stage is drawn as, this being the same fact said
+   twice over. */
+.beside {
+  margin: 0 0 0.5rem;
+  padding-left: 1.25rem;
+  color: var(--ink-soft);
+}
+
+.beside li {
+  margin: 0.15rem 0;
+}

@@ -198,6 +198,18 @@
   margin-top: 0.7rem;
 }
 
+/* What the list says about a section beyond its name — a stage's state on a
+   roadmap's nav. Set small and quiet and lined up under the name, so it reads as
+   something said about that line rather than as a line of its own. */
+.section > .mark {
+  display: block;
+  /* The link's own left inset: its padding, and the room it keeps for the mark
+     that lights up. */
+  padding-left: calc(0.4rem + 2px);
+  color: var(--ink-soft);
+  font-size: 0.75rem;
+}
+
 /* Indented against a rule, so a file or a Question reads as part of the section
    above it rather than as another section. */
 .entries {
