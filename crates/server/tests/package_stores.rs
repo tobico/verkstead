@@ -31,7 +31,12 @@
 //!
 //! **The registry is this machine's own.** Nothing here reaches the internet: a
 //! proof lays a package out in whatever shape its tool fetches from, and hands
-//! it to the two Sandboxes that are allowed it and to no others. So *denied its
+//! it to the two Sandboxes that are allowed it and to no others. Which is
+//! **measured rather than intended** — bind an empty `resolv.conf` over
+//! `/etc/resolv.conf`, run this file inside that, and every proof in it still
+//! passes. See
+//! [`pipenv_fills_one_cache_and_a_third_install_reads_it`], where one of them
+//! did not until it was told which index its distribution comes from. So *denied its
 //! registry* is a fact about the machine as well as about the flag — and which
 //! fact depends on what the tool can read a registry off:
 //!
@@ -2680,6 +2685,26 @@ async fn poetry_fills_one_cache_and_a_third_install_reads_it() {
 /// of that finding: pip mounts a non-caching adapter for plain `http://` and the
 /// caching one only for a host that was named.
 ///
+/// **And the `Pipfile` names the index the distribution comes from**, which is
+/// one line that keeps this proof off the internet altogether. pipenv collects
+/// hashes as it locks, and which way it goes about it turns on the index URL it
+/// matched for the entry: a `[packages]` entry with no `index` key matches no
+/// declared source, so the URL falls back to `https://pypi.org/simple/` and
+/// pipenv asks `https://pypi.org/pypi/<name>/json` — a *hardcoded* host that
+/// `PIPENV_PYPI_MIRROR` does not move. Naming the source sends it to
+/// `get_hashes_from_remote_index_urls` instead, which asks the index this proof
+/// serves.
+///
+/// **It passed either way on a machine with a resolver**, which is why it took a
+/// runner to find: pypi.org answers 404 for a distribution only this suite has
+/// ever heard of, `r.json()["releases"]` raises `KeyError`, and pipenv catches
+/// that and shrugs. Where the name does not resolve it raises requests'
+/// `ConnectionError`, which is not Python's builtin of that name and so is *not*
+/// what the `except` beside it catches — so the lock dies. Reproduced here by
+/// binding an empty `resolv.conf` over `/etc/resolv.conf` and running the suite
+/// inside that, which is the condition a sandbox with no DNS is in; all of it
+/// passes that way now, and this proof did not before.
+///
 /// The control fails on `Connection refused`, which is pip having had to fetch.
 #[tokio::test]
 async fn pipenv_fills_one_cache_and_a_third_install_reads_it() {
@@ -2694,7 +2719,8 @@ async fn pipenv_fills_one_cache_and_a_third_install_reads_it() {
              verify_ssl = false\n\
              \n\
              [packages]\n\
-             greet-from-the-store = {file = \"{wheel}\"}\n",
+             greet-from-the-store = {file = \"{wheel}\", \
+             index = \"the-one-this-proof-serves\"}\n",
         )),
         lockfile: Some("Pipfile.lock"),
         settings: "export VIRTUALENV_NO_PERIODIC_UPDATE=1",
@@ -2936,7 +2962,8 @@ async fn pipenvs_environment_stays_in_the_worktree_and_the_store_holds_no_venv()
              verify_ssl = false\n\
              \n\
              [packages]\n\
-             greet-from-the-store = {file = \"{wheel}\"}\n",
+             greet-from-the-store = {file = \"{wheel}\", \
+             index = \"the-one-this-proof-serves\"}\n",
         ),
         store: ("PIPENV_CACHE_DIR", "pipenv"),
         installing: "export VIRTUALENV_NO_PERIODIC_UPDATE=1\n\
