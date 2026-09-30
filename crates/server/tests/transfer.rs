@@ -1527,7 +1527,7 @@ const CODEX_CHOSE: &str = "01a0f0e9-3280-7900-9dda-c7d0920b0735";
 /// fallback.
 fn codex_that_carries_on_at(gate: &Path, opening: &str, names_itself: bool) -> String {
     let says = match names_itself {
-        true => format!(r#"\"session_id\":\"{CODEX_CHOSE}\","#),
+        true => format!(r#""session_id":"{CODEX_CHOSE}","#),
         false => String::new(),
     };
 
@@ -1554,7 +1554,7 @@ day="$store/2026/09/30"
 mkdir -p "$day"
 log="$day/rollout-2026-09-30T17-47-00-{chose}.jsonl"
 
-printf '{{"type":"session_meta","payload":{{{says}\"cwd\":\"%s\"}}}}\n' "$PWD" > "$log"
+printf '{{"type":"session_meta","payload":{{{says}"cwd":"%s"}}}}\n' "$PWD" > "$log"
 printf '%s\n' '{asked}' >> "$log"
 
 {waiting}
