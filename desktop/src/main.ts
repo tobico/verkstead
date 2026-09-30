@@ -42,6 +42,7 @@ import { join } from "node:path";
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
 
 import { artwork } from "./artwork.js";
+import { autoscrolling } from "./autoscroll.js";
 import { FILE } from "./bounds.js";
 import { ASKED, HEAD, LOGS, PRELOAD, REGISTER, SET, STARTUP } from "./bridge.js";
 import { cli, type Install, OVERRIDE } from "./cli.js";
@@ -336,6 +337,20 @@ async function run(): Promise<void> {
   if (machine.platform === "win32") {
     app.setAppUserModelId(APP_ID);
     say(`this window is ${APP_ID} on the taskbar, which is the Start-menu entry's own name`);
+  }
+
+  // And the one thing this platform's Chromium has to be told before a renderer
+  // of it starts: **Middle-Click Autoscroll**, which Chromium has and enables on
+  // Windows alone — so the same workbench scrolls under a held middle button
+  // there and does not here. A Blink runtime feature is read by the renderer as
+  // it starts rather than asked for per window, so this is a command-line switch
+  // and there is nothing on `webPreferences` behind it; which platforms are told
+  // and what they are told is [`autoscrolling`](./autoscroll.js)'s, and this is
+  // the telling.
+  const scrolling = autoscrolling(machine.platform);
+  if (scrolling !== undefined) {
+    app.commandLine.appendSwitch(scrolling.name, scrolling.value);
+    say(`a held middle button autoscrolls the window — --${scrolling.name}=${scrolling.value}`);
   }
 
   // First of the app's own steps, and before anything is started: a second

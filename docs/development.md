@@ -117,6 +117,16 @@ still the app quitting. The sidecar's stdout and the app's own lines both go to
 `verkstead.log` under the **Log Directory**, which the app names on the terminal
 as it opens it and which both **View Logs** open.
 
+**And a held middle button scrolls the pane under it**, on Linux as on Windows.
+Chromium has middle-click autoscroll already and enables it on Windows alone, so
+the app asks Blink for it by name — `--enable-blink-features=MiddleClickAutoscroll`,
+appended before there is a renderer to read it, on every platform but Windows and
+a Mac: Windows has it on, and a Mac has no such gesture for it to match. It takes
+nothing away from the other thing a middle button does on Linux, a middle click
+in a text field still pasting the X primary selection, and a middle press on a
+link still scrolling nothing. Which platforms are told is `autoscroll.ts`, and
+vitest runs every arm of it.
+
 **And the window has no title bar of its own.** What stands at its top-right
 corner on Linux and Windows is the platform's own controls overlay, drawn on the
 paper the page's heads are drawn on with its symbols in their ink and as tall as
