@@ -16,6 +16,13 @@
 //! gone. Pressed with nothing running there is nothing to see out, and the move
 //! runs where it stands.
 //!
+//! **A session's own call is seen out the way `verkstead done` is** (ADR-0020,
+//! *The agent's call*): the session is ended once it is next idle, so its
+//! closing words reach the Transcript, and then the move runs. Whatever was
+//! driving it reads the ending as Verkstead's and stands down, the rescue says
+//! nothing into a session idling behind the call, and the work carries on at the
+//! far end.
+//!
 //! **And it runs after the session's ending has finished happening.** A session
 //! away from home writes its account's login and this Repo's memory entries back
 //! to the device they are at home on as it ends, and the word that it is over is
@@ -376,9 +383,7 @@ async fn by_the_session(
         .await
         .map_err(ours)?;
 
-    if born.is_none_or(|born| born.device != device.device)
-        && !ticked.contains(&device.device)
-    {
+    if born.is_none_or(|born| born.device != device.device) && !ticked.contains(&device.device) {
         return Err(format!(
             "{} ({}) is not a device the human has said this work may be moved to — they tick \
              those under *May be transferred to* in the Transfer dialog. Pick one that is, or \
@@ -412,6 +417,13 @@ async fn by_the_session(
     )
     .await
     .map_err(ours)?;
+
+    // A call clears a wait, as a Done signal does: the session has said its turn
+    // is the last one here, so it is ended once it is next idle by its backend's
+    // own reading.
+    if let Some(session) = state.sessions.following(conversation_id) {
+        session.idle.done_waiting();
+    }
 
     Ok(device.name.clone())
 }
@@ -646,9 +658,14 @@ pub(crate) async fn moving(state: &AppState, conversation_id: i64) -> bool {
 /// is this task — so the stall sweep leaves it alone and the page says something
 /// is holding it.
 ///
-/// The session is waited on rather than ended: Stop after the current task is
-/// exactly the promise here, and what stops anything being launched behind it is
-/// [`going`], asked in front of every launch. Waited on in a loop because a
+/// The session is waited on rather than ended where the human pressed: Stop
+/// after the current task is exactly the promise there, and what stops anything
+/// being launched behind it is [`going`], asked in front of every launch. **Where
+/// the session made the call it is ended once its turn is over** — see
+/// [`called_and_idle`] — because an interactive agent idles rather than exits,
+/// and a call it waited on would never move anything. Whatever was driving it
+/// reads that ending as Verkstead's own and stands down without a stop: see
+/// [`crate::sessions::Ended::on_purpose`]. Waited on in a loop because a
 /// launch decided before the request landed is a session that appears after the
 /// first wait — one lap, and then there is nothing running.
 ///
@@ -694,7 +711,27 @@ fn see_out(state: AppState, conversation_id: i64, device: String) {
                 );
 
                 seen = writing;
-                session.ended().await;
+                let idle = session.idle.clone();
+
+                tokio::select! {
+                    _ = session.ended() => {}
+
+                    () = called_and_idle(&state, conversation_id, &device, &idle) => {
+                        // The same session the wait was for, rather than whatever
+                        // is on the register now.
+                        if state.sessions.writing(conversation_id) == seen {
+                            tracing::info!(
+                                conversation_id,
+                                device,
+                                "the session asked for the move and its turn is over, so it \
+                                 is being ended",
+                            );
+
+                            state.sessions.end(conversation_id).await;
+                        }
+                    }
+                }
+
                 continue;
             }
 
@@ -728,6 +765,77 @@ fn see_out(state: AppState, conversation_id: i64, device: String) {
 
         move_it(&state, conversation_id, &device).await;
     });
+}
+
+/// Wait until the move to `device` is the session's own call and the session's
+/// turn is over: idle by its backend's own reading, and for [`Pace::grace`]
+/// since the call as well as since it last printed — so the closing words it
+/// prints once `verkstead transfer` comes back reach the Transcript rather than
+/// being cut off under it.
+///
+/// **The session's call alone.** An interactive agent idles when its turn is
+/// over rather than exiting, so a call waited out the way a press is would move
+/// nothing, ever; the human's press is *stop after the current task*, and a
+/// session left to end by itself is exactly what it promises. The request is
+/// read again every poll, because the later request wins whoever made it: a
+/// press after the call hands the ending back to the session, and a call after
+/// the press takes it. Never returns where the call never comes, which is what
+/// makes it an arm of a `select!`. See [`crate::runner`]'s `signalled_and_idle`,
+/// which is the same wait for `verkstead done`.
+///
+/// [`Pace::grace`]: crate::runner::Pace::grace
+async fn called_and_idle(
+    state: &AppState,
+    conversation_id: i64,
+    device: &str,
+    idle: &crate::sessions::Idle,
+) {
+    let pace = state.sessions.pace();
+    let mut called: Option<std::time::Instant> = None;
+
+    loop {
+        if !asked_by_the_session(state, conversation_id, device).await {
+            called = None;
+            tokio::time::sleep(pace.poll).await;
+            continue;
+        }
+
+        let since = *called.get_or_insert_with(std::time::Instant::now);
+
+        let owed = pace
+            .grace
+            .saturating_sub(idle.for_how_long())
+            .max(pace.grace.saturating_sub(since.elapsed()));
+
+        if owed.is_zero() {
+            return;
+        }
+
+        tokio::time::sleep(owed.min(pace.poll)).await;
+    }
+}
+
+/// Whether the move standing for this Conversation — to `device` — was asked
+/// for by the session running in it rather than by the human.
+async fn asked_by_the_session(state: &AppState, conversation_id: i64, device: &str) -> bool {
+    matches!(
+        store::transfer_asked_by(&state.pool, conversation_id).await,
+        Ok(Some((asked, store::AskedBy::Session))) if asked == device
+    )
+}
+
+/// Whether the session running in this Conversation has asked for the work to
+/// be moved, and is to be ended at its turn's end for it.
+///
+/// What the rescue asks before speaking: a session idling behind its own call
+/// has finished its turn on purpose, and the mover is about to end it. A store
+/// that will not answer reads as no call, which costs a line typed into a
+/// session rather than a session nobody speaks to.
+pub(crate) async fn called(state: &AppState, conversation_id: i64) -> bool {
+    matches!(
+        store::transfer_asked_by(&state.pool, conversation_id).await,
+        Ok(Some((_, store::AskedBy::Session)))
+    )
 }
 
 /// The move itself, once there is nothing left running.

@@ -50,6 +50,7 @@ use tower::ServiceExt;
 use verkstead_render::{
     ConversationEntry, ConversationView, Lifecycle, ProfileEntry, Standing, Started, TimelineEvent,
 };
+use verkstead_schema::Direction;
 use verkstead_server::attachments::Attachments;
 use verkstead_server::build_cache::BuildCache;
 use verkstead_server::device::reading::Reading;
@@ -65,7 +66,7 @@ use verkstead_server::sandbox::{Executable, Homes, Reachable, SandboxConfig};
 use verkstead_server::settings::Settings;
 use verkstead_server::skills::Skills;
 use verkstead_server::{
-    Agents, Gh, Routers, open_database, routers_answering_devices_telling,
+    Agents, Gh, Pace, Routers, open_database, routers_answering_devices_telling,
     routers_running_sessions_answering_devices, store,
 };
 use verkstead_store::{Linking, record_member};
@@ -187,10 +188,16 @@ impl Verkstead {
     /// 07's — but a device taking work in needs what a served one has: a Data
     /// Directory, which is where an arriving Conversation's attached files land.
     async fn running(id: &str, stub: &str, spill: &Path) -> Verkstead {
-        Verkstead::standing(id, Some(stub), spill).await
+        Verkstead::standing(id, Some(stub), spill, Pace::default()).await
     }
 
-    async fn standing(id: &str, stub: Option<&str>, spill: &Path) -> Verkstead {
+    /// The same at `pace`, for the one test that needs a session spoken to
+    /// sooner than a server would.
+    async fn running_at(id: &str, stub: &str, spill: &Path, pace: Pace) -> Verkstead {
+        Verkstead::standing(id, Some(stub), spill, pace).await
+    }
+
+    async fn standing(id: &str, stub: Option<&str>, spill: &Path, pace: Pace) -> Verkstead {
         let dir = tempfile::tempdir().unwrap();
         let home = tempfile::tempdir().unwrap();
         let elsewhere = tempfile::tempdir().unwrap();
@@ -243,7 +250,7 @@ impl Verkstead {
             Some(stub) => routers_running_sessions_answering_devices(
                 pool.clone(),
                 dir.path().to_owned(),
-                agents(stub, home.path(), dir.path(), spill),
+                agents(stub, home.path(), dir.path(), spill).at_pace(pace),
                 gh_stub(NO_GITHUB),
                 cluster.clone(),
                 nudges.clone(),
@@ -1422,6 +1429,11 @@ const CARRYING_ON: &str = r#"{"type":"assistant","message":{"content":[{"type":"
 /// memory sync is a store of the shape the far end has to find a log in, and
 /// nothing here is told where to put one.
 fn writes_a_log_and_waits_at(gate: &Path) -> String {
+    writes_a_log_then(&waits_at(gate))
+}
+
+/// The same log, and then whatever the session does next.
+fn writes_a_log_then(next: &str) -> String {
     format!(
         r#"
 entry=$(printf '%s' "$PWD" | tr -c 'a-zA-Z0-9' '-')
@@ -1435,11 +1447,73 @@ done
 mkdir -p "$HOME/.claude/projects/$entry"
 printf '%s\n' '{asked}' > "$HOME/.claude/projects/$entry/$session.jsonl"
 
-{waiting}
+{next}
 "#,
         asked = THE_QUESTION_IT_WAS_ON,
-        waiting = waits_at(gate),
     )
+}
+
+/// What an agent says once `verkstead transfer` has come back to it: its last
+/// words on this machine, which must reach the Transcript before the session is
+/// ended for the move.
+const CLOSING: &str = "over to the laptop now";
+
+/// What stands where claude goes for **the agent's call**: a session at work —
+/// printing, so that nothing reads it as idle — until the gate the test opens
+/// once the call is made, and then its closing line and an idle that never ends.
+///
+/// Which is the shape a real interactive agent has after its call: it says what
+/// it has left to say and sits at its prompt. It never exits, so a move that
+/// waited for it to would never run.
+fn calls_then_idles_at(gate: &Path) -> String {
+    format!(
+        r#"
+printf 'grilling\r\n'
+while [ ! -f {gate} ]; do printf '.'; sleep 0.2; done
+printf '\r\n{CLOSING}\r\n'
+sleep 300
+"#,
+        gate = quoted(gate),
+    )
+}
+
+/// And the same inside **a backlog**: the grilling commits a one-task backlog
+/// and exits, and the session sent to work its step makes the call the way the
+/// one above does.
+fn works_a_step_then_idles_at(gate: &Path) -> String {
+    format!(
+        r#"
+case "$2" in
+*next-task/SKILL.md*)
+    printf 'working the step\r\n'
+    while [ ! -f {gate} ]; do printf '.'; sleep 0.2; done
+    printf '\r\n{CLOSING}\r\n'
+    sleep 300
+    ;;
+*)
+    mkdir -p .tasks
+    printf '# Rate limiting\n\n## Tasks\n\n- [ ] 01: count the requests\n' > .tasks/TODO.md
+    printf '# 01. Count the requests\n' > .tasks/01-count.md
+    git add .tasks
+    git commit --quiet -m 'chore: plan the rate limiter'
+    printf 'grilling\r\n'
+    ;;
+esac
+"#,
+        gate = quoted(gate),
+    )
+}
+
+/// And what stands where claude goes on **B** for the backlog: a session that
+/// says what it was launched on and stays up, so that the step it carries on is
+/// one still being worked when the test reads it.
+fn carries_the_step_on() -> String {
+    r#"
+printf 'carrying the step on\r\n'
+printf 'prompt=%s\r\n' "$2"
+sleep 300
+"#
+    .to_owned()
 }
 
 /// And what stands where claude goes on **B** when the question is the resume: a
@@ -2110,7 +2184,19 @@ async fn drafted_remembering(
     repositories: Repositories,
     memory: bool,
 ) -> (Verkstead, Verkstead, Holding, i64) {
-    let a = Verkstead::running(A, on_a, spill).await;
+    drafted_at(on_a, on_b, spill, repositories, memory, Pace::default()).await
+}
+
+/// And the same with A's sessions seen along at `pace`.
+async fn drafted_at(
+    on_a: &str,
+    on_b: &str,
+    spill: &Path,
+    repositories: Repositories,
+    memory: bool,
+    pace: Pace,
+) -> (Verkstead, Verkstead, Holding, i64) {
+    let a = Verkstead::running_at(A, on_a, spill, pace).await;
     let b = Verkstead::running(B, on_b, spill).await;
 
     a.linked_to(&b.device, B_MACHINE, B_OS, vec![b.at()]).await;
@@ -2719,6 +2805,180 @@ async fn a_call_after_the_press_is_the_one_that_moves() {
     assert!(
         arrived.contains("at the session"),
         "the call came last, so the move is the session's: {arrived}",
+    );
+}
+
+/// **A session that made the call is ended once its turn is over**: an
+/// interactive agent idles rather than exits, so a call waited out the way a
+/// press is would never move anything. Its closing words reach the Transcript,
+/// and they precede *Transferred to B at the session's request* on the Timeline
+/// the work carries on under.
+#[tokio::test]
+async fn a_session_idling_after_its_call_is_ended_moved_and_carried_on() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = drafted_running(
+        &writes_a_log_then(&calls_then_idles_at(&gate)),
+        &carries_on(),
+        spill.path(),
+        Repositories::Apart,
+    )
+    .await;
+
+    a.grills(conversation).await;
+    a.printed(conversation, "grilling").await;
+
+    assert_eq!(a.permits(conversation, B, true).await, "\"Recorded\"");
+    assert_eq!(a.calls(conversation, B_MACHINE).await.0, StatusCode::OK);
+
+    // The agent says its last words and goes idle, and never exits.
+    std::fs::write(&gate, "go").unwrap();
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    let session = a.sessions_on(conversation).await[0];
+    assert!(
+        a.capture_of(conversation, session).await.contains(CLOSING),
+        "the closing words reached A's record before the session was ended",
+    );
+
+    // On the Timeline the work carries on under: the session that crossed,
+    // closing words and all, and after it the move.
+    let notice = b.notice_saying(there, "at the session").await;
+    let timeline = b.view(there).await.timeline;
+
+    let spoke = timeline
+        .iter()
+        .position(|event| matches!(event, TimelineEvent::AgentOutput(_)))
+        .expect("the session on A crossed with the record");
+    let told = timeline
+        .iter()
+        .position(|event| matches!(event, TimelineEvent::Notice(said) if said.html == notice))
+        .expect("the Notice saying the move");
+
+    assert!(
+        spoke < told,
+        "the agent's last words on A precede the move: {timeline:#?}"
+    );
+
+    let crossed = b.sessions_on(there).await[0];
+    assert!(
+        b.capture_of(there, crossed).await.contains(CLOSING),
+        "and they are the closing words, on B as on A",
+    );
+
+    let resumed = b.latest_capture_saying(there, "carried on").await;
+    assert!(
+        resumed.contains("arg=--resume"),
+        "B's session carries on the conversation A's was having: {resumed:?}",
+    );
+}
+
+/// The pace A runs the backlog below at: the rescue's grace well inside the
+/// ending's, so that a session idling behind its call is one the rescue would
+/// have spoken to long before the mover ended it, were it going to.
+fn rescuing() -> Pace {
+    Pace {
+        poll: Duration::from_millis(100),
+        grace: Duration::from_secs(3),
+        proposing: Duration::from_millis(500),
+        waking: Duration::from_secs(1),
+        ..Pace::default()
+    }
+}
+
+/// The words the rescue types into a session, the start of them.
+const RESCUED: &str = "If you have your next step";
+
+/// **A backlog step whose session made the call stands down quietly**: no stop,
+/// no Notice about a step that failed to land, and no rescue typed into the
+/// session idling behind the call. The work carries on at the far end, where
+/// B's session is sent for the same step.
+#[tokio::test]
+async fn a_backlog_step_that_made_the_call_stands_down_and_carries_on_over_there() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = drafted_at(
+        &works_a_step_then_idles_at(&gate),
+        &carries_the_step_on(),
+        spill.path(),
+        Repositories::Apart,
+        true,
+        rescuing(),
+    )
+    .await;
+
+    // The grilling commits its backlog and exits, and the pick that would have
+    // followed is written the way the record takes one.
+    a.grills(conversation).await;
+    a.printed(conversation, "grilling").await;
+    a.view_saying(conversation, |drawn| !drawn.working).await;
+
+    assert!(matches!(
+        store::pick_direction(&a.pool, conversation, Direction::TaskList)
+            .await
+            .unwrap(),
+        store::Directing::Writing,
+    ));
+    store::start_implementing(&a.pool, conversation)
+        .await
+        .unwrap();
+
+    let resumed = press(
+        &a.workbench,
+        &format!("/api/ui/conversations/{conversation}/resume"),
+        None,
+    )
+    .await;
+    assert_eq!(resumed, "\"Resumed\"", "the backlog is worked");
+
+    a.latest_capture_saying(conversation, "working the step")
+        .await;
+
+    assert_eq!(a.permits(conversation, B, true).await, "\"Recorded\"");
+
+    let before = a.notices(conversation).await;
+
+    assert_eq!(a.calls(conversation, B_MACHINE).await.0, StatusCode::OK);
+    std::fs::write(&gate, "go").unwrap();
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    let last = a.latest_capture_saying(conversation, CLOSING).await;
+    assert!(
+        !last.contains(RESCUED),
+        "nothing was typed into the session idling behind its call: {last:?}",
+    );
+
+    for notice in a.notices(conversation).await {
+        assert!(
+            before.contains(&notice) || notice.contains("Transferred to"),
+            "the move is the one thing A says about the step: {notice}",
+        );
+    }
+
+    let carried = b.latest_capture_saying(there, "carrying the step on").await;
+    assert!(
+        carried.contains("next-task/SKILL.md"),
+        "B's session is sent for the backlog: {carried:?}",
+    );
+
+    let worktree = b.worktree(there).await;
+    assert!(
+        std::fs::read_to_string(worktree.join(".tasks/TODO.md"))
+            .unwrap()
+            .contains("- [ ] 01: count the requests"),
+        "and the step it carries on is the one A's session was working",
     );
 }
 

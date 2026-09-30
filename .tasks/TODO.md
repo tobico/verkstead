@@ -25,5 +25,5 @@ Roadmap stage: [11: The agent's call](docs/roadmaps/cluster-mode/11-the-agents-c
 
 - [x] 01: Permitted devices on the record — [details](01-permitted-devices-on-the-record.md)
 - [x] 02: `verkstead transfer`, and the move it asks for — [details](02-verkstead-transfer.md)
-- [ ] 03: Ended at the turn's end — [details](03-ended-at-the-turns-end.md)
+- [x] 03: Ended at the turn's end — [details](03-ended-at-the-turns-end.md)
 - [ ] 04: The prompt and the Guide — [details](04-the-prompt-and-the-guide.md)

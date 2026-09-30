@@ -1227,9 +1227,10 @@ pub(crate) enum Ended {
     Badly(String),
 
     /// Verkstead ended it, however it came to: it had said it was done and gone
-    /// quiet since, the human closed the Conversation or pressed Force stop out
-    /// from under it, or the account it was spending ran out of window and the
-    /// stop written for that ended it — see [`crate::limits`].
+    /// quiet since, it had asked for the work to be moved and gone quiet since,
+    /// the human closed the Conversation or pressed Force stop out from under
+    /// it, or the account it was spending ran out of window and the stop written
+    /// for that ended it — see [`crate::limits`].
     Stopped,
 
     /// It is over and nothing can say how — the relay itself failed, or could not
@@ -1262,10 +1263,12 @@ impl Ended {
     /// tell them driving had stopped about the thing they just stopped, or
     /// write a second stop behind one already on the record.
     ///
-    /// Three ways in, and the driver treats them alike. The step landed and the
-    /// session went quiet, so there is nothing to tell. The human closed the
-    /// Conversation or pressed Force stop, and the stop their press wrote is
-    /// already there. Or the account ran out of window, and the stop
+    /// Four ways in, and the driver treats them alike. The step landed and the
+    /// session went quiet, so there is nothing to tell. The session asked for the
+    /// work to be moved and its turn is over, so the work carries on at the far
+    /// end and nothing here is to be launched after it — see
+    /// [`crate::transfers`]. The human closed the Conversation or pressed Force
+    /// stop, and the stop their press wrote is already there. Or the account ran out of window, and the stop
     /// [`crate::limits`] wrote before killing the sandbox is already there too —
     /// which is what this has to be read as for, because a driver reading it as
     /// the human's act alone would advance a run that has stopped.

@@ -163,6 +163,29 @@ pub async fn transfer_asked(pool: &SqlitePool, conversation_id: i64) -> Result<O
     Ok(row.map(|(device,)| device))
 }
 
+/// Who asked for the move this Conversation is on its way to, where one is.
+///
+/// What tells the mover whether the session it is seeing out is to be ended at
+/// its turn's end — the session's own call — or left to end by itself, which is
+/// what the human's press promises (ADR-0020, *The agent's call*). Read with the
+/// device, because a request that has moved on to another machine is not the one
+/// the asker was reading about.
+pub async fn transfer_asked_by(
+    pool: &SqlitePool,
+    conversation_id: i64,
+) -> Result<Option<(String, AskedBy)>> {
+    let row: Option<(String, String)> =
+        sqlx::query_as("SELECT device, asked_by FROM transfers WHERE conversation_id = ?")
+            .bind(conversation_id)
+            .fetch_optional(pool)
+            .await
+            .with_context(|| {
+                format!("reading who asked for Conversation {conversation_id} to be transferred")
+            })?;
+
+    Ok(row.map(|(device, by)| (device, AskedBy::read(&by))))
+}
+
 /// Write the mark saying where the live record now is, and spend the request in
 /// the same breath — or say that the request has moved on and write nothing
 /// (ADR-0020, *Transfer*).
