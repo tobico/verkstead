@@ -337,44 +337,7 @@ async fn by_the_session(
 
     let members = devices.membership().rows().await.map_err(ours)?;
 
-    if said == devices.id() || said == devices.name() {
-        return Err(format!(
-            "the work is already on {}, which is this device",
-            devices.name()
-        ));
-    }
-
-    let device = match members.iter().find(|member| member.device == said) {
-        Some(member) => member,
-        None => {
-            let named: Vec<_> = members
-                .iter()
-                .filter(|member| member.name == said)
-                .collect();
-
-            match named.as_slice() {
-                [member] => *member,
-                [] => {
-                    return Err(format!(
-                        "no device of this cluster is called {said} or has that id{}",
-                        known(&members),
-                    ));
-                }
-                several => {
-                    return Err(format!(
-                        "{} devices of this cluster are called {said}, so name the one you mean \
-                         by its id: {}",
-                        several.len(),
-                        several
-                            .iter()
-                            .map(|member| format!("{} ({})", member.device, member.os))
-                            .collect::<Vec<_>>()
-                            .join(", "),
-                    ));
-                }
-            }
-        }
-    };
+    let device = named_among(devices.id(), &devices.name(), &members, said)?;
 
     let born = store::birth(&state.pool, conversation_id)
         .await
@@ -426,6 +389,55 @@ async fn by_the_session(
     }
 
     Ok(device.name.clone())
+}
+
+/// The member of the cluster a call names, by its id or by its name — or why
+/// it names none.
+///
+/// **A member before this device.** A name this device shares with a member —
+/// a WSL and the Windows machine it runs on, say, which go by one hostname —
+/// can only mean the member, this device being no place to move the work to;
+/// so *already on this device* is the answer only where no member has the name,
+/// or where the call gave this device's id. A name two members share is refused
+/// naming both, for the agent to retry by id.
+fn named_among<'a>(
+    here: &str,
+    here_named: &str,
+    members: &'a [store::Member],
+    said: &str,
+) -> Result<&'a store::Member, String> {
+    let already = || format!("the work is already on {here_named}, which is this device");
+
+    if said == here {
+        return Err(already());
+    }
+
+    if let Some(member) = members.iter().find(|member| member.device == said) {
+        return Ok(member);
+    }
+
+    let named: Vec<_> = members
+        .iter()
+        .filter(|member| member.name == said)
+        .collect();
+
+    match named.as_slice() {
+        [member] => Ok(*member),
+        [] if said == here_named => Err(already()),
+        [] => Err(format!(
+            "no device of this cluster is called {said} or has that id{}",
+            known(members),
+        )),
+        several => Err(format!(
+            "{} devices of this cluster are called {said}, so name the one you mean by its id: {}",
+            several.len(),
+            several
+                .iter()
+                .map(|member| format!("{} ({})", member.device, member.os))
+                .collect::<Vec<_>>()
+                .join(", "),
+        )),
+    }
 }
 
 /// The devices a name could have been, said after a name that is none of them.
@@ -1771,6 +1783,53 @@ mod tests {
         assert_eq!(
             named(&permitted_among("b", Some("a"), &ticked, members)),
             vec!["workstation", "laptop"],
+        );
+    }
+
+    /// A name this device shares with a member is the member's — a WSL and the
+    /// Windows machine it runs on — and *already on this device* only where no
+    /// member has it, or where the call gives this device's id.
+    #[test]
+    fn a_name_this_device_shares_with_a_member_names_the_member() {
+        let members = vec![
+            member("b", "winvm", "Windows"),
+            member("c", "laptop", "macOS"),
+        ];
+
+        assert_eq!(
+            named_among("a", "winvm", &members, "winvm").map(|member| member.device.as_str()),
+            Ok("b"),
+        );
+        assert!(
+            named_among("a", "winvm", &members, "a")
+                .unwrap_err()
+                .contains("already on winvm")
+        );
+        assert!(
+            named_among("a", "workstation", &members, "workstation")
+                .unwrap_err()
+                .contains("already on workstation")
+        );
+        assert!(
+            named_among("a", "workstation", &members, "toaster")
+                .unwrap_err()
+                .contains("no device of this cluster is called toaster")
+        );
+    }
+
+    /// And a name two members share is refused naming both, whatever this
+    /// device is called.
+    #[test]
+    fn a_name_two_members_share_is_refused_naming_both() {
+        let members = vec![
+            member("b", "winvm", "Windows"),
+            member("c", "winvm", "Linux (WSL)"),
+        ];
+
+        let said = named_among("a", "winvm", &members, "winvm").unwrap_err();
+        assert!(
+            said.contains("b (Windows)") && said.contains("c (Linux (WSL))"),
+            "{said}"
         );
     }
 
