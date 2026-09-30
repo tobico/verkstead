@@ -41,8 +41,8 @@
 //! **Variables are every session's**, whatever the Repo holds, for the reason
 //! Rust's are today: a manifest is often not at the root of a checkout, and a
 //! variable nothing reads costs nothing. [`Descriptor::detected`] is for the
-//! setup card's warning alone — see [`crate::build_cache::builds_rust`], which
-//! is its one caller.
+//! setup card's warning alone — see
+//! [`crate::build_cache::repo_builds_through_sccache`], which is its one caller.
 //!
 //! **Placeholders are what only the server knows** — see [`Machine`], and the
 //! embedded file, which is where each of the four is spelled out. A

@@ -844,14 +844,20 @@ export function ProcessPicker(props: {
   );
 }
 
-/// What a Rust repository loses on a server with no sccache: the compiling.
+/// What a repository that compiles loses on a server with no sccache: the
+/// caching of its compiles.
 ///
-/// Drawn only where all three hold — the repository is a Cargo workspace, the
-/// shared build cache is switched on, and the server found no sccache — which
-/// is the one boolean the server sends rather than three for this to combine.
+/// Drawn only where all three hold — a switched-on language that compiles
+/// through sccache finds its build in the repository (a Cargo workspace, a
+/// CMake project), and the server found no sccache — which is the one boolean
+/// the server sends rather than three for this to combine.
+///
+/// Worded for every such language rather than for Rust's: a Cargo workspace
+/// still shares its downloads, but a CMake project has none to speak of, so
+/// what the note says is lost is the compiling, and nothing about what is kept.
 ///
 /// A note rather than a refusal, and it gates nothing. The work runs perfectly
-/// well: the crate downloads are still shared, and what is lost is time. It is
+/// well, and what is lost is time. It is
 /// here because this is where somebody is about to spend that time, and because
 /// what fixes it is on the server rather than in this browser.
 function UncachedCompiles(props: {
@@ -860,9 +866,9 @@ function UncachedCompiles(props: {
   return (
     <Show when={props.conversation.compiles_uncached}>
       <p class={styles.uncached}>
-        No sccache is installed where the server can see it, so this
-        repository's dependency compiles will not be cached — only its crate
-        downloads. Install sccache on the server to cache the compiling too.
+        No sccache is installed where the server can see it, so what this
+        repository compiles will not be cached, and every session compiles it
+        again from scratch. Install sccache on the server to cache it.
       </p>
     </Show>
   );

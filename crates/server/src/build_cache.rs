@@ -830,21 +830,24 @@ impl Shared {
     }
 }
 
-/// Whether a Repo at `path` is one a session would build Rust in: one of the
-/// manifests Rust's descriptor detects it by, at its root.
+/// Whether a Repo at `path` is one a session would compile through an sccache
+/// in: a switched-on language naming [`languages::SCCACHE`] detects it — Rust
+/// by a manifest at the root, C/C++ by a CMake or Meson build file where a
+/// checkout ordinarily keeps one.
 ///
 /// **The setup card's warning and nothing else**, now that the Compile Server
 /// starts on the switch rather than on what a checkout holds — see
 /// [`BuildCache::compiling`], and [`crate::languages::Descriptor::detected`],
 /// which is the question itself.
 ///
-/// The descriptors rather than a config, because the one caller asks Rust's
-/// switch of them in the same breath: a language that is off compiles nothing
-/// to warn about.
-pub fn builds_rust(loaded: &Languages, repo: &Path) -> bool {
-    loaded
-        .get(languages::RUST)
-        .is_some_and(|rust| rust.detected(repo))
+/// Asked of the capability rather than of a language's name, so a descriptor
+/// that names the Compile Server is one this warns for without anything here
+/// knowing which language it is — and asked of the switch in the same breath,
+/// because a language that is off compiles nothing to warn about.
+pub fn repo_builds_through_sccache(loaded: &Languages, repo: &Path) -> bool {
+    loaded.iter().any(|(_, descriptor)| {
+        descriptor.enabled() && descriptor.names(languages::SCCACHE) && descriptor.detected(repo)
+    })
 }
 
 /// The variable the Compile Server is told every Worktree in: the directories
@@ -2072,11 +2075,11 @@ mod tests {
     /// asked of now. The Compile Server comes up on the switch instead; see
     /// [`crate::languages::Languages::wanting`].
     #[test]
-    fn a_repo_builds_rust_where_it_has_a_manifest_at_its_root() {
+    fn a_cargo_workspace_compiles_through_sccache_where_its_manifest_is_at_the_root() {
         let dir = tempfile::tempdir().unwrap();
 
         assert!(
-            !builds_rust(languages::built_in(), dir.path()),
+            !repo_builds_through_sccache(languages::built_in(), dir.path()),
             "an empty directory builds nothing"
         );
 
@@ -2084,12 +2087,56 @@ mod tests {
         std::fs::write(dir.path().join("crates/Cargo.toml"), "[package]\n").unwrap();
 
         assert!(
-            !builds_rust(languages::built_in(), dir.path()),
+            !repo_builds_through_sccache(languages::built_in(), dir.path()),
             "a manifest somewhere underneath is not the root's"
         );
 
         std::fs::write(dir.path().join("Cargo.toml"), "[workspace]\n").unwrap();
 
-        assert!(builds_rust(languages::built_in(), dir.path()));
+        assert!(repo_builds_through_sccache(
+            languages::built_in(),
+            dir.path()
+        ));
+    }
+
+    /// And a CMake project does too, with no Cargo manifest anywhere: C/C++
+    /// names the same capability, and its build file is at the root or under
+    /// the `native/` a project ordinarily keeps it in.
+    #[test]
+    fn a_cmake_project_compiles_through_sccache_while_cpp_is_on() {
+        for build_file in ["CMakeLists.txt", "native/CMakeLists.txt"] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join(build_file);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, "project(p CXX)\n").unwrap();
+
+            assert!(
+                repo_builds_through_sccache(languages::built_in(), dir.path()),
+                "{build_file} is a C/C++ build"
+            );
+
+            let off = languages::built_in()
+                .merged(&Languages::read("languages:\n  cpp:\n    enabled: false\n").unwrap());
+            assert!(
+                !repo_builds_through_sccache(&off, dir.path()),
+                "{build_file} compiles nothing to warn about with C/C++ off"
+            );
+        }
+    }
+
+    /// Whereas a Cargo workspace is Rust's to answer for, whatever C/C++'s
+    /// switch says — and nothing to warn about once Rust is off.
+    #[test]
+    fn a_cargo_workspace_turns_on_rusts_switch_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("Cargo.toml"), "[workspace]\n").unwrap();
+
+        let without_cpp = languages::built_in()
+            .merged(&Languages::read("languages:\n  cpp:\n    enabled: false\n").unwrap());
+        assert!(repo_builds_through_sccache(&without_cpp, dir.path()));
+
+        let without_rust = languages::built_in()
+            .merged(&Languages::read("languages:\n  rust:\n    enabled: false\n").unwrap());
+        assert!(!repo_builds_through_sccache(&without_rust, dir.path()));
     }
 }

@@ -139,7 +139,12 @@ function useSettings() {
 ///
 /// Drawn on the card and in the pane alike, because it is the same sentence in
 /// both: said where somebody would otherwise wonder why nothing got faster. Not
-/// an error — the downloads are still shared, and the builds still work.
+/// an error — the builds still work, and a language with downloads still shares
+/// them.
+///
+/// Worded for every language that compiles through sccache rather than for
+/// Rust's: C/C++ has no downloads to fall back on, so the sentence says what is
+/// lost and leaves what is kept to the language.
 ///
 /// **And it is something to go and do**, which it was not always. `cached`
 /// carried a third answer for a while: a Windows server was a machine where no
@@ -152,9 +157,9 @@ function useSettings() {
 function uncompiled(): JSX.Element {
   return (
     <p class={styles.warning}>
-      No sccache is installed where the server can see it, so dependency{" "}
-      <em>compiles</em> are not cached — only the downloads. Install sccache on
-      the server to cache the compiling too.
+      No sccache is installed where the server can see it, so{" "}
+      <em>compiles</em> are not cached, and every session compiles again what
+      the last one did. Install sccache on the server to cache them.
     </p>
   );
 }
@@ -163,13 +168,14 @@ function uncompiled(): JSX.Element {
 ///
 /// Only for a language that is switched on, because the rest of it is only true
 /// then: switched off, nothing of that language is cached at all, and a line
-/// saying the downloads still are would be wrong exactly where somebody has just
+/// singling out its compiles would be wrong exactly where somebody has just
 /// turned it off.
 ///
 /// The setup card's own warning is gated on more than this: it is drawn only
-/// for a Repo that builds Rust, because that is a note above a press rather
-/// than a page about the machine — see `ConversationView::compiles_uncached`,
-/// which the server works out with the switch already in hand.
+/// for a Repo a switched-on language compiling through sccache detects, because
+/// that is a note above a press rather than a page about the machine — see
+/// `ConversationView::compiles_uncached`, which the server works out with the
+/// switch already in hand.
 function warned(told: SettingsView | undefined): boolean {
   return (told?.languages ?? []).some(
     (language) =>

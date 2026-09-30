@@ -262,12 +262,17 @@ describe("the card", () => {
     const { container } = mountCard();
 
     await waitFor(() => screen.getByText(/No sccache is installed/));
-    expect(container.querySelector(`.${styles.warning}`)).not.toBeNull();
+    const warning = container.querySelector(`.${styles.warning}`);
+    expect(warning).not.toBeNull();
+    expect(
+      warning!.textContent,
+      "C/C++ compiles through it too, and has no crates or downloads",
+    ).not.toMatch(/crate|download|dependenc/i);
   });
 
   /// And nothing about it while the languages that want one are switched off,
-  /// because the half of that warning that says the downloads are still shared
-  /// is only true while there is a cache to share them. Both of them: C/C++
+  /// because a warning about a language's compiles is only true while there is
+  /// a language compiling. Both of them: C/C++
   /// compiles through the same Compile Server, so it is uncached too.
   it("says nothing about sccache while the languages that want one are off", async () => {
     theSettings(off(off(UNSET), CPP));

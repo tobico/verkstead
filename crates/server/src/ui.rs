@@ -1512,29 +1512,28 @@ pub(crate) async fn conversation_view(
     );
 
     // And whether this Repo is one the missing sccache costs anything — see
-    // [`ConversationView::compiles_uncached`]. A `Cargo.toml` at the root is a
-    // look at the filesystem, and it is only worth taking where the other two
-    // halves already hold: the answer is the same for a repository that is not
-    // Rust, and this way the settings file is read only on a server that has
-    // something to warn about.
+    // [`ConversationView::compiles_uncached`]. Whether a switched-on language
+    // compiling through sccache detects the Repo is a look at the filesystem,
+    // and it is only worth taking where the other two halves already hold: the
+    // answer is the same for a repository that builds nothing compiled, and
+    // this way the settings file is read only on a server that has something to
+    // warn about.
     //
     // A missing sccache rather than uncached compiles, which is the platform
     // arm here: where no session compiles through one at all, nothing is
     // missing and there is nothing for the human to go and do — see
     // [`crate::build_cache::compiles_through_an_sccache`]. That is a standing
     // fact about the machine, and the settings page is where it is said.
-    // The switch is Rust's descriptor's now rather than the key that used to
-    // hold it — see [`crate::languages`] — because what a session is given is
-    // what the descriptors say, and a card warning about a language nobody has
-    // switched on would be warning about compiles that never happen.
-    let languages = crate::languages::configured(&state.settings.config());
-
+    // The switches are the descriptors' — see [`crate::languages`] — because
+    // what a session is given is what the descriptors say, and a card warning
+    // about a language nobody has switched on would be warning about compiles
+    // that never happen.
     let compiles_uncached = !state.sessions.caches_compiles()
         && crate::build_cache::compiles_through_an_sccache(crate::platform::Platform::HERE)
-        && languages
-            .get(crate::languages::RUST)
-            .is_some_and(crate::languages::Descriptor::enabled)
-        && crate::build_cache::builds_rust(&languages, &conversation.repo.path);
+        && crate::build_cache::repo_builds_through_sccache(
+            &crate::languages::configured(&state.settings.config()),
+            &conversation.repo.path,
+        );
 
     // Which Brief is still being written, where one is. A Brief freezes when its
     // round's grilling starts, so the one open is the newest — and only while the
