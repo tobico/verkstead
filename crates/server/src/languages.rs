@@ -1255,16 +1255,24 @@ mod tests {
     /// session is handed the path its own tools would have built, so a test that
     /// spelled the answer out would be a test that only held on two of them.
     fn cached(rest: &str) -> String {
-        Path::new("/var/cache/verkstead")
-            .join(rest)
-            .display()
-            .to_string()
+        under(Path::new("/var/cache/verkstead"), rest)
     }
 
     /// And one under the directory beside the Worktrees, for the same reason.
     fn stored(rest: &str) -> String {
-        stores(Path::new("/var/lib/verkstead"))
-            .join(rest)
+        under(&stores(Path::new("/var/lib/verkstead")), rest)
+    }
+
+    /// `rest` under `base`, **a segment at a time**, which is how a descriptor's
+    /// own `/` becomes this platform's separator — see [`separated`].
+    ///
+    /// One `join` of `"go/mod"` would keep that `/` inside the string on
+    /// Windows and compare a path no `go` there would read against the one the
+    /// code correctly composed. A difference Linux cannot see, so it is written
+    /// once here rather than left to the caller.
+    fn under(base: &Path, rest: &str) -> String {
+        rest.split('/')
+            .fold(base.to_owned(), |path, segment| path.join(segment))
             .display()
             .to_string()
     }

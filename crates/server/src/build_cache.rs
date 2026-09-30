@@ -1168,8 +1168,10 @@ mod tests {
     /// comes to, and what keeps these holding on the platform whose separator is
     /// not the grammar's.
     fn cached(rest: &str) -> String {
-        Path::new("/var/cache/verkstead")
-            .join(rest)
+        rest.split('/')
+            .fold(PathBuf::from("/var/cache/verkstead"), |path, segment| {
+                path.join(segment)
+            })
             .display()
             .to_string()
     }
