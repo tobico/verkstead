@@ -166,7 +166,7 @@ pub use repos::{
     registered_repo, registered_repo_at, registered_repos, unregister_repo,
 };
 pub use session_endings::{Ended, end_session, session_ending};
-pub use session_names::{continued_as, session_id, session_ids};
+pub use session_names::{continued_as, found_as, session_id, session_ids};
 pub use session_pairings::RanUnder;
 pub use shares::{Share, record_share, record_share_comment, share, share_commented};
 pub use slices::{

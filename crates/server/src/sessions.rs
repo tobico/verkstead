@@ -490,9 +490,33 @@ impl Agents {
             None => vec![binary(agent_type).to_owned()],
         };
 
+        // Which resume this launch is, where it is one at all: `None` is every
+        // ordinary launch and every backend Verkstead does not carry a conversation
+        // on from. Read before anything is written, because the shape of the whole
+        // line turns on it — see [`Resume`].
+        let resuming = match named {
+            Named::Continuing => line.resume.as_ref().zip(session),
+            Named::Opening => None,
+        };
+
+        // A resume that is a subcommand is the first word after the binary, ahead
+        // of the options it takes: what follows is that subcommand's line rather
+        // than the ordinary one.
+        if let Some((Resume::Subcommand { word, .. }, _)) = resuming {
+            argv.push((*word).to_owned());
+        }
+
         if let Some(model) = pairing.runs_on() {
             argv.push(line.model.to_owned());
             argv.push(model.to_owned());
+        }
+
+        // And the session it is resuming, where that subcommand takes it as the
+        // positional in front of the prompt. Here rather than in the one slot
+        // below, because a positional's place on the line is the whole of what
+        // says which argument it is.
+        if let Some((Resume::Subcommand { .. }, session)) = resuming {
+            argv.push(session.to_owned());
         }
 
         if let Some(flag) = line.prompt {
@@ -511,17 +535,23 @@ impl Agents {
         // The session's name, or the resume that stands in its place: one slot,
         // because a session cannot be both named and resumed. A launch that is
         // continuing a conversation is told to resume the name it carries, and a
-        // launch opening one is told to run under it.
-        match named {
-            Named::Continuing => {
-                if let Some((flag, session)) = line.resume.zip(session) {
-                    argv.push(flag.to_owned());
-                    argv.push(session.to_owned());
-                }
+        // launch opening one is told to run under it. The subcommand shape has
+        // said both of its halves already, and says neither again.
+        match resuming {
+            Some((Resume::Flag(flag), session)) => {
+                argv.push((*flag).to_owned());
+                argv.push(session.to_owned());
             }
 
-            Named::Opening => {
-                if let Some(session) = session.filter(|_| line.names_the_session) {
+            Some((Resume::Subcommand { .. }, _)) => {}
+
+            // Either an ordinary launch, which names the session it is opening, or
+            // a continuation with no resume to say — and that one is told nothing
+            // at all: the name belongs to a session it is not opening.
+            None => {
+                if let (Named::Opening, Some(session)) =
+                    (named, session.filter(|_| line.names_the_session))
+                {
                     argv.push("--session-id".to_owned());
                     argv.push(session.to_owned());
                 }
@@ -529,6 +559,13 @@ impl Agents {
         }
 
         argv.extend(line.tail);
+
+        // And what the continuation itself needs said, which the ordinary line has
+        // no business carrying: a setting about how a resume is resolved means
+        // nothing to a launch that is opening a conversation.
+        if let Some((Resume::Subcommand { also, .. }, _)) = resuming {
+            argv.extend(also.iter().cloned());
+        }
 
         Some(argv)
     }
@@ -651,20 +688,60 @@ struct Line {
     /// convention: a conversation carried on keeps the id it already had, so
     /// there is nothing left to name it.
     ///
+    /// And it is not always a flag — see [`Resume`]: codex's is a subcommand, and
+    /// what a subcommand changes is the shape of the whole line rather than what
+    /// is on the end of it.
+    ///
     /// `None` where Verkstead does not carry a conversation on from a session of
-    /// this backend — which is Codex and OpenCode. Neither is named at launch, so
-    /// there is no id on the record to resume by until the Transcript search has
-    /// found the backend's own and written it down; each also keys its store by the
-    /// directory the session ran in, so each needs a relocation of its own on top
-    /// of that. Until then a launch under one of them opens a session of its own,
-    /// which is Verkstead's own Resume and nothing lost.
-    resume: Option<&'static str>,
+    /// this backend, which is OpenCode alone. It is not named at launch, so there
+    /// is no id on the record to resume by until the Transcript search has found
+    /// the backend's own and written it down; it also keys its store by the
+    /// directory the session ran in, so it needs a relocation of its own on top of
+    /// that. Until then a launch under it opens a session of its own, which is
+    /// Verkstead's own Resume and nothing lost.
+    resume: Option<Resume>,
 
     /// The flags and configuration overrides that go last, after the prompt.
     ///
     /// Owned rather than borrowed, because the trust pre-seed below names the
     /// Worktree this session is being launched in.
     tail: Vec<String>,
+}
+
+/// How a backend is told to carry a conversation on rather than open one — see
+/// [`Line::resume`].
+///
+/// **Two shapes rather than one spelling**, because the backends do not agree on
+/// what a resume *is*. For two of them it is another option on the same line, and
+/// the id goes where the id would have gone. For codex it is a subcommand: the
+/// line is `codex resume <session-id> <prompt>`, so the word comes ahead of
+/// everything the ordinary line says and the id is a positional in front of the
+/// prompt rather than a value after a flag.
+///
+/// What does *not* change with the shape is the rest of the line. A resumed
+/// session is the same session under the same account in the same Worktree, so the
+/// model, the approval bypass and every configuration override the ordinary line
+/// carries come across onto the subcommand — a resume that dropped them would come
+/// up logged out and sitting on a trust prompt.
+enum Resume {
+    /// A flag and the id, written where the session id it is mutually exclusive
+    /// with would have gone. Claude's and Grok Build's, both spelled `--resume`.
+    Flag(&'static str),
+
+    /// A subcommand and the id, written in front of the line rather than on the
+    /// end of it. Codex's.
+    Subcommand {
+        /// The word itself, straight after the binary.
+        word: &'static str,
+
+        /// And what the continuation needs said that the ordinary line does not,
+        /// which goes on the end with the tail.
+        ///
+        /// Here rather than in [`Line::tail`] because it is about resuming: a
+        /// launch opening a conversation would be carrying a setting for a
+        /// question it is not asking.
+        also: Vec<String>,
+    },
 }
 
 /// Whether the session Verkstead named is one this launch is **opening** or one
@@ -713,7 +790,8 @@ enum Named {
 /// the same at-work label — is what to reach for the day the Capture has to be
 /// that record instead.
 ///
-/// **And Claude and Grok Build are the backends Verkstead continues a conversation
+/// **And Claude, Grok Build and Codex are the backends Verkstead continues a
+/// conversation
 /// on.** Claude's resume is `--resume <session-id>`, written where the session id it
 /// is mutually exclusive with would have gone — after the prompt, which stays
 /// exactly where it already is, and which claude takes alongside the flag as the
@@ -733,7 +811,39 @@ enum Named {
 /// titles. Its log is proved to be there for Claude's reason and one more: grok
 /// resolves a resume against the directory it was started in, so the log has to have
 /// been moved under this device's own name for this Worktree first — see
-/// [`crate::transcript::relocated`], and the two left on [`Line::resume`]'s `None`.
+/// [`crate::transcript::relocated`], and the one left on [`Line::resume`]'s `None`.
+///
+/// **Codex's is a subcommand rather than a flag**, which is the one line in this
+/// table whose shape changes rather than growing an argument: `codex resume
+/// <session-id> <prompt>`, the word straight after the binary and both of the
+/// others its positionals (codex 0.155.1's own help, and driven to prove it). The
+/// model flag and every override the ordinary line carries come across onto it —
+/// a resume without them comes up logged out and sitting on the trust prompt —
+/// and one more goes on that the ordinary line has no business with:
+/// [`CODEX_RESUME_CWD`].
+///
+/// **And nothing of codex's store has to be put right, which is why it is asked
+/// this way.** Codex files its rollouts by the date they were written rather than
+/// by the directory they were written in, so what the memory sync carries lands at
+/// the same relative path it left. A resume by an explicit id is resolved against
+/// the whole store and not against the directory codex was started in — driven
+/// against 0.155.1, which resumed a rollout recording a directory that machine
+/// never had — so where Grok needs its log moved, Codex needs nothing moved at
+/// all. Which is the answer worth having: the relocation writes into somebody
+/// else's store, and this does not.
+///
+/// **What it has instead is a prompt about which directory to resume in.** Where a
+/// rollout records a directory other than the one codex is started in — which a
+/// carried one always does — 0.155.1 asks the human to choose between them, and a
+/// session stopped at a prompt is a run waiting on nobody. [`CODEX_RESUME_CWD`] is
+/// that choice made: this device's Worktree, which is where the work now is.
+///
+/// **Its id is the one Verkstead did not pick.** Codex takes no session id at
+/// launch, so what goes after the subcommand is the id the rollout gives itself —
+/// read out of the log as the Transcript search finds it and written onto the
+/// record there, which is what leaves a device that never ran the session able to
+/// resume it. See [`crate::transcript::names_itself`] and
+/// [`crate::transcript::in_the_store`].
 ///
 /// **Grok Build is the one backend after Claude that takes the session id.** It
 /// takes it under the spelling [`Agents::argv`] writes, it insists on a valid
@@ -772,7 +882,7 @@ fn line(agent_type: store::AgentType, worktree: Option<&Path>) -> Line {
             model: "--model",
             prompt: None,
             names_the_session: true,
-            resume: Some("--resume"),
+            resume: Some(Resume::Flag("--resume")),
             tail: vec!["--dangerously-skip-permissions".to_owned()],
         },
         store::AgentType::Codex => {
@@ -806,7 +916,10 @@ fn line(agent_type: store::AgentType, worktree: Option<&Path>) -> Line {
                 model: "-m",
                 prompt: None,
                 names_the_session: false,
-                resume: None,
+                resume: Some(Resume::Subcommand {
+                    word: "resume",
+                    also: vec!["-c".to_owned(), format!("{CODEX_RESUME_CWD}=\"current\"")],
+                }),
                 tail,
             }
         }
@@ -814,7 +927,7 @@ fn line(agent_type: store::AgentType, worktree: Option<&Path>) -> Line {
             model: "-m",
             prompt: None,
             names_the_session: true,
-            resume: Some("--resume"),
+            resume: Some(Resume::Flag("--resume")),
             tail: vec![
                 "--always-approve".to_owned(),
                 "--sandbox".to_owned(),
@@ -839,6 +952,26 @@ fn line(agent_type: store::AgentType, worktree: Option<&Path>) -> Line {
 /// usage-limit phrase and the idle signature make: one place to edit when it
 /// moves.
 const CODEX_CREDENTIAL_STORE: &str = "cli_auth_credentials_store";
+
+/// And which directory codex resumes a session **in**, which for a conversation
+/// carried across a cluster is this device's rather than the one the rollout
+/// records.
+///
+/// A rollout records the directory its session ran in, and a carried one records
+/// the *sending* device's Worktree — a path that does not exist here. Codex
+/// 0.155.1 puts the two side by side and asks the human to pick, which is a
+/// session stopped in front of nobody; this setting is that choice made once, and
+/// the choice is the directory codex was started in, which is where the work now
+/// is. Its other value would resume into the path the work has left.
+///
+/// Said on the line rather than written into the account's configuration, for the
+/// reason [`CODEX_CREDENTIAL_STORE`] is: the home belongs to the human's account.
+/// And on the resume alone — see [`Resume::Subcommand`] — because an ordinary
+/// launch resumes nothing.
+///
+/// Named for the reason the spelling above it is, and it is the same bargain: the
+/// key is codex's and it will move, and moving it costs one edit here.
+const CODEX_RESUME_CWD: &str = "tui.resume_cwd";
 
 /// What codex has on its Screen while it is working, and nothing of what it has
 /// there when it is waiting for a human — see [`Signature::AtWork`].
@@ -3188,7 +3321,7 @@ struct Continuing {
 ///   Conversation whose Profile was changed under it has a log no other backend
 ///   could read.
 /// - **That harness has a resume line at all** — see [`Line::resume`], which is
-///   Claude's and Grok Build's, and for now nobody else's.
+///   Claude's, Grok Build's and Codex's, and for now nobody else's.
 /// - **And the log is really on this machine, where the harness will look for it.**
 ///   Claude's store crosses with the memory sync as a labelled part each machine
 ///   names its own path for, so it should land under this device's own encoding of
@@ -3197,7 +3330,10 @@ struct Continuing {
 ///   so it is proved rather than assumed. Grok's store crosses keyed by the
 ///   *sending* device's name for the sending device's Worktree, so the same call
 ///   files it under this one's first, and answers `None` where it cannot — a device
-///   that has never run grok in this Worktree being the plain case of that. See
+///   that has never run grok in this Worktree being the plain case of that. Codex's
+///   crosses to the path it left and needs nothing moved, but nothing names it
+///   either: the rollout the id belongs to is searched for in the store, and a
+///   rollout that never crossed is a `None` like the rest. See
 ///   [`crate::transcript::carried`].
 ///
 /// `home` is the Conversation's own, which is where the log of a session whose
@@ -3211,7 +3347,9 @@ struct Continuing {
 /// whatever this launch then turns out to run as: Grok Build's is, a directory per
 /// session inside the directory per working directory, and what the name the Capture
 /// opened with buys is nothing, there being no session of that name anywhere. Nothing
-/// to Claude's either way, whose parts are the two `projects/` entries.
+/// to Claude's either way, whose parts are the two `projects/` entries, and nothing
+/// to Codex's, whose rollouts are picked out by the Worktree they name rather than
+/// by any id at all.
 ///
 /// **And this is where a relaunch's holding off is made good**, which is the one
 /// thing a launch does that is not about the launch. A relaunch locks every
@@ -4257,6 +4395,83 @@ mod tests {
         );
     }
 
+    /// And a continued **Codex** session is told it by a **subcommand**, which is
+    /// the one line in the table whose shape changes rather than growing an
+    /// argument: `resume` straight after the binary, the session id and the prompt
+    /// as its positionals in that order, and the ordinary line's whole tail after
+    /// them.
+    ///
+    /// **The tail is the point of the assertion as much as the subcommand is.** A
+    /// resumed session is the same session under the same account in the same
+    /// Worktree, so the model, the bypass, the file-backed credential store and the
+    /// trust pre-seed all come across — a resume without them would come up logged
+    /// out and sitting on a trust prompt, which is a run waiting on nobody.
+    ///
+    /// And one override the ordinary line does not carry: which directory codex
+    /// resumes *in*. A carried rollout records the sending device's Worktree, and
+    /// codex 0.155.1 stops to ask which of the two directories to use — see
+    /// [`CODEX_RESUME_CWD`], which is that question answered with the one the work
+    /// is now in.
+    #[test]
+    fn a_continued_codex_session_is_told_to_resume_by_a_subcommand() {
+        let state = tempfile::tempdir().unwrap();
+        let argv = agents(vec!["codex".to_owned()], state.path()).resumed(
+            &codex_pairing(),
+            "This Conversation has been moved onto another machine\n",
+            Some("01a0f0e9-3280-7900-9dda-c7d0920b0735"),
+            worktree(),
+        );
+
+        assert_eq!(
+            argv,
+            vec![
+                "codex".to_owned(),
+                "resume".to_owned(),
+                "-m".to_owned(),
+                "gpt-5-codex".to_owned(),
+                "01a0f0e9-3280-7900-9dda-c7d0920b0735".to_owned(),
+                "This Conversation has been moved onto another machine\n".to_owned(),
+                "--dangerously-bypass-approvals-and-sandbox".to_owned(),
+                "--no-alt-screen".to_owned(),
+                "-c".to_owned(),
+                "cli_auth_credentials_store=\"file\"".to_owned(),
+                "-c".to_owned(),
+                format!("projects={{\"{WORKTREE}\"={{trust_level=\"trusted\"}}}}"),
+                "-c".to_owned(),
+                "tui.resume_cwd=\"current\"".to_owned(),
+            ],
+            "the subcommand leads and the id is the positional in front of the \
+             prompt: {argv:?}",
+        );
+    }
+
+    /// And an ordinary Codex launch carries none of the resume's own half: the
+    /// subcommand is not there, and neither is the setting that says which
+    /// directory a resume resolves in.
+    ///
+    /// Which is the whole of why that setting is on the resume rather than in the
+    /// line's tail: a launch opening a conversation would be answering a question
+    /// nobody had asked it.
+    #[test]
+    fn an_opening_codex_session_carries_nothing_of_the_resume() {
+        let state = tempfile::tempdir().unwrap();
+        let argv = agents(vec!["codex".to_owned()], state.path()).launched(
+            &codex_pairing(),
+            "# Rate limiting\n",
+            Some("d3b07384-d9a0-4c9b-8f2a-1b7c5e6f0a12"),
+            worktree(),
+        );
+
+        assert!(
+            !argv.iter().any(|argument| argument == "resume"),
+            "nothing on an opening line says resume: {argv:?}",
+        );
+        assert!(
+            !argv.iter().any(|argument| argument.contains("resume_cwd")),
+            "and nothing on it answers a question about resuming: {argv:?}",
+        );
+    }
+
     /// And a harness Verkstead does not carry a conversation on from is told
     /// neither: no resume, because it has no line for one, and no name either,
     /// because the name belongs to a session it is not opening.
@@ -4269,21 +4484,19 @@ mod tests {
     fn a_harness_with_no_resume_line_is_told_neither() {
         let state = tempfile::tempdir().unwrap();
 
-        for pairing in [codex_pairing(), opencode_pairing()] {
-            let argv = agents(vec!["agent".to_owned()], state.path()).resumed(
-                &pairing,
-                "# Rate limiting\n",
-                Some("d3b07384-d9a0-4c9b-8f2a-1b7c5e6f0a12"),
-                worktree(),
-            );
+        let argv = agents(vec!["agent".to_owned()], state.path()).resumed(
+            &opencode_pairing(),
+            "# Rate limiting\n",
+            Some("d3b07384-d9a0-4c9b-8f2a-1b7c5e6f0a12"),
+            worktree(),
+        );
 
-            assert!(
-                !argv
-                    .iter()
-                    .any(|argument| argument.contains("d3b07384-d9a0-4c9b-8f2a-1b7c5e6f0a12")),
-                "nothing on the line names the session: {argv:?}",
-            );
-        }
+        assert!(
+            !argv
+                .iter()
+                .any(|argument| argument.contains("d3b07384-d9a0-4c9b-8f2a-1b7c5e6f0a12")),
+            "nothing on the line names the session: {argv:?}",
+        );
     }
 
     /// A Profile is launched on the binary its agent type names, so that a

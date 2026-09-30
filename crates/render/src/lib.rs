@@ -104,7 +104,7 @@ pub use sharing::{
 };
 pub use transcript::{
     Bookkeeping, Cursor, Prose, Put, Reasoning, ToolResult, ToolUse, TranscriptView, Turn, Unread,
-    rollout_cwd, statements, transcript_after, transcript_view, turns,
+    rollout_cwd, rollout_session, statements, transcript_after, transcript_view, turns,
 };
 pub use transfer::{
     Arrived, BirthKey, CameFrom, CheckoutAcross, CompanionCheckoutAcross, ConversationAcross,

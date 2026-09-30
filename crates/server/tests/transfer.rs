@@ -96,6 +96,10 @@ const MODEL: &str = "claude-opus-5";
 /// that runs on the other harness a conversation is carried on from.
 const GROK_MODEL: &str = "grok-4.6";
 
+/// And a **Codex** account's, for the tests that run on the harness Verkstead
+/// cannot name.
+const CODEX_MODEL: &str = "gpt-5-codex";
+
 /// What every repository in this suite is called. Neither end has an origin, so
 /// the match is by name — which is the ordinary case for two clones nobody has
 /// pushed anywhere.
@@ -480,6 +484,39 @@ impl Verkstead {
         .await;
 
         assert_eq!(said, "\"Saved\"", "saving the Grok account");
+
+        self.profile_called(ACCOUNT).await.id
+    }
+
+    /// And a **Codex** account of this device's own, saved over the one directory
+    /// that harness keeps an account in.
+    ///
+    /// Here because Codex is the harness Verkstead cannot name: it takes no session
+    /// id at launch, so what a carried conversation is resumed by is an id read out
+    /// of the log the session wrote. Which is a thing only a Codex Profile can be
+    /// tested on.
+    async fn codex_account(&self) -> i64 {
+        let home = self.elsewhere.path().join(ACCOUNT).join(".codex");
+
+        std::fs::create_dir_all(home.join("sessions")).unwrap();
+        std::fs::write(home.join("auth.json"), "{\"access\":\"the-desk\"}").unwrap();
+
+        let said = press(
+            &self.workbench,
+            PROFILES,
+            Some(
+                &serde_json::json!({
+                    "name": ACCOUNT,
+                    "account": { "agent_type": "Codex", "home": home },
+                    "models": [CODEX_MODEL],
+                    "memory": true,
+                })
+                .to_string(),
+            ),
+        )
+        .await;
+
+        assert_eq!(said, "\"Saved\"", "saving the Codex account");
 
         self.profile_called(ACCOUNT).await.id
     }
@@ -1324,6 +1361,84 @@ printf '%s\n' '{asked}' > "$kept/updates.jsonl"
 const OPENED_HERE: &str = "opened";
 const RE_PRIMED_THERE: &str = "re-primed";
 
+/// The session id **codex chooses for itself**, which is the whole difficulty of
+/// this harness: Verkstead names no Codex session, so the only place this string
+/// exists before the session runs is inside the stub that is about to write it.
+///
+/// Shaped as codex shapes one, and nothing here depends on the shape: what
+/// matters is that it is not a name anything on either machine could have known.
+const CODEX_CHOSE: &str = "01a0f0e9-3280-7900-9dda-c7d0920b0735";
+
+/// And what stands where **codex** goes, on either machine: one script for both of
+/// the launches a device makes, because whether a launch opens a conversation or
+/// carries one on is what the line says.
+///
+/// **Its store is written where codex writes one and named what codex names it**:
+/// a rollout under `sessions/YYYY/MM/DD`, called after the session id, opening
+/// with the `session_meta` line that says which session it is and which directory
+/// it was launched in. So what crosses with the memory sync is a store of the
+/// shape the far end has to find a log in, and what the far end has to find it
+/// *by* is a name only this file holds.
+///
+/// **A launch it was not told to resume** — codex's resume is a subcommand, so
+/// `$0` is the word that says which this is — writes the question it is on and
+/// waits at the gate, which is the turn in flight a move has to run to the end of.
+///
+/// **A launch it was told to resume** says every word of its own line, one per
+/// line, and appends to the rollout **named by the id it was handed**: it globs
+/// the store for it rather than assuming where it landed, so an append is proof
+/// both that the log crossed and that the line named the right session. A resume
+/// handed an id nothing answers to writes nowhere, which is the shape of the
+/// failure rather than a green test.
+///
+/// `opening` is the word the first of those prints, and it is a different one on
+/// each machine for [`drafted_running`]'s reason: a suite whose two devices
+/// printed the same words could not say which of them had run.
+///
+/// `names_itself` is whether the rollout carries the `session_id` a real one
+/// does — false being the log Verkstead can read nothing out of, which is the
+/// fallback.
+fn codex_that_carries_on_at(gate: &Path, opening: &str, names_itself: bool) -> String {
+    let says = match names_itself {
+        true => format!(r#"\"session_id\":\"{CODEX_CHOSE}\","#),
+        false => String::new(),
+    };
+
+    format!(
+        r#"
+store="$HOME/.codex/sessions"
+
+if [ "$0" = resume ]; then
+  printf 'carried on\r\n'
+  printf 'arg=%s\r\n' "$0"
+  for word in "$@"; do printf 'arg=%s\r\n' "$word"; done
+
+  for found in "$store"/*/*/*/rollout-*-"$3".jsonl; do
+    if [ -f "$found" ]; then printf '%s\n' '{carrying}' >> "$found"; fi
+  done
+
+  exit 0
+fi
+
+printf '{opening}\r\n'
+printf 'prompt=%s\r\n' "$2"
+
+day="$store/2026/09/30"
+mkdir -p "$day"
+log="$day/rollout-2026-09-30T17-47-00-{chose}.jsonl"
+
+printf '{{"type":"session_meta","payload":{{{says}\"cwd\":\"%s\"}}}}\n' "$PWD" > "$log"
+printf '%s\n' '{asked}' >> "$log"
+
+{waiting}
+"#,
+        chose = CODEX_CHOSE,
+        carrying = CARRYING_ON,
+        asked = THE_QUESTION_IT_WAS_ON,
+        waiting = waits_at(gate),
+    )
+}
+
 /// Set `core.autocrlf` on a repository, the way the machine it is on would have
 /// it — and respell whatever is checked out of it so the trees agree with the
 /// switch.
@@ -1567,6 +1682,54 @@ async fn ready_to_carry_grok_on(
     b.profile_called(ACCOUNT).await;
 
     let conversation = a.drafting_under_on(account, GROK_MODEL).await;
+
+    a.grills(conversation).await;
+
+    (a, b, holding, conversation)
+}
+
+/// And the same again on **Codex**, the harness Verkstead cannot name: both
+/// machines run the one script that opens a conversation or carries one on as its
+/// line says, each waiting at a gate of its own.
+///
+/// `names_itself` is whether A's rollout says which session it is of — see
+/// [`codex_that_carries_on_at`]. True is the ordinary case, and false is the log
+/// nothing can be read out of, which is the fallback.
+///
+/// Every test about carrying a Codex conversation on starts here.
+async fn ready_to_carry_codex_on(
+    here: &Path,
+    there: &Path,
+    spill: &Path,
+    names_itself: bool,
+) -> (Verkstead, Verkstead, Holding, i64) {
+    let a = Verkstead::running(
+        A,
+        &codex_that_carries_on_at(here, OPENED_HERE, names_itself),
+        spill,
+    )
+    .await;
+    let b = Verkstead::running(
+        B,
+        &codex_that_carries_on_at(there, RE_PRIMED_THERE, names_itself),
+        spill,
+    )
+    .await;
+
+    a.linked_to(&b.device, B_MACHINE, B_OS, vec![b.at()]).await;
+
+    let (machine, os) = this_machine();
+    b.linked_to(&a.device, &machine, &os, vec![a.at()]).await;
+
+    let theirs = a.repo().await;
+    b.cloned_from(&theirs).await;
+
+    let account = a.codex_account().await;
+
+    let holding = b.holding();
+    b.profile_called(ACCOUNT).await;
+
+    let conversation = a.drafting_under_on(account, CODEX_MODEL).await;
 
     a.grills(conversation).await;
 
@@ -3546,6 +3709,186 @@ async fn a_grok_grilling_carries_on_where_the_store_has_a_name_for_the_worktree(
 /// test can say where a log ought to be.
 fn encoded(worktree: &Path) -> String {
     worktree.display().to_string().replace('/', "%2F")
+}
+
+/// **A Codex grilling transferred mid-interview carries on from the question it
+/// was on, under a name nobody gave it** — which is the harder half of resuming a
+/// harness, and this one's whole difficulty.
+///
+/// Codex takes no session id at launch, so nothing Verkstead knew before the
+/// session started names its log. What identifies a rollout is what the session
+/// wrote in it about itself, and among that is **its own session id** — the id
+/// `codex resume` takes. So the Transcript search that finds the log writes that
+/// id onto the record beside the session, exactly where the id Verkstead picked
+/// would have gone for the two backends that take one, and from there a device
+/// that never ran the session can resume it.
+///
+/// **And its store needs nothing put right.** Codex files its rollouts by the
+/// date they were written, so what the memory sync carries lands at the relative
+/// path it left; the resume is by id and is resolved against the whole store
+/// rather than against the directory codex was started in. What the line carries
+/// instead is the answer to the question codex would otherwise stop and ask —
+/// which of the two directories to resume in — and it answers the one the work is
+/// now in.
+///
+/// **Four things are read, and each is something only this could have left.** The
+/// name on A's record is the one the rollout gave itself rather than the one the
+/// Capture opened under. The line B's session was launched on is the subcommand,
+/// with that id as the positional in front of the prompt, and with the account's
+/// own half of the ordinary line come across onto it. Its prompt is the note
+/// alone. And its Transcript holds what it said and not what the session on A had
+/// already written into the same file — which it could only have appended to by
+/// finding the carried rollout under the id it was handed.
+#[tokio::test]
+async fn a_codex_grilling_transferred_mid_interview_carries_on_under_a_name_nobody_gave_it() {
+    let spill = tempfile::tempdir().unwrap();
+    let here = spill.path().join("go-here");
+    let there = spill.path().join("go-there");
+    let (a, b, _holding, conversation) =
+        ready_to_carry_codex_on(&here, &there, spill.path(), true).await;
+
+    // A turn genuinely in flight, and a rollout with the interview in it: the
+    // session writes one as it starts, so waiting for it to say it has opened the
+    // conversation is waiting for the log to be there.
+    a.printed(conversation, OPENED_HERE).await;
+
+    assert_eq!(
+        a.transcript_of(conversation, 0).await.pop(),
+        Some(THE_QUESTION_IT_WAS_ON.to_owned()),
+        "the interview is on A's Transcript, read out of the rollout codex wrote \
+         — under the opening line, which is a line of the log like any other",
+    );
+
+    assert_eq!(
+        session_names(&a.pool)
+            .await
+            .into_iter()
+            .map(|(_, name)| name)
+            .collect::<Vec<String>>(),
+        vec![CODEX_CHOSE.to_owned()],
+        "and A's record calls that session what the rollout calls it, which is \
+         the only name it has: the Capture was opened under one nothing uses",
+    );
+
+    // The turn ends, and the move follows it.
+    std::fs::write(&here, "go").unwrap();
+
+    let there_id = handed_on(&a, conversation, B).await;
+
+    came_home(&b, there_id).await;
+
+    let said = b.latest_capture_saying(there_id, "carried on").await;
+
+    assert!(
+        said.contains("arg=resume"),
+        "B's session was told to resume rather than to open one, and told by the \
+         subcommand codex takes: {said:?}",
+    );
+    assert!(
+        said.contains(&format!("arg={CODEX_CHOSE}")),
+        "and to resume the session the rollout named, which is {CODEX_CHOSE}: \
+         {said:?}",
+    );
+    assert!(
+        said.contains("arg=cli_auth_credentials_store=\"file\"")
+            && said.contains("trust_level=\"trusted\""),
+        "and the account's own half of the line came across onto the subcommand, \
+         or the resume would come up logged out on a trust prompt: {said:?}",
+    );
+    assert!(
+        said.contains("arg=tui.resume_cwd=\"current\""),
+        "and the answer to the question a carried rollout makes codex ask, which \
+         is the directory the work is now in: {said:?}",
+    );
+
+    let worktree = b.worktree(there_id).await;
+
+    assert!(
+        said.contains(&worktree.display().to_string()),
+        "the note names the Worktree's new path: {said:?}",
+    );
+    assert!(
+        !said.contains("Rate limiting"),
+        "and nothing else: the Brief is already in the context this session kept: \
+         {said:?}",
+    );
+
+    assert_eq!(
+        session_names(&b.pool)
+            .await
+            .into_iter()
+            .map(|(_, name)| name)
+            .collect::<Vec<String>>(),
+        vec![CODEX_CHOSE.to_owned(), CODEX_CHOSE.to_owned()],
+        "both of B's Events name that session: the one that crossed, and the one \
+         resuming it — which is what leaves the log of the session actually \
+         running findable",
+    );
+
+    assert_eq!(
+        b.transcript_of(there_id, 1).await,
+        vec![CARRYING_ON.to_owned()],
+        "and the resumed session's Transcript holds what it said and not what the \
+         session on A had already written into the same rollout — which is also \
+         what says the append landed in the carried rollout at all: the session \
+         found it by globbing the store for the id it was handed, and a glob that \
+         matched nothing would have written nowhere",
+    );
+
+    assert_eq!(
+        b.view(there_id).await.state,
+        Lifecycle::Grilling,
+        "and it is still a grilling: what moved is where the work is being done \
+         rather than how far it has got",
+    );
+}
+
+/// **And a rollout that never said which session it was of leaves Verkstead's own
+/// Resume doing exactly what it does today.**
+///
+/// Which is the fallback this harness needs most, because it is the one whose
+/// name is read rather than chosen: a rollout caught before its opening line was
+/// finished, one written by a codex that spells that line some other way, and one
+/// that never crossed at all, all come to the same place — no name on the record,
+/// so nothing for a resume to be asked by.
+///
+/// Nothing is lost by it. The far end re-primes off the record, Brief and all, the
+/// way stage 09 left it.
+#[tokio::test]
+async fn a_codex_rollout_that_named_no_session_falls_through_to_verksteads_resume() {
+    let spill = tempfile::tempdir().unwrap();
+    let here = spill.path().join("go-here");
+    let there = spill.path().join("go-there");
+    let (a, b, _holding, conversation) =
+        ready_to_carry_codex_on(&here, &there, spill.path(), false).await;
+
+    a.printed(conversation, OPENED_HERE).await;
+
+    assert_eq!(
+        a.transcript_of(conversation, 0).await.pop(),
+        Some(THE_QUESTION_IT_WAS_ON.to_owned()),
+        "the interview is on A's Transcript all the same: a log that says nothing \
+         about itself is still a log to follow",
+    );
+
+    std::fs::write(&here, "go").unwrap();
+
+    let there_id = handed_on(&a, conversation, B).await;
+
+    came_home(&b, there_id).await;
+
+    let re_primed = b.latest_capture_saying(there_id, RE_PRIMED_THERE).await;
+
+    assert!(
+        !re_primed.contains("arg=resume"),
+        "nothing on A's record named that session, so there is nothing for a \
+         resume to be asked by and Verkstead's own Resume stands: {re_primed:?}",
+    );
+    assert!(
+        re_primed.contains("Rate limiting"),
+        "which means the session was primed off the record, Brief and all: \
+         {re_primed:?}",
+    );
 }
 
 /// **Each end's Timeline says what happened to it**: the far end's that the work

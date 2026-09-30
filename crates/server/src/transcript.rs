@@ -28,6 +28,15 @@
 //! that records this Worktree and was created after this session was launched,
 //! which is Codex's rule against a store of another shape.
 //!
+//! **And what the search finds is what gives a Codex session its name.** It is the
+//! one backend Verkstead cannot name, so the Capture is opened under a name nothing
+//! ever uses — and a rollout names *itself*, in the line the finder is reading
+//! anyway. So the moment the log is found, the id it says it is of goes on the
+//! record beside the session, where the id Verkstead picked would have gone for the
+//! backends that take one. Which is what lets a machine that never ran the session
+//! carry its conversation on: the resume is by that id and nothing else. See
+//! [`names_itself`].
+//!
 //! **And a session continuing an earlier one's conversation is followed from
 //! where that one left off.** A resumed session appends to the log it is resuming,
 //! so nothing is looked for at all: the log is the one the launch proved was
@@ -274,10 +283,7 @@ impl Tail {
             // session's own root on the host where it does not — for Claude's
             // reason above, `sessions/` being joined whole rather than by entry.
             (store::Account::Codex { home: account }, Some(worktree)) => Search::Rollout {
-                sessions: match profile.memory {
-                    true => account.join(ROLLOUTS),
-                    false => home.codex_sessions(),
-                },
+                sessions: codex_rollouts(account, profile.memory, home),
                 worktree: worktree.to_owned(),
                 launched: to_the_second(launched),
             },
@@ -357,6 +363,14 @@ impl Tail {
     pub(crate) async fn poll(&mut self, pool: &SqlitePool, nudges: &Nudges, event_id: i64) -> bool {
         if matches!(self.following, Following::Looking) {
             self.following = self.find().await;
+
+            // And the moment a rollout is found is the moment its session has a
+            // name: codex takes none at launch, so the log is found rather than
+            // named, and the id it turns out to be of is written down here — see
+            // [`declares`]. Once, because a Tail looks only until it finds one.
+            if let (Search::Rollout { .. }, Following::Log(log)) = (&self.search, &self.following) {
+                names_itself(pool, event_id, &log.log).await;
+            }
         }
 
         let arrived = match &mut self.following {
@@ -574,14 +588,17 @@ pub(crate) struct Carried {
 /// The log of the session named `session`, as something a session launched under
 /// `profile` could carry on from — see [`Carried`].
 ///
-/// **Two harnesses, because a store keyed by the directory a session ran in has to
-/// be put right first.** Claude's log lands where this device would have written
-/// one, so it is the lookup the Transcript makes; Grok Build's arrives still filed
-/// under the *sending* device's name for the *sending* device's Worktree, so it is
-/// relocated before there is anything here to resume against — see [`relocated`].
-/// The two after them have no resume line at all and nothing looks for their logs:
-/// a launch under one of them opens a session of its own, which is Verkstead's own
-/// Resume and nothing lost.
+/// **Three harnesses, and each looks for its log the way its own resume does.**
+/// Claude's lands where this device would have written one, so it is the lookup
+/// the Transcript makes. Grok Build's arrives still filed under the *sending*
+/// device's name for the *sending* device's Worktree, so it is relocated before
+/// there is anything here to resume against — see [`relocated`]. Codex's is filed
+/// by the date it was written rather than by anywhere, so it crosses to the same
+/// relative path it left and nothing has to be put right — but nothing names it
+/// either, codex having taken no session id at launch, so it is **searched for by
+/// the id it gives itself**: see [`declares`], and [`in_the_store`]. OpenCode has
+/// no resume line yet and nothing looks for its log: a launch under it opens a
+/// session of its own, which is Verkstead's own Resume and nothing lost.
 ///
 /// **`None` is a log that is not there**, and that is the answer a Conversation
 /// whose store did not come across gets. Claude's store crosses as a labelled part
@@ -599,7 +616,11 @@ pub(crate) struct Carried {
 /// is being started in (checked against claude 2.1.278, which resumes a log filed
 /// under another directory's entry). Grok is the other way about, and that is what
 /// the relocation is for: it resolves a resume against the directory it is started
-/// in, so a log filed anywhere else in the store is a log it will not find.
+/// in, so a log filed anywhere else in the store is a log it will not find. Codex
+/// is Claude's way again and further: a rollout named on its line is read out of
+/// the store wherever it sits and whatever directory it records — checked against
+/// codex 0.155.1, which resumed a rollout recording another machine's path from a
+/// directory that machine never had.
 ///
 /// `worktree` is the directory the session about to be launched runs in, which is
 /// the path the relocation names its destination by. A Conversation with none never
@@ -624,7 +645,11 @@ pub(crate) async fn carried(
             .await?
         }
 
-        store::Account::Codex { .. } | store::Account::OpenCode { .. } => return None,
+        store::Account::Codex { home: account } => {
+            in_the_store(&codex_rollouts(account, profile.memory, home), session).await?
+        }
+
+        store::Account::OpenCode { .. } => return None,
     };
 
     let read = tokio::fs::metadata(&log).await.ok()?.len();
@@ -793,6 +818,15 @@ fn claude_projects(claude_dir: &Path, memory: bool, home: &crate::sandbox::Home)
     }
 }
 
+/// And where Codex keeps its rollouts for one, which is the same two answers for
+/// the same reason — see [`claude_projects`].
+fn codex_rollouts(account: &Path, memory: bool, home: &crate::sandbox::Home) -> PathBuf {
+    match memory {
+        true => account.join(ROLLOUTS),
+        false => home.codex_sessions(),
+    }
+}
+
 /// And where Grok Build keeps its sessions for one, which is the same two answers
 /// for the same reason — see [`claude_projects`], and [`Tail::of`]'s own reading of
 /// the switch, which this is the other caller of.
@@ -913,6 +947,59 @@ async fn days(sessions: &Path, launched: SystemTime) -> Vec<PathBuf> {
     days
 }
 
+/// The rollout under `sessions` that says it is the session called `session`, as
+/// something a resume could be asked against.
+///
+/// **The one search here with nothing but a name to go on.** The Transcript's own
+/// finder has a Worktree and a moment, because it is looking for the log of a
+/// session it just launched; this is looking for the log of a session that ran on
+/// another machine, whose Worktree was that machine's path and whose moment was
+/// before the move. What is left is the id, which is the id codex chose and wrote
+/// in its own opening line — so every rollout in the store is asked what it is
+/// until one of them answers to it. See [`declares`].
+///
+/// **Its own line rather than its name.** A rollout's filename carries the id too,
+/// and reading it off there would be resting on codex's spelling of a filename
+/// rather than on what the file says about itself (ADR 0006) — and on a store that
+/// has compressed or renamed a log it would be reading a name that is no longer
+/// the one codex would write.
+///
+/// What it costs is one small read per rollout, once per arrival: the opening line
+/// and no more of a file that runs to megabytes. The store it is walked on is
+/// nearly always the arriving one, which holds this Conversation's rollouts and
+/// nothing else — the memory sync picks them out by the Worktree they name — and on
+/// the way home it is an account's whole store, read once as the session starts.
+///
+/// `None` is every way the log is not here: a store the sync did not reach, a
+/// rollout that was never written, and an id nothing in the store answers to —
+/// which is what a session whose own name was never found has. Each of them is
+/// Verkstead's own Resume.
+async fn in_the_store(sessions: &Path, session: &str) -> Option<PathBuf> {
+    for year in directories(sessions).await {
+        for month in directories(&year).await {
+            for day in directories(&month).await {
+                let Ok(mut entries) = tokio::fs::read_dir(&day).await else {
+                    continue;
+                };
+
+                while let Ok(Some(entry)) = entries.next_entry().await {
+                    let log = entry.path();
+
+                    if !is_rollout(&log) {
+                        continue;
+                    }
+
+                    if declares(&log).await.as_deref() == Some(session) {
+                        return Some(log);
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
 /// Whether the first line of `log` says its session was working in `worktree`.
 ///
 /// A rollout opens with the session's own metadata, and in it is the directory
@@ -929,22 +1016,69 @@ async fn days(sessions: &Path, launched: SystemTime) -> Vec<PathBuf> {
 /// that session stays Capture-only — the same answer as a log that never
 /// appeared.
 async fn names(log: &Path, worktree: &Path) -> bool {
-    let Ok(file) = tokio::fs::File::open(log).await else {
+    let Some(opening) = opening(log).await else {
         return false;
     };
 
+    verkstead_render::rollout_cwd(&opening).is_some_and(|cwd| Path::new(&cwd) == worktree)
+}
+
+/// And the id that same line gives the session, which is what `codex resume`
+/// takes — see [`verkstead_render::rollout_session`].
+///
+/// `None` for a rollout whose opening line has not been written yet, one that is
+/// not a rollout at all, and one whose line this build cannot read. Each of them
+/// is a session with no name on the record, which is Verkstead's own Resume
+/// wherever that session's conversation is asked to be carried on.
+async fn declares(log: &Path) -> Option<String> {
+    verkstead_render::rollout_session(&opening(log).await?)
+}
+
+/// The line a rollout opens with, which is the whole of what says what it is.
+///
+/// One line rather than the file, for [`names`]'s reason, and bounded for its
+/// reason too: this runs against a file somebody else is writing, and a poll can
+/// land before the first line has its newline.
+async fn opening(log: &Path) -> Option<String> {
+    let file = tokio::fs::File::open(log).await.ok()?;
     let mut first = Vec::new();
 
-    if BufReader::new(file.take(FIRST_LINE))
+    BufReader::new(file.take(FIRST_LINE))
         .read_until(b'\n', &mut first)
         .await
-        .is_err()
-    {
-        return false;
-    }
+        .ok()?;
 
-    verkstead_render::rollout_cwd(&String::from_utf8_lossy(&first))
-        .is_some_and(|cwd| Path::new(&cwd) == worktree)
+    Some(String::from_utf8_lossy(&first).into_owned())
+}
+
+/// Put the id a found rollout gives itself on the record beside the session that
+/// wrote it — see [`store::found_as`].
+///
+/// **Which is the only moment Verkstead learns a Codex session's name.** It takes
+/// no session id at launch, so the Capture was opened under a name nothing ever
+/// used; what the log turns out to be of is read out of the log itself, and from
+/// here on it is a name like any other — the id a device that never ran this
+/// session is told to resume by.
+///
+/// Every way of failing is the same one: the session keeps the name the Capture
+/// opened with, which no harness answers to, and a resume of it finds no log and
+/// falls through to Verkstead's own Resume. Said in the log rather than to the
+/// human, this being about a Transcript rather than about the work.
+async fn names_itself(pool: &SqlitePool, event_id: i64, log: &Path) {
+    let Some(session) = declares(log).await else {
+        tracing::info!(
+            event_id,
+            log = %log.display(),
+            "the rollout this session's Transcript is read from does not say which session \
+             it is of, so nothing on another device could carry its conversation on",
+        );
+
+        return;
+    };
+
+    if let Err(error) = store::found_as(pool, event_id, &session).await {
+        tracing::error!(error = ?error, event_id, session, "writing down what a Codex session calls itself failed, so nothing on another device could carry its conversation on");
+    }
 }
 
 /// How much of a rollout is read to identify it. Generous against the eighteen
@@ -1115,23 +1249,25 @@ mod tests {
         assert_eq!(latest(&[]), None);
     }
 
-    /// A rollout as codex opens one, naming the directory the session was
-    /// launched in.
-    fn meta(cwd: &Path) -> String {
+    /// A rollout as codex opens one, naming the session it is of and the
+    /// directory that session was launched in — the two things a rollout says
+    /// about itself, and the two things anything here reads off one.
+    fn meta(session: &str, cwd: &Path) -> String {
         format!(
-            r#"{{"timestamp":"2026-08-30T07:47:01.017Z","ordinal":0,"type":"session_meta","payload":{{"session_id":"01a051a2","cwd":"{}"}}}}"#,
+            r#"{{"timestamp":"2026-08-30T07:47:01.017Z","ordinal":0,"type":"session_meta","payload":{{"session_id":"{session}","cwd":"{}"}}}}"#,
             cwd.display()
         )
     }
 
     /// One written into the day directory of a session store, under a name
-    /// codex would have given it.
+    /// codex would have given it — and saying inside it that it is that
+    /// session's, the way codex's own does.
     fn wrote(sessions: &Path, day: &str, uuid: &str, cwd: &Path) -> PathBuf {
         let directory = sessions.join(day);
         std::fs::create_dir_all(&directory).unwrap();
 
         let log = directory.join(format!("rollout-2026-08-30T17-47-00-{uuid}.jsonl"));
-        std::fs::write(&log, format!("{}\n", meta(cwd))).unwrap();
+        std::fs::write(&log, format!("{}\n", meta(uuid, cwd))).unwrap();
 
         log
     }
@@ -1254,7 +1390,7 @@ mod tests {
             "sessions.sqlite",
             "sessions.sqlite-wal",
         ] {
-            std::fs::write(day.join(beside), format!("{}\n", meta(&worktree))).unwrap();
+            std::fs::write(day.join(beside), format!("{}\n", meta("aaaa", &worktree))).unwrap();
         }
 
         assert_eq!(
@@ -1276,7 +1412,7 @@ mod tests {
         std::fs::create_dir_all(&day).unwrap();
 
         let log = day.join("rollout-2026-08-30T17-47-00-aaaa.jsonl");
-        let whole = meta(&worktree);
+        let whole = meta("aaaa", &worktree);
         std::fs::write(&log, &whole[..40]).unwrap();
 
         assert_eq!(rollout(&sessions, &worktree, a_moment_ago()).await, None);
@@ -1315,6 +1451,149 @@ mod tests {
             rollout(&sessions, &worktree, launched).await,
             Some(tomorrow)
         );
+    }
+
+    /// And what a found rollout is *called*, which is the only place a Codex
+    /// session's name is written down at all: codex takes none at launch, so the
+    /// id it chose for itself is read out of the line it opened its log with.
+    #[tokio::test]
+    async fn a_rollout_says_which_session_it_is_of() {
+        let store = tempfile::tempdir().unwrap();
+        let sessions = store.path().join("sessions");
+        let worktree = PathBuf::from("/srv/worktrees/rate-limiting");
+
+        let log = wrote(
+            &sessions,
+            "2026/08/30",
+            "01a0f0e9-3280-7900-9dda-c7d0920b0735",
+            &worktree,
+        );
+
+        assert_eq!(
+            declares(&log).await.as_deref(),
+            Some("01a0f0e9-3280-7900-9dda-c7d0920b0735"),
+        );
+    }
+
+    /// And a log that says nothing of the kind has no name to give: one caught
+    /// before its opening line was finished, and one that is not a rollout at all.
+    ///
+    /// Each of them is a session that stays nameless, which is a conversation no
+    /// other device can be told to carry on — Verkstead's own Resume there, and
+    /// nothing lost here.
+    #[tokio::test]
+    async fn a_log_that_names_no_session_gives_no_name() {
+        let store = tempfile::tempdir().unwrap();
+        let day = store.path().join("sessions/2026/08/30");
+        std::fs::create_dir_all(&day).unwrap();
+
+        let worktree = PathBuf::from("/srv/worktrees/rate-limiting");
+        let whole = meta("aaaa", &worktree);
+
+        let torn = day.join("rollout-2026-08-30T17-47-00-aaaa.jsonl");
+        std::fs::write(&torn, &whole[..40]).unwrap();
+
+        assert_eq!(
+            declares(&torn).await,
+            None,
+            "half an opening line says nothing"
+        );
+
+        let other = day.join("rollout-2026-08-30T17-47-00-bbbb.jsonl");
+        std::fs::write(&other, "{\"type\":\"turn_context\"}\n").unwrap();
+
+        assert_eq!(
+            declares(&other).await,
+            None,
+            "and neither does another line"
+        );
+
+        assert_eq!(
+            declares(&day.join("rollout-2026-08-30T17-47-00-cccc.jsonl")).await,
+            None,
+            "and a log that is not there says nothing either",
+        );
+    }
+
+    /// **A carried rollout is found by the id it names**, wherever in the store
+    /// it sits and whatever directory it records — which is what makes a Codex
+    /// conversation resumable on a device that never ran it.
+    ///
+    /// Codex files its rollouts by the date they were written, so what crosses
+    /// lands at the relative path it left and nothing has to be put right. What
+    /// there is none of is a name: the search has the id and nothing else, so
+    /// every rollout in the store is asked what it is.
+    #[tokio::test]
+    async fn a_carried_rollout_is_found_by_the_id_it_names_for_itself() {
+        let store = tempfile::tempdir().unwrap();
+        let sessions = store.path().join("sessions");
+
+        // The Worktree the session ran in on the other machine, which is a path
+        // this device does not have — and which nothing here reads.
+        let over_there = PathBuf::from("/var/lib/verkstead/worktrees/rate-limiting");
+
+        let beside = wrote(&sessions, "2026/08/29", "aaaa", &over_there);
+        let carried = wrote(&sessions, "2026/08/30", "bbbb", &over_there);
+
+        assert_eq!(
+            in_the_store(&sessions, "bbbb").await,
+            Some(carried),
+            "the rollout naming that session is the one to resume against",
+        );
+        assert_eq!(
+            in_the_store(&sessions, "aaaa").await,
+            Some(beside),
+            "and the one beside it under another day is found the same way",
+        );
+    }
+
+    /// And an id nothing in the store answers to is the fallback: a rollout that
+    /// did not cross, and a session whose own name was never read off its log.
+    ///
+    /// Which is Verkstead's own Resume, and nothing lost.
+    #[tokio::test]
+    async fn a_rollout_that_did_not_cross_carries_nothing_on() {
+        let store = tempfile::tempdir().unwrap();
+        let sessions = store.path().join("sessions");
+        let worktree = PathBuf::from("/srv/worktrees/rate-limiting");
+
+        assert_eq!(
+            in_the_store(&sessions, "bbbb").await,
+            None,
+            "a store the sync never reached holds nothing to resume",
+        );
+
+        wrote(&sessions, "2026/08/30", "aaaa", &worktree);
+
+        assert_eq!(
+            in_the_store(&sessions, "bbbb").await,
+            None,
+            "and a store holding somebody else's rollouts holds nothing of this \
+             session's",
+        );
+    }
+
+    /// And nothing in the store but a rollout is searched: codex compresses its
+    /// older logs and keeps an index of them beside them, and neither is a log to
+    /// resume against.
+    #[tokio::test]
+    async fn nothing_beside_a_rollout_is_taken_for_one_when_the_id_is_searched() {
+        let store = tempfile::tempdir().unwrap();
+        let sessions = store.path().join("sessions");
+        let worktree = PathBuf::from("/srv/worktrees/rate-limiting");
+
+        let day = sessions.join("2026/08/30");
+        std::fs::create_dir_all(&day).unwrap();
+
+        for beside in [
+            "rollout-2026-08-30T17-47-00-aaaa.jsonl.zst",
+            "rollout-2026-08-30T17-47-00-aaaa.jsonl.gz",
+            "sessions.sqlite",
+        ] {
+            std::fs::write(day.join(beside), format!("{}\n", meta("aaaa", &worktree))).unwrap();
+        }
+
+        assert_eq!(in_the_store(&sessions, "aaaa").await, None);
     }
 
     /// A Grok session's log where grok keeps one: `updates.jsonl` inside a
