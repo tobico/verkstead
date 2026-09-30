@@ -203,6 +203,11 @@ export function AtOncePane(props: {
         // own save refused over a pattern it never showed anybody — see
         // [`IgnoredCommentsEdit`].
         ignored_comments: "Keep",
+        // And the declared MCP servers, for the reason beside it: they are the
+        // other setting that travels as an action, and a section that spoke for
+        // them could have its own save refused over a name somebody hand-edited
+        // into the file weeks ago — see [`McpServersEdit`].
+        mcp_servers: "Keep",
         // And the one thing this form is about, as it was typed: an empty field
         // is the default asked for back, and the press never sends a number the
         // roadmap could not run — see [`refused`].

@@ -72,6 +72,9 @@ const REST = {
     trim: { enabled: true, days: "5" },
     delete: { enabled: true, days: "90" },
   },
+  // And how much Verkstead runs at once, as the string a form holds — see
+  // [`heldAtOnce`].
+  at_once: { roadmap_stages: "1" },
   conflict_resolution: TOLD.conflict_resolution,
   share_on_done: TOLD.share_on_done,
   sandbox_binds: ["/var/cache/verkstead-node", "/var/cache/verkstead-cargo"],
@@ -344,6 +347,7 @@ describe("the pane", () => {
           trim: { enabled: true, days: "" },
           delete: { enabled: false, days: "" },
         },
+        at_once: { roadmap_stages: "" },
         conflict_resolution: UNSET.conflict_resolution,
         share_on_done: UNSET.share_on_done,
         sandbox_binds: [],
