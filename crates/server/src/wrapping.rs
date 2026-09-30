@@ -248,10 +248,61 @@ pub(crate) async fn record(
             // one having been written before there was anything to say; and
             // before the watchers, which is what watches what it recorded. See
             // [`crate::stacks`].
-            if let Some(said) = crate::stacks::walked(state, conversation_id).await
-                && let Err(error) = store::note(&state.pool, conversation_id, &said).await
-            {
-                tracing::error!(error = ?error, conversation_id, "recording what the stack is failed");
+            //
+            // **And the neighbours make way here too, or the run stops.** Every
+            // link of a stack Verkstead built is a Conversation's, each keeping a
+            // worktree with its branch checked out, and what a conflict in one
+            // dispatches is a session told to run `gh stack sync` — which rebases
+            // and force-pushes the whole chain. Nothing can be asked of the human
+            // by now, so a neighbour that has finished is closed and one that has
+            // not stops the run with a Notice naming it, rather than spending a go
+            // on a sync that cannot move the branch. See
+            // [`crate::conversations::neighbours_give_way`].
+            let stopping = match crate::stacks::walking(state, conversation_id).await {
+                Some((repo, own, walked)) => {
+                    let neighbours = walked.neighbours(own);
+
+                    let made_way = match neighbours.is_empty() {
+                        true => Ok(Vec::new()),
+                        false => {
+                            crate::conversations::neighbours_give_way(
+                                state,
+                                conversation_id,
+                                &repo,
+                                &neighbours,
+                            )
+                            .await
+                        }
+                    };
+
+                    // Said either way, because what the chain *is* is worth
+                    // recording whether or not the run goes on: a wrap-up stopped
+                    // over a neighbour reads as a wrap-up stopped over nothing
+                    // unless the Timeline says what the chain was.
+                    let said = crate::stacks::record(
+                        state,
+                        conversation_id,
+                        &repo,
+                        own,
+                        &walked,
+                        made_way.as_deref().unwrap_or_default(),
+                    )
+                    .await;
+
+                    if let Some(said) = said
+                        && let Err(error) = store::note(&state.pool, conversation_id, &said).await
+                    {
+                        tracing::error!(error = ?error, conversation_id, "recording what the stack is failed");
+                    }
+
+                    made_way.err()
+                }
+                None => None,
+            };
+
+            if let Some(why) = stopping {
+                stopped(state, conversation_id, &why, writing).await;
+                return;
             }
 
             // And the wrap-up itself starts here. The branch has just been

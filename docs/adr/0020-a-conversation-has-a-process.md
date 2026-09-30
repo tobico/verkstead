@@ -115,6 +115,44 @@ strategy says, a stack being gh-stack's and a merge into each branch of one
 being what the strategy's own documentation warns against; a lone pull request
 follows the strategy as it always has.
 
+## One open Conversation per pull request
+
+*Amended 2026-09-29.* A take-up was refused wherever another Conversation had
+the pull request on its record, whatever state that Conversation was in: *one
+Conversation per piece of work*. Which left Review and Fix Merge Issues unable
+to be pointed at anything Verkstead had built, every pull request it opens being
+some Conversation's from the moment it is opened — and a stack of stages being a
+Conversation per link.
+
+So the rule is **one open Conversation per pull request**, open being neither
+Done nor Closed. A Review or a Fix Merge Issues started over a pull request whose
+holder is **Done** closes that holder, by the ordinary Close, and takes the pull
+request up; a holder already Closed or Archived has nothing to give up; a holder
+still at work refuses the start and leads there, as before. The same in a stack,
+for every link: each Done Conversation standing on a branch of the chain is
+closed, and one still at work refuses the start, naming it, before anything is
+closed. And the same the other way: a Closed Conversation steered back into work
+on its pull request closes the Done one that took it, and is refused where that
+one is still at work.
+
+**Closed rather than left Done with its checkout let go of**, which was the
+other shape considered. Git holds one checkout per branch and a stack sync moves
+every branch of the chain, so the holder's worktree has to go either way; what
+closing adds is that there is never a second Conversation offering presses over
+a pull request somebody else is wrapping up. The **Resolve conflicts** press
+needs no refusal of its own for that reason. Exempting Fix Merge Issues whatever
+state the holder was in was rejected: two live wrap-ups pushing to one branch is
+what the refusal was for.
+
+**A close discards what was uncommitted, so that is asked about first** and
+nothing else is. Where a Conversation about to be closed holds uncommitted
+changes the press stops and names it, and a second press goes ahead; where none
+does, the start closes what it closes and says so on the Timeline. Asking on
+every start was rejected as a question with one answer nearly every time.
+
+A pull request is on several Conversations' records from here, so whoever asks
+which Conversation is on one is told the open one, and the newest where none is.
+
 ## Naming a pull request or a branch
 
 Review and Fix Merge Issues need a target. A pull request URL or `#number` is

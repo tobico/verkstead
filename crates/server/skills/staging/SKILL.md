@@ -74,6 +74,28 @@ Split the effort into sequential stages. Each one must be:
   cross-stage dependencies in the index: unlike tasks, stages are sometimes
   reorderable, and the index should say which.
 
+Then **say what each stage stands on, on the stage's own line in the index** —
+after the link to its brief, because that line is the record Verkstead reads.
+The prose notes above the list stay where they are: they are the *why* behind
+the declarations rather than a substitute for them.
+
+- `after 01, 03` — the stages it stands on, named by their labels as the index
+  writes them, zero-padding and all. A stage may only name stages of this
+  roadmap.
+- `no dependencies` — a stage that stands on nothing, which at least one of
+  them is.
+- `on linux`, `on macos` or `on windows` — where the stage wants a platform,
+  after what it stands on. Most want none and say nothing, and a platform is
+  recorded and shown rather than acted on: nothing places a stage by it yet.
+
+**Every line carries a declaration or none of them does.** A roadmap that
+declares on some lines and not others is refused at this session's
+`verkstead done`, because a bare line there cannot be told from a forgotten
+one — as is one whose `after` names a stage that is not in the list, and one
+whose stages stand on each other in a circle. A roadmap that declares nothing
+at all is one run in order, and that is what every roadmap written before this
+is.
+
 ## 3. Put the stage list to the human
 
 The staging is a decision they own, so it goes to them as an ordinary Question
@@ -109,12 +131,14 @@ the briefs are provisional — re-grounded against the codebase when the stage
 starts.
 
 <Dependency notes: which stages are reorderable, which genuinely depend on
-which.>
+which — the why behind the declarations on the lines below, rather than a
+substitute for them.>
 
 ## Stages
 
-- [ ] 01: <title> — [brief](01-<slug>.md)
-- [ ] 02: <title> — [brief](02-<slug>.md)
+- [ ] 01: <title> — [brief](01-<slug>.md) — no dependencies
+- [ ] 02: <title> — [brief](02-<slug>.md) — after 01
+- [ ] 03: <title> — [brief](03-<slug>.md) — after 01 — on macos
 - ...
 </roadmap-template>
 
@@ -150,7 +174,8 @@ first".>
 
 The checkbox list under `## Stages` is what says how far the effort has got, and
 it is read back by Verkstead and by whoever starts the next stage. Every stage
-starts unchecked: nothing has been done yet.
+starts unchecked: nothing has been done yet. What follows each link is the
+declaration step 2 settled, and it is read off the line the same way.
 
 ## 5. Commit the roadmap
 
