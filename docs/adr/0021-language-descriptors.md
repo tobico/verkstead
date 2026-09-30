@@ -164,7 +164,9 @@ daemon holds memory for hours. That stage may end with the daemon staying off.
   `-Daether.syncContext.named.nameMapper=file-gav`, which Maven 3.9 reads and
   Maven 4 makes the default. Maven 3.8 has no named locks and ignores them.
 - **An explicit `--daemon` on the command line still wins**, and registers in
-  the shared home again, where the next session's build can attach to it. That
+  the shared home again, where another session's build that also says
+  `--daemon` can attach to it. A build with the daemon off never looks there,
+  so it cannot — measured, and proven beside the hole in the suite. That
   hole is **accepted and documented** rather than closed: the failure it causes
   is loud, and a daemon of Verkstead's own is what would close it for good.
   `-Dorg.gradle.daemon.registry.base` pointed at a directory per Sandbox was

@@ -751,7 +751,9 @@ languages:
       # build pays for a JVM starting up, which is the price.
       #
       # **An explicit `--daemon` on the command line still beats it**, and
-      # registers in the shared home again. That is accepted rather than worked
+      # registers in the shared home again, where another session's build
+      # reaches it only by saying `--daemon` too: with the daemon off, Gradle
+      # never looks. That is accepted rather than worked
       # around: the failure it causes is loud, and a daemon of Verkstead's own
       # is what would close it for good. `-Dorg.gradle.daemon.registry.base`
       # closes it too, and was turned down: it is undocumented.

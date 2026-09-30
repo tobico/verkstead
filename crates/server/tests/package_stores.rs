@@ -5389,6 +5389,77 @@ async fn a_repo_or_the_shared_home_asking_for_a_daemon_still_gets_none() {
     }
 }
 
+/// Two Sandboxes sharing one Gradle home, one build after the other: the first
+/// session builds `mark` with `first`, then holds its Sandbox open while the
+/// second builds `mark` with `second`. Each is the shell said before `gradle`
+/// and the flags on its command line.
+///
+/// What comes back is the first session's run, and the second's with the exit
+/// of its `gradle` under `built`, since whether it works is what is asked.
+async fn one_session_beside_anothers_daemon(
+    gradle: &Path,
+    first: (&str, &str),
+    second: (&str, &str),
+) -> (Ran, Ran) {
+    let machine = machine(2).await;
+    let cache = machine.cache();
+    let dir = cache.dir().expect("the fixture's cache has a directory");
+
+    for nth in 0..2 {
+        gradle_consumer(machine.worktree(nth), None);
+    }
+
+    let meet = dir.join("meeting");
+    std::fs::create_dir_all(&meet).unwrap();
+
+    // A wait of two minutes at most, in the shell, on a file the other
+    // Sandbox leaves under the Build Cache.
+    let waiting = |on: &str| {
+        format!(
+            "i=0; while [ ! -e '{meet}/{on}' ]; do i=$((i+1)); \
+             [ $i -gt 1200 ] && exit 3; sleep 0.1; done\n",
+            meet = meet.display(),
+        )
+    };
+
+    let (first_said, first_flag) = first;
+    let (second_said, second_flag) = second;
+
+    let first = starting(
+        &machine.sandbox(0, &cache, reaching_nothing()),
+        &format!(
+            "set -e\n\
+             {marking}\
+             {first_said}\
+             '{gradle}' {GRADLE_FLAGS} {first_flag} mark\n\
+             touch '{meet}/built'\n\
+             {waiting}",
+            marking = marking("first"),
+            gradle = gradle.display(),
+            meet = meet.display(),
+            waiting = waiting("done"),
+        ),
+    );
+
+    let second = installing(
+        &machine.sandbox(1, &cache, reaching_nothing()),
+        &format!(
+            "{waiting}\
+             {marking}\
+             {second_said}\
+             '{gradle}' {GRADLE_FLAGS} {second_flag} mark\n\
+             echo \"built=$?\"\n\
+             touch '{meet}/done'\n",
+            marking = marking("second"),
+            gradle = gradle.display(),
+            meet = meet.display(),
+            waiting = waiting("built"),
+        ),
+    );
+
+    (finished(first), second)
+}
+
 /// The control, which says the suite can see what the descriptor is there to
 /// stop: **with the daemon left on, a second session's build lands in the
 /// first session's daemon**, in the first session's Sandbox, where the second
@@ -5398,11 +5469,11 @@ async fn a_repo_or_the_shared_home_asking_for_a_daemon_still_gets_none() {
 ///
 /// - `GRADLE_OPTS` taken out, which is Gradle's own default, and what the
 ///   descriptor says without its second variable.
-/// - And an explicit `--daemon`, with `GRADLE_OPTS` in place. The command line
-///   beats the variable, and **that is accepted rather than defeated**: the
-///   failure is loud, and the way to close it for good is the daemon of
-///   Verkstead's own. This line is here so that it stays a known hole rather
-///   than a surprise.
+/// - And an explicit `--daemon` in both sessions, with `GRADLE_OPTS` in place.
+///   The command line beats the variable, and **that is accepted rather than
+///   defeated**: the failure is loud, and the way to close it for good is the
+///   daemon of Verkstead's own. This line is here so that it stays a known hole
+///   rather than a surprise.
 ///
 /// The first session builds, leaves its daemon up and waits. The second builds
 /// while it waits and fails, in Gradle's words, to change into a directory its
@@ -5420,60 +5491,8 @@ async fn with_the_daemon_back_on_a_second_sessions_build_lands_in_the_firsts_san
         ("with GRADLE_OPTS taken out", "unset GRADLE_OPTS\n", ""),
         ("with --daemon on the command line", "", "--daemon"),
     ] {
-        let machine = machine(2).await;
-        let cache = machine.cache();
-        let dir = cache.dir().expect("the fixture's cache has a directory");
-
-        for nth in 0..2 {
-            gradle_consumer(machine.worktree(nth), None);
-        }
-
-        let meet = dir.join("meeting");
-        std::fs::create_dir_all(&meet).unwrap();
-
-        // A wait of two minutes at most, in the shell, on a file the other
-        // Sandbox leaves under the Build Cache.
-        let waiting = |on: &str| {
-            format!(
-                "i=0; while [ ! -e '{meet}/{on}' ]; do i=$((i+1)); \
-                 [ $i -gt 1200 ] && exit 3; sleep 0.1; done\n",
-                meet = meet.display(),
-            )
-        };
-
-        let first = starting(
-            &machine.sandbox(0, &cache, reaching_nothing()),
-            &format!(
-                "set -e\n\
-                 {marking}\
-                 {back_on}\
-                 '{gradle}' {GRADLE_FLAGS} {flag} mark\n\
-                 touch '{meet}/built'\n\
-                 {waiting}",
-                marking = marking("first"),
-                gradle = gradle.display(),
-                meet = meet.display(),
-                waiting = waiting("done"),
-            ),
-        );
-
-        let second = installing(
-            &machine.sandbox(1, &cache, reaching_nothing()),
-            &format!(
-                "{waiting}\
-                 {marking}\
-                 {back_on}\
-                 '{gradle}' {GRADLE_FLAGS} {flag} mark\n\
-                 echo \"built=$?\"\n\
-                 touch '{meet}/done'\n",
-                marking = marking("second"),
-                gradle = gradle.display(),
-                meet = meet.display(),
-                waiting = waiting("built"),
-            ),
-        );
-
-        let first = finished(first);
+        let (first, second) =
+            one_session_beside_anothers_daemon(gradle, (back_on, flag), (back_on, flag)).await;
 
         first.worked(&format!("{how}, the first session builds, in a daemon"));
         assert!(
@@ -5500,6 +5519,48 @@ async fn with_the_daemon_back_on_a_second_sessions_build_lands_in_the_firsts_san
             second.said,
         );
     }
+}
+
+/// And **the `--daemon` hole reaches only a session that asks for a daemon
+/// itself.** A daemon one session's explicit `--daemon` left up is registered
+/// in the shared home, but a session given `-Dorg.gradle.daemon=false` never
+/// looks there: Gradle starts a single-use daemon of its own for every such
+/// build, whatever is idle beside it.
+///
+/// So the second session here, with `GRADLE_OPTS` as the descriptor gave it and
+/// no flag, builds in its own Sandbox while the first one's daemon is up.
+#[tokio::test]
+async fn a_daemon_left_up_by_one_sessions_daemon_flag_is_not_reached_by_a_session_with_it_off() {
+    let Some(found) = tools("Gradle", &["gradle"]) else {
+        return;
+    };
+    let [gradle] = &found[..] else {
+        unreachable!("one tool was asked for");
+    };
+
+    let (first, second) =
+        one_session_beside_anothers_daemon(gradle, ("", "--daemon"), ("", "")).await;
+
+    first.worked("the first session builds, in a daemon its `--daemon` asked for");
+    assert!(
+        first.said.contains("marker: first"),
+        "in its own Sandbox. It said:\n{}",
+        first.said,
+    );
+
+    assert_eq!(
+        line(&second, "built"),
+        "0",
+        "a session with the daemon off builds while the other session's daemon is up. \
+         It said:\n{}",
+        second.said,
+    );
+    assert!(
+        second.said.contains("marker: second"),
+        "and in its own Sandbox, rather than in the daemon the first session left \
+         registered in the shared home. It said:\n{}",
+        second.said,
+    );
 }
 
 /// And **Kotlin's compile daemon stays in the Sandbox that started it**, which

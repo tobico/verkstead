@@ -1313,8 +1313,11 @@ and it may end with the daemon staying off.
 
 **An explicit `gradle --daemon` still gets a daemon.** The command line beats
 the environment, so a build started that way registers in the shared home
-again, and the *next* session's Gradle build — any session's, `--daemon` or not
-— can attach to it and fail with the `setcwd()` error above. That is accepted
+again. **Only a build that asks for a daemon itself can reach it**: a session
+given `-Dorg.gradle.daemon=false` never looks in the registry and starts a
+single-use daemon of its own whatever is idle beside it, but another session's
+`gradle --daemon` attaches to the one left up and fails with the `setcwd()`
+error above. That is accepted
 rather than worked around: the failure is loud rather than a build quietly
 running in the wrong place, and `gradle --stop` in any session, or the daemon's
 own idle timeout, puts it right. Leave
