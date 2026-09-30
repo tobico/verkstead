@@ -25,8 +25,8 @@ use verkstead_schema::Response;
 use verkstead_store::{
     Account, Arrival, ArrivingPicked, Ask, Birth, Lifecycle, ProfileFacts, Renaming, STAYS_BEHIND,
     Settlements, Submission, arrive, ask, capture, carried_tables, create_profile, deleted_tables,
-    land, load_conversation, load_response, register_repo, session_id, sets_as_they_landed, slice,
-    submit_response, timeline, transcript,
+    land, load_conversation, load_response, queue_to_join, register_repo, session_id,
+    sets_as_they_landed, slice, start_conversation, submit_response, timeline, transcript,
 };
 
 mod owning;
@@ -239,6 +239,69 @@ async fn a_record_landing_again_takes_the_one_that_was_here_with_it() {
     assert!(
         second.iter().all(|event| !first.contains(event)),
         "every Event on it is one this landing wrote: {second:?} against {first:?}",
+    );
+}
+
+/// A stage that crosses queued to join its roadmap's chain arrives queued, at a
+/// place the far end issues — behind whatever is already waiting there.
+///
+/// The place is an order rather than a fact, and every Verkstead counts its own:
+/// one carried as the number it was would land in front of stages that finished
+/// over there before it arrived, or on a place already taken.
+#[tokio::test]
+async fn a_stage_queued_to_join_lands_queued_behind_what_waits_there() {
+    let moved = moved("rate-limiting").await;
+
+    // Another stage already waiting on the far end, queued before the record
+    // lands again — which is what a return over a busy device is.
+    let theirs = repos(&moved.there.pool).await;
+    let waiting = start_conversation(&moved.there.pool, theirs[0], "waiting", BORN_ON)
+        .await
+        .unwrap()
+        .expect("the Repo is registered");
+
+    queue_to_join(&moved.there.pool, waiting).await.unwrap();
+
+    let read = slice(&moved.here.pool, moved.worked.id).await.unwrap();
+
+    let renaming = Renaming {
+        repos: repos(&moved.here.pool)
+            .await
+            .into_iter()
+            .zip(theirs)
+            .collect(),
+        ..Renaming::default()
+    };
+
+    land(&moved.there.pool, moved.to, &read, &renaming)
+        .await
+        .unwrap();
+
+    let place = |conversation: i64| {
+        let pool = moved.there.pool.clone();
+
+        async move {
+            sqlx::query_as::<_, (i64,)>(
+                "SELECT place FROM stage_joinings WHERE conversation_id = ?",
+            )
+            .bind(conversation)
+            .fetch_optional(&pool)
+            .await
+            .unwrap()
+            .map(|(place,)| place)
+        }
+    };
+
+    let landed = place(moved.to)
+        .await
+        .expect("the stage crossed with its place in the queue");
+    let before = place(waiting)
+        .await
+        .expect("and the other one is still queued");
+
+    assert!(
+        landed > before,
+        "it waits behind the stage already waiting there: {landed} against {before}",
     );
 }
 
