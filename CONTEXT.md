@@ -515,11 +515,14 @@ _Avoid_: tool server, integration, plugin, extension, connector
 **Descriptor**:
 What a language *is* to Verkstead: **data**, in one grammar, saying a label for
 the settings page, the manifests that detect it in a Repo, the variables a
-session is given, and the **capabilities** it names. Rust is the only one
-Verkstead ships and there is nothing special about it — the built-ins are a
-YAML file embedded in the binary, written the way an installer writes one, so
-they are the grammar's own worked examples rather than a second shape nobody
-ever sees.
+session is given, and the **capabilities** it names. Five ship — Rust, and the
+four **package stores**, Go, Node, Python and .NET — and there is nothing
+special about any of them: the built-ins are a YAML file embedded in the
+binary, written the way an installer writes one, so they are the grammar's own
+worked examples rather than a second shape nobody ever sees. **One entry per
+ecosystem rather than per tool**, which is what makes Node six tools and Python
+four: what one box on the settings page turns off is every tool that installs
+from one registry.
 **Data rather than behaviour.** A descriptor cannot say a command to run: a
 settings file that started programs would be one whose sandbox somebody then
 had to describe in YAML too. Behaviour is a **capability** built
@@ -545,18 +548,24 @@ anything about is one that works. `rust_build_cache`, where Rust's two used to
 be said, is still read as Rust's, and the map wins where both say something.
 **Placeholders are what only the server knows**, and there are four. `{cache}`
 is the **Build Cache**, where a store goes that nothing has to share a
-filesystem with — Rust's two are both there. `{stores}` is a directory beside
-the **Worktrees**, for a store that does: pnpm, bun and uv hardlink packages out
-of theirs into the project rather than copying them and fall back to copying the
-lot where the two are on different filesystems, and the Build Cache is free to
-be a disk of its own — `--build-cache-dir` may name one outright, and the
-packaged unit's `CacheDirectory` and `StateDirectory` are two things a sysadmin
-mounts separately as a matter of course. `{size}` is this entry's own size, and
-`{sccache}` is where a session reaches the sccache this server found, which is
-the `sccache` capability's alone. A placeholder's directory is made, and granted
-writable to a session, only where a loaded descriptor names it — so with Rust
-the only language built in, nothing names the one beside the Worktrees and no
-session is opened onto it.
+filesystem with — Rust's two are both there, and so are Go's, npm's, both
+yarns', pip's, poetry's, pipenv's and all three of NuGet's. `{stores}` is a
+directory beside the **Worktrees**, for a store that does: pnpm, deno, bun and
+uv hardlink packages out of theirs into the project rather than copying them
+and fall back to copying the lot where the two are on different filesystems,
+and the Build Cache is free to be a disk of its own — `--build-cache-dir` may
+name one outright, and the packaged unit's `CacheDirectory` and
+`StateDirectory` are two things a sysadmin mounts separately as a matter of
+course. **On Linux they fall back anyway**, a Worktree and that directory being
+two bind mounts and a hardlink crossing neither: the store still saves the
+download and not the disk space, which is the sandbox's to close rather than a
+descriptor's. `{size}` is this entry's own size, and `{sccache}` is where a
+session reaches the sccache this server found, which is the `sccache`
+capability's alone. A placeholder's directory is made, and granted writable to
+a session, only where a loaded descriptor names it — and four of the shipped
+variables name the one beside the Worktrees, so a session with Node or Python
+switched on is opened onto it and an install with both off is opened onto
+none.
 **An entry that will not load falls back to the built-in of that name.** Two
 ways one fails — naming a variable the Sandbox sets itself, which is refused by
 name, and being something nothing can parse, a key the grammar does not have
@@ -578,8 +587,13 @@ One directory of Verkstead's own that every Sandbox gets writable, so what a
 build downloads and compiles is fetched once for the machine rather than once
 per Conversation. What `{cache}` in a **Descriptor** stands for, and the place
 for a store nothing has to share a filesystem with: Rust's descriptor puts
-`CARGO_HOME` and the compiled objects in it, and a language added after it
-reaches the same directory by writing the same placeholder. The server's own
+`CARGO_HOME` and the compiled objects in it, the four **package stores** put
+everything of theirs that nothing hardlinks out of there too, and a language
+added after them reaches the same directory by writing the same placeholder.
+**Writable is the point and the cost of it**: a store two Conversations share
+is one either of them can plant a package in for the other to install, which is
+accepted rather than mitigated — it was already true of Rust's registry, and
+the machine is one person's. The server's own
 feature rather than Sandbox Configuration: it makes the directory, it resolves
 the `sccache` it compiles through off its own environment, and it is **on with
 nothing configured** — a human should never have a worse experience for not

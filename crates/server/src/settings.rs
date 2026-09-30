@@ -31,10 +31,12 @@
 //!   rust:
 //!     enabled: true
 //!     size: 30G
-//!   node:
-//!     label: Node
+//!   dotnet:
+//!     enabled: false
+//!   conda:
+//!     label: conda
 //!     env:
-//!       PNPM_HOME: "{stores}/pnpm"
+//!       CONDA_PKGS_DIRS: "{stores}/conda"
 //! cleanup:
 //!   trim:
 //!     enabled: true

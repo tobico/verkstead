@@ -180,14 +180,17 @@ settings page is where a language is switched off, or its compiled store given
 a size.
 
 **None of those variable names are Rust's by name in the server.** A language
-is a **descriptor** — data, in one grammar — and Rust's is
+is a **descriptor** — data, in one grammar — and the five Verkstead ships are
 `crates/server/languages.yaml`, embedded in the binary and read by
 `crates/server/src/languages.rs`, which is the module's documentation as well
-as its data. What a session is given is whatever the loaded descriptors say,
-with the `languages:` map in `config.yaml` merged over the built-ins key by
-key. `{cache}` in one of them is this directory; `{stores}` is a second one
-beside the worktrees, for a store that has to share a filesystem with the
-project, and it is made only where a loaded descriptor names it — at startup and
+as its data: Rust, and the four package stores — Go, Node, Python and .NET —
+whose eleven tools download into this directory the same way. What a session is
+given is whatever the loaded descriptors say, with the `languages:` map in
+`config.yaml` merged over the built-ins key by key. `{cache}` in one of them is
+this directory; `{stores}` is a second one beside the worktrees, for a store
+that has to share a filesystem with the project — pnpm's, deno's, bun's and
+uv's, which is what makes it a directory a checkout run really has — and it is
+made only where a loaded descriptor names it — at startup and
 again as each session is spawned, so a descriptor hand-edited in between the two
 is one the next session really starts with. A key the grammar does not have is
 refused like a refused variable, so a misspelled one falls back to the built-in
@@ -253,6 +256,14 @@ languages:
   rust:
     enabled: true
     size: 30G
+  go:
+    enabled: true
+  node:
+    enabled: true
+  python:
+    enabled: true
+  dotnet:
+    enabled: false
   gleam:
     label: Gleam
     detect:
@@ -274,8 +285,11 @@ sandbox_binds:
 ```
 
 `languages` is one entry per language, merged key by key over the descriptors
-embedded in the binary: `enabled` and `size` are the two the settings page
-writes, and everything else in an entry is the installer's. `gleam` above is a
+embedded in the binary — the five Verkstead ships are Rust and the four package
+stores, and a save from the settings page writes an entry for each: `enabled`
+and `size` are the two the page writes, and everything else in an entry is the
+installer's. `dotnet: enabled: false` above is a machine that builds no .NET and
+would rather not have NuGet's three variables in every session. `gleam` is a
 language Verkstead has never heard of and works all the same. `rust_build_cache`
 is where Rust's two used to be said, and is still read as Rust's — the map wins
 where both say something, and the first save from the settings page carries it
@@ -304,35 +318,56 @@ what the settings page saves through:
 ```console
 $ curl http://127.0.0.1:8422/api/ui/settings
 {"git_author":{"name":"","email":""},"github_token":null,
- "languages":[{"name":"rust","label":"Rust","enabled":true,
-   "compiling":{"size":"30G","size_configured":false,"cached":"Cached"},
-   "unread":null}],
+ "languages":[{"name":"rust","label":"Rust","enabled":true,"size":"30G",
+   "size_configured":false,"compiling":"Cached","unread":null},
+  {"name":"go","label":"Go","enabled":true,"size":"30G",
+   "size_configured":false,"compiling":null,"unread":null},
+  {"name":"node","label":"Node","enabled":true,"size":"30G",
+   "size_configured":false,"compiling":null,"unread":null},
+  {"name":"python","label":"Python","enabled":true,"size":"30G",
+   "size_configured":false,"compiling":null,"unread":null},
+  {"name":"dotnet","label":".NET","enabled":true,"size":"30G",
+   "size_configured":false,"compiling":null,"unread":null}],
  "cleanup":{"trim":{"enabled":true,"days":3,"days_configured":false},
    "delete":{"enabled":false,"days":30,"days_configured":false}},
  "conflict_resolution":"Merge",
- "share_on_done":false,"paths":{"binds":[]}}
+ "share_on_done":false,"paths":{"binds":[]},
+ "ignored_comments":[],"instructions":""}
 $ curl -X POST -H 'Content-Type: application/json' \
     -d '{"git_author":{"name":"Tobias Cohen","email":"tobi@tobico.net"},
          "github_token":{"Set":{"token":"ghp_..."}},
-         "languages":[{"name":"rust","enabled":true,"size":""}],
+         "languages":[{"name":"rust","enabled":true,"size":""},
+           {"name":"go","enabled":true,"size":""},
+           {"name":"node","enabled":true,"size":""},
+           {"name":"python","enabled":true,"size":""},
+           {"name":"dotnet","enabled":false,"size":""}],
          "cleanup":{"trim":{"enabled":true,"days":""},
            "delete":{"enabled":false,"days":""}},
          "conflict_resolution":"Merge",
          "share_on_done":false,
-         "sandbox_binds":["/var/cache/verkstead-node"]}' \
+         "sandbox_binds":["/var/cache/verkstead-node"],
+         "ignored_comments":"Keep","instructions":""}' \
     http://127.0.0.1:8422/api/ui/settings
 {"settings":{"git_author":{"name":"Tobias Cohen","email":"tobi@tobico.net"},
   "github_token":{"last_four":"cdef","at":"2026-08-23T08:23:15.041950412Z"},
-  "languages":[{"name":"rust","label":"Rust","enabled":true,
-    "compiling":{"size":"30G","size_configured":false,"cached":"Cached"},
-    "unread":null}],
+  "languages":[{"name":"rust","label":"Rust","enabled":true,"size":"30G",
+    "size_configured":false,"compiling":"Cached","unread":null},
+   {"name":"go","label":"Go","enabled":true,"size":"30G",
+    "size_configured":false,"compiling":null,"unread":null},
+   {"name":"node","label":"Node","enabled":true,"size":"30G",
+    "size_configured":false,"compiling":null,"unread":null},
+   {"name":"python","label":"Python","enabled":true,"size":"30G",
+    "size_configured":false,"compiling":null,"unread":null},
+   {"name":"dotnet","label":".NET","enabled":false,"size":"30G",
+    "size_configured":false,"compiling":null,"unread":null}],
   "cleanup":{"trim":{"enabled":true,"days":3,"days_configured":false},
     "delete":{"enabled":false,"days":30,"days_configured":false}},
   "conflict_resolution":"Merge",
   "share_on_done":false,
   "paths":{"binds":[{"path":"/var/cache/verkstead-node","repo":null,
     "source":"Settings","resolution":{"Unresolved":{"why":
-      "the server cannot see it: there is nothing at that path"}}}]}},
+      "the server cannot see it: there is nothing at that path"}}}]},
+  "ignored_comments":[],"instructions":""},
  "verified":{"Account":{"login":"tobico","missing":["gist"]}}}
 ```
 
@@ -348,15 +383,18 @@ fine-grained one GitHub named no scopes for at all. `"github_token"` is
 `"Keep"` to leave the configured one alone, which is what a save of the author
 fields sends, and `"Clear"` to take it away.
 
-`"languages"` is one entry per **descriptor** the server loaded, sent as values
-rather than as an action. A save carries the two keys the page draws — the
-switch and, on the one whose store an sccache bounds, the size, where an empty
+`"languages"` is one entry per **descriptor** the server loaded — the five
+Verkstead ships and whatever `config.yaml` added — sent as values rather than as
+an action, and the whole list every time, because a save writes the whole file.
+It carries the two keys the page draws, the switch and the size, where an empty
 `"size"` is no size configured and puts the default back — and nothing else, so
 the rest of an entry in `config.yaml` is left exactly as its author wrote it.
 Everything else in what comes back is read-only: `"label"` is the descriptor's,
-`"compiling"` stands only on a language naming the `sccache` capability and its
-`"cached"` is the server's own environment — `"Cached"` where it found an
-`sccache` and `"NoSccache"` where it did not — and `"unread"` is null unless
+`"size_configured"` says whether the size is one somebody typed or the default
+being shown, `"compiling"` is null on a language naming no `sccache` capability
+— which is what says nothing reads its size and the pane draws no field for it —
+and on one that does it is the server's own environment, `"Cached"` where it
+found an `sccache` and `"NoSccache"` where it did not. `"unread"` is null unless
 that language's entry in the file would not load, when it carries the reason
 and whether the language fell back to `"BuiltIn"` or to `"Nothing"`.
 

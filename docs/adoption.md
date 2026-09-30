@@ -876,11 +876,13 @@ directory — is [development.md](development.md#quickstart).
 ## Languages
 
 A language is a **descriptor**: data, in one grammar, saying what to call it,
-what says a checkout builds it, and what variables a session is given. Rust is
-the only one Verkstead ships, and there is nothing special about it — its
-descriptor is a YAML file embedded in the binary, written exactly the way you
-would write one. So the built-ins below are both what Verkstead does and the
-worked examples of the grammar.
+what says a checkout builds it, and what variables a session is given. Five
+ship — Rust, Go, Node, Python and .NET — and there is nothing special about any
+of them: each is an entry in a YAML file embedded in the binary, written
+exactly the way you would write one. So the built-ins below are both what
+Verkstead does and the worked examples of the grammar. What each of the other
+four shares, tool by tool, is [at the end of this
+section](#what-each-language-shares).
 
 This is the whole of Rust's, as it ships:
 
@@ -967,22 +969,32 @@ platform's own cache directory otherwise — and it is where a store goes that
 nothing has to share a filesystem with. Rust's two are both there: a registry
 and a pile of compiled objects are *read*, wherever they are. `{stores}` is a
 directory beside the **Worktrees**, under the data directory, and it is for a
-store that *does* care: pnpm, bun and uv hardlink packages out of theirs into
-the project rather than copying them, and fall back to copying the lot where
-the store and the project are on different filesystems. The Build Cache is free
-to be a second disk — the flag may name one outright, and the packaged unit's
-`CacheDirectory` and `StateDirectory` are two mounts a sysadmin separates as a
-matter of course — so a store that has to be next to the checkout says so:
+store that *does* care: pnpm, deno, bun and uv hardlink packages out of theirs
+into the project rather than copying them, and fall back to copying the lot
+where the store and the project are on different filesystems. The Build Cache
+is free to be a second disk — the flag may name one outright, and the packaged
+unit's `CacheDirectory` and `StateDirectory` are two mounts a sysadmin
+separates as a matter of course — so a store that has to be next to the
+checkout says so. Four of the built-in variables do, and an entry of your own
+says it the same way — conda hardlinks a package out of its cache into an
+environment and copies it where it cannot, so its cache belongs there too:
 
 ```yaml
 languages:
-  node:
-    label: Node
+  conda:
+    label: conda
     detect:
-      - package.json
+      - environment.yml
     env:
-      PNPM_HOME: "{stores}/pnpm"
+      CONDA_PKGS_DIRS: "{stores}/conda"
 ```
+
+**On Linux they all copy anyway today**, which is worth knowing before you
+count on the space a hardlink saves: a Worktree and this directory are two
+separate bind mounts inside a session's sandbox, and a hardlink does not cross
+two mounts however few disks are underneath them. The store still does its
+work — a copy out of it is a download that did not happen — and pnpm and uv say
+in as many words that they fell back, where deno and bun do it without a word.
 
 Write `/` after a placeholder whatever platform you are on. A descriptor is one
 file read on three, so the grammar has one separator, and a Windows session is
@@ -992,9 +1004,10 @@ The other two are not a choice. `{size}` is that entry's own `size` key, and
 `{sccache}` is where a session reaches the sccache this server found — it only
 means anything inside the `sccache` capability, which is what says there is one
 at all. A placeholder's directory is made, and opened to a session, only where
-a loaded descriptor names it: on an install whose `config.yaml` says nothing,
-the descriptors Verkstead ships are the only ones loaded, none of them names
-`{stores}`, and no session is opened onto it.
+a loaded descriptor names it: four of the shipped variables name `{stores}` —
+pnpm's store, deno's cache, bun's and uv's — so every session with Node or
+Python switched on is opened onto that directory, and an install with both of
+them off is opened onto none of it.
 
 **What an entry that will not load costs you is the entry, and nothing else.**
 Two ways one fails. Naming a variable the Sandbox sets itself — `PATH`, `HOME`,
@@ -1018,6 +1031,105 @@ it. Nothing of what you typed is thrown away — a save from that page writes th
 whole of `config.yaml` and puts your entry back exactly as it was — so the fix
 is in the file, and the next session reads it. Settings are read at every
 session spawn: nothing restarts.
+
+### What each language shares
+
+Rust's descriptor is above. The other four are the **package stores**: every
+tool that installs from one ecosystem's registry is in that ecosystem's entry
+rather than one of its own, so one box on the **Language support** pane turns
+the lot of them on or off, and a session gets every variable of a language that
+is on whatever its checkout holds.
+
+Each row below is one variable the built-in sets, where its directory goes, and
+what moves there. `{cache}` is the **Build Cache** and `{stores}` is the
+directory beside the **Worktrees** — a store is under the second one where its
+tool hardlinks a package out of it into the project.
+
+**Go**, detected by `go.mod`:
+
+| Variable | Where | What moves there |
+| --- | --- | --- |
+| `GOMODCACHE` | `{cache}` | the modules the `go` command downloaded |
+| `GOCACHE` | `{cache}` | **the compiled half**: what a build compiled, which for Go is a directory and nothing else |
+
+Go is the one ecosystem here whose compiled output is shared as well, and it is
+the easy kind: where Rust's second half wants an `sccache` running, Go's is a
+directory two sessions both write.
+
+**Node**, detected by `package.json` — npm, pnpm, both yarns, deno and bun,
+with no variable name shared between them:
+
+| Variable | Where | What moves there |
+| --- | --- | --- |
+| `NPM_CONFIG_CACHE` | `{cache}` | npm's `_cacache`: the packages it downloaded, and what `npm --offline` installs out of |
+| `PNPM_CONFIG_STORE_DIR` | `{stores}` | pnpm's content-addressable store, the one it hardlinks packages out of. Not `PNPM_HOME`, which is where pnpm puts global binaries and holds no packages at all |
+| `PNPM_CONFIG_CACHE_DIR` | `{cache}` | the registry metadata beside that store, which an offline install needs as much as the packages |
+| `YARN_CACHE_FOLDER` | `{cache}` | Yarn Classic's cache — yarn 1.x, still what `yarn` is on most machines |
+| `YARN_GLOBAL_FOLDER` | `{cache}` | Yarn Berry's, which is yarn 2 and up. Berry keeps its cache here rather than in the folder above, so the two yarns are two directories |
+| `DENO_DIR` | `{stores}` | deno's whole cache: remote modules, npm packages, what it emitted — and its origin storage, below |
+| `BUN_INSTALL_CACHE_DIR` | `{stores}` | bun's package cache. Not `BUN_INSTALL`, which is bun's install root and whose `bin` is on a session's `PATH` |
+
+No compiled store among the six: the one piece of built output any of them
+keeps is what deno emitted, which rides along inside `DENO_DIR` rather than
+being a second directory anybody chose to share. Everything else a build makes
+is in the project.
+
+**Python**, detected by `pyproject.toml` or `requirements.txt` — pip, uv,
+poetry and pipenv:
+
+| Variable | Where | What moves there |
+| --- | --- | --- |
+| `PIP_CACHE_DIR` | `{cache}` | pip's downloaded responses and the wheels it built out of an sdist |
+| `UV_CACHE_DIR` | `{stores}` | uv's: the index responses, the downloads, and the unpacked wheels it links into an environment |
+| `POETRY_CACHE_DIR` | `{cache}` | poetry's downloaded distributions and the release information it resolved against — an install offline needs both |
+| `PIPENV_CACHE_DIR` | `{cache}` | pipenv's, which **is** the pip cache a pipenv install uses: pipenv builds pip's environment itself and passes none of the session's other `PIP_` variables through, so the row above does nothing for it |
+
+And two that are not directories at all: `POETRY_VIRTUALENVS_IN_PROJECT` and
+`PIPENV_VENV_IN_PROJECT`, both on. **Only downloads are shared, never a virtual
+environment.** Poetry's would otherwise go under the cache directory above,
+which is to say into the shared store, and a virtual environment holds absolute
+paths — one built in another Worktree is broken in this one. So every `.venv`
+is in the Worktree that made it, where it also outlives the session. No
+compiled half here either.
+
+**.NET**, and the one tool every .NET machine installs through, NuGet:
+
+| Variable | Where | What moves there |
+| --- | --- | --- |
+| `NUGET_PACKAGES` | `{cache}` | the global packages folder: what restore downloaded and unpacked, and what a build then compiles against where it lies |
+| `NUGET_HTTP_CACHE_PATH` | `{cache}` | the responses behind it — the service index, the version lists and the `.nupkg` as it came off the wire |
+| `NUGET_SCRATCH` | `{cache}` | NuGet's temp directory, which holds no downloads. It is here because the lock restore takes before it extracts a package is a *file* in it, and two sessions that cannot see one lock extract over each other |
+
+This is the one entry with an empty `detect`, and on purpose: a .NET project is
+a `*.csproj`, a `*.fsproj` or a `*.sln`, and `detect` matches literal filenames
+rather than globs. What that costs is the composer's warning on a .NET Repo and
+nothing else — the variables are every session's either way. And there is no
+compiled half: what a build leaves is `obj/` and `bin/` in the project.
+
+**A shared store is a writable store, which means one session can plant a
+package another installs.** A Conversation that writes into pnpm's store or
+NuGet's packages folder is writing where the next one reads, and nothing here
+checks what it put there. That is accepted rather than mitigated: it has been
+true of Rust's registry since there was a Build Cache, the machine is one
+person's, and the alternative is every Conversation downloading the internet
+again. What is *not* shared is anything that is a session's own — a registry
+login lives beside these directories rather than in them, and none of the
+variables above moves the directory a login is in.
+
+**`DENO_DIR` is the one that holds more than downloads.** deno keeps its origin
+storage there: `localStorage` for a program run with a `--location`, and the
+database `Deno.openKv()` opens where it was given no path. So two Conversations
+running one Repo's program see one `localStorage` between them. That is a
+program's own state rather than a secret, and it is the same bargain as the
+store — but it is a bargain, so it is written down here.
+
+**A Repo's own configuration does not win over these.** Every one of these
+tools with a config key for its store puts the environment above that file, so
+a session's variable beats an `.npmrc`, a `pnpm-workspace.yaml`, a `.yarnrc` or
+a `bunfig.toml`, and a Repo that must have a store of its own passes
+`--cache`, `--store-dir` or `--cache-folder` on the command line where it
+installs. Nothing a descriptor can do changes that: the grammar sets variables,
+and there is no rung below the environment to set one on.
 
 ## A day's work
 
