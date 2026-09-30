@@ -133,6 +133,7 @@ import type {
 } from "../api/types";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine, Note } from "../notices";
+import { rowPress } from "../rows";
 import { PaneSticky } from "../Panes";
 import * as pairing from "../pairing";
 import { Listbox } from "../picking";
@@ -758,7 +759,16 @@ function Alongside(props: {
       {/* Only on a read-only row. A read-write one is already as open as a
           companion gets, so there is nothing here for it to offer. */}
       <Show when={props.companion.mode === "ReadOnly"}>
-        <label class={styles.steerOpenUp}>
+        {/* Pressed as a row — see `rowPress`, and the press a label stops
+            forwarding once a hand has slid. Refused while the row is disabled,
+            as the box is. */}
+        <label
+          class={styles.steerOpenUp}
+          onClick={rowPress(() => {
+            props.open(props.upgrade === undefined ? MIRRORING : null);
+            props.keeper.keep();
+          })}
+        >
           <input
             type="checkbox"
             checked={props.upgrade !== undefined}
@@ -827,7 +837,16 @@ function Adding(props: {
 
   return (
     <li class={styles.steerAdd}>
-      <label class={styles.steerAddName}>
+      {/* Pressed as a row — see `rowPress`, and the press a label stops
+          forwarding once a hand has slid. Refused while the row is disabled, as
+          the box is. */}
+      <label
+        class={styles.steerAddName}
+        onClick={rowPress(() => {
+          props.settle(props.addition === undefined ? PLAINEST : null);
+          props.keeper.keep();
+        })}
+      >
         <input
           type="checkbox"
           checked={props.addition !== undefined}
@@ -1413,7 +1432,17 @@ export function Steer(props: {
           <For each={offered()}>
             {(offered) => (
               <div class={styles.steerTarget}>
-                <label>
+                {/* The row answers its own press rather than the one a label
+                    would have forwarded to the radio, which a hand that slid a
+                    pixel never got — see `rowPress`. The note under the row is
+                    outside it, being what the target means rather than the
+                    target. */}
+                <label
+                  onClick={rowPress(() => {
+                    setTarget(offered.target);
+                    keeper.keep();
+                  })}
+                >
                   <input
                     type="radio"
                     name="steer-target"
@@ -1462,7 +1491,15 @@ export function Steer(props: {
               brief the earlier round was built from stays on the timeline.
             </Note>
 
-            <label class={styles.steerDigest}>
+            {/* Pressed as a row — see `rowPress`, and the press a label stops
+                forwarding once a hand has slid. */}
+            <label
+              class={styles.steerDigest}
+              onClick={rowPress(() => {
+                setDigest(!priming());
+                keeper.keep();
+              })}
+            >
               <input
                 type="checkbox"
                 checked={priming()}
@@ -1634,7 +1671,13 @@ export function Steer(props: {
             would promise something about a session that is not there. */}
         <Show when={props.conversation.working}>
           <div class={styles.steerInterrupt}>
-            <label>
+            {/* Pressed as a row like the targets above it — see `rowPress`. */}
+            <label
+              onClick={rowPress(() => {
+                setInterrupt(!ending());
+                keeper.keep();
+              })}
+            >
               <input
                 type="checkbox"
                 checked={ending()}

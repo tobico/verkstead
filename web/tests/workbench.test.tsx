@@ -364,6 +364,7 @@ import {
   theEditor,
   themed,
 } from "./editing";
+import { slidPress } from "./sliding";
 import { pending } from "./steering";
 import abandoned from "./fixtures/abandoned-roadmaps.json" with { type: "json" };
 import adopting from "./fixtures/conversation-adopting.json" with { type: "json" };
@@ -11271,6 +11272,45 @@ function targets(pane: ParentNode): string[] {
 }
 
 describe("steering a conversation", () => {
+  /// A target is a row of words with a radio at its head, and the words are as
+  /// much the press as the radio is — see `rowPress` in `src/rows.ts`, and
+  /// `tests/sliding.ts` for the press a browser stops forwarding to a radio.
+  /// The words between two of these targets are the difference between an hour
+  /// of work and none, so a press on them that did nothing was worth fixing here
+  /// as much as on an answer. The name is the label's own text rather than
+  /// anything with a class, so the row is what a press is put on.
+  it("picks the target a press that slid over its words landed on", async () => {
+    theGrillingSteering({ ready_to_stop: true, working: true });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const pane = await openSteer(container);
+    const target = (await drawn(
+      pane,
+      `.${steerForm.steerTarget} input[value="Implementing"]`,
+    )) as HTMLInputElement;
+
+    slidPress(target.closest("label")!);
+
+    expect(target.checked).toBe(true);
+  });
+
+  /// And the box that ends the run in flight, which is the same row in a
+  /// different shape and the same press.
+  it("ticks the interrupt a press that slid over its words landed on", async () => {
+    theGrillingSteering({ ready_to_stop: true, working: true });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const pane = await openSteer(container);
+    const box = (await drawn(
+      pane,
+      `.${steerForm.steerInterrupt} input`,
+    )) as HTMLInputElement;
+
+    slidPress(box.closest("label")!);
+
+    expect(box.checked).toBe(true);
+  });
+
   /// Every state is somewhere to steer *from* — a draft nothing has run in, a
   /// run in flight, work Verkstead has finished with — so the row is drawn
   /// wherever the menu is, unlike the two stops beside it. Which states it can
