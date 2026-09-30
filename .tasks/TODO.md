@@ -50,7 +50,7 @@ Maven 3.9.12 and OpenJDK 21 from nixpkgs.
 
 ## Tasks
 
-- [ ] 01: A JDK, Maven and Gradle in the dev shell and CI — [details](01-jdk-maven-gradle-in-the-shell-and-ci.md)
+- [x] 01: A JDK, Maven and Gradle in the dev shell and CI — [details](01-jdk-maven-gradle-in-the-shell-and-ci.md)
 - [ ] 02: Maven — [details](02-maven.md)
 - [ ] 03: Gradle, daemon off — [details](03-gradle-daemon-off.md)
 - [ ] 04: Gradle's build cache, where a Repo turns it on — [details](04-gradles-build-cache.md)

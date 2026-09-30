@@ -221,6 +221,17 @@
               # what a nix dev shell hands a session anyway.
               cmake
               ninja
+              # And the JVM's, which are the `jvm` descriptor's two build tools
+              # and the JDK they run on. Maven and Gradle each keep a store of
+              # their own and each is proved by a real build in a Sandbox, so a
+              # shell without them is a shell where neither store is ever read.
+              # Both are wrappers that set `JAVA_HOME` to nixpkgs' own JDK when
+              # nothing else has, which is what makes them runnable inside a
+              # Sandbox that is handed no `JAVA_HOME` of the host's; `jdk` is
+              # here as well so that `java` itself is a name the proofs can find.
+              jdk
+              maven
+              gradle
               # What a ticked `gh` row unpacks on an Intel Mac, which has no
               # Homebrew to install one with — see
               # `crates/server/src/onboarding/install.rs`'s `GH_RELEASE`. Both

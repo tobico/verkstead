@@ -4316,3 +4316,64 @@ async fn cmake_compiles_through_the_compile_server_and_a_rebuild_or_a_second_con
          compiled: {across}",
     );
 }
+
+// ---------------------------------------------------------------------------
+// The JVM: Maven and Gradle, and the JDK they run on.
+// ---------------------------------------------------------------------------
+
+/// The three JVM tools each answer inside a Sandbox, before anything asks them
+/// to build.
+///
+/// This is the proof the later JVM ones stand on, and it is asked on its own
+/// because a JDK is the likeliest tool in this file not to be reachable at all:
+/// the runner image keeps its JDKs under `/usr/lib/jvm` behind
+/// `/etc/alternatives`, nixpkgs' Maven and Gradle are wrappers that name their
+/// JDK by a `/nix/store` path, and a Sandbox is handed no `JAVA_HOME` of the
+/// host's. Any of those landing outside a bind is a build that dies on a
+/// missing `java` rather than on anything to do with a store, and this is the
+/// line that says so first.
+///
+/// Gradle is told where its home is, and it is a directory of this Sandbox's
+/// Worktree: `--version` writes into it, and which home a session is really
+/// given is the `jvm` descriptor's to say rather than this proof's.
+#[tokio::test]
+async fn java_maven_and_gradle_each_answer_inside_a_sandbox() {
+    let Some(found) = tools("JVM", &["java", "mvn", "gradle"]) else {
+        return;
+    };
+
+    let [java, mvn, gradle] = &found[..] else {
+        unreachable!("three tools were asked for");
+    };
+
+    let machine = machine(1).await;
+    let cache = machine.cache();
+    let sandbox = machine.sandbox(0, &cache, vec![]);
+
+    let ran = installing(
+        &sandbox,
+        &format!(
+            "set -e\n\
+             '{java}' -version\n\
+             '{mvn}' --batch-mode -v\n\
+             '{gradle}' --gradle-user-home \"$PWD/gradle-home\" --version\n",
+            java = java.display(),
+            mvn = mvn.display(),
+            gradle = gradle.display(),
+        ),
+    );
+
+    ran.worked("`java -version`, `mvn -v` and `gradle --version` each succeed in a session");
+
+    for (tool, says) in [
+        ("java", "version \""),
+        ("mvn", "Apache Maven "),
+        ("gradle", "Gradle "),
+    ] {
+        assert!(
+            ran.said.contains(says),
+            "`{tool}` printed its version, which starts `{says}`. It said:\n{}",
+            ran.said,
+        );
+    }
+}
