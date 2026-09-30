@@ -254,6 +254,11 @@ pub fn shared(
             blocked_on: None,
             stopped_by_hand: false,
             waiting_on_checks: false,
+
+            // And the condition a stage waiting to join wears, which is a
+            // register of this process read as the page is drawn: a share is a
+            // file, and there is no run holding anything in it.
+            waiting_to_join: false,
             resets: None,
 
             // And the steer somebody is part-way through writing, which never

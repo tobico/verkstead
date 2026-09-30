@@ -209,6 +209,14 @@ pub struct Pace {
     /// rest: what it is watching is a clock counted in days.
     pub cleanup: Duration,
 
+    /// And how often a stage held before its finish looks at whether the chain
+    /// below it has settled — see [`crate::joins`].
+    ///
+    /// Here beside the rest for [`Pace::checks`]'s reason: a caller standing a
+    /// server up chooses how often Verkstead looks at things, and the chain a
+    /// stage is waiting to join is one of the things it looks at.
+    pub joins: Duration,
+
     /// And how often every Conversation is looked over for one that has
     /// Stalled — see [`crate::stalls`].
     ///
@@ -217,6 +225,17 @@ pub struct Pace {
     /// how often Verkstead looks at things, and a stall is one of the things it
     /// looks for.
     pub stalls: Duration,
+
+    /// And how long the roadmaps being driven go unlooked-at for a stage waiting
+    /// on a place the whole server has, where **nothing frees one** — see
+    /// [`crate::places`].
+    ///
+    /// Here for [`Pace::stalls`]'s reason again, and it is the one of these that
+    /// decides how long work waits rather than how long a report does: what comes
+    /// of a look is a stage started. The backstop rather than the pace, though —
+    /// what ordinarily brings a look about is a place coming free, which this
+    /// says nothing about and does not wait for.
+    pub places: Duration,
 }
 
 impl Default for Pace {
@@ -229,6 +248,8 @@ impl Default for Pace {
             waking: Duration::from_secs(300),
             long_stop: Duration::from_secs(300),
             stalls: crate::stalls::SWEPT_EVERY,
+            places: crate::places::LOOKED_AT_EVERY,
+            joins: crate::joins::LOOKED_AT_EVERY,
             merges: crate::merges::SWEPT_EVERY,
             cleanup: crate::cleanup::SWEPT_EVERY,
             reviewing: Duration::ZERO,
@@ -638,13 +659,13 @@ async fn backlog_again(
         // half happened: a stage that has planned nothing has pushed nothing and
         // opened nothing, so what an empty backlog means there is that the run
         // has not started rather than that it is over.
-        if let Some(stacked_on) = stage_to_plan(&state, conversation_id, working_in, base).await {
+        if let Some(cut_from) = stage_to_plan(&state, conversation_id, working_in, base).await {
             tracing::info!(
                 conversation_id,
                 "a stage's backlog was never planned, so the planning is being run again",
             );
 
-            return plan_stage(state, conversation_id, stacked_on, driving).await;
+            return plan_stage(state, conversation_id, cut_from, driving).await;
         }
 
         return nothing_left(state, conversation_id, working_in, base, driving).await;
@@ -667,9 +688,29 @@ async fn backlog_again(
         return;
     }
 
+    // And the press waits for the chain exactly as the loop does, which is the
+    // second of the two places a finish session is launched from: a stage whose
+    // boxes are all ticked is one whose next step is the join, whether the run
+    // reached it by itself or a Resume took it up — see [`crate::joins`]. The
+    // registration is held across the wait for the loop's reason, and it is held
+    // here already: it is handed on to [`work`] below.
+    //
+    // And what it is let in *to* is read the moment it is let in, which is the
+    // other half of the join: the chain is Verkstead's to say and the rebase is
+    // the session's to do, so the branches this one goes on top of are carried
+    // in the prompt — see [`crate::joins::joining`].
+    let joining = match step == Step::Finish {
+        true => {
+            crate::joins::hold(&state, conversation_id).await;
+            crate::joins::joining(&state, conversation_id).await
+        }
+        false => Vec::new(),
+    };
+
     tracing::info!(conversation_id, step = ?step, "a stopped run is being taken up again");
 
-    let Some(session) = launch_in_turn(&state, conversation_id, Prompt::NextTask).await else {
+    let Some(session) = launch_in_turn(&state, conversation_id, Prompt::NextTask { joining }).await
+    else {
         return;
     };
 
@@ -930,9 +971,11 @@ async fn roadmap_again(state: AppState, conversation_id: i64, working_in: &Path,
 /// whose backlog nothing else would ever write, so what is read there is a run
 /// that never began rather than one that is worked out — see [`stage_to_plan`].
 ///
-/// `stacked_on` is the branch this stage's branch was made on top of, which the
-/// fork is told because it is the one thing about a stage the repository does not
-/// say.
+/// `cut_from` is the branch this stage's branch was cut from, which the fork is
+/// told because it is the one thing about a stage the repository does not say.
+/// The base rather than what the stage ends up stacked on: the join is at the
+/// finish — see [`crate::joins`] — and a session told otherwise now would be
+/// told something the finish contradicts.
 ///
 /// `driving` is the registration that says this Conversation is being driven,
 /// taken by whoever is starting the planning rather than here — the stage being
@@ -943,11 +986,11 @@ async fn roadmap_again(state: AppState, conversation_id: i64, working_in: &Path,
 pub(crate) async fn plan_stage(
     state: AppState,
     conversation_id: i64,
-    stacked_on: Option<String>,
+    cut_from: Option<String>,
     driving: Driving,
 ) {
     let Some(session) =
-        launch_in_turn(&state, conversation_id, Prompt::PlanningStage(stacked_on)).await
+        launch_in_turn(&state, conversation_id, Prompt::PlanningStage(cut_from)).await
     else {
         return;
     };
@@ -1086,9 +1129,31 @@ async fn carry_on(state: AppState, conversation_id: i64, _driving: Driving) {
             return;
         }
 
+        // And the finish waits for the chain, where this is a stage of a roadmap
+        // and a stage already in that chain has not settled: the finish is what
+        // joins the chain, and nothing rebases onto a branch that is still
+        // moving — see [`crate::joins`]. In front of the launch rather than
+        // inside it, so a held stage is one no session has been started in; and
+        // inside the loop, which holds the registration, so a stage waiting here
+        // is still a Conversation being driven.
+        //
+        // Then the chain itself, read the moment the stage is let in and carried
+        // in the finish session's prompt: the rebase onto the top of it comes
+        // before anything is pushed, and it is the session's to run — see
+        // [`crate::joins::joining`].
+        let joining = match step == Step::Finish {
+            true => {
+                crate::joins::hold(&state, conversation_id).await;
+                crate::joins::joining(&state, conversation_id).await
+            }
+            false => Vec::new(),
+        };
+
         tracing::info!(conversation_id, step = ?step, "a fresh session is starting on the next step");
 
-        let Some(started) = launch_in_turn(&state, conversation_id, Prompt::NextTask).await else {
+        let Some(started) =
+            launch_in_turn(&state, conversation_id, Prompt::NextTask { joining }).await
+        else {
             return;
         };
 
@@ -3544,20 +3609,32 @@ fn lacking(worktree: &Path, landing: &Landing) -> Option<String> {
         // pinned stage list is drawn by, so the list the human is watching and
         // the step the runner is waiting on cannot disagree.
         Landing::Roadmap(base) => {
-            if crate::stages::touched(worktree, base).is_empty() {
+            let touched = crate::stages::touched(worktree, base);
+
+            if touched.is_empty() {
                 return Some(format!(
                     "this branch has not written a roadmap under `{}`",
                     crate::stages::ROADMAPS,
                 ));
             }
 
-            return match pending(worktree, Path::new(crate::stages::ROADMAPS)) {
-                Some(false) => None,
-                _ => Some(format!(
+            if pending(worktree, Path::new(crate::stages::ROADMAPS)) != Some(false) {
+                return Some(format!(
                     "the roadmap under `{}` is not committed",
                     crate::stages::ROADMAPS,
-                )),
-            };
+                ));
+            }
+
+            // And the third thing asked of a landed roadmap: that what it
+            // declares is a roadmap something could run. Written and committed is
+            // not enough where the lines declare badly — a declaration on some
+            // lines and not others, an `after` naming no stage of the roadmap, a
+            // platform that is not one, or a cycle — because the session that
+            // wrote it is the one that can put it right, and it is alive until
+            // this signal is taken. See [`crate::declarations::judge`], whose
+            // sentence is said as it is: what the scheduler will show is the same
+            // one.
+            return crate::stages::misdeclared(worktree, &touched);
         }
         // And this one is not in the Worktree at all, so there is no commit to
         // wait for: the document being there with something in it is the whole
@@ -3621,7 +3698,7 @@ fn pending(worktree: &Path, path: &Path) -> Option<bool> {
 ///
 /// So it is asked for here. `Some` is that stage, carrying what
 /// [`crate::skills::next_stage`] has to be told — the branch this stage's branch
-/// stacks on, or `None` inside where it came off the default branch. `None` is
+/// was cut from, or `None` inside where it came off the default branch. `None` is
 /// every other Conversation: one that is not a stage, one whose backlog has been
 /// written already, and one with no base commit to read a branch's writing
 /// against.
@@ -3643,12 +3720,12 @@ pub(crate) async fn stage_to_plan(
     // writing can be read against either.
     let base = base?;
 
-    let stacked_on = match store::stacks_on(&state.pool, conversation_id).await {
+    let cut_from = match store::stacks_on(&state.pool, conversation_id).await {
         // The outer answer is whether this is a stage at all, and the inner one
-        // is what its branch was made on top of. Only the outer one decides
+        // is the branch its own was cut from. Only the outer one decides
         // anything here; the inner is carried through to the fork, which is the
         // one thing about a stage the repository does not say.
-        Ok(stacked_on) => stacked_on?,
+        Ok(cut_from) => cut_from?,
         Err(error) => {
             tracing::error!(
                 error = ?error,
@@ -3660,7 +3737,7 @@ pub(crate) async fn stage_to_plan(
         }
     };
 
-    (!wrote_a_backlog(worktree, Some(base)).await).then_some(stacked_on)
+    (!wrote_a_backlog(worktree, Some(base)).await).then_some(cut_from)
 }
 
 /// [`backlog_written`] as the two things that turn on it ask it: off the
@@ -3822,7 +3899,7 @@ fn next_step(worktree: &Path) -> Step {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Prompt {
     /// Its fork of next-stage, which writes a roadmap stage's backlog instead —
-    /// carrying what the branch was made on top of, which is the one thing about
+    /// carrying the branch this one was cut from, which is the one thing about
     /// a stage the session cannot read out of the repository.
     PlanningStage(Option<String>),
 
@@ -3832,7 +3909,18 @@ enum Prompt {
 
     /// Its fork of next-task, which every session of a backlog runs — the task
     /// sessions and the finish one alike.
-    NextTask,
+    ///
+    /// `joining` is the chain a stage's branch goes on top of, bottom to top,
+    /// and it is the one thing a finish session is told that a task session is
+    /// not: the finish is where a stage joins its roadmap's chain, and the
+    /// rebase comes before the push. Empty on every task session, and on the
+    /// finish of anything that is not a stage with a chain under it — see
+    /// [`crate::joins::joining`], which reads it, and [`skills::joining`], which
+    /// is what it is said in.
+    NextTask {
+        /// Every branch this one is joining above, bottom to top.
+        joining: Vec<skills::Link>,
+    },
 
     /// The implementation skill, which is the whole of an inline run.
     Implementing,
@@ -4078,11 +4166,16 @@ async fn launch(state: &AppState, conversation_id: i64, inside: Prompt) -> Optio
             let handoff = handoff.as_deref();
 
             match &inside {
-                Prompt::PlanningStage(stacked_on) => {
-                    skills::next_stage(skills, &brief, stacked_on.as_deref())
+                Prompt::PlanningStage(cut_from) => {
+                    skills::next_stage(skills, &brief, cut_from.as_deref())
                 }
                 Prompt::Staging => skills::staging(skills, &brief),
-                Prompt::NextTask => skills::next_task(skills, &brief, handoff),
+                // And the chain under it, on the finish of a stage: the section
+                // is the finish's alone, and a task session carries an empty
+                // chain and reads the prompt it always read.
+                Prompt::NextTask { joining } => {
+                    skills::joining(&skills::next_task(skills, &brief, handoff), joining)
+                }
                 Prompt::Implementing => skills::implementing(skills, &brief, handoff),
                 Prompt::Submitting { against } => {
                     skills::submitting(skills, &brief, handoff, against.as_deref())
@@ -4738,6 +4831,79 @@ mod tests {
         run(path, &["commit", "-m", "docs: stage the mvp roadmap"]);
 
         assert!(landed(path, &landing), "written and committed");
+    }
+
+    /// And the third thing asked of a landed roadmap: that what it declares is a
+    /// roadmap something could run.
+    ///
+    /// Written and committed is not enough where the lines declare badly, and
+    /// this is the moment to say so — the session that wrote the roadmap is at a
+    /// terminal until its signal is taken, and nothing after it would ever be
+    /// sent to fix a declaration. An undeclared roadmap is no fault at all, that
+    /// being every roadmap written before any of this.
+    #[test]
+    fn a_roadmap_that_declares_badly_has_not_landed() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path();
+
+        run(path, &["init", "--initial-branch", "main"]);
+        run(path, &["config", "user.email", "test@verkstead.invalid"]);
+        run(path, &["config", "user.name", "Verkstead Test"]);
+        std::fs::write(path.join("README.md"), "# Somewhere\n").unwrap();
+        run(path, &["add", "-A"]);
+        run(
+            path,
+            &["commit", "-m", "chore: the commit the branch came off"],
+        );
+
+        let base = run(path, &["rev-parse", "HEAD"]).trim().to_owned();
+        let landing = Landing::Roadmap(base);
+
+        let index = path
+            .join(crate::stages::ROADMAPS)
+            .join("parallel-stages")
+            .join(crate::stages::INDEX);
+        std::fs::create_dir_all(index.parent().unwrap()).unwrap();
+
+        let staged = |list: &str| {
+            std::fs::write(&index, list).unwrap();
+            run(path, &["add", "-A"]);
+            run(path, &["commit", "-m", "docs: stage the roadmap"]);
+        };
+
+        staged(
+            "# Parallel stages\n\n\
+             - [ ] 01: Reading — [brief](01-reading.md) — no dependencies\n\
+             - [ ] 02: Scheduling — [brief](02-scheduling.md) — after 04\n",
+        );
+
+        let why = lacking(path, &landing).expect("a roadmap naming a stage that is not there");
+        assert!(why.contains("stage 02"), "{why}");
+        assert!(why.contains("after 04"), "{why}");
+
+        staged(
+            "# Parallel stages\n\n\
+             - [ ] 01: Reading — [brief](01-reading.md) — no dependencies\n\
+             - [ ] 02: Scheduling — [brief](02-scheduling.md) — after 01 — on windows\n",
+        );
+
+        assert_eq!(
+            lacking(path, &landing),
+            None,
+            "written, committed and declaring a graph something could run",
+        );
+
+        staged(
+            "# Parallel stages\n\n\
+             - [ ] 01: Reading — [brief](01-reading.md)\n\
+             - [ ] 02: Scheduling — [brief](02-scheduling.md)\n",
+        );
+
+        assert_eq!(
+            lacking(path, &landing),
+            None,
+            "and a roadmap declaring nothing at all is every roadmap written before this",
+        );
     }
 
     /// A Done signal refused over a step that has not landed says which half is

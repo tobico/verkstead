@@ -142,6 +142,25 @@ describe("the status word", () => {
     });
   });
 
+  /// And a stage whose tasks are all done says the same kind of thing one
+  /// state earlier: nothing is running, nothing has stopped, and what it waits
+  /// on is the stage below it settling.
+  it("says a stage is waiting to join its roadmap's chain", () => {
+    expect(status(like({ waiting_to_join: true }))).toEqual({
+      word: "Waiting to join",
+      state: "Implementing",
+      attention: false,
+    });
+  });
+
+  /// Under the stop as well, for the reason the checks are: a stage with a
+  /// resume to make has stopped, and the chain is not what is holding it.
+  it("says Stopped over the chain where there is a resume to make", () => {
+    expect(
+      status(like({ waiting_to_join: true, ready_to_resume: true })).word,
+    ).toBe("Stopped");
+  });
+
   /// Under the stop, though — a wrap-up with a resume to make has stopped, and
   /// the checks are not what is holding it.
   it("says Stopped over the checks where there is a resume to make", () => {

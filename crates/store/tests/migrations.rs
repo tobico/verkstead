@@ -61,6 +61,12 @@
 //! could have written into it, so it comes in empty — which is what an empty slot
 //! means on every other one of the form's fields too.
 //!
+//! And one more column added holding nothing: the record of which roadmap a
+//! Conversation is a stage of says which stage of it now. The label arrives with
+//! the column and nothing can recover one — a label read off the branch is the
+//! guess the record exists to stop — so every stage from before has the roadmap
+//! it always had and no stage beside it.
+//!
 //! And six more rebuilt, for one repository holding more than one pull request —
 //! a stack. The record of what was opened, the check rollup, the merge reading,
 //! the standing, what the wrap-up had settled and what its checks had been given
@@ -88,13 +94,14 @@ use std::path::PathBuf;
 use sqlx::SqlitePool;
 use verkstead_store::{
     Account, Clash, Commit, Decision, Event, Finished, Lifecycle, Merging, Mirror, Pairing,
-    ProfileFacts, PullRequest, RanUnder, Rollup, Saving, Standing, WaitingOn, asked_to_stop,
-    check_rollup, clear_stop, commit_repo, conflict_fix_attempts, conversations, create_profile,
-    finish_wrap_up, fix_attempts, load_conversation, load_profile, merging, open_database,
-    open_pending_steer, pending_steer, profiles, pull_request, pull_request_repo, pull_requests,
-    record_another_pull_request, record_check_rollup, record_commit, record_conflict_fix_attempt,
-    record_fix_attempt, record_mirror, recorded_commits, register_repo, save_pending_steer,
-    settle_wrap_up, stack, standing, start_capture, start_conversation, start_grilling,
+    ProfileFacts, PullRequest, RanUnder, RoadmapStage, Rollup, Saving, StageOf, Standing,
+    WaitingOn, asked_to_stop, check_rollup, clear_stop, commit_repo, conflict_fix_attempts,
+    conversations, create_profile, finish_wrap_up, fix_attempts, load_conversation, load_profile,
+    merging, open_database, open_pending_steer, pending_steer, profiles, pull_request,
+    pull_request_repo, pull_requests, record_another_pull_request, record_check_rollup,
+    record_commit, record_conflict_fix_attempt, record_fix_attempt, record_mirror,
+    recorded_commits, register_repo, save_brief, save_pending_steer, settle_wrap_up, stack,
+    stage_roadmap, standing, start_capture, start_conversation, start_grilling, start_stage,
     start_unnamed_conversation, stop, stopped, timeline, update_profile, wrap_up_settled,
 };
 
@@ -3402,4 +3409,83 @@ async fn a_pull_request_recorded_after_the_column_arrives_names_its_base() {
             (43, Some("rate-limiting-2".to_owned())),
         ],
     );
+}
+
+/// And a stage recorded before Verkstead wrote down *which* stage it was keeps
+/// the roadmap it had, with nothing said about the stage.
+///
+/// The label arrives with the column, so every row this reaches was written when
+/// the record held the roadmap alone — and there is nothing to recover one from:
+/// the branch the stage was worked on names a stage, and reading it off there is
+/// the guess the record exists to stop. So the column comes in empty, which is
+/// the record saying nobody wrote a label, and the roadmap beside it is exactly
+/// where it was left.
+///
+/// The column is taken off rather than an old database stood up, which is the
+/// same state read from the other side: what a stage from before this looks like
+/// is a stage whose row says the roadmap and no more.
+#[tokio::test]
+async fn a_stage_recorded_before_the_label_keeps_its_roadmap_and_no_stage() {
+    let dir = tempfile::tempdir().unwrap();
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    let repo = register_repo(&pool, Path::new("/watched/verkstead"), "verkstead", "main")
+        .await
+        .unwrap()
+        .unwrap()
+        .id;
+
+    let id = start_conversation(&pool, repo, "rate-limiting", THIS_DEVICE)
+        .await
+        .unwrap()
+        .unwrap();
+
+    save_brief(&pool, id, "# 05. Wrap up\n").await.unwrap();
+
+    start_stage(
+        &pool,
+        id,
+        "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
+        Path::new("/data/worktrees/verkstead-stage"),
+        Some("roadmaps/mvp/04-implementation"),
+        RoadmapStage {
+            roadmap: "mvp",
+            label: "05",
+        },
+        &[],
+    )
+    .await
+    .unwrap();
+
+    // The column off, which is the whole of what says this database is one from
+    // before: the record held which roadmap and never which stage of it.
+    sqlx::query("ALTER TABLE stage_roadmaps DROP COLUMN stage")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    pool.close().await;
+
+    for opening in [
+        "it opens, which is most of what this is about",
+        "it opens again",
+    ] {
+        let pool = open_database(&dir.path().join("verkstead.db"))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            stage_roadmap(&pool, id).await.unwrap(),
+            Some(StageOf {
+                roadmap: "mvp".to_owned(),
+                stage: None,
+            }),
+            "{opening}: the roadmap where it was left, and no stage — nothing \
+             knows which one this was and the branch is not asked",
+        );
+
+        pool.close().await;
+    }
 }

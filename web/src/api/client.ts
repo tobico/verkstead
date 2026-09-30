@@ -35,6 +35,7 @@ import type {
   CompanionMode,
   CompanionModeChosen,
   CompanionRemoved,
+  Confirming,
   ConversationArchived,
   ConversationClosed,
   ConversationEntry,
@@ -1437,15 +1438,25 @@ export function adoptRoadmap(device: Device, id: number): Promise<Adopted> {
 /// field read, the branch checked out, the pull request recorded where there is
 /// one, and the wrap-up running over it.
 ///
-/// Nothing is sent here either, for the reason nothing is sent to adopt: which
+/// Almost nothing is sent, for the reason nothing is sent to adopt: which
 /// conversation is in the path, and what the field names and what the branch is
 /// now are the record's and the repository's own answers — read when the button
 /// is pressed rather than taken from a page that read them a moment ago.
+///
+/// The one exception is the one thing the press asks about. A take-up may close
+/// the conversation that had the pull request, and a close takes its worktree
+/// away with whatever was left uncommitted in it, so a press over that stops and
+/// names who would lose something — and the press that follows sends those
+/// conversations back as `discarding`, which is the human saying to go ahead.
+/// Empty on every press that was not stopped, which is nearly all of them.
 export function takeUpPullRequest(
   device: Device,
   id: number,
+  discarding: number[] = [],
 ): Promise<TakenUp> {
-  return post<TakenUp>(on(device, `/api/ui/conversations/${id}/take-up`), {});
+  return post<TakenUp>(on(device, `/api/ui/conversations/${id}/take-up`), {
+    discarding,
+  } satisfies Confirming);
 }
 
 /// What another device of the cluster lacks before this conversation could be

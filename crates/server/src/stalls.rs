@@ -36,7 +36,7 @@
 
 use std::time::Duration;
 
-use tokio::task::JoinHandle;
+use tokio::sync::watch;
 
 use crate::AppState;
 use crate::store::{self, Lifecycle};
@@ -51,15 +51,16 @@ use crate::store::{self, Lifecycle};
 pub(crate) const SWEPT_EVERY: Duration = Duration::from_secs(60);
 
 /// Sweep for stalled Conversations from now until the process stops: once as
-/// soon as `resumed` is done, and every [`crate::Pace::stalls`] after that.
+/// soon as `resumed` says so, and every [`crate::Pace::stalls`] after that.
 ///
-/// `resumed` is whatever the startup takes up again before anything is judged —
-/// the restart's own resume over every Conversation it was left driving, which
-/// registers as it goes. Waited for rather than raced, because the two answer the
-/// same question from opposite ends: a Conversation left mid-run has nothing
-/// driving it for exactly as long as it takes to take it up again, and a sweep
-/// that got there first would call every healthy one of them stalled.
-pub(crate) fn sweeping(state: &AppState, resumed: Vec<JoinHandle<()>>) {
+/// `resumed` is the signal that the startup has taken up again everything it was
+/// going to before anything is judged — the restart's own resume over every
+/// Conversation it was left driving, which registers as it goes; see
+/// [`crate::resume::taken_up`]. Waited for rather than raced, because the two
+/// answer the same question from opposite ends: a Conversation left mid-run has
+/// nothing driving it for exactly as long as it takes to take it up again, and a
+/// sweep that got there first would call every healthy one of them stalled.
+pub(crate) fn sweeping(state: &AppState, mut resumed: watch::Receiver<bool>) {
     // Nothing to sweep for on a server that runs no sessions — see
     // [`crate::sessions::Sessions::runs_sessions`]. A stall is a Conversation
     // *nothing is driving*, and a server with no agents drives nothing by
@@ -77,10 +78,13 @@ pub(crate) fn sweeping(state: &AppState, resumed: Vec<JoinHandle<()>>) {
     let state = state.clone();
 
     tokio::spawn(async move {
-        for taking_up in resumed {
-            if let Err(error) = taking_up.await {
-                tracing::error!(error = ?error, "taking up what was left running failed, so the sweep judges what it finds");
-            }
+        if resumed.wait_for(|done| *done).await.is_err() {
+            tracing::error!(
+                "the signal saying what was left running had been taken up again is gone, so \
+                 the stall sweep stands down",
+            );
+
+            return;
         }
 
         loop {

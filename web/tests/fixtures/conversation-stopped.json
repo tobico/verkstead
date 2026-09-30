@@ -204,6 +204,7 @@
   "trimmed": false,
   "waiting": true,
   "waiting_on_checks": false,
+  "waiting_to_join": false,
   "working": false,
   "worktree": {
     "missing": false,
