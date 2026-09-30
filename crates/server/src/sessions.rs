@@ -313,6 +313,15 @@ impl Agents {
             )
         });
 
+        // And the directories the languages this session is set up for are to
+        // be opened onto, made before the sandbox that binds them is described
+        // — see [`BuildCache::opening`]. Here rather than at startup alone for
+        // the reason the server below is: a descriptor is read at this moment,
+        // so one an installer hand-edited in an hour ago names a directory
+        // startup never heard of, and a bind of a path that is not there is a
+        // session that will not start.
+        self.cache.opening(&config);
+
         // And the one sccache server this machine compiles through, up before
         // whatever will reach for it — see [`BuildCache::compiling`]. Here
         // rather than at startup, and asked of every session rather than of the

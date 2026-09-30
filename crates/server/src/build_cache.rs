@@ -421,9 +421,14 @@ impl BuildCache {
         // this morning is one turned on again this afternoon without the server
         // being restarted. `languages` is therefore the configured set rather
         // than the built-in one — an installer whose own descriptor hardlinks
-        // out of a store wants the directory made, and a descriptor added to
-        // `config.yaml` after this ran is the one case here that wants a
-        // restart.
+        // out of a store wants the directory made.
+        //
+        // **Said here to refuse startup over, and not to be the only place it
+        // is made.** A descriptor is read afresh at every spawn, so one
+        // hand-edited in after this ran names a directory this never saw — see
+        // [`BuildCache::opening`], which is this again at every spawn. What this
+        // adds is the refusal: a path that cannot be made at all is better said
+        // once at startup than by every session that tries.
         if languages.names_stores() {
             let stores = languages::stores(data_dir);
 
@@ -490,6 +495,47 @@ impl BuildCache {
     /// not would still be said.
     pub fn caches_compiles(&self) -> bool {
         self.dir.is_some() && self.sccache.is_some()
+    }
+
+    /// Make whatever directory the descriptors this installation has **now**
+    /// name, which is what [`BuildCache::resolve`] did at startup off the
+    /// descriptors it read then.
+    ///
+    /// Said again here because a descriptor is read afresh at every spawn — see
+    /// [`BuildCache::shared`], and [`crate::languages::configured`]. An
+    /// installer who wrote one into `config.yaml` an hour ago names a directory
+    /// startup never heard of, and a bind of a path that is not there is a
+    /// session that will not start: *settings are read at every session spawn*
+    /// has to hold for the placeholder that was put in for installers to point
+    /// at, or it holds for the variables and not for the store they name.
+    ///
+    /// The Build Cache itself is not here. That one is [`BuildCache::resolve`]'s
+    /// and is the one directory whose absence refuses startup outright, there
+    /// being no session worth starting without it.
+    ///
+    /// Made rather than refused, and the ordinary case is a directory that is
+    /// already there. A failure is logged and the session goes on to fail its
+    /// own bind naming the path, which is what a rendering does about every
+    /// other directory of Verkstead's own it could not make.
+    pub fn opening(&self, config: &Config) {
+        let Some(data_dir) = &self.data_dir else {
+            return;
+        };
+
+        if !languages::configured(config).names_stores() {
+            return;
+        }
+
+        let stores = languages::stores(data_dir);
+
+        if let Err(error) = std::fs::create_dir_all(&stores) {
+            tracing::error!(
+                error = ?error,
+                directory = %stores.display(),
+                "the language store directory could not be made, so a session opened onto \
+                 it will not start",
+            );
+        }
     }
 
     /// Make sure the one sccache server this machine compiles through is
@@ -645,6 +691,12 @@ impl BuildCache {
     /// `config` is read at every session spawn rather than held from startup,
     /// so a switch flipped in the workbench applies to the next session — and
     /// so does a descriptor an installer wrote into `config.yaml` this morning.
+    /// Which is why [`BuildCache::opening`] is said before this: what this hands
+    /// out a bind of has to be there for the bind to be made.
+    ///
+    /// **Nothing here touches a disk.** It is a description of a sandbox, and
+    /// the two things that make what it describes are that call and
+    /// [`BuildCache::resolve`].
     pub fn shared(&self, config: &Config, platform: Platform, ours: &Path) -> Option<Shared> {
         let (dir, data_dir) = (self.dir.as_deref()?, self.data_dir.as_deref()?);
 
@@ -1275,6 +1327,54 @@ mod tests {
             variable(&shared, "CARGO_HOME"),
             Some("/var/cache/verkstead/cargo"),
             "beside Rust's, which is untouched by a language beside it",
+        );
+    }
+
+    /// A directory a descriptor names is made where the bind is handed out, so
+    /// an entry hand-edited in after the server came up is one the next session
+    /// really starts with.
+    ///
+    /// The whole of what *settings are read at every session spawn* has to mean
+    /// for the placeholder that was added for installers to point at: startup
+    /// made nothing here — no descriptor it read named one — and a bind of a
+    /// path that is not there is a session that will not start rather than a
+    /// language that goes without.
+    #[test]
+    fn a_directory_a_descriptor_names_is_made_where_the_bind_is_handed_out() {
+        let dir = tempfile::tempdir().unwrap();
+        let (cache, data_dir) = (dir.path().join("cache"), dir.path().join("state"));
+
+        let resolved = BuildCache::resolve(Some(&cache), &data_dir, languages::built_in())
+            .expect("a cache the server came up on");
+
+        let stores = languages::stores(&data_dir);
+        assert!(
+            !stores.exists(),
+            "nothing built in names it, so startup made nothing"
+        );
+
+        // And then somebody writes one, without restarting anything.
+        let config = configured(
+            "languages:\n  node:\n    label: Node\n    env:\n      \
+             PNPM_HOME: \"{stores}/pnpm\"\n",
+        );
+
+        let shared = shared(&resolved, &config).expect("the session is given it");
+
+        assert!(
+            shared.dirs().contains(&stores),
+            "the next session is opened onto it, startup or no startup"
+        );
+        assert!(
+            !stores.exists(),
+            "and describing a sandbox makes nothing: that is what spawning does"
+        );
+
+        resolved.opening(&config);
+
+        assert!(
+            stores.is_dir(),
+            "the directory the bind names is there for the bind to be made of"
         );
     }
 
