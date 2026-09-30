@@ -371,6 +371,14 @@ struct Grilling {
 }
 
 impl Grilling {
+    /// The directory beside this fixture's Worktrees, which is where a store
+    /// goes that has to be on one filesystem with the project — named by the
+    /// server rather than spelled here, for the reason every other path this
+    /// fixture hands over is read off the record.
+    fn stores_dir(&self) -> PathBuf {
+        verkstead_server::languages::stores(self.state.path())
+    }
+
     /// The Conversation as the workbench reads it.
     async fn view(&self) -> ConversationView {
         get(&self.app, &format!("/api/ui/conversations/{}", self.id)).await
@@ -2185,9 +2193,15 @@ fn whose(pid: u32) -> String {
 /// session started inside itself for want of it. That hazard is exactly the
 /// ordinary case, a manifest one directory down from the root.
 ///
-/// **And Go's two directories beside them**, which is this platform's half of
-/// what the package stores promise: the same one grant, with a second
-/// language's store under it, written the way Windows writes a path.
+/// **And Go's two directories beside them, and Node's five**, which is this
+/// platform's half of what the package stores promise: the same one grant, with
+/// every language's store under it, written the way Windows writes a path.
+///
+/// Four of Node's five are under that one directory. The fifth — pnpm's store,
+/// which pnpm links a package out of into the project rather than copying —
+/// is under the directory beside the Worktrees, and is **a second grant this
+/// platform has to write**: a path a session cannot open is a store it installs
+/// past rather than out of, so it is written to as well as printed.
 #[tokio::test]
 async fn a_session_gets_the_shared_cargo_home_and_the_compiler_wrapper() {
     // Held for as long as this fixture is up. A session handed a cache is a
@@ -2206,6 +2220,11 @@ async fn a_session_gets_the_shared_cargo_home_and_the_compiler_wrapper() {
         Note 'sccache-dir' $env:SCCACHE_DIR
         Note 'gomodcache' $env:GOMODCACHE
         Note 'gocache' $env:GOCACHE
+        Note 'npm-cache' $env:NPM_CONFIG_CACHE
+        Note 'pnpm-store' $env:PNPM_CONFIG_STORE_DIR
+        Note 'pnpm-metadata' $env:PNPM_CONFIG_CACHE_DIR
+        Note 'yarn-cache' $env:YARN_CACHE_FOLDER
+        Note 'yarn-global' $env:YARN_GLOBAL_FOLDER
 
         # Run the thing it was pointed at, which is the only way to ask whether
         # the boundary really lets a session open it.
@@ -2217,6 +2236,11 @@ async fn a_session_gets_the_shared_cargo_home_and_the_compiler_wrapper() {
 
         [void][System.IO.Directory]::CreateDirectory($env:GOMODCACHE)
         [System.IO.File]::WriteAllText((Under $env:GOMODCACHE 'downloaded.zip'), 'here')
+
+        # And the one store that is not under the cache at all, which is the
+        # second grant rather than a name under the first.
+        [void][System.IO.Directory]::CreateDirectory($env:PNPM_CONFIG_STORE_DIR)
+        [System.IO.File]::WriteAllText((Under $env:PNPM_CONFIG_STORE_DIR 'downloaded.tgz'), 'here')
         "#,
         Some(cache.path()),
         Builds::Nothing,
@@ -2274,6 +2298,37 @@ async fn a_session_gets_the_shared_cargo_home_and_the_compiler_wrapper() {
         "and what it compiles out of them goes beside them",
     );
 
+    // And Node's four under the same directory, composed the same way: four
+    // tools rather than one, with a directory per yarn because the two of them
+    // read two different variables.
+    for (said, under) in [
+        ("npm-cache", vec!["npm"]),
+        ("pnpm-metadata", vec!["pnpm", "metadata"]),
+        ("yarn-cache", vec!["yarn", "cache"]),
+        ("yarn-global", vec!["yarn", "global"]),
+    ] {
+        let composed = under
+            .iter()
+            .fold(cache.path().to_owned(), |path, name| path.join(name));
+
+        assert_eq!(
+            fixture.written(said).await,
+            composed.display().to_string(),
+            "{said} is under the one shared cache, written the way this \
+             platform writes a path",
+        );
+    }
+
+    // And the fifth, which is not under it: pnpm's store is beside the
+    // Worktrees, so this is the second directory a session is granted.
+    assert_eq!(
+        fixture.written("pnpm-store").await,
+        fixture.stores_dir().join("pnpm").display().to_string(),
+        "pnpm's store is beside the Worktrees rather than under the cache, \
+         which is what the second placeholder says on this platform as much as \
+         on the others",
+    );
+
     let downloaded = cache.path().join("cargo").join("downloaded.crate");
 
     until_there(&downloaded).await;
@@ -2294,6 +2349,20 @@ async fn a_session_gets_the_shared_cargo_home_and_the_compiler_wrapper() {
         "and the grant reaches the second language's store as well as the \
          first's: one directory written for the session account, with every \
          store this machine shares underneath it",
+    );
+
+    // And the second directory, which is a grant of its own rather than a name
+    // under the first: a store a session cannot write in is a store it
+    // installs past.
+    let package = fixture.stores_dir().join("pnpm").join("downloaded.tgz");
+
+    until_there(&package).await;
+
+    assert_eq!(
+        std::fs::read_to_string(&package).unwrap().trim(),
+        "here",
+        "so the directory beside the Worktrees is written for the session \
+         account too, wherever a descriptor points a store",
     );
 
     let started: Vec<u32> = servers().difference(&already).copied().collect();

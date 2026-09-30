@@ -37,6 +37,15 @@
       "size": "30G",
       "size_configured": false,
       "unread": null
+    },
+    {
+      "compiling": null,
+      "enabled": true,
+      "label": "Node",
+      "name": "node",
+      "size": "30G",
+      "size_configured": false,
+      "unread": null
     }
   ],
   "mcp_servers": [],

@@ -40,6 +40,16 @@
 #              free to be a disk of its own, which is what the packaged unit's
 #              separate `CacheDirectory` and `StateDirectory` are.
 #
+#              **And on Linux they copy anyway**, which is a fact about the
+#              sandbox rather than about this placeholder: a Worktree and this
+#              directory are two bind mounts, and `link(2)` answers `EXDEV`
+#              across two mounts however many filesystems are underneath them.
+#              So what a store here buys today is one download for the machine,
+#              the same as `{cache}` — the space a hardlink saves waits on one
+#              mount holding both, which is whoever changes what a session may
+#              reach. See `tests/package_stores.rs`, where both halves of that
+#              are proved.
+#
 #   {size}     how big this language's store may grow: this entry's own `size`
 #              key, which the settings page writes, and 30G where nobody has.
 #
@@ -48,8 +58,9 @@
 #              says there is one at all.
 #
 # A placeholder's directory is made, and granted writable to a session, only
-# where a loaded descriptor names it. Of the languages below none names
-# `{stores}`, so no session is opened onto one.
+# where a loaded descriptor names it. Node's pnpm store below names `{stores}`,
+# so every session with Node switched on is opened onto it; an installation with
+# every language that names it switched off is opened onto none.
 #
 # **Write `/` between the placeholder and what is under it, on every platform.**
 # A descriptor is one file read on three, so the grammar has one separator: what
@@ -124,3 +135,118 @@ languages:
     env:
       GOMODCACHE: "{cache}/go/mod"
       GOCACHE: "{cache}/go/build"
+
+  node:
+    # The JavaScript ecosystem, and the second of the package stores. One entry
+    # for every tool that installs from the npm registry rather than one each:
+    # switching Node off switches the lot off, which is what one box on the
+    # settings page for an ecosystem means (ADR-0021).
+    label: Node
+
+    # The manifest every one of them reads, at the root of a checkout — for the
+    # setup card's warning and nothing else, exactly as Rust's and Go's are.
+    detect:
+      - package.json
+
+    # Four tools and five variables between them, and **not one name shared**.
+    # Each was read out of the tool that reads it as this entry was written —
+    # `<tool> config get`, against the releases the dev shell and the CI job
+    # pin — rather than taken from a variable that looks like it ought to work:
+    #
+    #   NPM_CONFIG_CACHE          npm's `cache`, which holds the packages it has
+    #                             downloaded (`_cacache`) and what `--offline`
+    #                             installs out of. npm's own `npm_config_`
+    #                             prefix in its documented upper-case spelling,
+    #                             which is one of the two forms npm reads.
+    #
+    #   PNPM_CONFIG_STORE_DIR     pnpm's `store-dir`: the content-addressable
+    #                             store, **not** `PNPM_HOME`, which is where
+    #                             pnpm puts global binaries and holds no
+    #                             packages at all. `PNPM_CONFIG_` is pnpm's own
+    #                             prefix — pnpm 11 reads neither `store-dir`
+    #                             out of an `.npmrc` nor `npm_config_store_dir`
+    #                             out of the environment.
+    #
+    #   PNPM_CONFIG_CACHE_DIR     and pnpm's `cache-dir`, which is the registry
+    #                             metadata beside that store. Both halves, for
+    #                             the reason Go gets both of its: an offline
+    #                             install that has the packages and not the
+    #                             metadata fails, `ERR_PNPM_NO_OFFLINE_META`.
+    #
+    #   YARN_CACHE_FOLDER         Yarn Classic's `cache-folder`. Classic is
+    #                             yarn 1.x, still what `yarn` is on most
+    #                             machines, and this is the only one of its
+    #                             settings that moves the download.
+    #
+    #   YARN_GLOBAL_FOLDER        Yarn Berry's `globalFolder`, which is yarn 2
+    #                             and up, and where Berry's cache is *by
+    #                             default*. **Berry does not read
+    #                             `YARN_CACHE_FOLDER` there**:
+    #                             `enableGlobalCache` is on by default in Yarn
+    #                             4, and Berry then disregards `cacheFolder`
+    #                             and keeps the cache in `globalFolder/cache`.
+    #                             So the two yarns are two variables naming two
+    #                             directories, which is also what keeps
+    #                             Classic's `v6` layout out of Berry's zips.
+    #
+    #                             A Repo that writes `enableGlobalCache: false`
+    #                             sends Berry back to `cacheFolder`, which is
+    #                             the directory above — shared, and shared with
+    #                             Classic. That Repo does not get the
+    #                             project-local cache it would have had without
+    #                             Verkstead, which is the one thing a session
+    #                             takes away from it. `YARN_ENABLE_GLOBAL_CACHE`
+    #                             would settle it either way and is deliberately
+    #                             not set: moving a store is this descriptor's
+    #                             business and overriding a Repo's policy switch
+    #                             is not.
+    #
+    # **pnpm's store is the one under `{stores}`**, and the first built-in to
+    # name that placeholder, because pnpm hardlinks a package out of its store
+    # into `node_modules` rather than copying it.
+    #
+    # **And on Linux it copies anyway**, which this stage found rather than
+    # assumed. A Worktree and this directory are two separate **bind mounts** in
+    # a session's sandbox, and `link(2)` answers `EXDEV` across two mounts even
+    # where both are the same filesystem — so the fall-back pnpm documents for
+    # two filesystems is what a session gets whatever disk these are on. The
+    # store still works: a copy out of it fetches nothing, which is the whole of
+    # what the install proofs assert. What is gone is the disk space a hardlink
+    # would have saved. Closing it means one mount holding both the Worktree and
+    # the store, which is the sandbox's business rather than a descriptor's — so
+    # it is written down here, proved in `tests/package_stores.rs`, and left to
+    # whoever changes what a session may reach. `{stores}` stays because it is
+    # still the right side of that line, and because it is where the fix would
+    # land.
+    #
+    # The other three copy out of their store, or in Berry's case read the zip
+    # where it lies, so none of this costs them anything.
+    #
+    # Every one of these is safe for two installs at once — npm's `_cacache` and
+    # pnpm's store are both content-addressed, and both yarns write a download
+    # to a temporary name and rename it into place — which is the other half of
+    # what a shared store has to be, and what two Sandboxes installing at the
+    # same time is there to say.
+    #
+    # And none of them holds anything that is a session's own. A registry login
+    # is `.npmrc`'s `_authToken` or Berry's `npmAuthToken`, both in a file
+    # nothing here moves. What npm keeps under its cache besides the packages is
+    # `_logs`, which is its own account of a failed install rather than a
+    # secret, and Berry's `globalFolder` holds the cache, the metadata and an
+    # empty hardlink index and nothing else.
+    #
+    # **A Repo's own config does not win over these**, and it is worth knowing
+    # which way round that is: all four tools put the command line above the
+    # environment and the environment above their rc files, so a session's
+    # variable beats an `.npmrc`, a `pnpm-workspace.yaml` or a `.yarnrc`, and a
+    # Repo that must have its own store passes `--cache`, `--store-dir` or
+    # `--cache-folder` where it installs. Nothing a descriptor can do changes
+    # that: the grammar sets variables, and there is no rung below the
+    # environment to set one on. Both halves are asserted in
+    # `tests/package_stores.rs`, because a silent loss is the worse of the two.
+    env:
+      NPM_CONFIG_CACHE: "{cache}/npm"
+      PNPM_CONFIG_STORE_DIR: "{stores}/pnpm"
+      PNPM_CONFIG_CACHE_DIR: "{cache}/pnpm/metadata"
+      YARN_CACHE_FOLDER: "{cache}/yarn/cache"
+      YARN_GLOBAL_FOLDER: "{cache}/yarn/global"

@@ -156,14 +156,31 @@
               # which is the sharing proved without touching the internet.
               curl
               # What `crates/server/tests/package_stores.rs` proves a shared
-              # package store with. That suite really installs a module inside
+              # package store with. That suite really installs a package inside
               # a Sandbox, twice at once and then with the registry denied,
               # because a descriptor naming `GOMODCACHE` cannot say whether Go
-              # still reads it — see ADR-0021. A checkout without this stays
-              # green, the proof skipping in a line that names the tool; the
-              # dev shell carries it so that the maintainer, who builds only
-              # Rust, is not the one who never runs it.
+              # still reads it — see ADR-0021. A checkout without one of these
+              # stays green, the proof skipping in a line that names the tool;
+              # the dev shell carries them so that the maintainer, who builds
+              # only Rust, is not the one who never runs them.
               go
+              # And the JavaScript ecosystem's four, which are the `node`
+              # descriptor's. `nodejs` is what npm comes in and what the proofs
+              # run an installed package with.
+              nodejs
+              pnpm
+              # **Both yarns, and they are two different tools.** Classic reads
+              # `YARN_CACHE_FOLDER` and Berry reads `YARN_GLOBAL_FOLDER`, so a
+              # shell carrying one of them is a shell where half of that is
+              # never proved. Both packages install a program called `yarn`, so
+              # Berry's is linked in under a name of its own — which is the
+              # name `tests/package_stores.rs` looks for, and the same name the
+              # CI job installs it as.
+              yarn
+              (pkgs.runCommand "yarn-berry-under-its-own-name" { } ''
+                mkdir -p "$out/bin"
+                ln -s ${pkgs.lib.getExe' pkgs.yarn-berry "yarn"} "$out/bin/yarn-berry"
+              '')
               # What a ticked `gh` row unpacks on an Intel Mac, which has no
               # Homebrew to install one with — see
               # `crates/server/src/onboarding/install.rs`'s `GH_RELEASE`. Both

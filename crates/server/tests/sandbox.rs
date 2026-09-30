@@ -227,6 +227,14 @@ impl Grilling {
         self.state.path().join("build-cache")
     }
 
+    /// And the directory beside the Worktrees, which is where a store goes that
+    /// has to be on one filesystem with the project — named by the server
+    /// rather than spelled here, for the reason every other path this fixture
+    /// hands over is read off the record.
+    fn stores_dir(&self) -> PathBuf {
+        verkstead_server::languages::stores(self.state.path())
+    }
+
     /// A cache at that directory, with a stub sccache where `compiling` says so.
     ///
     /// The stub is a script that says which build it is, for the reason
@@ -238,11 +246,20 @@ impl Grilling {
         let dir = self.cache_dir();
         std::fs::create_dir_all(&dir).unwrap();
 
-        BuildCache::at(
+        let cache = BuildCache::at(
             dir,
             compiling.then(|| self.sccache()),
             self.state.path().to_owned(),
-        )
+        );
+
+        // And the directory beside the Worktrees, which a built-in descriptor
+        // names now — see [`Grilling::stores_dir`]. Made by the server's own
+        // call rather than here, because that is what a session spawn does,
+        // and a bind of a path that is not there is a sandbox that will not
+        // start at all.
+        cache.opening(&self.settings.config());
+
+        cache
     }
 
     /// The Worktrees directory the compile server is shown of that Data
@@ -5553,13 +5570,19 @@ async fn the_settings_held_binds_compose_the_way_the_installations_do() {
 /// because a human who has never opened the settings page should not be the one
 /// paying for every dependency to be compiled twice.
 ///
-/// The directory is writable at the same path inside, and every built-in
-/// language's stores point into it: `CARGO_HOME`, which is the half of Rust's
-/// cache that works with no sccache anywhere, and Go's two — the downloads and
-/// the compiled objects, which for Go is a directory and nothing more.
+/// The directory is writable at the same path inside, and the built-in
+/// languages' stores point into it: `CARGO_HOME`, which is the half of Rust's
+/// cache that works with no sccache anywhere, Go's two — the downloads and the
+/// compiled objects, which for Go is a directory and nothing more — and four of
+/// Node's five.
 ///
-/// That is what stops two Conversations downloading one crate, or one module,
-/// twice.
+/// That is what stops two Conversations downloading one crate, one module or
+/// one package twice.
+///
+/// **Node's fifth is somewhere else**, and it is the reason a session now gets
+/// a second bind: pnpm's store is under the directory beside the Worktrees. See
+/// [`a_session_is_opened_onto_the_store_beside_the_worktrees_as_well`], which
+/// is that one on its own.
 #[tokio::test]
 async fn the_build_cache_is_writable_inside_and_the_stores_are_in_it() {
     let fixture = grilling().await;
@@ -5575,6 +5598,10 @@ async fn the_build_cache_is_writable_inside_and_the_stores_are_in_it() {
             say sccache-dir "${{SCCACHE_DIR-unset}}"
             say gomodcache "${{GOMODCACHE-unset}}"
             say gocache "${{GOCACHE-unset}}"
+            say npm-cache "${{NPM_CONFIG_CACHE-unset}}"
+            say pnpm-metadata "${{PNPM_CONFIG_CACHE_DIR-unset}}"
+            say yarn-cache "${{YARN_CACHE_FOLDER-unset}}"
+            say yarn-global "${{YARN_GLOBAL_FOLDER-unset}}"
             "#,
             dir = quoted(&fixture.cache_dir()),
         ),
@@ -5606,6 +5633,64 @@ async fn the_build_cache_is_writable_inside_and_the_stores_are_in_it() {
         fixture.cache_dir().join("go/build").display().to_string(),
         "beside the compiled output Go shares, which needs no compile server: \
          it is a directory, and the one bind is what opens it",
+    );
+
+    // And Node's four, which are four tools rather than one: npm's packages,
+    // pnpm's registry metadata, and a directory per yarn, the two of them
+    // reading two different variables.
+    for (said, under) in [
+        ("npm-cache", "npm"),
+        ("pnpm-metadata", "pnpm/metadata"),
+        ("yarn-cache", "yarn/cache"),
+        ("yarn-global", "yarn/global"),
+    ] {
+        assert_eq!(
+            reported[said],
+            fixture.cache_dir().join(under).display().to_string(),
+            "{said} is {under} inside the same bind: one directory, and a \
+             store of every tool this machine shares under it",
+        );
+    }
+}
+
+/// And the store beside the Worktrees, which is the second bind a session gets
+/// now that a built-in descriptor names one.
+///
+/// pnpm's is the only one of them there, and the reason is what pnpm does with
+/// its store rather than what is in it: it links a package out into the project
+/// instead of copying, and a link does not cross a filesystem — see
+/// `crates/server/languages.yaml`, and `tests/package_stores.rs`, where what
+/// really comes of that on this platform is proved.
+///
+/// Writable, and at the same path inside, for the reason the Build Cache is:
+/// one store for the machine, and every Conversation's session writing the
+/// same one.
+#[tokio::test]
+async fn a_session_is_opened_onto_the_store_beside_the_worktrees_as_well() {
+    let fixture = grilling().await;
+    let cache = fixture.cache(false);
+    let beside = fixture.stores_dir();
+
+    let reported = probe(
+        &fixture.sandbox_caching(&cache),
+        &format!(
+            r#"
+            dir {beside} stores
+            say pnpm-store "${{PNPM_CONFIG_STORE_DIR-unset}}"
+            "#,
+            beside = quoted(&beside),
+        ),
+    );
+
+    assert_eq!(
+        reported["stores"], "write",
+        "a store a session cannot write to is no store"
+    );
+    assert_eq!(
+        reported["pnpm-store"],
+        beside.join("pnpm").display().to_string(),
+        "and pnpm's store is inside it rather than under the Build Cache, \
+         which is the whole of what the second placeholder says",
     );
 }
 
@@ -5670,8 +5755,10 @@ async fn the_sccache_the_server_resolved_is_what_rustc_is_wrapped_in() {
 #[tokio::test]
 async fn a_build_cache_switched_off_is_no_bind_and_no_variables() {
     let fixture = grilling().await;
-    fixture
-        .configure("rust_build_cache:\n  enabled: false\nlanguages:\n  go:\n    enabled: false\n");
+    fixture.configure(
+        "rust_build_cache:\n  enabled: false\nlanguages:\n  go:\n    enabled: false\n  \
+         node:\n    enabled: false\n",
+    );
 
     // The server still resolved one, sccache and all: what is being shown is
     // that the switch decides, not that there was nothing to hand out.
@@ -5688,9 +5775,13 @@ async fn a_build_cache_switched_off_is_no_bind_and_no_variables() {
             say size "${{SCCACHE_CACHE_SIZE-unset}}"
             say gomodcache "${{GOMODCACHE-unset}}"
             say gocache "${{GOCACHE-unset}}"
+            say npm-cache "${{NPM_CONFIG_CACHE-unset}}"
+            say pnpm-store "${{PNPM_CONFIG_STORE_DIR-unset}}"
+            dir {beside} stores
             file /verkstead/bin/sccache binary
             "#,
             dir = quoted(&fixture.cache_dir()),
+            beside = quoted(&fixture.stores_dir()),
         ),
     );
 
@@ -5704,6 +5795,13 @@ async fn a_build_cache_switched_off_is_no_bind_and_no_variables() {
     assert_eq!(reported["size"], "unset");
     assert_eq!(reported["gomodcache"], "unset");
     assert_eq!(reported["gocache"], "unset");
+    assert_eq!(reported["npm-cache"], "unset");
+    assert_eq!(reported["pnpm-store"], "unset");
+    assert_eq!(
+        reported["stores"], "absent",
+        "and the directory beside the Worktrees closes with it, the only \
+         language that named it being off",
+    );
     assert_eq!(
         reported["binary"], "absent",
         "and the sccache goes with it: there is nothing left for it to compile into"

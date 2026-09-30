@@ -48,6 +48,7 @@ const UNSET = unset as SettingsView;
 /// `config.yaml` keys them under, which is what a save names back.
 const RUST = "rust";
 const GO = "go";
+const NODE = "node";
 const GLEAM = "gleam";
 
 /// The binds the fixture holds, as a save puts them back on the wire: the
@@ -215,7 +216,7 @@ describe("the card", () => {
 
     await waitFor(() =>
       expect(container.querySelector(`.${styles.standing}`)?.textContent).toBe(
-        "Rust, Go, Gleam",
+        "Rust, Go, Node, Gleam",
       ),
     );
   });
@@ -228,7 +229,7 @@ describe("the card", () => {
 
     await waitFor(() =>
       expect(container.querySelector(`.${styles.standing}`)?.textContent).toBe(
-        "Rust, Go",
+        "Rust, Go, Node",
       ),
     );
   });
@@ -236,7 +237,7 @@ describe("the card", () => {
   /// And nothing at all under the heading where none are: a card saying a
   /// machine builds nothing would be a line nobody needs.
   it("says nothing under the heading while they are all off", async () => {
-    theSettings(off(off(off(TOLD), GO), GLEAM));
+    theSettings(off(off(off(off(TOLD), GO), NODE), GLEAM));
     const { container } = mountCard();
 
     const face = await theCard(container);
@@ -271,7 +272,7 @@ describe("the card", () => {
     theSettings(compiling(UNSET));
     mountCard();
 
-    await waitFor(() => screen.getByText("Rust, Go"));
+    await waitFor(() => screen.getByText("Rust, Go, Node"));
     expect(screen.queryByText(/No sccache is installed/)).toBeNull();
   });
 
@@ -330,8 +331,9 @@ describe("the languages as the pane draws them", () => {
 
     await waitFor(() => expect(theCheck("Rust").checked).toBe(true));
     expect(theCheck("Go").checked).toBe(true);
+    expect(theCheck("Node").checked).toBe(true);
     expect(theCheck("Gleam").checked).toBe(true);
-    expect(screen.getAllByRole("checkbox")).toHaveLength(3);
+    expect(screen.getAllByRole("checkbox")).toHaveLength(4);
   });
 
   /// The box says where its language stands rather than whether anybody has
@@ -519,6 +521,7 @@ describe("changing the languages", () => {
         languages: [
           { name: RUST, enabled: false, size: "50G" },
           { name: GO, enabled: true, size: "" },
+          { name: NODE, enabled: true, size: "" },
           { name: GLEAM, enabled: true, size: "8G" },
         ],
         // Untouched by this form, and sent back as it stands: one request
@@ -550,6 +553,7 @@ describe("changing the languages", () => {
       expect(languagesSent(fetching)).toEqual([
         { name: RUST, enabled: true, size: "50G" },
         { name: GO, enabled: true, size: "" },
+        { name: NODE, enabled: true, size: "" },
         { name: GLEAM, enabled: false, size: "8G" },
       ]),
     );
@@ -609,6 +613,7 @@ describe("changing the languages", () => {
         languages: [
           { name: RUST, enabled: true, size: "80G" },
           { name: GO, enabled: true, size: "" },
+          { name: NODE, enabled: true, size: "" },
           { name: GLEAM, enabled: true, size: "8G" },
         ],
         // Untouched by this form, and sent back as it stands: one request
@@ -663,6 +668,7 @@ describe("changing the languages", () => {
       expect(languagesSent(fetching)).toEqual([
         { name: RUST, enabled: false, size: "50G" },
         { name: GO, enabled: true, size: "" },
+        { name: NODE, enabled: true, size: "" },
         { name: GLEAM, enabled: true, size: "8G" },
       ]),
     );
@@ -681,14 +687,14 @@ describe("changing the languages", () => {
 
     await waitFor(() => expect(theCheck().checked).toBe(true));
     expect(container.querySelector(`.${styles.standing}`)?.textContent).toBe(
-      "Rust, Go, Gleam",
+      "Rust, Go, Node, Gleam",
     );
 
     fireEvent.click(theCheck());
 
     await waitFor(() =>
       expect(container.querySelector(`.${styles.standing}`)?.textContent).toBe(
-        "Go, Gleam",
+        "Go, Node, Gleam",
       ),
     );
   });

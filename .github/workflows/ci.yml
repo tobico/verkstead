@@ -144,6 +144,12 @@ jobs:
   # Windows legs, and a job that builds one crate's test target and runs a
   # handful of small installs does not come close. The measurement after it
   # landed is in this branch's pull request.
+  #
+  # Node's four tools add one tarball and two `npm install -g` runs to the
+  # setup below, and four installs of one package to the suite. Nothing here
+  # builds a project, so what each ecosystem costs this job is its toolchain's
+  # download rather than its proofs — which is the shape to keep as the later
+  # stages add Python's four and NuGet.
   package-stores:
     name: Package stores
     runs-on: ubuntu-24.04
@@ -190,6 +196,48 @@ jobs:
           sudo tar -C /usr/local -xzf "$RUNNER_TEMP/go.tar.gz"
           echo /usr/local/go/bin >> "$GITHUB_PATH"
 
+      # **And the JavaScript ecosystem's four, every one of them reachable by a
+      # name on `/usr/local/bin`.** Not the runner image's own Node, which is
+      # whatever the image pins, and not `actions/setup-node`, for the reason
+      # Go is not `actions/setup-go`: the tool cache is outside every bind a
+      # session gets.
+      #
+      # `/usr/local/bin` rather than a directory of this job's own, because
+      # npm, pnpm and Yarn Classic are all `#!/usr/bin/env node` scripts —
+      # `node` being findable on the *session's* `PATH` is what makes them
+      # runnable inside a sandbox at all, and that `PATH`'s floor holds
+      # `/usr/local/bin` and nothing this job could invent. See `LINUX_PATH` in
+      # `crates/server/src/sandbox.rs`.
+      #
+      # The same releases the dev shell's nixpkgs carries, so that a proof that
+      # passes here is a proof of the versions a developer ran it against.
+      - name: Install Node 24.21.0, pnpm and both yarns
+        run: |
+          curl -sSfL -o "$RUNNER_TEMP/node.tar.xz" \
+            https://nodejs.org/dist/v24.21.0/node-v24.21.0-linux-x64.tar.xz
+          sudo mkdir -p /usr/local/node
+          sudo tar -C /usr/local/node --strip-components=1 -xJf "$RUNNER_TEMP/node.tar.xz"
+
+          for tool in node npm npx; do
+            sudo ln -sf "/usr/local/node/bin/$tool" "/usr/local/bin/$tool"
+          done
+
+          sudo /usr/local/node/bin/npm install -g --prefix /usr/local/node \
+            pnpm@11.27.0 yarn@1.22.22
+          sudo ln -sf /usr/local/node/bin/pnpm /usr/local/bin/pnpm
+          sudo ln -sf /usr/local/node/bin/yarn /usr/local/bin/yarn
+
+          # **Berry in a prefix of its own**, because the two yarns are two
+          # different tools and both packages install a program called `yarn`.
+          # Classic reads `YARN_CACHE_FOLDER` and Berry reads
+          # `YARN_GLOBAL_FOLDER`, so a runner carrying one of them is a runner
+          # where half of that is never proved — the name here is the one
+          # `tests/package_stores.rs` looks for and the one the dev shell links
+          # it in under.
+          sudo /usr/local/node/bin/npm install -g --prefix /usr/local/yarn-berry \
+            @yarnpkg/cli-dist@4.14.1
+          sudo ln -sf /usr/local/yarn-berry/bin/yarn /usr/local/bin/yarn-berry
+
       # And the same question asked of every tool on the list, in a line naming
       # the one that fails it rather than as a test failure about a shell that
       # could not find a program — the reason the sandbox-surface step in the
@@ -203,7 +251,7 @@ jobs:
         run: |
           status=0
 
-          for tool in go zip; do
+          for tool in go zip node npm pnpm yarn yarn-berry tar sha1sum; do
             found=$(command -v "$tool" || true)
 
             if [ -z "$found" ]; then

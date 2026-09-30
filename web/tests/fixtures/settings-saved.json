@@ -52,6 +52,15 @@
       {
         "compiling": null,
         "enabled": true,
+        "label": "Node",
+        "name": "node",
+        "size": "30G",
+        "size_configured": false,
+        "unread": null
+      },
+      {
+        "compiling": null,
+        "enabled": true,
         "label": "Gleam",
         "name": "gleam",
         "size": "8G",

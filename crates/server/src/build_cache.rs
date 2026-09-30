@@ -413,8 +413,9 @@ impl BuildCache {
 
         // And the directory beside it, **only where a loaded descriptor names
         // it** — see [`crate::languages`], and the `{stores}` placeholder in
-        // the descriptors. With only the languages Verkstead ships, nothing
-        // names it, nothing is made here and no session is opened onto one.
+        // the descriptors. Node's pnpm store is what names it among the
+        // languages Verkstead ships; an installation with every one of those
+        // switched off makes nothing here and is opened onto nothing.
         //
         // Asked of every descriptor rather than of the enabled ones, because
         // this is startup and the switch is a session's: a language turned off
@@ -1209,7 +1210,8 @@ mod tests {
             shared(
                 &cache,
                 &configured(
-                    "rust_build_cache:\n  enabled: false\nlanguages:\n  go:\n    enabled: false\n"
+                    "rust_build_cache:\n  enabled: false\nlanguages:\n  go:\n    \
+                     enabled: false\n  node:\n    enabled: false\n"
                 )
             )
             .is_none(),
@@ -1238,8 +1240,13 @@ mod tests {
 
         assert_eq!(
             shared.dirs(),
-            [PathBuf::from("/var/cache/verkstead")],
-            "one bind, because both halves are inside it"
+            [
+                PathBuf::from("/var/cache/verkstead"),
+                PathBuf::from("/var/lib/verkstead/stores"),
+            ],
+            "one bind of the cache, because both of Rust's halves are inside \
+             it — and the directory beside the Worktrees, which pnpm's store \
+             is in"
         );
         assert_eq!(
             variable(&shared, "CARGO_HOME"),
@@ -1370,29 +1377,37 @@ mod tests {
     /// really starts with.
     ///
     /// The whole of what *settings are read at every session spawn* has to mean
-    /// for the placeholder that was added for installers to point at: startup
-    /// made nothing here — no descriptor it read named one — and a bind of a
-    /// path that is not there is a session that will not start rather than a
+    /// for the placeholder installers point at as well: a server that came up
+    /// on descriptors naming none of it made nothing here, and a bind of a path
+    /// that is not there is a session that will not start rather than a
     /// language that goes without.
+    ///
+    /// **Started on a Verkstead whose descriptors name none of it**, which is
+    /// what Node's entry having a `{stores}` store in it costs this test:
+    /// taking pnpm's variable out with a `null` is the whole of the difference
+    /// between the two halves below, and it is what an installer who wants
+    /// none of that directory writes.
     #[test]
     fn a_directory_a_descriptor_names_is_made_where_the_bind_is_handed_out() {
         let dir = tempfile::tempdir().unwrap();
         let (cache, data_dir) = (dir.path().join("cache"), dir.path().join("state"));
 
-        let resolved = BuildCache::resolve(Some(&cache), &data_dir, languages::built_in())
+        let naming_none_of_it = languages::configured(&configured(
+            "languages:\n  node:\n    env:\n      PNPM_CONFIG_STORE_DIR: null\n",
+        ));
+
+        let resolved = BuildCache::resolve(Some(&cache), &data_dir, &naming_none_of_it)
             .expect("a cache the server came up on");
 
         let stores = languages::stores(&data_dir);
         assert!(
             !stores.exists(),
-            "nothing built in names it, so startup made nothing"
+            "no descriptor it came up on named it, so startup made nothing"
         );
 
-        // And then somebody writes one, without restarting anything.
-        let config = configured(
-            "languages:\n  node:\n    label: Node\n    env:\n      \
-             PNPM_HOME: \"{stores}/pnpm\"\n",
-        );
+        // And then somebody puts it back, without restarting anything — which
+        // is the built-ins as they stand.
+        let config = unconfigured();
 
         let shared = shared(&resolved, &config).expect("the session is given it");
 
@@ -1483,9 +1498,10 @@ mod tests {
             "and the worktrees directory with it, which the compile server binds"
         );
         assert!(
-            !languages::stores(dir.path()).exists(),
-            "and nothing beside it: no descriptor built in names that placeholder, \
-             so there is nothing for a session to be opened onto"
+            languages::stores(dir.path()).is_dir(),
+            "and the directory beside it, which pnpm's store is under: a \
+             descriptor built in names that placeholder, so there is a bind \
+             for a session to be opened onto"
         );
     }
 

@@ -47,8 +47,9 @@
 //! **Placeholders are what only the server knows** — see [`Machine`], and the
 //! embedded file, which is where each of the four is spelled out. A
 //! placeholder's directory is granted to a session only where a loaded
-//! descriptor names it, so the one beside the Worktrees grants nothing while
-//! no built-in names it.
+//! descriptor names it: the one beside the Worktrees is Node's pnpm store,
+//! and an installation with every language that names it switched off is
+//! opened onto none.
 //!
 //! **And an entry that will not load falls back to the built-in of that name.**
 //! Two ways one fails and one answer to both: an entry naming a variable the
@@ -94,6 +95,11 @@ pub const RUST: &str = "rust";
 /// And Go, the first of the package stores — two directories and no
 /// capability, which is the whole of what a language costs the server now.
 pub const GO: &str = "go";
+
+/// And Node, which is one entry for every tool that installs out of the npm
+/// registry — and the first built-in to name the directory beside the
+/// Worktrees, pnpm hardlinking out of its store into the project.
+pub const NODE: &str = "node";
 
 /// The one capability this server has: the **Compile Server**, which is one
 /// sccache server for the machine in a sandbox of its own — see
@@ -840,7 +846,11 @@ fn separated(written: &str) -> String {
 /// Named here for the reason [`crate::worktrees::directory`] is named there:
 /// what makes it the right place is what is *next to* it, so one function says
 /// where it is and the descriptors point at it by placeholder.
-pub(crate) fn stores(data: &Path) -> PathBuf {
+///
+/// Public for the proofs' sake as much as the server's: `tests/package_stores.rs`
+/// really installs out of a store under it, and a suite that spelled the
+/// directory out itself would be a suite agreeing with a second copy of this.
+pub fn stores(data: &Path) -> PathBuf {
     data.join("stores")
 }
 
@@ -1274,11 +1284,21 @@ mod tests {
             "Go's compiled half is a directory, so there is no Compile Server \
              in it to name",
         );
+
+        let node = built_in().get(NODE).expect("and Node is the third");
+
+        assert_eq!(node.label(), Some("Node"));
+        assert_eq!(node.detect, vec![String::from("package.json")]);
+        assert!(
+            !node.names(SCCACHE),
+            "nothing in the npm ecosystem compiles through a server, so there \
+             is nothing here to name either",
+        );
     }
 
     /// A session of a machine with an sccache: Rust's four variables, in the
-    /// order it has always had them, then Go's two, and the cache open
-    /// underneath.
+    /// order it has always had them, then Go's two and Node's five, and the two
+    /// directories they name open underneath.
     ///
     /// Rust's four lead and are unchanged, which is the promise the descriptors
     /// landed on: a language added to the file is variables after the ones a
@@ -1299,15 +1319,26 @@ mod tests {
                 (String::from("SCCACHE_CACHE_SIZE"), String::from("30G")),
                 (String::from("GOMODCACHE"), cached("go/mod")),
                 (String::from("GOCACHE"), cached("go/build")),
+                (String::from("NPM_CONFIG_CACHE"), cached("npm")),
+                (String::from("PNPM_CONFIG_STORE_DIR"), stored("pnpm")),
+                (
+                    String::from("PNPM_CONFIG_CACHE_DIR"),
+                    cached("pnpm/metadata")
+                ),
+                (String::from("YARN_CACHE_FOLDER"), cached("yarn/cache")),
+                (String::from("YARN_GLOBAL_FOLDER"), cached("yarn/global")),
             ],
         );
 
         assert_eq!(
             given.dirs(),
-            [PathBuf::from("/var/cache/verkstead")],
-            "the Build Cache once, because both descriptors name that one \
-             placeholder and a bind per store would be several holes saying \
-             the same thing"
+            [
+                PathBuf::from("/var/cache/verkstead"),
+                PathBuf::from("/var/lib/verkstead/stores"),
+            ],
+            "the Build Cache once however many descriptors name it, and the \
+             directory beside the Worktrees because pnpm's store is there: a \
+             bind per store would be several holes saying the same thing"
         );
         assert!(given.sccache(), "and the sccache to reach it through");
     }
@@ -1324,11 +1355,25 @@ mod tests {
                 (String::from("CARGO_HOME"), cached("cargo")),
                 (String::from("GOMODCACHE"), cached("go/mod")),
                 (String::from("GOCACHE"), cached("go/build")),
+                (String::from("NPM_CONFIG_CACHE"), cached("npm")),
+                (String::from("PNPM_CONFIG_STORE_DIR"), stored("pnpm")),
+                (
+                    String::from("PNPM_CONFIG_CACHE_DIR"),
+                    cached("pnpm/metadata")
+                ),
+                (String::from("YARN_CACHE_FOLDER"), cached("yarn/cache")),
+                (String::from("YARN_GLOBAL_FOLDER"), cached("yarn/global")),
             ],
-            "Go's two are in no capability, so a machine with no sccache gets \
-             the whole of what Go's descriptor says",
+            "Go's two and Node's five are in no capability, so a machine with \
+             no sccache gets the whole of what those descriptors say",
         );
-        assert_eq!(given.dirs(), [PathBuf::from("/var/cache/verkstead")]);
+        assert_eq!(
+            given.dirs(),
+            [
+                PathBuf::from("/var/cache/verkstead"),
+                PathBuf::from("/var/lib/verkstead/stores"),
+            ],
+        );
         assert!(!given.sccache());
     }
 
@@ -1341,12 +1386,14 @@ mod tests {
         let given = off.given(&machine(true));
 
         assert_eq!(
-            given.env(),
-            [
-                (String::from("GOMODCACHE"), cached("go/mod")),
-                (String::from("GOCACHE"), cached("go/build")),
-            ],
-            "nothing of Rust's is left, and the language beside it is untouched",
+            given.env().first(),
+            Some(&(String::from("GOMODCACHE"), cached("go/mod"))),
+            "nothing of Rust's is left, and the languages beside it are untouched",
+        );
+        assert_eq!(
+            given.env().len(),
+            7,
+            "which is Go's two and Node's five and nothing else"
         );
         assert!(!given.sccache());
         assert!(
@@ -1354,9 +1401,22 @@ mod tests {
             "and nothing wants a Compile Server up"
         );
 
+        // And the language that names the second directory switched off on its
+        // own: the Build Cache is still open, because two languages still point
+        // into it, and the directory beside the Worktrees is not.
+        let without_node = off.merged(&written("languages:\n  node:\n    enabled: false\n"));
+        let given = without_node.given(&machine(true));
+
+        assert_eq!(
+            given.dirs(),
+            [PathBuf::from("/var/cache/verkstead")],
+            "the one placeholder the language still on names, and not the one \
+             only the language switched off did"
+        );
+
         // And with every one of them off there is nothing to open at all,
         // which is what an installation that wants none of this looks like.
-        let none = off.merged(&written("languages:\n  go:\n    enabled: false\n"));
+        let none = without_node.merged(&written("languages:\n  go:\n    enabled: false\n"));
         let given = none.given(&machine(true));
 
         assert!(given.is_empty());
@@ -1382,31 +1442,47 @@ mod tests {
         );
     }
 
-    /// The second placeholder is in the grammar and grants nothing while no
-    /// loaded descriptor names it — which is the whole of what it costs a
-    /// machine that only builds Rust.
+    /// The second placeholder is granted only where a loaded descriptor names
+    /// it, and among the built-ins one does: pnpm's store, because a hardlink
+    /// out of a store does not cross a filesystem.
     #[test]
     fn the_directory_beside_the_worktrees_is_granted_only_where_it_is_named() {
         assert!(
-            !built_in().names_stores(),
-            "Rust's store is under the Build Cache"
+            built_in().names_stores(),
+            "Node's pnpm store is beside the Worktrees"
         );
 
+        // Rust and Go on their own name none of it: Rust's store is under the
+        // Build Cache and so are both of Go's, so an installation of only
+        // those two is opened onto no second directory at all.
+        let only_compiled =
+            built_in().merged(&written("languages:\n  node:\n    enabled: false\n"));
+
+        assert_eq!(
+            only_compiled.given(&machine(true)).dirs(),
+            [PathBuf::from("/var/cache/verkstead")],
+        );
+
+        // An installer's own descriptor naming it is granted it the same way,
+        // whatever the built-ins say.
         let hardlinking = written(
-            "languages:\n  node:\n    label: Node\n    env:\n      \
-             PNPM_HOME: \"{stores}/pnpm\"\n",
+            "languages:\n  bun:\n    label: Bun\n    env:\n      \
+             BUN_INSTALL_CACHE_DIR: \"{stores}/bun\"\n",
         );
 
         assert!(hardlinking.names_stores());
 
         let given = hardlinking.given(&machine(true));
 
-        assert_eq!(given.env(), [(String::from("PNPM_HOME"), stored("pnpm"))],);
+        assert_eq!(
+            given.env(),
+            [(String::from("BUN_INSTALL_CACHE_DIR"), stored("bun"))],
+        );
         assert_eq!(
             given.dirs(),
             [PathBuf::from("/var/lib/verkstead/stores")],
-            "beside the Worktrees, because a hardlink out of a store does not \
-             cross a filesystem"
+            "beside the Worktrees, and the Build Cache not at all: nothing in \
+             this descriptor points into it"
         );
     }
 
@@ -1449,22 +1525,16 @@ mod tests {
         // only.
         joined("GOMODCACHE", &cache.join("go"), "mod");
         joined("GOCACHE", &cache.join("go"), "build");
+        joined("PNPM_CONFIG_CACHE_DIR", &cache.join("pnpm"), "metadata");
+        joined("YARN_CACHE_FOLDER", &cache.join("yarn"), "cache");
 
-        // And a descriptor of an installer's, pointed at the other directory,
-        // because the two are made different ways — one is the cache as it was
-        // handed over and the other is a `join` of this crate's own.
-        let hardlinking =
-            written("languages:\n  node:\n    env:\n      PNPM_HOME: \"{stores}/pnpm\"\n");
-
-        assert_eq!(
-            hardlinking.given(&machine(true)).env(),
-            [(
-                String::from("PNPM_HOME"),
-                stores(Path::new("/var/lib/verkstead"))
-                    .join("pnpm")
-                    .display()
-                    .to_string()
-            )],
+        // And the one built-in pointed at the other directory, because the two
+        // are made different ways — one is the cache as it was handed over and
+        // the other is a `join` of this crate's own.
+        joined(
+            "PNPM_CONFIG_STORE_DIR",
+            &stores(Path::new("/var/lib/verkstead")),
+            "pnpm",
         );
     }
 
