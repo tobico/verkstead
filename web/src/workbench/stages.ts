@@ -56,3 +56,28 @@ export function stageState(state: StageState): string {
 export function settled(state: StageState): boolean {
   return state.state === "Done";
 }
+
+/// Whether a stage is in flight: somebody is on it, or Verkstead is holding it
+/// somewhere on its way through, or it has stopped part-way and is waiting for
+/// a human. Which is the other thing the page asks of a state, and it asks for
+/// the card: every stage in flight is a row on it, however many there are —
+/// see `windowing.ts`.
+///
+/// Halted counts, being the one of them nobody is working: a stage that has
+/// stopped is a stage somebody has to do something about, so it is the last row
+/// worth hiding rather than the first. A stage waiting on another does not: what
+/// it is waiting for is work elsewhere in the roadmap, and the row worth reading
+/// is that work's.
+export function inFlight(state: StageState): boolean {
+  switch (state.state) {
+    case "InProgress":
+    case "WaitingToJoin":
+    case "WaitingForAPlace":
+    case "Halted":
+      return true;
+    case "Done":
+    case "WaitingOn":
+    case "ToDo":
+      return false;
+  }
+}

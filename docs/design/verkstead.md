@@ -979,14 +979,25 @@ Timeline events:
   rows existed are not backfilled: they keep their pinned cards alone.
 - **A checklist card shows five entries, not all of them** (*settled
   2026-08-28, building design-fixes*): the task list and the stage list window
-  to five real entries centred on the first one that is not done, held inside
-  the list's ends — none of ten done shows 1–5, five of ten shows 4–8, nine of
-  ten shows 6–10, and a list with every box ticked shows its last five. A plain
-  ellipsis row marks whichever end has entries out of sight, and does not count
-  against the five. A card that grew with the backlog would push the record it
-  is pinned above off the screen; the progress line on it still counts the whole
-  list, and the details pane it opens still holds every entry, which is where
-  the whole list is read.
+  to five real entries around the places the work is at, held inside the list's
+  ends — none of ten done shows 1–5, five of ten shows 4–8, nine of ten shows
+  6–10, and a list with every box ticked shows its last five. A plain ellipsis
+  row marks whichever end has entries out of sight, and does not count against
+  the five. A card that grew with the backlog would push the record it is pinned
+  above off the screen; the progress line on it still counts the whole list, and
+  the details pane it opens still holds every entry, which is where the whole
+  list is read. **Where the work is at is one place on a backlog and as many as
+  a roadmap has stages in flight** (*refined 2026-09-30, building
+  parallel-stages/06-every-stage-in-flight*): the first entry that is not done
+  while nothing is in flight, which is every backlog and a roadmap nobody is
+  running, and otherwise every stage the record has in progress, waiting to
+  join, waiting for a place or halted — none of which is dropped to hold the
+  card at five, three stages running being three rows whatever gives way for
+  them. What is left of the five goes on closing the gaps between them and then
+  on their neighbours, and stages too far apart to join up are drawn as
+  stretches with an ellipsis row saying what is out of sight between them as
+  well as at the ends. A stage waiting on another is not in flight: what it
+  waits for is the work the card is already showing.
 - **A session's liveness is a mark rather than a word**, and the same mark
   everywhere it is said — the sidebar card, the agent-output row and the
   details pane above the record. A slowly turning ring while the session is

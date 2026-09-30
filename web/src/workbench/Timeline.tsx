@@ -160,7 +160,7 @@ import { RemoteBanner } from "./RemoteBanner";
 import { StatusButton } from "./StatusButton";
 import styles from "./Timeline.module.css";
 import { titled } from "./naming";
-import { settled, stageState } from "./stages";
+import { inFlight, settled, stageState } from "./stages";
 import { STATE } from "./states";
 import { opensRoadmap, type Opening } from "./openings";
 import { windowed } from "./windowing";
@@ -1391,7 +1391,9 @@ function Box(props: { done: boolean }): JSX.Element {
   );
 }
 
-/// The entries a windowed list is not showing, at the end they are hidden at.
+/// The entries a windowed list is not showing, in the place they are hidden at:
+/// either end of the window, and the gaps inside one that is drawing the list in
+/// stretches.
 ///
 /// An ellipsis rather than a count, because what it says is that the list goes
 /// on and the card is not the place to read it in — the details pane the card
@@ -1465,21 +1467,30 @@ function TaskList(props: {
       </div>
 
       <ol class={styles.tasks}>
-        <Hidden count={shown().before} />
-        <For each={shown().entries}>
-          {(task) => (
-            <li classList={{ [styles.done!]: task.done }}>
-              <Box done={task.done} />
-              <span class={styles.what}>{task.title}</span>
-              {/* At the far end of the row, where it is out of the way of the
-                  reading: what a backlog is scanned for is which titles are
-                  left, and a number is what one is quoted by afterwards. */}
-              <span class={styles.n}>{task.number}</span>
-              {/* The word travels with the row rather than being drawn by the
-                  stylesheet, so a list read aloud or copied out still says
-                  which tasks are finished. */}
-              <span class={styles.state}>{task.done ? "done" : "to do"}</span>
-            </li>
+        <For each={shown().stretches}>
+          {(stretch) => (
+            <>
+              <Hidden count={stretch.hidden} />
+              <For each={stretch.entries}>
+                {(task) => (
+                  <li classList={{ [styles.done!]: task.done }}>
+                    <Box done={task.done} />
+                    <span class={styles.what}>{task.title}</span>
+                    {/* At the far end of the row, where it is out of the way of
+                        the reading: what a backlog is scanned for is which
+                        titles are left, and a number is what one is quoted by
+                        afterwards. */}
+                    <span class={styles.n}>{task.number}</span>
+                    {/* The word travels with the row rather than being drawn by
+                        the stylesheet, so a list read aloud or copied out still
+                        says which tasks are finished. */}
+                    <span class={styles.state}>
+                      {task.done ? "done" : "to do"}
+                    </span>
+                  </li>
+                )}
+              </For>
+            </>
           )}
         </For>
         <Hidden count={shown().after} />
@@ -1495,6 +1506,11 @@ function TaskList(props: {
 /// because it is the same kind of thing one level up — and it is read out of `docs/roadmaps/` in the worktree
 /// every time the page reads the conversation, so a stage finishing moves this
 /// without anybody pressing anything, in both of the places it is drawn.
+///
+/// The window is over every stage in flight rather than over one place the work
+/// is at, which is where the roadmap's card parts company with the backlog's:
+/// stages run side by side, and three of them running is three rows whatever
+/// else gives way for them — see `windowing.ts`.
 ///
 /// It opens the same way too, and what it opens is not the list again: each
 /// entry names a brief beside `ROADMAP.md` that says what that stage is for, and
@@ -1515,9 +1531,15 @@ function StageList(props: {
     props.stages.stages.filter((stage) => settled(stage.state)).length;
 
   // The same window the task list draws, because it is the same card one level
-  // up — see `windowing.ts`.
+  // up — over every stage in flight rather than over the one place a backlog is
+  // worked at, which is the one thing a roadmap tells it that a backlog cannot.
+  // See `windowing.ts`.
   const shown = createMemo(() =>
-    windowed(props.stages.stages, (stage) => settled(stage.state)),
+    windowed(
+      props.stages.stages,
+      (stage) => settled(stage.state),
+      (stage) => inFlight(stage.state),
+    ),
   );
 
   return (
@@ -1537,22 +1559,29 @@ function StageList(props: {
       </div>
 
       <ol class={styles.stages}>
-        <Hidden count={shown().before} />
-        <For each={shown().entries}>
-          {(stage) => (
-            <li classList={{ [styles.done!]: settled(stage.state) }}>
-              <Box done={settled(stage.state)} />
-              <span class={styles.what}>{stage.title}</span>
-              {/* Where the stage is, in the words the server's reading settled —
-                  drawn rather than kept for the readers that need words, which
-                  is the one place this row parts company with a task's. A box can
-                  say two of the states there are, and one of them names stages,
-                  so the word is what the row says and the box rides along. */}
-              <span class={styles.state}>{stageState(stage.state)}</span>
-              {/* At the far end of the row, as a task's is, and for the reason
-                  a task's is. */}
-              <span class={styles.n}>{stage.number}</span>
-            </li>
+        <For each={shown().stretches}>
+          {(stretch) => (
+            <>
+              <Hidden count={stretch.hidden} />
+              <For each={stretch.entries}>
+                {(stage) => (
+                  <li classList={{ [styles.done!]: settled(stage.state) }}>
+                    <Box done={settled(stage.state)} />
+                    <span class={styles.what}>{stage.title}</span>
+                    {/* Where the stage is, in the words the server's reading
+                        settled — drawn rather than kept for the readers that
+                        need words, which is the one place this row parts company
+                        with a task's. A box can say two of the states there are,
+                        and one of them names stages, so the word is what the row
+                        says and the box rides along. */}
+                    <span class={styles.state}>{stageState(stage.state)}</span>
+                    {/* At the far end of the row, as a task's is, and for the
+                        reason a task's is. */}
+                    <span class={styles.n}>{stage.number}</span>
+                  </li>
+                )}
+              </For>
+            </>
           )}
         </For>
         <Hidden count={shown().after} />

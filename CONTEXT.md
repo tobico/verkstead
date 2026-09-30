@@ -2383,6 +2383,20 @@ only come to disagree. The pane
 says the state twice, on the Stage's section heading and on the line the table of
 contents reaches it by, beside what the Stage's line declares it stands on.
 
+**And every Stage in flight is a row on that card.** It draws five entries of a
+longer roadmap, and which five was the ones around the first Stage not ticked
+while that was *where the work has got to*; with Stages worked side by side it is
+every Stage the record has in flight — *in progress*, *waiting to join*,
+*waiting for a place* or *halted* — and none of them gives way to hold the card
+at five, three Stages running being what a reader came to it for. A Stage
+*waiting on* another is not in flight, what it waits for being the work the card
+already shows. What is left of the five goes on closing the gaps between them and
+then on their neighbours, so a roadmap running in one place reads as it always
+did, and Stages too far apart to join up are drawn as stretches of the roadmap
+with an ellipsis row saying what is out of sight between them as well as at the
+ends. The count beside the heading still counts the whole roadmap, and the
+details pane still holds every Stage.
+
 **And it joins its roadmap's chain at its finish, not before.** A roadmap is one
 chain of branches in the order its Stages finish, and a Stage joins it when its
 finish pushes its branch and opens its pull request — so the pull request

@@ -466,9 +466,11 @@
   white-space: nowrap;
 }
 
-/* The ends of a list that is longer than the card shows: an ellipsis where the
+/* The parts of a list that is longer than the card shows: an ellipsis where the
    entries carry on, in the column the boxes are in so it reads as part of the
-   list rather than as something under it. */
+   list rather than as something under it. At either end of the window, and
+   between its stretches where the card is drawing a roadmap whose stages in
+   flight are not neighbours. */
 .taskList .more,
 .stageList .more {
   color: var(--ink-soft);

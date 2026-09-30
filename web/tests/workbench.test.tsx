@@ -299,6 +299,7 @@ import statusButtonCss from "../src/workbench/StatusButton.module.css?raw";
 import banner from "../src/workbench/RemoteBanner.module.css";
 import timeline from "../src/workbench/Timeline.module.css";
 import timelineCss from "../src/workbench/Timeline.module.css?raw";
+import { WINDOW } from "../src/workbench/windowing";
 import truncatedCss from "../src/Truncated.module.css?raw";
 // And the frame the three panes stand in, both ways: it holds the layout rules
 // jsdom lays nothing out for, and the pane names everything else is found by.
@@ -15850,6 +15851,196 @@ describe("a checklist longer than its card", () => {
         `.${shell.detailsPane} .${documents.section}`,
       ),
     ).toHaveLength(BACKLOG_PANE.tasks.length);
+  });
+});
+
+/// A roadmap of `states.length` stages, one state each and numbered from one:
+/// longer than the five a card draws, which is the only thing the window shows
+/// up on.
+function stagesOf(states: StageState[]): StageListEvent {
+  return {
+    name: ROADMAP.name,
+    title: ROADMAP.title,
+    stages: states.map((state, at) => ({
+      number: `${at + 1}`.padStart(2, "0"),
+      title: `Stage ${at + 1}`,
+      state,
+    })),
+  };
+}
+
+/// A roadmap of `count` stages with the ones numbered `flight` running side by
+/// side: the stages the effort has gone past are over and the ones it has not
+/// reached are waiting, which is the shape a roadmap running in several places
+/// arrives in.
+function stagesRunning(count: number, ...flight: number[]): StageListEvent {
+  const furthest = Math.max(...flight);
+
+  return stagesOf(
+    Array.from({ length: count }, (_, at) =>
+      flight.includes(at + 1)
+        ? ({ state: "InProgress" } as const)
+        : at + 1 < furthest
+          ? ({ state: "Done" } as const)
+          : ({ state: "ToDo" } as const),
+    ),
+  );
+}
+
+/// What one card is showing, row by row down the list: a stage's number, or the
+/// count the ellipsis row standing in its place is hiding.
+function down(card: Element): string[] {
+  return [...card.querySelectorAll("ol > li")].map(
+    (row) =>
+      row.querySelector(`.${row.classList.contains(timeline.more!) ? timeline.state : timeline.n}`)!
+        .textContent!,
+  );
+}
+
+/// A roadmap's stages run side by side, so *where the work has got to* is as
+/// many places as it has stages in flight — and every one of them is a row on
+/// the card, whatever has to give way to fit it. The card is what a human looks
+/// at to see where the effort is, and a card that hid two of three running
+/// stages to stay five rows tall would be answering a different question.
+describe("a roadmap with more than one stage in flight", () => {
+  it("puts every stage in flight on the card, with the count over the whole roadmap", async () => {
+    theStaged({ pinned: [{ StageList: stagesRunning(10, 4, 5, 6) }] });
+    const { container } = mount(`/conversations/${STAGED.id}`);
+
+    const card = await drawn(
+      container,
+      `.${timeline.pinned} .${timeline.stageList}`,
+    );
+
+    // The three of them, with what the effort came out of and what it goes into
+    // either side — and the head still counting the roadmap rather than the
+    // window, which is what it is there for.
+    expect(down(card)).toEqual([
+      "2 more",
+      "03",
+      "04",
+      "05",
+      "06",
+      "07",
+      "3 more",
+    ]);
+    expect(card.querySelector(`.${timeline.progress}`)!.textContent).toBe(
+      "3 of 10 done",
+    );
+    expect(
+      [...card.querySelectorAll(`.${timeline.stages} li:not(.${timeline.more})`)]
+        .map((row) => row.querySelector(`.${timeline.state}`)!.textContent)
+        .filter((state) => state === "in progress"),
+    ).toHaveLength(3);
+  });
+
+  /// Far apart is where the window stops being one slice of the list: the
+  /// stretches it can afford are drawn, and what is out of sight between them is
+  /// said the way what is out of sight at the ends is.
+  it("keeps stages in flight in view however far apart in the roadmap they sit", async () => {
+    theStaged({ pinned: [{ StageList: stagesRunning(20, 3, 10, 18) }] });
+    const { container } = mount(`/conversations/${STAGED.id}`);
+
+    const card = await drawn(
+      container,
+      `.${timeline.pinned} .${timeline.stageList}`,
+    );
+
+    expect(down(card)).toEqual([
+      "1 more",
+      "02",
+      "03",
+      "6 more",
+      "10",
+      "7 more",
+      "18",
+      "19",
+      "1 more",
+    ]);
+
+    // Five stages and four marks over a roadmap of twenty: the card is still a
+    // card, which is the whole reason it is windowed at all. Everything hidden
+    // is counted in one of the marks, so the rows add up to the roadmap.
+    expect(down(card).filter((row) => !row.endsWith("more"))).toHaveLength(
+      WINDOW,
+    );
+    expect(
+      down(card)
+        .filter((row) => row.endsWith("more"))
+        .map((row) => Number.parseInt(row, 10))
+        .reduce((all, hidden) => all + hidden, 0),
+    ).toBe(20 - WINDOW);
+  });
+
+  /// Which is the reading the one before it grew out of: a roadmap with one
+  /// place the work is at draws the five it always drew, and so do the two that
+  /// have no place at all.
+  it("draws one stage in flight, none, and a finished roadmap as it always did", async () => {
+    for (const [stages, entries] of [
+      [stagesRunning(10, 6), ["04", "05", "06", "07", "08"]],
+      [stagesOfTen(0), ["01", "02", "03", "04", "05"]],
+      [stagesOfTen(10), ["06", "07", "08", "09", "10"]],
+    ] as const) {
+      theStaged({ pinned: [{ StageList: stages }] });
+      const { container, unmount } = mount(`/conversations/${STAGED.id}`);
+
+      expect(
+        through(
+          await drawn(container, `.${timeline.pinned} .${timeline.stageList}`),
+        ),
+      ).toEqual({
+        entries,
+        above: entries[0] !== "01",
+        below: entries[4] !== "10",
+      });
+
+      unmount();
+    }
+  });
+
+  /// A stage nobody is working is in flight all the same where it has stopped:
+  /// a halted stage is the one somebody has to do something about, so it is the
+  /// last row worth hiding rather than the first. A stage waiting on another is
+  /// not — what that one is waiting for is the work the card is already showing.
+  it("counts a halted stage among them, and a stage waiting on one not at all", async () => {
+    theStaged({
+      pinned: [
+        {
+          StageList: stagesOf([
+            { state: "Done" },
+            { state: "Halted" },
+            { state: "Done" },
+            { state: "Done" },
+            { state: "Done" },
+            { state: "Done" },
+            { state: "InProgress" },
+            { state: "WaitingOn", stages: ["07"] },
+            { state: "ToDo" },
+            { state: "ToDo" },
+          ]),
+        },
+      ],
+    });
+    const { container } = mount(`/conversations/${STAGED.id}`);
+
+    const card = await drawn(
+      container,
+      `.${timeline.pinned} .${timeline.stageList}`,
+    );
+
+    // 02 stopped and 07 is somebody's now, so both are rows and what is left of
+    // the window goes either side of them rather than on the four stages between
+    // them — and 08, which is only waiting on 07, is a neighbour here rather
+    // than a place the work is.
+    expect(down(card)).toEqual([
+      "01",
+      "02",
+      "4 more",
+      "07",
+      "08",
+      "09",
+      "1 more",
+    ]);
   });
 });
 
