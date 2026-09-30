@@ -260,11 +260,28 @@ languages:
     # The other three copy out of their store, or in Berry's case read the zip
     # where it lies, so none of this costs them anything.
     #
-    # Every one of these is safe for two installs at once — npm's `_cacache`,
+    # Five of the six are safe for two installs at once — npm's `_cacache`,
     # pnpm's store and deno's npm cache are content-addressed or keyed by
-    # version, and both yarns write a download to a temporary name and rename it
+    # version, and Berry writes each zip under a temporary name and renames it
     # into place — which is the other half of what a shared store has to be, and
     # what two Sandboxes installing at the same time is there to say.
+    #
+    # **Yarn Classic is the sixth, and it is not.** It was written here as
+    # renaming into place like Berry, and the two-at-once proof disproved it:
+    # Classic makes the cache entry at the entry's *final* path and fills it
+    # afterwards, so an install that arrives in between finds the directory,
+    # takes the entry for complete, and opens a `.yarn-tarball.tgz` that is not
+    # written yet. `ENOENT`, and that install stops — about one run in four under
+    # this suite.
+    #
+    # **The cache is shared anyway, and that is a decision rather than an
+    # oversight.** What a collision damages is the install that hit it and not
+    # the store: measured, in `tests/package_stores.rs`, a third install with
+    # the registry gone still installs out of what is there and still runs what
+    # it installed, whichever of the two lost. So what sharing costs Classic is
+    # an install that fails and is run again, and what it buys is the download
+    # every other Conversation then does not make. A human sees it as a yarn
+    # error naming a file in the cache; the adoption doc says so.
     #
     # And none of them holds a secret of a session's own. A registry login is
     # `.npmrc`'s `_authToken` or Berry's `npmAuthToken`, both in a file nothing

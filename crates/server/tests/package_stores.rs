@@ -958,6 +958,39 @@ fn npm_consumer(worktree: &Path) {
     .unwrap();
 }
 
+/// What two of this tool's installs at once are allowed to come to.
+///
+/// **The two-at-once half of every proof asks the same question and one tool
+/// answers it differently**, so the answer is a field rather than a silence: a
+/// suite that quietly tolerated a failure everywhere would be a suite with
+/// nothing to say about the ten tools that never need it.
+enum Racing {
+    /// Both finish, which is what a store safe for concurrent writers means and
+    /// what ten of the eleven tools give.
+    BothFinish,
+
+    /// One of the two may fail, and the store is still there for whoever comes
+    /// next — **Yarn Classic, measured**.
+    ///
+    /// Classic creates its cache entry at the entry's *final* path and fills it
+    /// afterwards, so a second install that arrives in between sees the
+    /// directory, takes the entry for complete, and opens a `.yarn-tarball.tgz`
+    /// the first one has not written yet: `ENOENT`, and that install stops.
+    /// About one run in four here.
+    ///
+    /// **What is not damaged is the store**, which is the thing this proof is
+    /// really for and which is asserted below whichever of the two lost: a third
+    /// install with the registry gone still installs out of it and still runs
+    /// what it installed. So the cache stays shared — one download for the
+    /// machine is what it is for — and what a collision costs is the install
+    /// that hit it, which is re-run.
+    ///
+    /// Berry is [`Racing::BothFinish`] and needs none of this: its cache is one
+    /// zip per package written under a temporary name and renamed, so there is
+    /// no half-made entry for anybody to find.
+    OneMayLose,
+}
+
 /// What one JavaScript tool's install proof needs saying about it. Everything
 /// else about it is the four Sandboxes below, which are the same for all four.
 struct Installs {
@@ -994,6 +1027,9 @@ struct Installs {
     /// And what the control's failure has to say, so that what it failed over
     /// was the denial rather than anything else.
     denied: &'static str,
+
+    /// What two of them at once are allowed to come to — see [`Racing`].
+    racing: Racing,
 }
 
 /// One tool's proof: two installs at once against one store, a third out of
@@ -1068,21 +1104,56 @@ async fn one_javascript_tools_store(proof: Installs) {
     let first = finished(first);
     let second = finished(second);
 
-    first.worked(&format!(
-        "the first session's {} install fills the store",
-        proof.tool
-    ));
-    second.worked("and the second one racing it finishes just as well");
+    match proof.racing {
+        Racing::BothFinish => {
+            first.worked(&format!(
+                "the first session's {} install fills the store",
+                proof.tool
+            ));
+            second.worked("and the second one racing it finishes just as well");
+        }
+        // And for the one tool that cannot promise that, the weaker thing that
+        // is true — see [`Racing::OneMayLose`]. What the store was left in is
+        // the third install's to say, below, which is the assertion that
+        // matters either way.
+        Racing::OneMayLose => assert!(
+            first.worked || second.worked,
+            "one of the two racing {} installs has to finish, whichever loses: \
+             a collision that takes them both is a store nobody filled. The \
+             first said:\n{}\nand the second said:\n{}",
+            proof.tool,
+            first.said,
+            second.said,
+        ),
+    }
 
-    // The lockfile the first one wrote, carried to the two that follow the way
-    // a Repo carries one: committed, and checked out into every Worktree.
-    let written = machine.worktree(0).join(proof.lockfile);
+    // The lockfile a Repo would have committed, carried to the two that follow:
+    // committed, and checked out into every Worktree.
+    //
+    // **Off whichever of the two finished**, because the one that lost a race
+    // may have written none — and a `read` of the first Worktree alone would
+    // then report a missing lockfile where what happened was the collision this
+    // proof is about.
+    let wrote_it = [(0, &first), (1, &second)]
+        .into_iter()
+        .filter(|(_, ran)| ran.worked)
+        .map(|(nth, ran)| (machine.worktree(nth).join(proof.lockfile), ran))
+        .find(|(path, _)| path.is_file());
+
+    let Some((written, ran)) = wrote_it else {
+        panic!(
+            "{} should have written {} in the Worktree of an install that \
+             finished. The first said:\n{}\nand the second said:\n{}",
+            proof.tool, proof.lockfile, first.said, second.said,
+        )
+    };
+
     let lock = std::fs::read(&written).unwrap_or_else(|error| {
         panic!(
             "{} should have written {} ({error}), and it said:\n{}",
             proof.tool,
             written.display(),
-            first.said,
+            ran.said,
         )
     });
 
@@ -1152,6 +1223,7 @@ async fn npm_fills_one_cache_and_a_third_install_reads_it() {
         offline: "{npm} install --offline --registry={registry} --no-audit --no-fund",
         running: "{node} -e \"process.stdout.write(require('greet-from-the-store'))\"",
         denied: "ENOTCACHED",
+        racing: Racing::BothFinish,
     })
     .await;
 }
@@ -1174,6 +1246,7 @@ async fn pnpm_fills_one_store_and_a_third_install_reads_it() {
         offline: "{pnpm} install --offline --registry={registry}",
         running: "{node} -e \"process.stdout.write(require('greet-from-the-store'))\"",
         denied: "ERR_PNPM_NO_OFFLINE_META",
+        racing: Racing::BothFinish,
     })
     .await;
 }
@@ -1183,6 +1256,14 @@ async fn pnpm_fills_one_store_and_a_third_install_reads_it() {
 ///
 /// `--no-default-rc` so that what moved the cache was the variable the
 /// descriptor set and nothing a `.yarnrc` anywhere said.
+///
+/// **And the one tool of the eleven whose two racing installs may not both
+/// finish** — [`Racing::OneMayLose`], which is where the measurement is. This
+/// was read as a flake first and is not one: it is Classic filling a cache
+/// entry in place, under the entry's final name, so that a second install
+/// arriving mid-write finds the directory and not the file inside it. The
+/// descriptor shares the cache anyway, because what a collision costs is the
+/// install that hit it and what it buys is one download for the machine.
 #[tokio::test]
 async fn yarn_classic_fills_one_cache_and_a_third_install_reads_it() {
     one_javascript_tools_store(Installs {
@@ -1194,6 +1275,7 @@ async fn yarn_classic_fills_one_cache_and_a_third_install_reads_it() {
         offline: "{yarn} install --no-default-rc --offline --registry={registry}",
         running: "{node} -e \"process.stdout.write(require('greet-from-the-store'))\"",
         denied: "Can't make a request in offline mode",
+        racing: Racing::OneMayLose,
     })
     .await;
 }
@@ -1231,6 +1313,7 @@ async fn yarn_berry_fills_one_cache_and_a_third_install_reads_it() {
         running: "{yarn-berry} node -e \
                   \"process.stdout.write(require('greet-from-the-store'))\"",
         denied: "YN0080",
+        racing: Racing::BothFinish,
     })
     .await;
 }
@@ -1265,6 +1348,7 @@ async fn deno_fills_one_cache_and_a_third_install_reads_it() {
         running: "{deno} eval --cached-only \
                   \"import greeting from 'greet-from-the-store'; console.log(greeting)\"",
         denied: "--cached-only is specified",
+        racing: Racing::BothFinish,
     })
     .await;
 }
@@ -1294,6 +1378,7 @@ async fn bun_fills_one_cache_and_a_third_install_reads_it() {
         offline: "{bun} install --registry={registry}",
         running: "{bun} -e \"process.stdout.write(require('greet-from-the-store'))\"",
         denied: "ConnectionRefused",
+        racing: Racing::BothFinish,
     })
     .await;
 }
