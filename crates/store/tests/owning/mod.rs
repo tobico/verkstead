@@ -644,6 +644,16 @@ async fn written_straight_in(pool: &SqlitePool, id: i64, companion: i64, event: 
     .await
     .unwrap();
 
+    // And what the last record to land renumbered that Conversation's Question
+    // Sets to, which is the arithmetic beside that row: what the ids were is
+    // another device's and is not a key here, so this is written straight in the
+    // way the marks above are.
+    sqlx::query("INSERT INTO landed_sets (conversation_id, was, landed_as) VALUES (?, 41, 903)")
+        .bind(id)
+        .execute(pool)
+        .await
+        .unwrap();
+
     sqlx::query("INSERT INTO worktrees (conversation_id, path) VALUES (?, '/state/worktrees/x')")
         .bind(id)
         .execute(pool)

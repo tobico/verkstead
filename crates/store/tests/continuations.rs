@@ -23,9 +23,9 @@ use std::time::Duration;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Account, AgentType, Continued, Pairing, ProfileFacts, continue_on_arrival, create_profile,
-    end_session, open_database, register_repo, start_capture, start_conversation,
-    take_up_the_conversation, the_last_session,
+    Account, AgentType, Continued, Pairing, ProfileFacts, carrying_a_conversation,
+    continue_on_arrival, create_profile, end_session, open_database, register_repo, start_capture,
+    start_conversation, take_up_the_conversation, the_last_session,
 };
 
 /// The device every Conversation started here is ranked by, named the way a
@@ -185,6 +185,46 @@ async fn taking_the_conversation_up_spends_it() {
         "and the launch after that has nothing to take up: what it would have \
          been primed with is a note about a move the session before it was \
          already told about",
+    );
+}
+
+/// **And asking whether there is one to take up does not spend it**, which is
+/// what lets the question be asked in front of the launch as well as by it.
+///
+/// A relaunch holds the Question Sets it would otherwise lock where a conversation
+/// is standing to be carried on, and that reading comes before the launch that
+/// spends the row — so a peek that spent it would be the relaunch resuming nothing
+/// and locking nothing.
+#[tokio::test]
+async fn asking_whether_there_is_a_conversation_to_carry_on_does_not_spend_it() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = conversation(&pool).await;
+
+    assert!(
+        !carrying_a_conversation(&pool, id).await.unwrap(),
+        "nothing has arrived on it, which is every ordinary launch",
+    );
+
+    let continued = Continued {
+        session_id: "77777777-7777-4777-8777-777777777777".to_owned(),
+        agent_type: AgentType::Claude,
+    };
+
+    continue_on_arrival(&pool, id, &continued).await.unwrap();
+
+    assert!(
+        carrying_a_conversation(&pool, id).await.unwrap(),
+        "and there is one now",
+    );
+    assert!(
+        carrying_a_conversation(&pool, id).await.unwrap(),
+        "asked twice over, the looking having taken nothing",
+    );
+
+    assert_eq!(
+        take_up_the_conversation(&pool, id).await.unwrap(),
+        Some(continued),
+        "and the launch after the peeking is still the one that takes it up",
     );
 }
 

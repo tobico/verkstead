@@ -462,8 +462,15 @@ exactly where it stands**, the way a restart leaves one: moving work onto anothe
 machine is not somebody deciding differently about a brake the human pulled. And
 what a relaunched grilling does to the Sets the gone session was idling on, it does
 here too — it locks them unanswered, the reader being on a machine the work has
-left, and asks again what it still needs. A **Deferred Ask** had nobody behind it
-to begin with and lands open, answerable where the work now is.
+left, and asks again what it still needs. **Unless the conversation itself is
+carried on**, which is the one thing that takes the premise away: a **Carried
+Conversation** brings that very reader back on this machine, so the Sets are held
+open for it rather than locked, and the Note names each of them by the id it landed
+under. Which of the two it is turns on the log having come across, and that is not
+settled until the launch has run the **Memory sync** — so the relaunch holds off
+and the launch locks them after all where the resume cannot be made. A **Deferred
+Ask** had nobody behind it to begin with and lands open either way, answerable
+where the work now is.
 **And a Conversation that has been on a device before comes home rather than
 arriving.** The second time work moves it is usually coming back — drafted on the
 laptop, worked on the desktop, home again — and the **Birth Key** is what says
@@ -544,9 +551,31 @@ stem that came out differently here is a part asked for under a name the sending
 device never used.
 **The Note is the whole of what a carried conversation is primed with.** The
 session has its own context and is mid-turn in its own thinking, so being told the
-Brief again is worse than being told nothing: what it is sent is the two things it
-cannot know, which are the device the work now runs on and the **Worktree**'s new
-path. Not the ordinary re-prime with the note over it.
+Brief again is worse than being told nothing: what it is sent is what it cannot
+know — the device the work now runs on, the **Worktree**'s new path, and the
+**Question Sets** it was idling on. Not the ordinary re-prime with the note over
+it.
+**Those Sets are the one place the note bends from statement to instruction**,
+because a wait that has gone is something to do again rather than something to
+know. A blocking ask is a wait held open by a command running in the session's
+sandbox, and that command died with the process on the other machine — so the agent
+comes back to a question it asked with nothing in front of it, and under an id that
+is not the one it asked under, every id of an arriving record being renumbered as
+it lands. The landing writes the map from old id to new down against the
+Conversation as it walks, because everything pointing at a Set has to be renumbered
+against it anyway, and the record lands a leg before the arrival: so the note reads
+that map back and names each Set both ways round, with the `verkstead answers` line
+that fetches the Answers.
+**And those Sets are left open rather than locked**, which is the reversal a
+carried conversation makes: a relaunch locks what it orphans because the reader has
+gone, and here the reader is coming back. So a Set the human was part way through
+answering when the work moved is still there on the **Timeline**, answerable, and
+their answer reaches the session that asked it — rather than being struck through
+and asked again from the new machine. **Conditional on the resume happening**: a
+fallback to Verkstead's own Resume locks them exactly as it does today, because
+there the reader really has gone. Only the ones the session was *idling on* are
+any of this: a Set the human answered before the move is one the agent has already
+read, and a **Deferred Ask** never had anybody waiting on it.
 **And the Transcript opens where the carried log ends.** Each **Event** holds its
 own session's words, and the resumed session appends to the same file — so the
 following of it starts at the end of what crossed, rather than drawing the whole of

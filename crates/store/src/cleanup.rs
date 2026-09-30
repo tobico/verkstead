@@ -215,6 +215,9 @@ const CONVERSATION_KEYED: &[&str] = &[
     // for the same reason again: it names a conversation nothing on this device
     // is going to resume.
     "continued_sessions",
+    // And what the last record to land renumbered its Question Sets to, which
+    // names Sets the walk above has just deleted.
+    "landed_sets",
     // The archiving that authorised all of this, and the trim mark under it.
     "archived_conversations",
     "trimmed_conversations",

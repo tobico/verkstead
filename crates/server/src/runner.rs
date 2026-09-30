@@ -4156,6 +4156,10 @@ async fn launch(state: &AppState, conversation_id: i64, inside: Prompt) -> Optio
             &conversation,
             &pairing,
             &prompt,
+            // Nothing held: a run's relaunch locks no Question Set, so there is
+            // nothing for the launch to make good either way — see
+            // [`crate::sessions::Held`].
+            crate::sessions::Held::nothing(&state.settlements),
         )
         .await
     {

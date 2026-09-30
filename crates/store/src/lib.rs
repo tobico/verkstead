@@ -101,7 +101,8 @@ pub use companions::{
     Removing, add_companion, companions, configure_companion, remove_companion,
 };
 pub use continuations::{
-    Continued, continue_on_arrival, take_up_the_conversation, the_last_session,
+    Continued, carrying_a_conversation, continue_on_arrival, sets_as_they_landed,
+    take_up_the_conversation, the_last_session,
 };
 pub use conversations::{
     AdoptedPullRequest, Base, Chosen, Closable, ClosableCompanion, Closing, Conversation,

@@ -48,7 +48,7 @@ use sqlx::SqlitePool;
 use tokio::task::JoinHandle;
 use tower::ServiceExt;
 use verkstead_render::{
-    ConversationEntry, ConversationView, Lifecycle, ProfileEntry, Started, TimelineEvent,
+    ConversationEntry, ConversationView, Lifecycle, ProfileEntry, Standing, Started, TimelineEvent,
 };
 use verkstead_server::attachments::Attachments;
 use verkstead_server::build_cache::BuildCache;
@@ -672,6 +672,76 @@ impl Verkstead {
         let said = String::from_utf8_lossy(&bytes).into_owned();
 
         assert!(status.is_success(), "answering Set {set}: {status} {said}");
+    }
+
+    /// Wait until that Conversation's Timeline reads Set `set` as **locked
+    /// unanswered**, and say whether it ever did.
+    ///
+    /// **Read rather than pressed, which is the whole point of it.** The other way
+    /// to find out is to try to answer and be refused — and trying to answer a Set
+    /// that is still open *answers* it, which settles the very question this is
+    /// asking. Verkstead's locking of a Set whose reader has gone comes a launch
+    /// after the arrival now, because whether that reader is coming back on this
+    /// machine is not settled until the launch has run the memory sync (see
+    /// `server::sessions::continuing`), so a poll that pressed would win that race
+    /// and prove nothing.
+    async fn locked(&self, conversation: i64, set: i64) -> bool {
+        let deadline = Instant::now() + WAITING;
+
+        loop {
+            let standing = self
+                .view(conversation)
+                .await
+                .timeline
+                .into_iter()
+                .find_map(|event| match event {
+                    TimelineEvent::QuestionSet(asked) if asked.set_id == set => {
+                        Some(asked.standing)
+                    }
+                    _ => None,
+                });
+
+            if matches!(standing, Some(Standing::LockedUnanswered(_))) {
+                return true;
+            }
+
+            if Instant::now() >= deadline {
+                return false;
+            }
+
+            tokio::time::sleep(LOOKING).await;
+        }
+    }
+
+    /// Come back for a Set's Answers the way `verkstead answers` does: one fetch
+    /// over the endpoint the CLI fetches on, **holding for nothing**.
+    ///
+    /// Which is the line a resumed session is given for every Set it was idling
+    /// on: the wait it had was a command running on the machine the work came
+    /// from, and it died with the process. `hold=0` is the whole of what parts a
+    /// fetch from a wait, and it is what `cli::answers` sends — a Set nobody has
+    /// answered yet is *nothing yet* rather than something to idle on. Left off,
+    /// the same route holds the connection open for half a minute, which is the
+    /// blocking ask.
+    async fn fetches(&self, conversation: i64, set: i64) -> (StatusCode, String) {
+        let fetched = self
+            .workbench
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!(
+                        "/conversations/{conversation}/api/v1/sets/{set}/response?hold=0"
+                    ))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let status = fetched.status();
+        let bytes = fetched.into_body().collect().await.unwrap().to_bytes();
+
+        (status, String::from_utf8_lossy(&bytes).into_owned())
     }
 
     /// The same over the raw status, for the times a refusal is the answer being
@@ -2002,6 +2072,13 @@ async fn a_set_left_open_is_answerable_where_the_work_now_is() {
 /// is, the machine it was on having handed the work over. The session the far end
 /// starts is primed with what was answered and asks again what it still needs.
 ///
+/// **The reader really has gone here, which is what makes this the fallback.** The
+/// session on A wrote no log, so there is nothing for the far end to resume
+/// against, and the Sets its relaunch held off locking are locked by the launch
+/// that finds that out — the same locking a launch later. Where the resume *is*
+/// made they stay open, and that is
+/// `the_set_a_resumed_session_was_idling_on_stays_open_under_the_id_the_note_gives`.
+///
 /// **And the Deferred Ask beside it is left where it stands**, nobody having been
 /// behind it to begin with: it crosses, it lands open, and its Answers go into the
 /// prompt of a later session of this Conversation — which is now a session on
@@ -2040,22 +2117,23 @@ async fn the_set_a_gone_session_was_waiting_on_is_locked_where_the_work_lands() 
     // The blocking one, once the arrival's Resume has been over it: the session
     // that asked is on a machine the work has left, so it is locked unanswered
     // rather than left for the human to write into.
-    let shut = tokio::time::timeout(WAITING, async {
-        loop {
-            if b.answering(there, crossed[0], ANSWERED).await == StatusCode::GONE {
-                return;
-            }
-
-            tokio::time::sleep(LOOKING).await;
-        }
-    })
-    .await;
-
+    //
+    // Watched rather than pressed at — see [`Verkstead::locked`]. The locking
+    // comes a launch after the arrival, that being when the far end finds out
+    // whether the reader is coming back on it, and a poll that tried to answer
+    // would answer the Set before the launch had decided.
     assert!(
-        shut.is_ok(),
+        b.locked(there, crossed[0]).await,
         "the Set the gone session was idling on is locked unanswered here: \
          {idled} on A, {} on B",
         crossed[0],
+    );
+
+    assert_eq!(
+        b.answering(there, crossed[0], ANSWERED).await,
+        StatusCode::GONE,
+        "and it takes no Answer, which is what locked unanswered means to the \
+         human on the machine the work is on now",
     );
 
     // And the Deferred Ask, which the relaunch leaves exactly where it stands:
@@ -3047,6 +3125,126 @@ async fn a_grilling_transferred_mid_interview_carries_on_from_the_question_it_wa
         Lifecycle::Grilling,
         "and it is still a grilling: what moved is where the work is being done \
          rather than how far it has got",
+    );
+}
+
+/// **And the Question Set it was idling on is still open where the work lands**,
+/// under the id the note gives it, answerable, and its Answers there to be come
+/// back for.
+///
+/// Which is the reversal this stage makes. A relaunched grilling locks every Set it
+/// orphans, because the session that asked has gone and the human would be
+/// answering into nothing — and a harness resume brings that very reader back on
+/// another machine, so the premise does not hold: the Set stays open, the answer
+/// reaches the session that asked, and nobody is asked the same question twice.
+/// The fallback still locks, and that is
+/// `the_set_a_gone_session_was_waiting_on_is_locked_where_the_work_lands`.
+///
+/// **And what the note has to tell it is the id.** The wait was a command running
+/// on the machine the work came from and it died with the process, so the session
+/// comes back to the Set by fetching it — and every id of a moved record is
+/// renumbered as it lands, so the number the agent has in its own context is not
+/// the number the Set has here. The landing wrote the map down and the note reads
+/// it back, both ways round.
+///
+/// **Three Sets, because only one of them is the note's.** The one the session was
+/// idling on; one the human answered before the move, which the agent has already
+/// read; and a Deferred Ask, which never had anybody waiting on it. The last two
+/// cross and stand exactly as they did, and neither is anything to say to a
+/// resumed session.
+#[tokio::test]
+async fn the_set_a_resumed_session_was_idling_on_stays_open_under_the_id_the_note_gives() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = ready_to_carry_on(&gate, spill.path()).await;
+
+    // A Set of B's own, asked before the work arrives. Both databases count their
+    // Sets from one, so without it the id the Set was asked under and the id it
+    // lands as would be the same number — and the note's two halves would prove
+    // nothing about either.
+    let mine = b.drafting_under(b.profile_called(ACCOUNT).await.id).await;
+    b.asks(mine, ASKED).await;
+
+    a.printed(conversation, "grilling").await;
+
+    // In this order, so that reading them off B's Timeline says which is which.
+    let settled = a.asks(conversation, ASKED).await;
+    a.answers(conversation, settled, ANSWERED).await;
+
+    let idled = a.asks(conversation, ASKED).await;
+    a.defers(conversation, ASKED).await;
+
+    std::fs::write(&gate, "go").unwrap();
+
+    assert_eq!(a.transfers(conversation, B).await, "\"Transferring\"");
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    let crossed = b.sets_on(there).await;
+
+    assert_eq!(crossed.len(), 3, "all three crossed: {crossed:?}");
+
+    let carried = crossed[1];
+
+    assert_ne!(
+        carried, idled,
+        "and the one the session was idling on landed under an id of B's own",
+    );
+
+    let said = b.latest_capture_saying(there, "carried on").await;
+
+    assert!(
+        said.contains(&format!(
+            "The Set you asked as {idled} is Set {carried} here: `verkstead answers {carried}`"
+        )),
+        "the note names it both ways round, with the line that fetches the \
+         Answers: {said:?}",
+    );
+
+    for other in [crossed[0], crossed[2]] {
+        assert!(
+            !said.contains(&format!("verkstead answers {other}")),
+            "and neither the Set the human answered before the move nor the \
+             Deferred Ask beside it is in the note: Set {other} in {said:?}",
+        );
+    }
+
+    // Nothing yet, which is what the note says to expect: a Set nobody has
+    // answered is not something to idle on.
+    assert_eq!(
+        b.fetches(there, carried).await.0,
+        StatusCode::NO_CONTENT,
+        "the Set is open and unanswered where the work now is",
+    );
+
+    // And the human answering it on the machine the work is on now, which is the
+    // press a locked Set would have refused.
+    assert!(
+        b.answering(there, carried, ANSWERED).await.is_success(),
+        "the Set the resumed session was idling on took the Answer: it was held \
+         open for a reader that came back rather than locked over one that had \
+         gone",
+    );
+
+    let (status, handed) = b.fetches(there, carried).await;
+
+    assert_eq!(status, StatusCode::OK, "coming back for it: {handed}");
+    assert!(
+        handed.contains("shared between instances"),
+        "and what `verkstead answers {carried}` hands the resumed session is the \
+         Answer to the Set it asked on the other machine: {handed}",
+    );
+
+    // The Deferred Ask, which the resume leaves where a relaunch leaves it:
+    // nobody was ever behind one, so nothing about it changed.
+    assert!(
+        b.answering(there, crossed[2], ANSWERED).await.is_success(),
+        "the Deferred Ask is answerable where the work now is",
     );
 }
 

@@ -1178,18 +1178,80 @@ pub(crate) fn naming(prompt: &str, naming: bool) -> String {
 /// has been editing all along, at a path that is this device's rather than the
 /// other one's. Everything else about the work is what it was.
 ///
+/// **And the third thing, where there is one: the Question Sets it was idling
+/// on.** A blocking ask is a wait held open by a shell command, and that command
+/// died with the process on the other machine — so the session comes back to a
+/// question it asked, no wait in front of it, and an id that is not the id the Set
+/// has here. Each of them is named both ways round and with the line that fetches
+/// the Answers, which is the one `verkstead ask` itself points a session at when a
+/// wait is killed. `sets` is empty for a session that was idling on nothing, which
+/// is most of them, and nothing is said about them at all.
+///
 /// Written as a statement rather than an instruction. There is nothing for the
 /// session to do about a move, and a prompt that told it to start again would be
-/// undoing the whole point of resuming it.
-pub(crate) fn moved(machine: &str, worktree: &Path) -> String {
-    format!(
+/// undoing the whole point of resuming it. The Sets are the one place that bends,
+/// because a wait that has gone is something to do again rather than something to
+/// know.
+pub(crate) fn moved(machine: &str, worktree: &Path, sets: &[CarriedSet]) -> String {
+    let mut note = format!(
         "This Conversation has been moved onto another machine and you are running on it \
          now: **{machine}**. Nothing about the work has changed — this is the \
          conversation above carried on rather than a new one.\n\nWhat has changed is \
          where the work sits on disk: your worktree is at `{}` now, the same checkout \
          at a path of this machine's. Carry on from where you were.\n",
         worktree.display(),
-    )
+    );
+
+    if sets.is_empty() {
+        return note;
+    }
+
+    note.push_str(
+        "\nAnd the Question Sets you were waiting on came across under new ids, every id \
+         of a moved record being renumbered as it lands. The waits themselves are gone — \
+         each was a command running on the other machine — but the Sets are still open \
+         and still the human's to answer, so come back for the Answers by the id each has \
+         here:\n\n",
+    );
+
+    for set in sets {
+        match set.was {
+            Some(was) => note.push_str(&format!(
+                "- The Set you asked as {was} is Set {now} here: `verkstead answers {now}`\n",
+                now = set.now,
+            )),
+            None => note.push_str(&format!(
+                "- Set {now} is still open here: `verkstead answers {now}`\n",
+                now = set.now,
+            )),
+        }
+    }
+
+    note.push_str(
+        "\nA Set nobody has answered yet refuses that command rather than waiting on the \
+         door, so ask again when the nudge lands.\n",
+    );
+
+    note
+}
+
+/// One Question Set a resumed session was idling on, said both ways round.
+///
+/// **The id it has here is what a session does anything with**, and the id it had
+/// is what it knows the question by: the agent asked it on the other machine and
+/// has that number in its own context, so a note naming only the new one would
+/// leave it to guess which of its questions had become which.
+///
+/// `was` is `None` for a Set the landing's own map has nothing to say about,
+/// which is not a case a move makes — every Set of an arriving record is
+/// renumbered by that map — but is one a reader of the note can still act on. The
+/// new id is the load-bearing half.
+pub(crate) struct CarriedSet {
+    /// What the Set was asked under, on the machine the work came from.
+    pub(crate) was: Option<i64>,
+
+    /// And what it landed as here, which is what `verkstead answers` takes.
+    pub(crate) now: i64,
 }
 
 /// The opening line and the one thing said beside it wherever a session is

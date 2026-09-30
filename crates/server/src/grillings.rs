@@ -23,6 +23,15 @@
 //! write. So the relaunch locks it unanswered first — the same locking the
 //! human reaches by hand for a Set whose agent has gone.
 //!
+//! **Unless the conversation itself is about to be carried on**, which is the one
+//! case in which the reader has not gone: a Conversation moved onto this device is
+//! relaunched here, and where its harness has a resume of its own the session that
+//! starts is that resume rather than a fresh one (ADR-0020, *Transfer*). So the
+//! Sets are held rather than locked, and the launch is what makes the holding good
+//! — it names them in the note it primes the resumed session with, or locks them
+//! after all where the resume turns out not to be possible. See
+//! [`held_for_a_resume`] and [`crate::sessions::Held`].
+//!
 //! **A Deferred Ask is left standing**, and that is the same rule read the other
 //! way. Nothing was ever waiting on one — see [`crate::deferrals`] — so a dead
 //! session takes nothing away from it, and what the human writes is folded into
@@ -35,6 +44,7 @@ use crate::AppState;
 use crate::answer_files::OnAnswers;
 use crate::drivers::Driving;
 use crate::exchanges::exchange;
+use crate::sessions;
 use crate::skills;
 use crate::store;
 
@@ -86,8 +96,6 @@ pub(crate) async fn again(state: AppState, conversation_id: i64, driving: Drivin
             return;
         }
     };
-
-    orphaned(&state, conversation_id, &timeline).await;
 
     // What the prompt names first is the grilling skill, by the path this
     // server installed it at — and a server that installed none runs no
@@ -142,6 +150,32 @@ pub(crate) async fn again(state: AppState, conversation_id: i64, driving: Drivin
         return;
     };
 
+    // What the dead grilling left open: locked as it always has been, or held for
+    // the resume that is about to be tried — in which case the launch is what
+    // makes the holding good, either by naming those Sets in the note it primes
+    // the resumed session with or by locking them after all. See [`orphaned`].
+    //
+    // **Here rather than up with the reading of the Timeline**, and that is the
+    // whole of why it is this far down: everything between the two is a way this
+    // relaunch gives up, and a Set held for a launch that never happened would be
+    // one nobody ever settled. Past this point the only way out is the launch
+    // itself, and both of its answers are dealt with below.
+    let held = if held_for_a_resume(&state, conversation_id).await {
+        let held = crate::sets::open(&timeline, crate::sets::Open::Idled);
+
+        tracing::info!(
+            conversation_id,
+            sets = ?held,
+            "a conversation is standing to be carried on here, so the Question Sets this \
+             grilling left open are held rather than locked",
+        );
+
+        held
+    } else {
+        orphaned(&state, conversation_id, &timeline).await;
+        Vec::new()
+    };
+
     // One Worktree holds one agent. The session this is replacing died rather
     // than being ended, so a register still holding a relay that has not
     // finished unwinding would be two agents editing each other's files.
@@ -156,10 +190,14 @@ pub(crate) async fn again(state: AppState, conversation_id: i64, driving: Drivin
             &conversation,
             &pairing,
             &prompt,
+            sessions::Held {
+                sets: &held,
+                settlements: &state.settlements,
+            },
         )
         .await;
 
-    match started {
+    match &started {
         Ok(Some(session)) => tracing::info!(
             conversation_id,
             event_id = session.event_id,
@@ -172,6 +210,15 @@ pub(crate) async fn again(state: AppState, conversation_id: i64, driving: Drivin
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, "a relaunched grilling could not be started");
         }
+    }
+
+    // And where there is no session at all, whatever was held is made good here
+    // instead: the launch settles what it was handed, and a launch that did not
+    // happen settled nothing. Which leaves this relaunch exactly where one that
+    // held nothing leaves it — a Conversation with no session, and no question
+    // standing in front of the human with nobody behind it.
+    if !held.is_empty() && !matches!(started, Ok(Some(_))) {
+        orphaned(&state, conversation_id, &timeline).await;
     }
 
     // Whatever came of it, the registration goes now: either there is a session
@@ -201,6 +248,14 @@ pub(crate) async fn again(state: AppState, conversation_id: i64, driving: Drivin
 /// away from it and it is left where it is — see the module note. A
 /// store-and-nudge ask is locked with the blocking ones, stored though it is:
 /// the session that was idling on it is the one that has gone.
+///
+/// **And not at all where a conversation is standing to be carried on**, which is
+/// the one case in which the premise does not hold: the reader has not gone, it is
+/// about to come back on another machine as the harness's own resume of the very
+/// session that asked (ADR-0020, *Transfer*). See [`held_for_a_resume`], and
+/// [`crate::sessions`] for the launch that makes the holding good either way — a
+/// resume names those Sets in its note and leaves them open, and a launch that
+/// finds it cannot resume after all locks them as this would have.
 async fn orphaned(state: &AppState, conversation_id: i64, timeline: &[store::TimelineEvent]) {
     crate::sets::lock(
         state,
@@ -209,6 +264,45 @@ async fn orphaned(state: &AppState, conversation_id: i64, timeline: &[store::Tim
         "the grilling that asked it is gone",
     )
     .await;
+}
+
+/// Whether the launch this relaunch is about to make will be the harness's own
+/// **resume** of the session that asked — in which case the Sets it left open are
+/// held rather than locked (ADR-0020, *Transfer*).
+///
+/// **Read without spending, which is what parts it from the launch's own reading.**
+/// A conversation standing to be carried on is spent by the launch that takes it
+/// up — see [`store::take_up_the_conversation`] — and this is a question asked in
+/// front of that, so it only looks. See [`store::carrying_a_conversation`].
+///
+/// **And it is the question this can answer rather than the one it would like
+/// to.** Whether the resume really happens turns on the log having come across
+/// with the memory sync, which is not settled until the launch has run that sync —
+/// so what is read here is that a resume is *going to be tried*. A try that fails
+/// leaves the Sets open a launch longer than they would have been, and the launch
+/// locks them on its way through: the answer is late rather than wrong.
+///
+/// **What holding costs is a window, and it is the price of the reversal.** Until
+/// this stage the locking was the first thing a relaunch did, so a Set whose reader
+/// had gone was shut before the human could write into it. Held, it stays open for
+/// the length of a launch — and where the resume then cannot be made, an Answer
+/// given inside that window is one nobody reads. The other way round is worse and
+/// is certain rather than possible: locking a Set the resumed session is coming
+/// back for throws away an interview the human was part way through, every time.
+///
+/// A read that fails is read as *no*, which closes the window rather than opening
+/// it: a Set locked over a resume that would have read it is a question asked
+/// twice, which is the mistake Verkstead made until this stage and the one it can
+/// afford.
+async fn held_for_a_resume(state: &AppState, conversation_id: i64) -> bool {
+    match store::carrying_a_conversation(&state.pool, conversation_id).await {
+        Ok(carrying) => carrying,
+
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading whether a conversation is standing to be carried on here failed, so the Question Sets this grilling left open are locked as they always were");
+            false
+        }
+    }
 }
 
 /// The Brief the round started from, which is what a grilling is a grilling of.

@@ -2254,6 +2254,14 @@ impl Sessions {
     /// session, for the reason a sandbox that could not be built starts none: a
     /// session under a Profile with no account is one that comes up logged out
     /// with nothing saying why. See [`crate::mirroring::account`].
+    ///
+    /// **And `held` is the one thing a launch settles that is not about the
+    /// launch**: the Question Sets the caller left open rather than locking,
+    /// because a conversation was standing to be carried on here and a resume
+    /// brings the reader that asked them back. Whether it really can be made is not
+    /// known until this has run the memory sync, so where it cannot the Sets are
+    /// locked here instead — see [`Held`] and [`continuing`].
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn start(
         &self,
         pool: &SqlitePool,
@@ -2262,6 +2270,7 @@ impl Sessions {
         conversation: &store::Conversation,
         pairing: &store::Pairing,
         prompt: &str,
+        held: Held<'_>,
     ) -> Result<Option<Session>> {
         let Some(agents) = self.agents.clone() else {
             tracing::warn!(
@@ -2548,9 +2557,11 @@ impl Sessions {
         // sync above has just carried over.
         let continuing = continuing(
             pool,
+            nudges,
             conversation,
             pairing,
             &agents.homes.for_conversation(conversation_id),
+            held,
         )
         .await;
 
@@ -3097,6 +3108,41 @@ impl Sessions {
     }
 }
 
+/// What a relaunch has **held** for a resume that may not happen, handed to the
+/// launch that makes the holding good (ADR-0020, *Transfer*).
+///
+/// A relaunch locks every Question Set it orphans, because the session that asked
+/// has gone and the human would be answering into nothing — and it holds off where
+/// a conversation is standing to be carried on here, a resume bringing that reader
+/// back on another machine. Which of the two it is turns on the log having come
+/// across with the memory sync, and that is not settled until the launch has run
+/// the sync: so the holding is handed over and settled there. See [`continuing`].
+///
+/// **The channel travels with the Sets** because it is what shutting one takes
+/// besides the store, and it has no other business in a launch: the one thing a
+/// session's start settles is what somebody else held for it.
+#[derive(Clone, Copy)]
+pub(crate) struct Held<'a> {
+    /// The Sets left open rather than locked. Empty from every caller that held
+    /// nothing, which is every launch but a grilling relaunched over an arrival —
+    /// and a launch handed none locks none, whatever else it finds open.
+    pub(crate) sets: &'a [i64],
+
+    /// And the channel a settlement is announced on, so a wait held here on one of
+    /// them ends rather than sitting out its window.
+    pub(crate) settlements: &'a store::Settlements,
+}
+
+impl<'a> Held<'a> {
+    /// Nothing held, which is what every launch but one hands over.
+    pub(crate) fn nothing(settlements: &'a store::Settlements) -> Held<'a> {
+        Held {
+            sets: &[],
+            settlements,
+        }
+    }
+}
+
 /// A session launched as the harness's own **resume** of an earlier one: what it
 /// is told to carry on from, what it is primed with, and the record it is already
 /// part way through.
@@ -3150,7 +3196,66 @@ struct Continuing {
 /// under. Nothing to Claude's, whose parts are the two `projects/` entries; the
 /// first harness whose store is keyed by the name has that to settle as well as
 /// its relocation.
+///
+/// **And this is where a relaunch's holding off is made good**, which is the one
+/// thing a launch does that is not about the launch. A relaunch locks every
+/// Question Set it orphans, because the session that asked has gone and the human
+/// would be answering into nothing — and it holds off where a conversation is
+/// standing to be carried on, because a resume brings that very reader back on
+/// another machine. Which of the two it turns out to be is not settled until the
+/// memory sync above has run, so it is settled here: a resume names those Sets in
+/// its note and leaves them open, and every way of answering no locks them exactly
+/// as the relaunch would have. See [`crate::grillings`], where the holding off is.
+///
+/// `held` is what that caller held and nothing more. A relaunch that locks nothing
+/// hands over nothing and nothing is locked here either — an arrival into
+/// Implementing leaves an open Set exactly where its relaunch leaves one, and this
+/// is not the moment to change that. The **note** is the other way about: it reads
+/// what is open off the record, so a session resumed by any of the relaunches is
+/// told about the questions it was idling on.
 async fn continuing(
+    pool: &SqlitePool,
+    nudges: &Nudges,
+    conversation: &store::Conversation,
+    pairing: &store::Pairing,
+    home: &crate::sandbox::Home,
+    held: Held<'_>,
+) -> Option<Continuing> {
+    let continuing = carried_on(pool, conversation, pairing, home).await;
+
+    if continuing.is_none() {
+        // The resume is not going to happen, so the reader really has gone, and
+        // whatever the caller held for it goes the way a relaunch has always sent
+        // it — a launch later than it would otherwise have gone. `held` rather
+        // than the record's own reading of what is open: what is made good here
+        // is exactly what somebody held off locking, and a relaunch that locks
+        // nothing hands over nothing for this to lock.
+        //
+        // Every way of answering no, the two in front of the decision included: a
+        // steer that spent the row between the caller's reading and this one is
+        // the human replacing the session, which is the case the caller would
+        // have locked for.
+        crate::sets::locking(
+            pool,
+            held.settlements,
+            nudges,
+            conversation.id,
+            held.sets,
+            "the session that asked it is on the machine the work has left",
+        )
+        .await;
+    }
+
+    continuing
+}
+
+/// The decision itself — [`continuing`]'s middle, with nothing to say about what a
+/// caller is holding.
+///
+/// Parted from it so that every way of answering no is one `None` rather than five
+/// returns each having to remember what the fallback owes. What each of them means
+/// is written up there.
+async fn carried_on(
     pool: &SqlitePool,
     conversation: &store::Conversation,
     pairing: &store::Pairing,
@@ -3217,9 +3322,72 @@ async fn continuing(
 
     Some(Continuing {
         session: continued.session_id,
-        note: skills::moved(&crate::platform::hostname(), worktree),
+        note: skills::moved(
+            &crate::platform::hostname(),
+            worktree,
+            &idling_on(pool, conversation.id).await,
+        ),
         carried,
     })
+}
+
+/// And each of the Question Sets the resumed session was idling on, said the way
+/// the note says it: by the id it has here, and by the id it was asked under
+/// (ADR-0020, *Transfer*).
+///
+/// **Both, because each is a name in a different place.** The landing numbered
+/// every Set of the arriving Conversation afresh, so the ids on this Timeline are
+/// this device's; the ids the agent has in its own context are the other device's,
+/// and they are the only names it knows its questions by. The landing wrote the map
+/// between them down as it walked — see [`store::sets_as_they_landed`] — and this
+/// reads it back.
+///
+/// **Which is read off the record rather than taken from what a relaunch held**,
+/// unlike the locking: a relaunch that locks nothing still leaves an agent coming
+/// back to a question with no wait in front of it, and that is a session to tell.
+/// The reading is [`crate::sets::open`]'s narrow one — a Set the human answered
+/// before the move is one the agent has already read, and a Deferred Ask never had
+/// anybody waiting on it.
+///
+/// A map that cannot be read leaves every line naming the id the Set has here and
+/// nothing else, which is the half that does the work: it is what `verkstead
+/// answers` takes. A Timeline that cannot be read leaves the note without its Set
+/// lines, which is worth more than a resume that did not happen — both said in the
+/// log.
+async fn idling_on(pool: &SqlitePool, conversation_id: i64) -> Vec<skills::CarriedSet> {
+    let open = match store::timeline(pool, conversation_id).await {
+        Ok(timeline) => crate::sets::open(&timeline, crate::sets::Open::Idled),
+
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading what a carried conversation was idling on failed, so the note it is primed with says nothing about its Question Sets");
+            return Vec::new();
+        }
+    };
+
+    if open.is_empty() {
+        return Vec::new();
+    }
+
+    let landed = match store::sets_as_they_landed(pool, conversation_id).await {
+        Ok(landed) => landed,
+
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading what the Question Sets of a carried conversation landed as failed, so the note names them by the ids they have here alone");
+            HashMap::new()
+        }
+    };
+
+    // Inverted, because the map is written the way the landing built it — what a
+    // Set was, against what it became — and what is in hand here is what it
+    // became.
+    let was: HashMap<i64, i64> = landed.into_iter().map(|(was, now)| (now, was)).collect();
+
+    open.into_iter()
+        .map(|now| skills::CarriedSet {
+            was: was.get(&now).copied(),
+            now,
+        })
+        .collect()
 }
 
 /// A name for a session about to be started: a version 4 UUID, which is what

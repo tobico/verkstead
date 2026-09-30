@@ -687,6 +687,10 @@ pub const STAYS_BEHIND: &[&str] = &[
     // reading of an arrival: it is written in the leg after the record lands, out
     // of what landed — see [`super::continuations`].
     "continued_sessions",
+    // And what this landing renumbered each Question Set to, which is this
+    // device's arithmetic rather than anything about the work: the far end issues
+    // its own ids and writes its own map as the record lands over there.
+    "landed_sets",
     // The two tables a Verkstead of before kept a stopped Conversation in.
     // Nothing writes either any more and the stop itself crosses on the row —
     // see [`Marks`].
@@ -955,6 +959,15 @@ pub async fn land(
     }
 
     stand(&mut tx, conversation_id, &slice.marks, &landing.events).await?;
+
+    // And the Set half of the arithmetic written down, which is the one part of it
+    // anything after this transaction has to know. A resumed agent asks after its
+    // Questions by the ids it asked them under, and the record lands in a leg of
+    // its own, one before the session that resumes is started — so the map goes on
+    // the record rather than being handed on. The Event half is nobody's outside
+    // this: what points at an Event landed pointing at it. See
+    // [`super::continuations::sets_landed`].
+    super::continuations::sets_landed(&mut tx, conversation_id, &landing.sets).await?;
 
     tx.commit()
         .await

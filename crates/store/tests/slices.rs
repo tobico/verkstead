@@ -25,8 +25,8 @@ use verkstead_schema::Response;
 use verkstead_store::{
     Account, Arrival, ArrivingPicked, Ask, Birth, Lifecycle, ProfileFacts, Renaming, STAYS_BEHIND,
     Settlements, Submission, arrive, ask, capture, carried_tables, create_profile, deleted_tables,
-    land, load_conversation, load_response, register_repo, session_id, slice, submit_response,
-    timeline, transcript,
+    land, load_conversation, load_response, register_repo, session_id, sets_as_they_landed, slice,
+    submit_response, timeline, transcript,
 };
 
 mod owning;
@@ -300,6 +300,82 @@ async fn a_set_left_open_is_answerable_where_the_work_now_is() {
     assert!(
         open_sets(&moved.here.pool).await.len() == open_sets(&moved.there.pool).await.len() + 1,
         "the one just answered is the only one either end has settled since",
+    );
+}
+
+/// And what each Set landed *as* is written down against the Conversation, which
+/// is the one piece of the landing's arithmetic anything after it needs.
+///
+/// A resumed agent knows its Questions by the ids it asked them under, and those
+/// are the sending device's. The landing builds the map because everything pointing
+/// at a Set has to be renumbered against it, and the record lands in a leg of its
+/// own — one before the session that resumes is started — so a map dropped at the
+/// commit would be a note that could not say which question was which. See
+/// `continuations::sets_as_they_landed`, and the server's own `tests/transfer.rs`
+/// for the note it turns into.
+///
+/// **And a second landing writes its own over it.** A Conversation that has come
+/// and gone and come back again landed under ids of its own each time, and the map
+/// of two moves ago names Sets this device has renumbered since.
+#[tokio::test]
+async fn what_each_set_landed_as_is_written_down_against_the_conversation() {
+    let moved = moved("rate-limiting").await;
+
+    let there = asked_from(&moved.there.pool, moved.to).await;
+
+    assert_eq!(
+        sets_as_they_landed(&moved.there.pool, moved.to)
+            .await
+            .unwrap(),
+        asked_from(&moved.here.pool, moved.worked.id)
+            .await
+            .into_iter()
+            .zip(there.iter().copied())
+            .collect(),
+        "every Set of the record is there, by the id it was asked under against \
+         the id it landed as",
+    );
+
+    // The same record again, which is what a return is — and the ids it lands
+    // under this time are ids nothing has issued yet.
+    let read = slice(&moved.here.pool, moved.worked.id).await.unwrap();
+
+    let renaming = Renaming {
+        repos: repos(&moved.here.pool)
+            .await
+            .into_iter()
+            .zip(repos(&moved.there.pool).await)
+            .collect(),
+        ..Renaming::default()
+    };
+
+    land(&moved.there.pool, moved.to, &read, &renaming)
+        .await
+        .unwrap();
+
+    let again = asked_from(&moved.there.pool, moved.to).await;
+
+    // The Sets are issued from a sequence rather than from whatever the table has
+    // room for — see `question_sets` — so the second landing's ids are ids nothing
+    // has ever held, and the map is read against numbers that are not the ones it
+    // was built from. Which is what makes the rest of this a test of the
+    // arithmetic rather than of two databases that happened to count alike.
+    assert!(
+        again.iter().all(|landed| !there.contains(landed)),
+        "the second landing issued ids of its own: {again:?} against {there:?}",
+    );
+
+    assert_eq!(
+        sets_as_they_landed(&moved.there.pool, moved.to)
+            .await
+            .unwrap(),
+        asked_from(&moved.here.pool, moved.worked.id)
+            .await
+            .into_iter()
+            .zip(again)
+            .collect(),
+        "and the map is that landing's rather than the one before it: one row per \
+         Set, each naming what this landing issued",
     );
 }
 

@@ -30,6 +30,23 @@
 //! is — a Conversation whose Profile was changed under it has a log no other
 //! backend can read — and that is a fact about the session that crossed, the way
 //! everything in [`super::session_pairings`] is.
+//!
+//! **And beside that row, what the Question Sets landed as.** A resumed agent
+//! remembers asking a Set and remembers the id it asked under, and every id of a
+//! transferred record is renumbered as it lands — so the note that primes the
+//! resume has to tell it which id each of its questions has here. The landing
+//! builds that map as it walks, because everything pointing at a Set has to be
+//! renumbered against it, and the record lands in a leg of its own, one before
+//! the arrival: there is no handing it on in memory, so it is written down. See
+//! [`sets_landed`] and [`sets_as_they_landed`].
+//!
+//! **Which is not spent, unlike the row above.** Whether a launch continues
+//! something is a moment; what a Set landed as is a fact, and it stays true for as
+//! long as the record that landed is the record here. The next landing writes its
+//! own map over it — see [`super::slices::land`] — and a Conversation deleted
+//! takes it along.
+
+use std::collections::HashMap;
 
 use anyhow::{Context, Result};
 use sqlx::SqlitePool;
@@ -50,8 +67,9 @@ pub struct Continued {
     pub agent_type: AgentType,
 }
 
-/// The table: one at most per Conversation, because a launch continues one
-/// conversation or none.
+/// The two tables: the conversation a launch continues, one at most per
+/// Conversation because a launch continues one conversation or none — and what
+/// each Question Set of the last record to land came out as, one row per Set.
 pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS continued_sessions (
@@ -64,7 +82,97 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     .await
     .context("creating the continued_sessions table")?;
 
+    // Keyed by the Conversation and the id the Set was asked under, because that
+    // is what the reading is by: the note answers *what is this question of mine
+    // called here*, and the id it had over there is the only name the agent has
+    // for it.
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS landed_sets (
+             conversation_id INTEGER NOT NULL REFERENCES conversations(id),
+             was             INTEGER NOT NULL,
+             landed_as       INTEGER NOT NULL,
+             PRIMARY KEY (conversation_id, was)
+         ) STRICT",
+    )
+    .execute(pool)
+    .await
+    .context("creating the landed_sets table")?;
+
     Ok(())
+}
+
+/// Write down what each Question Set of an arriving record landed as, inside the
+/// transaction the record lands in.
+///
+/// `sets` is the landing's own map, old id against new. Written over whatever an
+/// earlier landing left: a Conversation that has come and gone and come back again
+/// landed under ids of its own each time, and the map of two moves ago names Sets
+/// this device has renumbered since.
+///
+/// Takes the connection rather than the pool, unlike everything else here. This is
+/// part of the landing rather than a write beside it — a map that outlived a
+/// record which did not land would say a Set had an id nothing ever issued. See
+/// [`super::slices::land`], which is the one caller.
+pub(crate) async fn sets_landed(
+    tx: &mut sqlx::SqliteConnection,
+    conversation_id: i64,
+    sets: &HashMap<i64, i64>,
+) -> Result<()> {
+    sqlx::query("DELETE FROM landed_sets WHERE conversation_id = ?")
+        .bind(conversation_id)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| {
+            format!(
+                "letting go of what an earlier record landed Conversation \
+                 {conversation_id}'s Question Sets as"
+            )
+        })?;
+
+    for (was, landed_as) in sets {
+        sqlx::query("INSERT INTO landed_sets (conversation_id, was, landed_as) VALUES (?, ?, ?)")
+            .bind(conversation_id)
+            .bind(was)
+            .bind(landed_as)
+            .execute(&mut *tx)
+            .await
+            .with_context(|| {
+                format!(
+                    "recording that Question Set {was} of an arriving Conversation landed as \
+                     {landed_as}"
+                )
+            })?;
+    }
+
+    Ok(())
+}
+
+/// What the Question Sets of the record that landed against `conversation_id` came
+/// out as: the id each was asked under, against the id it has here.
+///
+/// Read by the launch that carries a conversation on, which is the whole of what
+/// the map is for: the agent it resumes knows its questions by the ids it asked
+/// them under, and nothing else on this device could tell it which of them is
+/// which.
+///
+/// Empty for every Conversation that was never moved here, and for one whose
+/// record landed with no Set asked from it.
+pub async fn sets_as_they_landed(
+    pool: &SqlitePool,
+    conversation_id: i64,
+) -> Result<HashMap<i64, i64>> {
+    let rows: Vec<(i64, i64)> =
+        sqlx::query_as("SELECT was, landed_as FROM landed_sets WHERE conversation_id = ?")
+            .bind(conversation_id)
+            .fetch_all(pool)
+            .await
+            .with_context(|| {
+                format!(
+                    "reading what the Question Sets of Conversation {conversation_id} landed as"
+                )
+            })?;
+
+    Ok(rows.into_iter().collect())
 }
 
 /// Write down that the next session launched for `conversation_id` on this device
@@ -144,6 +252,33 @@ pub async fn take_up_the_conversation(
         session_id,
         agent_type,
     }))
+}
+
+/// Whether there is a conversation standing to be carried on for
+/// `conversation_id` — **read without spending it**.
+///
+/// The one question that has to be asked before the launch rather than by it: a
+/// relaunch locks the Question Sets the dead session was idling on, and a resume
+/// brings that reader back on another machine, so whether the Sets are held or
+/// locked turns on this. See `server::grillings`, the one caller, where a peek
+/// that came out wrong costs a Set held open for a session that then opened one of
+/// its own — which the launch locks on its way through instead.
+///
+/// False for nearly every launch there is, this being a row written only by an
+/// arrival.
+pub async fn carrying_a_conversation(pool: &SqlitePool, conversation_id: i64) -> Result<bool> {
+    let row: Option<(i64,)> =
+        sqlx::query_as("SELECT conversation_id FROM continued_sessions WHERE conversation_id = ?")
+            .bind(conversation_id)
+            .fetch_optional(pool)
+            .await
+            .with_context(|| {
+                format!(
+                    "reading whether Conversation {conversation_id} has a conversation to carry on"
+                )
+            })?;
+
+    Ok(row.is_some())
 }
 
 /// The newest session of `conversation_id`, as something a launch could carry on
