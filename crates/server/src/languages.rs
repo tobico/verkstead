@@ -802,9 +802,6 @@ impl Machine {
         }
     }
 
-    /// `value` with its placeholders filled in, or `None` where one of them
-    /// names something this machine has not got.
-    ///
     /// The directory `value` would put whitespace into, where `value` is a
     /// **line of words** — a line of flags, which is what the file writes where
     /// a tool has no variable for a path and reads it out of its options.
@@ -833,6 +830,9 @@ impl Machine {
         .find(|dir| dir.to_string_lossy().contains(char::is_whitespace))
     }
 
+    /// `value` with its placeholders filled in, or `None` where one of them
+    /// names something this machine has not got.
+    ///
     /// A variable that cannot be filled is left out rather than written with the
     /// placeholder still in it: what a `RUSTC_WRAPPER` naming `{sccache}`
     /// literally would do is fail every build inside.
