@@ -56,7 +56,7 @@ the others have landed, because it is their stores it bounds. 06 needs 04.
 
 - [x] 01: Language descriptors — [brief](01-language-descriptors.md)
 - [x] 02: Package stores — [brief](02-package-stores.md)
-- [ ] 03: C++ through the Compile Server — [brief](03-cpp-through-the-compile-server.md)
+- [ ] 03: C++ through the Compile Server — [brief](03-cpp-through-the-compile-server.md) *(in progress: `roadmaps/language-caches/03-cpp-through-the-compile-server`)*
 - [ ] 04: The JVM — [brief](04-the-jvm.md)
 - [ ] 05: Sizes and eviction — [brief](05-sizes-and-eviction.md)
 - [ ] 06: A Gradle daemon of Verkstead's own — [brief](06-a-gradle-daemon-of-verksteads-own.md)
