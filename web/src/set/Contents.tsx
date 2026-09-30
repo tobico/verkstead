@@ -126,6 +126,14 @@ export function Contents(props: {
                 nav={props.nav}
                 stands={standsFor(props.watched, section)}
               />
+              {/* What the list says about the section beyond its name, where it
+                  says anything: under the name rather than beside it, the column
+                  being 8rem wide and the name being what a jump is aimed at.
+                  Outside the link, because it is not part of what this line
+                  takes the reader to. */}
+              <Show when={section.mark}>
+                {(mark) => <span class={contents.mark}>{mark()}</span>}
+              </Show>
               <Show when={section.entries.length > 0}>
                 <ol class={contents.entries}>
                   <For each={section.entries}>

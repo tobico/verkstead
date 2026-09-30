@@ -10,10 +10,11 @@
 //! fresh install needs them: everything git is told first, because without the
 //! token and the author nothing a session does with a Repo can be pushed, then
 //! the languages a session gets build support for, then the one text every
-//! session is given, then the MCP servers a Conversation may attach, then what
-//! becomes of a Conversation once it is archived, then whether this machine can
-//! be reached from a phone, then the Agent Profiles and the Repos a Conversation
-//! is settled against, and last the extra directories a sandbox is given.
+//! session is given, then the MCP servers a Conversation may attach, then how
+//! much of the machine Verkstead helps itself to, then what becomes of a
+//! Conversation once it is archived, then whether this machine can be reached
+//! from a phone, then the Agent Profiles and the Repos a Conversation is settled
+//! against, and last the extra directories a sandbox is given.
 //!
 //! **And one section above all of those that is not the server's at all**: what
 //! the desktop app does about its own window, drawn only where the page is being
@@ -60,6 +61,7 @@ import { UpdateNotice } from "../update/UpdateNotice";
 import { Conversations } from "../workbench/Conversations";
 import { PaneHead } from "../workbench/PaneHead";
 import { pathOf } from "../workbench/openings";
+import { AtOnceCard, AtOncePane } from "./AtOnce";
 import { CleanupCard, CleanupPane } from "./Cleanup";
 import { DesktopCard, DesktopPane } from "./Desktop";
 import { GitCard, GitPane } from "./Git";
@@ -294,6 +296,17 @@ function Settings(props: {
           open={props.opening === "mcp-servers"}
           press={() => props.select("mcp-servers")}
         />
+        {/* And how much of this machine Verkstead helps itself to: how many
+            stages of one roadmap it works side by side. Under the four above
+            because those are about what a session is given and this is about how
+            many of them there are — and above the Cleanup, because it is a
+            setting about the work rather than about what becomes of the record of
+            it. A card of its own with room in its pane for the limit across the
+            whole server, which is the same question asked wider. */}
+        <AtOnceCard
+          open={props.opening === "at-once"}
+          press={() => props.select("at-once")}
+        />
         {/* And what becomes of a Conversation once the human has archived it:
             the trim that takes its bulk, and the delete that takes the whole of
             it. Under the two above because it is the setting nobody has to read
@@ -389,6 +402,9 @@ function Details(props: {
       </Match>
       <Match when={props.opening === "sandbox-binds"}>
         <SandboxBindsPane back={props.back} />
+      </Match>
+      <Match when={props.opening === "at-once"}>
+        <AtOncePane back={props.back} />
       </Match>
       <Match when={props.opening === "cleanup"}>
         <CleanupPane back={props.back} />

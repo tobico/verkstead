@@ -177,7 +177,12 @@ function MoveSheet(props: {
       // ids colliding by construction. Which is also what leaves the old draft
       // open: a move that was refused anywhere closes nothing, so both ends are
       // there to be looked at.
-      leaveRefusals(props.to.reaching, outcome.conversation, outcome.refused);
+      leaveRefusals(
+        props.to.reaching,
+        outcome.conversation,
+        outcome.refused,
+        outcome.stopped,
+      );
 
       // The sidebar is one list merged from the whole cluster and read off this
       // device whoever owns the rows in it, so the key is this device's own

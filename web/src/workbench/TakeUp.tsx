@@ -8,14 +8,27 @@
 //! not the only place one is read: the compose page's own create replay carries
 //! them to the draft it made.
 //!
-//! One of them has a way out of itself inside it — a pull request another
-//! Conversation is already on — so there are two readings here: the sentence, and
-//! the sentence with the link. See [`takeUpRefusal`] and [`TakeUpRefusal`].
+//! Two of them have a way out of themselves inside them — a pull request another
+//! Conversation is still at work on, and the Conversations a start would close
+//! that are holding uncommitted changes — so there are two readings here: the
+//! sentence, and the sentence with the links. See [`takeUpRefusal`] and
+//! [`TakeUpRefusal`].
+//!
+//! And one of them is not a refusal at all. `WouldDiscard` is the press stopping
+//! to ask: the start goes ahead on the press after it, which is why the press
+//! reads as going ahead while it is drawn. See [`goingAhead`].
+//!
+//! Which is the one the create replay does *not* carry as a sentence. What answers
+//! it is a press rather than anything to go and fix, so it travels whole and the
+//! draft's own take-up picks it up as its starting outcome — see `stoppedOnCreate`
+//! in [`composing`](./composing.ts). Carried as a sentence it would have told the
+//! human to press start again over a press that could only ask the same question
+//! over again.
 
 import { A } from "@solidjs/router";
-import { Show, type JSX } from "solid-js";
+import { For, Show, type JSX } from "solid-js";
 
-import type { TakenUp } from "../api/types";
+import type { TakenUp, Uncommitted } from "../api/types";
 import { pathOf } from "./openings";
 import { companionRefusal, profileRefusal } from "./Timeline";
 
@@ -82,7 +95,11 @@ export function takeUpRefusal(outcome: TakenUp): string {
     }
 
     if ("AlreadyHeld" in outcome) {
-      return "That pull request is already another conversation's, and there is one conversation per piece of work.";
+      return "Another conversation is still at work on that pull request, so the way on is that conversation rather than a second one over the same branch.";
+    }
+
+    if ("WouldDiscard" in outcome) {
+      return `${held(outcome.WouldDiscard.uncommitted)} ${closingThem(outcome.WouldDiscard.uncommitted.length)}`;
     }
 
     if ("ProfileBroken" in outcome) {
@@ -95,26 +112,117 @@ export function takeUpRefusal(outcome: TakenUp): string {
   return TAKE_UP_REFUSAL[outcome];
 }
 
-/// The same, as the line a composer draws under its press — which is the one
-/// place a refusal has room for a way out of itself.
+/// What every drawing of `WouldDiscard` ends on: what would be lost, and what to
+/// do about it.
 ///
-/// The pull request another conversation holds is what that is for: there is
-/// one conversation per piece of work, so what this refusal offers is the one
-/// that has it rather than a second wrap-up over the same branch. Every other
-/// refusal is the sentence and nothing else.
+/// One sentence rather than two readings of it, because the way out of this one
+/// is the press itself rather than anywhere to go: the links say who, and this
+/// says what pressing again does.
+///
+/// Agreeing with how many were named, because a stack is asked about in one list:
+/// every conversation standing on a link of it is named by the one press, so
+/// several of them and one worktree between them is the sentence a chain of five
+/// would have read.
+function closingThem(count: number): string {
+  return count === 1
+    ? "would be closed to make way, and the uncommitted changes in its worktree would go with it. Press start again to go ahead."
+    : "would each be closed to make way, and the uncommitted changes in their worktrees would go with them. Press start again to go ahead.";
+}
+
+/// Who is holding something, as the plain sentence names them: by branch, in the
+/// order the server gave, and as one clause whether there is one of them or four.
+function held(uncommitted: Uncommitted[]): string {
+  const branches = uncommitted.map((one) => one.branch).join(", ");
+
+  return uncommitted.length === 1
+    ? `The conversation on ${branches}`
+    : `The conversations on ${branches}`;
+}
+
+/// The conversations a press was stopped over, or `null` where it was not
+/// stopped at all.
+///
+/// The one reading of that outcome here, because everything the composer wants
+/// of it is this list: what the button reads, what the line under it draws, and
+/// what the press after it sends back.
+function wouldDiscard(outcome: TakenUp | null): Uncommitted[] | null {
+  return (
+      outcome !== null &&
+        typeof outcome === "object" &&
+        "WouldDiscard" in outcome
+    ) ?
+      outcome.WouldDiscard.uncommitted
+    : null;
+}
+
+/// Whether an outcome is the press stopping to ask rather than refusing.
+///
+/// What the composer reads it for is the button: a start that has been stopped
+/// over what a close would discard is one press away from going ahead, so the
+/// press says so. Every refusal answers `false` — there is nothing to press
+/// through, only something to go and fix.
+export function goingAhead(outcome: TakenUp | null): boolean {
+  return wouldDiscard(outcome) !== null;
+}
+
+/// And which conversations a press that goes ahead is agreeing to lose, for the
+/// body of that press. Empty for everything else.
+export function discarding(outcome: TakenUp | null): number[] {
+  return (wouldDiscard(outcome) ?? []).map((one) => one.conversation);
+}
+
+/// The same, as the line a composer draws under its press — which is the one
+/// place these have room for a way out of themselves.
+///
+/// Two of them have one. The pull request another conversation is still at work
+/// on offers that conversation: there is one open conversation per pull request,
+/// so the way on is the one that has it rather than a second wrap-up over the
+/// same branch. And the conversations a start would close with something
+/// uncommitted in them are each a link too — the human is being asked whether to
+/// throw that away, and the way to answer it is to go and look.
+///
+/// Every other refusal is the sentence and nothing else.
+///
+/// A conversation that has finished with the pull request and left nothing behind
+/// is neither of them: the start closes it and takes the pull request up, so
+/// there is nothing to refuse and nothing to draw.
 export function TakeUpRefusal(props: { outcome: TakenUp }): JSX.Element {
-  const held = (): number | null =>
+  const stillAtWork = (): number | null =>
     typeof props.outcome === "object" && "AlreadyHeld" in props.outcome
       ? props.outcome.AlreadyHeld.conversation
       : null;
 
+  const holding = (): Uncommitted[] | null => wouldDiscard(props.outcome);
+
   return (
-    <Show when={held()} fallback={takeUpRefusal(props.outcome)}>
-      {(conversation) => (
+    <Show
+      when={holding()}
+      fallback={
+        <Show when={stillAtWork()} fallback={takeUpRefusal(props.outcome)}>
+          {(conversation) => (
+            <>
+              <A href={pathOf(conversation())}>Another conversation</A> is still
+              at work on that pull request, so the way on is that conversation
+              rather than a second one over the same branch.
+            </>
+          )}
+        </Show>
+      }
+    >
+      {(uncommitted) => (
         <>
-          That pull request is already{" "}
-          <A href={pathOf(conversation())}>another conversation's</A>, and there
-          is one conversation per piece of work.
+          {uncommitted().length === 1 ?
+            "The conversation on "
+          : "The conversations on "}
+          <For each={uncommitted()}>
+            {(one, at) => (
+              <>
+                <Show when={at() > 0}>, </Show>
+                <A href={pathOf(one.conversation)}>{one.branch}</A>
+              </>
+            )}
+          </For>{" "}
+          {closingThem(uncommitted().length)}
         </>
       )}
     </Show>
