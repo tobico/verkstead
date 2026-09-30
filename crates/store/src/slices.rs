@@ -578,6 +578,20 @@ const CARRIED: &[Carried] = &[
         found: Found::ByConversation,
         ids: &[("conversation_id", Holds::Conversation)],
     },
+    // And its place in the queue to join its roadmap's chain, where its tasks
+    // have finished: a stage that crosses queued arrives queued, rather than
+    // waiting for its finish to be launched again over there to take a place.
+    // The place is an order rather than a fact, so the far end issues its own —
+    // behind whatever is already waiting there, the way it would have been had
+    // its tasks finished at the moment it landed. See the server's `joins`.
+    Carried {
+        table: "stage_joinings",
+        found: Found::ByConversation,
+        ids: &[
+            ("place", Holds::Mine(Remembered::Nothing)),
+            ("conversation_id", Holds::Conversation),
+        ],
+    },
     Carried {
         table: "adoptions",
         found: Found::ByConversation,
@@ -677,12 +691,6 @@ pub const STAYS_BEHIND: &[&str] = &[
     // itself: it is the one thing about a Conversation that is the cluster's,
     // and the arrival is where it is written.
     "births",
-    // The place a finished stage took in the queue to join its roadmap's chain,
-    // which is an order among the stages of one Repo's roadmap on this device —
-    // the far end has its own queue for its own Repo, and a stage that arrives
-    // with its tasks finished takes a place in it when its finish is next
-    // launched there. See the server's `joins`.
-    "stage_joinings",
     // And the two marks about where a copy of the work went, each of which
     // names a machine from the point of view of the device holding it: which
     // device has the live record, and a move somebody pressed for and nothing
