@@ -5185,6 +5185,35 @@ fn gradle_consumer(worktree: &Path, from: Option<&str>) {
 /// the home a session is given.
 const NO_DAEMONS: &str = "No Gradle daemons are running.";
 
+/// One build in the shared Gradle home before a proof starts two at once, so
+/// that the two find its daemon registry already written.
+///
+/// **Gradle's own race on a home's first use, and nothing of a Sandbox's.** A
+/// daemon registers itself in `daemon/<version>/registry.bin` under a lock
+/// file, and a lock file Gradle has only just made starts out marked as not
+/// unlocked cleanly. So the first registration in a home is refused as an
+/// integrity violation, and Gradle recovers by writing a fresh registry
+/// holding only the daemon in hand — under a second lock, not the one the
+/// refusal was read under. Two daemons starting at the same moment in a new
+/// home both take that path, the later write drops the earlier daemon, and
+/// that daemon's client waits thirty seconds for an entry that is gone:
+/// `Timeout waiting to connect to the Gradle daemon`. Read out of 9.7.1's
+/// classes and reproduced with it, about one run in twenty on two busy
+/// cores. It would happen to any two first builds in one new home, Sandboxed
+/// or not, and it cannot happen once the registry has been written cleanly.
+///
+/// A machine's shared home is new once; every proof's is new every run. So
+/// the proofs take that first write out of the race, with `help`, which
+/// resolves nothing and leaves the stores as empty as it found them.
+fn gradle_home_used_once(machine: &Machine, cache: &BuildCache, gradle: &Path) {
+    let once = installing(
+        &machine.sandbox(0, cache, reaching_nothing()),
+        &format!("set -e\n'{}' {GRADLE_FLAGS} -q help\n", gradle.display()),
+    );
+
+    once.worked("a build before the proof's own writes the Gradle home's daemon registry");
+}
+
 /// Gradle: two Sandboxes building at once against one Gradle home, each in its
 /// own Sandbox, a third building with `--offline` and the registry off the air,
 /// and the control that says the third proved something.
@@ -5219,6 +5248,8 @@ async fn two_gradle_builds_at_once_each_in_its_own_sandbox_fill_one_home_and_a_t
     for nth in 0..4 {
         gradle_consumer(machine.worktree(nth), Some(&registry.url));
     }
+
+    gradle_home_used_once(&machine, &cache, gradle);
 
     let meet = dir.join("meeting");
     std::fs::create_dir_all(&meet).unwrap();
@@ -5605,6 +5636,8 @@ async fn a_kotlin_compile_daemons_run_files_stay_in_the_sandbox_that_started_it(
     for nth in 0..2 {
         gradle_consumer(machine.worktree(nth), None);
     }
+
+    gradle_home_used_once(&machine, &cache, gradle);
 
     let meet = dir.join("meeting");
     std::fs::create_dir_all(&meet).unwrap();
