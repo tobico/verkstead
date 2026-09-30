@@ -64,6 +64,7 @@ import { art, marked } from "./marking";
 import { offered as offeredRows, pick, rows, showing } from "./pickers";
 import { askedFor, json, serving, whenever } from "./serving";
 import profiles from "./fixtures/profiles.json" with { type: "json" };
+import shared from "./fixtures/profiles-shared.json" with { type: "json" };
 
 const SAVED = profiles as ProfileEntry[];
 const FABLE = SAVED[0]!;
@@ -71,6 +72,16 @@ const FABLE = SAVED[0]!;
 /// The fixture's other account, which lists more than one model — a profile
 /// says everything it can launch, and the card is where that is read.
 const OPUS = SAVED[1]!;
+
+/// And the same list answered by a device that is in a cluster: two of its own,
+/// and a **mirror** of a member's account.
+const CLUSTER = shared as ProfileEntry[];
+
+/// The mirror among them, and the machine it is at home on — which is the
+/// device's own reading of its membership rather than anything the far end sent
+/// with the Profile.
+const MIRROR = CLUSTER[2]!;
+const MACHINE = MIRROR.device!;
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -436,6 +447,243 @@ describe("the cards", () => {
     expect(title.textContent).not.toContain(DEFAULT_PROFILE);
     expect(title.textContent).not.toContain("—");
     expect(marked(title)).toBe(art(claudeMarkFile));
+  });
+});
+
+/// Every device's Profiles section lists every member's accounts beside its own
+/// (ADR-0020, *Shared Profiles*), which is one list rather than a section per
+/// machine: a profile is a profile, and which machine its account sits on is a
+/// fact on the row.
+///
+/// `tests/fixtures/profiles-shared.json` is that list as the server really
+/// answers it — two of this device's own and one mirror of a member's, with the
+/// membership row behind it saying what the machine is called and which mark it
+/// wears.
+describe("a member's accounts", () => {
+  it("says which machine one is on, under the reading", async () => {
+    serving(whenever("/api/ui/profiles", json(CLUSTER)));
+    mountCards();
+
+    await waitFor(() => screen.getByText(reads(MIRROR)));
+
+    const card = theCard(reads(MIRROR));
+
+    expect(card.querySelector(`.${styles.device}`)!.textContent).toBe(
+      MACHINE.name,
+    );
+    // The mark for its operating system, drawn the way a sidebar row of that
+    // machine's work draws it — a Mac here, which is what the fixture holds.
+    expect(card.querySelector(`.${styles.os}`)).toBeTruthy();
+  });
+
+  /// And nothing at all on this device's own, which is every row where there is
+  /// no cluster: a machine's own name on every card would be a column of one
+  /// answer repeated.
+  it("says nothing about a machine on this device's own", async () => {
+    serving(whenever("/api/ui/profiles", json(CLUSTER)));
+    mountCards();
+
+    await waitFor(() => screen.getByText(reads(MIRROR)));
+
+    expect(
+      theCard(reads(CLUSTER[0]!)).querySelector(`.${styles.device}`),
+    ).toBeNull();
+  });
+
+  /// And nothing is wrong with it: the paths on the row are that machine's and
+  /// are judged against nothing here — what a session on this device is given is
+  /// a mirror of the account, fetched from the machine it is on before the launch
+  /// (ADR-0020, *Shared Profiles*). So the card says which machine, and says no
+  /// trouble.
+  it("says no trouble about one, its account being fetched before a launch", async () => {
+    serving(whenever("/api/ui/profiles", json(CLUSTER)));
+    mountCards();
+
+    await waitFor(() => screen.getByText(reads(MIRROR)));
+
+    expect(MIRROR.broken).toBe(null);
+    expect(theCard(reads(MIRROR)).querySelector(`.${styles.broken}`)).toBeNull();
+  });
+
+  /// And the pane over one of them is the same form, which saves: every device's
+  /// Profiles section lists everyone's, and an edit or a removal is put to the
+  /// machine the account is on (ADR-0020, *Shared Profiles*). Said over the form
+  /// because the paths under it are that machine's rather than this one's.
+  it("says in the pane that a save over one goes to that machine", async () => {
+    serving(whenever("/api/ui/profiles", json(CLUSTER)));
+    mountPane(MIRROR.id);
+
+    await waitFor(() => screen.getByLabelText(/^Name, where two accounts/));
+
+    expect(document.body.textContent).toContain(
+      `This account is on ${MACHINE.name}.`,
+    );
+  });
+
+  /// And nothing at all over one of this device's own accounts, which is every
+  /// row where there is no cluster.
+  it("says nothing of the sort over one of this device's own", async () => {
+    serving(whenever("/api/ui/profiles", json(CLUSTER)));
+    mountPane(CLUSTER[0]!.id);
+
+    await waitFor(() => screen.getByLabelText(/^Name, where two accounts/));
+
+    expect(document.body.textContent).not.toContain("This account is on");
+  });
+
+  /// The save goes to the Profile's own endpoint on the device the browser
+  /// opened, exactly as a save over one of this device's own rows does: the hop
+  /// is the server's, and nothing here knows there is one. A mirror keeps a
+  /// **local** id, which is what that endpoint is addressed by.
+  it("saves a mirror at its own local id, the hop being the server's", async () => {
+    const fetching = serving(
+      whenever("/api/ui/profiles", json(CLUSTER)),
+      whenever(`/api/ui/profiles/${MIRROR.id}`, json("Saved"), "POST"),
+    );
+    const { done } = mountPane(MIRROR.id);
+
+    await waitFor(() => screen.getByLabelText(/^Name, where two accounts/));
+
+    fireEvent.input(screen.getByLabelText(/^Name, where two accounts/), {
+      target: { value: "weekend" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => expect(done).toHaveBeenCalled());
+
+    // The account as the row carries it — the home machine's paths — with the
+    // name changed: what is judged against that filesystem is judged on that
+    // machine.
+    expect(sent(fetching, `/api/ui/profiles/${MIRROR.id}`)).toEqual({
+      name: "weekend",
+      account: MIRROR.account,
+      models: MIRROR.models,
+      memory: MIRROR.memory,
+    });
+  });
+});
+
+/// The three ways a **mirror** is not usable on this device (ADR-0020, *Shared
+/// Profiles*), each named on the row where the human is looking.
+///
+/// **Refused rather than hidden**: every one of them stays on the list and in
+/// the pickers, because a row saying why it cannot be run is something to go
+/// and put right and a row quietly missing is a human looking for a Profile
+/// they know they saved. What the server decides is which of the three it is —
+/// `crates/server/tests/mirroring.rs` is where that is asked — and what is
+/// asked here is that the card says it.
+describe("a member's account that cannot be run from here", () => {
+  /// One mirror reading the way the server would answer it.
+  const troubled = (broken: ProfileEntry["broken"]): ProfileEntry[] => [
+    CLUSTER[0]!,
+    { ...MIRROR, broken },
+  ];
+
+  it("names the machine where the home has stopped answering", async () => {
+    serving(
+      whenever(
+        "/api/ui/profiles",
+        json([
+          CLUSTER[0]!,
+          {
+            ...MIRROR,
+            broken: "HomeUnreachable",
+            device: { ...MACHINE, reachable: false },
+          },
+        ]),
+      ),
+    );
+    mountCards();
+
+    await waitFor(() => screen.getByText(reads(MIRROR)));
+
+    // The word the sidebar wears for the same finding: one dial worked down
+    // that machine's addresses and reached none of them.
+    expect(
+      theCard(reads(MIRROR)).querySelector(`.${styles.broken}`)!.textContent,
+    ).toBe(
+      `${MACHINE.name} is unreachable, so its account cannot be fetched and no session here can be built out of it.`,
+    );
+  });
+
+  /// A login kept in the macOS Keychain leaves no file for another device to
+  /// mirror, and neither does a sign-out. The fix is a login on the machine the
+  /// account is on, which is why the row names it.
+  it("names the machine to log in on where the account has no login file", async () => {
+    serving(
+      whenever(
+        "/api/ui/profiles",
+        json([CLUSTER[0]!, { ...MIRROR, broken: "NoLoginAtHome", login: false }]),
+      ),
+    );
+    mountCards();
+
+    await waitFor(() => screen.getByText(reads(MIRROR)));
+
+    expect(
+      theCard(reads(MIRROR)).querySelector(`.${styles.broken}`)!.textContent,
+    ).toBe(
+      `Its account on ${MACHINE.name} holds no login file, so there is nothing to mirror here. Log in on that machine.`,
+    );
+  });
+
+  /// And a harness that is not on this machine reads in the onboarding probe's
+  /// own word, carrying the sentence that step shows — one vocabulary for one
+  /// fact, rather than a second invented here. See `src/broken.ts`.
+  it("says a harness that is not here in the onboarding step's own words", async () => {
+    serving(whenever("/api/ui/profiles", json(troubled("HarnessMissing"))));
+    mountCards();
+
+    await waitFor(() => screen.getByText(reads(MIRROR)));
+
+    expect(
+      theCard(reads(MIRROR)).querySelector(`.${styles.broken}`)!.textContent,
+    ).toBe(`${AGENT_NAME[MIRROR.account.agent_type]} is not on this machine.`);
+  });
+
+  /// And none of them takes the row off the list: two rows in, two rows drawn.
+  it.each(["HomeUnreachable", "NoLoginAtHome", "HarnessMissing"] as const)(
+    "leaves a row reading %s on the list",
+    async (broken) => {
+      serving(whenever("/api/ui/profiles", json(troubled(broken))));
+      mountCards();
+
+      await waitFor(() => screen.getByText(reads(MIRROR)));
+
+      expect(screen.getByText(reads(CLUSTER[0]!))).toBeTruthy();
+    },
+  );
+
+  /// And the row on the device the account *is* on says the one thing that is
+  /// true there: the Profile runs perfectly well here and cannot be lent out.
+  /// Not broken — there is nothing wrong with a login in a Keychain — which is
+  /// why it reads as a note rather than as a trouble.
+  it("says on the home device that an account with no login cannot be used away", async () => {
+    serving(
+      whenever("/api/ui/profiles", json([{ ...CLUSTER[0]!, login: false }])),
+    );
+    mountCards();
+
+    await waitFor(() => screen.getByText(reads(CLUSTER[0]!)));
+
+    const card = theCard(reads(CLUSTER[0]!));
+
+    expect(card.querySelector(`.${styles.broken}`)).toBeNull();
+    expect(card.textContent).toContain(
+      "No login file in this account, so it cannot be used from another device.",
+    );
+  });
+
+  /// And nothing at all where there is a login, which is every ordinary
+  /// account: a row saying what is *not* wrong with it would be a line on every
+  /// card in the section.
+  it("says nothing of the sort about an account that is logged in", async () => {
+    theProfiles();
+    mountCards();
+
+    await waitFor(() => screen.getByText(reads(FABLE)));
+
+    expect(document.body.textContent).not.toContain("No login file");
   });
 });
 

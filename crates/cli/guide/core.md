@@ -471,3 +471,35 @@ Answers reach a later session.
 
 Being unable to finish is not a kind of done. That is a Question for the human,
 asked with `verkstead ask`.
+
+## Moving the work to another device
+
+A Verkstead can be one device of a cluster, and the human can let a session
+move its work onto another of them. **Only where they have**: a session's
+prompt names the devices it may move to, each with its name, its id and its
+operating system, and a session whose prompt names none may move nowhere.
+
+Reach for it when the work needs **something this platform cannot do** —
+building or testing for another operating system, most often. Name the device
+by its name, or by its id where two devices share a name:
+
+```
+verkstead transfer <device>
+```
+
+Verkstead checks the device there and then: that it is one the work may go
+to, that it is awake, that it holds the repository and every companion, and
+that it has the harness this session runs on.
+
+- **Accepted** — it prints a confirmation and exits 0. Nothing is moved yet:
+  the session is **ended once this turn is over**, and the work is carried on
+  over there — the same conversation, in a checkout at a path of that device's.
+  Say anything left to say before ending the turn; it stays on this device's
+  Timeline, ahead of the move.
+- **Refused** — it exits non-zero, says why on stderr, and nothing is moved:
+  a device the work may not go to, a name that is nobody's or two devices',
+  or what the device is missing. The session carries on. Pick another device
+  from the prompt's list, or ask the human.
+
+The branch, the Worktree with whatever is uncommitted in it, and the record
+all move together, so there is nothing to tidy up first.

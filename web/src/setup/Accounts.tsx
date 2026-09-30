@@ -45,6 +45,7 @@ import { For, Show, createEffect, createSignal, type JSX } from "solid-js";
 import { HarnessMark } from "../HarnessMark";
 import { AGENT_NAME, type AgentType } from "../agents";
 import { createProfile } from "../api/client";
+import { harnessAbsent } from "../broken";
 import type {
   AccountView,
   OnboardingView,
@@ -53,6 +54,7 @@ import type {
 } from "../api/types";
 import { KNOWN_MODELS } from "../models";
 import { ErrorLine, Note } from "../notices";
+import { rowPress } from "../rows";
 import { BLANK_PROFILE, PROFILE_REFUSAL, ProfileForm } from "../profiles/ProfileList";
 import { Mark } from "./Mark";
 import styles from "./Accounts.module.css";
@@ -306,7 +308,15 @@ function Row(props: {
       data-account={agent()}
       data-harness={props.found.harness ? "yes" : "no"}
     >
-      <label class={styles.head}>
+      {/* The whole row is what is ticked, so the row answers the press rather
+          than the box a label forwards one to — and stops forwarding the moment
+          a hand slides. An account with no binary on the machine is refused
+          there, its box being disabled, which is what the greyed row says. See
+          `rowPress`. */}
+      <label
+        class={styles.head}
+        onClick={rowPress(() => props.tick(!props.ticked))}
+      >
         <input
           type="checkbox"
           checked={props.ticked}
@@ -326,11 +336,16 @@ function Row(props: {
 
       {/* An account whose harness is missing is one there is nothing to run:
           the row is drawn so that it is not a surprise later, and the step
-          before this one is where it is put right. */}
+          before this one is where it is put right.
+
+          The finding is said in the words every other site says it in — a
+          mirror of a member's profile whose harness is not here reads broken in
+          this sentence too, see [`../broken.ts`] — and what is added after it
+          is this step's own, there being a step above to point at. */}
       <Show when={!props.found.harness}>
         <Note>
-          {AGENT_NAME[agent()]} is not on this machine. Install it in the step
-          above and this account can be taken on.
+          {harnessAbsent(agent())} Install it in the step above and this account
+          can be taken on.
         </Note>
       </Show>
     </li>

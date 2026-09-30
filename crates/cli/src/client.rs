@@ -198,6 +198,34 @@ impl Client {
         }
     }
 
+    /// Ask for this session's work to be moved onto `device`, by name or id, and
+    /// hand back the name the server knows that machine by.
+    ///
+    /// No retry, for [`Client::done`]'s reason: a refusal is a device to pick
+    /// again or a human to ask, and the agent is owed it straight away.
+    pub fn transfer(&self, device: &str) -> Result<String> {
+        let mut reply = self
+            .agent
+            .post(format!("{}/api/v1/transfer", self.base))
+            .send(device)
+            .with_context(|| format!("asking {} to move this work", self.said))?;
+
+        let status = reply.status().as_u16();
+        let text = reply
+            .body_mut()
+            .read_to_string()
+            .context("reading the server's reply")?;
+
+        match status {
+            200 => Ok(text.trim().to_owned()),
+            404 => bail!(
+                "the server at {} has no transfer to take — it may be older than this command",
+                self.said
+            ),
+            _ => bail!("the server refused: {}", refusal(&text)),
+        }
+    }
+
     /// Say this session is waiting on work of its own for `length` — the
     /// server's default where `None` — and hand back what the server made of it.
     ///

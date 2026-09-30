@@ -21,15 +21,15 @@ use serde::de::DeserializeOwned;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_render::{
-    Adopted, AgentType, BacklogPane, BaseRecorded, BranchRenamed, BriefSaved, CheckRollup,
-    CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed, CompanionMode,
-    CompanionModeChosen, CompanionRefusal, CompanionRemoved, ConversationArchived,
+    AbandonedRepo, Adopted, AgentType, BacklogPane, BaseRecorded, BranchRenamed, BriefSaved,
+    Broken, CheckRollup, CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed,
+    CompanionMode, CompanionModeChosen, CompanionRefusal, CompanionRemoved, ConversationArchived,
     ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
     ConversationUnarchived, ConversationView, GrillingStarted, Lifecycle, Merging, PickedView,
-    PinnedEvent, Process, ProcessPicked, ProfileChosen, ProfileSaved, Registered, RepoEntry,
-    RepoSwitched, Resolved, Resumed, RoadmapPane, ShowingArchived, Standing, Started,
-    SteerCancelled, SteerCompanionRefusal, SteerOpened, SteerPairingView, SteerSaved, TakenUp,
-    TargetRecorded, TimelineEvent,
+    PinnedEvent, Process, ProcessPicked, ProfileChosen, ProfileSaved, ProfileTrouble, Registered,
+    RepoEntry, RepoSwitched, Resolved, Resumed, RoadmapPane, ShowingArchived, StageState, Standing,
+    Started, SteerCancelled, SteerCompanionRefusal, SteerOpened, SteerPairingView, SteerSaved,
+    TakenUp, TargetRecorded, TimelineEvent, Uncommitted,
 };
 use verkstead_server::{Gh, open_database, router_asking_github, router_keeping, store};
 
@@ -70,6 +70,20 @@ const CONFIG: &str = "config.yaml";
 /// And who that author is, on every workbench here but the one that takes it
 /// away.
 const THE_AUTHOR: &str = "git_author:\n  name: Verkstead Test\n  email: test@verkstead.invalid\n";
+
+/// How many stages of one roadmap this workbench runs side by side.
+///
+/// Written into the file rather than saved through the settings page, for the
+/// reason the author above is: what these tests are about is the press that reads
+/// it, and the page has a suite of its own. Read afresh at every press, so a
+/// number written between two of them is in force for the second.
+fn at_once(dir: &tempfile::TempDir, stages: usize) {
+    std::fs::write(
+        dir.path().join(CONFIG),
+        format!("{THE_AUTHOR}at_once:\n  roadmap_stages: {stages}\n"),
+    )
+    .unwrap();
+}
 
 /// Take the author back off a workbench, leaving one configured the way a
 /// machine that skipped the settings page is.
@@ -1330,23 +1344,49 @@ async fn order(app: &Router) -> Vec<i64> {
     sidebar(app).await.into_iter().map(|row| row.id).collect()
 }
 
-/// Say where the whole list goes, which is what letting go of a dragged row
-/// sends. Answered with nothing, because there is nothing to answer.
-async fn place(app: &Router, ids: &[i64]) {
-    let (status, body) = fetch(
+/// Say where one row of the list now sits, which is what letting go of a dragged
+/// card sends: the Conversation that moved, and the row it landed under —
+/// `None` being the top of the list. Answered with nothing, because there is
+/// nothing to answer.
+///
+/// Both rows are named by device and id, an id alone naming a row on no
+/// particular machine — and `null` is the device the browser opened, which is
+/// this one and the only one there is here. What a drag across two of them comes
+/// to is `tests/merging.rs`.
+async fn rank(app: &Router, id: i64, below: Option<i64>) {
+    let (status, body) = dropped(app, id, below).await;
+
+    assert_eq!(status, StatusCode::NO_CONTENT, "ranking failed: {body}");
+}
+
+/// The same press, with its answer handed back rather than asserted on.
+async fn dropped(app: &Router, id: i64, below: Option<i64>) -> (StatusCode, String) {
+    fetch(
         app,
         Request::builder()
-            .method("POST")
-            .uri("/api/ui/conversations/order")
+            .method("PUT")
+            .uri("/api/ui/conversations/rank")
             .header(header::CONTENT_TYPE, "application/json")
             .body(Body::from(
-                serde_json::to_vec(&serde_json::json!({ "order": ids })).unwrap(),
+                serde_json::to_vec(&serde_json::json!({
+                    "row": { "device": None::<String>, "id": id },
+                    "below": below.map(|id| serde_json::json!({ "device": None::<String>, "id": id })),
+                }))
+                .unwrap(),
             ))
             .unwrap(),
     )
-    .await;
+    .await
+}
 
-    assert_eq!(status, StatusCode::NO_CONTENT, "placing failed: {body}");
+/// The rank one row carries, read off the sidebar it came back on.
+async fn rank_of(app: &Router, id: i64) -> String {
+    sidebar(app)
+        .await
+        .into_iter()
+        .find(|row| row.id == id)
+        .expect("the row is on the sidebar")
+        .rank
 }
 
 #[tokio::test]
@@ -1359,44 +1399,224 @@ async fn the_sidebar_comes_back_in_the_order_it_was_dragged_into() {
     assert_eq!(
         order(&app).await,
         vec![third, second, first],
-        "unplaced, the list is newest first",
+        "nobody having dragged anything, the list is newest first",
     );
 
-    place(&app, &[second, first, third]).await;
+    // The top card dropped between the two under it, which is one row moving and
+    // so one request naming one Conversation.
+    rank(&app, third, Some(second)).await;
 
     assert_eq!(
         order(&app).await,
-        vec![second, first, third],
+        vec![second, third, first],
         "and afterwards it is where the human put it — which is what a reload, a \
          restart and a second device each read",
     );
+
+    // And the same row again, this time to the top, which is the drop with no
+    // row to name.
+    rank(&app, first, None).await;
+
+    assert_eq!(order(&app).await, vec![first, second, third]);
 }
 
-/// The one row nobody could have placed, because it did not exist when they
-/// dragged. Above the order rather than at the end of it: it is where the work
-/// they just started will be looked for.
+/// The one row nobody could have dragged, because it did not exist when they
+/// did. Above the order rather than at the end of it: it is where the work they
+/// just started will be looked for, and it is there because a start ranks it
+/// there rather than because the list makes a case of it.
 #[tokio::test]
 async fn a_conversation_started_after_the_order_lands_at_the_top() {
     let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
     let first = started(&app, repo_id).await;
     let second = started(&app, repo_id).await;
 
-    place(&app, &[first, second]).await;
+    rank(&app, first, Some(second)).await;
     let third = started(&app, repo_id).await;
 
-    assert_eq!(order(&app).await, vec![third, first, second]);
+    assert_eq!(order(&app).await, vec![third, second, first]);
 }
 
-/// A viewer sends the list it drew, and a row can be gone by the time it lands.
+/// A viewer sends the list it drew, and the row it names as a neighbour can be
+/// gone by the time it lands. There is nothing left to rank against, so the list
+/// stays as the rest of it says rather than the drag being refused.
 #[tokio::test]
-async fn an_order_naming_a_conversation_that_is_not_there_is_still_taken() {
+async fn a_neighbour_that_is_not_there_is_still_taken() {
     let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
     let first = started(&app, repo_id).await;
     let second = started(&app, repo_id).await;
 
-    place(&app, &[second, 9_999, first]).await;
+    rank(&app, first, Some(9_999)).await;
 
     assert_eq!(order(&app).await, vec![second, first]);
+}
+
+/// A card let go at the top of the list, which is the one drop with no row to
+/// name: the key minted is outside the range rather than between two of them.
+#[tokio::test]
+async fn a_row_dropped_at_the_top_is_ranked_above_everything() {
+    let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let first = started(&app, repo_id).await;
+    let second = started(&app, repo_id).await;
+    let third = started(&app, repo_id).await;
+
+    rank(&app, first, None).await;
+
+    assert_eq!(order(&app).await, vec![first, third, second]);
+    assert!(
+        rank_of(&app, first).await < rank_of(&app, third).await,
+        "the row that moved is above the one that was the top",
+    );
+}
+
+/// And one let go at the foot, which is the other end of the same thing: the row
+/// it lands under is the last one there is, so there is nothing under the gap.
+#[tokio::test]
+async fn a_row_dropped_at_the_foot_is_ranked_below_everything() {
+    let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let first = started(&app, repo_id).await;
+    let second = started(&app, repo_id).await;
+    let third = started(&app, repo_id).await;
+
+    rank(&app, third, Some(first)).await;
+
+    assert_eq!(order(&app).await, vec![second, first, third]);
+    assert!(
+        rank_of(&app, third).await > rank_of(&app, first).await,
+        "the row that moved is under the one that was the foot",
+    );
+}
+
+/// The drop everything else is a special case of: the key minted sorts between
+/// its two neighbours **with the suffixes on**, which is what the separator is
+/// there to buy — the arithmetic never sees a device, and the strings the
+/// database sorts always carry one.
+#[tokio::test]
+async fn a_row_dropped_between_two_sorts_between_them() {
+    let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let first = started(&app, repo_id).await;
+    let second = started(&app, repo_id).await;
+    let third = started(&app, repo_id).await;
+
+    rank(&app, third, Some(second)).await;
+
+    assert_eq!(order(&app).await, vec![second, third, first]);
+
+    let moved = rank_of(&app, third).await;
+
+    assert!(
+        rank_of(&app, second).await < moved && moved < rank_of(&app, first).await,
+        "the minted rank sorts between its neighbours, suffixes and all: {moved}",
+    );
+}
+
+/// A row dropped where it already is has to be a row that has not moved. It is
+/// its own neighbour's neighbour, and a key minted between a row and itself is
+/// one the arithmetic has nothing to compute — so the row that moved is left out
+/// of the search for the rank under the gap.
+#[tokio::test]
+async fn a_row_dropped_where_it_already_sits_stays_there() {
+    let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let first = started(&app, repo_id).await;
+    let second = started(&app, repo_id).await;
+    let third = started(&app, repo_id).await;
+
+    rank(&app, second, Some(third)).await;
+
+    assert_eq!(order(&app).await, vec![third, second, first]);
+}
+
+/// Two drops into one gap in quick succession are two ranks rather than one key
+/// minted twice: the mint is read, computed and written under one lock — see the
+/// server's `ranking` module.
+#[tokio::test]
+async fn two_drops_into_one_gap_mint_two_ranks() {
+    let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let first = started(&app, repo_id).await;
+    let second = started(&app, repo_id).await;
+    let third = started(&app, repo_id).await;
+    let fourth = started(&app, repo_id).await;
+
+    // Both of them dropped under the same row, at once — which is the press
+    // made twice before either answer has come back.
+    let (one, other) = tokio::join!(
+        dropped(&app, first, Some(fourth)),
+        dropped(&app, second, Some(fourth)),
+    );
+
+    assert_eq!(one.0, StatusCode::NO_CONTENT, "{}", one.1);
+    assert_eq!(other.0, StatusCode::NO_CONTENT, "{}", other.1);
+
+    assert_ne!(
+        rank_of(&app, first).await,
+        rank_of(&app, second).await,
+        "two drops into one gap are two ranks",
+    );
+    assert_eq!(
+        order(&app).await.len(),
+        4,
+        "and the list is still the four rows it was",
+    );
+    assert_eq!(
+        order(&app).await[0],
+        fourth,
+        "under the row they were dropped under"
+    );
+    assert_eq!(order(&app).await[3], third);
+}
+
+/// An id out of a URL, which is not always a number — and the rank a hub writes
+/// is a PUT under the Conversation, so it has one to parse like every other row
+/// does.
+#[tokio::test]
+async fn ranking_something_that_is_not_a_conversation_is_not_found() {
+    let (_elsewhere, _dir, app, _repo, _repo_id) = workbench().await;
+
+    let (status, _) = fetch(
+        &app,
+        Request::builder()
+            .method("PUT")
+            .uri("/api/ui/conversations/nonsense/rank")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&serde_json::json!({ "rank": "a0-whoever" })).unwrap(),
+            ))
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+/// And the rank a hub minted, put straight onto the row it was minted for. The
+/// other half of a drag's sentence, which is what a member is told over the
+/// Relay and what this device is told by its own mint.
+#[tokio::test]
+async fn a_rank_stated_is_the_rank_the_row_comes_back_with() {
+    let (_elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let first = started(&app, repo_id).await;
+    let second = started(&app, repo_id).await;
+
+    let under_them = format!(
+        "z0-{}",
+        rank_of(&app, first).await.split_once('-').unwrap().1
+    );
+
+    let (status, body) = fetch(
+        &app,
+        Request::builder()
+            .method("PUT")
+            .uri(format!("/api/ui/conversations/{second}/rank"))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&serde_json::json!({ "rank": under_them })).unwrap(),
+            ))
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+    assert_eq!(rank_of(&app, second).await, under_them);
+    assert_eq!(order(&app).await, vec![first, second]);
 }
 
 /// A claude dir and config file pair inside `elsewhere`, so a Profile saved from
@@ -1637,6 +1857,26 @@ async fn steer_into(app: &Router, id: i64, target: &str, interrupt: bool) -> Con
         app,
         &format!("/api/ui/conversations/{id}/steer/submit"),
         &serde_json::json!({ "target": target, "interrupt": interrupt }),
+    )
+    .await
+}
+
+/// And the submit that confirms one a submit before it stopped over: the
+/// Conversations whose uncommitted changes may go with the close that makes way.
+async fn steer_into_confirming(
+    app: &Router,
+    id: i64,
+    target: &str,
+    discarding: &[i64],
+) -> ConversationSteered {
+    post(
+        app,
+        &format!("/api/ui/conversations/{id}/steer/submit"),
+        &serde_json::json!({
+            "target": target,
+            "interrupt": false,
+            "discarding": discarding,
+        }),
     )
     .await
 }
@@ -2473,7 +2713,18 @@ async fn starting_is_refused_when_a_chosen_profiles_pair_has_gone() {
     std::fs::remove_dir_all(elsewhere.path().join("fable")).unwrap();
 
     assert!(!opened(&app, id).await.ready_to_grill);
-    assert_eq!(grill(&app, id).await, GrillingStarted::ProfileBroken);
+
+    // Named rather than lumped: the refusal carries what the Profile's own row
+    // carries, so the sentence at the press is the sentence the row is already
+    // showing.
+    assert_eq!(
+        grill(&app, id).await,
+        GrillingStarted::ProfileBroken(ProfileTrouble {
+            broken: Broken::DirMissing,
+            agent_type: AgentType::Claude,
+            device: None,
+        }),
+    );
 }
 
 /// The Brief is what the grilling starts from, and freezing an empty one would
@@ -7136,15 +7387,20 @@ async fn the_stage_list_opens_as_every_stage_brief_it_names() {
     assert_eq!(
         pane.stages
             .iter()
-            .map(|stage| (stage.number.as_str(), stage.title.as_str(), stage.done))
+            .map(|stage| (
+                stage.number.as_str(),
+                stage.title.as_str(),
+                stage.state.clone()
+            ))
             .collect::<Vec<_>>(),
         [
-            ("01", "Workbench", true),
-            ("02", "Grilling", true),
-            ("03", "Implementation", false),
-            ("04", "Wrap-up", false),
+            ("01", "Workbench", StageState::Done),
+            ("02", "Grilling", StageState::Done),
+            ("03", "Implementation", StageState::ToDo),
+            ("04", "Wrap-up", StageState::ToDo),
         ],
-        "the roadmap's own order, which is the order they get worked in",
+        "the roadmap's own order, which is the order they get worked in — and off \
+         its boxes, nothing here having started a stage of it",
     );
 
     // A stage's brief stays where it is for ever, so a done stage has its
@@ -7170,6 +7426,55 @@ async fn the_stage_list_opens_as_every_stage_brief_it_names() {
     // says in words rather than drawing a gap.
     assert_eq!(pane.stages[1].html, None);
     assert_eq!(pane.stages[3].html, None);
+
+    // And nothing on any of them about what it stands on, this being a roadmap
+    // whose lines declare nothing — which is every roadmap written before there
+    // was anything to declare, and is a roadmap run in order.
+    assert!(
+        pane.stages
+            .iter()
+            .all(|stage| stage.stands_on.is_none() && stage.platform.is_none()),
+        "an undeclared roadmap reads exactly as it did: {:?}",
+        pane.stages,
+    );
+}
+
+/// And a roadmap that declares hands the pane what each stage stands on and the
+/// platform it wants, read off the line rather than out of the brief.
+///
+/// Every line of it declares, because a roadmap declaring on some lines and not
+/// others is one nothing will run — and stage 03's line declares beside the
+/// annotation saying whose it is, the two sharing one tail.
+#[tokio::test]
+async fn a_declaring_roadmap_says_what_each_stage_stands_on() {
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
+    grill(&app, id).await;
+
+    let worktree = PathBuf::from(opened(&app, id).await.worktree.unwrap().path);
+    staged(&worktree, "mvp", DECLARING, &[]);
+
+    let pane = roadmap_pane(&app, id, "mvp").await;
+
+    assert_eq!(
+        pane.stages
+            .iter()
+            .map(|stage| (
+                stage.number.as_str(),
+                stage.stands_on.clone(),
+                stage.platform.as_deref(),
+            ))
+            .collect::<Vec<_>>(),
+        [
+            // `no dependencies`: the root, which comes over as the empty list.
+            ("01", Some(Vec::new()), None),
+            ("02", Some(vec!["01".to_owned()]), None),
+            // Beside the annotation, which neither reading trips on.
+            ("03", Some(vec!["01".to_owned(), "02".to_owned()]), None),
+            ("04", Some(vec!["03".to_owned()]), Some("windows")),
+        ],
+        "the labels as the roadmap writes them, and the platform as it named it",
+    );
 }
 
 /// The ways there is nothing to open, refused the same way: what the human would
@@ -7284,6 +7589,78 @@ Turns this askance clone into Verkstead.
 - [x] 02: Grilling — [brief](02-grilling.md)
 - [ ] 03: Implementation — [brief](03-implementation.md)
 - [ ] 04: Wrap-up — [brief](04-wrap-up.md)
+";
+
+/// The same roadmap with every line declaring, which is what one written since
+/// ADR-0021 looks like: what each stage stands on, a platform where it wants
+/// one, and one line whose tail carries a declaration and the in-flight
+/// annotation at once.
+const DECLARING: &str = "\
+# MVP roadmap
+
+Turns this askance clone into Verkstead.
+
+## Stages
+
+- [x] 01: Workbench — [brief](01-workbench.md) — no dependencies
+- [x] 02: Grilling — [brief](02-grilling.md) — after 01
+- [ ] 03: Implementation — [brief](03-implementation.md) — after 01, 02 \
+*(in progress: `roadmaps/mvp/03-implementation`)*
+- [ ] 04: Wrap-up — [brief](04-wrap-up.md) — after 03 — on windows
+";
+
+/// And the same roadmap with nothing ticked at all, which is what a repository
+/// holds while the stage that would tick the first box is still on its own branch.
+///
+/// Verkstead's own record is the only thing that can say a stage of this one is
+/// done, which is what makes it the roadmap the record is read for.
+const NONE_TICKED: &str = "\
+# MVP roadmap
+
+Turns this askance clone into Verkstead.
+
+## Stages
+
+- [ ] 01: Workbench — [brief](01-workbench.md)
+- [ ] 02: Grilling — [brief](02-grilling.md)
+";
+
+/// And the same roadmap declaring badly: stage 04's line says nothing after its
+/// link while the three above it do.
+///
+/// The first of the judgement's four faults, and the one a human writing a
+/// roadmap by hand actually makes — a bare line is a root and a forgotten
+/// declaration at once, and there is no telling which. Which fault it is does not
+/// matter to anything here: what is being asked is whether a refusal reaches the
+/// press with its own words on it, and the judgement has already been tested on
+/// all four.
+const MISDECLARED: &str = "\
+# MVP roadmap
+
+Turns this askance clone into Verkstead.
+
+## Stages
+
+- [x] 01: Workbench — [brief](01-workbench.md) — no dependencies
+- [x] 02: Grilling — [brief](02-grilling.md) — after 01
+- [ ] 03: Implementation — [brief](03-implementation.md) — after 02
+- [ ] 04: Wrap-up — [brief](04-wrap-up.md)
+";
+
+/// And a declaring roadmap with two stages standing on nothing, which is the
+/// shape the scheduler is for: 01 and 02 are both ready from the start, 03 stands
+/// on 02 and 04 waits for both 01 and 03.
+const TWO_ROOTS: &str = "\
+# MVP roadmap
+
+Turns this askance clone into Verkstead.
+
+## Stages
+
+- [ ] 01: Workbench — [brief](01-workbench.md) — no dependencies
+- [ ] 02: Grilling — [brief](02-grilling.md) — no dependencies
+- [ ] 03: Implementation — [brief](03-implementation.md) — after 02
+- [ ] 04: Wrap-up — [brief](04-wrap-up.md) — after 01, 03
 ";
 
 /// And with that stage ticked off, which is what the stage after it leaves.
@@ -7578,6 +7955,28 @@ async fn ready_to_adopt(app: &Router, elsewhere: &Path, repo_id: i64, name: &str
     choose(app, id, "grilling", grilling).await;
     choose(app, id, "implementation", implementation).await;
     choose(app, id, "review", review).await;
+
+    id
+}
+
+/// The same for a second adoption on the same workbench: a Profile's name is
+/// taken once it is saved, so this one chooses the three that are already there.
+async fn ready_to_adopt_again(app: &Router, repo_id: i64, name: &str) -> i64 {
+    let id = adopting(app, repo_id, name).await;
+
+    let profiles: Vec<verkstead_render::ProfileEntry> = get(app, "/api/ui/profiles").await;
+
+    let saved = |wanted: &str| {
+        profiles
+            .iter()
+            .find(|profile| profile.name.as_deref() == Some(wanted))
+            .expect("the Profiles of the first adoption are still saved")
+            .id
+    };
+
+    choose(app, id, "grilling", saved("fable")).await;
+    choose(app, id, "implementation", saved("opus")).await;
+    choose(app, id, "review", saved("haiku")).await;
 
     id
 }
@@ -8470,7 +8869,8 @@ async fn steering_a_closed_conversation_checks_its_companions_out_again() {
 
 /// The whole of what pressing Adopt does: the stage's own branch off the base
 /// commit, a worktree with it, the stage brief as the Brief, and a Conversation
-/// that is implementing the stage.
+/// that is implementing the stage — with which stage of which roadmap it is on
+/// the record, which is the fact the human settled by pressing this.
 #[tokio::test]
 async fn adopting_starts_the_stage_on_its_own_branch_off_the_base_commit() {
     let (elsewhere, dir, app, repo, repo_id) = workbench().await;
@@ -8521,6 +8921,21 @@ async fn adopting_starts_the_stage_on_its_own_branch_off_the_base_commit() {
         worktree
             .join("docs/roadmaps/mvp/03-implementation.md")
             .exists()
+    );
+
+    // And the record says which stage of which roadmap this is — the label as
+    // the roadmap's own line writes it, rather than anything read back off the
+    // branch above.
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        store::stage_roadmap(&pool, id).await.unwrap(),
+        Some(store::StageOf {
+            roadmap: "mvp".to_owned(),
+            stage: Some("03".to_owned()),
+        }),
     );
 }
 
@@ -8654,6 +9069,294 @@ async fn a_companion_adoption_cannot_deliver_refuses_the_press_by_name() {
         worktrees(&askance).len(),
         1,
         "only the companion repository itself",
+    );
+}
+
+/// *Continue a roadmap* starts **every** stage of it that is ready, not the
+/// lowest of them: the first becomes the Conversation the human composed and the
+/// rest start beside it, each as a Conversation of its own.
+///
+/// The press stands in for whatever would otherwise have started them, so what it
+/// starts is what a settle would have — and everything the human settled on the
+/// composer is settled for all of them at once: the same Pairings, the same
+/// companions and the same base commit.
+#[tokio::test]
+async fn adopting_a_declaring_roadmap_starts_every_stage_that_is_ready() {
+    let (elsewhere, dir, app, repo, repo_id) = workbench().await;
+    roadmap(&repo, TWO_ROOTS, &["01-workbench.md", "02-grilling.md"]);
+    let tip = git(&repo, &["rev-parse", "HEAD"]).trim().to_owned();
+
+    let alongside = second_repo(&app, elsewhere.path(), "askance").await;
+    let id = ready_to_adopt(&app, elsewhere.path(), repo_id, "mvp").await;
+
+    add_companion(&app, id, alongside).await;
+
+    // The pane names both of them before the press, which is the whole of what
+    // makes the press honest: what is offered is what pressing does.
+    let pane = opened(&app, id)
+        .await
+        .adopting
+        .expect("this Conversation is adopting one");
+
+    assert_eq!(stage_of(&opened(&app, id).await).label, "01");
+    assert_eq!(
+        pane.beside
+            .iter()
+            .map(|stage| (stage.label.as_str(), stage.branch.as_str()))
+            .collect::<Vec<_>>(),
+        [("02", "roadmaps/mvp/02-grilling")],
+    );
+
+    assert_eq!(press_adopt(&app, id).await, Adopted::Adopted);
+
+    // The lowest is this Conversation, exactly as it has always been.
+    let first = opened(&app, id).await;
+
+    assert_eq!(first.branch, "roadmaps/mvp/01-workbench");
+    assert_eq!(first.state, Lifecycle::Implementing);
+
+    // And the other is a Conversation of its own, on its own branch.
+    let second = sidebar(&app)
+        .await
+        .into_iter()
+        .find(|entry| entry.branch == "roadmaps/mvp/02-grilling")
+        .expect("stage 02 started beside it");
+
+    let beside = opened(&app, second.id).await;
+
+    assert_eq!(beside.state, Lifecycle::Implementing);
+    assert_eq!(beside.repo.id, repo_id);
+
+    // The same base the human settled on the composer, which is the one act that
+    // settled it for both.
+    assert_eq!(beside.base_commit.as_deref(), Some(tip.as_str()));
+    assert_eq!(first.base_commit, beside.base_commit);
+    assert_eq!(
+        git(&repo, &["rev-parse", "refs/heads/roadmaps/mvp/02-grilling"]).trim(),
+        tip,
+    );
+
+    // The same Pairings, every one of them.
+    assert_eq!(beside.grilling_pairing, first.grilling_pairing);
+    assert_eq!(beside.implementation_pairing, first.implementation_pairing);
+    assert_eq!(beside.review_pairing, first.review_pairing);
+
+    // The same companions, checked out beside it rather than merely recorded.
+    assert_eq!(companions(&app, second.id).await, ["askance"]);
+    assert!(checked_out(&beside, "askance").starts_with(dir.path()));
+
+    // Its own Brief is its own stage's, read at the same commit.
+    assert!(brief(&beside).markdown.contains("02-grilling.md"));
+
+    // And the record says which stage of which roadmap each of them is.
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        store::stage_roadmap(&pool, second.id).await.unwrap(),
+        Some(store::StageOf {
+            roadmap: "mvp".to_owned(),
+            stage: Some("02".to_owned()),
+        }),
+    );
+
+    // The Conversation the human pressed on says so on its Timeline, that being
+    // where they were standing when it happened.
+    assert!(
+        notices(&opened(&app, id).await)
+            .iter()
+            .any(|notice| notice.contains("started beside it")),
+        "the press says what it started beside this one",
+    );
+}
+
+/// And a companion branch the human typed on the composer is the **first**
+/// stage's alone: the stages that start beside it mirror their own branches.
+///
+/// The rule a stage started by a settle has kept all along — two stages sharing
+/// one companion branch would be two review units on one branch with two pull
+/// requests fighting over it, and git would refuse the second checkout anyway. So
+/// what each of these is planned off is the row inheritance wrote for it rather
+/// than the row it was copied from.
+#[tokio::test]
+async fn a_typed_companion_branch_does_not_follow_the_stages_started_beside() {
+    let (elsewhere, _dir, app, repo, repo_id) = workbench().await;
+    roadmap(&repo, TWO_ROOTS, &["01-workbench.md", "02-grilling.md"]);
+
+    let writing = second_repo(&app, elsewhere.path(), "askance").await;
+    let id = ready_to_adopt(&app, elsewhere.path(), repo_id, "mvp").await;
+
+    add_companion(&app, id, writing).await;
+    companion_mode(&app, id, writing, CompanionMode::ReadWrite).await;
+    companion_branch(&app, id, writing, "alongside").await;
+
+    assert_eq!(press_adopt(&app, id).await, Adopted::Adopted);
+
+    // The stage the human composed gets the name they typed, as it always has.
+    let first = opened(&app, id).await;
+
+    assert_eq!(first.branch, "roadmaps/mvp/01-workbench");
+    assert_eq!(
+        git(
+            &checked_out(&first, "askance"),
+            &["symbolic-ref", "--short", "HEAD"]
+        )
+        .trim(),
+        "alongside",
+    );
+
+    // And the one started beside it mirrors its own, which is the only way both
+    // of them can have a companion checkout at all.
+    let second = sidebar(&app)
+        .await
+        .into_iter()
+        .find(|entry| entry.branch == "roadmaps/mvp/02-grilling")
+        .expect("stage 02 started beside it");
+
+    let beside = opened(&app, second.id).await;
+
+    assert_eq!(
+        git(
+            &checked_out(&beside, "askance"),
+            &["symbolic-ref", "--short", "HEAD"],
+        )
+        .trim(),
+        "roadmaps/mvp/02-grilling",
+    );
+    assert!(has_branch(
+        &elsewhere.path().join("askance"),
+        "roadmaps/mvp/02-grilling",
+    ));
+}
+
+/// A stage that cannot be started beside the adopted one is **said** on the
+/// Timeline the human pressed on, and leaves nothing behind.
+///
+/// Each start is its own act: the press has already succeeded for the stage they
+/// composed, so a sibling git will not cut a companion branch for halts itself
+/// and no more. And it is said, because the pane named it *and beside it* a
+/// moment ago — a stage that quietly never appeared, with the reason in the
+/// server log alone, is the one thing an offer that names its stages must not
+/// come to.
+#[tokio::test]
+async fn a_stage_that_cannot_start_beside_the_adopted_one_is_said_on_the_timeline() {
+    let (elsewhere, _dir, app, repo, repo_id) = workbench().await;
+    roadmap(&repo, TWO_ROOTS, &["01-workbench.md", "02-grilling.md"]);
+
+    let writing = second_repo(&app, elsewhere.path(), "askance").await;
+    let id = ready_to_adopt(&app, elsewhere.path(), repo_id, "mvp").await;
+
+    add_companion(&app, id, writing).await;
+    companion_mode(&app, id, writing, CompanionMode::ReadWrite).await;
+
+    // The branch stage 02 would mirror into the companion, already there. Stage
+    // 01's is free, so what this stops is the one start rather than the press.
+    let companion = elsewhere.path().join("askance");
+    git(&companion, &["branch", "roadmaps/mvp/02-grilling"]);
+
+    assert_eq!(press_adopt(&app, id).await, Adopted::Adopted);
+
+    // The stage the human composed started, its sibling's trouble being its own.
+    let first = opened(&app, id).await;
+
+    assert_eq!(first.branch, "roadmaps/mvp/01-workbench");
+    assert_eq!(first.state, Lifecycle::Implementing);
+
+    // And the halt is on the Timeline they were standing on, naming the stage,
+    // the repository it could not be given and what is in the way of it.
+    let said = notices(&first).join("\n");
+
+    assert!(
+        said.contains("Stage 02")
+            && said.contains("askance")
+            && said.contains("already a branch of that repository")
+            && said.contains("nothing was left behind"),
+        "which stage, which repository and what stopped it: {said:?}",
+    );
+
+    // Nothing left behind: the half-made row is closed rather than left drafting
+    // for somebody to find and wonder about — see `continuing::gave_up` — with
+    // nothing checked out under it, and no branch in the Repo the stage would
+    // have been worked in.
+    let halted = sidebar(&app)
+        .await
+        .into_iter()
+        .find(|entry| entry.branch == "roadmaps/mvp/02-grilling")
+        .expect("the half-made row is closed rather than gone");
+
+    let halted = opened(&app, halted.id).await;
+
+    assert_eq!(halted.state, Lifecycle::Closed);
+    assert_eq!(halted.worktree, None);
+    assert!(
+        !has_branch(&repo, "roadmaps/mvp/02-grilling"),
+        "and no branch in the Repo the stage would have been worked in",
+    );
+}
+
+/// And a roadmap with a stage in flight is continued for the ones that are
+/// ready: the guard that refused the whole roadmap for it has gone.
+///
+/// What that guard protected against — a second Conversation on a stage already
+/// under way — is still refused, by the record saying the stage is in flight and
+/// by its branch being taken.
+#[tokio::test]
+async fn a_roadmap_with_a_stage_in_flight_is_continued_for_the_one_that_is_ready() {
+    let (elsewhere, dir, app, repo, repo_id) = workbench().await;
+    roadmap(&repo, TWO_ROOTS, &["01-workbench.md", "02-grilling.md"]);
+
+    // One at a time to begin with, so the first press starts stage 01 and leaves
+    // 02 where it is — which is the roadmap this is about: one stage under way,
+    // and one standing on nothing beside it.
+    at_once(&dir, 1);
+
+    // Stage 01 under way: adopted a moment ago, which is the record saying so and
+    // its branch being cut in the one act.
+    let first = ready_to_adopt(&app, elsewhere.path(), repo_id, "mvp").await;
+    assert_eq!(press_adopt(&app, first).await, Adopted::Adopted);
+    assert_eq!(
+        opened(&app, first).await.branch,
+        "roadmaps/mvp/01-workbench"
+    );
+
+    // And the limit back to three, so that what holds 02 up now is only what the
+    // record says about 01 rather than the places the roadmap has.
+    at_once(&dir, 3);
+
+    // The roadmap is still offered, and for stage 02 alone — 01 is somebody's,
+    // and 03 and 04 stand on what has not settled.
+    let second = ready_to_adopt_again(&app, repo_id, "mvp").await;
+    let pane = opened(&app, second)
+        .await
+        .adopting
+        .expect("this Conversation is adopting one");
+
+    assert_eq!(
+        pane.stage.expect("stage 02 stands on nothing").label,
+        "02",
+        "the stage the press would start",
+    );
+    assert!(
+        pane.beside.is_empty(),
+        "and nothing beside it: 01 is under way and holding a place of its own",
+    );
+
+    assert_eq!(press_adopt(&app, second).await, Adopted::Adopted);
+
+    let view = opened(&app, second).await;
+
+    assert_eq!(view.branch, "roadmaps/mvp/02-grilling");
+    assert_eq!(view.state, Lifecycle::Implementing);
+
+    assert_eq!(
+        sidebar(&app)
+            .await
+            .iter()
+            .filter(|entry| entry.branch.starts_with("roadmaps/mvp/"))
+            .count(),
+        2,
+        "one Conversation per stage, and neither stage started twice",
     );
 }
 
@@ -9011,7 +9714,14 @@ async fn adopting_is_refused_when_a_chosen_profiles_pair_has_gone() {
     let id = ready_to_adopt(&app, elsewhere.path(), repo_id, "mvp").await;
     std::fs::remove_dir_all(elsewhere.path().join("fable")).unwrap();
 
-    assert_eq!(press_adopt(&app, id).await, Adopted::ProfileBroken);
+    assert_eq!(
+        press_adopt(&app, id).await,
+        Adopted::ProfileBroken(ProfileTrouble {
+            broken: Broken::DirMissing,
+            agent_type: AgentType::Claude,
+            device: None,
+        }),
+    );
     nothing_adopted(&app, id, &repo).await;
 }
 
@@ -9045,6 +9755,124 @@ async fn only_a_drafting_adopting_conversation_can_be_adopted() {
     );
 
     assert_eq!(worktrees(&repo).len(), 2, "the repository and one worktree");
+}
+
+/// Which stage of a roadmap the adoption offers comes off Verkstead's own record
+/// where it has one, and off the boxes where it has none — the same rule the
+/// carry-on joins the two readings by, asked here of a Repo nothing is checked out
+/// of, and read by all three places at once.
+///
+/// Nothing in this roadmap is ticked and nothing in it is annotated, which is what
+/// a repository holds while the stage that would tick the first box is still on
+/// its own branch: a stage ticks its own box in its own finish commit, and that
+/// commit rides on the stage's branch until its pull request merges.
+///
+/// So off the boxes alone the reading finds stage 01 open, finds its branch — cut
+/// by the adoption below — and refuses the whole roadmap: the effort that most
+/// needs carrying on is the one that offers nothing. Which is exactly what the
+/// record is here to fix.
+#[tokio::test]
+async fn the_record_is_what_says_which_stage_a_roadmap_has_left_to_adopt() {
+    let (elsewhere, _dir, app, repo, repo_id) = workbench().await;
+    roadmap(&repo, NONE_TICKED, &["01-workbench.md", "02-grilling.md"]);
+
+    // Stage 01 is adopted, which is what puts its label on the record: a branch of
+    // its own in the Repo, and a Conversation implementing that stage.
+    let first = ready_to_adopt(&app, elsewhere.path(), repo_id, "mvp").await;
+
+    assert_eq!(press_adopt(&app, first).await, Adopted::Adopted);
+    assert_eq!(
+        opened(&app, first).await.branch,
+        "roadmaps/mvp/01-workbench",
+    );
+
+    // In flight, and refused as in flight by the record itself — the roadmap on
+    // the default branch says nothing at all about stage 01, no tick and no
+    // annotation, so the branch was the only thing that ever knew.
+    let second = ready_to_adopt_again(&app, repo_id, "mvp").await;
+
+    assert_eq!(adopted_stage(&app, second).await, None);
+    assert!(
+        waiting(&app).await.is_empty(),
+        "and the Repo is holding nothing to adopt while somebody is on it",
+    );
+    assert_eq!(press_adopt(&app, second).await, Adopted::StageInFlight);
+
+    // And settled, which is the human's own say: a Conversation in Done is a stage
+    // whose work is finished, whether or not anybody has merged its branch.
+    assert_eq!(steer(&app, first).await, SteerOpened::Opened);
+    assert_eq!(
+        steer_into(&app, first, "Done", false).await,
+        ConversationSteered::Steered,
+    );
+    assert_eq!(opened(&app, first).await.state, Lifecycle::Done);
+
+    // The notice, the page and the press, all three off the one rule and all three
+    // naming stage 02 — with stage 01's box still unticked on the branch every one
+    // of them is reading.
+    assert_eq!(
+        waiting(&app)
+            .await
+            .iter()
+            .flat_map(|repo| repo.roadmaps.iter())
+            .map(|roadmap| (roadmap.name.as_str(), roadmap.stage.as_str()))
+            .collect::<Vec<_>>(),
+        [("mvp", "02")],
+    );
+    assert_eq!(adopted_stage(&app, second).await.as_deref(), Some("02"));
+    assert_eq!(press_adopt(&app, second).await, Adopted::Adopted);
+    assert_eq!(
+        opened(&app, second).await.branch,
+        "roadmaps/mvp/02-grilling",
+        "which is the stage the press started",
+    );
+
+    assert_eq!(
+        git(&repo, &["show", "main:docs/roadmaps/mvp/ROADMAP.md"]),
+        NONE_TICKED,
+        "and the boxes on the default branch never said any of it",
+    );
+}
+
+/// And a stage whose Conversation was closed before it ever wrapped up did not
+/// settle: it is on the record as abandoned, which says nothing about whether the
+/// stage is done, and what refuses it is the branch it left behind — exactly as it
+/// did before there was a record. Reopening abandoned work is nobody's business
+/// here, and the branch is the human's to look at.
+#[tokio::test]
+async fn a_stage_abandoned_part_way_through_is_refused_by_its_branch() {
+    let (elsewhere, _dir, app, repo, repo_id) = workbench().await;
+    roadmap(&repo, NONE_TICKED, &["01-workbench.md", "02-grilling.md"]);
+
+    let first = ready_to_adopt(&app, elsewhere.path(), repo_id, "mvp").await;
+
+    assert_eq!(press_adopt(&app, first).await, Adopted::Adopted);
+    assert_eq!(close(&app, first).await, ConversationClosed::Closed);
+
+    let second = ready_to_adopt_again(&app, repo_id, "mvp").await;
+
+    assert_eq!(adopted_stage(&app, second).await, None);
+    assert_eq!(
+        press_adopt(&app, second).await,
+        Adopted::BranchExists,
+        "stage 01 is still what is next, and `roadmaps/mvp/01-workbench` is still there",
+    );
+}
+
+/// What stage an adopting Conversation's page names, where it names one.
+async fn adopted_stage(app: &Router, id: i64) -> Option<String> {
+    opened(app, id)
+        .await
+        .adopting
+        .expect("this Conversation is adopting a roadmap")
+        .stage
+        .map(|stage| stage.label)
+}
+
+/// And the notice under the new-conversation box: the registered Repos holding
+/// roadmaps nothing is driving.
+async fn waiting(app: &Router) -> Vec<AbandonedRepo> {
+    get(app, "/api/ui/abandoned-roadmaps").await
 }
 
 /// A branch that was there when the human picked it can be gone by the time the
@@ -9182,6 +10010,72 @@ async fn adopting_is_refused_by_name_for_each_way_the_stage_has_gone() {
     assert_eq!(press_adopt(&app, id).await, Adopted::Adopted);
 }
 
+/// A roadmap that declares badly is refused at all three doors of the adoption:
+/// the notice offers nothing, the page names no stage, and the press says which
+/// line to go and fix.
+///
+/// The press is the one of the three with a human waiting on an answer, and a
+/// roadmap written by hand or by the old tools — which is what adoption is for —
+/// is the likeliest to declare badly. So it names the fault where the press was
+/// made rather than leaving it on a Timeline nobody has opened, and the sentence
+/// it names it in is the judgement's own: the same words `verkstead done` refuses
+/// the roadmap's own session in, and the same words a running roadmap leaves on a
+/// Timeline. One fault reads as one fault wherever the human meets it.
+///
+/// Refused rather than repaired, and never run in order instead — which would
+/// run a roadmap in a way nobody wrote down.
+#[tokio::test]
+async fn adopting_a_roadmap_that_declares_badly_is_refused_with_the_fault_named() {
+    let (elsewhere, _dir, app, repo, repo_id) = workbench().await;
+    roadmap(
+        &repo,
+        MISDECLARED,
+        &["03-implementation.md", "04-wrap-up.md"],
+    );
+
+    // The notice under the new-conversation box has nothing to say about this
+    // Repo, and neither has the compose page beside it — they are one reading, so
+    // they offer the same nothing. The human cannot press what would be refused.
+    assert_eq!(
+        waiting(&app).await,
+        Vec::new(),
+        "nothing of a roadmap that declares badly is offered",
+    );
+
+    let id = ready_to_adopt(&app, elsewhere.path(), repo_id, "mvp").await;
+
+    // Nor does the page the press is actually on, which reads the roadmap afresh
+    // at this Conversation's own base.
+    assert_eq!(
+        opened(&app, id)
+            .await
+            .adopting
+            .expect("this Conversation is adopting a roadmap")
+            .stage,
+        None,
+        "the adopting page names no stage off it either",
+    );
+
+    let refused = press_adopt(&app, id).await;
+
+    let Adopted::Misdeclared { why } = &refused else {
+        panic!("the press is where the fault is worth wording, got {refused:?}");
+    };
+
+    assert!(
+        why.contains("mvp") && why.contains("04"),
+        "which roadmap, and which line to go and read: {why:?}",
+    );
+
+    nothing_adopted(&app, id, &repo).await;
+
+    // And the line put right is a roadmap the press starts, nothing here having
+    // refused a declaration for being one.
+    roadmap(&repo, DECLARING, &[]);
+
+    assert_eq!(press_adopt(&app, id).await, Adopted::Adopted);
+}
+
 /// Verkstead did not make the branch, so it will not take it over: what is on
 /// it is somebody's work, whatever the roadmap's boxes say.
 #[tokio::test]
@@ -9305,10 +10199,16 @@ async fn the_cheap_refusals_are_answered_before_the_ones_git_is_paid_for() {
 
 /// The press on a Draft holding a pull request, sent as its page sends it.
 async fn press_take_up(app: &Router, id: i64) -> TakenUp {
+    press_take_up_confirming(app, id, &[]).await
+}
+
+/// And the press that confirms one the last press stopped over: the Conversations
+/// whose uncommitted changes may go with the close that makes way.
+async fn press_take_up_confirming(app: &Router, id: i64, discarding: &[i64]) -> TakenUp {
     post(
         app,
         &format!("/api/ui/conversations/{id}/take-up"),
-        &serde_json::json!({}),
+        &serde_json::json!({ "discarding": discarding }),
     )
     .await
 }
@@ -10003,13 +10903,18 @@ async fn a_review_whose_head_branch_has_diverged_is_refused_by_name() {
     assert_eq!(press_take_up(&app, id).await, TakenUp::BranchDiverged);
     assert_eq!(opened(&app, id).await.state, Lifecycle::Draft);
 }
-
-/// And a pull request another Conversation is already on is refused naming that
-/// Conversation: there is one Conversation per piece of work, so the way on is
-/// the one that has it rather than a second wrap-up over the same branch.
+/// And a pull request another Conversation is still at work on is refused naming
+/// that Conversation: there is one *open* Conversation per pull request, so the
+/// way on is the one that has it rather than a second wrap-up over the same
+/// branch.
+///
+/// Still at work being everything that is neither Done nor Closed — see ADR-0020,
+/// *One open Conversation per pull request*. The holder here is Wrapping, which is
+/// where a take-up leaves one, and two live wrap-ups pushing to one branch is
+/// exactly what this refusal is for. Nothing about the holder moves.
 #[cfg(unix)]
 #[tokio::test]
-async fn a_review_over_a_pull_request_another_conversation_holds_leads_there() {
+async fn a_review_over_a_pull_request_another_conversation_is_at_work_on_leads_there() {
     let (elsewhere, _dir, app, repo, upstream, repo_id) = workbench_reviewing().await;
     head_on_origin(&upstream, "rate-limiting");
     opened_on_github(&repo, 41, "rate-limiting");
@@ -10032,20 +10937,30 @@ async fn a_review_over_a_pull_request_another_conversation_holds_leads_there() {
     );
     assert_eq!(opened(&app, second).await.state, Lifecycle::Draft);
     assert_eq!(opened(&app, second).await.worktree, None);
+
+    let holder = opened(&app, first).await;
+
+    assert_eq!(
+        holder.state,
+        Lifecycle::Wrapping,
+        "and the Conversation that has it is exactly where the press found it",
+    );
+    assert!(
+        holder.worktree.is_some(),
+        "with the checkout it was working in still its own",
+    );
 }
 
-/// And so is a *branch* whose pull request another Conversation is on, which is
-/// the same refusal reached by the other name.
+/// And so is a *branch* whose pull request another Conversation is still at work
+/// on, which is the same refusal reached by the other name.
 ///
-/// The one that matters most, because it is the one `settled` cannot catch: a
-/// Conversation that finished with a pull request and was Closed has let go of its
-/// worktree and kept its branch, so nothing is standing on the name — and the
-/// `submitting` session a branch take-up sends is told by its own skill that a
-/// pull request already on the branch is the job done. Unasked, naming the branch
-/// would be the way round this refusal rather than a case it does not cover.
+/// A branch is the other name for the same piece of work: the `submitting`
+/// session a branch take-up sends is told by its own skill that a pull request
+/// already on the branch *is the job done*, so naming the branch would otherwise
+/// be the way round the rule rather than a case it covers.
 #[cfg(unix)]
 #[tokio::test]
-async fn a_review_over_a_branch_another_conversation_has_a_pull_request_on_leads_there() {
+async fn a_review_over_a_branch_another_conversation_is_at_work_on_leads_there() {
     let (elsewhere, _dir, app, repo, upstream, repo_id) = workbench_reviewing().await;
     head_on_origin(&upstream, "rate-limiting");
     opened_on_github(&repo, 41, "rate-limiting");
@@ -10053,32 +10968,13 @@ async fn a_review_over_a_branch_another_conversation_has_a_pull_request_on_leads
     let implementation = profile(&app, elsewhere.path(), "opus").await;
     let review = profile(&app, elsewhere.path(), "haiku").await;
 
-    // The first Conversation takes the pull request up by number and is closed,
-    // which is what leaves the branch standing with nobody on it: the worktree
-    // goes with the close and the record of the pull request does not.
     let first =
         ready_to_review_under(&app, repo_id, "Wrap #41 up.\n", implementation, review).await;
     assert_eq!(press_take_up(&app, first).await, TakenUp::TakenUp);
 
-    assert_eq!(close(&app, first).await, ConversationClosed::Closed);
-
     // And the second is pointed at the *branch*, which names the same piece of
     // work without ever saying the number.
-    let second = started(&app, repo_id).await;
-    assert_eq!(
-        pick_process(&app, second, Process::Review).await,
-        ProcessPicked::Picked,
-    );
-    assert_eq!(
-        write_brief(&app, second, "Give the limiter branch a read.\n").await,
-        BriefSaved::Saved,
-    );
-    choose(&app, second, "implementation", implementation).await;
-    choose(&app, second, "review", review).await;
-    assert_eq!(
-        name_target(&app, second, "rate-limiting").await,
-        TargetRecorded::Recorded,
-    );
+    let second = pointed_at_the_branch(&app, repo_id, implementation, review).await;
 
     assert_eq!(
         press_take_up(&app, second).await,
@@ -10087,7 +10983,889 @@ async fn a_review_over_a_branch_another_conversation_has_a_pull_request_on_leads
         },
         "the branch is the pull request, and the way on is the Conversation on it",
     );
-    nothing_taken_up(&app, second, &repo).await;
+    assert_eq!(opened(&app, second).await.state, Lifecycle::Draft);
+    assert_eq!(opened(&app, first).await.state, Lifecycle::Wrapping);
+}
+
+/// A Review over a pull request whose Conversation has *finished* with it closes
+/// that Conversation and takes the pull request up: one open Conversation per
+/// pull request, open being neither Done nor Closed.
+///
+/// Which is the whole point of the rule being about open Conversations. Every
+/// pull request Verkstead opens is some Conversation's from the moment it is
+/// opened, so before this a Review could not be pointed at anything Verkstead had
+/// built.
+///
+/// **And the close is the ordinary Close**, so the holder comes out of it Closed
+/// with its Worktree given back — which is also what lets this take-up happen at
+/// all: a Done Conversation keeps its checkout, and git holds one checkout per
+/// branch.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_review_over_a_finished_conversations_pull_request_closes_it_and_takes_it_up() {
+    let (elsewhere, _dir, app, repo, upstream, repo_id) = workbench_reviewing().await;
+    head_on_origin(&upstream, "rate-limiting");
+    opened_on_github(&repo, 41, "rate-limiting");
+
+    let implementation = profile(&app, elsewhere.path(), "opus").await;
+    let review = profile(&app, elsewhere.path(), "haiku").await;
+
+    let first =
+        ready_to_review_under(&app, repo_id, "Wrap #41 up.\n", implementation, review).await;
+    assert_eq!(press_take_up(&app, first).await, TakenUp::TakenUp);
+    finished_with_it(&app, first).await;
+
+    let second = ready_to_review_under(
+        &app,
+        repo_id,
+        "Read the limiter again.\n#41\n",
+        implementation,
+        review,
+    )
+    .await;
+
+    assert_eq!(
+        press_take_up(&app, second).await,
+        TakenUp::TakenUp,
+        "the holder had finished with it, so it made way",
+    );
+
+    let holder = opened(&app, first).await;
+
+    assert_eq!(holder.state, Lifecycle::Closed);
+    assert_eq!(
+        holder.worktree, None,
+        "closed by the ordinary Close, so its checkout went with it",
+    );
+
+    let view = opened(&app, second).await;
+
+    assert_eq!(view.state, Lifecycle::Wrapping);
+    assert_eq!(view.branch, "rate-limiting");
+    assert!(view.worktree.is_some());
+
+    // And this Conversation's Timeline says what it closed, naming it by its
+    // branch the way the stack note names a neighbour's holder.
+    let said = notices(&view).join("\n");
+
+    assert!(
+        said.contains(
+            "The Conversation on <code>rate-limiting</code> had finished with this pull request"
+        ),
+        "the Timeline names the Conversation this start closed: {said}",
+    );
+}
+
+/// And a **Fix Merge Issues** the same, which is the press the rule was relaxed
+/// for: a red merge on work Verkstead built is a pull request some Conversation
+/// has, every time.
+///
+/// One role rather than two, and the wrap-up it lands in is the narrowed one —
+/// neither of which this changes. What is under test is that the holder's state is
+/// what the start turns on rather than which Process is pressing.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_fix_merge_issues_over_a_finished_conversations_pull_request_closes_it_too() {
+    let (elsewhere, _dir, app, repo, upstream, repo_id) = workbench_reviewing().await;
+    head_on_origin(&upstream, "rate-limiting");
+    opened_on_github(&repo, 41, "rate-limiting");
+
+    let implementation = profile(&app, elsewhere.path(), "opus").await;
+
+    let first = ready_to_fix_under(&app, repo_id, "Wrap #41 up.\n", implementation).await;
+    assert_eq!(press_take_up(&app, first).await, TakenUp::TakenUp);
+    finished_with_it(&app, first).await;
+
+    let second = ready_to_fix_under(&app, repo_id, "#41 will not merge.\n", implementation).await;
+
+    assert_eq!(press_take_up(&app, second).await, TakenUp::TakenUp);
+
+    assert_eq!(opened(&app, first).await.state, Lifecycle::Closed);
+    assert_eq!(opened(&app, first).await.worktree, None);
+
+    let view = opened(&app, second).await;
+
+    assert_eq!(view.state, Lifecycle::Wrapping);
+    assert_eq!(view.branch, "rate-limiting");
+}
+
+/// And the same over the *branch* the pull request is open on — which is the case
+/// that says lifting the refusal alone would not have been enough.
+///
+/// A Done Conversation keeps its Worktree, so the branch is checked out where it
+/// stands: unclosed, this take-up would be refused all over again as
+/// `CheckedOutElsewhere`, whichever name it was pointed at the work by. Naming the
+/// branch is the sharper half of it, because a branch is what `settled` reads and
+/// the number is not.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_review_over_the_branch_of_a_finished_conversations_pull_request_closes_it_too() {
+    let (elsewhere, _dir, app, repo, upstream, repo_id) = workbench_reviewing().await;
+    head_on_origin(&upstream, "rate-limiting");
+    opened_on_github(&repo, 41, "rate-limiting");
+
+    let implementation = profile(&app, elsewhere.path(), "opus").await;
+    let review = profile(&app, elsewhere.path(), "haiku").await;
+
+    let first =
+        ready_to_review_under(&app, repo_id, "Wrap #41 up.\n", implementation, review).await;
+    assert_eq!(press_take_up(&app, first).await, TakenUp::TakenUp);
+    finished_with_it(&app, first).await;
+
+    assert!(
+        opened(&app, first).await.worktree.is_some(),
+        "Done keeps its checkout, so the branch is standing in it",
+    );
+
+    let second = pointed_at_the_branch(&app, repo_id, implementation, review).await;
+
+    assert_eq!(press_take_up(&app, second).await, TakenUp::TakenUp);
+
+    assert_eq!(opened(&app, first).await.state, Lifecycle::Closed);
+    assert_eq!(opened(&app, first).await.worktree, None);
+
+    let view = opened(&app, second).await;
+
+    assert_eq!(view.state, Lifecycle::Wrapping);
+    assert_eq!(view.branch, "rate-limiting");
+    assert_eq!(
+        worktrees(&repo).len(),
+        2,
+        "the repository and this Conversation's own, the holder's having gone",
+    );
+
+    // And the Timeline names the pull request the holder gave up by its number.
+    // Not *this pull request*: a branch take-up records none of its own and has
+    // just said so, so the number is the only thing that says which one was
+    // finished with.
+    let said = notices(&view).join("\n");
+
+    assert!(
+        said.contains(
+            "The Conversation on <code>rate-limiting</code> had finished with pull request #41 on \
+             that branch"
+        ),
+        "the Timeline names what was given up, by its number: {said}",
+    );
+    assert!(
+        !said.contains("had finished with this pull request"),
+        "and not as this pull request, there being no pull request on this record to mean: {said}",
+    );
+}
+
+/// A holder that is Closed already — or Archived, which is a Closed Conversation
+/// off the sidebar — is passed over and left exactly as it was.
+///
+/// There is nothing to give up: the Worktree went with the close, and a Closed
+/// Conversation offers no presses over the pull request. So the take-up carries
+/// on, and it closes nothing — a second close would be a move on a record nothing
+/// had happened to.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_holder_that_is_closed_or_archived_is_passed_over_and_left_as_it_was() {
+    let (elsewhere, _dir, app, repo, upstream, repo_id) = workbench_reviewing().await;
+    head_on_origin(&upstream, "rate-limiting");
+    head_on_origin(&upstream, "retries");
+    opened_on_github(&repo, 41, "rate-limiting");
+    opened_on_github(&repo, 42, "retries");
+
+    let implementation = profile(&app, elsewhere.path(), "opus").await;
+    let review = profile(&app, elsewhere.path(), "haiku").await;
+
+    for (number, archive_it) in [(41, false), (42, true)] {
+        let first = ready_to_review_under(
+            &app,
+            repo_id,
+            &format!("Wrap #{number} up.\n"),
+            implementation,
+            review,
+        )
+        .await;
+        assert_eq!(press_take_up(&app, first).await, TakenUp::TakenUp);
+        assert_eq!(close(&app, first).await, ConversationClosed::Closed);
+
+        if archive_it {
+            assert_eq!(archive(&app, first).await, ConversationArchived::Archived);
+        }
+
+        let moved = opened(&app, first).await.timeline.len();
+
+        let second = ready_to_review_under(
+            &app,
+            repo_id,
+            &format!("Read #{number} again.\n"),
+            implementation,
+            review,
+        )
+        .await;
+
+        assert_eq!(
+            press_take_up(&app, second).await,
+            TakenUp::TakenUp,
+            "a finished holder with nothing to give up is nothing to refuse for",
+        );
+        assert_eq!(opened(&app, second).await.state, Lifecycle::Wrapping);
+
+        let holder = opened(&app, first).await;
+
+        assert_eq!(holder.state, Lifecycle::Closed);
+        assert_eq!(
+            holder.timeline.len(),
+            moved,
+            "and nothing happened to it: no second close on its Timeline",
+        );
+    }
+}
+
+/// Every state the holder's work is still in refuses the start and leads there,
+/// and nothing is closed and nothing is made.
+///
+/// Five of them, because *open* is everything that is neither Done nor Closed and
+/// a wrap-up's pull request can be on a Conversation in any of them: steered back
+/// into a second round, sent back to be built, wrapping up, followed up on, or
+/// being asked a question about. The state word is written by hand for the reason
+/// `corrupt_the_state` writes one — what is under test is the *reading*, and how a
+/// Conversation got where it is, is the steer's business and tested where the
+/// steer is.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_take_up_is_refused_by_every_state_the_holders_work_is_still_in() {
+    let (elsewhere, dir, app, repo, upstream, repo_id) = workbench_reviewing().await;
+    head_on_origin(&upstream, "rate-limiting");
+    opened_on_github(&repo, 41, "rate-limiting");
+
+    let implementation = profile(&app, elsewhere.path(), "opus").await;
+    let review = profile(&app, elsewhere.path(), "haiku").await;
+
+    let first =
+        ready_to_review_under(&app, repo_id, "Wrap #41 up.\n", implementation, review).await;
+    assert_eq!(press_take_up(&app, first).await, TakenUp::TakenUp);
+
+    for word in [
+        "grilling",
+        "implementing",
+        "wrapping",
+        "follow-up",
+        "investigating",
+    ] {
+        left_in(&dir, first, word).await;
+
+        let second =
+            ready_to_review_under(&app, repo_id, "Wrap #41 up too.\n", implementation, review)
+                .await;
+
+        assert_eq!(
+            press_take_up(&app, second).await,
+            TakenUp::AlreadyHeld {
+                conversation: first,
+            },
+            "a holder in {word} is still at work on it",
+        );
+        assert_eq!(opened(&app, second).await.state, Lifecycle::Draft);
+        assert_eq!(opened(&app, second).await.worktree, None);
+
+        assert_eq!(
+            stored_state(&dir, first).await,
+            word,
+            "and the holder is where it was: nothing was closed",
+        );
+        assert_eq!(
+            worktrees(&repo).len(),
+            2,
+            "and nothing was made: the repository and the holder's own",
+        );
+    }
+}
+
+/// And a start refused for its Profiles or its Target closes nothing, however
+/// finished the Conversation on the pull request it names is.
+///
+/// Which is why the cheap refusals come first and the record is asked who has the
+/// pull request last of all: nothing is closed for a press that was never going
+/// to start.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_start_refused_for_its_profiles_or_its_target_closes_nothing() {
+    let (elsewhere, _dir, app, repo, upstream, repo_id) = workbench_reviewing().await;
+    head_on_origin(&upstream, "rate-limiting");
+    opened_on_github(&repo, 41, "rate-limiting");
+
+    let implementation = profile(&app, elsewhere.path(), "opus").await;
+    let review = profile(&app, elsewhere.path(), "haiku").await;
+
+    let first =
+        ready_to_review_under(&app, repo_id, "Wrap #41 up.\n", implementation, review).await;
+    assert_eq!(press_take_up(&app, first).await, TakenUp::TakenUp);
+    finished_with_it(&app, first).await;
+
+    // A draft whose Target names that very pull request, which GitHub no longer
+    // has open: the Target is read and GitHub asked before the record is.
+    on_github(&repo, 41, "rate-limiting", "main", "MERGED", false);
+
+    let merged =
+        ready_to_review_under(&app, repo_id, "Wrap #41 up too.\n", implementation, review).await;
+
+    assert_eq!(
+        press_take_up(&app, merged).await,
+        TakenUp::NoSuchPullRequest { number: 41 },
+    );
+    assert_eq!(
+        opened(&app, first).await.state,
+        Lifecycle::Done,
+        "the Target is resolved before the record is asked who has the pull request",
+    );
+
+    // And one over the same pull request, open again, whose implementation
+    // Profile's pair has gone — which is the Profiles refusal that survives the
+    // Repo remembering a Pairing per role: what is missing is the account rather
+    // than the choice.
+    opened_on_github(&repo, 41, "rate-limiting");
+
+    let unready = ready_to_review_under(
+        &app,
+        repo_id,
+        "Wrap #41 up as well.\n",
+        implementation,
+        review,
+    )
+    .await;
+    std::fs::remove_dir_all(elsewhere.path().join("opus")).unwrap();
+
+    assert_eq!(
+        press_take_up(&app, unready).await,
+        TakenUp::ProfileBroken(ProfileTrouble {
+            broken: Broken::DirMissing,
+            agent_type: AgentType::Claude,
+            device: None,
+        }),
+    );
+    assert_eq!(
+        opened(&app, first).await.state,
+        Lifecycle::Done,
+        "and the Profiles are answered before it in turn",
+    );
+    assert!(opened(&app, first).await.worktree.is_some());
+}
+
+/// A Done holder with something uncommitted in its Worktree stops the press
+/// naming it, and nothing at all happens.
+///
+/// A close takes the Worktree away by force, so whatever was left uncommitted in
+/// it goes with it — the one thing making way costs that cannot be given back, and
+/// so the one thing the human is asked about. See ADR-0020.
+///
+/// Three kinds of change, because the reading is `verkstead done`'s: modified,
+/// staged, and untracked and not ignored. Each of them on its own is something to
+/// lose.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_finished_holder_with_uncommitted_changes_stops_the_press_naming_it() {
+    for change in [Change::Modified, Change::Staged, Change::Untracked] {
+        let (elsewhere, _dir, app, repo, upstream, repo_id) = workbench_reviewing().await;
+        head_on_origin(&upstream, "rate-limiting");
+        opened_on_github(&repo, 41, "rate-limiting");
+
+        let implementation = profile(&app, elsewhere.path(), "opus").await;
+        let review = profile(&app, elsewhere.path(), "haiku").await;
+
+        let first =
+            ready_to_review_under(&app, repo_id, "Wrap #41 up.\n", implementation, review).await;
+        assert_eq!(press_take_up(&app, first).await, TakenUp::TakenUp);
+        finished_with_it(&app, first).await;
+
+        let left = left_uncommitted(&app, first, change).await;
+
+        let second = ready_to_review_under(
+            &app,
+            repo_id,
+            "Read the limiter again.\n#41\n",
+            implementation,
+            review,
+        )
+        .await;
+
+        assert_eq!(
+            press_take_up(&app, second).await,
+            TakenUp::WouldDiscard {
+                uncommitted: vec![Uncommitted {
+                    conversation: first,
+                    branch: "rate-limiting".to_owned(),
+                }],
+            },
+            "a {change:?} file is something to lose, so the press stops and names who holds it",
+        );
+
+        let holder = opened(&app, first).await;
+
+        assert_eq!(
+            holder.state,
+            Lifecycle::Done,
+            "and the holder is exactly where the press found it",
+        );
+
+        let worktree = holder.worktree.expect("Done keeps its checkout");
+
+        assert!(!worktree.missing, "with the checkout still on disk");
+        assert!(
+            changed(Path::new(&worktree.path)).contains(&left),
+            "and what was uncommitted in it still uncommitted",
+        );
+
+        assert_eq!(opened(&app, second).await.state, Lifecycle::Draft);
+        assert_eq!(
+            opened(&app, second).await.worktree,
+            None,
+            "and nothing was made: the draft is still a draft",
+        );
+    }
+}
+
+/// And something uncommitted in a companion checkout the holder may write in
+/// stops it too.
+///
+/// The reading is `verkstead done`'s whole reading: what a session may write in is
+/// what is asked about, which is the Worktree and each read-write companion. A
+/// companion's worktree goes with the close exactly as the Conversation's own
+/// does, so what is uncommitted in one is just as lost.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_finished_holders_companion_checkout_stops_the_press_too() {
+    let (elsewhere, _dir, app, repo, upstream, repo_id) = workbench_reviewing().await;
+    head_on_origin(&upstream, "rate-limiting");
+    opened_on_github(&repo, 41, "rate-limiting");
+
+    let askance = second_repo(&app, elsewhere.path(), "askance").await;
+    let implementation = profile(&app, elsewhere.path(), "opus").await;
+    let review = profile(&app, elsewhere.path(), "haiku").await;
+
+    let first =
+        ready_to_review_under(&app, repo_id, "Wrap #41 up.\n", implementation, review).await;
+
+    assert_eq!(
+        add_companion(&app, first, askance).await,
+        CompanionAdded::Added,
+    );
+    assert_eq!(
+        companion_mode(&app, first, askance, CompanionMode::ReadWrite).await,
+        CompanionModeChosen::Chosen,
+    );
+
+    assert_eq!(press_take_up(&app, first).await, TakenUp::TakenUp);
+    finished_with_it(&app, first).await;
+
+    // The Conversation's own checkout is clean, and the companion's is not: it is
+    // the companion alone that stops this.
+    let companion = only_companion(&app, first)
+        .await
+        .worktree
+        .expect("the take-up checked it out beside the work");
+
+    std::fs::write(
+        Path::new(&companion.path).join("notes.md"),
+        "half a thought\n",
+    )
+    .unwrap();
+
+    let second = ready_to_review_under(
+        &app,
+        repo_id,
+        "Read the limiter again.\n#41\n",
+        implementation,
+        review,
+    )
+    .await;
+
+    assert_eq!(
+        press_take_up(&app, second).await,
+        TakenUp::WouldDiscard {
+            uncommitted: vec![Uncommitted {
+                conversation: first,
+                branch: "rate-limiting".to_owned(),
+            }],
+        },
+    );
+    assert_eq!(opened(&app, first).await.state, Lifecycle::Done);
+
+    // And the press that confirms it goes ahead, companion checkout and all.
+    assert_eq!(
+        press_take_up_confirming(&app, second, &[first]).await,
+        TakenUp::TakenUp,
+    );
+    assert_eq!(opened(&app, first).await.state, Lifecycle::Closed);
+}
+
+/// The second press names what the first one stopped over, and that one closes
+/// the holder and takes the pull request up.
+///
+/// Which is the whole of what the asking is: a question with two answers, and the
+/// second press is the yes. Nothing about it is a different start — it is the same
+/// take-up with the losses agreed to.
+#[cfg(unix)]
+#[tokio::test]
+async fn the_second_press_closes_the_holder_and_takes_the_pull_request_up() {
+    let (elsewhere, _dir, app, repo, upstream, repo_id) = workbench_reviewing().await;
+    head_on_origin(&upstream, "rate-limiting");
+    opened_on_github(&repo, 41, "rate-limiting");
+
+    let implementation = profile(&app, elsewhere.path(), "opus").await;
+    let review = profile(&app, elsewhere.path(), "haiku").await;
+
+    let first =
+        ready_to_review_under(&app, repo_id, "Wrap #41 up.\n", implementation, review).await;
+    assert_eq!(press_take_up(&app, first).await, TakenUp::TakenUp);
+    finished_with_it(&app, first).await;
+    left_uncommitted(&app, first, Change::Modified).await;
+
+    let second = ready_to_review_under(
+        &app,
+        repo_id,
+        "Read the limiter again.\n#41\n",
+        implementation,
+        review,
+    )
+    .await;
+
+    assert!(matches!(
+        press_take_up(&app, second).await,
+        TakenUp::WouldDiscard { .. },
+    ));
+
+    assert_eq!(
+        press_take_up_confirming(&app, second, &[first]).await,
+        TakenUp::TakenUp,
+        "the press that names it is the one that goes ahead",
+    );
+
+    let holder = opened(&app, first).await;
+
+    assert_eq!(holder.state, Lifecycle::Closed);
+    assert_eq!(
+        holder.worktree, None,
+        "closed by the ordinary Close, so the checkout it was holding went with it",
+    );
+
+    let view = opened(&app, second).await;
+
+    assert_eq!(view.state, Lifecycle::Wrapping);
+    assert_eq!(view.branch, "rate-limiting");
+}
+
+/// And a confirmation that is not the whole of what would be lost stops the press
+/// all over again, with the list as it stands now.
+///
+/// The checkouts are read again on every press rather than trusted from the one
+/// before: what the confirmation says is which Conversations *may* lose something,
+/// and a Conversation holding something that it does not name has not been asked
+/// about at all.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_confirmation_that_does_not_name_what_is_held_stops_the_press_again() {
+    let (elsewhere, _dir, app, repo, upstream, repo_id) = workbench_reviewing().await;
+    head_on_origin(&upstream, "rate-limiting");
+    opened_on_github(&repo, 41, "rate-limiting");
+
+    let implementation = profile(&app, elsewhere.path(), "opus").await;
+    let review = profile(&app, elsewhere.path(), "haiku").await;
+
+    let first =
+        ready_to_review_under(&app, repo_id, "Wrap #41 up.\n", implementation, review).await;
+    assert_eq!(press_take_up(&app, first).await, TakenUp::TakenUp);
+    finished_with_it(&app, first).await;
+
+    let second = ready_to_review_under(
+        &app,
+        repo_id,
+        "Read the limiter again.\n#41\n",
+        implementation,
+        review,
+    )
+    .await;
+
+    // A press that names a Conversation which is not the one holding anything —
+    // the page's list having been drawn against a world that has moved since.
+    left_uncommitted(&app, first, Change::Untracked).await;
+
+    assert_eq!(
+        press_take_up_confirming(&app, second, &[first + 404]).await,
+        TakenUp::WouldDiscard {
+            uncommitted: vec![Uncommitted {
+                conversation: first,
+                branch: "rate-limiting".to_owned(),
+            }],
+        },
+        "what it agreed to is not what would be lost, so it is asked again",
+    );
+    assert_eq!(opened(&app, first).await.state, Lifecycle::Done);
+    assert_eq!(opened(&app, second).await.state, Lifecycle::Draft);
+}
+
+/// And a Done holder whose checkouts are clean is closed and taken up from with
+/// the one press, nothing being asked about.
+///
+/// Which is the other half of the rule: asking on every start would be a question
+/// with one answer nearly every time. A holder whose Worktree directory has gone
+/// is the same case reached the other way — there is nothing left in it to lose,
+/// and a directory that is *there* and unreadable is not that case at all: see
+/// [`a_finished_holder_whose_checkout_git_will_not_read_stops_the_press`].
+#[cfg(unix)]
+#[tokio::test]
+async fn a_finished_holder_with_a_clean_or_missing_checkout_is_closed_with_no_question() {
+    for take_the_directory in [false, true] {
+        let (elsewhere, _dir, app, repo, upstream, repo_id) = workbench_reviewing().await;
+        head_on_origin(&upstream, "rate-limiting");
+        opened_on_github(&repo, 41, "rate-limiting");
+
+        let implementation = profile(&app, elsewhere.path(), "opus").await;
+        let review = profile(&app, elsewhere.path(), "haiku").await;
+
+        let first =
+            ready_to_review_under(&app, repo_id, "Wrap #41 up.\n", implementation, review).await;
+        assert_eq!(press_take_up(&app, first).await, TakenUp::TakenUp);
+        finished_with_it(&app, first).await;
+
+        if take_the_directory {
+            // Uncommitted work and the directory taken out from under it, which is
+            // the Worktree a human deleted by hand: there is nothing there to ask
+            // about.
+            left_uncommitted(&app, first, Change::Modified).await;
+
+            let worktree = opened(&app, first).await.worktree.unwrap();
+            std::fs::remove_dir_all(&worktree.path).unwrap();
+        }
+
+        let second = ready_to_review_under(
+            &app,
+            repo_id,
+            "Read the limiter again.\n#41\n",
+            implementation,
+            review,
+        )
+        .await;
+
+        assert_eq!(
+            press_take_up(&app, second).await,
+            TakenUp::TakenUp,
+            "nothing to lose, so nothing to ask about",
+        );
+        assert_eq!(opened(&app, first).await.state, Lifecycle::Closed);
+        assert_eq!(opened(&app, second).await.state, Lifecycle::Wrapping);
+    }
+}
+
+/// And a Done holder whose checkout is still on disk but which git will not read
+/// stops the press too, rather than being closed over.
+///
+/// The close takes the directory by force, so what decides whether there is
+/// anything to ask about is whether the directory is *there* — not whether git
+/// answered about it. A Worktree that has gone holds nothing; one that is sitting
+/// there while `git status` fails holds work nobody can read, which is the one
+/// thing a close cannot give back. `verkstead done` refuses a signal over the same
+/// reading rather than accepting it.
+///
+/// Reached here by breaking the `.git` file the way a pruned registration does.
+/// What matters is that the directory and its contents are untouched and git will
+/// not answer: exactly what the human would find if they went and looked.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_finished_holder_whose_checkout_git_will_not_read_stops_the_press() {
+    let (elsewhere, _dir, app, repo, upstream, repo_id) = workbench_reviewing().await;
+    head_on_origin(&upstream, "rate-limiting");
+    opened_on_github(&repo, 41, "rate-limiting");
+
+    let implementation = profile(&app, elsewhere.path(), "opus").await;
+    let review = profile(&app, elsewhere.path(), "haiku").await;
+
+    let first =
+        ready_to_review_under(&app, repo_id, "Wrap #41 up.\n", implementation, review).await;
+    assert_eq!(press_take_up(&app, first).await, TakenUp::TakenUp);
+    finished_with_it(&app, first).await;
+
+    let left = left_uncommitted(&app, first, Change::Modified).await;
+    let worktree = opened(&app, first).await.worktree.expect("Done keeps it");
+
+    // The link out of the checkout, pointed nowhere — which is what a registration
+    // pruned from under a live directory leaves behind. The work is all still
+    // there; nothing can read it.
+    std::fs::write(
+        Path::new(&worktree.path).join(".git"),
+        "gitdir: /nowhere-at-all\n",
+    )
+    .unwrap();
+
+    // The premise, said out loud: git refuses the question rather than answering
+    // that the directory is clean. Run straight rather than through [`git`], which
+    // panics on exactly the exit code this is looking for.
+    let asked = std::process::Command::new("git")
+        .current_dir(&worktree.path)
+        .args(["status", "--porcelain=v1"])
+        .output()
+        .unwrap();
+
+    assert!(
+        !asked.status.success(),
+        "git would answer about it, so this test is not about what it says it is",
+    );
+
+    let second = ready_to_review_under(
+        &app,
+        repo_id,
+        "Read the limiter again.\n#41\n",
+        implementation,
+        review,
+    )
+    .await;
+
+    assert_eq!(
+        press_take_up(&app, second).await,
+        TakenUp::WouldDiscard {
+            uncommitted: vec![Uncommitted {
+                conversation: first,
+                branch: "rate-limiting".to_owned(),
+            }],
+        },
+        "a directory nobody can read is a directory to ask about, not one to close over",
+    );
+
+    assert_eq!(
+        opened(&app, first).await.state,
+        Lifecycle::Done,
+        "and nothing was closed",
+    );
+    assert!(
+        Path::new(&worktree.path).join(&left).exists(),
+        "and what was left uncommitted is still on disk",
+    );
+
+    // And the press that says to go ahead anyway does, which is the human having
+    // been given the chance to look.
+    assert_eq!(
+        press_take_up_confirming(&app, second, &[first]).await,
+        TakenUp::TakenUp,
+    );
+    assert_eq!(opened(&app, first).await.state, Lifecycle::Closed);
+}
+
+/// A kind of uncommitted change to leave in a checkout, which is the reading a
+/// close is asked about: modified, staged, or untracked and not ignored.
+#[cfg(unix)]
+#[derive(Debug, Clone, Copy)]
+enum Change {
+    Modified,
+    Staged,
+    Untracked,
+}
+
+/// Leave one in a Conversation's own Worktree, on the one file every one of these
+/// repositories has on the head branch.
+///
+/// `limits.md` is what `head_on_origin` commits, so a modified and a staged change
+/// are edits to a file that is really there; an untracked one is a file beside it.
+#[cfg(unix)]
+async fn left_uncommitted(app: &Router, id: i64, change: Change) -> String {
+    let worktree = opened(app, id)
+        .await
+        .worktree
+        .expect("it is Done, which keeps its checkout");
+    let worktree = Path::new(&worktree.path);
+
+    let path = match change {
+        Change::Modified | Change::Staged => "limits.md",
+        Change::Untracked => "scratch.md",
+    };
+
+    std::fs::write(worktree.join(path), "half a thought\n").unwrap();
+
+    if matches!(change, Change::Staged) {
+        git(worktree, &["add", path]);
+    }
+
+    path.to_owned()
+}
+
+/// What git sees as changed in a checkout, by path — the reading a close is asked
+/// about, read here the way the human would read it.
+#[cfg(unix)]
+fn changed(worktree: &Path) -> Vec<String> {
+    git(
+        worktree,
+        &["status", "--porcelain=v1", "--untracked-files=all"],
+    )
+    .lines()
+    .filter_map(|line| line.get(3..))
+    .map(str::to_owned)
+    .collect()
+}
+
+/// A Review Draft pointed at a bare branch rather than at a number, over Profiles
+/// already saved.
+///
+/// The other name for the same piece of work, which is what the two readings of
+/// the rule both have to cover: a branch never says the number, and what GitHub
+/// has open on it is what says which pull request it is.
+#[cfg(unix)]
+async fn pointed_at_the_branch(
+    app: &Router,
+    repo_id: i64,
+    implementation: i64,
+    review: i64,
+) -> i64 {
+    let id = started(app, repo_id).await;
+
+    assert_eq!(
+        pick_process(app, id, Process::Review).await,
+        ProcessPicked::Picked,
+    );
+    assert_eq!(
+        write_brief(app, id, "Give the limiter branch a read.\n").await,
+        BriefSaved::Saved,
+    );
+    choose(app, id, "implementation", implementation).await;
+    choose(app, id, "review", review).await;
+    assert_eq!(
+        name_target(app, id, "rate-limiting").await,
+        TargetRecorded::Recorded,
+    );
+
+    id
+}
+
+/// Walk a Conversation that has taken a pull request up to Done, which is what a
+/// wrap-up that finished leaves behind.
+///
+/// By the steer that ends one, so the record says what a finished wrap-up's says:
+/// Done, with its Worktree still standing — Done being the ending that keeps a
+/// checkout, a Follow-up steer picking the work up there.
+#[cfg(unix)]
+async fn finished_with_it(app: &Router, id: i64) {
+    assert_eq!(steer(app, id).await, SteerOpened::Opened);
+    assert_eq!(
+        steer_into(app, id, "Done", false).await,
+        ConversationSteered::Steered,
+    );
+    assert_eq!(opened(app, id).await.state, Lifecycle::Done);
+}
+
+/// Write a state word into a Conversation's row, leaving everything else about it
+/// alone.
+///
+/// `corrupt_the_state`'s sibling over a word Verkstead does know: what is being
+/// set up is a holder the take-up has to *read*, and walking one into each of five
+/// states through the presses that reach them would be five steers tested where
+/// the steer is not.
+#[cfg(unix)]
+async fn left_in(dir: &tempfile::TempDir, id: i64, state: &str) {
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")
+        .bind(state)
+        .bind(id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    pool.close().await;
 }
 
 /// A Review whose Target is a branch on origin lands Wrapping over that branch
@@ -10946,6 +12724,15 @@ async fn a_fix_merge_issues_pointed_into_a_stack_records_the_whole_chain() {
         said.contains("#40") && said.contains("#42"),
         "and names the pull requests it found: {said}",
     );
+
+    // And a link nobody is on is left alone and said to be nobody's, which is
+    // what it has always been: there is no Conversation here to close, and
+    // nothing standing on the branch for a sync to be refused over.
+    assert!(
+        said.contains("#40 belongs to no Conversation")
+            && said.contains("#42 belongs to no Conversation"),
+        "a neighbour that is nobody's is noted rather than acted on: {said}",
+    );
 }
 
 /// A lone pull request records one, and a chain whose next link is in a fork is
@@ -10993,6 +12780,336 @@ async fn a_lone_pull_request_records_one_and_a_fork_is_no_link() {
         stack(dir.path(), under, repo_id).await,
         [50],
         "the chain stops where the fork is rather than following it out of the Repo",
+    );
+}
+
+/// Every branch of a three-deep chain on the upstream, which is what a stack of
+/// stages pushes.
+#[cfg(unix)]
+fn a_stack_on_origin(upstream: &Path) {
+    for branch in ["stage-01", "stage-02", "stage-03"] {
+        head_on_origin(upstream, branch);
+    }
+}
+
+/// A **Review** taken up over one link of the stack, which is what each stage of
+/// one is: a Conversation with that pull request on its record and a Worktree
+/// with that branch checked out.
+///
+/// A Review rather than a Fix Merge Issues, because only the latter walks a
+/// chain — what these are standing in for is the stage Conversations that built
+/// the stack, and none of those ever walked anything.
+#[cfg(unix)]
+async fn standing_on(
+    app: &Router,
+    repo_id: i64,
+    number: i64,
+    implementation: i64,
+    review: i64,
+) -> i64 {
+    let id = ready_to_review_under(
+        app,
+        repo_id,
+        &format!("Wrap #{number} up.\n"),
+        implementation,
+        review,
+    )
+    .await;
+
+    assert_eq!(press_take_up(app, id).await, TakenUp::TakenUp);
+
+    id
+}
+
+/// The case this whole backlog was opened for: a **Fix Merge Issues** pointed at
+/// the middle of a stack Verkstead built closes the Conversations standing on the
+/// links either side of it, and nothing is left holding a branch of the chain.
+///
+/// Which is what makes the press useful at all. The conflict is low in the stack
+/// and the session sent at it is told to run `gh stack sync`, which rebases and
+/// force-pushes every branch of the chain — and git will not move a branch that is
+/// checked out in another worktree. Every link of such a stack is a stage
+/// Conversation's, usually Done, and every one of those keeps its checkout.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_fix_merge_issues_over_a_stack_closes_the_conversations_on_its_neighbours() {
+    let (elsewhere, dir, app, repo, upstream, repo_id) = workbench_reviewing().await;
+    a_stack_on_origin(&upstream);
+    a_stack_on_github(&repo);
+
+    let implementation = profile(&app, elsewhere.path(), "opus").await;
+    let review = profile(&app, elsewhere.path(), "haiku").await;
+
+    let below = standing_on(&app, repo_id, 40, implementation, review).await;
+    finished_with_it(&app, below).await;
+
+    let above = standing_on(&app, repo_id, 42, implementation, review).await;
+    finished_with_it(&app, above).await;
+
+    let fixing = ready_to_fix_under(&app, repo_id, "#41 will not merge.\n", implementation).await;
+
+    assert_eq!(
+        press_take_up(&app, fixing).await,
+        TakenUp::TakenUp,
+        "both neighbours had finished, so both made way",
+    );
+
+    for holder in [below, above] {
+        let view = opened(&app, holder).await;
+
+        assert_eq!(view.state, Lifecycle::Closed);
+        assert_eq!(
+            view.worktree, None,
+            "closed by the ordinary Close, so the checkout it was standing on went with it",
+        );
+    }
+
+    let view = opened(&app, fixing).await;
+
+    assert_eq!(view.state, Lifecycle::Wrapping);
+    assert_eq!(view.branch, "stage-02");
+    assert_eq!(
+        stack(dir.path(), fixing, repo_id).await,
+        [40, 41, 42],
+        "and the whole chain is this wrap-up's to watch",
+    );
+
+    // Nothing of the chain is checked out anywhere but the Conversation that took
+    // it up, which is the thing a sync was going to be refused over.
+    let mine = PathBuf::from(&view.worktree.as_ref().expect("it is wrapping").path);
+    let mine = mine.canonicalize().unwrap_or(mine);
+
+    assert_eq!(
+        worktrees(&repo),
+        vec![repo.canonicalize().unwrap_or(repo.clone()), mine],
+        "the Repo and the new Worktree, and nobody standing on stage-01 or stage-03",
+    );
+
+    // And the Timeline names what was closed, where it already says what the
+    // stack is and whose each link was.
+    let said = notices(&view).join("\n");
+
+    assert!(
+        said.contains(
+            "#40 belonged to the Conversation on <code>stage-01</code>, which had finished with \
+             it and was closed to make way"
+        ),
+        "the note names the Conversation that was closed off the link below: {said}",
+    );
+    assert!(
+        said.contains(
+            "#42 belonged to the Conversation on <code>stage-03</code>, which had finished with \
+             it and was closed to make way"
+        ),
+        "and the one above it: {said}",
+    );
+}
+
+/// And one neighbour still at work refuses the whole start, naming it — with
+/// every Done Conversation left Done.
+///
+/// All or nothing, because a sync is all or nothing: it rebases and force-pushes
+/// the whole chain, so a chain with one branch it cannot move is a chain it
+/// cannot sync. Closing the Conversations standing on the rest would be several
+/// Conversations given up for a run that was never going to work.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_neighbour_still_at_work_refuses_the_start_and_nothing_is_closed() {
+    let (elsewhere, _dir, app, repo, upstream, repo_id) = workbench_reviewing().await;
+    a_stack_on_origin(&upstream);
+    a_stack_on_github(&repo);
+
+    let implementation = profile(&app, elsewhere.path(), "opus").await;
+    let review = profile(&app, elsewhere.path(), "haiku").await;
+
+    // The link below has finished with its pull request, the one above has not —
+    // and the pull request being named has a finished holder of its own.
+    let below = standing_on(&app, repo_id, 40, implementation, review).await;
+    finished_with_it(&app, below).await;
+
+    let holder = standing_on(&app, repo_id, 41, implementation, review).await;
+    finished_with_it(&app, holder).await;
+
+    let above = standing_on(&app, repo_id, 42, implementation, review).await;
+
+    let fixing = ready_to_fix_under(&app, repo_id, "#41 will not merge.\n", implementation).await;
+
+    assert_eq!(
+        press_take_up(&app, fixing).await,
+        TakenUp::AlreadyHeld {
+            conversation: above,
+        },
+        "the refusal leads to the Conversation that will not give its link up",
+    );
+
+    nothing_taken_up_alongside(&app, fixing).await;
+
+    for finished in [below, holder] {
+        let view = opened(&app, finished).await;
+
+        assert_eq!(
+            view.state,
+            Lifecycle::Done,
+            "nothing was closed for a start that was refused",
+        );
+        assert!(
+            view.worktree.is_some(),
+            "and the checkout it was standing on is still its own",
+        );
+    }
+
+    assert_eq!(opened(&app, above).await.state, Lifecycle::Wrapping);
+    assert_eq!(
+        worktrees(&repo).len(),
+        4,
+        "the Repo and the three Conversations' checkouts, exactly as before the press",
+    );
+}
+
+/// And a link checked out by somebody who is no Conversation refuses the start
+/// the way the branch being taken up already does — said about the neighbour.
+///
+/// Which is the refusal Verkstead cannot work round: a Conversation that has
+/// finished is closed and its Worktree given back, and a checkout that is nobody's
+/// here is one nothing may take away. Git will refuse the sync over it all the
+/// same.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_link_checked_out_by_nobody_refuses_the_start_naming_where() {
+    let (elsewhere, _dir, app, repo, upstream, repo_id) = workbench_reviewing().await;
+    a_stack_on_origin(&upstream);
+    a_stack_on_github(&repo);
+
+    let implementation = profile(&app, elsewhere.path(), "opus").await;
+
+    // Somebody's own checkout of the link below, made by hand and belonging to no
+    // Conversation.
+    let theirs = elsewhere.path().join("somebody-elses-checkout");
+    git(
+        &repo,
+        &["fetch", "--quiet", "origin", "stage-01:refs/heads/stage-01"],
+    );
+    git(
+        &repo,
+        &[
+            "worktree",
+            "add",
+            "--quiet",
+            &theirs.to_string_lossy(),
+            "stage-01",
+        ],
+    );
+
+    let fixing = ready_to_fix_under(&app, repo_id, "#41 will not merge.\n", implementation).await;
+
+    assert_eq!(
+        press_take_up(&app, fixing).await,
+        TakenUp::CheckedOutElsewhere {
+            at: theirs.to_string_lossy().into_owned(),
+        },
+    );
+
+    nothing_taken_up_alongside(&app, fixing).await;
+}
+
+/// A Conversation refused a take-up has not moved and has checked nothing out —
+/// the whole of [`nothing_taken_up`] but the count of the Repo's worktrees, which
+/// a stack's own Conversations are among.
+#[cfg(unix)]
+async fn nothing_taken_up_alongside(app: &Router, id: i64) {
+    let view = opened(app, id).await;
+
+    assert_eq!(view.state, Lifecycle::Draft);
+    assert_eq!(view.worktree, None);
+    assert!(
+        !view
+            .timeline
+            .iter()
+            .any(|event| matches!(event, TimelineEvent::PullRequest(_))),
+        "and nothing was recorded against it",
+    );
+}
+
+/// And the neighbours holding uncommitted changes are named in the one list the
+/// pull request's own holder is named in, which one press confirms.
+///
+/// One question for the whole stack: a stack of five closed one at a time would be
+/// five presses, and what the human is being asked is one question about one
+/// start. The list is every Conversation that would lose something, and the press
+/// that follows it is the one that can confirm it.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_stacks_uncommitted_changes_are_asked_about_in_one_list() {
+    let (elsewhere, _dir, app, repo, upstream, repo_id) = workbench_reviewing().await;
+    a_stack_on_origin(&upstream);
+    a_stack_on_github(&repo);
+
+    let implementation = profile(&app, elsewhere.path(), "opus").await;
+    let review = profile(&app, elsewhere.path(), "haiku").await;
+
+    let below = standing_on(&app, repo_id, 40, implementation, review).await;
+    finished_with_it(&app, below).await;
+    left_uncommitted(&app, below, Change::Untracked).await;
+
+    let holder = standing_on(&app, repo_id, 41, implementation, review).await;
+    finished_with_it(&app, holder).await;
+    left_uncommitted(&app, holder, Change::Modified).await;
+
+    // And a neighbour with nothing to lose, which is closed without being asked
+    // about.
+    let above = standing_on(&app, repo_id, 42, implementation, review).await;
+    finished_with_it(&app, above).await;
+
+    let fixing = ready_to_fix_under(&app, repo_id, "#41 will not merge.\n", implementation).await;
+
+    assert_eq!(
+        press_take_up(&app, fixing).await,
+        TakenUp::WouldDiscard {
+            uncommitted: vec![
+                Uncommitted {
+                    conversation: holder,
+                    branch: "stage-02".to_owned(),
+                },
+                Uncommitted {
+                    conversation: below,
+                    branch: "stage-01".to_owned(),
+                },
+            ],
+        },
+        "the pull request's own holder and the neighbour, in one list",
+    );
+
+    for untouched in [below, holder, above] {
+        assert_eq!(
+            opened(&app, untouched).await.state,
+            Lifecycle::Done,
+            "nothing is closed by the press that asks",
+        );
+    }
+
+    assert_eq!(
+        press_take_up_confirming(&app, fixing, &[holder, below]).await,
+        TakenUp::TakenUp,
+        "and one confirming press closes every one of them",
+    );
+
+    for closed in [below, holder, above] {
+        let view = opened(&app, closed).await;
+
+        assert_eq!(view.state, Lifecycle::Closed);
+        assert_eq!(view.worktree, None);
+    }
+
+    let view = opened(&app, fixing).await;
+
+    assert_eq!(view.state, Lifecycle::Wrapping);
+    assert_eq!(
+        worktrees(&repo),
+        vec![repo.canonicalize().unwrap_or(repo.clone()), {
+            let mine = PathBuf::from(&view.worktree.as_ref().expect("it is wrapping").path);
+            mine.canonicalize().unwrap_or(mine)
+        },],
+        "and nothing of the chain is checked out anywhere else",
     );
 }
 
@@ -11057,6 +13174,12 @@ async fn a_chain_gh_would_not_list_is_said_on_the_timeline() {
 /// is a Conversation per pull request, so the neighbours nearly always belong to
 /// somebody: recording them is what lets this wrap-up wait on the whole chain,
 /// and it is not a claim on any of them.
+///
+/// The neighbour here is a Closed Conversation, which is one with nothing left to
+/// give up — the case that leaves a record to name and no close to do. A
+/// neighbour still at work refuses the start outright, and a Done one is closed
+/// to make way; both are the rule about *standing* on a link rather than about
+/// recording one.
 #[cfg(unix)]
 #[tokio::test]
 async fn a_neighbour_another_conversation_holds_is_recorded_without_being_claimed() {
@@ -11067,10 +13190,11 @@ async fn a_neighbour_another_conversation_holds_is_recorded_without_being_claime
 
     let implementation = profile(&app, elsewhere.path(), "opus").await;
 
-    // The bottom of the stack, taken up by a Conversation of its own — which is
-    // what a stacked stage leaves behind.
+    // The bottom of the stack, taken up by a Conversation of its own and stopped
+    // since — which is what a stacked stage that has been closed leaves behind.
     let below = ready_to_fix_under(&app, repo_id, "Wrap #40 up.\n", implementation).await;
     assert_eq!(press_take_up(&app, below).await, TakenUp::TakenUp);
+    assert_eq!(close(&app, below).await, ConversationClosed::Closed);
 
     // And the middle, which is a link of the same chain and nobody's work.
     let id = ready_to_fix_under(&app, repo_id, "Wrap #41 up.\n", implementation).await;
@@ -11094,16 +13218,380 @@ async fn a_neighbour_another_conversation_holds_is_recorded_without_being_claime
     );
 
     // And the refusal is untouched where it is about the pull request somebody
-    // was pointed at: a third Conversation over `#40` leads to the one on it.
-    let second = ready_to_fix_under(&app, repo_id, "Wrap #40 up too.\n", implementation).await;
+    // was pointed at and is still at work on: a third Conversation over `#41`
+    // leads to the one on it.
+    let second = ready_to_fix_under(&app, repo_id, "Wrap #41 up too.\n", implementation).await;
 
     assert_eq!(
         press_take_up(&app, second).await,
-        TakenUp::AlreadyHeld {
-            conversation: below,
-        },
+        TakenUp::AlreadyHeld { conversation: id },
     );
     assert_eq!(opened(&app, second).await.state, Lifecycle::Draft);
+    assert_eq!(
+        opened(&app, id).await.state,
+        Lifecycle::Wrapping,
+        "and a holder still at work is refused for rather than closed",
+    );
+}
+
+/// A pull request that has changed hands: the Conversation that had it, closed,
+/// and the one that took it over, finished with it.
+///
+/// Which is the shape the way back is written for — see ADR-0020. Every pull
+/// request Verkstead opens is some Conversation's, so a Review pointed at one
+/// closes the holder and takes it up; the human then wants the first Conversation
+/// back, and the second is standing on its branch.
+///
+/// Both walked through the presses that reach them rather than written into the
+/// row, because what is under test is a record two take-ups really made.
+#[cfg(unix)]
+async fn handed_over(app: &Router, repo_id: i64, implementation: i64, review: i64) -> (i64, i64) {
+    let first = ready_to_review_under(app, repo_id, "Wrap #41 up.\n", implementation, review).await;
+
+    assert_eq!(press_take_up(app, first).await, TakenUp::TakenUp);
+    finished_with_it(app, first).await;
+    assert_eq!(close(app, first).await, ConversationClosed::Closed);
+
+    let second = ready_to_review_under(
+        app,
+        repo_id,
+        "Read the limiter again.\n#41\n",
+        implementation,
+        review,
+    )
+    .await;
+
+    assert_eq!(press_take_up(app, second).await, TakenUp::TakenUp);
+    finished_with_it(app, second).await;
+
+    (first, second)
+}
+
+/// A Closed Conversation steered back into a wrap-up closes the Done Conversation
+/// that took its pull request over, and has its checkout made from the branch.
+///
+/// The rule read the other way round — one *open* Conversation per pull request,
+/// open being neither Done nor Closed. Before this the steer made its checkout
+/// from a branch somebody was still standing on and answered *git would not make
+/// the worktree*, which is the one refusal described as having nothing for the
+/// human to correct; here there was something.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_steer_back_into_a_wrap_up_closes_the_conversation_that_took_the_pull_request_over() {
+    let (elsewhere, _dir, app, repo, upstream, repo_id) = workbench_reviewing().await;
+    head_on_origin(&upstream, "rate-limiting");
+    opened_on_github(&repo, 41, "rate-limiting");
+
+    let implementation = profile(&app, elsewhere.path(), "opus").await;
+    let review = profile(&app, elsewhere.path(), "haiku").await;
+
+    let (first, second) = handed_over(&app, repo_id, implementation, review).await;
+
+    assert_eq!(steer(&app, first).await, SteerOpened::Opened);
+    assert_eq!(
+        steer_into(&app, first, "Wrapping", false).await,
+        ConversationSteered::Steered,
+        "the holder had finished with it, so it made way",
+    );
+
+    let holder = opened(&app, second).await;
+
+    assert_eq!(holder.state, Lifecycle::Closed);
+    assert_eq!(
+        holder.worktree, None,
+        "closed by the ordinary Close, so its checkout went with it",
+    );
+
+    let view = opened(&app, first).await;
+
+    assert_eq!(view.state, Lifecycle::Wrapping);
+    assert_eq!(view.branch, "rate-limiting");
+    assert!(
+        view.worktree.is_some(),
+        "and the checkout it had let go of is made again from the branch",
+    );
+
+    // And this Conversation's Timeline says what it closed, naming it by its
+    // branch the way the take-up's own note names a holder.
+    let said = notices(&view).join("\n");
+
+    assert!(
+        said.contains(
+            "The Conversation on <code>rate-limiting</code> had taken this pull request over"
+        ),
+        "the Timeline names the Conversation this steer closed: {said}",
+    );
+}
+
+/// And a steer into Follow-up the same, that being the other target the way back
+/// leads to.
+///
+/// A follow-up is the human taking something up about work that is already on a
+/// pull request, so it turns on the same fact the wrap-up does and wants the same
+/// checkout. Which is the whole of what is under test: the target is not what the
+/// rule reads.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_steer_back_into_a_follow_up_makes_way_the_same() {
+    let (elsewhere, _dir, app, repo, upstream, repo_id) = workbench_reviewing().await;
+    head_on_origin(&upstream, "rate-limiting");
+    opened_on_github(&repo, 41, "rate-limiting");
+
+    let implementation = profile(&app, elsewhere.path(), "opus").await;
+    let review = profile(&app, elsewhere.path(), "haiku").await;
+
+    let (first, second) = handed_over(&app, repo_id, implementation, review).await;
+
+    assert_eq!(steer(&app, first).await, SteerOpened::Opened);
+    assert_eq!(
+        steer_following_up(&app, first, Some("What did the limiter end up doing?\n")).await,
+        ConversationSteered::Steered,
+    );
+
+    assert_eq!(opened(&app, second).await.state, Lifecycle::Closed);
+
+    let view = opened(&app, first).await;
+
+    assert_eq!(view.state, Lifecycle::FollowUp);
+    assert!(view.worktree.is_some());
+}
+
+/// A steer onto a pull request another Conversation is still at work on is
+/// refused naming it, and nothing is closed and nothing is made.
+///
+/// Still at work being everything that is neither Done nor Closed. Two live
+/// wrap-ups pushing to one branch is what the rule is for, so the way on is that
+/// Conversation rather than this one beside it — and the refusal leads there.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_steer_onto_a_pull_request_somebody_is_at_work_on_is_refused_naming_it() {
+    let (elsewhere, _dir, app, repo, upstream, repo_id) = workbench_reviewing().await;
+    head_on_origin(&upstream, "rate-limiting");
+    opened_on_github(&repo, 41, "rate-limiting");
+
+    let implementation = profile(&app, elsewhere.path(), "opus").await;
+    let review = profile(&app, elsewhere.path(), "haiku").await;
+
+    let first =
+        ready_to_review_under(&app, repo_id, "Wrap #41 up.\n", implementation, review).await;
+
+    assert_eq!(press_take_up(&app, first).await, TakenUp::TakenUp);
+    finished_with_it(&app, first).await;
+    assert_eq!(close(&app, first).await, ConversationClosed::Closed);
+
+    // The one that took it over is left wrapping it up, which is where a take-up
+    // leaves one.
+    let second = ready_to_review_under(
+        &app,
+        repo_id,
+        "Read the limiter again.\n#41\n",
+        implementation,
+        review,
+    )
+    .await;
+
+    assert_eq!(press_take_up(&app, second).await, TakenUp::TakenUp);
+
+    assert_eq!(steer(&app, first).await, SteerOpened::Opened);
+    assert_eq!(
+        steer_into(&app, first, "Wrapping", false).await,
+        ConversationSteered::AlreadyHeld {
+            conversation: second,
+        },
+    );
+
+    let holder = opened(&app, second).await;
+
+    assert_eq!(
+        holder.state,
+        Lifecycle::Wrapping,
+        "the Conversation that has it is exactly where the submit found it",
+    );
+    assert!(
+        holder.worktree.is_some(),
+        "with the checkout it was working in still its own",
+    );
+
+    let view = opened(&app, first).await;
+
+    assert_eq!(view.state, Lifecycle::Closed, "and nothing moved here");
+    assert_eq!(view.worktree, None, "with nothing made");
+    assert!(
+        view.pending_steer.is_some(),
+        "and the pending steer stands, the form being somewhere to come back to",
+    );
+}
+
+/// Where the Conversation that would be closed holds uncommitted changes the
+/// submit stops naming it, the pending steer still standing, and the submit after
+/// it goes ahead.
+///
+/// The one thing a close cannot give back, asked about here exactly as it is at
+/// the take-up: a Worktree goes by force, so whatever was left uncommitted in it
+/// goes with it. Nothing else is asked about.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_steer_whose_holder_holds_something_stops_the_submit_naming_it() {
+    let (elsewhere, _dir, app, repo, upstream, repo_id) = workbench_reviewing().await;
+    head_on_origin(&upstream, "rate-limiting");
+    opened_on_github(&repo, 41, "rate-limiting");
+
+    let implementation = profile(&app, elsewhere.path(), "opus").await;
+    let review = profile(&app, elsewhere.path(), "haiku").await;
+
+    let (first, second) = handed_over(&app, repo_id, implementation, review).await;
+    let left = left_uncommitted(&app, second, Change::Modified).await;
+
+    assert_eq!(steer(&app, first).await, SteerOpened::Opened);
+    assert_eq!(
+        steer_into(&app, first, "Wrapping", false).await,
+        ConversationSteered::WouldDiscard {
+            uncommitted: vec![Uncommitted {
+                conversation: second,
+                branch: "rate-limiting".to_owned(),
+            }],
+        },
+    );
+
+    let holder = opened(&app, second).await;
+    let worktree = holder.worktree.clone().expect("nothing was closed");
+
+    assert_eq!(
+        holder.state,
+        Lifecycle::Done,
+        "nothing is closed by the ask"
+    );
+    assert_eq!(
+        changed(Path::new(&worktree.path)),
+        vec![left],
+        "and what it is holding is where it was left",
+    );
+
+    let view = opened(&app, first).await;
+
+    assert_eq!(view.state, Lifecycle::Closed, "and nothing moved here");
+    assert!(
+        view.pending_steer.is_some(),
+        "and the pending steer stands, so the submit that confirms has a form to send",
+    );
+
+    assert_eq!(
+        steer_into_confirming(&app, first, "Wrapping", &[second]).await,
+        ConversationSteered::Steered,
+        "and the submit that names it goes ahead",
+    );
+
+    assert_eq!(opened(&app, second).await.state, Lifecycle::Closed);
+    assert_eq!(opened(&app, first).await.state, Lifecycle::Wrapping);
+}
+
+/// And a confirmation that does not name what is held stops the submit all over
+/// again, with the list as it stands.
+///
+/// The checkouts are read again on every submit rather than trusted from the one
+/// before: what a confirmation says is which Conversations *may* lose something,
+/// and one holding something it does not name has not been asked about at all.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_steers_confirmation_that_names_nobody_stops_it_again() {
+    let (elsewhere, _dir, app, repo, upstream, repo_id) = workbench_reviewing().await;
+    head_on_origin(&upstream, "rate-limiting");
+    opened_on_github(&repo, 41, "rate-limiting");
+
+    let implementation = profile(&app, elsewhere.path(), "opus").await;
+    let review = profile(&app, elsewhere.path(), "haiku").await;
+
+    let (first, second) = handed_over(&app, repo_id, implementation, review).await;
+    left_uncommitted(&app, second, Change::Untracked).await;
+
+    assert_eq!(steer(&app, first).await, SteerOpened::Opened);
+    assert_eq!(
+        steer_into_confirming(&app, first, "Wrapping", &[]).await,
+        ConversationSteered::WouldDiscard {
+            uncommitted: vec![Uncommitted {
+                conversation: second,
+                branch: "rate-limiting".to_owned(),
+            }],
+        },
+    );
+
+    assert_eq!(opened(&app, second).await.state, Lifecycle::Done);
+    assert_eq!(opened(&app, first).await.state, Lifecycle::Closed);
+}
+
+/// A steer into Done closes nothing: it runs nothing, so it wants no checkout and
+/// has nobody to want it from.
+///
+/// Which is why the question is asked of the target rather than of the
+/// Conversation. A Conversation is steered into Done to say the human is finished
+/// with it, and taking somebody else's Conversation away for that would be a close
+/// nothing needed.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_steer_into_done_closes_nothing() {
+    let (elsewhere, _dir, app, repo, upstream, repo_id) = workbench_reviewing().await;
+    head_on_origin(&upstream, "rate-limiting");
+    opened_on_github(&repo, 41, "rate-limiting");
+
+    let implementation = profile(&app, elsewhere.path(), "opus").await;
+    let review = profile(&app, elsewhere.path(), "haiku").await;
+
+    let (first, second) = handed_over(&app, repo_id, implementation, review).await;
+
+    assert_eq!(steer(&app, first).await, SteerOpened::Opened);
+    assert_eq!(
+        steer_into(&app, first, "Done", false).await,
+        ConversationSteered::Steered,
+    );
+
+    let holder = opened(&app, second).await;
+
+    assert_eq!(holder.state, Lifecycle::Done, "nothing was closed");
+    assert!(
+        holder.worktree.is_some(),
+        "and nothing was taken away from it",
+    );
+
+    assert_eq!(opened(&app, first).await.state, Lifecycle::Done);
+}
+
+/// And a steer by a Conversation nobody else shares a pull request with is the
+/// steer it has always been: the checkout made again from the branch, and nothing
+/// closed anywhere.
+///
+/// The ordinary case, which is nearly every steer there is — and the one this has
+/// to leave alone. A Closed Conversation whose pull request nobody took over is
+/// what the way back was already for.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_steer_over_a_pull_request_nobody_else_has_is_unchanged() {
+    let (elsewhere, _dir, app, repo, upstream, repo_id) = workbench_reviewing().await;
+    head_on_origin(&upstream, "rate-limiting");
+    opened_on_github(&repo, 41, "rate-limiting");
+
+    let implementation = profile(&app, elsewhere.path(), "opus").await;
+    let review = profile(&app, elsewhere.path(), "haiku").await;
+
+    let id = ready_to_review_under(&app, repo_id, "Wrap #41 up.\n", implementation, review).await;
+
+    assert_eq!(press_take_up(&app, id).await, TakenUp::TakenUp);
+    finished_with_it(&app, id).await;
+    assert_eq!(close(&app, id).await, ConversationClosed::Closed);
+
+    assert_eq!(steer(&app, id).await, SteerOpened::Opened);
+    assert_eq!(
+        steer_into(&app, id, "Wrapping", false).await,
+        ConversationSteered::Steered,
+    );
+
+    let view = opened(&app, id).await;
+
+    assert_eq!(view.state, Lifecycle::Wrapping);
+    assert!(view.worktree.is_some());
+    assert!(
+        !notices(&view).join("\n").contains("closed to make way"),
+        "and nothing says a Conversation was closed, because none was",
+    );
 }
 
 /// How a pull request's checks are is carried to both copies of its card: the

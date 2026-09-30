@@ -16,6 +16,10 @@ use verkstead_store::{
     record_folded, register_repo, start_conversation, submit_response, timeline, unfolded,
 };
 
+/// The device every Conversation started here is ranked by, named the way a
+/// cluster names one (ADR-0020, *Ranks*).
+const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
+
 /// A pool over a fresh database, plus the directory keeping it alive.
 async fn fresh_pool() -> (tempfile::TempDir, SqlitePool) {
     let dir = tempfile::tempdir().unwrap();
@@ -32,7 +36,7 @@ async fn conversation(pool: &SqlitePool) -> i64 {
         .unwrap()
         .expect("nothing is registered at that path yet");
 
-    start_conversation(pool, repo.id, "deferred-asks")
+    start_conversation(pool, repo.id, "deferred-asks", THIS_DEVICE)
         .await
         .unwrap()
         .expect("the Repo was just registered")
@@ -298,7 +302,7 @@ async fn only_this_conversations_deferred_answers_are_folded_into_its_prompts() 
     let mine = conversation(&pool).await;
 
     let repo = verkstead_store::registered_repos(&pool).await.unwrap()[0].id;
-    let yours = start_conversation(&pool, repo, "somebody-elses-work")
+    let yours = start_conversation(&pool, repo, "somebody-elses-work", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();

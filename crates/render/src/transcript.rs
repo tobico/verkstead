@@ -539,6 +539,32 @@ pub fn rollout_cwd(line: &str) -> Option<String> {
     Some(line.get("payload")?.get("cwd")?.as_str()?.to_owned())
 }
 
+/// And the id that same opening line gives the session — which for Codex is the
+/// only place it is written down at all.
+///
+/// Codex takes no session id at launch, so nothing Verkstead knew before the
+/// session started names its log. What a rollout carries instead is the id codex
+/// chose for itself, and that is the id `codex resume` takes — so the search that
+/// finds the log reads it here, and it goes on the record beside the session where
+/// the id Verkstead picked would have gone for the backends that take one.
+///
+/// Beside [`rollout_cwd`] and read exactly as it is, for the same reason: the
+/// shape of somebody else's file is known in one place (ADR 0006).
+///
+/// `session_id` rather than the `id` codex 0.155.1 writes beside it holding the
+/// same value. One reading rather than two that have to agree, and the older of
+/// the two spellings: a rollout written before the second appeared is still a
+/// rollout to resume.
+pub fn rollout_session(line: &str) -> Option<String> {
+    let line: Value = serde_json::from_str(line).ok()?;
+
+    if line.get("type")?.as_str()? != SESSION_META {
+        return None;
+    }
+
+    Some(line.get("payload")?.get("session_id")?.as_str()?.to_owned())
+}
+
 /// What codex calls the line it opens a rollout with. Named because it is
 /// somebody else's spelling, the same bargain the usage-limit phrase and the
 /// idle signature make: one place to edit when it moves.
@@ -2116,6 +2142,34 @@ mod tests {
             "",
         ] {
             assert_eq!(rollout_cwd(line), None, "{line:?}");
+        }
+    }
+
+    /// And what says which session a rollout is *of*, which is the id codex chose
+    /// for itself — the one thing nobody else on either machine knows, codex
+    /// taking no session id at launch.
+    #[test]
+    fn a_rollouts_opening_line_says_which_session_it_is_of() {
+        assert_eq!(
+            rollout_session(SESSION_META_LINE).as_deref(),
+            Some("01a051a2-d4e0-7f03-8839-d771ca4d0e73")
+        );
+    }
+
+    /// And no other line of it does, for the reason no other line says where the
+    /// session was working: a rollout says what it is in the line it opens with,
+    /// and a line that is not that one is not evidence of anything.
+    #[test]
+    fn no_other_line_of_a_rollout_says_which_session_it_is_of() {
+        for line in [
+            r#"{"type":"turn_context","payload":{"session_id":"01a051a2"}}"#,
+            r#"{"type":"session_meta","payload":{"cwd":"/srv/worktrees/rate-limiting"}}"#,
+            r#"{"type":"session_meta"}"#,
+            r#"{"payload":{"session_id":"01a051a2"}}"#,
+            "not JSON at all",
+            "",
+        ] {
+            assert_eq!(rollout_session(line), None, "{line:?}");
         }
     }
 

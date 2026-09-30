@@ -66,7 +66,7 @@ export type Opening = Package.editor.IStandaloneEditorConstructionOptions;
 /// A type rather than three arguments, because they are set twice — once as an
 /// editor is opened and again each time the menu moves one — and the two have
 /// to be the same three words or an editor would open drawn one way and be
-/// redrawn another. See `device.ts`, where what this is made out of is kept.
+/// redrawn another. See `remembered.ts`, where what this is made out of is kept.
 export type Drawing = Pick<Opening, "wordWrap" | "fontSize" | "minimap">;
 
 /// And the package, as the three calls this pane makes of it.

@@ -33,7 +33,7 @@
 //! measuring itself is the page's, in `Panes.tsx`, because a width is only ever
 //! a width of something drawn.
 
-import { forget, read, write } from "./device";
+import { forget, read, write } from "./remembered";
 
 /// From here the sidebar stands beside the level being read, and the divider
 /// between the two can be dragged. Below it the frame pages one pane at a time:

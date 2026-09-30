@@ -82,6 +82,9 @@ const REST = {
   ignored_comments: "Keep",
   mcp_servers: "Keep",
   ...LANGUAGES,
+  // And how much Verkstead runs at once, as the strings a form holds — see
+  // [`heldAtOnce`].
+  at_once: { roadmap_stages: "1", conversations: "2" },
   conflict_resolution: TOLD.conflict_resolution,
   share_on_done: TOLD.share_on_done,
   ...PATHS,

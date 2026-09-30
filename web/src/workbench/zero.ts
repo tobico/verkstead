@@ -61,7 +61,7 @@ export function useZero(): Accessor<Zero> {
   const conversations = useReading(() => ({
     queryKey: ["conversations"],
     queryFn: listConversations,
-    freshness: { reconcile: "id" } as const,
+    freshness: { reconcile: "rank" } as const,
   }));
 
   const archived = useReading(() => ({

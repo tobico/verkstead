@@ -17,16 +17,18 @@
 use ts_rs::TS;
 
 use crate::{
-    AbandonedRepo, Adopted, AnswerAttached, AnswerAttachmentRemoved, Attached, AttachmentRemoved,
-    BacklogPane, BaseBranchChoice, BaseRecorded, BranchRename, BranchRenamed, BriefEdit,
-    BriefSaved, Capture, CommitPane, CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed,
-    CompanionModeChoice, CompanionModeChosen, CompanionRemoved, ConversationArchived,
-    ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
-    ConversationUnarchived, ConversationView, Created, Creation, DirectoryListing, FileDeleted,
-    FileDeleting, FileListsView, FileMade, FileMaking, FileReading, FileRenamed, FileRenaming,
-    FileRootsView, FileStatusView, FileWrite, FileWritten, FolderListing, GrillingStarted,
-    InstallPress, Locked, NewAdoption, NewCompanion, NewConversation, NewOrder, OnboardingView,
-    PrefillView, ProcessChoice, ProcessPicked, ProfileChoice, ProfileChosen, ProfileDeleted,
+    AbandonedRepo, Adopted, AnswerAttached, AnswerAttachmentRemoved, AskingDevice, Attached,
+    AttachmentRemoved, BacklogPane, BaseBranchChoice, BaseRecorded, BranchRename, BranchRenamed,
+    BriefEdit, BriefSaved, Capture, CommitPane, CompanionAdded, CompanionBaseRecorded,
+    CompanionBranchRenamed, CompanionModeChoice, CompanionModeChosen, CompanionRemoved, Confirming,
+    ConversationArchived, ConversationClosed, ConversationEntry, ConversationMove,
+    ConversationSteered, ConversationStopped, ConversationUnarchived, ConversationView, Created,
+    Creation, DeviceIdentity, DevicesView, DirectoryListing, DiscoveredDevice, DroppedRow,
+    FileDeleted, FileDeleting, FileListsView, FileMade, FileMaking, FileReading, FileRenamed,
+    FileRenaming, FileRootsView, FileStatusView, FileWrite, FileWritten, FolderListing,
+    GrillingStarted, InstallPress, LinkedDevice, Locked, NewAdoption, NewCompanion,
+    NewConversation, NewJoin, NewRank, OnboardingView, PendingJoin, Permitting, PrefillView,
+    Preflight, ProcessChoice, ProcessPicked, ProfileChoice, ProfileChosen, ProfileDeleted,
     ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails, PushKey, Registered, Registration,
     RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoPairingsView, RepoRemoved, RepoSwitched,
     RepoView, Resolved, Resumed, RoadmapPane, RoleChoice, Screen, ServeEdit, ServePress,
@@ -34,7 +36,7 @@ use crate::{
     ShareCommented, SharePublished, SharedConversation, ShowArchived, ShowingArchived, Shown,
     Started, SteerCancelled, SteerForm, SteerOpened, SteerSaved, SteerSubmission, Submitted,
     Subscribed, Subscription, TakenUp, TargetNamed, TargetRecorded, TerminalClosed, TerminalOpened,
-    TerminalsView, TranscriptView, Unsubscribe, UpdateNotice, Watching,
+    TerminalsView, TranscriptView, Transferring, Unsubscribe, UpdateNotice, Watching,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -80,8 +82,8 @@ fn the_viewers_types_are_written_from_these() {
     // different sentence to put in front of the human.
     ConversationEntry::export_all(&config).unwrap();
 
-    // And what is offered beside the sidebar: the Repos holding roadmaps
-    // nothing is driving, which writes the roadmap inside it.
+    // And what is offered beside the sidebar: the Repos holding roadmaps with a
+    // stage that could be started, which writes the roadmap inside it.
     AbandonedRepo::export_all(&config).unwrap();
     ConversationView::export_all(&config).unwrap();
     NewConversation::export_all(&config).unwrap();
@@ -103,9 +105,13 @@ fn the_viewers_types_are_written_from_these() {
     // than saying them over again.
     ShareCommented::export_all(&config).unwrap();
 
-    // And the order the human dragged that sidebar into, which is the one thing
-    // they say about the list itself rather than about anything on it.
-    NewOrder::export_all(&config).unwrap();
+    // And where they have just dragged one row of that sidebar to, which is the
+    // one thing they say about the list itself rather than about anything on it.
+    // Two shapes, because a drag is said twice: the drop, named by device and id
+    // at both ends, and the rank that comes of it, which is what the device
+    // owning the row is told — see `crate::DroppedRow`.
+    DroppedRow::export_all(&config).unwrap();
+    NewRank::export_all(&config).unwrap();
 
     // And the other: whether what has been put away is drawn among them, which
     // is read back with whether there is anything put away at all and written
@@ -184,6 +190,11 @@ fn the_viewers_types_are_written_from_these() {
     GrillingStarted::export_all(&config).unwrap();
     ConversationClosed::export_all(&config).unwrap();
 
+    // And the close a draft's work moving to another device ends with, which is
+    // the one close that carries a request shape: where the work went, for the
+    // words left on the Timeline here — see [`crate::ConversationMove`].
+    ConversationMove::export_all(&config).unwrap();
+
     // And the press that puts a closed one away, which takes no request shape
     // either: which Conversation it is is the whole of what it says.
     ConversationArchived::export_all(&config).unwrap();
@@ -199,6 +210,11 @@ fn the_viewers_types_are_written_from_these() {
     // reasons of its own, a branch that is already there being the point rather
     // than the trouble.
     TakenUp::export_all(&config).unwrap();
+
+    // And the one request shape any of those three presses takes: which closes
+    // the human has agreed to, sent by the press that confirms a take-up the
+    // last one stopped over uncommitted changes.
+    Confirming::export_all(&config).unwrap();
 
     // Nothing here for how the work gets built: the recommendation and its
     // reasoning ride on the `SetView` above, the pick goes back as a field of
@@ -412,6 +428,54 @@ fn the_viewers_types_are_written_from_these() {
     ServeEdit::export_all(&config).unwrap();
     ServePress::export_all(&config).unwrap();
 
+    // And what a device says it is when it is asked: the id every record names
+    // it by and the fingerprint of the certificate it presents. A peer reads it
+    // off the identity endpoint on the peer listener; the Devices section of
+    // that same pane draws this device's own.
+    DeviceIdentity::export_all(&config).unwrap();
+
+    // And the same device as the workbench draws it, which is that identity
+    // whole with a count of the devices linked to it beside it: the Devices
+    // section of that pane reads this, and the card above it says the count.
+    // Each member carries whether the last dial to it got through, which is
+    // what dims a row and reads *unreachable* on it.
+    DevicesView::export_all(&config).unwrap();
+    LinkedDevice::export_all(&config).unwrap();
+
+    // And the devices nobody has typed an address for, which is the Discovered
+    // list under those rows: a reading of its own rather than a field of the one
+    // above, so that a browse finding something does not re-read the membership
+    // and cannot take the rows the pane already drew with it. Each says where it
+    // was found, which is a list — a device on one LAN and one tailnet is found
+    // twice and is one row.
+    DiscoveredDevice::export_all(&config).unwrap();
+
+    // And the one thing in that section that is pressed rather than read: Add,
+    // which takes an address to go and ask at. What it leaves behind is a
+    // pending row on the reading above — the device being waited on, and whether
+    // the ten minutes it is held for have run out.
+    NewJoin::export_all(&config).unwrap();
+    PendingJoin::export_all(&config).unwrap();
+
+    // And the other side of that waiting: the question the device that *was*
+    // asked is holding, which the modal in every one of its open workbenches is
+    // drawn from — what this device calls the request, and the whole of what the
+    // asker said about itself.
+    AskingDevice::export_all(&config).unwrap();
+
+    // And what a device lacks before work is moved onto it, which is the
+    // reading the Transfer dialog draws under its device select and refuses Go
+    // on. The findings write the role and the harness they name with them.
+    Preflight::export_all(&config).unwrap();
+
+    // And what became of pressing Go, which carries that same reading back where
+    // the machine has gone off between the drawing and the press.
+    Transferring::export_all(&config).unwrap();
+
+    // And the ticks under *May be transferred to*, which change the list the
+    // agent may move the work along and move nothing themselves.
+    Permitting::export_all(&config).unwrap();
+
     // And whether a fresh Verkstead can do anything yet: the mode the wizard
     // runs in, the machine it is standing on, and what is missing from it. It
     // writes the rows and the three steps' met-ness with it, and the install run
@@ -436,4 +500,9 @@ fn the_viewers_types_are_written_from_these() {
     // moved, which is what decides which of the reads above is worth making
     // again. It hands over nothing itself — see `Nudge`.
     verkstead_schema::Nudge::export_all(&config).unwrap();
+
+    // And the envelope it goes down the stream in, which says whose news it is:
+    // this device's own, or a member's, re-announced under the Device Id the hub
+    // heard it from (ADR-0020, *The opened device relays*).
+    verkstead_schema::Nudged::export_all(&config).unwrap();
 }

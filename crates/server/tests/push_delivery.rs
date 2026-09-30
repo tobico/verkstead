@@ -30,6 +30,10 @@ use verkstead_server::{open_database, router, store};
 const ASKING_FROM: i64 = 1;
 use web_push_native::Auth;
 
+/// The device every Conversation started here is ranked by, named the way a
+/// cluster names one (ADR-0020, *Ranks*).
+const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
+
 const SET: &str = r#"
 title: Rate limiting for the public API
 project: verkstead
@@ -181,7 +185,7 @@ async fn fresh_app() -> (tempfile::TempDir, SqlitePool, Router) {
     .unwrap()
     .expect("nothing is registered at that path yet");
 
-    let conversation = store::start_conversation(&pool, repo.id, "push")
+    let conversation = store::start_conversation(&pool, repo.id, "push", THIS_DEVICE)
         .await
         .unwrap()
         .expect("the Repo was just registered");

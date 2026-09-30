@@ -1,0 +1,38 @@
+[
+  {
+    "addresses": [
+      "192.168.1.31:8423",
+      "10.0.0.31:8423"
+    ],
+    "device": "0011223344556677889900aabbccddee",
+    "found": [
+      "Lan"
+    ],
+    "name": "laptop",
+    "os": "macOS"
+  },
+  {
+    "addresses": [
+      "100.64.0.9:8423"
+    ],
+    "device": "99887766554433221100aabbccddeeff",
+    "found": [
+      "Tailscale"
+    ],
+    "name": "kitchen-mini",
+    "os": "macOS"
+  },
+  {
+    "addresses": [
+      "172.29.0.14:9423",
+      "100.64.0.14:8423"
+    ],
+    "device": "ffeeddccbbaa00998877665544332211",
+    "found": [
+      "Lan",
+      "Tailscale"
+    ],
+    "name": "workbench",
+    "os": "Linux (WSL)"
+  }
+]

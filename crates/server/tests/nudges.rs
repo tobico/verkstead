@@ -18,6 +18,10 @@ use tower::ServiceExt;
 use verkstead_schema::{Nudge, SetCreated};
 use verkstead_server::{open_database, router, store};
 
+/// The device every Conversation started here is ranked by, named the way a
+/// cluster names one (ADR-0020, *Ranks*).
+const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
+
 /// The Conversation every Set in this file is asked from, made by [`fresh_app`]
 /// over a database with nothing in it.
 const ASKING_FROM: i64 = 1;
@@ -66,7 +70,7 @@ async fn fresh_app() -> (tempfile::TempDir, Router) {
         .unwrap()
         .expect("nothing is registered at that path yet");
 
-    let conversation = store::start_conversation(&pool, repo.id, "nudge")
+    let conversation = store::start_conversation(&pool, repo.id, "nudge", THIS_DEVICE)
         .await
         .unwrap()
         .expect("the Repo was just registered");
@@ -472,7 +476,7 @@ const SCOPED_TO: i64 = 7;
 ///
 /// One of each rather than one per file: this is a vocabulary rather than a set
 /// of payloads, and what a reader of it wants to see is the whole of it at once.
-const KINDS: [Nudge; 10] = [
+const KINDS: [Nudge; 14] = [
     Nudge::Transcript {
         conversation: SCOPED_TO,
     },
@@ -496,7 +500,11 @@ const KINDS: [Nudge; 10] = [
     },
     Nudge::Conversations,
     Nudge::Repos,
+    Nudge::Joins,
+    Nudge::Devices,
+    Nudge::Discovered,
     Nudge::Profiles,
+    Nudge::Everything,
 ];
 
 /// Where the golden fixtures are written, relative to this crate — the same

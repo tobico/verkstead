@@ -31,12 +31,12 @@
    stands on a card, and the events that are not one: the moves and steers drawn
    as lines between the cards, and the manual task nothing writes another of. */
 
-/* What the pane is called: the branch, and the Repo the work is in understated
-   beside it. The title/subtitle pattern the sidebar's card draws the same two
-   facts in — see `.conversationRow .title` and `.meta` in
-   `Conversations.module.css` — so the card and the header of the pane it opens
-   read as the one name said twice, and the status button at the foot of the
-   block says its own line in the same voice.
+/* What the pane is called: the branch, and understated beside it the machine
+   the work is on and the Repo it is in. The title/subtitle pattern the
+   sidebar's card draws the same facts in — see `.conversationRow .title` and
+   `.meta` in `Conversations.module.css` — so the card and the header of the
+   pane it opens read as the one name said twice, and the status button at the
+   foot of the block says its own line in the same voice.
 
    Inside the `<h1>` rather than under it, because the Repo is part of what this
    pane is called rather than a caption on it: on a Draft the title is the word
@@ -78,6 +78,36 @@
   font-weight: 400;
   color: var(--ink-soft);
   white-space: nowrap;
+}
+
+/* And which machine the work is on, set exactly as the Repo beside it and for
+   the same reason: the two are one line of provenance under a name, said here
+   along the heading rather than under it. Ahead of the Repo, which is the
+   order the sidebar's card says the same two facts in.
+
+   Its own box so that the mark and the name are one item the flex row cannot
+   break apart, and `flex: none` so that what gives way when the header is
+   narrow is the branch — a hostname is a short word and the branch is the long
+   one. */
+.paneName .paneDevice {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.3rem;
+  flex: none;
+  font-size: 0.9rem;
+  font-weight: 400;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+
+/* The mark for its OS, sized against the line it stands in: this line is a
+   step down from the title, and a mark written down in rem would be the one
+   thing on it that did not step down with it. Nudged onto the baseline the
+   words sit on, an SVG having none of its own. */
+.paneName .paneOs {
+  width: 1em;
+  height: 1em;
+  align-self: center;
 }
 
 /* The way on to the next level, which only the timeline has one of: the details
@@ -405,6 +435,37 @@
   font-size: 0.9rem;
 }
 
+/* A stage's row is a press of its own where the record says which Conversation
+   the stage is, so the parts of it hang off the row rather than off the item it
+   sits in — which is what lets the row be a button at all. Everything a button
+   brings with it comes off again: the whole of what this is, is the line the
+   list item was, and a row that leads nowhere is drawn by the same rule.
+
+   Taking the whole width, so the number at its far end is still at the far end
+   of the card, and `min-width: 0` so the title inside it is what gives way when
+   a name is too long — a flex item will not shrink under its content without
+   it. */
+.stageList .stage {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  margin: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  background: none;
+  border: 0;
+}
+
+/* And where it leads somewhere it is a target, which is the pointer — the same
+   one the card under it wears, the card being a press as well. */
+.stageList button.stage {
+  cursor: pointer;
+}
+
 /* The number the entry answers to, as the list writes it, at the far end of the
    row — `☐ Some task            01`. Monospaced so the column reads straight
    down whatever the numbers are, and held against that edge by the margin the
@@ -441,9 +502,16 @@
 /* And the word the box replaced, kept for the readers that need words: out of
    the layout and still in the document, so a row read aloud or copied out says
    which entries are finished. Not `display: none`, which would take it out of
-   the accessibility tree along with the layout. */
+   the accessibility tree along with the layout.
+
+   The count on an ellipsis row is kept the same way, on both cards: an
+   ellipsis read aloud says nothing whatever, and the row is a mark saying the
+   list goes on rather than a row saying how far. Its own class rather than the
+   state word's, because a stage's state word *is* drawn — see below — and the
+   two would otherwise be one rule the moment they were written as one. */
 .taskList .state,
-.stageList .state {
+.taskList .count,
+.stageList .count {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -455,9 +523,23 @@
   border: 0;
 }
 
-/* The ends of a list that is longer than the card shows: an ellipsis where the
+/* A stage's is drawn, which is where the roadmap's card parts company with the
+   backlog's: a task is done or it is not and a box says which, where a stage is
+   in one of four places and only two of them are a box. So the word is on the
+   row for everybody, before the number at the edge, and quiet enough that the
+   titles are still what the column is read down. */
+.stageList .state {
+  flex: none;
+  color: var(--ink-soft);
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+/* The parts of a list that is longer than the card shows: an ellipsis where the
    entries carry on, in the column the boxes are in so it reads as part of the
-   list rather than as something under it. */
+   list rather than as something under it. At either end of the window, and
+   between its stretches where the card is drawing a roadmap whose stages in
+   flight are not neighbours. */
 .taskList .more,
 .stageList .more {
   color: var(--ink-soft);
@@ -470,6 +552,23 @@
 .stageList .stages li.done .what {
   text-decoration: line-through;
   color: var(--ink-soft);
+}
+
+/* And a stage's row that leads somewhere says which row is under the hand, in
+   the one colour this app means *a way out of here* by — the colour a link is
+   drawn in. The pointer cannot say it on its own: the card under the row is a
+   press too and wears the same one. A fill would have said it by lighting a
+   second surface inside a card that is already lit, which is two targets drawn
+   where the reader is being shown one.
+
+   After the struck-through rule above rather than before it, because a settled
+   stage keeps its Conversation — that is where its pull request and its review
+   are — so the two land on one row and the colour under the hand is the later
+   word. The line through the title is untouched either way. */
+@media (hover: hover) {
+  .stageList button.stage:hover .what {
+    color: var(--accent);
+  }
 }
 
 /* The pull request: the same card as the backlog above it, because it is the

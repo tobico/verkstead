@@ -357,8 +357,10 @@ pub(crate) async fn watched(
 
         // Idle and silent, having said it is done: the driver beside this is
         // ending the session on exactly that, and a line typed into one that has
-        // done its job would be Verkstead prodding an agent for finishing.
-        if signal.given() {
+        // done its job would be Verkstead prodding an agent for finishing. The
+        // same for one that has asked for the work to be moved, which the mover
+        // is ending at this turn's end — see [`crate::transfers`].
+        if signal.given() || crate::transfers::called(state, conversation_id).await {
             tokio::time::sleep(pace.poll).await;
             continue;
         }

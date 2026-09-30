@@ -70,7 +70,13 @@ import type {
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
 import { PaneHead } from "../workbench/PaneHead";
-import { heldCleanup, heldInstructions, heldLanguages, heldPaths } from "./held";
+import {
+  heldAtOnce,
+  heldCleanup,
+  heldInstructions,
+  heldLanguages,
+  heldPaths,
+} from "./held";
 import styles from "./Cleanup.module.css";
 
 /// The settings as they stand, read once for the two panes that draw them — the
@@ -229,6 +235,8 @@ export function CleanupPane(props: {
         // be a list emptied — see [`heldLanguages`].
         ...heldLanguages(told()),
         cleanup: edit,
+        // And how much Verkstead runs at once — see [`heldAtOnce`].
+        at_once: heldAtOnce(told()),
         // And how a conflict is resolved, and whether Done shares the record to
         // the pull request, for that reason again.
         conflict_resolution: told()?.conflict_resolution ?? "Merge",

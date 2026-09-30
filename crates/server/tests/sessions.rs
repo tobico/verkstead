@@ -73,9 +73,9 @@ use verkstead_render::{
     ConversationClosed, ConversationSteered, ConversationStopped, ConversationView,
     GrillingStarted, Lifecycle, NoticeEvent, PickedView, PinnedEvent, Process, ProcessPicked,
     ProfileSaved, PullRequestEvent, Registered, Resolved, Resumed, ServerAttached, SetReading,
-    SetView, Shown, Size, StageListReached, Started, SteerOpened, Submitted, TargetRecorded,
-    TaskListEvent, TaskListReached, TerminalClosed, TerminalOpened, TerminalView, TerminalsView,
-    TimelineEvent, TranscriptView, Turn, Watching,
+    SetView, Shown, Size, StageListReached, StageState, Started, SteerOpened, Submitted,
+    TargetRecorded, TaskListEvent, TaskListReached, TerminalClosed, TerminalOpened, TerminalView,
+    TerminalsView, TimelineEvent, TranscriptView, Turn, Watching,
 };
 use verkstead_schema::{Direction, Nudge};
 use verkstead_server::attachments::Attachments;
@@ -86,7 +86,11 @@ use verkstead_server::sandbox::{Executable, Homes, Reachable, SandboxConfig};
 use verkstead_server::settings::Settings;
 use verkstead_server::skills::Skills;
 use verkstead_server::{Agents, Gh, Pace, open_database, router_running_sessions};
-use verkstead_store::Decision;
+use verkstead_store::{Decision, StageOf, stage_roadmap};
+
+/// The device every Conversation started here is ranked by, named the way a
+/// cluster names one (ADR-0020, *Ranks*).
+const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
 
 /// The Brief every Conversation here is started from, and what the stub agent
 /// is primed with.
@@ -194,6 +198,14 @@ struct Grilling {
 
     app: Router,
     id: i64,
+
+    /// The Repo this Conversation is against, for the tests that start a second
+    /// Conversation of their own on the same bench.
+    ///
+    /// The id rather than the path — [`Grilling::repo`] is where the directory
+    /// is. What a compose needs is the registry row, and nothing else here has
+    /// it to hand once the bench has become a fixture.
+    repo_id: i64,
 
     /// Where the database is, for the tests that stand a second server up over
     /// it.
@@ -424,6 +436,13 @@ impl Grilling {
     /// The caller holds on to what comes back — dropping the Router is the second
     /// server going away again.
     async fn restarted(&self, stub: &str, gh: &str) -> Router {
+        self.restarted_at_pace(stub, gh, *BRISKLY).await
+    }
+
+    /// And the same at a pace of the caller's choosing, for the tests where what
+    /// the second server does is something the first one was not doing: a sweep
+    /// the first server's pace had switched off.
+    async fn restarted_at_pace(&self, stub: &str, gh: &str, pace: Pace) -> Router {
         router_running_sessions(
             open_database(&self.database).await.unwrap(),
             self.state.path().to_owned(),
@@ -446,7 +465,7 @@ impl Grilling {
                 Attachments::under(self.state.path()),
                 Settings::in_data_dir(self.state.path()),
             )
-            .at_pace(*BRISKLY),
+            .at_pace(pace),
             gh_stub(gh),
         )
     }
@@ -1091,6 +1110,11 @@ static BRISKLY: LazyLock<Pace> = LazyLock::new(|| Pace {
     // can assert *nothing happened* inside — and one long enough that a loaded
     // machine cannot close it.
     waking: paced(Duration::from_millis(3600)),
+    // How often a stage held before its finish looks at whether the chain
+    // below it has settled, which is the same kind of choice as the poll above:
+    // what it decides is how long after the stage below settles the one behind
+    // it gets going.
+    joins: paced(Duration::from_millis(100)),
     // Longer than any of these run for, so that the sweep for a stalled
     // Conversation is the one thing that never fires by itself here. Every one
     // of these fixtures is a Conversation whose grilling session has printed and
@@ -1098,6 +1122,11 @@ static BRISKLY: LazyLock<Pace> = LazyLock::new(|| Pace {
     // about something else say nothing about it, and the ones that are about it
     // keep [`SWEEPING`].
     stalls: paced(Duration::from_secs(600)),
+    // And longer than any of these run for again, for the stall sweep's reason
+    // and one step further: the look for a free place *starts* something, so one
+    // firing under a test about anything else would put a Conversation on the
+    // sidebar it never asked for. The ones that are about it keep [`LOOKING`].
+    places: paced(Duration::from_secs(600)),
     // And longer than any of these run for again, for the stall sweep's reason
     // one sweep along: every fixture that reaches Done has a pull request
     // nothing has merged, which is exactly what the sweep after Done goes and
@@ -1133,6 +1162,18 @@ static BRISKLY: LazyLock<Pace> = LazyLock::new(|| Pace {
 /// number of seconds it waits before noticing is not part of the answer.
 static SWEEPING: LazyLock<Pace> = LazyLock::new(|| Pace {
     stalls: paced(Duration::from_millis(100)),
+    ..*BRISKLY
+});
+
+/// And the same at a pace that looks for a free place on the server, for the
+/// tests about a stage that waited for one.
+///
+/// A server looks every half minute. What is being asked here is whether a stage
+/// held back for want of a place is started once one comes free, with nobody
+/// pressing anything — and the seconds it waits before looking are not part of
+/// the answer.
+static LOOKING: LazyLock<Pace> = LazyLock::new(|| Pace {
+    places: paced(Duration::from_millis(100)),
     ..*BRISKLY
 });
 
@@ -1177,6 +1218,31 @@ static CLEANING: LazyLock<Pace> = LazyLock::new(|| Pace {
 /// session has to say its first word inside.
 static UNSPOKEN: LazyLock<Pace> = LazyLock::new(|| Pace {
     waking: paced(Duration::from_secs(600)),
+    ..*BRISKLY
+});
+
+/// And the same at a pace that holds the rescue off a session that *has* spoken,
+/// for the tests whose subject is the wrap-up or the follow-up rather than the
+/// rescue.
+///
+/// [`UNSPOKEN`] above holds the ceiling on a stir; this holds the grace behind
+/// it, which is the span a session that said its piece and went quiet is spoken
+/// to after. The trap is the review stub every one of these fixtures runs — see
+/// [`REVIEW_AND_FIND_NOTHING`], which prints what it found and exits. Between
+/// that line and the process being reaped it is a session idle with nothing open
+/// and no signal given, which is exactly the shape the rescue watches for: a reap
+/// slower than `proposing` is a line typed into it, and one slower than three of
+/// those plus the ceiling is an escalation Notice standing on the Timeline for
+/// good — the Notice being what happened, whatever the session did next. Which is
+/// a thing about how long the machine took to reap a process, and nothing about
+/// the code.
+///
+/// Longer than any of these run for, for the reason `stalls`, `merges` and
+/// `cleanup` are what they are above, and still clear of `grace` the way
+/// [`BRISKLY`]'s own is. A server's own is a minute, which is how long a real
+/// session has to be doing nothing before it is spoken to.
+static UNRESCUED: LazyLock<Pace> = LazyLock::new(|| Pace {
+    proposing: paced(Duration::from_secs(600)),
     ..*BRISKLY
 });
 
@@ -2303,6 +2369,13 @@ async fn grilling_spilling(spill: tempfile::TempDir, stub: &str, gh: &str) -> Gr
     grilling_at_pace(spill, stub, gh, *BRISKLY, &[]).await
 }
 
+/// And the same on a server whose rescue speaks to nothing at all — for the
+/// tests that go all the way through a wrap-up and read what the Conversation
+/// had to say about itself afterwards. See [`UNRESCUED`].
+async fn grilling_unrescued(spill: tempfile::TempDir, stub: &str, gh: &str) -> Grilling {
+    grilling_at_pace(spill, stub, gh, *UNRESCUED, &[]).await
+}
+
 /// The same workbench with the same press, on a draft whose Process is
 /// **Tinker**: it lands in Follow-up rather than Grilling, and the one session
 /// it starts is the follow-up's.
@@ -3350,6 +3423,7 @@ impl Bench {
             spill: self.spill,
             app: self.app,
             id,
+            repo_id: self.repo_id,
             _signalling: signalling,
             database: self.database,
             _room: self.room,
@@ -3598,11 +3672,17 @@ fn pull_requests(view: &ConversationView) -> Vec<&PullRequestEvent> {
 /// idle on a blocking ask, so this is how one is held at a point the test needs
 /// it held at.
 fn handoff_directory(fixture: &Grilling) -> PathBuf {
-    fixture
-        .state
-        .path()
-        .join("handoffs")
-        .join(fixture.id.to_string())
+    handoffs_of(fixture, fixture.id)
+}
+
+/// And the same for any Conversation of this bench, for the tests that stand a
+/// second one up beside the fixture's own.
+///
+/// The directory is the *Conversation's* rather than the bench's — every session
+/// of one sees it as `/tmp/verkstead` — so a test that drives two of them cannot
+/// reach the second's markers through [`handoff_directory`].
+fn handoffs_of(fixture: &Grilling, id: i64) -> PathBuf {
+    fixture.state.path().join("handoffs").join(id.to_string())
 }
 
 /// The handoff on a Timeline, once the grilling has handed one over.
@@ -7164,13 +7244,18 @@ async fn choosing_a_roadmap_stages_the_work_in_the_grilling_session() {
         stages
             .stages
             .iter()
-            .map(|stage| (stage.number.as_str(), stage.title.as_str(), stage.done))
+            .map(|stage| (
+                stage.number.as_str(),
+                stage.title.as_str(),
+                stage.state.clone()
+            ))
             .collect::<Vec<_>>(),
         [
-            ("01", "Count the requests", true),
-            ("02", "Refuse the rest", false),
+            ("01", "Count the requests", StageState::Done),
+            ("02", "Refuse the rest", StageState::ToDo),
         ],
-        "the roadmap's own order, numbers and titles, and the boxes as it wrote them",
+        "the roadmap's own order, numbers and titles, and its boxes read as states: \
+         nothing has started a stage of it, so the boxes are all there is to go on",
     );
 
     // And the same roadmap on the record, at the row the landing stamped —
@@ -14686,7 +14771,7 @@ const PRINTS_AND_STOPS: &str = r#"printf 'nothing to do\n'"#;
 
 /// One archived Conversation with a session's worth of bulk on it.
 async fn archived_printing(pool: &SqlitePool, repo: i64, branch: &str) -> Archived {
-    let id = verkstead_store::start_conversation(pool, repo, branch)
+    let id = verkstead_store::start_conversation(pool, repo, branch, THIS_DEVICE)
         .await
         .unwrap()
         .expect("the Repo is registered");
@@ -17952,6 +18037,24 @@ fn a_roadmap_then_wraps_up(
     workflow: &str,
     merging: &str,
 ) -> String {
+    a_roadmap_of_briefs_then_wraps_up(planning, worked, stages, workflow, merging, "")
+}
+
+/// And the same with `briefs` written beside the two every one of these
+/// roadmaps has — for a roadmap with more stages in its index than the two.
+///
+/// A fragment of the staging session's own shell rather than a list of files,
+/// because that is what writes the roadmap: the stages are written on the branch
+/// the roadmap Conversation is on, and a brief nobody wrote is a stage nothing
+/// starts.
+fn a_roadmap_of_briefs_then_wraps_up(
+    planning: &Path,
+    worked: &Path,
+    stages: &str,
+    workflow: &str,
+    merging: &str,
+    briefs: &str,
+) -> String {
     format!(
         r#"
 case "$2" in
@@ -17964,6 +18067,7 @@ case "$2" in
     printf '# Rate limiting roadmap\n\n## Stages\n\n{stages}' > docs/roadmaps/rate-limiting/ROADMAP.md
     printf '# 01. Count the requests\n\n## Goal\n\nA counter per key, and nothing else.\n' > docs/roadmaps/rate-limiting/01-counter.md
     printf '# 02. Refuse the rest\n' > docs/roadmaps/rate-limiting/02-refusing.md
+{briefs}
     git add -A
     git commit --quiet -m 'docs: stage the rate-limiting roadmap'
     : > /tmp/verkstead/done
@@ -18025,6 +18129,33 @@ const RECORDS_STACKING: &str = r#"    printf '# Git workflow\n\n## Review proces
 /// Both stages open, which is a roadmap with something to start.
 const TWO_STAGES: &str = r#"- [ ] 01: Count the requests — [brief](01-counter.md)\n- [ ] 02: Refuse the rest — [brief](02-refusing.md)\n"#;
 
+/// And both of them declaring that they stand on nothing, which is a roadmap with
+/// two stages to start off the one settle.
+///
+/// The declaration is written on the stage's own line, after the link to its
+/// brief — see `declarations`, which is the reading of it. A roadmap declaring on
+/// every line is a declaring roadmap; [`TWO_STAGES`] declares on none, and runs in
+/// order.
+const TWO_ROOTS: &str = r#"- [ ] 01: Count the requests — [brief](01-counter.md) — no dependencies\n- [ ] 02: Refuse the rest — [brief](02-refusing.md) — no dependencies\n"#;
+
+/// And four of them, which is more roots than one roadmap has places: three start
+/// and the fourth waits.
+const FOUR_ROOTS: &str = r#"- [ ] 01: Count the requests — [brief](01-counter.md) — no dependencies\n- [ ] 02: Refuse the rest — [brief](02-refusing.md) — no dependencies\n- [ ] 03: Count the refusals — [brief](03-refusals.md) — no dependencies\n- [ ] 04: Say why — [brief](04-saying-why.md) — no dependencies\n"#;
+
+/// And five, which is more roots than the **server** has places however many the
+/// roadmap is allowed: four start and the fifth waits.
+const FIVE_ROOTS: &str = r#"- [ ] 01: Count the requests — [brief](01-counter.md) — no dependencies\n- [ ] 02: Refuse the rest — [brief](02-refusing.md) — no dependencies\n- [ ] 03: Count the refusals — [brief](03-refusals.md) — no dependencies\n- [ ] 04: Say why — [brief](04-saying-why.md) — no dependencies\n- [ ] 05: Let them through — [brief](05-letting-through.md) — no dependencies\n"#;
+
+/// The briefs those last two name, written on the roadmap's own branch beside the
+/// two every one of these fixtures writes.
+const TWO_MORE_BRIEFS: &str = r#"    printf '# 03. Count the refusals\n' > docs/roadmaps/rate-limiting/03-refusals.md
+    printf '# 04. Say why\n' > docs/roadmaps/rate-limiting/04-saying-why.md"#;
+
+/// And the fifth beside them, for the roadmap with five roots.
+const THREE_MORE_BRIEFS: &str = r#"    printf '# 03. Count the refusals\n' > docs/roadmaps/rate-limiting/03-refusals.md
+    printf '# 04. Say why\n' > docs/roadmaps/rate-limiting/04-saying-why.md
+    printf '# 05. Let them through\n' > docs/roadmaps/rate-limiting/05-letting-through.md"#;
+
 /// The two presses a roadmap Conversation ever takes: start grilling, and pick
 /// the roadmap direction on the Set that ends it.
 ///
@@ -18066,12 +18197,14 @@ async fn stage_of(fixture: &Grilling) -> ConversationView {
     let deadline = Instant::now() + *PATIENCE;
 
     loop {
-        let started = conversations(&fixture.app)
-            .await
-            .into_iter()
-            .find(|entry| entry.id != fixture.id);
+        // Every other Conversation rather than the newest of them: a test may
+        // have put a stage of its own into the record by hand, and one of those
+        // is never working.
+        for entry in conversations(&fixture.app).await {
+            if entry.id == fixture.id {
+                continue;
+            }
 
-        if let Some(entry) = started {
             let view: ConversationView =
                 get(&fixture.app, &format!("/api/ui/conversations/{}", entry.id)).await;
 
@@ -18083,6 +18216,51 @@ async fn stage_of(fixture: &Grilling) -> ConversationView {
         assert!(
             Instant::now() < deadline,
             "no stage was ever started. The Timeline says: {:?}",
+            notices(&fixture.view().await),
+        );
+
+        pause(Duration::from_millis(25)).await;
+    }
+}
+
+/// The Conversations the stages were started as, branch order, once `many` of
+/// them are working — or a panic saying how many ever did.
+///
+/// Waited for as a count rather than one at a time: a settle starts every ready
+/// stage of its roadmap, one after another, so a test that took the first one it
+/// saw would be reading the scheduler part-way through.
+async fn stages_of(fixture: &Grilling, many: usize) -> Vec<ConversationView> {
+    let deadline = Instant::now() + *PATIENCE;
+
+    loop {
+        let mut working = Vec::new();
+
+        // Every other Conversation rather than the newest of them, for
+        // [`stage_of`]'s reason: a test may have put a stage of its own into the
+        // record by hand, and one of those is never working.
+        for entry in conversations(&fixture.app).await {
+            if entry.id == fixture.id {
+                continue;
+            }
+
+            let view: ConversationView =
+                get(&fixture.app, &format!("/api/ui/conversations/{}", entry.id)).await;
+
+            if view.state == Lifecycle::Implementing && !notices(&view).is_empty() {
+                working.push(view);
+            }
+        }
+
+        if working.len() >= many {
+            working.sort_by(|one, two| one.branch.cmp(&two.branch));
+
+            return working;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "{} of {many} stages ever started. The Timeline says: {:?}",
+            working.len(),
             notices(&fixture.view().await),
         );
 
@@ -18203,9 +18381,10 @@ fn escalation(notice: &NoticeEvent) -> bool {
 ///
 /// The stage is a Conversation of its own — one Repo, one branch, one Worktree —
 /// against the same Repo, under the same Profiles, primed with the stage brief as
-/// its Brief and going straight to Implementing. Its branch stacks on the
-/// predecessor because this repository records how, and the session it starts is
-/// the bundled fork of next-stage, told which of the two happened.
+/// its Brief and going straight to Implementing. Its branch is cut from the
+/// roadmap's own, the chain holding nothing higher that has settled, and the
+/// session it starts is the bundled fork of next-stage, told which of the two
+/// happened.
 #[tokio::test]
 async fn a_settled_wrap_up_starts_the_next_stage_on_a_conversation_of_its_own() {
     let spill = tempfile::tempdir().unwrap();
@@ -18291,9 +18470,24 @@ async fn a_settled_wrap_up_starts_the_next_stage_on_a_conversation_of_its_own() 
         said.contains("Stage 01") && said.contains("rate-limiting"),
         "the stage says which stage of which roadmap it is: {said:?}",
     );
+
+    // And so does the record, which is where every reading of it starts from
+    // here: the roadmap the branch wrote, and stage 01 of it as the roadmap's own
+    // line labels it. Nothing derives either from the branch above.
+    let pool = open_database(&fixture.database).await.unwrap();
+
+    assert_eq!(
+        stage_roadmap(&pool, stage.id).await.unwrap(),
+        Some(StageOf {
+            roadmap: "rate-limiting".to_owned(),
+            stage: Some("01".to_owned()),
+        }),
+    );
+
+    pool.close().await;
     assert!(
         said.contains(&format!("<code>{roadmap_branch}</code>")),
-        "and that its branch stacks on the one the stage before it was worked on: {said:?}",
+        "and that its branch was cut from the one the stage before it was worked on: {said:?}",
     );
 
     // The branch really is on top of the predecessor's work, which is what
@@ -18302,7 +18496,7 @@ async fn a_settled_wrap_up_starts_the_next_stage_on_a_conversation_of_its_own() 
 
     assert!(
         git(&worktree, &["log", "--oneline"]).contains("docs: stage the rate-limiting roadmap"),
-        "the stage's branch stands on the predecessor's unmerged work",
+        "the stage's branch really is on top of that unmerged work",
     );
 
     // And the Conversation that settled says what became of it, where the human
@@ -18333,8 +18527,8 @@ async fn a_settled_wrap_up_starts_the_next_stage_on_a_conversation_of_its_own() 
         "primed with the stage brief: {prompt:?}",
     );
     assert!(
-        prompt.contains(&format!("stacks on `{roadmap_branch}`")),
-        "and told what its branch stands on, which it cannot read anywhere: {prompt:?}",
+        prompt.contains(&format!("cut from `{roadmap_branch}`")),
+        "and told what its branch was cut from, which it cannot read anywhere: {prompt:?}",
     );
 
     // And what the plan commit hands over to: the runner works the backlog the
@@ -18364,13 +18558,19 @@ async fn a_settled_wrap_up_starts_the_next_stage_on_a_conversation_of_its_own() 
         stages
             .stages
             .iter()
-            .map(|stage| (stage.number.as_str(), stage.title.as_str(), stage.done))
+            .map(|stage| (
+                stage.number.as_str(),
+                stage.title.as_str(),
+                stage.state.clone()
+            ))
             .collect::<Vec<_>>(),
         [
-            ("01", "Count the requests", false),
-            ("02", "Refuse the rest", false),
+            ("01", "Count the requests", StageState::InProgress),
+            ("02", "Refuse the rest", StageState::ToDo),
         ],
-        "stage 01 is under way rather than done: what ticks it is the stage after it",
+        "stage 01 is under way rather than done, and the card says so in a word the \
+         boxes could never have said: this is that stage's own Conversation, and \
+         the record has it in flight",
     );
 
     assert!(
@@ -18394,6 +18594,1619 @@ async fn a_settled_wrap_up_starts_the_next_stage_on_a_conversation_of_its_own() 
     assert!(
         index.contains("*(in progress: `roadmaps/rate-limiting/01-counter`)*"),
         "the roadmap says which branch stage 01 is being worked on: {index:?}",
+    );
+}
+
+/// A settle starts **every** stage of its roadmap that may start now, rather than
+/// the lowest of them: both roots of a declaring roadmap, off the one wrap-up.
+///
+/// Each of them a Conversation of its own, on a branch of its own, in a Worktree
+/// of its own — a stage cannot be anything else — and the Conversation that
+/// settled names both of them where the human was watching when it happened.
+#[tokio::test]
+async fn a_settle_starts_every_ready_stage_of_a_declaring_roadmap() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+    let worked = spill.path().join("task-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_roadmap_then_wraps_up(&planning, &worked, TWO_ROOTS, RECORDS_STACKING, ""),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    staged_and_settled(&fixture).await;
+
+    let stages = stages_of(&fixture, 2).await;
+
+    assert_eq!(
+        stages
+            .iter()
+            .map(|stage| stage.branch.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "roadmaps/rate-limiting/01-counter",
+            "roadmaps/rate-limiting/02-refusing",
+        ],
+        "both roots started, each on a branch named for its own brief",
+    );
+
+    for stage in &stages {
+        assert_eq!(
+            stage.state,
+            Lifecycle::Implementing,
+            "each goes straight to work, the brief being what a grilling would have settled",
+        );
+        assert!(
+            git(&fixture.repo(), &["branch", "--list", &stage.branch]).contains(&stage.branch),
+            "and its branch really is cut: {}",
+            stage.branch,
+        );
+    }
+
+    let worktrees: std::collections::BTreeSet<String> = stages
+        .iter()
+        .map(|stage| {
+            stage
+                .worktree
+                .as_ref()
+                .expect("a stage has a Worktree")
+                .path
+                .clone()
+        })
+        .collect();
+
+    assert_eq!(
+        worktrees.len(),
+        2,
+        "a Worktree each, two stages worked side by side being two checkouts: {worktrees:?}",
+    );
+
+    // And the Conversation that settled names each of them, that being the one
+    // Timeline the human is looking at when a roadmap carries itself on.
+    //
+    // Waited on the second of the two notices: each start says so on the stage's
+    // own Timeline before this one, so a stage that is working is not yet a stage
+    // this Timeline has heard of.
+    let carried_on = said_on(&fixture, fixture.id, "02-refusing</code>.").await;
+
+    assert!(
+        carried_on.contains("Stage 01")
+            && carried_on.contains("<code>roadmaps/rate-limiting/01-counter</code>"),
+        "the settled Conversation says stage 01 started and on what: {carried_on:?}",
+    );
+    assert!(
+        carried_on.contains("Stage 02")
+            && carried_on.contains("<code>roadmaps/rate-limiting/02-refusing</code>"),
+        "and stage 02 beside it, one notice per stage started: {carried_on:?}",
+    );
+}
+
+/// And how many stages of one roadmap start at once is a **setting**: set to one,
+/// a roadmap declaring two roots starts the lower of them and tells the other it
+/// is waiting for a place.
+///
+/// Which is what *a declared roadmap run in order* is — the declarations still say
+/// both may start, and the limit is what says only one does. The number is written
+/// into `config.yaml` after the server came up, because that is the human at the
+/// settings page on their phone while the work was going on: it is read afresh at
+/// the start, so what the file says at the settle is what the scheduler goes by.
+#[tokio::test]
+async fn the_settings_say_how_many_stages_of_one_roadmap_start_at_once() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+    let worked = spill.path().join("task-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_roadmap_then_wraps_up(&planning, &worked, TWO_ROOTS, RECORDS_STACKING, ""),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    // One place, said while the roadmap was being planned — nothing was restarted
+    // for it, and nothing had to be.
+    configure(&fixture, "at_once:\n  roadmap_stages: 1\n");
+
+    staged_and_settled(&fixture).await;
+
+    let stages = stages_of(&fixture, 1).await;
+
+    assert_eq!(
+        stages[0].branch, "roadmaps/rate-limiting/01-counter",
+        "the lowest-numbered of the two roots is the one that started",
+    );
+
+    // Said after the one that started, the waiting being a consequence of it.
+    let said = said_on(&fixture, fixture.id, "waiting for a place").await;
+
+    assert!(
+        said.contains("Stage 02") && said.contains("runs one stage at a time"),
+        "which stage is waiting, and the limit it is waiting on: {said:?}",
+    );
+
+    assert_eq!(
+        conversations(&fixture.app).await.len(),
+        2,
+        "the roadmap's own Conversation and one stage, the setting having said one",
+    );
+    assert!(
+        !git(
+            &fixture.repo(),
+            &["branch", "--list", "roadmaps/rate-limiting/02-refusing"],
+        )
+        .contains("02-refusing"),
+        "and no branch was cut for the root that waited",
+    );
+}
+
+/// Three stages of one roadmap at once, and the fourth ready stage waits for a
+/// place — told so on the Timeline, so that a roadmap which has gone quiet with
+/// work left in it says why rather than looking forgotten.
+///
+/// Four roots, which is more than the places a roadmap has. The lowest-numbered
+/// of them start: the roadmap's order is still the roadmap's own, and it is what
+/// decides between stages that are otherwise alike.
+#[tokio::test]
+async fn a_fourth_ready_stage_waits_for_a_place_and_is_told_so() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+    let worked = spill.path().join("task-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_roadmap_of_briefs_then_wraps_up(
+            &planning,
+            &worked,
+            FOUR_ROOTS,
+            RECORDS_STACKING,
+            "",
+            TWO_MORE_BRIEFS,
+        ),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    staged_and_settled(&fixture).await;
+
+    let stages = stages_of(&fixture, 3).await;
+
+    assert_eq!(
+        stages
+            .iter()
+            .map(|stage| stage.branch.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "roadmaps/rate-limiting/01-counter",
+            "roadmaps/rate-limiting/02-refusing",
+            "roadmaps/rate-limiting/03-refusals",
+        ],
+        "three of one roadmap at once, and the lowest-numbered three at that",
+    );
+
+    // Said after the three that started, the waiting being a consequence of them.
+    let said = said_on(&fixture, fixture.id, "waiting for a place").await;
+
+    assert!(
+        said.contains("Stage 04") && said.contains("at most 3 stages at a time"),
+        "which stage is waiting, and what for: {said:?}",
+    );
+
+    assert_eq!(
+        conversations(&fixture.app).await.len(),
+        4,
+        "the roadmap's own Conversation and three stages, and no fourth stage",
+    );
+    assert!(
+        !git(
+            &fixture.repo(),
+            &["branch", "--list", "roadmaps/rate-limiting/04-saying-why"],
+        )
+        .contains("04-saying-why"),
+        "and no branch was cut for the one that waited",
+    );
+}
+
+/// And the **server's** places are the second limit, in front of the roadmap's: a
+/// roadmap allowed five stages with five roots starts four, which is as many
+/// Conversations as the whole server runs at once — and then a **press** starts
+/// the fifth over the limit.
+///
+/// Two halves of the one rule, which is why they are one test: the limit holds
+/// back what Verkstead starts by itself and never what the human presses. The
+/// fifth is told it is waiting for a place *on the server* rather than on its
+/// roadmap, because they are two different things to be waiting for — nothing
+/// about this roadmap will free the place, and what took them is four sessions
+/// running. Then *Continue a roadmap* starts it anyway, with all four places held,
+/// and what the press made is a fifth Conversation running.
+#[tokio::test]
+async fn the_servers_places_hold_a_settle_back_and_never_a_press() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+    let worked = spill.path().join("task-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_roadmap_of_briefs_then_wraps_up(
+            &planning,
+            &worked,
+            FIVE_ROOTS,
+            RECORDS_STACKING,
+            "",
+            THREE_MORE_BRIEFS,
+        ),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    // Five places of its own, so the roadmap's limit is not what holds anything
+    // back here: what is left is the server's four, and nothing else is running.
+    configure(&fixture, "at_once:\n  roadmap_stages: 5\n");
+
+    staged_and_settled(&fixture).await;
+
+    let stages = stages_of(&fixture, 4).await;
+
+    assert_eq!(
+        stages
+            .iter()
+            .map(|stage| stage.branch.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "roadmaps/rate-limiting/01-counter",
+            "roadmaps/rate-limiting/02-refusing",
+            "roadmaps/rate-limiting/03-refusals",
+            "roadmaps/rate-limiting/04-saying-why",
+        ],
+        "four Conversations across the server, and the lowest-numbered four at that",
+    );
+
+    // Said after the four that started, the waiting being a consequence of them.
+    let said = said_on(&fixture, fixture.id, "waiting for a place on the server").await;
+
+    assert!(
+        said.contains("Stage 05"),
+        "which stage is waiting: {said:?}",
+    );
+    assert!(
+        !said.contains("this roadmap runs"),
+        "and not on its roadmap, which was given five places: {said:?}",
+    );
+
+    assert_eq!(
+        conversations(&fixture.app).await.len(),
+        5,
+        "the roadmap's own Conversation and four stages, and no fifth stage",
+    );
+    assert!(
+        !git(
+            &fixture.repo(),
+            &[
+                "branch",
+                "--list",
+                "roadmaps/rate-limiting/05-letting-through"
+            ],
+        )
+        .contains("05-letting-through"),
+        "and no branch was cut for the one that waited",
+    );
+
+    // Every one of the four is still running or still driven, which is what makes
+    // the press below a press at four rather than a press at however many were
+    // left: a place is held by a Conversation with a session running or a driver
+    // registered, and each of these has both.
+    for stage in &stages {
+        let view: ConversationView =
+            get(&fixture.app, &format!("/api/ui/conversations/{}", stage.id)).await;
+
+        assert!(
+            view.working || view.driven,
+            "{} is holding a place on the server",
+            view.branch,
+        );
+    }
+
+    // And the settings page says the same number, which is the one thing on it
+    // out of neither file: how many of the server's places are held, as of the
+    // moment the page asked. A server holding every place starts nothing more
+    // until one comes free, and this is what keeps that from reading as a stall —
+    // so what it is worth is being the count a start is weighed against rather
+    // than a number of its own.
+    //
+    // Against the Conversations themselves rather than against a four written
+    // here, because the four are what the count is *of*: a page reading one
+    // register, or none, would agree with a literal and not with these.
+    assert_eq!(
+        places_taken(&fixture).await,
+        holding_a_place(&fixture).await,
+        "the settings page counts the Conversations that are holding a place",
+    );
+
+    assert_eq!(
+        holding_a_place(&fixture).await,
+        4,
+        "which is the four stages, the roadmap's own Conversation having let go",
+    );
+
+    // And now the human presses *Continue a roadmap* on the stage that is
+    // waiting. The limit is there for what Verkstead starts by itself, so the
+    // press goes ahead over it — read its own way in, through the adoption rather
+    // than through the carry-on.
+    //
+    // Off the notice, the way the press is: the roadmap is a document on the
+    // branch the Conversation that planned it is still on, so the base travels
+    // with the reading and the adoption is fixed to it.
+    let offers: Vec<verkstead_render::AbandonedRepo> =
+        get(&fixture.app, "/api/ui/abandoned-roadmaps").await;
+
+    let offered = offers
+        .iter()
+        .flat_map(|repo| repo.roadmaps.iter().map(move |roadmap| (repo, roadmap)))
+        .find(|(_, roadmap)| roadmap.name == "rate-limiting")
+        .expect("the roadmap is still offered with a stage waiting");
+
+    assert_eq!(
+        offered.1.stage, "05",
+        "and 05 is the stage the press would start, the other four being somebody's",
+    );
+
+    let started: Started = post(
+        &fixture.app,
+        "/api/ui/adoptions",
+        &serde_json::json!({
+            "repo_id": offered.0.repo_id,
+            "roadmap": "rate-limiting",
+            "base": offered.1.base,
+        }),
+    )
+    .await;
+    let Started::Started { id: adopting } = started else {
+        panic!("the adoption starts a Conversation to press on, got {started:?}");
+    };
+
+    // The Profiles this bench already saved rather than three more of them: a
+    // Profile's name is taken once it is saved, and what the pairings settle is
+    // which account the stage runs under rather than which Profile row it is.
+    let profiles: Vec<verkstead_render::ProfileEntry> = get(&fixture.app, "/api/ui/profiles").await;
+
+    for role in ["grilling", "implementation", "review"] {
+        let profile = profiles
+            .iter()
+            .find(|profile| profile.name.as_deref() == Some(role))
+            .expect("the Profiles the roadmap Conversation was paired under are still saved")
+            .id;
+
+        let pairing = serde_json::json!({
+            "profile_id": profile,
+            "model": format!("claude-{role}-5"),
+        });
+        let picked = match role {
+            "review" => serde_json::json!({ "pairing": pairing }),
+            _ => pairing,
+        };
+
+        let chosen: verkstead_render::ProfileChosen = post(
+            &fixture.app,
+            &format!("/api/ui/conversations/{adopting}/{role}-pairing"),
+            &picked,
+        )
+        .await;
+        assert_eq!(chosen, verkstead_render::ProfileChosen::Chosen);
+    }
+
+    let adopted: Adopted = post(
+        &fixture.app,
+        &format!("/api/ui/conversations/{adopting}/adopt"),
+        &serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(
+        adopted,
+        Adopted::Adopted,
+        "the press is not held back by a server whose places are taken",
+    );
+
+    let fifth: ConversationView =
+        get(&fixture.app, &format!("/api/ui/conversations/{adopting}")).await;
+
+    assert_eq!(fifth.branch, "roadmaps/rate-limiting/05-letting-through");
+    assert_eq!(fifth.state, Lifecycle::Implementing);
+    assert!(
+        git(
+            &fixture.repo(),
+            &[
+                "branch",
+                "--list",
+                "roadmaps/rate-limiting/05-letting-through"
+            ],
+        )
+        .contains("05-letting-through"),
+        "and the branch the settle would not cut is cut now",
+    );
+
+    // And what the press made is counted from then on: a fifth Conversation
+    // running, over a limit of four. The press goes ahead of the limit rather
+    // than out from under it — the next thing Verkstead would start by itself
+    // stands behind all five.
+    let deadline = Instant::now() + *PATIENCE;
+
+    loop {
+        let fifth: ConversationView =
+            get(&fixture.app, &format!("/api/ui/conversations/{adopting}")).await;
+
+        if fifth.working || fifth.driven {
+            break;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "the stage the press started never took a place of its own. \
+             The Timeline says: {:?}",
+            notices(&fifth),
+        );
+
+        pause(Duration::from_millis(25)).await;
+    }
+}
+
+/// A bench whose roadmap has a stage **waiting for a place on the server**, with
+/// nothing of its own roadmap about to settle.
+///
+/// Four roots and five places of the roadmap's own, so the roadmap's limit is
+/// never what holds anything back — and an **investigation** running beside them,
+/// which is a Conversation of another Process taking one of the server's four
+/// places. So three stages start and the fourth waits, and what frees its place
+/// is the investigation ending rather than any stage settling. Which is the case
+/// the look exists for: nothing that frees a place is a settle.
+///
+/// Hands back the investigation's Conversation, that being what the caller ends
+/// to free the place — and the stub itself, for the test that stands a second
+/// server up over the same work and has to run it under the same agent.
+async fn a_stage_waiting_behind_an_investigation(pace: Pace) -> (Grilling, i64, String) {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+    let worked = spill.path().join("task-prompts");
+
+    // The roadmap's own stub with an investigating session in front of it: one
+    // `case` inside another, because what tells every session here apart is the
+    // skill its prompt names and an investigation's is not one the roadmap knows.
+    let stub = format!(
+        r#"
+case "$2" in
+*investigating/SKILL.md*)
+    SAYING='finding out where the 429s come from'
+    printf '%s\n' "$SAYING"
+    {WHILE_NOBODY_HAS_ASKED}
+    while [ ! -f /tmp/verkstead/answered ]; do sleep 0.1; done
+    printf 'that is that, then\n'
+    ;;
+*)
+{roadmap}
+    ;;
+esac
+"#,
+        roadmap = a_roadmap_of_briefs_then_wraps_up(
+            &planning,
+            &worked,
+            FOUR_ROOTS,
+            RECORDS_STACKING,
+            "",
+            TWO_MORE_BRIEFS,
+        ),
+    );
+
+    let fixture = grilling_at_pace(spill, &stub, &gh_about(GREEN, "", ""), pace, &[]).await;
+
+    // Five places of its own against four roots, so nothing here is ever waiting
+    // on its own roadmap: what holds the fourth back is the server's four.
+    configure(&fixture, "at_once:\n  roadmap_stages: 5\n");
+
+    // And the investigation, started before the roadmap settles so that it is
+    // already holding a place when the carry-on counts them.
+    let investigating = composed_beside(&fixture, Process::Investigate).await;
+
+    grilled(&fixture, investigating).await;
+
+    // Waited for as a session actually running, which is what takes a place: a
+    // row that exists is a Conversation the register has not heard of yet.
+    until_working(&fixture, investigating).await;
+
+    staged_and_settled(&fixture).await;
+
+    let stages = stages_of(&fixture, 3).await;
+
+    assert_eq!(
+        stages
+            .iter()
+            .map(|stage| stage.branch.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "roadmaps/rate-limiting/01-counter",
+            "roadmaps/rate-limiting/02-refusing",
+            "roadmaps/rate-limiting/03-refusals",
+        ],
+        "three stages and the investigation, which is the server's four places",
+    );
+
+    let said = said_on(&fixture, fixture.id, "waiting for a place on the server").await;
+
+    assert!(
+        said.contains("Stage 04"),
+        "and stage 04 is the one that waited: {said:?}",
+    );
+
+    (fixture, investigating, stub)
+}
+
+/// Compose a **second** Conversation on this bench's Repo — paired, given a
+/// Process and a Brief — and hand back its id, with nothing started yet.
+///
+/// Everything a compose is but the press, so that a caller which has to put
+/// something where the session will find it can do so before there is a session.
+/// The Profiles this bench saved rather than another set of them: what a Pairing
+/// settles is which account the session runs under, and one is one.
+///
+/// Its own function because the tests about the server's places all want the
+/// same thing — a Conversation of another kind beside the fixture's own, holding
+/// one of the four.
+async fn composed_beside(fixture: &Grilling, process: Process) -> i64 {
+    let started: Started = post(
+        &fixture.app,
+        "/api/ui/conversations",
+        &serde_json::json!({ "repo_id": fixture.repo_id }),
+    )
+    .await;
+    let Started::Started { id } = started else {
+        panic!("a second Conversation starts on the same Repo, got {started:?}");
+    };
+
+    let profiles: Vec<verkstead_render::ProfileEntry> = get(&fixture.app, "/api/ui/profiles").await;
+    let implementation = profiles
+        .iter()
+        .find(|profile| profile.name.as_deref() == Some("implementation"))
+        .expect("the bench saved an implementation Profile for the roadmap")
+        .id;
+
+    let chosen: verkstead_render::ProfileChosen = post(
+        &fixture.app,
+        &format!("/api/ui/conversations/{id}/implementation-pairing"),
+        &serde_json::json!({
+            "profile_id": implementation,
+            "model": "claude-implementation-5",
+        }),
+    )
+    .await;
+    assert_eq!(chosen, verkstead_render::ProfileChosen::Chosen);
+
+    let picked: ProcessPicked = post(
+        &fixture.app,
+        &format!("/api/ui/conversations/{id}/process"),
+        &serde_json::json!({ "process": process }),
+    )
+    .await;
+    assert_eq!(picked, ProcessPicked::Picked);
+
+    let saved: BriefSaved = post(
+        &fixture.app,
+        &format!("/api/ui/conversations/{id}/brief"),
+        &serde_json::json!({ "markdown": BRIEF }),
+    )
+    .await;
+    assert_eq!(saved, BriefSaved::Saved);
+
+    id
+}
+
+/// And the press that starts it, once whatever its session is to find is in
+/// place.
+async fn grilled(fixture: &Grilling, id: i64) {
+    let start: GrillingStarted = post(
+        &fixture.app,
+        &format!("/api/ui/conversations/{id}/grill"),
+        &serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(start, GrillingStarted::Started);
+}
+
+/// Read a Conversation of this bench back until something is running in it.
+///
+/// Off the Conversation's own view rather than the sidebar's row, so that it can
+/// be asked about a Conversation that is not the fixture's own — which is what
+/// [`Grilling::until`] cannot be.
+async fn until_working(fixture: &Grilling, id: i64) {
+    let deadline = Instant::now() + *PATIENCE;
+
+    loop {
+        let view: ConversationView =
+            get(&fixture.app, &format!("/api/ui/conversations/{id}")).await;
+
+        if view.working {
+            return;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "nothing ever ran in Conversation {id}. The Timeline says: {:?}",
+            notices(&view),
+        );
+
+        pause(Duration::from_millis(25)).await;
+    }
+}
+
+/// Put a Question Set to the human the way a session inside `id` would — see
+/// [`Grilling::ask`], which is this on the fixture's own Conversation.
+///
+/// The marker goes in *that* Conversation's handoff directory, which is what its
+/// sessions see as `/tmp/verkstead`: a bench driving two Conversations has two of
+/// them, and a marker left in the wrong one reaches nobody.
+async fn asks(fixture: &Grilling, id: i64, yaml: &str) -> i64 {
+    let (status, body) = fetch(
+        &fixture.app,
+        Request::builder()
+            .method("POST")
+            .uri(format!("/conversations/{id}/api/v1/sets"))
+            .header(header::CONTENT_TYPE, "application/yaml")
+            .body(Body::from(yaml.to_owned()))
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::CREATED, "the Set was refused: {body}");
+
+    let directory = handoffs_of(fixture, id);
+
+    std::fs::create_dir_all(&directory).unwrap();
+    std::fs::write(directory.join("asked"), "").unwrap();
+
+    let created: verkstead_schema::SetCreated = serde_saphyr::from_str(&body).unwrap();
+
+    created.id
+}
+
+/// End the investigation the way the human does — the round answered with
+/// **Nothing else** ticked — and wait until it has reached Done and let its place
+/// go.
+///
+/// Which is a Conversation of another Process finishing, and that is the whole
+/// point: nothing about it is a settle, so nothing about it runs the carry-on.
+/// The place it frees is a place for the roadmap, and only a look will spend it.
+async fn ends(fixture: &Grilling, investigating: i64) {
+    let set = asks(fixture, investigating, A_FOLLOW_UP_ROUND).await;
+
+    let answered: Submitted = post(
+        &fixture.app,
+        &format!("/api/ui/sets/{set}/response"),
+        &serde_json::json!({
+            "answers": [{ "label": "Q9", "selected": 1 }],
+            "nothing_else": true,
+        }),
+    )
+    .await;
+    assert_eq!(answered, Submitted::Accepted);
+
+    std::fs::write(handoffs_of(fixture, investigating).join("answered"), "").unwrap();
+
+    until_let_go(fixture, investigating).await;
+}
+
+/// Read a Conversation of this bench back until it is Done with nothing running
+/// in it and nothing driving it — which is the moment it stops taking a place on
+/// the server.
+///
+/// Both registers rather than the state alone, for the reason the count is taken
+/// off both: a Conversation the record calls Done is still holding its place
+/// while the watcher that got it there is finishing up.
+async fn until_let_go(fixture: &Grilling, id: i64) {
+    let deadline = Instant::now() + *PATIENCE;
+
+    loop {
+        let view: ConversationView =
+            get(&fixture.app, &format!("/api/ui/conversations/{id}")).await;
+
+        if view.state == Lifecycle::Done && !view.working && !view.driven {
+            return;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "Conversation {id} never finished and let its place go. It says: {:?}",
+            notices(&view),
+        );
+
+        pause(Duration::from_millis(25)).await;
+    }
+}
+
+/// Take a **second** roadmap Conversation of this bench from its press to a
+/// settled wrap-up: grilled, staged, pushed, reviewed, green, done.
+///
+/// [`staged_and_settled`] on a Conversation that is not the fixture's own, which
+/// is what the tests driving two roadmaps at once need — the marker its session
+/// reads to know which roadmap it is writing goes in before the press, so it is
+/// there from the session's first line.
+async fn staged_and_settled_beside(fixture: &Grilling, id: i64, marker: &str) {
+    let directory = handoffs_of(fixture, id);
+
+    std::fs::create_dir_all(&directory).unwrap();
+    std::fs::write(directory.join(marker), "").unwrap();
+
+    grilled(fixture, id).await;
+
+    // Its session talking, which is what a Set answered out here has to arrive
+    // behind — see [`Grilling::ask`].
+    let deadline = Instant::now() + *PATIENCE;
+
+    loop {
+        let view: ConversationView =
+            get(&fixture.app, &format!("/api/ui/conversations/{id}")).await;
+
+        if output(&view).is_some_and(|output| output.lines > 0) {
+            break;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "the second roadmap's grilling never said anything. It says: {:?}",
+            notices(&view),
+        );
+
+        pause(Duration::from_millis(25)).await;
+    }
+
+    let set = asks(fixture, id, PROPOSING).await;
+
+    assert_eq!(fixture.pick(set, "roadmap").await, Submitted::Accepted);
+
+    until_settled(fixture, id).await;
+}
+
+/// What a Conversation of this bench has said on its own account, as it stands.
+///
+/// [`notices`] at a Conversation of the test's choosing and without a wait, for
+/// the tests that are about a Timeline **growing** — a look that passed a
+/// roadmap over says something it had already said once, so what says it
+/// happened again is another line rather than a line matching.
+async fn notices_on(fixture: &Grilling, id: i64) -> Vec<String> {
+    let view: ConversationView = get(&fixture.app, &format!("/api/ui/conversations/{id}")).await;
+
+    notices(&view)
+}
+
+/// Read a Conversation of this bench back until its wrap-up has settled — which
+/// is the reading that runs the carry-on.
+async fn until_settled(fixture: &Grilling, id: i64) {
+    let deadline = Instant::now() + *PATIENCE;
+
+    loop {
+        let view: ConversationView =
+            get(&fixture.app, &format!("/api/ui/conversations/{id}")).await;
+
+        if view.state == Lifecycle::Done {
+            return;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "Conversation {id} never settled. It says: {:?}",
+            notices(&view),
+        );
+
+        pause(Duration::from_millis(25)).await;
+    }
+}
+
+/// A place coming free starts the stage that waited, with nobody pressing
+/// anything and no stage of its own roadmap having settled.
+///
+/// The half of the limit task 01 could not close on its own: what frees a place
+/// is a Conversation finishing or stopping, and none of those is a settle — so a
+/// stage held for a place would wait on something of its own roadmap settling,
+/// which may be nothing at all. What starts it is a look of the server's own.
+///
+/// The investigation here is the place-holder and the Process is the point: it is
+/// not a stage, so its ending runs no carry-on and says nothing to this roadmap.
+/// Between it reaching Done and the fourth stage starting there is nothing but
+/// the look.
+///
+/// **And the look is the one the place itself woke**, rather than one the clock
+/// happened to bring round: this bench's slow look is ten minutes out and the
+/// test does not run for ten minutes. What wakes it is the last driver of the
+/// investigation letting go, which is what a Conversation finishing comes to —
+/// see the server's own `drivers::Drivers::letting_go`.
+///
+/// **And what the stage inherits comes off the foot of the chain.** No stage of
+/// this roadmap has settled, so the foot is the Conversation that wrote it — the
+/// Pairings the session runs under are that Conversation's, the branch is cut from
+/// its branch, and the notice saying the stage started is on its Timeline.
+#[tokio::test]
+async fn a_place_coming_free_starts_the_stage_that_waited_for_one() {
+    let (fixture, investigating, _stub) = a_stage_waiting_behind_an_investigation(*BRISKLY).await;
+
+    let planned = fixture.view().await.branch;
+
+    ends(&fixture, investigating).await;
+
+    let stages = stages_of(&fixture, 4).await;
+
+    assert_eq!(
+        stages
+            .iter()
+            .map(|stage| stage.branch.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "roadmaps/rate-limiting/01-counter",
+            "roadmaps/rate-limiting/02-refusing",
+            "roadmaps/rate-limiting/03-refusals",
+            "roadmaps/rate-limiting/04-saying-why",
+        ],
+        "the stage that waited started when the place came free",
+    );
+
+    // On the foot's Timeline, which is where the human is looking: the roadmap's
+    // own Conversation, no stage of it having settled.
+    let said = said_on(&fixture, fixture.id, "Stage 04").await;
+
+    assert!(
+        said.contains("has started as a Conversation of its own"),
+        "the foot's Timeline says the stage started: {said:?}",
+    );
+
+    let fourth = stages
+        .iter()
+        .find(|stage| stage.branch.ends_with("04-saying-why"))
+        .expect("the fourth stage is among them");
+
+    assert!(
+        notices(fourth).iter().any(|notice| notice
+            .contains(&format!("was cut from <code>{planned}</code>"))
+            || notice.contains(&format!("was cut from `{planned}`"))),
+        "and its branch was cut from the foot's own branch: {:?}",
+        notices(fourth),
+    );
+
+    // Every stage ran its planning session under the Pairing the foot was
+    // carrying, the one started off the look included — a stage inherits what its
+    // roadmap was settled with, and a look has nowhere else to take it from.
+    let planning = fixture.spill.path().join("stage-prompts");
+    let written = std::fs::read_to_string(&planning).unwrap_or_default();
+    let started = prompts(&written);
+
+    assert_eq!(started.len(), 4, "four planning sessions: {started:?}");
+    assert!(
+        started
+            .iter()
+            .all(|prompt| prompt.contains("model=claude-implementation-5")),
+        "each under the foot's implementation Pairing: {started:?}",
+    );
+
+    // And **one** start however two arrivals overlap: a look is woken by every
+    // driver that lets go, and this bench has been letting them go throughout —
+    // each of those looks running alongside the settle that started the first
+    // three. Six Conversations is the roadmap's own, the investigation and four
+    // stages, with nothing started twice.
+    assert_eq!(
+        conversations(&fixture.app).await.len(),
+        6,
+        "the roadmap, the investigation and one Conversation per stage",
+    );
+}
+
+/// And how many Conversations the whole server runs at once is a **setting**
+/// too: set to one, Verkstead starts nothing by itself while anything at all is
+/// running, and starts what it held back when that one finishes.
+///
+/// One place is the number somebody reaches for on a machine that is doing too
+/// much, and it is the shape in which the limit is easiest to be sure of: the
+/// investigation running beside the roadmap is holding the server's only place,
+/// so the settle that would ordinarily start both roots starts neither.
+///
+/// The roadmap's own limit is left where it is — three, against two roots — so
+/// nothing held back here is its doing. And the number is written into
+/// `config.yaml` after the server came up, which is the human at the settings
+/// page on their phone while the work was going on: it is read afresh at every
+/// start and at every look, so what the file says then is what both go by,
+/// without a restart and without stopping what was already running.
+#[tokio::test]
+async fn the_settings_say_how_many_conversations_the_server_runs_at_once() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+    let worked = spill.path().join("task-prompts");
+
+    // The roadmap's own stub with an investigating session in front of it, the way
+    // the tests about the server's places have it: one `case` inside another,
+    // because what tells every session here apart is the skill its prompt names.
+    let stub = format!(
+        r#"
+case "$2" in
+*investigating/SKILL.md*)
+    SAYING='finding out where the 429s come from'
+    printf '%s\n' "$SAYING"
+    {WHILE_NOBODY_HAS_ASKED}
+    while [ ! -f /tmp/verkstead/answered ]; do sleep 0.1; done
+    printf 'that is that, then\n'
+    ;;
+*)
+{roadmap}
+    ;;
+esac
+"#,
+        roadmap = a_roadmap_then_wraps_up(&planning, &worked, TWO_ROOTS, RECORDS_STACKING, ""),
+    );
+
+    let fixture = grilling_at_pace(spill, &stub, &gh_about(GREEN, "", ""), *LOOKING, &[]).await;
+
+    // One place across the whole server, said while the roadmap was being planned
+    // — nothing was restarted for it, and nothing had to be.
+    configure(&fixture, "at_once:\n  conversations: 1\n");
+
+    // And the investigation, started before the roadmap settles so that it is
+    // already holding that one place when the carry-on counts them. A press, so
+    // the limit never stood in front of it.
+    let investigating = composed_beside(&fixture, Process::Investigate).await;
+
+    grilled(&fixture, investigating).await;
+
+    // Waited for as a session actually running, which is what takes a place: a
+    // row that exists is a Conversation the register has not heard of yet.
+    until_working(&fixture, investigating).await;
+
+    staged_and_settled(&fixture).await;
+
+    // Said after the settle that started nothing, and about the lowest-numbered
+    // root: the roadmap's own places are all free, so the one it is waiting on is
+    // the server's.
+    let said = said_on(&fixture, fixture.id, "waiting for a place on the server").await;
+
+    assert!(
+        said.contains("Stage 01"),
+        "the lowest-numbered root is the one waiting: {said:?}",
+    );
+    assert!(
+        !said.contains("this roadmap runs"),
+        "and not on its roadmap, which has three places and two roots: {said:?}",
+    );
+
+    assert_eq!(
+        conversations(&fixture.app).await.len(),
+        2,
+        "the roadmap's own Conversation and the investigation, and no stage at all",
+    );
+    assert!(
+        !git(
+            &fixture.repo(),
+            &["branch", "--list", "roadmaps/rate-limiting/01-counter"],
+        )
+        .contains("01-counter"),
+        "and no branch was cut for the root that waited",
+    );
+
+    // And now the place comes free the other way about: the number is raised
+    // rather than the investigation ended, which is the human at the settings
+    // page deciding the machine can take one more.
+    //
+    // Nothing lets go of anything for it, so nothing wakes a look — this is the
+    // slow look behind the wake-up, and the whole of what that one is for. A
+    // limit changed under a full server frees a place and says so to nobody.
+    configure(&fixture, "at_once:\n  conversations: 2\n");
+
+    let stages = stages_of(&fixture, 1).await;
+
+    assert_eq!(
+        stages[0].branch, "roadmaps/rate-limiting/01-counter",
+        "the stage that waited started once the raised limit left a place for it",
+    );
+
+    // And the investigation is still going, which is what says the place was made
+    // rather than freed: nothing on this server has finished at all.
+    let still: ConversationView = get(
+        &fixture.app,
+        &format!("/api/ui/conversations/{investigating}"),
+    )
+    .await;
+
+    assert_eq!(still.state, Lifecycle::Investigating);
+}
+
+/// And a server restarted while a stage was waiting starts it when a place comes
+/// free, nothing about the waiting having been written down.
+///
+/// Which is what *nothing is stored* buys: the second server has never heard of
+/// this roadmap having anything held back, and it does not need to have. What is
+/// ready is read afresh from the declarations, the record and the boxes at every
+/// look, so the look the new server makes finds exactly what the old one's would
+/// have.
+///
+/// The place is made rather than freed — the limit raised, with the investigation
+/// still going — so that nothing about it wakes the first server: a look comes of
+/// a driver letting go, and here nothing lets go of anything. The first server
+/// looked once as it came up, with nothing yet to find, and its slow look is ten
+/// minutes out, which this test does not run for. So the place stands empty under
+/// it, and the stage that wants it is still waiting when the second server
+/// arrives.
+#[tokio::test]
+async fn a_restart_starts_the_stage_that_was_waiting_when_a_place_comes_free() {
+    let (fixture, _investigating, stub) = a_stage_waiting_behind_an_investigation(*BRISKLY).await;
+
+    // Five places rather than four, with the same four held: the fifth is the one
+    // the waiting stage wants, and nothing has to end for it to exist. The
+    // roadmap's own five carried over from the bench, one save writing both.
+    configure(
+        &fixture,
+        "at_once:\n  roadmap_stages: 5\n  conversations: 5\n",
+    );
+
+    // Nothing starts under the first server, whose slow look is ten minutes out
+    // and whose wake-up nothing has pulled: the place is there and the stage that
+    // wants it is waiting, and only a look spends it.
+    pause(paced(Duration::from_millis(500))).await;
+
+    assert_eq!(
+        conversations(&fixture.app).await.len(),
+        5,
+        "the roadmap, the investigation and three stages, with the fourth still waiting",
+    );
+
+    // A second server over the same database, which is what a restart is — at a
+    // pace that looks. It takes up what the first one was driving before it
+    // counts a single place, which is what keeps it from starting over the top of
+    // three stages it cannot see yet.
+    let _restarted = fixture
+        .restarted_at_pace(&stub, &gh_about(GREEN, "", ""), *LOOKING)
+        .await;
+
+    let stages = stages_of(&fixture, 4).await;
+
+    assert!(
+        stages
+            .iter()
+            .any(|stage| stage.branch == "roadmaps/rate-limiting/04-saying-why"),
+        "the stage that was waiting when the server went started after it came back: {:?}",
+        stages
+            .iter()
+            .map(|stage| stage.branch.as_str())
+            .collect::<Vec<_>>(),
+    );
+}
+
+/// The stub two roadmaps are driven from: one grilling that writes whichever of
+/// them the marker in its handoff directory names.
+///
+/// One script because there is one agent — every session of this bench runs it,
+/// and what tells them apart is the skill the prompt names. The two grillings
+/// name the same skill, so the marker is what tells them apart: a file the test
+/// puts in the second Conversation's handoff directory before the press, which
+/// is what that Conversation's sessions see as `/tmp/verkstead`.
+fn two_roadmaps_an_investigation_and_their_stages(planning: &Path, worked: &Path) -> String {
+    format!(
+        r#"
+case "$2" in
+*investigating/SKILL.md*)
+    SAYING='finding out where the 429s come from'
+    printf '%s\n' "$SAYING"
+    {WHILE_NOBODY_HAS_ASKED}
+    while [ ! -f /tmp/verkstead/answered ]; do sleep 0.1; done
+    printf 'that is that, then\n'
+    ;;
+*grilling/SKILL.md*)
+    printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+    : > /tmp/verkstead/done
+    printf 'the handoff is written\n'
+    mkdir -p docs/agents
+{RECORDS_STACKING}
+    if [ -f /tmp/verkstead/parity ]; then
+        mkdir -p docs/roadmaps/brain-chat-parity
+        printf '# Brain chat parity roadmap\n\n## Stages\n\n{PARITY_ROOTS}' > docs/roadmaps/brain-chat-parity/ROADMAP.md
+        printf '# 01. The widget\n' > docs/roadmaps/brain-chat-parity/01-widget.md
+        printf '# 02. The transcript\n' > docs/roadmaps/brain-chat-parity/02-transcript.md
+    else
+        mkdir -p docs/roadmaps/rate-limiting
+        printf '# Rate limiting roadmap\n\n## Stages\n\n{FOUR_ROOTS}' > docs/roadmaps/rate-limiting/ROADMAP.md
+        printf '# 01. Count the requests\n' > docs/roadmaps/rate-limiting/01-counter.md
+        printf '# 02. Refuse the rest\n' > docs/roadmaps/rate-limiting/02-refusing.md
+{TWO_MORE_BRIEFS}
+    fi
+    git add -A
+    git commit --quiet -m 'docs: stage the roadmap'
+    : > /tmp/verkstead/done
+    printf 'pushed, and the pull request is open\n'
+    sleep 300
+    ;;
+*reviewing/SKILL.md*)
+    printf 'I read the whole branch and found nothing worth raising\n'
+    exit 0
+    ;;
+*next-stage/SKILL.md*)
+    printf 'model=%s\n%s\n=====\n' "$1" "$2" >> {planning}
+    printf 'planning the stage\n'
+    sleep 300
+    ;;
+*next-task/SKILL.md*)
+    printf 'model=%s\n%s\n=====\n' "$1" "$2" >> {worked}
+    printf 'working the stage backlog\n'
+    sleep 300
+    ;;
+*)
+    sleep 300
+    ;;
+esac
+"#,
+        planning = quoted(planning),
+        worked = quoted(worked),
+    )
+}
+
+/// The younger roadmap's two stages, both standing on nothing — so that what
+/// decides whether either of them starts is the places rather than the roadmap.
+const PARITY_ROOTS: &str = r#"- [ ] 01: The widget — [brief](01-widget.md) — no dependencies\n- [ ] 02: The transcript — [brief](02-transcript.md) — no dependencies\n"#;
+
+/// A bench driving **two roadmaps at once**, with every place on the server
+/// taken and a ready stage waiting on each of them.
+///
+/// The older roadmap is the fixture's own — `rate-limiting`, four roots, planned
+/// first. The younger is `brain-chat-parity`, two roots, planned in a second
+/// Conversation afterwards; its name sorts *before* the older one's and its Repo
+/// row is the same, so nothing but their ages tells them apart. Which is the
+/// point: the order the places go out in is the roadmaps' own ages, rather than
+/// their names or the order a database happens to hand them over in.
+///
+/// And an **investigation** beside them, which is what the caller ends to free
+/// one place — a Conversation of another Process, so nothing about its ending is
+/// a settle and only a look will spend what it frees.
+///
+/// `at_once` is how many stages of one roadmap may run together, which is what
+/// decides which of the two limits is holding the older roadmap's fourth stage:
+/// its roadmap's, or the server's.
+///
+/// Hands back the investigation and the younger roadmap's own Conversation —
+/// the place to free, and the Timeline the younger roadmap says things on, no
+/// stage of it having settled.
+async fn two_roadmaps_waiting_for_a_place(at_once: usize, pace: Pace) -> (Grilling, i64, i64) {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+    let worked = spill.path().join("task-prompts");
+
+    let stub = two_roadmaps_an_investigation_and_their_stages(&planning, &worked);
+    let fixture = grilling_at_pace(spill, &stub, &gh_about(GREEN, "", ""), pace, &[]).await;
+
+    configure(
+        &fixture,
+        &format!("at_once:\n  roadmap_stages: {at_once}\n"),
+    );
+
+    // The investigation first, so that it is already holding one of the four
+    // when the older roadmap settles and the carry-on counts them.
+    let investigating = composed_beside(&fixture, Process::Investigate).await;
+
+    grilled(&fixture, investigating).await;
+    until_working(&fixture, investigating).await;
+
+    // The older roadmap. Three of its four roots start — the server having three
+    // places left — and the fourth waits, on whichever limit `at_once` leaves
+    // biting.
+    staged_and_settled(&fixture).await;
+
+    let stages = stages_of(&fixture, 3).await;
+
+    assert_eq!(
+        stages
+            .iter()
+            .map(|stage| stage.branch.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "roadmaps/rate-limiting/01-counter",
+            "roadmaps/rate-limiting/02-refusing",
+            "roadmaps/rate-limiting/03-refusals",
+        ],
+        "three stages and the investigation, which is the server's four places",
+    );
+
+    let said = said_on(&fixture, fixture.id, "Stage 04").await;
+
+    assert!(
+        said.contains("is ready and waiting for a place"),
+        "and the older roadmap's fourth stage is the one that waited: {said:?}",
+    );
+
+    // And the younger roadmap, planned and settled with every place taken. A
+    // press starts its grilling over the limit — presses are never held back —
+    // and its settle finds nothing free, so both its roots wait.
+    let parity = composed_beside(&fixture, Process::Develop).await;
+
+    staged_and_settled_beside(&fixture, parity, "parity").await;
+
+    let said = said_on(&fixture, parity, "waiting for a place on the server").await;
+
+    assert!(
+        said.contains("Stage 01") && said.contains("brain-chat-parity"),
+        "the younger roadmap is told its stages are waiting on the machine: {said:?}",
+    );
+
+    // And its own card says the same thing in one word, off the limits as Settings
+    // has them and the places as the registers stand this moment: both its roots
+    // are ready, every place on the machine is taken, and a roadmap that said
+    // nothing here would read as a roadmap the scheduler forgot.
+    let card = get::<ConversationView>(&fixture.app, &format!("/api/ui/conversations/{parity}"))
+        .await
+        .pinned
+        .into_iter()
+        .find_map(|pinned| match pinned {
+            PinnedEvent::StageList(list) => Some(list),
+            _ => None,
+        })
+        .expect("the roadmap this Conversation's branch wrote is pinned");
+
+    assert_eq!(
+        card.stages
+            .iter()
+            .map(|stage| (stage.number.as_str(), stage.state.clone()))
+            .collect::<Vec<_>>(),
+        [
+            ("01", StageState::WaitingForAPlace),
+            ("02", StageState::WaitingForAPlace),
+        ],
+        "neither root stands on a stage, so what each of them waits for is a place",
+    );
+
+    (fixture, investigating, parity)
+}
+
+/// One place coming free with two roadmaps wanting it goes to the **older**
+/// roadmap, and the younger one is told it is still waiting.
+///
+/// Both of them are holding a ready stage that fits under its own roadmap's
+/// limit and not under the server's, so the roadmaps' own limits decide nothing
+/// here: the one thing between them is which effort was begun first. The
+/// younger roadmap's name sorts before the older one's and both are in the one
+/// Repo, so a look that walked them in any order a database offered would start
+/// the wrong one.
+///
+/// **And the one that did not get it is told so**, on its own roadmap's
+/// Timeline and in the same breath: the places ran out half way down the list,
+/// and a roadmap passed over in silence reads as a roadmap forgotten.
+#[tokio::test]
+async fn one_free_place_between_two_roadmaps_goes_to_the_older_one() {
+    // Five places of each roadmap's own against four roots and two, so nothing
+    // here is ever waiting on its own roadmap.
+    let (fixture, investigating, parity) = two_roadmaps_waiting_for_a_place(5, *LOOKING).await;
+
+    let already = notices_on(&fixture, parity).await.len();
+
+    ends(&fixture, investigating).await;
+
+    let stages = stages_of(&fixture, 4).await;
+
+    assert_eq!(
+        stages
+            .iter()
+            .map(|stage| stage.branch.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "roadmaps/rate-limiting/01-counter",
+            "roadmaps/rate-limiting/02-refusing",
+            "roadmaps/rate-limiting/03-refusals",
+            "roadmaps/rate-limiting/04-saying-why",
+        ],
+        "the older roadmap's waiting stage took the place, and the younger one's did not",
+    );
+
+    // Said again on the younger roadmap's own Timeline, which is what tells it
+    // apart from a roadmap the scheduler dropped: the look that started the
+    // older one's stage passed over this one and said so.
+    let deadline = Instant::now() + *PATIENCE;
+
+    loop {
+        let said = notices_on(&fixture, parity).await;
+
+        if said.len() > already {
+            assert!(
+                said.last()
+                    .is_some_and(|last| last.contains("waiting for a place on the server")),
+                "the younger roadmap is told it is still waiting: {said:?}",
+            );
+
+            break;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "the younger roadmap was passed over in silence. It says: {said:?}",
+        );
+
+        pause(Duration::from_millis(25)).await;
+    }
+}
+
+/// And a roadmap already at **its own limit** is passed over with a place free,
+/// which goes to the next roadmap waiting rather than standing empty.
+///
+/// The two limits are both in force and the roadmap's is the stricter one here:
+/// the older roadmap has its three running, so however long it has been waiting
+/// and however free the server is, nothing of it may start. A place is spent by
+/// a stage that starts and by nothing else, so the place it could not use is
+/// still there for the roadmap below it.
+///
+/// **And within that roadmap the lowest-numbered ready stage takes it.** The
+/// younger roadmap has both its roots waiting and one place to put them in.
+#[tokio::test]
+async fn a_roadmap_at_its_own_limit_is_passed_over_and_the_next_one_starts() {
+    // Three places of each roadmap's own, which is what the older roadmap's
+    // three running stages have taken.
+    let (fixture, investigating, parity) = two_roadmaps_waiting_for_a_place(3, *LOOKING).await;
+
+    // Waited on rather than read as it stands: the older roadmap's fourth stage
+    // is told about the server's places while its siblings are still starting,
+    // and what is asked here is what it settles on once they have.
+    said_on(&fixture, fixture.id, "this roadmap runs").await;
+
+    let last = notices_on(&fixture, fixture.id)
+        .await
+        .into_iter()
+        .rev()
+        .find(|notice| notice.contains("Stage 04"))
+        .expect("the older roadmap said something about its fourth stage");
+
+    assert!(
+        last.contains("this roadmap runs") && !last.contains("on the server"),
+        "the older roadmap's fourth stage waits on its own roadmap rather than the machine: \
+         {last:?}",
+    );
+
+    ends(&fixture, investigating).await;
+
+    let stages = stages_of(&fixture, 4).await;
+
+    assert_eq!(
+        stages
+            .iter()
+            .map(|stage| stage.branch.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "roadmaps/brain-chat-parity/01-widget",
+            "roadmaps/rate-limiting/01-counter",
+            "roadmaps/rate-limiting/02-refusing",
+            "roadmaps/rate-limiting/03-refusals",
+        ],
+        "the older roadmap was passed over at its own limit, and the place went to the younger",
+    );
+
+    // And to the lowest-numbered of the two stages the younger roadmap had
+    // waiting, the other being told it is still waiting for a place.
+    let said = notices_on(&fixture, parity).await.join("\n");
+
+    assert!(
+        said.contains("Stage 02") && said.contains("waiting for a place on the server"),
+        "its second stage is still waiting: {said:?}",
+    );
+}
+
+/// And a look that started nothing says nothing, however many stages it held:
+/// the stage waiting for a place on the server is told **once**, by the settle,
+/// and not again at every look for the rest of the server's life.
+///
+/// Which is the hole under *a look is silent unless it starts something*. A
+/// reading spends a place on every stage it puts up to start, and a start can
+/// still refuse after that — a branch somebody has taken, as here, or a git
+/// author nobody has set. So the place 01 spends is a place nothing takes: the
+/// server is no fuller than it was, the next look finds exactly what this one
+/// found, and a sentence said off that reading would be said again every half
+/// minute for as long as the server is up, on the one Timeline a look ever
+/// writes to.
+///
+/// What says it is not that the places were full when the look began but that
+/// they are full when it has finished starting — see the server's own
+/// `continuing::Brought::held`. Here they never are, so the Timeline stands
+/// where the settle left it.
+#[tokio::test]
+async fn a_look_that_started_nothing_does_not_say_a_stage_is_waiting_again() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+    let worked = spill.path().join("task-prompts");
+
+    let fixture = grilling_at_pace(
+        spill,
+        &a_roadmap_then_wraps_up(&planning, &worked, TWO_ROOTS, RECORDS_STACKING, ""),
+        &gh_about(GREEN, "", ""),
+        *LOOKING,
+        &[],
+    )
+    .await;
+
+    // One place across the whole server, so the roadmap's own three never come
+    // into it: what holds 02 back is 01 having gone up to start.
+    configure(&fixture, "at_once:\n  conversations: 1\n");
+
+    // And 01's branch already taken, which is the start that refuses *after* the
+    // reading has counted its place as spent.
+    git(
+        &fixture.repo(),
+        &["branch", "roadmaps/rate-limiting/01-counter"],
+    );
+
+    staged_and_settled(&fixture).await;
+
+    // Said once by the settle, which is right: a settle says every wait it finds,
+    // and it happens once.
+    let said = said_on(&fixture, fixture.id, "waiting for a place on the server").await;
+
+    assert!(
+        said.contains("Stage 02"),
+        "the stage behind the one that could not start is the one told: {said:?}",
+    );
+
+    assert_eq!(waiting_for_a_place(&fixture, fixture.id).await, 1);
+
+    // And nothing is left holding a place, so the look really does read this
+    // roadmap rather than stopping at the top — which is what makes the silence
+    // below a silence about something.
+    until_let_go(&fixture, fixture.id).await;
+
+    // Several looks' worth at a hundred milliseconds apiece, each finding what the
+    // settle found: 01 refused by its branch, 02 held behind it, nothing started.
+    pause(paced(Duration::from_millis(500))).await;
+
+    assert_eq!(
+        waiting_for_a_place(&fixture, fixture.id).await,
+        1,
+        "the looks in between said nothing: {:?}",
+        notices_on(&fixture, fixture.id).await,
+    );
+
+    assert_eq!(
+        conversations(&fixture.app).await.len(),
+        1,
+        "and none of them started anything either, 01's branch still being taken",
+    );
+}
+
+/// Every Conversation of this bench but the fixture's own, once each of them is
+/// **Closed**, and the ids they are.
+///
+/// What a halted start leaves behind, for the tests about a stage that got as far
+/// as a record and no further. Waited on rather than read as it stands, and read
+/// as a set rather than as one: a stage halted for something no place coming free
+/// would fix is tried again at the next look and halted again, so a bench can hold
+/// several of these and the newest of them is Draft for as long as the go that is
+/// making it takes.
+///
+/// Which is the whole of what is being asked — that none of them is left running.
+/// A Draft is a Conversation waiting for a human to write a Brief and press
+/// something, and a stage nobody is going to start by hand has no business
+/// sitting in one.
+async fn every_half_made(fixture: &Grilling) -> Vec<i64> {
+    let deadline = Instant::now() + *PATIENCE;
+
+    loop {
+        let rows: Vec<_> = conversations(&fixture.app)
+            .await
+            .into_iter()
+            .filter(|entry| entry.id != fixture.id)
+            .collect();
+
+        if !rows.is_empty() && rows.iter().all(|entry| entry.state == Lifecycle::Closed) {
+            return rows.into_iter().map(|entry| entry.id).collect();
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "a half-made stage Conversation was left running: {:?}",
+            rows.iter()
+                .map(|entry| (entry.id, entry.state))
+                .collect::<Vec<_>>(),
+        );
+
+        pause(Duration::from_millis(25)).await;
+    }
+}
+
+/// How many of the server's places the settings page says are taken.
+///
+/// The one number on that page that is out of neither `config.yaml` nor
+/// `secrets.yaml` — see the server's own `ui::taken`, which counts it off the two
+/// registers a start is weighed against.
+async fn places_taken(fixture: &Grilling) -> usize {
+    let settings: verkstead_render::SettingsView = get(&fixture.app, "/api/ui/settings").await;
+
+    settings.at_once.places_taken
+}
+
+/// And how many Conversations of this bench are actually holding one, asked of
+/// each of them in turn.
+///
+/// The same question by the other door, so that what the page says can be checked
+/// against the Conversations rather than against a number written into a test: a
+/// place is held by one with a session running **or** a driver registered, and a
+/// page counting either alone would still agree with a literal.
+async fn holding_a_place(fixture: &Grilling) -> usize {
+    let rows = conversations(&fixture.app).await;
+
+    let mut held = 0;
+
+    for row in rows {
+        let view: ConversationView =
+            get(&fixture.app, &format!("/api/ui/conversations/{}", row.id)).await;
+
+        if view.working || view.driven {
+            held += 1;
+        }
+    }
+
+    held
+}
+
+/// How many times a Conversation has been told a stage is waiting for a place on
+/// the server.
+///
+/// The count rather than a match, because what these are about is a sentence
+/// being said **again**: one that is true is on the Timeline already, so nothing
+/// short of counting tells a look that repeated it from a look that held its
+/// tongue.
+async fn waiting_for_a_place(fixture: &Grilling, id: i64) -> usize {
+    notices_on(fixture, id)
+        .await
+        .iter()
+        .filter(|said| said.contains("waiting for a place on the server"))
+        .count()
+}
+
+/// And a start that halts halts only itself: stage 01's branch is already taken,
+/// so stage 01 does not start and stage 02 does.
+///
+/// Which is where the carry-on stopped reading *branch already taken* as *nothing
+/// was started*. The refusal itself is unchanged — a second Conversation on a
+/// stage already under way is still refused, by the branch — and what changed is
+/// that its roadmap's other ready stages are no longer refused with it.
+#[tokio::test]
+async fn a_stage_whose_branch_is_taken_leaves_its_siblings_started() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+    let worked = spill.path().join("task-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_roadmap_then_wraps_up(&planning, &worked, TWO_ROOTS, RECORDS_STACKING, ""),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    // Stage 01 already on a branch, which is a stage somebody — or some earlier
+    // run — has started already.
+    git(
+        &fixture.repo(),
+        &["branch", "roadmaps/rate-limiting/01-counter"],
+    );
+
+    staged_and_settled(&fixture).await;
+
+    let stage = stage_of(&fixture).await;
+
+    assert_eq!(
+        stage.branch, "roadmaps/rate-limiting/02-refusing",
+        "01 is taken, and 02 stands on nothing of it",
+    );
+
+    // Waited on the notice the *second* start writes, which is the last of the
+    // two: the halt on 01 is said before it, so waiting on this one waits for the
+    // whole account of the settle rather than for half of it.
+    let said = said_on(&fixture, fixture.id, "02-refusing</code>.").await;
+
+    assert!(
+        said.contains("Stage 01")
+            && said.contains("<code>roadmaps/rate-limiting/01-counter</code>"),
+        "the halt names the stage and the branch that refused it: {said:?}",
+    );
+    assert!(
+        said.contains("Stage 02")
+            && said.contains("<code>roadmaps/rate-limiting/02-refusing</code>"),
+        "and its sibling started anyway: {said:?}",
+    );
+
+    assert_eq!(
+        conversations(&fixture.app).await.len(),
+        2,
+        "one stage started and one halted, which is two Conversations and no more",
     );
 }
 
@@ -18505,7 +20318,7 @@ async fn a_repository_with_no_stacking_recorded_still_stands_its_stage_on_the_pr
 
     assert!(
         said.contains(&format!("<code>{roadmap_branch}</code>")),
-        "the branch stands on the one the stage before it was worked on: {said:?}",
+        "the branch was cut from the one the stage before it was worked on: {said:?}",
     );
     assert!(
         said.contains("<code>main</code>") && said.contains("does not hold that work yet"),
@@ -18516,7 +20329,7 @@ async fn a_repository_with_no_stacking_recorded_still_stands_its_stage_on_the_pr
         "what was missing is said rather than swallowed: {said:?}",
     );
     assert!(
-        said.contains("carries the stage before it"),
+        said.contains("carries the branch below it"),
         "and what that costs the pull request this stage ends on: {said:?}",
     );
 
@@ -18530,7 +20343,7 @@ async fn a_repository_with_no_stacking_recorded_still_stands_its_stage_on_the_pr
     let prompt = until_written(&planning).await;
 
     assert!(
-        prompt.contains(&format!("stacks on `{roadmap_branch}`")),
+        prompt.contains(&format!("cut from `{roadmap_branch}`")),
         "and the session is told that rather than left to guess: {prompt:?}",
     );
 }
@@ -18560,12 +20373,13 @@ async fn a_stage_whose_predecessor_has_landed_comes_off_the_default_branch() {
     let said = notices(&stage).join("\n");
 
     assert!(
-        said.contains("<code>main</code>") && said.contains("already holds the stage before it"),
+        said.contains("<code>main</code>")
+            && said.contains("already holds everything this roadmap has finished"),
         "the notice says where the branch came off and why there was nothing to stand on: \
          {said:?}",
     );
     assert!(
-        !said.contains(&format!("stands on <code>{roadmap_branch}</code>")),
+        !said.contains(&format!("cut from <code>{roadmap_branch}</code>")),
         "and it does not stand on a branch whose work is already in the base: {said:?}",
     );
 
@@ -18579,10 +20393,109 @@ async fn a_stage_whose_predecessor_has_landed_comes_off_the_default_branch() {
     let prompt = until_written(&planning).await;
 
     assert!(
-        prompt.contains("not stacked on anything"),
+        prompt.contains("nothing unmerged left to stand on"),
         "and the session is told that rather than left to guess: {prompt:?}",
     );
 }
+
+/// A stage is cut from the **highest settled stage of its roadmap's chain**
+/// rather than from the branch whose settling started it.
+///
+/// Which is a difference only a roadmap with a sibling in it can show. Here the
+/// chain holds a stage 01 somebody else finished — joined, and settled — above
+/// the roadmap Conversation whose wrap-up is about to start stage 02. The
+/// predecessor reading would give the roadmap's own branch; the chain gives the
+/// sibling, and the sibling is where the work stage 02 builds on is.
+///
+/// Both halves are checked, because the base is two things at once: what
+/// Verkstead says it did, and what git actually cut. The sibling's own commit
+/// is in the stage's history, which no base but the sibling would put there.
+#[tokio::test]
+async fn a_stage_is_cut_from_the_highest_settled_stage_of_the_chain() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+    let worked = spill.path().join("task-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_roadmap_then_wraps_up(
+            &planning,
+            &worked,
+            TWO_STAGES,
+            RECORDS_STACKING,
+            BRANCHES_A_SIBLING,
+        ),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    let roadmap_branch = fixture.view().await.branch;
+    let repo_id = fixture.view().await.repo.id;
+
+    // Stage 01 of this roadmap, finished by somebody else: in the chain,
+    // because it opened a pull request, and settled, because it reached Done.
+    // Recorded before the wrap-up settles, which is when the chain is read.
+    let sibling = a_stage_in_the_chain(&fixture, repo_id, "01", 41).await;
+    settles(&fixture, sibling).await;
+
+    staged_and_settled(&fixture).await;
+
+    let stage = stage_of(&fixture).await;
+
+    assert_eq!(
+        stage.branch, "roadmaps/rate-limiting/02-refusing",
+        "the stage the record says is left, stage 01 having settled",
+    );
+
+    let said = notices(&stage).join("\n");
+
+    assert!(
+        said.contains("cut from <code>roadmaps/rate-limiting/01-by-hand</code>"),
+        "the branch is cut from the settled sibling rather than from the branch that \
+         settled: {said:?}",
+    );
+    assert!(
+        !said.contains(&format!("cut from <code>{roadmap_branch}</code>")),
+        "which is not the predecessor this carry-on would have given: {said:?}",
+    );
+
+    let worktree = PathBuf::from(stage.worktree.expect("a stage has a Worktree").path);
+    let history = git(&worktree, &["log", "--oneline"]);
+
+    assert!(
+        history.contains("feat: the sibling stage"),
+        "and git really cut it there: no other base puts that commit under it: {history:?}",
+    );
+    assert!(
+        history.contains("docs: stage the rate-limiting roadmap"),
+        "the roadmap is under it too, the sibling standing on the branch that wrote it",
+    );
+
+    let prompt = until_written(&planning).await;
+
+    assert!(
+        prompt.contains("cut from `roadmaps/rate-limiting/01-by-hand`"),
+        "and the planning session is told the base rather than a place in a chain \
+         its own finish decides: {prompt:?}",
+    );
+}
+
+/// What the review session leaves behind for the stage after it: a branch of
+/// the roadmap's own, one commit further on, standing in for a sibling stage
+/// somebody else finished while this roadmap was being written.
+///
+/// Named for the stage the record is given by hand — see
+/// [`a_stage_of_the_roadmap`], which names a by-hand stage's branch the same
+/// way — and made with `commit-tree` rather than a checkout, there being no
+/// worktree here to make one in. The commit is what the test reads back: a
+/// branch cut from this one has it, and a branch cut from anywhere else does
+/// not.
+///
+/// The repository is found from the worktree the session is standing in, for
+/// [`MERGES_THE_PREDECESSOR`]'s reason: there is no way to pass one in.
+const BRANCHES_A_SIBLING: &str = r#"    repo="$(dirname "$(git rev-parse --git-common-dir)")"
+    sibling=$(git -C "$repo" commit-tree "$(git rev-parse 'HEAD^{tree}')" -p "$(git rev-parse HEAD)" -m 'feat: the sibling stage')
+    git -C "$repo" branch roadmaps/rate-limiting/01-by-hand "$sibling""#;
 
 /// Give `repo` an origin it is behind: an upstream holding everything it holds
 /// plus one commit more, which this checkout has heard nothing about.
@@ -19370,36 +21283,38 @@ async fn a_stage_whose_companion_cannot_be_delivered_starts_nothing() {
     // The record the stage got as far as is closed rather than left drafting:
     // drafting is a Conversation waiting for a human to write a Brief and press
     // something, and this is a stage nobody is going to start by hand.
-    let half_made = conversations(&fixture.app)
-        .await
-        .into_iter()
-        .find(|entry| entry.id != fixture.id)
-        .expect("the stage got as far as a record before git was asked anything");
+    //
+    // **However many of them there are**, and there may be more than one: the
+    // branch in the companion's way is still in its way at the next look for a
+    // free place, so the stage is tried again and halted again, each go leaving a
+    // record of its own. What is being asked is that none of them is left
+    // running — see [`every_half_made`], which waits for the one being made as
+    // this is read.
+    let half_made = every_half_made(&fixture).await;
 
-    assert_eq!(
-        half_made.state,
-        Lifecycle::Closed,
-        "no half-made stage Conversation is left running",
-    );
-
-    let closed: ConversationView = get(
-        &fixture.app,
-        &format!("/api/ui/conversations/{}", half_made.id),
-    )
-    .await;
-
-    // Its rows say what it would have worked alongside, as any closed
-    // Conversation's do — and none of them says a directory, nothing having
-    // been checked out anywhere.
     assert!(
-        closed.worktree.is_none()
-            && closed
-                .companions
-                .iter()
-                .all(|companion| companion.worktree.is_none()),
-        "with nothing checked out anywhere: {:?}",
-        (closed.worktree, closed.companions),
+        !half_made.is_empty(),
+        "the stage got as far as a record before git was asked anything",
     );
+
+    // And its rows say what it would have worked alongside, as any closed
+    // Conversation's do — and none of them says a directory, nothing having
+    // been checked out anywhere. Of each of them, a go that left a directory
+    // behind being exactly what this is about.
+    for id in &half_made {
+        let closed: ConversationView =
+            get(&fixture.app, &format!("/api/ui/conversations/{id}")).await;
+
+        assert!(
+            closed.worktree.is_none()
+                && closed
+                    .companions
+                    .iter()
+                    .all(|companion| companion.worktree.is_none()),
+            "with nothing checked out anywhere: {:?}",
+            (closed.worktree, closed.companions),
+        );
+    }
 
     assert!(
         !planning.exists(),
@@ -19831,7 +21746,7 @@ async fn a_stage_from_before_the_record_starts_nothing_and_says_so() {
 
     let fixture = adopting_asking(
         spill,
-        &a_stage_planned_and_worked_to_a_finish(&planning),
+        &a_stage_planned_and_worked_to_a_finish(&planning, ANNOTATES_THE_STAGE),
         &gh_about(GREEN, "", ""),
     )
     .await;
@@ -20012,7 +21927,14 @@ async fn adopting(spill: tempfile::TempDir, stub: &str) -> Grilling {
 /// The same, with something else where `gh` goes — for the test that carries an
 /// adopted stage the whole way to a settled wrap-up.
 async fn adopting_asking(spill: tempfile::TempDir, stub: &str, gh: &str) -> Grilling {
-    let bench = bench(spill, stub, gh).await;
+    adopting_at_pace(spill, stub, gh, *BRISKLY).await
+}
+
+/// And the same at a pace of the caller's choosing — for the tests about what
+/// the stall sweep makes of a stage that is waiting rather than working, that
+/// being the one thing [`BRISKLY`] deliberately keeps slow.
+async fn adopting_at_pace(spill: tempfile::TempDir, stub: &str, gh: &str, pace: Pace) -> Grilling {
+    let bench = bench_at_pace(spill, stub, gh, pace, None).await;
 
     a_roadmap_already_committed(&bench.repo);
 
@@ -20239,11 +22161,23 @@ async fn taking_up_however_reviewed(
 /// bare-branch road being the one road both come down: a **Review** settles the
 /// two roles a wrap-up runs under, and a **Fix Merge Issues** the one role it
 /// has, nothing about it ever reading the branch.
+///
+/// `standing` is a branch to leave checked out in a worktree of the Repo that is
+/// no Conversation's — the human's own, in effect. Which is somebody standing on
+/// a link of whatever chain the walk turns out to find, and what git refuses a
+/// stack sync over. Made before the press, because the walk at the second door
+/// runs minutes later with nobody watching.
+///
+/// `holder` is the same thing where the checkout *is* a Conversation's and that
+/// Conversation has finished: the case the rule is for, which the walk clears by
+/// closing it. Made before the press for `standing`'s reason — see [`Holder`].
 async fn reviewing_a_branch(
     spill: tempfile::TempDir,
     stub: &str,
     gh: &str,
     base: Option<&str>,
+    standing: Option<&str>,
+    holder: Option<Holder<'_>>,
     process: Process,
 ) -> Grilling {
     let bench = bench(spill, stub, gh).await;
@@ -20256,6 +22190,26 @@ async fn reviewing_a_branch(
     // default branch the rule falls to.
     if let Some(base) = base {
         git(&bench.repo, &["branch", "--quiet", base]);
+    }
+
+    if let Some(standing) = standing {
+        let at = bench.elsewhere.path().join("somebody-elses-checkout");
+
+        git(
+            &bench.repo,
+            &[
+                "worktree",
+                "add",
+                "--quiet",
+                "-b",
+                standing,
+                &at.to_string_lossy(),
+            ],
+        );
+    }
+
+    if let Some(holder) = holder {
+        stood_on_by_a_finished_conversation(&bench, holder).await;
     }
 
     let started: Started = post(
@@ -20376,6 +22330,8 @@ async fn a_review_of_a_branch_sends_one_session_for_the_pull_request_it_is_owed(
         &a_submit_that_opens_against_what_it_was_told(&opened, &told_to),
         &gh_opened_by_hand(&opened),
         Some("release/2.1"),
+        None,
+        None,
         Process::Review,
     )
     .await;
@@ -20471,6 +22427,8 @@ async fn a_fix_merge_issues_over_a_branch_sends_the_one_session_it_is_owed() {
         &a_submit_that_opens_against_what_it_was_told(&opened, &told_to),
         &gh_opened_by_hand(&opened),
         Some("release/2.1"),
+        None,
+        None,
         Process::FixMergeIssues,
     )
     .await;
@@ -20553,6 +22511,139 @@ esac
     )
 }
 
+/// A Conversation to stand on a link of the chain, which is what a stack
+/// Verkstead built actually looks like: a stage apiece, each Done and each still
+/// holding the worktree its branch is checked out in.
+///
+/// `branch` is the link it stands on, `number` is the pull request of that link —
+/// which a stage Conversation has on its own record, that being what it was
+/// wrapped up onto — and `holding` is whether it has anything uncommitted in that
+/// worktree, which is the one thing a close cannot give back and, at this door, the
+/// one thing there is nobody left to ask about.
+#[derive(Clone, Copy)]
+struct Holder<'a> {
+    branch: &'a str,
+    number: i64,
+    holding: bool,
+}
+
+/// Put one of those on the bench: a real worktree on that branch, a Conversation
+/// recorded as working in it, and Done.
+///
+/// **Written through the store rather than driven through the app**, because what
+/// the walk reads is the record and the checkout and nothing else: which
+/// Conversation is working in the directory git names, and what state it is in.
+/// Taking one all the way round the app to reach Done would be a second wrap-up
+/// running inside a fixture that is about the first.
+///
+/// The branch is cut here and the worktree made here, which is what makes git
+/// refuse to move it — a stack sync rebases every branch of the chain, and that
+/// refusal is the whole reason any of this happens.
+///
+/// Hands back the Conversation's id, for the assertions about what became of it.
+async fn stood_on_by_a_finished_conversation(bench: &Bench, holder: Holder<'_>) -> i64 {
+    let at = bench
+        .elsewhere
+        .path()
+        .join(format!("{}-holder", holder.branch));
+
+    git(
+        &bench.repo,
+        &[
+            "worktree",
+            "add",
+            "--quiet",
+            "-b",
+            holder.branch,
+            &at.to_string_lossy(),
+        ],
+    );
+
+    assert!(
+        git(&bench.repo, &["worktree", "list"]).contains(&at.to_string_lossy().to_string()),
+        "the link has to be standing in a real checkout for any of this to be about anything",
+    );
+
+    if holder.holding {
+        std::fs::write(at.join("half-a-thought.md"), "not committed\n").unwrap();
+    }
+
+    let pool = open_database(&bench.database).await.unwrap();
+
+    let id = verkstead_server::store::start_conversation(
+        &pool,
+        bench.repo_id,
+        holder.branch,
+        THIS_DEVICE,
+    )
+    .await
+    .unwrap()
+    .expect("nothing else has that branch");
+
+    verkstead_server::store::save_brief(&pool, id, "# A stage of its own\n")
+        .await
+        .unwrap();
+
+    verkstead_server::store::start_grilling(&pool, id, "c0ffee", &at, &[])
+        .await
+        .unwrap();
+
+    // And the pull request its work went onto, which is what makes it the
+    // Conversation that link *belongs to* rather than merely one standing in the
+    // directory: a stage is wrapped up onto a pull request of its own, and that row
+    // is what the note naming whose each link is reads.
+    verkstead_server::store::record_pull_request(
+        &pool,
+        id,
+        bench.repo_id,
+        &verkstead_server::store::PullRequest {
+            number: holder.number,
+            title: "Stage".to_owned(),
+            url: format!("https://github.com/tobico/verkstead/pull/{}", holder.number),
+            head: Some(holder.branch.to_owned()),
+            base: Some("main".to_owned()),
+            repo: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    // And Done, which is where a stage Conversation ends: the state word written
+    // rather than walked to, the walk being a whole wrap-up and this fixture being
+    // about somebody else's.
+    sqlx::query("UPDATE conversations SET state = 'done' WHERE id = ?")
+        .bind(id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    pool.close().await;
+
+    id
+}
+
+/// The state word of the Conversation going under `branch`, read straight out of
+/// the column.
+///
+/// The word rather than the state, and read by SQL rather than through the store:
+/// what is being asked about is a Conversation this fixture's own endpoints have
+/// no way to reach — the sidebar's list leaves a Closed one out, and there is no
+/// id to hand because the fixture made it before it existed.
+async fn state_of_the_conversation_on(database: &Path, branch: &str) -> String {
+    let pool = open_database(database).await.unwrap();
+
+    let (state,): (String,) =
+        sqlx::query_as("SELECT state FROM conversations WHERE COALESCE(named_branch, branch) = ?")
+            .bind(branch)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+    pool.close().await;
+
+    state
+}
+
 /// A bare branch inside a stack is walked where its `submitting` step's pull
 /// request is recorded, and every pull request of the chain is watched from
 /// there.
@@ -20571,6 +22662,8 @@ async fn a_bare_branch_inside_a_stack_is_walked_when_its_pull_request_arrives() 
         spill,
         &a_submit_that_opens_against_what_it_was_told(&opened, &told_to),
         &gh_listing_a_stack(&opened),
+        None,
+        None,
         None,
         Process::FixMergeIssues,
     )
@@ -20661,6 +22754,242 @@ async fn a_bare_branch_inside_a_stack_is_walked_when_its_pull_request_arrives() 
     }
 }
 
+/// And a bare branch whose chain turns out to have somebody standing on it stops
+/// the run with a Notice naming where, rather than carrying on into a sync that
+/// cannot move the branch.
+///
+/// The second door is where nobody can be asked anything: the human pressed Start
+/// minutes ago, the `submitting` session has just opened the pull request, and
+/// what a conflict in this chain would dispatch is one session told to run
+/// `gh stack sync` — which rebases and force-pushes every branch of it. Git holds
+/// one checkout per branch, so a link checked out in somebody else's worktree is a
+/// sync that was never going to work, and a go spent on one is a go the human paid
+/// for and got nothing from.
+///
+/// A checkout that is no Conversation's is the case Verkstead cannot put right by
+/// itself: a Conversation that has finished is closed and its Worktree given back,
+/// and this one it may not touch.
+#[tokio::test]
+async fn a_bare_branch_whose_stack_somebody_is_standing_on_stops_the_run() {
+    let spill = tempfile::tempdir().unwrap();
+    let opened = spill.path().join("opened-when-asked");
+    let told_to = spill.path().join("submit-prompts");
+
+    let fixture = reviewing_a_branch(
+        spill,
+        &a_submit_that_opens_against_what_it_was_told(&opened, &told_to),
+        &gh_listing_a_stack(&opened),
+        None,
+        // The link under this branch, checked out in a worktree that is nobody's
+        // here — which is what a human's own clone of the stage below looks like.
+        Some("stage-01"),
+        None,
+        Process::FixMergeIssues,
+    )
+    .await;
+
+    // The pull request lands, so the walk runs — and what it finds is somebody on
+    // the link below.
+    let view = fixture
+        .until(|view| {
+            notices_since_the_take_up(view)
+                .iter()
+                .any(|notice| notice.contains("no sync was dispatched"))
+                .then(|| view.clone())
+        })
+        .await;
+
+    let said = notices(&view).join("\n");
+
+    assert!(
+        said.contains("checked out at") && said.contains("somebody-elses-checkout"),
+        "the Notice names where the branch is checked out: {said}",
+    );
+    assert!(
+        said.contains("no sync was dispatched"),
+        "and says the run stopped rather than spending a go on it: {said}",
+    );
+    assert!(
+        said.contains("one of a stack of 3"),
+        "and the chain it found is on the record all the same: {said}",
+    );
+
+    // The worktree that would not make way is exactly where it was.
+    assert!(
+        git(&fixture.repo(), &["worktree", "list"]).contains("somebody-elses-checkout"),
+        "nothing here may take somebody else's checkout away",
+    );
+}
+
+/// And a neighbour that *is* a Conversation's, finished with and holding nothing,
+/// makes way here on its own: closed, its worktree given back, and the run carries
+/// straight on into the wrap-up.
+///
+/// Which is the case a stack Verkstead built is made of — a stage per link, each
+/// Done and each still standing in the worktree its branch is checked out in — and
+/// the case the whole rule exists to clear. Nobody is here to be asked and nothing
+/// needs asking: a clean checkout has nothing to lose, so it is given back without
+/// a word and the sync the chain is owed can move the branch.
+#[tokio::test]
+async fn a_bare_branch_whose_stack_a_finished_conversation_stands_on_carries_on() {
+    let spill = tempfile::tempdir().unwrap();
+    let opened = spill.path().join("opened-when-asked");
+    let told_to = spill.path().join("submit-prompts");
+
+    let fixture = reviewing_a_branch(
+        spill,
+        &a_submit_that_opens_against_what_it_was_told(&opened, &told_to),
+        &gh_listing_a_stack(&opened),
+        None,
+        None,
+        // The stage below, which is a Conversation of its own that has finished
+        // with its work and kept its checkout — exactly what a stacked stage
+        // leaves behind.
+        Some(Holder {
+            branch: "stage-01",
+            number: 40,
+            holding: false,
+        }),
+        Process::FixMergeIssues,
+    )
+    .await;
+
+    // The pull request lands, the walk runs, and what it finds below gives way.
+    let view = fixture
+        .until(|view| {
+            notices(view)
+                .iter()
+                .any(|notice| notice.contains("one of a stack of 3"))
+                .then(|| view.clone())
+        })
+        .await;
+
+    let said = notices(&view).join("\n");
+
+    assert!(
+        !said.contains("no sync was dispatched"),
+        "nothing stopped the run: the neighbour had finished and was holding nothing: {said}",
+    );
+    assert!(
+        said.contains("was closed to make way"),
+        "and the note says which of the chain gave its link up: {said}",
+    );
+
+    // The holder is Closed with its checkout handed back, which is what frees the
+    // branch: git will not move one that is checked out anywhere else.
+    let deadline = Instant::now() + *PATIENCE;
+
+    loop {
+        let worktrees = git(&fixture.repo(), &["worktree", "list"]);
+
+        if !worktrees.contains("stage-01-holder") {
+            break;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "the finished Conversation never gave its checkout back: {worktrees}",
+        );
+        pause(Duration::from_millis(50)).await;
+    }
+
+    assert_eq!(
+        state_of_the_conversation_on(&fixture.database, "stage-01").await,
+        "closed",
+        "the Conversation that made way is Closed, and a Steer is the way back in",
+    );
+
+    // And the run went on rather than stopping: the wrap-up is watching the whole
+    // chain, which is what it was dispatched for.
+    let deadline = Instant::now() + *PATIENCE;
+
+    loop {
+        let pool = open_database(&fixture.database).await.unwrap();
+        let merges = verkstead_server::store::merges(&pool, fixture.id)
+            .await
+            .unwrap();
+        pool.close().await;
+
+        if merges.len() == 3 {
+            break;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "the wrap-up never got going over the chain: {} of 3 asked about",
+            merges.len(),
+        );
+        pause(Duration::from_millis(50)).await;
+    }
+}
+
+/// And one holding uncommitted changes stops the run naming it, rather than being
+/// closed over the human's head.
+///
+/// The one thing a close cannot give back, at the one door where nobody can be
+/// asked about it. At the press a holder with something uncommitted stops the press
+/// to be confirmed; by the time this walk runs the human pressed Start minutes ago
+/// and is not standing here, so the Notice is the asking — and what it stops is a
+/// sync that would have rebased the branch out from under that work anyway.
+#[tokio::test]
+async fn a_bare_branch_whose_stack_holds_uncommitted_changes_stops_the_run() {
+    let spill = tempfile::tempdir().unwrap();
+    let opened = spill.path().join("opened-when-asked");
+    let told_to = spill.path().join("submit-prompts");
+
+    let fixture = reviewing_a_branch(
+        spill,
+        &a_submit_that_opens_against_what_it_was_told(&opened, &told_to),
+        &gh_listing_a_stack(&opened),
+        None,
+        None,
+        Some(Holder {
+            branch: "stage-01",
+            number: 40,
+            holding: true,
+        }),
+        Process::FixMergeIssues,
+    )
+    .await;
+
+    let view = fixture
+        .until(|view| {
+            notices_since_the_take_up(view)
+                .iter()
+                .any(|notice| notice.contains("no sync was dispatched"))
+                .then(|| view.clone())
+        })
+        .await;
+
+    let said = notices(&view).join("\n");
+
+    assert!(
+        said.contains("uncommitted changes") && said.contains("nobody is here to be asked"),
+        "the Notice says what would have been thrown away and why nobody was asked: {said}",
+    );
+    assert!(
+        said.contains("stage-01"),
+        "and names the Conversation holding it, by its branch: {said}",
+    );
+    assert!(
+        said.contains("one of a stack of 3"),
+        "and the chain it found is on the record all the same: {said}",
+    );
+
+    // Nothing was closed and nothing was taken: the checkout is where it was, with
+    // what was left in it still in it.
+    assert!(
+        git(&fixture.repo(), &["worktree", "list"]).contains("stage-01-holder"),
+        "the holder keeps its checkout, nothing having been agreed to",
+    );
+
+    assert_eq!(
+        state_of_the_conversation_on(&fixture.database, "stage-01").await,
+        "done",
+        "and it is exactly where the walk found it",
+    );
+}
+
 /// And one whose session opens none stops the run with what that session last
 /// said — with Resume another go at the one thing still owed.
 ///
@@ -20677,6 +23006,8 @@ async fn a_review_of_a_branch_whose_session_opens_none_stops_and_resume_is_anoth
         spill,
         &a_tinker_whose_submit_stops_short_once(&opened, &asked_twice),
         &gh_opened_by_hand(&opened),
+        None,
+        None,
         None,
         Process::Review,
     )
@@ -20954,8 +23285,8 @@ async fn adopting_a_roadmap_starts_its_next_stage_with_a_planning_session() {
         "primed with the stage brief: {prompt:?}",
     );
     assert!(
-        prompt.contains("not stacked on anything"),
-        "and told its branch stands on nothing: adoption never stacks: {prompt:?}",
+        prompt.contains("nothing unmerged left to stand on"),
+        "and told its branch came off the default branch: adoption never stacks: {prompt:?}",
     );
 }
 
@@ -21088,7 +23419,7 @@ async fn resuming_a_stage_that_never_planned_runs_the_planning_again() {
         "the second one is the fork of next-stage as well: {planned:?}",
     );
     assert!(
-        prompts(&planned)[1].contains("not stacked on anything"),
+        prompts(&planned)[1].contains("nothing unmerged left to stand on"),
         "and told where its branch came from, exactly as the first was: {planned:?}",
     );
 
@@ -21113,16 +23444,19 @@ async fn resuming_a_stage_that_never_planned_runs_the_planning_again() {
 /// nothing worth raising.
 ///
 /// The plan commit is the piece the chain turns on, and it is written the way
-/// `/next-stage` writes one: `.tasks/`, plus the in-progress annotation naming
-/// the branch it is on. That annotation is what keeps the carry-on off this
-/// stage's own box when the wrap-up settles — *which* roadmap is read comes off
-/// the record the stage was started with rather than off anything the branch
-/// wrote.
+/// `/next-stage` writes one: `.tasks/`, plus whatever `annotating` puts on the
+/// stage's own line.
+///
+/// [`ANNOTATES_THE_STAGE`] is what the skill writes there, and nothing is what a
+/// roadmap looks like with the annotation left off — which is how a test asks
+/// whether Verkstead's own record is what decides that this stage is done. Either
+/// way *which* roadmap is read comes off the record the stage was started with
+/// rather than off anything the branch wrote.
 ///
 /// Which stage it is planning it reads off the branch it is standing on, because
 /// that is the fact it has: a stage's branch is its brief's name, so the entry to
 /// annotate is the one whose link names it.
-fn a_stage_planned_and_worked_to_a_finish(planning: &Path) -> String {
+fn a_stage_planned_and_worked_to_a_finish(planning: &Path, annotating: &str) -> String {
     format!(
         r#"
 case "$2" in
@@ -21134,7 +23468,7 @@ case "$2" in
     printf '# The stage\n\n## Tasks\n\n- [ ] 01: do the work — [details](01-do-the-work.md)\n' > .tasks/TODO.md
     printf '# 01. do the work\n' > .tasks/01-do-the-work.md
     stage=$(basename "$branch")
-    sed -i "/($stage.md)/s|\$| *(in progress: \`$branch\`)*|" docs/roadmaps/rate-limiting/ROADMAP.md
+{annotating}
     git add -A
     git commit --quiet -m "chore: plan the $branch stage"
     : > /tmp/verkstead/done
@@ -21172,6 +23506,14 @@ esac
     )
 }
 
+/// What `/next-stage` writes on the line of the stage it is planning: the branch
+/// it is being worked on, in backticks, beside whatever that line already says.
+///
+/// The roadmap keeping its own score for whoever reads the file. Verkstead does
+/// not need it to know which stage is being worked — that is its own record's —
+/// and it is what the readings fall back to where there is no record at all.
+const ANNOTATES_THE_STAGE: &str = r#"    sed -i "/($stage.md)/s|\$| *(in progress: \`$branch\`)*|" docs/roadmaps/rate-limiting/ROADMAP.md"#;
+
 /// The join adoption rests on: an adopted stage that settles starts the stage
 /// after it, down the path a staged roadmap has always gone down.
 ///
@@ -21192,7 +23534,7 @@ async fn an_adopted_stage_that_settles_starts_the_stage_after_it() {
 
     let fixture = adopting_asking(
         spill,
-        &a_stage_planned_and_worked_to_a_finish(&planning),
+        &a_stage_planned_and_worked_to_a_finish(&planning, ANNOTATES_THE_STAGE),
         &gh_about(GREEN, "", ""),
     )
     .await;
@@ -21280,6 +23622,851 @@ async fn an_adopted_stage_that_settles_starts_the_stage_after_it() {
         "one planning session for the adopted stage and one for the stage after \
          it: {planned:?}",
     );
+}
+
+/// And the same chain with the roadmap saying nothing at all about the stage that
+/// settled: its box unticked, its line unannotated, and the stage after it starts
+/// all the same.
+///
+/// This is what Verkstead's own record is for, end to end. The stage worked here
+/// ticks its own box in its own finish commit — which this stub never writes,
+/// exactly as a stage whose finish commit is on a branch this reading has never
+/// seen never wrote it — and nothing on the line says whose it is. So the boxes
+/// and the annotation together have nothing to say, and the only thing that keeps
+/// the carry-on from offering stage 01 back to itself for ever is the row saying
+/// that stage 01 of this roadmap, in this Repo, has settled.
+#[tokio::test]
+async fn a_settled_stage_the_roadmap_says_nothing_about_is_still_done() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+
+    let fixture = adopting_asking(
+        spill,
+        &a_stage_planned_and_worked_to_a_finish(&planning, ""),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    let next = stage_of(&fixture).await;
+
+    assert_eq!(
+        next.branch, "roadmaps/rate-limiting/02-refusing",
+        "the stage after the one that settled, by the record alone",
+    );
+
+    // And the roadmap on the settled stage's own branch really does say nothing:
+    // had the box been ticked or the line annotated, the reading off the boxes
+    // would have answered the same and this would be proving nothing.
+    let settled = fixture.view().await;
+    let worktree = PathBuf::from(settled.worktree.expect("a stage has a Worktree").path);
+    let index =
+        std::fs::read_to_string(worktree.join("docs/roadmaps/rate-limiting/ROADMAP.md")).unwrap();
+
+    assert!(
+        index.contains("- [ ] 01: Count the requests — [brief](01-counter.md)\n"),
+        "stage 01's line is exactly as the roadmap was written: {index:?}",
+    );
+}
+
+/// What `/next-stage` writes on a roadmap somebody has half-declared: the
+/// annotation as ever, and a declaration on this stage's line and no other.
+///
+/// Which is how a running roadmap comes to declare badly at all. The
+/// declarations are read afresh off the top of the chain at every start, so a
+/// line somebody added by hand and committed takes effect at the next settle —
+/// and a declaration on some lines and not others is the first of the
+/// judgement's four faults: a bare line is a root and a forgotten declaration at
+/// once, and there is no telling which.
+const DECLARES_BADLY: &str = r#"    sed -i "/($stage.md)/s|\$| — no dependencies *(in progress: \`$branch\`)*|" docs/roadmaps/rate-limiting/ROADMAP.md"#;
+
+/// A settle on a roadmap that declares badly starts nothing, and leaves the
+/// judgement's own sentence on the Timeline.
+///
+/// The other half of the refusal the roadmap's own session meets at `verkstead
+/// done` — here there is no such session, the roadmap having been adopted rather
+/// than staged, and the half-written line arrived on the branch afterwards. So
+/// this is the path the refusal was written for: nobody is watching, one stage
+/// has just settled, and the thing to say is what a human would have to go and
+/// fix.
+///
+/// Refused rather than repaired, and never run in order instead: stage 02 stands
+/// on stage 01 by the roadmap's own order, and starting it anyway would be
+/// running a roadmap in a way nobody wrote down.
+#[tokio::test]
+async fn a_settle_on_a_badly_declaring_roadmap_starts_nothing_and_says_why() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+
+    let fixture = adopting_asking(
+        spill,
+        &a_stage_planned_and_worked_to_a_finish(&planning, DECLARES_BADLY),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    let said = fixture
+        .until(|view| {
+            let said = notices(view).join("\n");
+
+            said.contains("No stage of the roadmap could be started")
+                .then_some(said)
+        })
+        .await;
+
+    assert!(
+        said.contains("declares what some of its stages stand on and not others")
+            && said.contains("stage 02 declares nothing after its link"),
+        "the Timeline carries the judgement's own sentence, fault and all: {said:?}",
+    );
+
+    // The premise, held to rather than assumed: the roadmap on the branch the
+    // declarations are read off really is the half-declared one.
+    let settled = fixture.view().await;
+    let worktree = PathBuf::from(settled.worktree.expect("a stage has a Worktree").path);
+    let index =
+        std::fs::read_to_string(worktree.join("docs/roadmaps/rate-limiting/ROADMAP.md")).unwrap();
+
+    assert!(
+        index.contains("01-counter.md) — no dependencies") && index.contains("02-refusing.md)\n"),
+        "one line declares and the other does not: {index:?}",
+    );
+
+    assert_eq!(
+        conversations(&fixture.app).await.len(),
+        1,
+        "and nothing was started: nothing of a roadmap that declares badly may \
+         start anywhere",
+    );
+
+    let planned = std::fs::read_to_string(&planning).unwrap_or_default();
+
+    assert_eq!(
+        planned.matches("planned=").count(),
+        1,
+        "so no session was launched inside the next-stage fork either — the one \
+         planning session is the adopted stage's own: {planned:?}",
+    );
+}
+
+/// A stub that plans one task, works it at a gate the test opens, and then
+/// finishes the stage — writing a line per `next-task` session so that a test
+/// can say which of the two steps ran and which did not.
+///
+/// The gate is inside the *task* rather than the finish, which is what makes
+/// the window it opens unmistakable: while the session sits there the stage has
+/// a box left to tick, so nothing about the chain has been asked yet, and the
+/// test has as long as it likes to put a stage below into the record.
+///
+/// It annotates the roadmap on its way through the planning, as
+/// [`ANNOTATES_THE_STAGE`] is what `/next-stage` writes there — so the branch has
+/// written to `docs/roadmaps/` and the stage card is pinned on this Conversation's
+/// Timeline, which is where the word this hold puts on a stage is read.
+fn a_stage_worked_to_its_finish(worked: &Path, gate: &Path) -> String {
+    format!(
+        r#"
+case "$2" in
+*next-stage/SKILL.md*)
+    printf 'planning the stage\n'
+    mkdir -p .tasks
+    printf '# The stage\n\n## Tasks\n\n- [ ] 01: do the work — [details](01-do-the-work.md)\n' > .tasks/TODO.md
+    printf '# 01. do the work\n' > .tasks/01-do-the-work.md
+    branch=$(git rev-parse --abbrev-ref HEAD)
+    stage=$(basename "$branch")
+{annotating}
+    git add -A
+    git commit --quiet -m 'chore: plan the stage'
+    : > /tmp/verkstead/done
+    sleep 300
+    ;;
+*next-task/SKILL.md*)
+    number=$(sed -n 's/^- \[ \] \([0-9]*\):.*/\1/p' .tasks/TODO.md | head -n 1)
+    if [ -n "$number" ]; then
+        printf 'worked=%s\n' "$number" >> {worked}
+        while [ ! -f {gate} ]; do sleep 0.05; done
+        printf 'working the task\n'
+        printf 'a counter\n' >> counter.md
+        sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
+        git add -A
+        git commit --quiet -m 'feat: count the requests'
+        : > /tmp/verkstead/done
+    else
+        printf 'finished=yes\n' >> {worked}
+        git rm --quiet -r .tasks
+        git commit --quiet -m 'chore: finish the stage'
+        : > /tmp/verkstead/done
+        printf 'pushed, and the pull request is open\n'
+    fi
+    sleep 300
+    ;;
+*reviewing/SKILL.md*)
+    printf 'I read the whole branch and found nothing worth raising\n'
+    exit 0
+    ;;
+*)
+    sleep 300
+    ;;
+esac
+"#,
+        annotating = ANNOTATES_THE_STAGE,
+        worked = quoted(worked),
+        gate = quoted(gate),
+    )
+}
+
+/// Put another stage of the same roadmap into the record by hand: started as a
+/// stage, and nothing else.
+///
+/// By hand because nothing starts two stages of one roadmap yet — the stage
+/// after this one starts when this one *settles*, which is the ordering the
+/// roadmap this work belongs to is taking apart. What the hold reads is the
+/// record, and this is the record a second stage leaves: a `stage_roadmaps` row
+/// saying which stage of which roadmap it is.
+///
+/// No worktree on disk and no session: nothing here reads either. What it is
+/// standing in for is a branch somebody else's stage is still working.
+async fn a_stage_of_the_roadmap(fixture: &Grilling, repo_id: i64, label: &str) -> i64 {
+    let pool = open_database(&fixture.database).await.unwrap();
+    let branch = format!("roadmaps/rate-limiting/{label}-by-hand");
+
+    let id = verkstead_store::start_conversation(&pool, repo_id, &branch, THIS_DEVICE)
+        .await
+        .unwrap()
+        .expect("the branch is free");
+
+    verkstead_store::start_stage(
+        &pool,
+        id,
+        "c0ffee",
+        Path::new("/data/worktrees/by-hand"),
+        None,
+        verkstead_store::RoadmapStage {
+            roadmap: "rate-limiting",
+            label,
+        },
+        &[],
+    )
+    .await
+    .unwrap();
+
+    id
+}
+
+/// And what puts it in the chain, which is the whole of what a join is: a pull
+/// request recorded against it on its own branch.
+async fn joins_the_chain(fixture: &Grilling, repo_id: i64, id: i64, label: &str, number: i64) {
+    let pool = open_database(&fixture.database).await.unwrap();
+
+    let branch = verkstead_store::conversation_branch(&pool, id)
+        .await
+        .unwrap()
+        .expect("a Conversation is on a branch from the moment it exists");
+
+    verkstead_store::record_pull_request(
+        &pool,
+        id,
+        repo_id,
+        &verkstead_store::PullRequest {
+            number,
+            title: format!("Stage {label}"),
+            url: format!("https://github.com/tobico/verkstead/pull/{number}"),
+            head: Some(branch),
+            base: None,
+            repo: None,
+        },
+    )
+    .await
+    .unwrap();
+}
+
+/// One already in the chain and not settled: a stage that has joined and is
+/// still wrapping up, which is a branch nothing may rebase onto.
+async fn a_stage_in_the_chain(fixture: &Grilling, repo_id: i64, label: &str, number: i64) -> i64 {
+    let id = a_stage_of_the_roadmap(fixture, repo_id, label).await;
+
+    joins_the_chain(fixture, repo_id, id, label, number).await;
+
+    id
+}
+
+/// And one whose tasks finished before this fixture's stage did and which has
+/// **not** joined yet: a place in the queue and no pull request.
+///
+/// Which is the case the queue is for. Both stages have every box ticked and the
+/// chain below them is settled, so the rule about a branch still moving has
+/// nothing to say about either — and one of them still has to go first.
+async fn a_stage_queued_to_join(fixture: &Grilling, repo_id: i64, label: &str) -> i64 {
+    let id = a_stage_of_the_roadmap(fixture, repo_id, label).await;
+
+    let pool = open_database(&fixture.database).await.unwrap();
+
+    verkstead_store::queue_to_join(&pool, id).await.unwrap();
+
+    id
+}
+
+/// And what settles it, which is the whole of what the hold is waiting for: the
+/// Conversation reaching Done.
+async fn settles(fixture: &Grilling, id: i64) {
+    let pool = open_database(&fixture.database).await.unwrap();
+
+    verkstead_store::set_state(&pool, id, verkstead_store::Lifecycle::Done)
+        .await
+        .unwrap();
+}
+
+/// A stage whose every box is ticked and whose roadmap's chain holds a stage
+/// that has not settled gets **no finish session**: it waits, says on its
+/// Timeline which stage it is waiting on, and is released the moment that stage
+/// settles.
+///
+/// The whole of the hold. A stage joins the chain at its finish — the branch is
+/// rebased onto the top, pushed and opened — and nothing rebases onto a branch
+/// that is still moving, so a stage below that is still wrapping up is one
+/// nothing may join above. Held in front of the launch rather than inside the
+/// skill, which is what makes it the server's judgement: there is no session
+/// sitting in a Worktree waiting to be told it may push.
+///
+/// At [`SWEEPING`]'s pace, because half of what is being asked is what the
+/// stall sweep makes of a held stage. The run holds its registration across the
+/// whole loop, so a stage waiting inside it is a Conversation being driven —
+/// and a sweep that read it as standing still would stop the very thing the
+/// hold is waiting on the chain for.
+#[tokio::test]
+async fn a_stage_waits_to_join_while_a_stage_in_its_chain_has_not_settled() {
+    let spill = tempfile::tempdir().unwrap();
+    let worked = spill.path().join("task-prompts");
+    let gate = spill.path().join("go");
+
+    let fixture = adopting_at_pace(
+        spill,
+        &a_stage_worked_to_its_finish(&worked, &gate),
+        &gh_about(GREEN, "", ""),
+        *SWEEPING,
+    )
+    .await;
+
+    let repo_id = fixture.view().await.repo.id;
+
+    // The task session is sitting at the gate, so the stage has a box left to
+    // tick and nothing has asked about the chain yet. Which is the window this
+    // puts a second stage into the record in.
+    until_written_saying(&worked, "worked=01").await;
+
+    let below = a_stage_in_the_chain(&fixture, repo_id, "02", 77).await;
+
+    std::fs::write(&gate, "").unwrap();
+
+    // The box is ticked, the backlog is worked out, and what the run does next
+    // is wait — saying so, and saying on which stage.
+    let said = said_on(&fixture, fixture.id, "Waiting to join").await;
+
+    assert!(
+        said.contains("stage 02"),
+        "the Timeline names the stage it is waiting on: {said:?}",
+    );
+    assert!(
+        said.contains("<code>rate-limiting</code>"),
+        "and whose roadmap that stage is of: {said:?}",
+    );
+
+    assert!(
+        !std::fs::read_to_string(&worked)
+            .unwrap()
+            .contains("finished"),
+        "and no finish session was launched: the hold stands in front of the launch",
+    );
+
+    let view = fixture.view().await;
+
+    assert!(
+        view.waiting_to_join,
+        "which the card says as a label beside the state",
+    );
+    assert_eq!(
+        view.state,
+        Lifecycle::Implementing,
+        "a condition of Implementing rather than a state: the Lifecycle is untouched",
+    );
+    assert!(
+        fixture.row().await.waiting_to_join,
+        "and the sidebar row says the same, from the same register",
+    );
+
+    // And so does the roadmap's own card, off that register read at the moment this
+    // page was drawn: the label over there and the word on the stage's row here are
+    // one reading of one hold, so they cannot come apart. The record has this stage
+    // in flight — its tasks are done and what waits is the join — and *waiting to
+    // join* is the more particular thing to say about it.
+    let stages = view
+        .pinned
+        .iter()
+        .find_map(|pinned| match pinned {
+            PinnedEvent::StageList(list) => Some(list),
+            _ => None,
+        })
+        .expect("the roadmap this stage's branch wrote to is pinned");
+
+    assert_eq!(
+        stages
+            .stages
+            .iter()
+            .find(|stage| stage.number == "01")
+            .map(|stage| stage.state.clone()),
+        Some(StageState::WaitingToJoin),
+        "this stage is the one being held, and its row says so in the word its \
+         Conversation wears as a label",
+    );
+
+    // And nothing reads it as standing still. The sweep is running at this
+    // fixture's pace and the run is holding its registration across the wait,
+    // so a held stage is one being driven rather than one to stop.
+    assert!(view.driven, "the run that is waiting is still driving it");
+    assert!(
+        view.blocked_on.is_none() && !view.ready_to_resume,
+        "so nothing stopped it: {:?}",
+        notices(&view),
+    );
+
+    // Then the stage below settles, and the finish runs exactly as it does
+    // today — same session, same skill, and on to the pull request it opens.
+    settles(&fixture, below).await;
+
+    until_written_saying(&worked, "finished=yes").await;
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    assert!(
+        !fixture.view().await.waiting_to_join,
+        "and the label goes with the hold",
+    );
+}
+
+/// And a restart finds it held again: the take-up a resume makes over a stage
+/// whose boxes are all ticked asks the chain exactly as the run's own loop
+/// does, and launches nothing either.
+///
+/// The second of the two places a finish session is launched from, and the one
+/// a restarting server goes through — no driver survives the process, so every
+/// Conversation left mid-run is taken up again from where it stands. A hold
+/// that only the loop knew about would be a stage that pushed on a restart,
+/// onto a branch still moving.
+///
+/// The register is this process's, so the second server holds nothing to begin
+/// with: what it draws the label from is the hold its own take-up entered.
+#[tokio::test]
+async fn a_restarted_server_takes_a_held_stage_up_and_holds_it_again() {
+    let spill = tempfile::tempdir().unwrap();
+    let worked = spill.path().join("task-prompts");
+    let gate = spill.path().join("go");
+    let stub = a_stage_worked_to_its_finish(&worked, &gate);
+
+    let fixture = adopting_asking(spill, &stub, &gh_about(GREEN, "", "")).await;
+
+    let repo_id = fixture.view().await.repo.id;
+
+    until_written_saying(&worked, "worked=01").await;
+
+    a_stage_in_the_chain(&fixture, repo_id, "02", 77).await;
+
+    std::fs::write(&gate, "").unwrap();
+
+    said_on(&fixture, fixture.id, "Waiting to join").await;
+
+    // A second server over the same database, which is what a restart is. It
+    // takes up everything it was left driving, and this stage is one of them:
+    // its boxes are all ticked, so what it is taken up to is the finish — and
+    // the chain below it is where it was.
+    let restarted = fixture.restarted(&stub, &gh_about(GREEN, "", "")).await;
+
+    let deadline = Instant::now() + *PATIENCE;
+
+    let held = loop {
+        let view: ConversationView =
+            get(&restarted, &format!("/api/ui/conversations/{}", fixture.id)).await;
+
+        if view.waiting_to_join {
+            break view;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "the restarted server never held the stage. It says: {:?}",
+            notices(&view),
+        );
+
+        pause(Duration::from_millis(25)).await;
+    };
+
+    assert_eq!(
+        held.state,
+        Lifecycle::Implementing,
+        "held where it stood, with the Lifecycle untouched",
+    );
+    assert!(
+        !std::fs::read_to_string(&worked)
+            .unwrap()
+            .contains("finished"),
+        "and the take-up launched no finish session either",
+    );
+}
+
+/// And a roadmap run in order holds nothing, which is every roadmap until
+/// stages start side by side.
+///
+/// The other half of the hold, and the one that has to stay true while the rest
+/// of this roadmap lands: a stage is started by the stage before it *settling*,
+/// so by the time the one after it reaches its finish the chain below is
+/// settled to the bottom. The rebase moves nothing, nobody waits, and nothing
+/// is said.
+///
+/// Two stages the whole way, because one proves half of it. Stage 01 finishes
+/// with an empty chain below it, and stage 02 finishes with stage 01 in the
+/// chain and settled.
+#[tokio::test]
+async fn a_roadmap_run_in_order_holds_no_stage_at_its_finish() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+
+    let fixture = adopting_asking(
+        spill,
+        &a_stage_planned_and_worked_to_a_finish(&planning, ANNOTATES_THE_STAGE),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    // Stage 01, planned, worked, finished and settled — which is what puts it
+    // in the chain, and what starts the stage after it.
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    let next = stage_of(&fixture).await;
+    let deadline = Instant::now() + *PATIENCE;
+
+    let settled = loop {
+        let view: ConversationView =
+            get(&fixture.app, &format!("/api/ui/conversations/{}", next.id)).await;
+
+        if view.state == Lifecycle::Done {
+            break view;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "the stage after it never settled. It says: {:?}",
+            notices(&view),
+        );
+
+        pause(Duration::from_millis(25)).await;
+    };
+
+    for (which, view) in [("01", fixture.view().await), ("02", settled)] {
+        assert!(
+            !notices(&view).join("\n").contains("Waiting to join"),
+            "stage {which} never waited for anything: {:?}",
+            notices(&view),
+        );
+        assert!(!view.waiting_to_join, "and wears no label for it either",);
+    }
+}
+
+/// The same stage run, with the **finish** session's whole prompt written down
+/// beside the planning ones.
+///
+/// What a finish is told about the chain it is joining is the one thing a task
+/// session is not told, and the only place to read it is the prompt itself: the
+/// rebase is the session's to run, so nothing about it reaches the record. One
+/// block per finish, headed by the branch it was the finish of — a roadmap run
+/// through two stages writes two, and which of them is which is the whole of
+/// what the test is about.
+fn a_stage_finished_saying_what_it_was_told(
+    planning: &Path,
+    finishing: &Path,
+    annotating: &str,
+) -> String {
+    format!(
+        r#"
+case "$2" in
+*next-stage/SKILL.md*)
+    branch=$(git rev-parse --abbrev-ref HEAD)
+    printf 'planned=%s\n' "$branch" >> {planning}
+    printf 'planning the stage\n'
+    mkdir -p .tasks
+    printf '# The stage\n\n## Tasks\n\n- [ ] 01: do the work — [details](01-do-the-work.md)\n' > .tasks/TODO.md
+    printf '# 01. do the work\n' > .tasks/01-do-the-work.md
+    stage=$(basename "$branch")
+{annotating}
+    git add -A
+    git commit --quiet -m "chore: plan the $branch stage"
+    : > /tmp/verkstead/done
+    sleep 300
+    ;;
+*next-task/SKILL.md*)
+    number=$(sed -n 's/^- \[ \] \([0-9]*\):.*/\1/p' .tasks/TODO.md | head -n 1)
+    if [ -n "$number" ]; then
+        printf 'working the task\n'
+        printf 'a counter\n' >> counter.md
+        sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
+        git add -A
+        git commit --quiet -m 'feat: count the requests'
+        : > /tmp/verkstead/done
+    else
+        printf 'finishing=%s\n%s\n' "$(git rev-parse --abbrev-ref HEAD)" "$2" >> {finishing}
+        printf 'finishing\n'
+        git rm --quiet -r .tasks
+        git commit --quiet -m 'chore: finish the stage'
+        : > /tmp/verkstead/done
+        printf 'pushed, and the pull request is open\n'
+    fi
+    sleep 300
+    ;;
+*reviewing/SKILL.md*)
+    printf 'I read the whole branch and found nothing worth raising\n'
+    exit 0
+    ;;
+*)
+    sleep 300
+    ;;
+esac
+"#,
+        planning = quoted(planning),
+        finishing = quoted(finishing),
+    )
+}
+
+/// What one finish session was told, out of the file every one of them wrote to.
+fn told_at_the_finish(finishing: &Path, branch: &str) -> String {
+    let said = std::fs::read_to_string(finishing).unwrap_or_default();
+
+    said.split("finishing=")
+        .find(|block| block.starts_with(&format!("{branch}\n")))
+        .unwrap_or_else(|| panic!("no finish session ran on {branch}. The file says: {said}"))
+        .to_owned()
+}
+
+/// A stage's finish session is told **what the chain is**, bottom to top, and
+/// that the rebase onto the top of it comes before anything is pushed.
+///
+/// The other half of the join. Task by task the runner holds the stage until the
+/// chain below it has settled; this is what it hands over when it lets it in.
+/// The chain is Verkstead's to say — it recorded which stages joined and in what
+/// order, and no agent could read that off a branch — and the rebase is the
+/// session's to do, `gh stack` being a session's to run and never the server's.
+///
+/// Two stages, because one proves neither half. The first comes off an adopted
+/// roadmap and stands on nothing, so there is no chain and nothing is said: a
+/// heading over an empty one would tell a session there was something to join.
+/// The second was cut from the first, which by then has joined — so it is told
+/// that branch, and told to rebase onto it before it pushes.
+///
+/// Which is also the case that has to change nothing anybody can see: the top of
+/// the chain is exactly what the branch was cut from, so the rebase moves no
+/// commit and the pull request opens where it always opened.
+#[tokio::test]
+async fn the_finish_of_a_stage_is_told_the_chain_it_joins_before_it_pushes() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+    let finishing = spill.path().join("finish-prompts");
+
+    let fixture = adopting_asking(
+        spill,
+        &a_stage_finished_saying_what_it_was_told(&planning, &finishing, ANNOTATES_THE_STAGE),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    // Stage 01, planned, worked, finished and settled — which is what puts it in
+    // the chain, and what starts the stage after it.
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    let below = fixture.view().await.branch;
+    let next = stage_of(&fixture).await;
+    let deadline = Instant::now() + *PATIENCE;
+
+    let settled = loop {
+        let view: ConversationView =
+            get(&fixture.app, &format!("/api/ui/conversations/{}", next.id)).await;
+
+        if view.state == Lifecycle::Done {
+            break view;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "the stage after it never settled. It says: {:?}",
+            notices(&view),
+        );
+
+        pause(Duration::from_millis(25)).await;
+    };
+
+    let first = told_at_the_finish(&finishing, &below);
+
+    assert!(
+        !first.contains("# The chain this stage joins"),
+        "the first stage of an adopted roadmap stands on nothing, so it joins no \
+         chain and is told none: {first}",
+    );
+
+    let second = told_at_the_finish(&finishing, &settled.branch);
+    let chain = second
+        .split_once("# The chain this stage joins")
+        .unwrap_or_else(|| panic!("the second stage was told no chain at all: {second}"))
+        .1;
+
+    assert!(
+        chain.contains(&format!("`{below}`")),
+        "the chain is the stage below, named by its branch: {chain}",
+    );
+    assert!(
+        chain.contains(&format!(
+            "**rebase this branch onto `{below}` before anything is pushed**"
+        )),
+        "and the rebase onto it comes before the push: {chain}",
+    );
+    assert!(
+        chain.contains(&format!("open the pull request against `{below}`")),
+        "which is what the pull request is opened against too: {chain}",
+    );
+    assert!(
+        chain.contains("docs/agents/git-workflow.md"),
+        "how it is done is the target repository's own block: {chain}",
+    );
+    assert!(
+        !chain.contains(&format!("`{}`", settled.branch)),
+        "and a branch is never told to rebase onto itself: {chain}",
+    );
+}
+
+/// Two stages whose tasks are all done are let into the chain **one at a time,
+/// in the order their tasks finished** — and the one in front *joining* does not
+/// release the one behind it. Its settling does.
+///
+/// The other half of the hold, and the one nothing about the chain can answer by
+/// itself: both stages have every box ticked, the chain below them is settled, so
+/// the rule about a branch still moving has nothing to say about either — and
+/// both would rebase onto the same top and push, one of them over the other. What
+/// tells them apart is the place each took as its tasks finished, which is a
+/// stored fact for exactly this reason.
+///
+/// Three things in a row here, which are one claim: the stage whose tasks
+/// finished second is held while the first has not joined, is *still* held once
+/// it has, and goes the moment it settles. A stage that has just joined is a
+/// branch still moving — its wrap-up is where a finding gets fixed and a check
+/// goes green — so the queue hands it over to the chain's own rule rather than
+/// letting go of it.
+///
+/// And a restart in the middle, because the queue is what a restart must not
+/// reorder: the wait may be long, and the take-up a second server makes reads the
+/// same places out of the record rather than making new ones in the order it
+/// happened to reach the stages.
+#[tokio::test]
+async fn a_stage_waits_its_turn_behind_the_stage_whose_tasks_finished_first() {
+    let spill = tempfile::tempdir().unwrap();
+    let worked = spill.path().join("task-prompts");
+    let gate = spill.path().join("go");
+    let stub = a_stage_worked_to_its_finish(&worked, &gate);
+
+    let fixture = adopting_asking(spill, &stub, &gh_about(GREEN, "", "")).await;
+
+    let repo_id = fixture.view().await.repo.id;
+
+    // The task session is sitting at the gate, so this stage has a box left to
+    // tick and has taken no place in the queue yet. Which is the window the stage
+    // that finished first takes its place in.
+    until_written_saying(&worked, "worked=01").await;
+
+    let first = a_stage_queued_to_join(&fixture, repo_id, "02").await;
+
+    std::fs::write(&gate, "").unwrap();
+
+    // The box is ticked, and what the run does next is wait — on a stage that is
+    // in no chain at all, and whose only claim on it is that its tasks finished
+    // first.
+    let said = said_on(&fixture, fixture.id, "Waiting to join").await;
+
+    assert!(
+        said.contains("stage 02 finished its tasks before this one and has not joined yet"),
+        "the Timeline says which stage is in front of it, and why: {said:?}",
+    );
+
+    assert!(
+        !std::fs::read_to_string(&worked)
+            .unwrap()
+            .contains("finished"),
+        "and no finish session was launched: the turn is not this stage's",
+    );
+    assert!(
+        fixture.view().await.waiting_to_join,
+        "which the card says as a label beside the state",
+    );
+
+    // A second server over the same database, which is what a restart is. The
+    // queue is where it was, so the stage is taken up and held again rather than
+    // let in ahead of the one whose tasks finished first.
+    let restarted = fixture.restarted(&stub, &gh_about(GREEN, "", "")).await;
+
+    let deadline = Instant::now() + *PATIENCE;
+
+    loop {
+        let view: ConversationView =
+            get(&restarted, &format!("/api/ui/conversations/{}", fixture.id)).await;
+
+        if view.waiting_to_join {
+            break;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "the restarted server let it in out of turn. It says: {:?}",
+            notices(&view),
+        );
+
+        pause(Duration::from_millis(25)).await;
+    }
+
+    // Then the stage in front joins — and that is not what releases this one. It
+    // has a pull request now, so it is a link of the chain, and a link that has
+    // not settled is a branch still moving.
+    joins_the_chain(&fixture, repo_id, first, "02", 77).await;
+
+    let said = said_on(
+        &fixture,
+        fixture.id,
+        "stage 02 has joined the chain and has not settled",
+    )
+    .await;
+
+    assert!(
+        said.contains("finished its tasks before this one"),
+        "and the line it said before it joined is still on the Timeline, \
+         so a queue of two reads as a queue: {said:?}",
+    );
+
+    assert!(
+        !std::fs::read_to_string(&worked)
+            .unwrap()
+            .contains("finished"),
+        "still no finish session: joining is not settling",
+    );
+
+    // And its settling is what lets this one in, whereupon the finish runs
+    // exactly as it does today.
+    settles(&fixture, first).await;
+
+    until_written_saying(&worked, "finished=yes").await;
 }
 
 /// The wrap-up over a pull request Verkstead never opened is the wrap-up: its
@@ -21755,6 +24942,8 @@ async fn a_fix_merge_issues_over_a_branch_enters_the_same_narrowed_wrap_up() {
         spill,
         &a_submit_that_opens_against_what_it_was_told(&opened, &told_to),
         &gh_opened_by_hand(&opened),
+        None,
+        None,
         None,
         Process::FixMergeIssues,
     )
@@ -28015,12 +31204,17 @@ async fn a_set_asked_after_the_mark_keeps_the_follow_up_open() {
 ///
 /// Whether there is anything else is the human's to say, so a follow-up session
 /// cannot end itself however finished it believes it is.
+///
+/// **With the rescue held off**, because what is read at the end is everything
+/// this Conversation had to say about itself — and the wrap-up before the
+/// follow-up leaves a review session idle between its one line and its reaping.
+/// See [`UNRESCUED`].
 #[tokio::test]
 async fn a_follow_up_signal_without_the_mark_is_refused_and_one_with_it_ends_the_follow_up() {
     let spill = tempfile::tempdir().unwrap();
     let reviews = spill.path().join("review-prompts");
 
-    let fixture = grilling_spilling(
+    let fixture = grilling_unrescued(
         spill,
         &a_backlog_then_a_follow_up(&reviews, SIGNALS_BEFORE_THE_MARK),
         &gh_about(GREEN, "", ""),

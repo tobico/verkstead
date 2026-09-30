@@ -6,7 +6,7 @@
 //! counting for anything — and a draft is that same arithmetic held still.
 
 import type { Answer, Direction, Response } from "../api/types";
-import { forget, read, write } from "../device";
+import { forget, read, write } from "../remembered";
 import { DIRECTIONS } from "../directions";
 
 /// One question's fields as the human left them, away from the signals holding

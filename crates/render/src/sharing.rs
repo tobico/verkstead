@@ -254,6 +254,11 @@ pub fn shared(
             blocked_on: None,
             stopped_by_hand: false,
             waiting_on_checks: false,
+
+            // And the condition a stage waiting to join wears, which is a
+            // register of this process read as the page is drawn: a share is a
+            // file, and there is no run holding anything in it.
+            waiting_to_join: false,
             resets: None,
 
             // And the steer somebody is part-way through writing, which never
@@ -262,6 +267,12 @@ pub fn shared(
             // workbench to submit, and what it would tell them is where the
             // work might be going rather than where it went.
             pending_steer: None,
+
+            // And where its agent was allowed to take the work, which names the
+            // human's own machines — a share leaves the tailnet, and nothing on
+            // it could be moved anywhere.
+            drafted_on: None,
+            permitted: Vec::new(),
 
             // And where a share of this Conversation was last published, which
             // is the workbench's fact about the record rather than part of it:

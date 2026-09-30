@@ -80,6 +80,7 @@ import type {
   Seen as SeenSomewhere,
 } from "../api/types";
 import { ErrorLine, Note } from "../notices";
+import { rowPress } from "../rows";
 import { Mark, type Standing } from "./Mark";
 import {
   DISTROS,
@@ -780,8 +781,13 @@ function Row(props: {
         }
       >
         {/* The name labels the box by being inside it — the same wrapping the
-            accounts step's rows use, and the whole of what a row is asking. */}
-        <label class={styles.head}>
+            accounts step's rows use, and the whole of what a row is asking. So
+            the row answers the press, rather than the box a label forwards one
+            to and stops forwarding the moment a hand slides — see `rowPress`. */}
+        <label
+          class={styles.head}
+          onClick={rowPress(() => props.tick?.(!(props.ticked ?? false)))}
+        >
           {head(
             <input
               type="checkbox"

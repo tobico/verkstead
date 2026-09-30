@@ -105,9 +105,11 @@ import type {
   RepoRemoved,
   RepoView,
 } from "../api/types";
-import { repoParent, setRepoParent } from "../device";
+import { repoParent, setRepoParent } from "../remembered";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine, Note } from "../notices";
+import { keyOf, useDevice } from "../reaching";
+import { rowPress } from "../rows";
 import { useSettings } from "../settings/PathEditor";
 import { PaneHead } from "../workbench/PaneHead";
 import styles from "./RepoList.module.css";
@@ -171,7 +173,10 @@ export const REPO_REMOVAL_REFUSAL: Record<RepoRemoved, string> = {
 function useRepos() {
   return useReading(() => ({
     queryKey: ["repos"],
-    queryFn: listRepos,
+    // This device's own: the Repos section is the settings page's, and a
+    // member's registry is read through the dropdown on that member's work —
+    // see [`RepoRegistration`], which is where the device comes in.
+    queryFn: () => listRepos(null),
     freshness: { reconcile: "id" },
   }));
 }
@@ -460,6 +465,14 @@ export function RepoRegistration(props: {
 }): JSX.Element {
   const queries = useQueryClient();
 
+  /// Which device the repository is being opened on.
+  ///
+  /// The dropdown this form is reached from is a draft's composer, and a draft
+  /// may be a member's: the path is one on that machine, the field browses that
+  /// machine's filesystem — see `PathField`, which takes the device the same
+  /// way — and the Repo lands on that machine's registry.
+  const device = useDevice();
+
   // The path typed into the field.
   const [path, setPath] = createSignal("");
 
@@ -469,7 +482,7 @@ export function RepoRegistration(props: {
   const [refused, setRefused] = createSignal<RepoRefused | null>(null);
 
   const register = useMutation(() => ({
-    mutationFn: (asked: string) => registerRepo(asked),
+    mutationFn: (asked: string) => registerRepo(device(), asked),
     onSuccess: (outcome: Registered) => {
       // A refusal, which is a bare word on the wire — the two outcomes that
       // leave a Repo registered carry it. Said where the path was typed, which
@@ -490,8 +503,10 @@ export function RepoRegistration(props: {
       // roadmap in it has something to offer the moment it lands — and
       // registering a path that was taken away brings a whole repository's worth
       // back at once.
-      void queries.invalidateQueries({ queryKey: ["repos"] });
-      void queries.invalidateQueries({ queryKey: ["abandoned-roadmaps"] });
+      void queries.invalidateQueries({ queryKey: keyOf(device(), "repos") });
+      void queries.invalidateQueries({
+        queryKey: keyOf(device(), "abandoned-roadmaps"),
+      });
       props.landed(
         "Added" in outcome ? outcome.Added : outcome.AlreadyRegistered,
       );
@@ -603,13 +618,16 @@ export function OpenRepo(props: {
 /// as two, joining them into a path here being the one place the browser would
 /// build one out of a separator the server never agreed to.
 ///
-/// **The parent is remembered on the device.** Somebody making a second
-/// repository is almost certainly putting it beside the first, and where they
-/// keep their code is a fact about the machine in front of them rather than
-/// something to tell the server — so it is kept where the wrap setting is, in
-/// `device.ts`, and the field opens inside it. Where there is none, which a
-/// first run always is, the field stands empty and browses the server's own
-/// home, which is where an unbounded browse already opens.
+/// **The parent is remembered, one answer per device of the cluster.** Somebody
+/// making a second repository is almost certainly putting it beside the first,
+/// and where they keep their code is a fact about the machine it goes on rather
+/// than something to tell the server — so it is kept where the wrap setting is,
+/// in `remembered.ts`, and the field opens inside it. One answer apiece because
+/// this card may be making the repository on a member, and a browser holding a
+/// single one would open a create on the laptop at a path on this machine. Where
+/// there is none for the device picked, which a first run there always is, the
+/// field stands empty and browses the server's own home — the picked device's
+/// home, this browse going out under it like every other.
 ///
 /// **And a tick that makes the same repository on GitHub**, drawn only where a
 /// token is saved. The settings say whether there is one without ever handing it
@@ -691,16 +709,24 @@ export function CreateRepo(props: {
   // has said what they mean to do with it.
   const [onGithub, setOnGithub] = createSignal(true);
 
+  // And which device it is being made on, for [`RepoRegistration`]'s reason:
+  // the dropdown this card was opened from may be a member's draft.
+  const device = useDevice();
+
   // The heading's own id, for [`OpenRepo`]'s reason: two Repo dropdowns may be
   // drawn on one page, and an id is the page's to keep unique.
   const id = createUniqueId();
 
-  // Where the last repo on this device went, which is where this one starts —
-  // and, because that is a path handed over rather than one being typed, where
-  // its browse opens: see `opened` on `PathField`, which is the tap that wrote
-  // it, made on an earlier visit. Empty on the first run, and an empty field
-  // browses the server's own home.
-  const remembered = repoParent();
+  // Where the last repo on the picked device went, which is where this one
+  // starts — and, because that is a path handed over rather than one being
+  // typed, where its browse opens: see `opened` on `PathField`, which is the tap
+  // that wrote it, made on an earlier visit. Empty where nothing has been made on
+  // that device, and an empty field browses that device's own home.
+  //
+  // Read once, as the card is built: the device is the one the dropdown this was
+  // opened from is drawn for, and a pick made behind an open modal is not a thing
+  // there is.
+  const remembered = repoParent(device());
 
   const [parent, setParent] = createSignal(remembered);
 
@@ -743,7 +769,7 @@ export function CreateRepo(props: {
 
   const create = useMutation(() => ({
     mutationFn: (asked: { parent: string; name: string; github: boolean }) =>
-      createRepo(asked.parent, asked.name, asked.github),
+      createRepo(device(), asked.parent, asked.name, asked.github),
     onSuccess: (outcome: Created) => {
       // Four of the refusals are a bare word, which this file has the sentence
       // for; the fifth is git's own account of what it would not do, said in
@@ -781,16 +807,19 @@ export function CreateRepo(props: {
   const made = (repo: RepoView) => {
     // The parent as the server resolved it rather than as it was typed: that
     // is the directory the repository is actually in, and so the one the next
-    // create should open in.
+    // create should open in — on that device, this being a path on it and on no
+    // other.
     const cut = repo.path.lastIndexOf("/");
-    setRepoParent(cut > 0 ? repo.path.slice(0, cut) : "/");
+    setRepoParent(device(), cut > 0 ? repo.path.slice(0, cut) : "/");
 
     // The list this was made over is now out of date, and so are the roadmaps
     // waiting to be adopted — a registration invalidates both for the same
     // reason, and a repository that was just made is a repository that has
     // just arrived.
-    void queries.invalidateQueries({ queryKey: ["repos"] });
-    void queries.invalidateQueries({ queryKey: ["abandoned-roadmaps"] });
+    void queries.invalidateQueries({ queryKey: keyOf(device(), "repos") });
+    void queries.invalidateQueries({
+      queryKey: keyOf(device(), "abandoned-roadmaps"),
+    });
   };
 
   const make = (ev: SubmitEvent) => {
@@ -875,7 +904,12 @@ export function CreateRepo(props: {
             is what the card is about to do about GitHub, and it does not know
             yet. */}
           <Show when={tokened() === true}>
-            <label class={styles.github}>
+            {/* Pressed as a row — see `rowPress`, and the press a label stops
+                forwarding once a hand has slid. */}
+            <label
+              class={styles.github}
+              onClick={rowPress(() => setOnGithub(!onGithub()))}
+            >
               <input
                 type="checkbox"
                 checked={onGithub()}

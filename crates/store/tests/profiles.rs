@@ -17,6 +17,10 @@ use verkstead_store::{
     skip_review, start_capture, start_conversation, start_grilling, timeline, update_profile,
 };
 
+/// The device every Conversation started here is ranked by, named the way a
+/// cluster names one (ADR-0020, *Ranks*).
+const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
+
 /// A pool over a fresh database, plus the directory keeping it alive.
 async fn fresh_pool() -> (tempfile::TempDir, SqlitePool) {
     let dir = tempfile::tempdir().unwrap();
@@ -103,7 +107,7 @@ async fn conversation(pool: &SqlitePool) -> i64 {
         .unwrap()
         .unwrap();
 
-    start_conversation(pool, repo.id, "amber-kestrel")
+    start_conversation(pool, repo.id, "amber-kestrel", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap()
@@ -945,11 +949,11 @@ async fn a_removal_neither_writes_nor_clears_the_row_that_runs_no_session() {
         .unwrap()
         .unwrap();
 
-    let kept = start_conversation(&pool, repo.id, "amber-kestrel")
+    let kept = start_conversation(&pool, repo.id, "amber-kestrel", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
-    let paired = start_conversation(&pool, repo.id, "russet-heron")
+    let paired = start_conversation(&pool, repo.id, "russet-heron", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();

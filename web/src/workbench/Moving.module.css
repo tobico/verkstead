@@ -1,0 +1,83 @@
+/* The card a draft is moved to another device on — see `Moving.tsx`.
+
+   The confirm sheet's shape, which is what this UI draws over the page whenever
+   a press cannot be taken back: a line naming what is about to happen, a line
+   saying what it costs, and the pair of presses at the foot. `Modal.module.css`
+   is the dialog and the card under it; what is here is what stands on the card.
+
+   One question between the words and the presses, which is the one thing this
+   sheet has that the unlink's has not: a Repo id is one Verkstead's own, so the
+   work cannot arrive over there until somebody has said which repository it is
+   in. */
+
+.moving .title {
+  margin-top: 0;
+  font-weight: 600;
+}
+
+.moving .why {
+  margin: 0.75rem 0 0;
+  color: var(--ink-soft);
+}
+
+/* The Repo select, which is the compose page's own control lifted out of the
+   setup row it is usually in. That row gives every trigger a quarter of the
+   box's width; here there is one, and it is what the card is asking, so it
+   takes the width and stands away from the words above it. */
+.moving .repo {
+  margin-top: 1rem;
+}
+
+.moving .repo > * {
+  display: block;
+  width: 100%;
+}
+
+/* What could not be done, in the app's own failure line — under the question it
+   is about, and above the presses, which is where every other refusal on a
+   composer sits. */
+.moving .failure {
+  margin-top: 0.75rem;
+}
+
+.moving .out {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: 1rem;
+}
+
+/* The shape both presses take, which is this row's own — said for both and over
+   `.secondary`, which is the paint rather than the shape. */
+.moving .out button {
+  flex: 1 1 9rem;
+  padding: 0.7rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  border-radius: 0.5rem;
+  cursor: pointer;
+}
+
+/* And the press that does the thing, filled. The way back beside it is a
+   secondary press like every other in the app — `.secondary` in
+   `styles/base.css` paints it — and it is stood out of the way with `:where`,
+   which weighs nothing: a bare `:not` would carry its class into this
+   selector's weight, and a rule written to sit over this press would find
+   itself under it instead. */
+.moving .out button:not(:where(.secondary)) {
+  color: var(--paper);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+}
+
+.moving .out button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+@media (hover: hover) {
+  .moving .out button:not(:where(.secondary)):not(:disabled):hover {
+    background: var(--accent-deep);
+    border-color: var(--accent-deep);
+  }
+}

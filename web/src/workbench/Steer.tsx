@@ -99,6 +99,7 @@
 //! without the frozen half would be the record saying the human answered a
 //! question they were never asked.
 
+import { A } from "@solidjs/router";
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { For, Show, createMemo, createSignal, type JSX } from "solid-js";
 
@@ -128,14 +129,18 @@ import type {
   SteerSaved,
   SteerTarget,
   TimelineEvent,
+  Uncommitted,
 } from "../api/types";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine, Note } from "../notices";
+import { rowPress } from "../rows";
 import { PaneSticky } from "../Panes";
 import * as pairing from "../pairing";
 import { Listbox } from "../picking";
+import { keyOf, useDevice } from "../reaching";
 import { Switch as Toggle } from "../Switch";
 import { chosen } from "./naming";
+import { pathOf } from "./openings";
 import { PaneHead } from "./PaneHead";
 import { narrowed } from "./processes";
 import { keeping, type Keeping } from "./settling";
@@ -148,8 +153,17 @@ import styles from "./Steer.module.css";
 /// Nothing here is about the state the conversation was in: every state is
 /// somewhere to steer *from*, so what is left to be wrong about is the target —
 /// a state whose work cannot be set going from what the record holds.
+///
+/// The three with something carried in them are not here, for the reason the
+/// take-up's list leaves its own out: what makes each of them actionable is the
+/// thing carried — which repo a companion's failing was in, and which
+/// conversation is on the pull request this one wants back. See [`steerRefusal`]
+/// and [`SteerRefusal`].
 export const STEER_REFUSAL: Record<
-  Exclude<ConversationSteered, { Companion: unknown }>,
+  Exclude<
+    ConversationSteered,
+    { Companion: unknown } | { AlreadyHeld: unknown } | { WouldDiscard: unknown }
+  >,
   string
 > = {
   Steered: "",
@@ -214,13 +228,6 @@ const STEER_COMPANION_REFUSAL: Record<SteerCompanionRefusal, string> = {
   WorktreeRefused: "Git would not make its worktree. The server log says why.",
 };
 
-/// What to say about a steer that was refused.
-///
-/// A companion's refusal names the repository, because that is the whole of what
-/// makes it different from the same failing on the conversation's own: the thing
-/// to go and look at is one of several repos rather than the obvious one. The
-/// grill start's own refusals are drawn the same way — see `grillRefusal` in
-/// [`Timeline`](./Timeline.tsx).
 /// Which of a target's notes this conversation reads, there being one target that
 /// means two different things.
 ///
@@ -240,12 +247,131 @@ function note(offered: (typeof TARGETS)[number], process: Process): string {
     : offered.note;
 }
 
+/// What every drawing of `WouldDiscard` ends on: what would be lost, and what to
+/// do about it.
+///
+/// One sentence rather than two readings of it, because the way out of this one
+/// is the press itself rather than anywhere to go: the link says who, and this
+/// says what submitting again does. The take-up says the same thing about its own
+/// press — see `WOULD_DISCARD` in [`TakeUp`](./TakeUp.tsx).
+const WOULD_DISCARD =
+  "took this pull request over and would be closed to make way, and the uncommitted changes in its worktree would go with it. Press steer again to go ahead.";
+
+/// And what `AlreadyHeld` says, as the plain sentence with nobody to lead to.
+const ALREADY_HELD =
+  "Another conversation is still at work on this pull request, so the way on is that conversation rather than a second one beside it.";
+
+/// What to say about a steer that was refused.
+///
+/// A companion's refusal names the repository, because that is the whole of what
+/// makes it different from the same failing on the conversation's own: the thing
+/// to go and look at is one of several repos rather than the obvious one. The
+/// grill start's own refusals are drawn the same way — see `grillRefusal` in
+/// [`Timeline`](./Timeline.tsx).
+///
+/// The two about the pull request carry a conversation instead, and this says
+/// each without the way there: the line under the press is where the link goes,
+/// and it is drawn by [`SteerRefusal`].
 export function steerRefusal(outcome: ConversationSteered): string {
   if (typeof outcome === "object") {
+    if ("AlreadyHeld" in outcome) {
+      return ALREADY_HELD;
+    }
+
+    if ("WouldDiscard" in outcome) {
+      return `The conversation on ${outcome.WouldDiscard.uncommitted
+        .map((one) => one.branch)
+        .join(", ")} ${WOULD_DISCARD}`;
+    }
+
     return `${outcome.Companion.repo}: ${STEER_COMPANION_REFUSAL[outcome.Companion.why]}`;
   }
 
   return STEER_REFUSAL[outcome];
+}
+
+/// The conversations a submit was stopped over, or `null` where it was not
+/// stopped at all.
+///
+/// The one reading of that outcome here, because everything the form wants of it
+/// is this list: what the button reads, what the line under it draws, and what
+/// the submit after it sends back.
+function wouldDiscard(outcome: ConversationSteered | null): Uncommitted[] | null {
+  return (
+      outcome !== null &&
+        typeof outcome === "object" &&
+        "WouldDiscard" in outcome
+    ) ?
+      outcome.WouldDiscard.uncommitted
+    : null;
+}
+
+/// Whether an outcome is the submit stopping to ask rather than refusing.
+///
+/// What the form reads it for is the button: a steer that has been stopped over
+/// what a close would discard is one press away from going ahead, so the press
+/// says so. Every refusal answers `false` — there is nothing to press through,
+/// only something to go and fix.
+export function goingAhead(outcome: ConversationSteered | null): boolean {
+  return wouldDiscard(outcome) !== null;
+}
+
+/// And which conversations a submit that goes ahead is agreeing to lose, for the
+/// body of that submit. Empty for everything else.
+export function discarding(outcome: ConversationSteered | null): number[] {
+  return (wouldDiscard(outcome) ?? []).map((one) => one.conversation);
+}
+
+/// The same, as the line the form draws under its press — which is the one place
+/// these have room for a way out of themselves.
+///
+/// Two of them have one, and it is the same conversation either way: the one on
+/// this pull request. Still at work on it, it is where the human goes instead —
+/// there is one open conversation per pull request, so the way on is the one
+/// that has it. Finished with it and holding something uncommitted, it is the
+/// thing they are being asked whether to throw away, and the way to answer that
+/// is to go and look.
+///
+/// Every other refusal is the sentence and nothing else.
+export function SteerRefusal(props: {
+  outcome: ConversationSteered;
+}): JSX.Element {
+  const stillAtWork = (): number | null =>
+    typeof props.outcome === "object" && "AlreadyHeld" in props.outcome
+      ? props.outcome.AlreadyHeld.conversation
+      : null;
+
+  return (
+    <Show
+      when={wouldDiscard(props.outcome)}
+      fallback={
+        <Show when={stillAtWork()} fallback={steerRefusal(props.outcome)}>
+          {(conversation) => (
+            <>
+              <A href={pathOf(conversation())}>Another conversation</A> is still
+              at work on this pull request, so the way on is that conversation
+              rather than a second one beside it.
+            </>
+          )}
+        </Show>
+      }
+    >
+      {(uncommitted) => (
+        <>
+          The conversation on{" "}
+          <For each={uncommitted()}>
+            {(one, at) => (
+              <>
+                <Show when={at() > 0}>, </Show>
+                <A href={pathOf(one.conversation)}>{one.branch}</A>
+              </>
+            )}
+          </For>{" "}
+          {WOULD_DISCARD}
+        </>
+      )}
+    </Show>
+  );
 }
 
 /// Where a steer can send a conversation, and what each target means.
@@ -503,9 +629,11 @@ function Companions(props: {
   keeper: Keeping;
   disabled: boolean;
 }): JSX.Element {
+  const device = useDevice();
+
   const repos = useReading(() => ({
-    queryKey: ["repos"],
-    queryFn: listRepos,
+    queryKey: keyOf(device(), "repos"),
+    queryFn: () => listRepos(device()),
 
     // Merged by the id each row carries flat: a rebuilt row is a new element,
     // and a nudge landing while the human is filling one in would take what
@@ -634,7 +762,16 @@ function Alongside(props: {
       {/* Only on a read-only row. A read-write one is already as open as a
           companion gets, so there is nothing here for it to offer. */}
       <Show when={props.companion.mode === "ReadOnly"}>
-        <label class={styles.steerOpenUp}>
+        {/* Pressed as a row — see `rowPress`, and the press a label stops
+            forwarding once a hand has slid. Refused while the row is disabled,
+            as the box is. */}
+        <label
+          class={styles.steerOpenUp}
+          onClick={rowPress(() => {
+            props.open(props.upgrade === undefined ? MIRRORING : null);
+            props.keeper.keep();
+          })}
+        >
           <input
             type="checkbox"
             checked={props.upgrade !== undefined}
@@ -703,7 +840,16 @@ function Adding(props: {
 
   return (
     <li class={styles.steerAdd}>
-      <label class={styles.steerAddName}>
+      {/* Pressed as a row — see `rowPress`, and the press a label stops
+          forwarding once a hand has slid. Refused while the row is disabled, as
+          the box is. */}
+      <label
+        class={styles.steerAddName}
+        onClick={rowPress(() => {
+          props.settle(props.addition === undefined ? PLAINEST : null);
+          props.keeper.keep();
+        })}
+      >
         <input
           type="checkbox"
           checked={props.addition !== undefined}
@@ -797,6 +943,7 @@ export function Steer(props: {
   done: () => void;
 }): JSX.Element {
   const queries = useQueryClient();
+  const device = useDevice();
 
   /// The targets this conversation can actually be sent to. Wrapping up is
   /// drawn out where the work is on no pull request: a target that would be
@@ -892,8 +1039,8 @@ export function Steer(props: {
   // The profile list is read here rather than passed in, so the picker is whole
   // wherever the form is opened from — the setup pane does the same.
   const profiles = useReading(() => ({
-    queryKey: ["profiles"],
-    queryFn: listProfiles,
+    queryKey: keyOf(device(), "profiles"),
+    queryFn: () => listProfiles(device()),
 
     // Merged by the id each row carries flat: a rebuilt `<option>` is a new
     // element in a `<select>` the human may have open, and a list re-read while
@@ -1145,7 +1292,8 @@ export function Steer(props: {
   );
 
   const saving = useMutation(() => ({
-    mutationFn: (form: SteerForm) => saveSteer(props.conversation.id, form),
+    mutationFn: (form: SteerForm) =>
+      saveSteer(device(), props.conversation.id, form),
     onSuccess: (outcome: SteerSaved, sent: SteerForm) => {
       if (outcome !== "Saved") {
         // What is on the screen stands: it is the only copy of it there is, and
@@ -1165,7 +1313,9 @@ export function Steer(props: {
       // would be the pane asking for the timeline over and over to redraw one
       // line that has not changed.
       if (moved) {
-        void queries.invalidateQueries({ queryKey: ["conversation"] });
+        void queries.invalidateQueries({
+          queryKey: keyOf(device(), "conversation"),
+        });
       }
     },
     // Whatever became of it, the form may have been typed into while it was in
@@ -1188,7 +1338,7 @@ export function Steer(props: {
     // has not been saved yet, and a press that asked the server to freeze what
     // it had would lose it. What the pane shows is what goes.
     mutationFn: () =>
-      steer(props.conversation.id, {
+      steer(device(), props.conversation.id, {
         target: going(),
         interrupt: ending(),
         // Sent only where the target runs something. A target nothing runs in
@@ -1211,12 +1361,20 @@ export function Steer(props: {
           going() === "FollowUp" && following().trim() ? following() : null,
         investigation:
           going() === "Investigating" && finding().trim() ? finding() : null,
+        // And what the last submit was stopped over, sent back: this submit is
+        // the human saying to go ahead with it. Empty on every submit the last
+        // one did not stop, which is every first submit — and the server reads
+        // the worktrees again regardless, so a list that has moved since stops
+        // this submit in its turn.
+        discarding: discarding(refused()),
       }),
     onSuccess: (outcome: ConversationSteered) => {
       // The page it was submitted from is out of date either way: the work has
       // moved, or the world had moved under the form. Reading it again is both
       // the correction and, where it was refused, the explanation.
-      void queries.invalidateQueries({ queryKey: ["conversation"] });
+      void queries.invalidateQueries({
+        queryKey: keyOf(device(), "conversation"),
+      });
       void queries.invalidateQueries({ queryKey: ["conversations"] });
 
       // The pending steer went with the record it became, so there is nothing
@@ -1229,7 +1387,7 @@ export function Steer(props: {
       // A refused submit leaves the pending steer exactly where it was, so the
       // form stays open and says why. A pairing refused is a profile list this
       // pane read a moment ago, so that is re-read too.
-      void queries.invalidateQueries({ queryKey: ["profiles"] });
+      void queries.invalidateQueries({ queryKey: keyOf(device(), "profiles") });
       setRefused(outcome);
     },
   }));
@@ -1242,9 +1400,11 @@ export function Steer(props: {
   /// conversation it was written about is exactly where the press that opened
   /// it left the work.
   const cancelling = useMutation(() => ({
-    mutationFn: () => cancelSteer(props.conversation.id),
+    mutationFn: () => cancelSteer(device(), props.conversation.id),
     onSuccess: () => {
-      void queries.invalidateQueries({ queryKey: ["conversation"] });
+      void queries.invalidateQueries({
+        queryKey: keyOf(device(), "conversation"),
+      });
       void queries.invalidateQueries({ queryKey: ["conversations"] });
 
       // Either way there is no pending steer at this address: a conversation
@@ -1283,7 +1443,17 @@ export function Steer(props: {
           <For each={offered()}>
             {(offered) => (
               <div class={styles.steerTarget}>
-                <label>
+                {/* The row answers its own press rather than the one a label
+                    would have forwarded to the radio, which a hand that slid a
+                    pixel never got — see `rowPress`. The note under the row is
+                    outside it, being what the target means rather than the
+                    target. */}
+                <label
+                  onClick={rowPress(() => {
+                    setTarget(offered.target);
+                    keeper.keep();
+                  })}
+                >
                   <input
                     type="radio"
                     name="steer-target"
@@ -1332,7 +1502,15 @@ export function Steer(props: {
               brief the earlier round was built from stays on the timeline.
             </Note>
 
-            <label class={styles.steerDigest}>
+            {/* Pressed as a row — see `rowPress`, and the press a label stops
+                forwarding once a hand has slid. */}
+            <label
+              class={styles.steerDigest}
+              onClick={rowPress(() => {
+                setDigest(!priming());
+                keeper.keep();
+              })}
+            >
               <input
                 type="checkbox"
                 checked={priming()}
@@ -1504,7 +1682,13 @@ export function Steer(props: {
             would promise something about a session that is not there. */}
         <Show when={props.conversation.working}>
           <div class={styles.steerInterrupt}>
-            <label>
+            {/* Pressed as a row like the targets above it — see `rowPress`. */}
+            <label
+              onClick={rowPress(() => {
+                setInterrupt(!ending());
+                keeper.keep();
+              })}
+            >
               <input
                 type="checkbox"
                 checked={ending()}
@@ -1541,7 +1725,13 @@ export function Steer(props: {
               needsInvestigation()
             }
           >
-            {submit.isPending ? "Steering…" : "Steer"}
+            {/* And *Steer anyway* where the last submit stopped to ask what a
+                close would discard: the submit after it is the same steer with
+                the loss agreed to, so the press says it goes ahead rather than
+                saying nothing about the line under it. */}
+            {submit.isPending ? "Steering…"
+            : goingAhead(refused()) ? "Steer anyway"
+            : "Steer"}
           </button>
           {/* A press of its own now rather than a way of dismissing a window:
               what it throws away is the pending steer, and the conversation is
@@ -1556,10 +1746,13 @@ export function Steer(props: {
           </button>
         </div>
 
+        {/* Drawn rather than said, because two of these have a conversation in
+            them and a line with somewhere to go is the whole of what makes
+            either actionable. */}
         <Show when={refused()}>
           {(outcome) => (
             <ErrorLine class={styles.failure}>
-              {steerRefusal(outcome())}
+              <SteerRefusal outcome={outcome()} />
             </ErrorLine>
           )}
         </Show>
