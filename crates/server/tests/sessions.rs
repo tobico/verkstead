@@ -19788,6 +19788,32 @@ async fn two_roadmaps_waiting_for_a_place(at_once: usize, pace: Pace) -> (Grilli
         "the younger roadmap is told its stages are waiting on the machine: {said:?}",
     );
 
+    // And its own card says the same thing in one word, off the limits as Settings
+    // has them and the places as the registers stand this moment: both its roots
+    // are ready, every place on the machine is taken, and a roadmap that said
+    // nothing here would read as a roadmap the scheduler forgot.
+    let card = get::<ConversationView>(&fixture.app, &format!("/api/ui/conversations/{parity}"))
+        .await
+        .pinned
+        .into_iter()
+        .find_map(|pinned| match pinned {
+            PinnedEvent::StageList(list) => Some(list),
+            _ => None,
+        })
+        .expect("the roadmap this Conversation's branch wrote is pinned");
+
+    assert_eq!(
+        card.stages
+            .iter()
+            .map(|stage| (stage.number.as_str(), stage.state.clone()))
+            .collect::<Vec<_>>(),
+        [
+            ("01", StageState::WaitingForAPlace),
+            ("02", StageState::WaitingForAPlace),
+        ],
+        "neither root stands on a stage, so what each of them waits for is a place",
+    );
+
     (fixture, investigating, parity)
 }
 

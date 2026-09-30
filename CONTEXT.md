@@ -2275,8 +2275,9 @@ hand edit committed to a running roadmap decides what starts next.
 beside waiting on a dependency that has not settled and **waiting to join** the
 chain. Nothing has gone wrong in any of the three and none of them is anybody's
 to fix, and what this one says for itself is a sentence on the Timeline naming
-the limit that holds it: a roadmap gone quiet with work left in it would
-otherwise read as a roadmap the scheduler forgot.
+the limit that holds it, and its own word on the roadmap's card and in the pane:
+a roadmap gone quiet with work left in it would otherwise read as a roadmap the
+scheduler forgot.
 
 **A Stage that halts before it has joined holds up only the Stages that stand on
 it.** A usage limit, a failed start, a question nobody answers: its siblings
@@ -2340,8 +2341,8 @@ ADR-0021.
 **And where it is, is a word the viewer is told.** The pinned stage card's row
 and the roadmap's details pane both say where each Stage of the roadmap has got
 to — *done*, *in progress*, *waiting to join*, *halted*, *waiting on* a named
-Stage or *to do* — in place of the *done* and *to do* the card used to work out
-from the box. The words come off Verkstead's own reading, the same one above:
+Stage, *waiting for a place* or *to do* — in place of the *done* and *to do* the
+card used to work out from the box. The words come off Verkstead's own reading, the same one above:
 *done* is a Stage that settled, or one the record holds nothing about whose box
 is ticked; *in progress* is one the record has in flight; *waiting to join* is one
 of those the server is **holding** before its finish, read off that register at
@@ -2355,8 +2356,12 @@ does about either is go and look at that Conversation — and it wins over the h
 a stopped Conversation being held by nothing; *waiting on* is a
 Stage of a declaring roadmap that nothing has started yet, naming the Stages its
 own line stands on that have not settled — only those, so what it says moves as
-the roadmap runs where what it *stands on* does not; and *to do* is everything
-else. The viewer works none of them out — a card that decided for itself whether
+the roadmap runs where what it *stands on* does not; *waiting for a place* is one
+that is **ready** — every Stage it stands on has settled — with nowhere to run,
+which is told apart from the one above it because a Stage waiting on a dependency
+waits on work and this one waits on the machine, and a roadmap gone quiet with
+ready work in it would otherwise read as a roadmap the scheduler forgot; and *to
+do* is everything else. The viewer works none of them out — a card that decided for itself whether
 a Stage was under way, or which of its neighbours it was behind, would be a
 second opinion about something the record already knows — and a roadmap the
 record holds nothing about reads *done* or *to do* throughout, off its boxes,
@@ -2364,7 +2369,17 @@ exactly as it always has. **An undeclared roadmap's unstarted Stages read *to
 do*** whatever the record says: such a roadmap is scheduled as each Stage
 standing on the one before it, but the silence is the scheduler's reading rather
 than something the roadmap says, and *waiting on 03* about a line that declares
-nothing would be Verkstead putting a declaration in the human's mouth. The pane
+nothing would be Verkstead putting a declaration in the human's mouth — an
+undeclared roadmap's ready Stage does read *waiting for a place*, that being the
+machine's fact rather than the roadmap's. **One word for both limits**, a
+roadmap's own and the server's: which of the two is holding a Stage is on the
+Timeline of the Conversation that held it, a row having no room for it, and where
+more Stages are ready than there are places the lowest-numbered take them, which
+is the scheduler's own order. Nothing about that waiting is stored — what is
+ready is worked out afresh from the declarations, the record, the boxes and the
+two limits as Settings has them every time it is asked, so raising one moves a
+Stage out of the state and a second record saying *this Stage is waiting* could
+only come to disagree. The pane
 says the state twice, on the Stage's section heading and on the line the table of
 contents reaches it by, beside what the Stage's line declares it stands on.
 

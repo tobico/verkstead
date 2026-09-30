@@ -1683,9 +1683,10 @@ pub struct StageEntry {
 /// wire rather than a box: with stages worked side by side, each branch carries a
 /// `ROADMAP.md` of its own and the boxes stop being one fact, while Verkstead's
 /// record of the stage Conversations is one — so the viewer is told where a stage
-/// is and never works it out. One of these comes off the running server rather
-/// than off the record alone, and is what it is at the moment the page was drawn.
-/// See the server's `stages` module for the rule, and
+/// is and never works it out. Two of these come off the running server rather
+/// than off the record alone — what it is holding before a finish, and how many
+/// places it has left — so each of them is what it was at the moment the page was
+/// drawn. See the server's `stages` module for the rule, and
 /// [ADR-0021](../../../docs/adr/0021-parallel-stages.md).
 ///
 /// A roadmap the record holds no rows for — one worked by hand or by the old
@@ -1760,6 +1761,28 @@ pub enum StageState {
         /// and which does not move as the roadmap runs.
         stages: Vec<String>,
     },
+
+    /// Nothing has started it and nothing about the roadmap is what holds it: it
+    /// is **ready** — every stage it stands on has settled — and there is nowhere
+    /// to run it.
+    ///
+    /// One word for the two limits there are: how many stages of its own roadmap
+    /// run at once, and how many Conversations the whole server runs at once. The
+    /// reader's next move differs between them — the first is waited out by a
+    /// stage of that roadmap settling and the second by anything anywhere coming
+    /// free — but a card's row has no room to say which, and the Timeline of the
+    /// Conversation that held it already does.
+    ///
+    /// Told apart from [`WaitingOn`](StageState::WaitingOn), which is the
+    /// distinction that earns this its own word: a stage waiting on a dependency
+    /// waits on work, and this one waits on the machine. A roadmap gone quiet with
+    /// ready work in it would otherwise read as a roadmap the scheduler forgot.
+    ///
+    /// Worked out afresh from the declarations, the record, the boxes and the two
+    /// limits every time it is asked, the way the look that spends freed places
+    /// works it out — so it is what it was at the moment the page was drawn, and
+    /// nothing about the waiting is stored.
+    WaitingForAPlace,
 
     /// Everything else: nothing has started it and nothing says why.
     ToDo,

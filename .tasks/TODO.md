@@ -21,6 +21,6 @@ Roadmap stage: [06: Every stage in flight](docs/roadmaps/parallel-stages/06-ever
 - [x] 01: A stage has a state — [details](01-a-stage-has-a-state.md)
 - [x] 02: Waiting on a named stage — [details](02-waiting-on-a-named-stage.md)
 - [x] 03: Waiting to join — [details](03-waiting-to-join.md)
-- [ ] 04: Waiting for a place — [details](04-waiting-for-a-place.md)
+- [x] 04: Waiting for a place — [details](04-waiting-for-a-place.md)
 - [ ] 05: Every stage in flight is in view — [details](05-every-stage-in-flight-is-in-view.md)
 - [ ] 06: A row leads to its Conversation — [details](06-a-row-leads-to-its-conversation.md)

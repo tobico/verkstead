@@ -15270,6 +15270,21 @@ const HELD: StageEntry[] = stated([
   { state: "ToDo" },
 ]);
 
+/// And the same four on a machine with nowhere to run them: 03 and 04 stand on
+/// nothing that has not settled and there is no place for either, which is a
+/// different thing from standing behind a stage — that waits on work, and this
+/// waits on the machine.
+///
+/// One word for the two limits there are, its roadmap's and the server's: which of
+/// them is holding a stage is on the Timeline of the Conversation that held it,
+/// and a card's row has no room for it.
+const PLACELESS: StageEntry[] = stated([
+  { state: "Done" },
+  { state: "InProgress" },
+  { state: "WaitingForAPlace" },
+  { state: "WaitingForAPlace" },
+]);
+
 /// The fixture's stages with one state each, in the roadmap's own order.
 function stated(states: StageState[]): StageEntry[] {
   return ROADMAP.stages.map((stage, at) => ({ ...stage, state: states[at]! }));
@@ -15442,6 +15457,43 @@ describe("the pinned stage list", () => {
       "☐",
       "☐",
       "☐",
+    ]);
+  });
+
+  /// And a stage that is ready with nowhere to run reads *waiting for a place*,
+  /// which is what keeps a roadmap gone quiet from reading as a roadmap the
+  /// scheduler forgot.
+  ///
+  /// The word the server sends and nothing the card works out: which of the two
+  /// limits is holding the stage, and how many places there are, are the running
+  /// server's own facts and a row would have no room for either.
+  it("says a stage that is ready with nowhere to run is waiting for a place", async () => {
+    theStaged({
+      pinned: [
+        {
+          StageList: {
+            ...ROADMAP,
+            stages: PLACELESS,
+          },
+        },
+      ],
+    });
+    const { container } = mount(`/conversations/${STAGED.id}`);
+
+    const list = await drawn(container, `.${timeline.pinned} .${timeline.stageList}`);
+    const rows = [...list.querySelectorAll(`.${timeline.stages} li`)];
+
+    expect(
+      rows.map((row) => row.querySelector(`.${timeline.state}`)!.textContent),
+    ).toEqual(["done", "in progress", "waiting for a place", "waiting for a place"]);
+
+    // And nothing about either of them is over: what is missing is a place, so the
+    // rows are neither struck through nor ticked.
+    expect(rows.map((row) => row.classList.contains(timeline.done!))).toEqual([
+      true,
+      false,
+      false,
+      false,
     ]);
   });
 
@@ -15847,6 +15899,16 @@ const HELD_PANE: RoadmapPane = {
   })),
 };
 
+/// And the same pane with the two ready stages of [`PLACELESS`] having nowhere to
+/// run, which the pane says exactly where the card does.
+const PLACELESS_PANE: RoadmapPane = {
+  ...ROADMAP_PANE,
+  stages: ROADMAP_PANE.stages.map((stage, at) => ({
+    ...stage,
+    state: PLACELESS[at]!.state,
+  })),
+};
+
 /// And the same roadmap with every line declaring, which is what one written
 /// since ADR-0021 looks like: a root, two stages standing on others, and a
 /// platform on the last of them. The empty list is `no dependencies` on the
@@ -15992,6 +16054,34 @@ describe("the stage list opened", () => {
     const nav = await drawn(container, `.${shell.detailsPane} .${contents.contents}`);
 
     const said = ["done", "waiting to join", "halted", "to do"];
+
+    expect(
+      [...nav.querySelectorAll(`.${contents.sections} > li`)].map(
+        (line) => line.querySelector(`.${contents.mark}`)?.textContent,
+      ),
+    ).toEqual(said);
+
+    expect(
+      [...container.querySelectorAll(`.${shell.detailsPane} .${documents.section}`)].map(
+        (section) => section.querySelector(`.${documents.mark}`)!.textContent,
+      ),
+    ).toEqual(said);
+  });
+
+  /// And a stage that is ready with nowhere to run says *waiting for a place* in
+  /// both of those places too — told apart from the stages waiting on a stage,
+  /// which is the distinction the word is there for.
+  it("says a stage with nowhere to run is waiting for a place, in both places", async () => {
+    theStaged({}, whenever(THE_ROADMAP, json(PLACELESS_PANE)));
+    const { container } = mount(`/conversations/${STAGED.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.pinned} .${timeline.stageList}`),
+    );
+
+    const nav = await drawn(container, `.${shell.detailsPane} .${contents.contents}`);
+
+    const said = ["done", "in progress", "waiting for a place", "waiting for a place"];
 
     expect(
       [...nav.querySelectorAll(`.${contents.sections} > li`)].map(

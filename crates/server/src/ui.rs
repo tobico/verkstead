@@ -1381,11 +1381,21 @@ pub(crate) async fn conversation_view(
     // one register read at the one moment and cannot disagree about a stage.
     let held = state.joins.all_waiting();
 
+    // And the places, which is the third thing a stage's state comes off and the
+    // one that is neither the record nor a register: both limits off Settings as
+    // they stand and how many places the server has given away this moment — see
+    // [`crate::stages::Places`]. Read here rather than in the reading for the
+    // reason the two above are, and read afresh for the reason the look that
+    // spends freed places reads them afresh: a limit raised on the settings page
+    // is in force at the next draw.
+    let places = crate::stages::Places::now(state);
+
     let roadmaps = crate::stages::showing(
         conversation.worktree.clone(),
         conversation.base_commit.clone(),
         record,
         held,
+        places,
     )
     .await;
 
@@ -3598,7 +3608,8 @@ async fn roadmap(
     // pane to its boxes, as the card's does. The joins register goes with it, and
     // is read at this moment for the same reason it is read at that one — a pane
     // saying a stage was in progress while the card that opened it said the stage
-    // was waiting to join would be two readings of one hold.
+    // was waiting to join would be two readings of one hold. And the places go
+    // with the two of them, read at the same moment for the same reason again.
     let record = match store::stage_standings(&state.pool, repo_id).await {
         Ok(record) => record,
         Err(error) => {
@@ -3607,7 +3618,18 @@ async fn roadmap(
         }
     };
 
-    match crate::stages::documents(worktree, base, name, record, state.joins.all_waiting()).await {
+    let places = crate::stages::Places::now(&state);
+
+    match crate::stages::documents(
+        worktree,
+        base,
+        name,
+        record,
+        state.joins.all_waiting(),
+        places,
+    )
+    .await
+    {
         Some(pane) => Json(pane).into_response(),
         None => no_such_roadmap(),
     }

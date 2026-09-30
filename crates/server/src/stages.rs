@@ -9,9 +9,9 @@
 //! finishes. So the Event is a reading of the Worktree as it stands and cannot
 //! disagree with the branch it is read off.
 //!
-//! **Where** each stage of it is — *done*, *in progress*, *halted*, *waiting on*
-//! a named stage or *to do* — is [`states`], which is what the card's rows and the
-//! pane's headings say. The same rule as [`done`] below and one word further: what
+//! **Where** each stage of it is — *done*, *in progress*, *waiting to join*,
+//! *halted*, *waiting on* a named stage, *waiting for a place* or *to do* — is
+//! [`states`], which is what the card's rows and the pane's headings say. The same rule as [`done`] below and one word further: what
 //! a scheduler asks is whether a stage is done, so that it knows what may start,
 //! and what a human reading the roadmap asks is where each of its stages has got
 //! to. So the states that are not done are told apart there and are all one *not
@@ -169,6 +169,63 @@ pub(crate) const AT_ONCE: usize = 3;
 /// free, [`crate::places`].
 pub(crate) const CONVERSATIONS_AT_ONCE: usize = 4;
 
+/// How many places there are for a stage to run in, at the moment a page is
+/// drawn — which is the other half of what says a ready stage is **waiting for a
+/// place** rather than merely not started.
+///
+/// The two limits the scheduler starts stages under and nothing else: [`AT_ONCE`]
+/// for one roadmap's own, [`CONVERSATIONS_AT_ONCE`] for the whole server's, and
+/// how many of the server's are taken this moment. What each of them counts, and
+/// what it is for, is written down at those two.
+///
+/// **Read at the moment the page is drawn rather than stored**, exactly as the
+/// look that spends freed places reads them — see [`crate::places::look`]. Both
+/// limits come off Settings as they stand, so a machine that has raised one shows
+/// fewer stages waiting at the next draw and nothing else changes; the count off
+/// the registers is a fact about this process, so a server that has just come
+/// back has every place free until its resume takes its runs back up.
+///
+/// Handed in as a value for the reason the record and the joins register are: a
+/// card that counted the places for itself could disagree with the pane beside
+/// it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Places {
+    /// How many stages of **one roadmap** run at once.
+    roadmap: usize,
+
+    /// How many Conversations the **whole server** runs at once.
+    server: usize,
+
+    /// And how many of the server's are taken, by Conversations of every kind.
+    taken: usize,
+}
+
+impl Places {
+    /// Both limits off Settings and the count off the two registers, as they
+    /// stand.
+    pub(crate) fn now(state: &crate::AppState) -> Places {
+        let config = state.settings.config();
+        let at_once = config.at_once();
+
+        Places {
+            roadmap: at_once.roadmap_stages(),
+            server: at_once.conversations(),
+            taken: state.drivers.taking(&state.sessions.working()).len(),
+        }
+    }
+
+    /// How many places the server has **left over**, which is what a stage of any
+    /// roadmap would take one of.
+    ///
+    /// Saturating for the reason the roadmap's own subtraction is: the registers
+    /// can hold more than a limit allows — it was lowered in Settings, or a press
+    /// went ahead over it — and a full server has none free rather than fewer than
+    /// none.
+    fn free(self) -> usize {
+        self.server.saturating_sub(self.taken)
+    }
+}
+
 /// The stage lists a Conversation's Timeline draws: the roadmaps its branch has
 /// written to, where there are any.
 ///
@@ -193,6 +250,11 @@ pub(crate) const CONVERSATIONS_AT_ONCE: usize = 4;
 /// the sidebar's own label is read there: the hold is a task of this process, and
 /// the label and the card's word are the one register read the one way.
 ///
+/// `places` is the third of them, and the one that is neither the record nor a
+/// register: how many places a stage of this roadmap would have to run in — see
+/// [`Places`], which is both limits and the count, read at this same moment for
+/// the same reason.
+///
 /// Blocking work, so it happens off the runtime's threads — this is a git read
 /// and a file read per Conversation the human opens.
 pub(crate) async fn showing(
@@ -200,12 +262,15 @@ pub(crate) async fn showing(
     base: Option<String>,
     record: store::StageStandings,
     held: HashSet<i64>,
+    places: Places,
 ) -> Vec<StageListEvent> {
     let (Some(worktree), Some(base)) = (worktree, base) else {
         return Vec::new();
     };
 
-    match tokio::task::spawn_blocking(move || roadmaps(&worktree, &base, &record, &held)).await {
+    match tokio::task::spawn_blocking(move || roadmaps(&worktree, &base, &record, &held, places))
+        .await
+    {
         Ok(pinned) => pinned,
         Err(error) => {
             tracing::error!(error = ?error, "reading a Worktree's roadmaps failed");
@@ -227,10 +292,11 @@ fn roadmaps(
     base: &str,
     record: &store::StageStandings,
     held: &HashSet<i64>,
+    places: Places,
 ) -> Vec<StageListEvent> {
     touched(worktree, base)
         .iter()
-        .filter_map(|name| roadmap(&worktree.join(ROADMAPS).join(name), record, held))
+        .filter_map(|name| roadmap(&worktree.join(ROADMAPS).join(name), record, held, places))
         .collect()
 }
 
@@ -1134,9 +1200,12 @@ fn done(entry: &checklist::Entry<'_>, standing: Option<store::StageStanding>) ->
 ///   in flight, and loses to *halted*, a stopped Conversation being held by
 ///   nothing.
 /// - **No row at all** leaves the box to speak. A ticked box is
-///   [`StageState::Done`], and an unticked one is [`StageState::WaitingOn`] the
-///   stages its own line stands on that have not settled, or
-///   [`StageState::ToDo`] where there are none of those.
+///   [`StageState::Done`]; an unticked one is [`StageState::WaitingOn`] the
+///   stages its own line stands on that have not settled, or — where there are
+///   none of those and there is nowhere to run it —
+///   [`StageState::WaitingForAPlace`], or [`StageState::ToDo`] where neither is
+///   true. The two waits cannot both be a stage's: what is ready waits on no
+///   stage, and what waits on a stage is not ready. See [`waiting_for_a_place`].
 ///
 /// **The whole list rather than a stage at a time**, which is the one thing this
 /// does that [`done`] does not have to: what a stage is waiting on is a fact about
@@ -1167,11 +1236,16 @@ fn done(entry: &checklist::Entry<'_>, standing: Option<store::StageStanding>) ->
 /// The label and this word being the one register read the one way is the point of
 /// it — a stage cannot read one thing on its own row and another on the roadmap's
 /// card.
+///
+/// `places` is how many places a stage of this roadmap would have to run in, and
+/// is read at that same moment for the same reason — see [`Places`], and
+/// [`waiting_for_a_place`], which is what it decides.
 fn states(
     roadmap: &str,
     list: &str,
     record: &store::StageStandings,
     held: &HashSet<i64>,
+    places: Places,
 ) -> Vec<StageState> {
     let entries: Vec<checklist::Entry<'_>> = list.lines().filter_map(checklist::entry).collect();
 
@@ -1191,6 +1265,10 @@ fn states(
         .map(|entry| done(entry, record.of(roadmap, entry.label)))
         .collect();
 
+    // And which of the stages that could start have nowhere to run, which is the
+    // scheduler's own reading of the same file against the places there are.
+    let placeless = waiting_for_a_place(roadmap, list, record, places);
+
     entries
         .iter()
         .map(|entry| match record.of(roadmap, entry.label) {
@@ -1207,10 +1285,71 @@ fn states(
             }
             None if entry.checked => StageState::Done,
             None => match waiting_on(entry, &entries, &settled, declaring) {
-                stages if stages.is_empty() => StageState::ToDo,
-                stages => StageState::WaitingOn { stages },
+                stages if !stages.is_empty() => StageState::WaitingOn { stages },
+                // A stage waiting on a neighbour is never one of these and the
+                // other way about — what is ready stands on nothing unsettled —
+                // so the order these are asked in decides nothing.
+                _ if placeless.contains(entry.label) => StageState::WaitingForAPlace,
+                _ => StageState::ToDo,
             },
         })
+        .collect()
+}
+
+/// Which stages of a roadmap are **ready and have nowhere to run**, by the labels
+/// the roadmap writes them under.
+///
+/// A stage is ready when every stage it stands on has settled and nothing has
+/// started it — [`ready`]'s own question, asked here rather than asked again, so
+/// that the word a reader sees and the decision to start cannot come apart. What
+/// a ready stage then needs is a place, and there are two limits on them: how
+/// many stages of its own roadmap run at once, and how many Conversations the
+/// whole server runs at once. Both are in force, so what is free is the smaller
+/// of the two — see [`Places`], and [`next_stage`], which spends them in this
+/// same order.
+///
+/// **The lowest-numbered take the places and the rest wait**, which is the
+/// scheduler's own order: [`ready`] answers lowest first, and the stages past the
+/// free places are the ones that would not be started. So a roadmap with one
+/// place left and three ready stages has two of them waiting rather than three or
+/// none.
+///
+/// Empty for every roadmap with nothing ready — one that has finished, one whose
+/// every unfinished stage is in flight or behind one that is, and one that
+/// declares badly, nothing of which may start anywhere. And empty while the
+/// places hold what is ready, which is the ordinary answer on a quiet server: a
+/// stage nothing has got round to starting yet is [`StageState::ToDo`] for the
+/// moment it takes.
+///
+/// Read with no settling branch behind it — the empty `branch` — because this is
+/// a page being drawn rather than a Conversation's own settle: what the record
+/// says is the whole of it, exactly as it is for [`states`]' every other word.
+fn waiting_for_a_place<'a>(
+    roadmap: &str,
+    list: &'a str,
+    record: &store::StageStandings,
+    places: Places,
+) -> HashSet<&'a str> {
+    let Ready::Stages {
+        lowest,
+        rest,
+        in_flight,
+    } = ready(roadmap, list, record, "")
+    else {
+        return HashSet::new();
+    };
+
+    // What is left of its roadmap's places once the stages of it somebody is on
+    // have taken theirs, and of the server's once everything running anywhere has
+    // — whichever of the two is the shorter. Saturating for [`next_stage`]'s
+    // reason: the record can hold more in flight than a lowered limit allows, and
+    // a roadmap over its limit has no places rather than fewer than none.
+    let free = places.roadmap.saturating_sub(in_flight).min(places.free());
+
+    std::iter::once(lowest)
+        .chain(rest)
+        .skip(free)
+        .map(|entry| entry.label)
         .collect()
 }
 
@@ -1311,6 +1450,7 @@ fn roadmap(
     directory: &Path,
     record: &store::StageStandings,
     held: &HashSet<i64>,
+    places: Places,
 ) -> Option<StageListEvent> {
     let index = directory.join(INDEX);
 
@@ -1343,7 +1483,7 @@ fn roadmap(
     let stages: Vec<StageEntry> = list
         .lines()
         .filter_map(checklist::entry)
-        .zip(states(&name, &list, record, held))
+        .zip(states(&name, &list, record, held, places))
         .map(|(entry, state)| StageEntry {
             number: entry.label.to_owned(),
             title: entry.title.to_owned(),
@@ -1395,9 +1535,9 @@ fn name(directory: &Path) -> String {
 /// is what the roadmap turns on, and a link is a string out of a file in a
 /// repository.
 ///
-/// `record` and `held` are the same record and the same register the card was
-/// drawn against, and reach this the same way — see [`showing`], which is where
-/// why is written down.
+/// `record`, `held` and `places` are the same record, the same register and the
+/// same count of places the card was drawn against, and reach this the same way —
+/// see [`showing`], which is where why is written down.
 ///
 /// Blocking work, so it happens off the runtime's threads — this is a git read,
 /// a directory read and a file read per stage.
@@ -1407,12 +1547,16 @@ pub(crate) async fn documents(
     name: String,
     record: store::StageStandings,
     held: HashSet<i64>,
+    places: Places,
 ) -> Option<RoadmapPane> {
     let (Some(worktree), Some(base)) = (worktree, base) else {
         return None;
     };
 
-    match tokio::task::spawn_blocking(move || opened(&worktree, &base, &name, &record, &held)).await
+    match tokio::task::spawn_blocking(move || {
+        opened(&worktree, &base, &name, &record, &held, places)
+    })
+    .await
     {
         Ok(pane) => pane,
         Err(error) => {
@@ -1431,6 +1575,7 @@ fn opened(
     name: &str,
     record: &store::StageStandings,
     held: &HashSet<i64>,
+    places: Places,
 ) -> Option<RoadmapPane> {
     if !touched(worktree, base).contains(name) {
         return None;
@@ -1458,7 +1603,7 @@ fn opened(
     let stages: Vec<StageSource> = list
         .lines()
         .filter_map(checklist::entry)
-        .zip(states(name, &list, record, held))
+        .zip(states(name, &list, record, held, places))
         .map(|(entry, state)| {
             // What its line declares, read off the same tail the in-flight
             // annotation lives in: the two share it in either order and neither
@@ -2827,7 +2972,18 @@ Turns this askance clone into Verkstead.
             record: &store::StageStandings,
             held: &HashSet<i64>,
         ) -> Vec<StageListEvent> {
-            roadmaps(self.path(), &self.base, record, held)
+            self.lists_with_places(record, held, all_free())
+        }
+
+        /// And with the places the caller's, which is where *waiting for a place*
+        /// comes from: both limits and how many of the server's are taken.
+        fn lists_with_places(
+            &self,
+            record: &store::StageStandings,
+            held: &HashSet<i64>,
+            places: Places,
+        ) -> Vec<StageListEvent> {
+            roadmaps(self.path(), &self.base, record, held, places)
         }
 
         /// One of them opened, which is the same reading a level deeper: the
@@ -2849,7 +3005,40 @@ Turns this askance clone into Verkstead.
             record: &store::StageStandings,
             held: &HashSet<i64>,
         ) -> Option<RoadmapPane> {
-            opened(self.path(), &self.base, name, record, held)
+            self.opened_with_places(name, record, held, all_free())
+        }
+
+        /// And against the places, which the pane reads exactly as the card does.
+        fn opened_with_places(
+            &self,
+            name: &str,
+            record: &store::StageStandings,
+            held: &HashSet<i64>,
+            places: Places,
+        ) -> Option<RoadmapPane> {
+            opened(self.path(), &self.base, name, record, held, places)
+        }
+    }
+
+    /// Every place there is standing free: neither limit set on this machine and
+    /// nothing running anywhere, which is what every reading here but the ones
+    /// about the places wants.
+    fn all_free() -> Places {
+        Places {
+            roadmap: AT_ONCE,
+            server: CONVERSATIONS_AT_ONCE,
+            taken: 0,
+        }
+    }
+
+    /// And a server with `taken` of its `server` places given away, its roadmaps
+    /// running `roadmap` stages apiece — which is what Settings and the two
+    /// registers hand the readings.
+    fn places(roadmap: usize, server: usize, taken: usize) -> Places {
+        Places {
+            roadmap,
+            server,
+            taken,
         }
     }
 
@@ -3326,6 +3515,217 @@ Turns this askance clone into Verkstead.
         );
     }
 
+    /// A ready stage its **own roadmap** has no place for reads *waiting for a
+    /// place*.
+    ///
+    /// [`DECLARED`] with stage 01 in flight and a roadmap that runs one stage at a
+    /// time: 02 stands on nothing and could start this moment, and what holds it
+    /// is the place 01 has. The two above it are behind stages rather than behind
+    /// the machine, and go on saying so.
+    #[test]
+    fn a_ready_stage_its_roadmaps_places_are_taken_is_waiting_for_a_place() {
+        let repo = Repo::with(&[]);
+        repo.write("mvp", DECLARED);
+
+        let record = record([("mvp", "01", store::StageStanding::InFlight)]);
+
+        assert_eq!(
+            states(&repo.lists_with_places(&record, &HashSet::new(), places(1, 4, 1))),
+            [
+                StageState::InProgress,
+                StageState::WaitingForAPlace,
+                behind(&["02"]),
+                behind(&["01", "03"]),
+            ],
+            "02 is ready and this roadmap's one place is taken, so what it is \
+             waiting for is a place rather than a stage",
+        );
+    }
+
+    /// And one the **server** has no place for reads the same word, which is the
+    /// whole of *one word for both limits*: which of the two is biting is on the
+    /// Timeline of the Conversation that held it, and a card's row has no room for
+    /// it.
+    ///
+    /// Nothing of this roadmap is in flight and it may run three at once, so its
+    /// own places are all free: what holds its two roots is every place on the
+    /// machine being taken by Conversations of some other kind.
+    #[test]
+    fn a_ready_stage_the_servers_places_are_taken_is_waiting_for_a_place_too() {
+        let repo = Repo::with(&[]);
+        repo.write("mvp", DECLARED);
+
+        assert_eq!(
+            states(&repo.lists_with_places(
+                &store::StageStandings::default(),
+                &HashSet::new(),
+                places(3, 4, 4),
+            )),
+            [
+                StageState::WaitingForAPlace,
+                StageState::WaitingForAPlace,
+                behind(&["02"]),
+                behind(&["01", "03"]),
+            ],
+            "both roots are ready and the machine is full, and the two that stand \
+             on stages are waiting on work rather than on the machine",
+        );
+    }
+
+    /// The two are told apart, which is the distinction that earns this its own
+    /// word: a stage waiting on a dependency waits on work, and a stage waiting for
+    /// a place waits on the machine.
+    ///
+    /// Stage 04 of [`DECLARED`] stands on 01 and 03 throughout, and the server is
+    /// full throughout. With 03 unsettled it is behind a stage and never reads
+    /// *waiting for a place*; with both settled it is ready and never reads
+    /// *waiting on*.
+    #[test]
+    fn a_stage_behind_a_stage_is_never_waiting_for_a_place_and_the_other_way_about() {
+        let repo = Repo::with(&[]);
+        repo.write("mvp", DECLARED);
+
+        let full = places(3, 4, 4);
+
+        let settled = |labels: &[&str]| {
+            record(
+                labels
+                    .iter()
+                    .map(|label| ("mvp", *label, store::StageStanding::Settled))
+                    .collect::<Vec<_>>(),
+            )
+        };
+
+        assert_eq!(
+            states(&repo.lists_with_places(&settled(&["01", "02"]), &HashSet::new(), full))[3],
+            behind(&["03"]),
+            "03 has not settled, so what 04 waits on is a stage however full the \
+             machine is",
+        );
+
+        assert_eq!(
+            states(&repo.lists_with_places(&settled(&["01", "02", "03"]), &HashSet::new(), full))
+                [3],
+            StageState::WaitingForAPlace,
+            "and with every stage it stands on settled it waits on the machine \
+             alone",
+        );
+    }
+
+    /// And **raising either limit** moves such a stage out of the state with
+    /// nothing else about the reading changing, both of them being read off
+    /// Settings as they stand.
+    #[test]
+    fn raising_either_limit_moves_a_stage_out_of_waiting_for_a_place() {
+        let repo = Repo::with(&[]);
+        repo.write("mvp", DECLARED);
+
+        let record = record([("mvp", "01", store::StageStanding::InFlight)]);
+
+        let state =
+            |places| states(&repo.lists_with_places(&record, &HashSet::new(), places))[1].clone();
+
+        assert_eq!(
+            state(places(1, 4, 1)),
+            StageState::WaitingForAPlace,
+            "one stage of this roadmap at a time, and 01 is it",
+        );
+        assert_eq!(
+            state(places(2, 4, 1)),
+            StageState::ToDo,
+            "a roadmap raised to two has a place for 02, and nothing else moved",
+        );
+
+        assert_eq!(
+            state(places(3, 4, 4)),
+            StageState::WaitingForAPlace,
+            "and with room on the roadmap it is the machine that is full",
+        );
+        assert_eq!(
+            state(places(3, 5, 4)),
+            StageState::ToDo,
+            "a server raised to five has a place for it, and nothing else moved",
+        );
+    }
+
+    /// Where more stages are ready than there are places, **the lowest-numbered
+    /// take them** and the rest wait — which is the scheduler's own order, so the
+    /// card says which of them will go first.
+    #[test]
+    fn the_lowest_numbered_ready_stages_take_the_places_and_the_rest_wait() {
+        let repo = Repo::with(&[]);
+        repo.write("mvp", FOUR_DECLARED_ROOTS);
+
+        assert_eq!(
+            states(&repo.lists_with_places(
+                &store::StageStandings::default(),
+                &HashSet::new(),
+                places(3, 4, 3),
+            )),
+            [
+                StageState::ToDo,
+                StageState::WaitingForAPlace,
+                StageState::WaitingForAPlace,
+                StageState::WaitingForAPlace,
+            ],
+            "four roots and one place between them: 01 has it, and the three \
+             behind it are waiting on the machine",
+        );
+    }
+
+    /// An **undeclared** roadmap's ready stage waits for a place like any other,
+    /// unlike *waiting on*, which only a declaring roadmap ever says.
+    ///
+    /// The silence is the scheduler's reading rather than the roadmap's, so saying
+    /// *waiting on 01* would be putting a declaration in the human's mouth — but a
+    /// place is the machine's fact rather than the roadmap's, and such a roadmap
+    /// gone quiet is the one most likely to read as forgotten.
+    #[test]
+    fn an_undeclared_roadmaps_ready_stage_waits_for_a_place_too() {
+        let repo = Repo::with(&[]);
+        repo.write("mvp", UNTICKED);
+
+        assert_eq!(
+            states(&repo.lists_with_places(
+                &store::StageStandings::default(),
+                &HashSet::new(),
+                places(3, 4, 4),
+            )),
+            [
+                StageState::WaitingForAPlace,
+                StageState::ToDo,
+                StageState::ToDo,
+            ],
+            "01 is the one this roadmap would start and the machine is full; the \
+             two behind it stand on stages that have not settled and say nothing \
+             they were not told",
+        );
+    }
+
+    /// And the pane says *waiting for a place* exactly where the card does, off the
+    /// one reading and the one count of the places.
+    #[test]
+    fn the_pane_says_a_stage_is_waiting_for_a_place_exactly_as_the_card_does() {
+        let repo = Repo::with(&[]);
+        repo.write("mvp", DECLARED);
+
+        let record = record([("mvp", "01", store::StageStanding::InFlight)]);
+        let places = places(1, 4, 1);
+
+        let pane = repo
+            .opened_with_places("mvp", &record, &HashSet::new(), places)
+            .expect("there is a roadmap to open");
+
+        assert_eq!(
+            pane.stages
+                .iter()
+                .map(|stage| stage.state.clone())
+                .collect::<Vec<_>>(),
+            states(&repo.lists_with_places(&record, &HashSet::new(), places)),
+        );
+        assert_eq!(pane.stages[1].state, StageState::WaitingForAPlace);
+    }
+
     /// A roadmap is this Conversation's whether the session has committed it
     /// yet or not: what the branch has written to is the question, and the
     /// commit is a step of the writing rather than the whole of it.
@@ -3643,6 +4043,7 @@ Turns this askance clone into Verkstead.
                 &roadmaps.join(name),
                 &store::StageStandings::default(),
                 &HashSet::new(),
+                all_free(),
             )
             .unwrap_or_else(|| panic!("{name} should read back as a stage list"));
 
@@ -3803,6 +4204,18 @@ Turns this askance clone into Verkstead.
 - [ ] 02: Grilling — [brief](02-grilling.md) — no dependencies
 - [ ] 03: Implementation — [brief](03-implementation.md) — after 02
 - [ ] 04: Wrap-up — [brief](04-wrap-up.md) — after 01, 03
+";
+
+    /// And four stages of it standing on nothing at all, which is a roadmap with
+    /// more ready at once than any machine here has places for: what decides which
+    /// of them start is the places rather than the roadmap's shape.
+    const FOUR_DECLARED_ROOTS: &str = "\
+# MVP roadmap
+
+- [ ] 01: Workbench — [brief](01-workbench.md) — no dependencies
+- [ ] 02: Grilling — [brief](02-grilling.md) — no dependencies
+- [ ] 03: Implementation — [brief](03-implementation.md) — no dependencies
+- [ ] 04: Wrap-up — [brief](04-wrap-up.md) — no dependencies
 ";
 
     /// What Verkstead's record says about the stages of this Repo's roadmaps.

@@ -2,9 +2,9 @@
 //!
 //! The wire carries a state as a name — the server's own reading of where the
 //! stage is, off Verkstead's record of the stage Conversations, the boxes in
-//! `ROADMAP.md`, what each line declares it stands on and which stages the server
-//! is holding before their finish, all together — and what the human reads is the
-//! page's to choose. The viewer picks the words and works out none of the states:
+//! `ROADMAP.md`, what each line declares it stands on, which stages the server is
+//! holding before their finish and how many places it has left, all together —
+//! and what the human reads is the page's to choose. The viewer picks the words and works out none of the states:
 //! a card that decided for itself whether a stage was under way, or which of its
 //! neighbours it was behind, would be a second opinion about something the record
 //! already knows.
@@ -25,6 +25,12 @@ import type { StageState } from "../api/types";
 /// started and whose line declared what it stands on says which of those it is
 /// still behind, which the server sends along with the state and the page joins
 /// up with commas the way it says what a stage stands on.
+///
+/// And one word covers two things: a stage waiting for a place is waiting on one
+/// of the two limits there are — its roadmap's and the server's — and which of
+/// them is said on the Timeline of the Conversation that held it rather than
+/// here, a row having no room for it and the reader's next move being the only
+/// thing the difference changes.
 export function stageState(state: StageState): string {
   switch (state.state) {
     case "Done":
@@ -37,6 +43,8 @@ export function stageState(state: StageState): string {
       return "halted";
     case "WaitingOn":
       return `waiting on ${state.stages.join(", ")}`;
+    case "WaitingForAPlace":
+      return "waiting for a place";
     case "ToDo":
       return "to do";
   }

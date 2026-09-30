@@ -5037,9 +5037,10 @@ at: string, roadmaps: Array<StageListEvent>, };
  * wire rather than a box: with stages worked side by side, each branch carries a
  * `ROADMAP.md` of its own and the boxes stop being one fact, while Verkstead's
  * record of the stage Conversations is one — so the viewer is told where a stage
- * is and never works it out. One of these comes off the running server rather
- * than off the record alone, and is what it is at the moment the page was drawn.
- * See the server's `stages` module for the rule, and
+ * is and never works it out. Two of these come off the running server rather
+ * than off the record alone — what it is holding before a finish, and how many
+ * places it has left — so each of them is what it was at the moment the page was
+ * drawn. See the server's `stages` module for the rule, and
  * [ADR-0021](../../../docs/adr/0021-parallel-stages.md).
  *
  * A roadmap the record holds no rows for — one worked by hand or by the old
@@ -5063,7 +5064,7 @@ export type StageState = { "state": "Done" } | { "state": "InProgress" } | { "st
  * whole is [`StageDocument::stands_on`], which the pane says beside this
  * and which does not move as the roadmap runs.
  */
-stages: Array<string>, } | { "state": "ToDo" };
+stages: Array<string>, } | { "state": "WaitingForAPlace" } | { "state": "ToDo" };
 
 /**
  * How a Set stands: still waiting on the human, answered, or closed unanswered.
