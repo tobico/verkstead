@@ -472,8 +472,16 @@
 /* And the word the box replaced, kept for the readers that need words: out of
    the layout and still in the document, so a row read aloud or copied out says
    which entries are finished. Not `display: none`, which would take it out of
-   the accessibility tree along with the layout. */
-.taskList .state {
+   the accessibility tree along with the layout.
+
+   The count on an ellipsis row is kept the same way, on both cards: an
+   ellipsis read aloud says nothing whatever, and the row is a mark saying the
+   list goes on rather than a row saying how far. Its own class rather than the
+   state word's, because a stage's state word *is* drawn — see below — and the
+   two would otherwise be one rule the moment they were written as one. */
+.taskList .state,
+.taskList .count,
+.stageList .count {
   position: absolute;
   width: 1px;
   height: 1px;

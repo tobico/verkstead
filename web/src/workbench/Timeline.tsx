@@ -1435,14 +1435,16 @@ function Box(props: { done: boolean }): JSX.Element {
 /// that end already: a row saying none are hidden is a row about nothing.
 ///
 /// The count itself is in words beside the glyph, out of the layout and still
-/// in the document, the way a row's own state word is: an ellipsis read aloud
-/// says nothing whatever.
+/// in the document, the way a task row's state word is: an ellipsis read aloud
+/// says nothing whatever. Its own class rather than that word's, because a
+/// stage's state word is drawn where a task's is not, and a mark saying how
+/// far the list goes on is not what either card draws.
 function Hidden(props: { count: number }): JSX.Element {
   return (
     <Show when={props.count > 0}>
       <li class={styles.more}>
         <span aria-hidden="true">…</span>
-        <span class={styles.state}>{props.count} more</span>
+        <span class={styles.count}>{props.count} more</span>
       </li>
     </Show>
   );

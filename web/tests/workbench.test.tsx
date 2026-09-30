@@ -14761,7 +14761,12 @@ describe("the pinned task list", () => {
     expect(rows.map((row) => row.querySelector(`.${timeline.state}`)!.textContent)).toEqual(
       BACKLOG.tasks.map((task) => (task.done ? "done" : "to do")),
     );
-    expect(timelineCss).toContain(".taskList .state {\n  position: absolute;");
+    expect(timelineCss).toContain(
+      ".taskList .state,\n" +
+        ".taskList .count,\n" +
+        ".stageList .count {\n" +
+        "  position: absolute;",
+    );
   });
 
   /// `[ ] Some task            01`: the box and the title lead, and the number
@@ -15918,7 +15923,7 @@ describe("a checklist longer than its card", () => {
     expect(
       [...card.querySelectorAll(`.${timeline.more}`)].map((row) => [
         row.querySelector("[aria-hidden]")!.textContent,
-        row.querySelector(`.${timeline.state}`)!.textContent,
+        row.querySelector(`.${timeline.count}`)!.textContent,
       ]),
     ).toEqual([
       ["…", "3 more"],
@@ -16075,8 +16080,9 @@ function stagesRunning(count: number, ...flight: number[]): StageListEvent {
 function down(card: Element): string[] {
   return [...card.querySelectorAll("ol > li")].map(
     (row) =>
-      row.querySelector(`.${row.classList.contains(timeline.more!) ? timeline.state : timeline.n}`)!
-        .textContent!,
+      row.querySelector(
+        `.${row.classList.contains(timeline.more!) ? timeline.count : timeline.n}`,
+      )!.textContent!,
   );
 }
 
@@ -16115,6 +16121,40 @@ describe("a roadmap with more than one stage in flight", () => {
         .map((row) => row.querySelector(`.${timeline.state}`)!.textContent)
         .filter((state) => state === "in progress"),
     ).toHaveLength(3);
+  });
+
+  /// And each of those marks is a plain ellipsis, as the backlog's is. A
+  /// stage's row draws the word saying where the stage is, which is the one
+  /// thing this card says out loud that a task's does not — and the count of
+  /// what a mark is hiding is not that word: it rides in the class the
+  /// stylesheet keeps out of the layout on both cards, so a roadmap longer
+  /// than the window is still marked rather than tallied.
+  it("keeps the count on an ellipsis row out of the layout", async () => {
+    theStaged({ pinned: [{ StageList: stagesRunning(10, 4, 5, 6) }] });
+    const { container } = mount(`/conversations/${STAGED.id}`);
+
+    const card = await drawn(
+      container,
+      `.${timeline.pinned} .${timeline.stageList}`,
+    );
+
+    expect(
+      [...card.querySelectorAll(`.${timeline.more}`)].map((row) => [
+        row.querySelector("[aria-hidden]")!.textContent,
+        row.querySelector(`.${timeline.count}`)!.textContent,
+        row.querySelector(`.${timeline.state}`),
+      ]),
+    ).toEqual([
+      ["…", "2 more", null],
+      ["…", "3 more", null],
+    ]);
+
+    expect(timelineCss).toContain(
+      ".taskList .state,\n" +
+        ".taskList .count,\n" +
+        ".stageList .count {\n" +
+        "  position: absolute;",
+    );
   });
 
   /// Far apart is where the window stops being one slice of the list: the
