@@ -331,7 +331,12 @@ impl Agents {
         // to reach starts one inside its own sandbox. Every time rather than
         // once, because the switch, the size and whether the server is still
         // alive are all read at this moment.
-        self.cache.compiling(&config, session_account.as_ref());
+        //
+        // And the hold that comes back is this launch's, carried by the sandbox
+        // into what its rendering leaves to see to, which is held until the
+        // process has been reaped: the Compile Server is not started again for
+        // a new Worktree while it is — see [`crate::build_cache::Compiles`].
+        let compiles = self.cache.compiling(&config, session_account.as_ref());
 
         let sandbox = Sandbox::for_conversation(
             conversation,
@@ -346,7 +351,8 @@ impl Agents {
             &config,
             &self.cache,
             self.config.binds(),
-        )?;
+        )?
+        .compiling_through(compiles);
 
         let worktree = conversation.worktree.clone()?;
 

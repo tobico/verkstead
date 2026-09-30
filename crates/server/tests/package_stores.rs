@@ -27,8 +27,9 @@
 //!
 //! **C/C++ is the one descriptor whose proof is a build instead**, because
 //! what it names is no store but the Compile Server: a CMake project built
-//! twice in one Sandbox, read off the server's own stats — see
-//! [`cmake_compiles_through_the_compile_server_and_a_clean_rebuild_is_all_hits`].
+//! twice in one Sandbox and once more in a second Conversation's, read off the
+//! server's own stats — see
+//! [`cmake_compiles_through_the_compile_server_and_a_rebuild_or_a_second_conversation_is_all_hits`].
 //!
 //! *Found the store populated* is deliberately nowhere in that list. The store
 //! is populated because the first two installs populated it, whether or not the
@@ -4054,11 +4055,24 @@ fn answering() {
 ///
 /// 1. The first build's compiles were requests to it, and every one ran.
 /// 2. The clean rebuild was served entirely out of its cache: not one miss, and
-///    as many C/C++ hits as there were requests. Same Worktree, same paths —
-///    a second Conversation's Worktree is at a path of its own, which is a
-///    different question and a proof of its own.
+///    as many C/C++ hits as there were requests.
 /// 3. And the server that answered is the one Verkstead started: it names the
 ///    cache this proof handed it.
+///
+/// **And then the same project in a second Conversation's Worktree**, at a
+/// path of its own — which sccache hashes into a C or C++ compile, so without
+/// `SCCACHE_BASEDIRS` it is every compile a miss. That Worktree is made while
+/// the first session is still running, so the spawn that starts the second one
+/// finds nothing running and starts the Compile Server again, told both:
+///
+/// 4. The second Conversation's build missed nothing, and every request was a
+///    hit, out of what the first one compiled.
+/// 5. And the server it compiled through is one told the second Worktree, which
+///    is the restart having happened rather than the paths happening to agree.
+///
+/// When that restart is *held back* — a spawn while another session is running
+/// — is a decision rather than a timing, and is proven as one in
+/// `build_cache`'s own tests.
 ///
 /// **And no sccache server was started inside the Sandbox.** An sccache client
 /// that finds no server starts one of its own, which would build perfectly
@@ -4080,7 +4094,8 @@ fn answering() {
 /// Run the suite in a network namespace of its own — `bwrap --dev-bind / /
 /// --unshare-net` — to prove it there.
 #[tokio::test]
-async fn cmake_compiles_through_the_compile_server_and_a_clean_rebuild_is_all_hits() {
+async fn cmake_compiles_through_the_compile_server_and_a_rebuild_or_a_second_conversation_is_all_hits()
+ {
     let Some(found) = tools("CMake", &["sccache", "cmake", "ninja", "cc", "c++"]) else {
         return;
     };
@@ -4105,22 +4120,30 @@ async fn cmake_compiles_through_the_compile_server_and_a_clean_rebuild_is_all_hi
         return;
     }
 
-    let machine = machine(1).await;
+    let machine = machine(2).await;
     let cache = machine.compiling_cache(sccache);
 
+    // The second Conversation's Worktree is not made until the first session
+    // is running — see below — so it is set aside until then. Nothing asks git
+    // about it in between, so a rename out and back is the Worktree being made
+    // later as far as the Compile Server can tell.
+    let second = machine.worktree(1);
+    let aside = machine.state.path().join("not-yet-made");
+    std::fs::rename(second, &aside).unwrap();
+
     // What a session's spawn does before the session, on a machine where C/C++
-    // is on — which every built-in language is, left alone.
-    cache.compiling(&machine.settings.config(), None);
+    // is on — which every built-in language is, left alone. Held for as long
+    // as that session runs, as a spawn's own is.
+    let running = cache.compiling(&machine.settings.config(), None);
     answering();
 
     let worktree = machine.worktree(0);
     cmake_project(&worktree.join("greeting"));
 
-    let sandbox = machine.sandbox(0, &cache, vec![]);
-
-    let built = installing(
-        &sandbox,
-        &format!(
+    // The script a session runs, building the project in its own Worktree,
+    // and what it does after: `after` is run once the first build is in.
+    let session = |after: &str| {
+        format!(
             r#"set -e
             printf 'c-launcher=%s\n' "${{CMAKE_C_COMPILER_LAUNCHER-unset}}"
             printf 'cxx-launcher=%s\n' "${{CMAKE_CXX_COMPILER_LAUNCHER-unset}}"
@@ -4135,11 +4158,7 @@ async fn cmake_compiles_through_the_compile_server_and_a_clean_rebuild_is_all_hi
 
             build
             "$CMAKE_C_COMPILER_LAUNCHER" --show-stats --stats-format=json > first.json
-            "$CMAKE_C_COMPILER_LAUNCHER" --zero-stats
-
-            rm -rf greeting/build
-            build
-            "$CMAKE_C_COMPILER_LAUNCHER" --show-stats --stats-format=json > again.json
+            {after}
 
             # Every sccache in this Sandbox's own process namespace, which the
             # Compile Server is not in.
@@ -4155,6 +4174,18 @@ async fn cmake_compiles_through_the_compile_server_and_a_clean_rebuild_is_all_hi
             ninja = ninja.display(),
             cc = cc.display(),
             cxx = cxx.display(),
+        )
+    };
+
+    let sandbox = machine.sandbox(0, &cache, vec![]);
+
+    let built = installing(
+        &sandbox,
+        &session(
+            r#""$CMAKE_C_COMPILER_LAUNCHER" --zero-stats
+            rm -rf greeting/build
+            build
+            "$CMAKE_C_COMPILER_LAUNCHER" --show-stats --stats-format=json > again.json"#,
         ),
     );
 
@@ -4226,5 +4257,62 @@ async fn cmake_compiles_through_the_compile_server_and_a_clean_rebuild_is_all_hi
         c_family(&again, "cache_hits"),
         again["stats"]["compile_requests"].as_u64().unwrap_or(0),
         "every one of its compiles was served from the cache: {again}",
+    );
+
+    // The second Conversation's Worktree is made while the first session is
+    // still running, and then that session ends.
+    std::fs::rename(&aside, second).unwrap();
+    drop(running);
+
+    // So the spawn of the second Conversation's session finds nothing running
+    // and starts the Compile Server again, told both Worktrees.
+    let _second_running = cache.compiling(&machine.settings.config(), None);
+    answering();
+
+    cmake_project(&second.join("greeting"));
+
+    let elsewhere = installing(&machine.sandbox(1, &cache, vec![]), &session(""));
+
+    elsewhere.worked("the same project builds in a second Conversation's Worktree");
+
+    assert_eq!(
+        line(&elsewhere, "started-inside"),
+        "0",
+        "and no sccache server was started inside that Sandbox either. It said:\n{}",
+        elsewhere.said,
+    );
+
+    let across = stats(second, "first.json");
+
+    let told: Vec<&str> = across["basedirs"]
+        .as_array()
+        .map(|dirs| dirs.iter().filter_map(|dir| dir.as_str()).collect())
+        .unwrap_or_default();
+
+    for worktree in [worktree, second] {
+        assert!(
+            told.iter().any(|dir| Path::new(dir) == worktree),
+            "the Compile Server it compiled through was started again and told {} as \
+             a base directory: {across}",
+            worktree.display(),
+        );
+    }
+
+    let requests = across["stats"]["compile_requests"].as_u64().unwrap_or(0);
+
+    assert!(
+        requests >= 2,
+        "the second Conversation's build compiled through the Compile Server: {across}",
+    );
+    assert_eq!(
+        c_family(&across, "cache_misses"),
+        0,
+        "and at a path of its own it missed nothing: {across}",
+    );
+    assert_eq!(
+        c_family(&across, "cache_hits"),
+        requests,
+        "every one of its compiles was served out of what the first Conversation \
+         compiled: {across}",
     );
 }

@@ -54,8 +54,10 @@
 //! the half that could never be data: where the cache directory is, whether
 //! there is an sccache to point at, and the Compile Server itself.
 
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::languages;
@@ -207,10 +209,37 @@ pub struct BuildCache {
     /// session is built on, and a server per clone would be a server per
     /// session, which is the thing this whole arrangement exists to stop.
     compiling: Arc<Mutex<Option<Compiling>>>,
+
+    /// How many sessions and terminals are running that could be compiling
+    /// through it — see [`Compiles`], which is what one of them holds.
+    ///
+    /// Counted because the one reason the Compile Server is started again that
+    /// is not a size or a death is a Worktree it was not told about, and that
+    /// restart is held back while anything could be mid-compile — see
+    /// [`deciding`].
+    using: Arc<AtomicUsize>,
 }
 
-/// The compile server as it is running: the process, and the size it was
-/// started with.
+/// One session or terminal that could be compiling through the Compile Server,
+/// held for as long as what it started is running.
+///
+/// Handed out by [`BuildCache::compiling`] and carried by the sandbox into what
+/// its rendering leaves to see to — see [`crate::sandbox::Closing`] — which is
+/// what is held until the process has been reaped. Letting go of it is the
+/// session being over as far as the Compile Server is concerned.
+#[derive(Debug)]
+pub struct Compiles {
+    using: Arc<AtomicUsize>,
+}
+
+impl Drop for Compiles {
+    fn drop(&mut self) {
+        self.using.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+/// The compile server as it is running: the process, and the size and the
+/// Worktrees it was started with.
 ///
 /// The size is kept because sccache reads `SCCACHE_CACHE_SIZE` once, when the
 /// server starts. The human changing it in the workbench would otherwise be a
@@ -220,6 +249,11 @@ pub struct BuildCache {
 struct Compiling {
     server: Started,
     size: String,
+
+    /// And the Worktrees it was told as `SCCACHE_BASEDIRS`, which it reads once
+    /// as well — see [`BASEDIRS`], and [`deciding`] for when a Worktree missing
+    /// from here is worth starting it again over.
+    worktrees: Vec<PathBuf>,
 
     /// And what holds it to this server's life on the platform whose answer is
     /// something to hold: the Job Object it is in — see
@@ -448,6 +482,7 @@ impl BuildCache {
             sccache,
             data_dir: Some(data_dir.to_owned()),
             compiling: Arc::default(),
+            using: Arc::default(),
         })
     }
 
@@ -466,6 +501,7 @@ impl BuildCache {
             sccache: sccache.filter(|_| compiles_through_an_sccache(Platform::HERE)),
             data_dir: Some(data_dir),
             compiling: Arc::default(),
+            using: Arc::default(),
         }
     }
 
@@ -584,13 +620,35 @@ impl BuildCache {
     /// running as the human. The two Unixes pass `None` and read it nowhere —
     /// what makes their boundary is a wrapper in the vector.
     ///
+    /// **And told every Worktree there is**, as `SCCACHE_BASEDIRS` — see
+    /// [`BASEDIRS`] — which is what lets a second Conversation's build of the
+    /// same project hit what the first one compiled. sccache reads that once, at
+    /// its start, so a Worktree made since is one more reason to start it again;
+    /// but only while nothing else is running — see [`deciding`].
+    ///
+    /// **What comes back is this caller's hold** on the server — see
+    /// [`Compiles`]. It is counted here, under the same lock the decision is
+    /// made under, so two spawns at once cannot both find the machine quiet.
+    /// Kept for as long as what the caller starts is running, and a caller that
+    /// drops it at once is one that restarts under nobody.
+    ///
     /// Nothing waits on it and nothing fails if it will not start: a session
     /// whose compile server is missing falls back to starting one of its own,
     /// which is what every session did before this existed.
-    pub fn compiling(&self, config: &Config, session_account: Option<&Logon>) {
+    pub fn compiling(&self, config: &Config, session_account: Option<&Logon>) -> Compiles {
+        let mut running = self.held();
+
+        // Everybody already holding one, read before this caller is counted
+        // among them: what a restart would be under.
+        let others = self.using.fetch_add(1, Ordering::AcqRel);
+
+        let compiles = Compiles {
+            using: self.using.clone(),
+        };
+
         let (Some(dir), Some(sccache), Some(data_dir)) = (&self.dir, &self.sccache, &self.data_dir)
         else {
-            return;
+            return compiles;
         };
 
         // Wanted by somebody, which is a language that is on and names the
@@ -599,22 +657,27 @@ impl BuildCache {
         let languages = languages::configured(config);
 
         let Some(size) = languages.wanting(languages::SCCACHE) else {
-            return;
+            return compiles;
         };
 
-        let mut running = self.held();
+        // Every Worktree on the machine as of now, which is what a server
+        // started here is told.
+        let worktrees = worktrees(data_dir);
 
-        if let Some(one) = running.as_mut() {
-            // Still up and still the size the human asked for is nothing to do.
+        let up = running.as_mut().map(|one| Up {
             // `try_wait` rather than a signal: a server that died is one to
             // start again, and asking is also what reaps it.
-            if !one.server.stopped() && one.size == size {
-                return;
-            }
+            stopped: one.server.stopped(),
+            size: one.size.clone(),
+            worktrees: one.worktrees.clone(),
+        });
 
-            // Dropped, which stops it where it is still up — see [`Compiling`].
-            *running = None;
+        if deciding(up.as_ref(), size, &worktrees, others > 0) == Deciding::Leave {
+            return compiles;
         }
+
+        // Dropped, which stops it where it is still up — see [`Compiling`].
+        *running = None;
 
         // Timed because a session waits on it and says nothing while it does:
         // the Compile Server is started before the first session that compiles
@@ -623,7 +686,7 @@ impl BuildCache {
         // have been.
         let began = std::time::Instant::now();
 
-        let started = compile_server(dir, sccache, data_dir, size, session_account)
+        let started = compile_server(dir, sccache, data_dir, size, &worktrees, session_account)
             .and_then(|rendering| left_running(&rendering));
 
         let took = began.elapsed();
@@ -646,6 +709,7 @@ impl BuildCache {
                 tracing::info!(
                     cache = %dir.display(),
                     size,
+                    worktrees = worktrees.len(),
                     ?took,
                     "the shared compile server is up: every session's rustc goes through \
                      this one, in a sandbox holding the worktrees and the cache",
@@ -655,6 +719,7 @@ impl BuildCache {
                     _held: outliving::held(Platform::HERE, &server),
                     server,
                     size: size.to_owned(),
+                    worktrees,
                 });
             }
             Err(error) => {
@@ -669,6 +734,8 @@ impl BuildCache {
                 );
             }
         }
+
+        compiles
     }
 
     /// The compile server, locked.
@@ -780,6 +847,132 @@ pub fn builds_rust(loaded: &Languages, repo: &Path) -> bool {
         .is_some_and(|rust| rust.detected(repo))
 }
 
+/// The variable the Compile Server is told every Worktree in: the directories
+/// sccache strips off the front of every path before it hashes a compile.
+///
+/// **Which is what a C or C++ compile needs to hit from a second
+/// Conversation.** sccache hashes such a compile's absolute paths — the source,
+/// every `-I`, and the line markers the preprocessor writes — and every
+/// Conversation's Worktree is a directory of its own, so the same project built
+/// in two of them was two sets of misses. Rust's did not miss this way because
+/// what it shares is its dependencies, compiled out of the one `CARGO_HOME` at
+/// the same path from every Worktree.
+///
+/// **Read by the server, once, as it starts**: a client's own is ignored, and
+/// a Worktree made since is one the server does not know. Exact directories
+/// rather than a parent of them, because the Worktree's own name would still
+/// be left in the path. Honoured since sccache 0.14; an older one ignores it,
+/// and a C/C++ build in a second Conversation misses as it always did.
+const BASEDIRS: &str = "SCCACHE_BASEDIRS";
+
+/// Every Worktree under `data_dir`, in a stable order, which is what the
+/// Compile Server is told as [`BASEDIRS`].
+///
+/// The directories the Worktrees directory holds, one per checkout — see
+/// [`crate::worktrees::worktree_path`] — whether or not a Conversation still
+/// claims one: one that is gone is only missing from the next list.
+fn worktrees(data_dir: &Path) -> Vec<PathBuf> {
+    let mut found: Vec<PathBuf> = std::fs::read_dir(crate::worktrees::directory(data_dir))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
+        .map(|entry| entry.path())
+        // sccache refuses to start at all on a relative one, and a directory
+        // that cannot be told apart from two when the list is split is not
+        // one to hand it either — see [`basedirs`].
+        .filter(|path| path.is_absolute())
+        .collect();
+
+    found.sort();
+    found
+}
+
+/// Those Worktrees as the one value [`BASEDIRS`] is, separated the way sccache
+/// splits it on `platform`: a `;` on Windows and a `:` on the two Unixes, which
+/// is how each writes a `PATH`.
+///
+/// A Worktree whose own path holds the separator is left out rather than
+/// handed over in two halves — which on the Unixes is a name nothing Verkstead
+/// makes, and on Windows is a character no path can hold.
+fn basedirs(platform: Platform, worktrees: &[PathBuf]) -> OsString {
+    let separator = match platform {
+        Platform::Windows => ";",
+        Platform::Linux | Platform::MacOs => ":",
+    };
+
+    let mut joined = OsString::new();
+
+    for worktree in worktrees {
+        if worktree.to_string_lossy().contains(separator) {
+            continue;
+        }
+
+        if !joined.is_empty() {
+            joined.push(separator);
+        }
+
+        joined.push(worktree);
+    }
+
+    joined
+}
+
+/// The Compile Server as it is, as far as whether to start it again goes.
+#[derive(Debug, Clone)]
+struct Up {
+    /// Whether it has exited, which is a server to start again whatever else.
+    stopped: bool,
+    size: String,
+    worktrees: Vec<PathBuf>,
+}
+
+/// What a spawn does about the Compile Server — see [`deciding`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Deciding {
+    /// Leave it running as it is.
+    Leave,
+
+    /// Start one, ending the one there is first where there is one.
+    Start,
+}
+
+/// Whether a spawn starts the Compile Server (again), given the one `up` there
+/// is, the `size` and `worktrees` it would be started with now, and whether
+/// any other session or terminal is running — which is the whole of the
+/// decision, and nothing about timing.
+///
+/// - **None running, or one that has exited**, is one to start.
+/// - **A size the human changed** is one to start again at once, as it always
+///   was: that setting is theirs, and it saves to do something.
+/// - **A Worktree it was not told about** is one to start again **only while
+///   nothing else is running**. A restart under a session mid-compile can leave
+///   that session's client starting a server of its own inside its Sandbox,
+///   which is the hazard the Compile Server exists to remove — so on a busy
+///   machine the new Conversation's compiles miss until the next quiet spawn. A
+///   miss is a slow build, never a failed one.
+/// - **A Worktree that has gone** is nothing to start again over: it is left out
+///   of the list the next time there is a reason.
+fn deciding(up: Option<&Up>, size: &str, worktrees: &[PathBuf], others: bool) -> Deciding {
+    let Some(up) = up else {
+        return Deciding::Start;
+    };
+
+    if up.stopped || up.size != size {
+        return Deciding::Start;
+    }
+
+    let told = worktrees
+        .iter()
+        .all(|worktree| up.worktrees.contains(worktree));
+
+    if told || others {
+        Deciding::Leave
+    } else {
+        Deciding::Start
+    }
+}
+
 /// The compile server as a command: one sccache, in the foreground, in a
 /// sandbox that holds the Worktrees, the cache and the system.
 ///
@@ -832,6 +1025,7 @@ fn compile_server(
     sccache: &Path,
     data_dir: &Path,
     size: &str,
+    checkouts: &[PathBuf],
     session_account: Option<&Logon>,
 ) -> std::io::Result<Rendering> {
     let worktrees = crate::worktrees::directory(data_dir);
@@ -930,6 +1124,15 @@ fn compile_server(
 
     if let Some(rustup) = &toolchains {
         surface.set(sandbox::RUSTUP_HOME, rustup);
+    }
+
+    // And every Worktree there is, so that a C or C++ compile hashes the same in
+    // any of them — see [`BASEDIRS`]. Left out rather than set empty on a
+    // machine with none yet.
+    let told = basedirs(Platform::HERE, checkouts);
+
+    if !told.is_empty() {
+        surface.set(BASEDIRS, told);
     }
 
     // And the names nothing on Windows runs without, which the two Unixes have
@@ -1631,6 +1834,7 @@ mod tests {
             Path::new(r"C:\sccache\sccache.exe"),
             dir.path(),
             SIZE,
+            &[],
             None,
         )
         .expect_err("a Windows compile server names the account it runs as");
@@ -1638,6 +1842,228 @@ mod tests {
         assert!(
             refused.to_string().contains("local account"),
             "the refusal says which half of it is not there: {refused}",
+        );
+    }
+
+    /// The Compile Server as a spawn finds it: up, at the default size, told
+    /// the Worktrees named.
+    fn up(worktrees: &[&str]) -> Up {
+        Up {
+            stopped: false,
+            size: SIZE.to_owned(),
+            worktrees: worktrees.iter().map(PathBuf::from).collect(),
+        }
+    }
+
+    fn paths(worktrees: &[&str]) -> Vec<PathBuf> {
+        worktrees.iter().map(PathBuf::from).collect()
+    }
+
+    /// A Worktree the Compile Server was not told about starts it again only
+    /// once nothing else is running — which is the decision itself, with the
+    /// other session's being there a value rather than a race.
+    #[test]
+    fn a_new_worktree_restarts_the_compile_server_only_once_nothing_else_is_running() {
+        let running = up(&["/data/worktrees/one"]);
+        let now = paths(&["/data/worktrees/one", "/data/worktrees/two"]);
+
+        assert_eq!(
+            deciding(Some(&running), SIZE, &now, true),
+            Deciding::Leave,
+            "another session is running, so the new Worktree's compiles miss \
+             rather than a restart landing under that session's",
+        );
+        assert_eq!(
+            deciding(Some(&running), SIZE, &now, false),
+            Deciding::Start,
+            "and with nothing running the next spawn starts it again, told both",
+        );
+    }
+
+    /// And nothing about the Worktrees is a reason to start it again where it
+    /// was told every one of them already — including where one of them has
+    /// gone since.
+    #[test]
+    fn worktrees_it_was_told_about_are_no_reason_to_start_it_again() {
+        let running = up(&["/data/worktrees/one", "/data/worktrees/two"]);
+
+        for now in [
+            paths(&["/data/worktrees/one", "/data/worktrees/two"]),
+            paths(&["/data/worktrees/two"]),
+            paths(&[]),
+        ] {
+            assert_eq!(
+                deciding(Some(&running), SIZE, &now, false),
+                Deciding::Leave,
+                "{now:?} is nothing it was not told",
+            );
+        }
+    }
+
+    /// A size the human changed and a server that died start it again as they
+    /// always did — whatever else is running, because neither of those waits.
+    #[test]
+    fn a_changed_size_or_a_dead_server_starts_it_again_whatever_is_running() {
+        let now = paths(&["/data/worktrees/one"]);
+
+        assert_eq!(
+            deciding(Some(&up(&["/data/worktrees/one"])), "90G", &now, true),
+            Deciding::Start,
+        );
+        assert_eq!(
+            deciding(
+                Some(&Up {
+                    stopped: true,
+                    ..up(&["/data/worktrees/one"])
+                }),
+                SIZE,
+                &now,
+                true,
+            ),
+            Deciding::Start,
+        );
+        assert_eq!(deciding(None, SIZE, &now, true), Deciding::Start);
+    }
+
+    /// Every spawn is counted while it holds what `compiling` handed it, and
+    /// only while — which is what "another session is running" is read off.
+    #[test]
+    fn a_spawn_is_counted_for_as_long_as_it_holds_its_compiles() {
+        let cache = compiling_cache();
+
+        let first = cache.compiling(
+            &configured(
+                "rust_build_cache:\n  enabled: false\nlanguages:\n  cpp:\n    enabled: false\n",
+            ),
+            None,
+        );
+        let second = cache.compiling(
+            &configured(
+                "rust_build_cache:\n  enabled: false\nlanguages:\n  cpp:\n    enabled: false\n",
+            ),
+            None,
+        );
+
+        assert_eq!(cache.using.load(Ordering::Acquire), 2);
+
+        drop(first);
+        assert_eq!(cache.using.load(Ordering::Acquire), 1);
+
+        drop(second);
+        assert_eq!(
+            cache.using.load(Ordering::Acquire),
+            0,
+            "and with both gone the machine is quiet",
+        );
+    }
+
+    /// The Worktrees are the directories under the Worktrees directory, in a
+    /// stable order, and nothing else there.
+    #[test]
+    fn the_worktrees_are_the_directories_the_worktrees_directory_holds() {
+        let data = tempfile::tempdir().unwrap();
+        let under = crate::worktrees::directory(data.path());
+
+        assert_eq!(
+            worktrees(data.path()),
+            Vec::<PathBuf>::new(),
+            "none made yet"
+        );
+
+        std::fs::create_dir_all(under.join("verkstead-b")).unwrap();
+        std::fs::create_dir_all(under.join("verkstead-a")).unwrap();
+        std::fs::write(under.join("stray-file"), "").unwrap();
+
+        assert_eq!(
+            worktrees(data.path()),
+            [under.join("verkstead-a"), under.join("verkstead-b")],
+        );
+    }
+
+    /// Separated the way sccache splits the variable on each platform, which is
+    /// how each writes a `PATH`.
+    #[test]
+    fn the_basedirs_are_separated_the_way_each_platform_splits_them() {
+        let unix = paths(&["/data/worktrees/one", "/data/worktrees/two"]);
+
+        assert_eq!(
+            basedirs(Platform::Linux, &unix),
+            "/data/worktrees/one:/data/worktrees/two"
+        );
+        assert_eq!(
+            basedirs(Platform::MacOs, &unix),
+            "/data/worktrees/one:/data/worktrees/two"
+        );
+        assert_eq!(
+            basedirs(
+                Platform::Windows,
+                &paths(&[r"C:\data\worktrees\one", r"C:\data\worktrees\two"])
+            ),
+            r"C:\data\worktrees\one;C:\data\worktrees\two"
+        );
+        assert_eq!(
+            basedirs(
+                Platform::Linux,
+                &paths(&["/data/worktrees/a:b", "/data/worktrees/two"])
+            ),
+            "/data/worktrees/two",
+            "a Worktree the split would cut in two is left out rather than halved",
+        );
+    }
+
+    /// And the Compile Server is started told them — on the two Unixes, where
+    /// the rendering is a description a test can read without an account.
+    #[test]
+    #[cfg(unix)]
+    fn the_compile_server_is_started_told_every_worktree() {
+        let dir = tempfile::tempdir().unwrap();
+        let told = paths(&["/data/worktrees/one", "/data/worktrees/two"]);
+
+        let rendering = compile_server(
+            dir.path(),
+            Path::new("/nix/store/whatever/bin/sccache"),
+            dir.path(),
+            SIZE,
+            &told,
+            None,
+        )
+        .expect("a Unix compile server refuses nothing");
+
+        let said: Vec<String> = rendering
+            .argv()
+            .iter()
+            .chain(rendering.env().iter().flat_map(|(key, value)| [key, value]))
+            .map(|word| word.to_string_lossy().into_owned())
+            .collect();
+
+        let at = said
+            .iter()
+            .position(|word| word == BASEDIRS)
+            .unwrap_or_else(|| panic!("{BASEDIRS} is set for the server: {said:?}"));
+
+        assert_eq!(
+            said[at + 1],
+            "/data/worktrees/one:/data/worktrees/two",
+            "naming both Worktrees",
+        );
+
+        let none = compile_server(
+            dir.path(),
+            Path::new("/nix/store/whatever/bin/sccache"),
+            dir.path(),
+            SIZE,
+            &[],
+            None,
+        )
+        .unwrap();
+
+        assert!(
+            !none
+                .argv()
+                .iter()
+                .chain(none.env().iter().map(|(key, _)| key))
+                .any(|word| word == BASEDIRS),
+            "and left out, rather than set empty, where there are none yet",
         );
     }
 

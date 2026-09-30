@@ -20,6 +20,6 @@ Roadmap stage: [03: C++ through the Compile Server](docs/roadmaps/language-cache
 
 - [x] 01: The C/C++ descriptor — [details](01-the-cpp-descriptor.md)
 - [x] 02: A real CMake build through the Compile Server — [details](02-a-real-cmake-build.md)
-- [ ] 03: A second Conversation's build hits the cache — [details](03-a-second-conversation-hits.md)
+- [x] 03: A second Conversation's build hits the cache — [details](03-a-second-conversation-hits.md)
 - [ ] 04: The uncached warning for any sccache language — [details](04-the-warning.md)
 - [ ] 05: The docs — [details](05-the-docs.md)

@@ -112,6 +112,12 @@ pub struct Closing {
     /// it.
     #[cfg(windows)]
     behind: Option<std::sync::Arc<super::entries::Entries>>,
+
+    /// And the launch's hold on the Compile Server, where it took one — see
+    /// [`crate::build_cache::Compiles`]. Held rather than seen to, like the
+    /// entries above: letting go of it once the process has gone is the whole
+    /// of what it is for.
+    compiles: Option<std::sync::Arc<crate::build_cache::Compiles>>,
 }
 
 impl Closing {
@@ -129,6 +135,7 @@ impl Closing {
             share: None,
             #[cfg(windows)]
             behind: None,
+            compiles: None,
         }
     }
 
@@ -144,6 +151,7 @@ impl Closing {
             share: None,
             #[cfg(windows)]
             behind: None,
+            compiles: None,
         }
     }
 
@@ -166,6 +174,17 @@ impl Closing {
     /// The same, holding the root this launch shares — see the field.
     pub(crate) fn sharing(mut self, share: Share) -> Closing {
         self.share = Some(share);
+
+        self
+    }
+
+    /// The same, holding the launch's hold on the Compile Server — see the
+    /// field.
+    pub(crate) fn compiling(
+        mut self,
+        compiles: std::sync::Arc<crate::build_cache::Compiles>,
+    ) -> Closing {
+        self.compiles = Some(compiles);
 
         self
     }

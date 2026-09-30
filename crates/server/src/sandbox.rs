@@ -163,6 +163,7 @@ use std::ffi::{OsStr, OsString};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::Arc;
 
 // And the description itself, which is not this module's alone: the compile
 // server outside every session is composed of the same vocabulary and rendered
@@ -179,7 +180,7 @@ use closing::Rejoin;
 pub use rendering::Rendering;
 
 use crate::attachments::{self, Attachments};
-use crate::build_cache::{self, BuildCache};
+use crate::build_cache::{self, BuildCache, Compiles};
 use crate::handoffs::{self, Handoffs};
 use crate::platform::Platform;
 use crate::settings::{Config, GitAuthor, Secrets};
@@ -3726,6 +3727,15 @@ pub struct Sandbox {
     /// tool install is reachable only where it has been granted, and which of a
     /// session's `PATH` entries are per-user is which of them are under this.
     servers_home: PathBuf,
+
+    /// And this launch's hold on the Compile Server, where the spawn took one —
+    /// see [`crate::build_cache::Compiles`]. Handed on to what every rendering
+    /// leaves to see to, which is held until what it started has been reaped,
+    /// so the Compile Server is not started again under it.
+    ///
+    /// Shared rather than owned, because a sandbox is cloned onto the thread
+    /// that renders it: the hold is one, however many copies say it.
+    compiles: Option<Arc<Compiles>>,
 }
 
 /// What a description comes to on the platform whose boundary is an identity
@@ -3967,7 +3977,17 @@ impl Sandbox {
             }),
 
             servers_home: homes.servers.clone(),
+            // Taken by whoever spawns, which is the one that knows it is about
+            // to run something — see [`Sandbox::compiling_through`].
+            compiles: None,
         })
+    }
+
+    /// The same sandbox, holding `compiles` for as long as what it starts runs
+    /// — see [`crate::build_cache::BuildCache::compiling`], which handed it out.
+    pub fn compiling_through(mut self, compiles: Compiles) -> Sandbox {
+        self.compiles = Some(Arc::new(compiles));
+        self
     }
 
     /// The same sandbox, built to run `shell`: `SHELL` names it inside, where a
@@ -4065,7 +4085,15 @@ impl Sandbox {
                     self.launched(argv, launch, saying)
                 })?;
 
-        Ok((rendering, closing.sharing(share)))
+        let closing = closing.sharing(share);
+
+        Ok((
+            rendering,
+            match &self.compiles {
+                Some(compiles) => closing.compiling(compiles.clone()),
+                None => closing,
+            },
+        ))
     }
 
     /// The same, told whether this launch builds its root or shares one that

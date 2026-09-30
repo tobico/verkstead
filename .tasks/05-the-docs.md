@@ -26,7 +26,10 @@ What to say:
 - **Base directories:** a second Conversation hits the cache because the Compile
   Server is told every Worktree. A new one is taken in only while no session is
   running, so a busy machine misses until it's quiet. It needs an sccache new
-  enough to honour `SCCACHE_BASEDIRS`; task 03 records the version. An object
+  enough to honour `SCCACHE_BASEDIRS`: **0.14.0 and later** (task 03 read it
+  off sccache's own `src/config.rs` at each tag). An older one ignores the
+  variable, so a C/C++ build in a second Conversation misses, and nothing
+  fails. The list is `:`-separated on the Unixes and `;` on Windows. An object
   served from another Conversation's compile carries that Worktree's path in
   its debug info.
 - **Where a build may go:** the Compile Server writes compiled output where the
