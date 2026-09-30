@@ -122,6 +122,14 @@
   align-items: baseline;
 }
 
+/* The head of a row being chosen is a `<label>` round the whole of it and a
+   press anywhere on it, where the head of one that is only reporting is a `div`
+   — so this is the label's alone. See `rowPress` in `src/rows.ts`. */
+label.head {
+  cursor: pointer;
+  user-select: none;
+}
+
 .name {
   display: flex;
   gap: 0.4rem;

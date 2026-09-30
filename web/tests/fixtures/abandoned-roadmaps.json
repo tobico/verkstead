@@ -5,6 +5,7 @@
     "roadmaps": [
       {
         "base": "",
+        "beside": [],
         "name": "mvp",
         "stage": "04",
         "stage_title": "Wrap-up",
@@ -12,6 +13,7 @@
       },
       {
         "base": "",
+        "beside": [],
         "name": "public-release",
         "stage": "01",
         "stage_title": "Packaging",
@@ -19,6 +21,7 @@
       },
       {
         "base": "tobi/steer",
+        "beside": [],
         "name": "steer",
         "stage": "01",
         "stage_title": "One stop and steer",

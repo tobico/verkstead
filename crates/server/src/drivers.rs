@@ -47,6 +47,8 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
+use tokio::sync::Notify;
+
 use crate::store::Lifecycle;
 
 /// Which Conversations have something driving them, and how many things.
@@ -65,6 +67,12 @@ use crate::store::Lifecycle;
 #[derive(Clone, Default)]
 pub(crate) struct Drivers {
     driving: Arc<Mutex<HashMap<i64, usize>>>,
+
+    /// Raised as the **last** driver of a Conversation lets go, which is what
+    /// frees a place on the server — see [`Drivers::letting_go`], which is the
+    /// one thing waiting on it, and [`Drivers::taking`], which is what a place
+    /// is counted off.
+    let_go: Arc<Notify>,
 }
 
 /// One driver's registration, held for as long as its task runs.
@@ -141,6 +149,76 @@ impl Drivers {
         }
     }
 
+    /// Which Conversations are **taking a place on the server**: those with a
+    /// driver registered, and those with a session running, each counted once.
+    ///
+    /// The second limit in front of an unattended start — see
+    /// [`crate::stages::CONVERSATIONS_AT_ONCE`], which is how many places there
+    /// are, and [`crate::continuing::carry_on`], which spends what is left of
+    /// them. Every Conversation of every kind is in it: a grilling, a Review, a
+    /// Tinker, another roadmap's stage. What the limit is for is the machine, and
+    /// the machine does not care which effort a session belongs to.
+    ///
+    /// **Both registers rather than either alone.** A stage waiting to join the
+    /// chain has no session — the hold stands in front of the launch — and a
+    /// Conversation between two task sessions has none for a moment either, so
+    /// counting sessions would let one more in through both gaps. And a grilling
+    /// nobody has picked on yet is a session with no driver behind it, which is
+    /// the gap the other way. The union is what stays put across all three.
+    ///
+    /// The sessions register is handed in whole rather than asked per
+    /// Conversation, for [`Drivers::driven`]'s reason: one lock taken once.
+    ///
+    /// A Conversation that is Done, Draft or stopped is in neither register and
+    /// so takes no place — a stop being raised as the driver lets go. And **both
+    /// registers are facts about this process**, so a server that has just come
+    /// back holds no places at all until the startup resume takes its runs back
+    /// up, which is the reading the stall sweep already waits for.
+    ///
+    /// The set rather than the count, because the one caller that has a
+    /// Conversation of its own to leave out needs to say which — see
+    /// [`crate::continuing::carry_on`], where the Conversation whose settle
+    /// brought the reading about is the place that settle freed.
+    pub(crate) fn taking(&self, working: &HashSet<i64>) -> HashSet<i64> {
+        self.driving
+            .lock()
+            .expect("the drivers register is not poisoned")
+            .keys()
+            .copied()
+            .chain(working.iter().copied())
+            .collect()
+    }
+
+    /// Wait until the **last** driver of some Conversation lets go, which is the
+    /// moment a place on the server may have come free.
+    ///
+    /// What [`crate::places::looking`] waits on instead of a clock. Nothing that
+    /// frees a place is a settle, and almost everything that frees one passes
+    /// through here: a run ends, a wrap-up finishes, a session is stopped, the
+    /// human closes something — each of those is the guard the driver was holding
+    /// going out of scope. So the look sleeps while nothing is happening and runs
+    /// the moment something has, rather than reading every roadmap there is twice
+    /// a minute on a server where nothing has changed for days.
+    ///
+    /// **May have**, rather than has. A Conversation is only off the places once
+    /// it is out of *both* registers, and a stage between two task sessions has
+    /// let its session go and not its driver. A look woken for nothing costs the
+    /// two register reads it takes to find the places as full as they were — see
+    /// [`crate::places::look`], which stops there.
+    ///
+    /// And the other way about, a session ending with no driver behind it — a
+    /// grilling nobody has picked on yet — frees a place without passing through
+    /// here at all. That is what the slow look behind this one is for: the wake-up
+    /// is what makes the common case prompt, and the backstop is what makes every
+    /// case eventual.
+    ///
+    /// One permit rather than a broadcast, so a place freed while the look is
+    /// already walking wakes it once more when it gets back rather than being
+    /// lost.
+    pub(crate) async fn letting_go(&self) {
+        self.let_go.notified().await;
+    }
+
     /// Whether any driver is registered for `conversation_id`.
     ///
     /// The raw reading of the register, which is what the Conversation page
@@ -179,8 +257,21 @@ impl Drop for Driving {
 
         // The last one out takes the Conversation with it, so *driven* is a key
         // being there rather than a count being read.
-        if *count == 0 {
+        let last = *count == 0;
+
+        if last {
             driving.remove(&self.conversation_id);
+        }
+
+        drop(driving);
+
+        // And the last one out is a place on the server that may have just come
+        // free, which is what the look for a waiting stage waits on rather than a
+        // clock — see [`Drivers::letting_go`]. Said after the register is written
+        // and the lock is gone, so that whatever wakes on it reads the register
+        // this drop left rather than the one it was half way through leaving.
+        if last {
+            self.drivers.let_go.notify_one();
         }
     }
 }
@@ -432,5 +523,66 @@ mod tests {
                 "{state:?} is not a state anything is supposed to be driving",
             );
         }
+    }
+
+    /// A place on the server is taken by a Conversation with a session running
+    /// **or** a driver registered, and by one with neither it is not.
+    ///
+    /// Both registers rather than either alone — see [`Drivers::taking`]. A stage
+    /// waiting to join the chain is a driver with no session, and a grilling
+    /// nobody has picked on yet is a session with no driver, so a count off one
+    /// register would miss whichever of the two it was not.
+    #[test]
+    fn a_session_running_or_a_driver_registered_each_take_a_place() {
+        let drivers = Drivers::new();
+
+        assert!(
+            drivers.taking(&working(&[])).is_empty(),
+            "a server with nothing running and nothing driven holds no places",
+        );
+
+        assert_eq!(
+            drivers.taking(&working(&[CONVERSATION])),
+            working(&[CONVERSATION]),
+            "a session running takes one, with nothing registered behind it",
+        );
+
+        let driving = drivers.driving(CONVERSATION + 1);
+
+        assert_eq!(
+            drivers.taking(&working(&[])),
+            working(&[CONVERSATION + 1]),
+            "and a driver registered takes one, with no session under it",
+        );
+
+        assert_eq!(
+            drivers.taking(&working(&[CONVERSATION])),
+            working(&[CONVERSATION, CONVERSATION + 1]),
+            "two Conversations, two places",
+        );
+
+        drop(driving);
+
+        assert!(
+            drivers.taking(&working(&[])).is_empty(),
+            "and a driver that let go leaves the place behind it",
+        );
+    }
+
+    /// And a Conversation in both registers at once takes **one** place rather
+    /// than two: what the limit counts is Conversations, and a run seen out by a
+    /// driver is the ordinary shape of one.
+    #[test]
+    fn a_conversation_in_both_registers_takes_one_place() {
+        let drivers = Drivers::new();
+        let watchers: Vec<Driving> = (0..3).map(|_| drivers.driving(CONVERSATION)).collect();
+
+        assert_eq!(
+            drivers.taking(&working(&[CONVERSATION])).len(),
+            1,
+            "one Conversation, however many things are holding it",
+        );
+
+        drop(watchers);
     }
 }

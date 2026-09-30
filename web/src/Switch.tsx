@@ -17,6 +17,7 @@
 
 import type { JSX } from "solid-js";
 
+import { rowPress } from "./rows";
 import styles from "./Switch.module.css";
 
 /// A labelled switch.
@@ -40,7 +41,14 @@ export function Switch(props: {
   flip: (on: boolean) => void;
 }): JSX.Element {
   return (
-    <label class={styles.switch}>
+    // The whole row is one thing to press, and it is the row that answers the
+    // press rather than the box it would have been forwarded to — see
+    // [`rowPress`], and what a hand that slid a pixel used to get instead. A
+    // disabled switch is refused there, as the browser refuses one.
+    <label
+      class={styles.switch}
+      onClick={rowPress(() => props.flip(!props.on))}
+    >
       <span>{props.label}</span>
       <input
         type="checkbox"
@@ -54,6 +62,9 @@ export function Switch(props: {
         // The box the browser has just ticked, rather than the opposite of what
         // the caller held: a disabled flip never gets here, and reading the
         // element is the account that cannot disagree with what the human sees.
+        // A press that landed anywhere else in the row never gets here either —
+        // the row has it, and asks for the opposite of `on` because nothing
+        // moved the box for it to read.
         //
         // And then put straight back where `on` says it stands, because the
         // browser moving it is not the same thing as it having moved. What ticks

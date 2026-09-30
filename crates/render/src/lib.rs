@@ -46,7 +46,7 @@ pub use conversations::{
     CheckRollup, Checked, Comment, CommitEvent, CommitPane, CommitRecord, CompanionAdded,
     CompanionAddition, CompanionBaseRecorded, CompanionBranchRenamed, CompanionMode,
     CompanionModeChoice, CompanionModeChosen, CompanionRefusal, CompanionRemoved, CompanionUpgrade,
-    CompanionView, ConversationArchived, ConversationClosed, ConversationEntry,
+    CompanionView, Confirming, ConversationArchived, ConversationClosed, ConversationEntry,
     ConversationSteered, ConversationStopped, ConversationUnarchived, ConversationView,
     GrillingStarted, HandoffEvent, Lifecycle, ManualTaskEvent, Merging, MovedEvent, NewAdoption,
     NewCompanion, NewConversation, NewOrder, NoticeEvent, Parked, PendingSteerView, PinnedEvent,
@@ -54,17 +54,17 @@ pub use conversations::{
     PullRequestCommit, PullRequestDetails, PullRequestEvent, PullRequestSummary, QuestionSetEvent,
     RepoChoice, RepoSwitched, ResolveConflictsEvent, Resolved, Resumed, RoadmapPane, Screen,
     ServerAttached, ServerRemoved, SetRow, ShareView, ShowArchived, ShowingArchived, Shown, Size,
-    StageDocument, StageEntry, StageListEvent, StageListReached, StageSource, Started,
+    StageDocument, StageEntry, StageListEvent, StageListReached, StageSource, StageState, Started,
     SteerAdditionView, SteerCancelled, SteerCompanionRefusal, SteerEvent, SteerForm, SteerOpened,
     SteerPairingView, SteerRecordView, SteerSaved, SteerSubmission, SteerTarget, SteerUpgradeView,
     TakenUp, TargetNamed, TargetRecorded, TaskDocument, TaskEntry, TaskListEvent, TaskListReached,
     TaskSource, TerminalClosed, TerminalOpened, TerminalView, TerminalsView, TimelineEvent,
-    UnreadableSetEvent, Watching, Worktree, agent_output_event, agent_output_pinned, backlog_pane,
-    brief_event, commit_event, commit_pane, handoff_event, manual_task_event, moved_event,
-    notice_event, proposal_view, pull_request_details, pull_request_event, pull_request_reached,
-    question_set_event, resolve_conflicts_event, roadmap_pane, stage_list, stage_list_event,
-    stage_list_reached, steer_event, task_list, task_list_event, task_list_reached,
-    unreadable_set_event,
+    Uncommitted, UnreadableSetEvent, Watching, Worktree, agent_output_event, agent_output_pinned,
+    backlog_pane, brief_event, commit_event, commit_pane, handoff_event, manual_task_event,
+    moved_event, notice_event, proposal_view, pull_request_details, pull_request_event,
+    pull_request_reached, question_set_event, resolve_conflicts_event, roadmap_pane, stage_list,
+    stage_list_event, stage_list_reached, steer_event, task_list, task_list_event,
+    task_list_reached, unreadable_set_event,
 };
 pub use device::{
     DeviceIdentity, DevicesView, DiscoveredDevice, FoundOn, LinkedDevice, RenewedCertificate,
@@ -87,11 +87,12 @@ pub use push::{PushKey, Subscribed, Subscription, Unsubscribe};
 pub use remote::{RemoteBanner, RemoteView, ServeEdit, ServePress, ServeView};
 pub use repos::{Created, Creation, Registered, Registration, RepoEntry, RepoRemoved, RepoView};
 pub use settings::{
-    Author, BindEntry, BuildCacheEdit, BuildCacheView, CleanupEdit, CleanupStepEdit,
-    CleanupStepView, CleanupView, CompileCaching, ConflictResolution, HeaderEdit, IgnoreRule,
-    IgnoredCommentsEdit, McpHeader, McpHeaderEdit, McpServer, McpServerEdit, McpServersEdit,
-    PathResolution, PathSource, PathsView, RuleField, RuleRefused, ServerField, ServerRefused,
-    ServerTried, SettingsEdit, SettingsSaved, SettingsView, TokenEdit, TokenSaved, Tried, Verified,
+    AtOnceEdit, AtOnceView, Author, BindEntry, BuildCacheEdit, BuildCacheView, CleanupEdit,
+    CleanupStepEdit, CleanupStepView, CleanupView, CompileCaching, ConflictResolution, HeaderEdit,
+    IgnoreRule, IgnoredCommentsEdit, McpHeader, McpHeaderEdit, McpServer, McpServerEdit,
+    McpServersEdit, PathResolution, PathSource, PathsView, RuleField, RuleRefused, ServerField,
+    ServerRefused, ServerTried, SettingsEdit, SettingsSaved, SettingsView, TokenEdit, TokenSaved,
+    Tried, Verified,
 };
 pub use sharing::{
     CommentedOn, MissedOut, SHARE_MARKER, ShareCommented, SharePublished, SharedCommit,

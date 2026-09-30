@@ -143,6 +143,7 @@ const CLOSED = {
   ready_to_continue: false,
   waiting: false,
   waiting_on_checks: false,
+  waiting_to_join: false,
   parked: null,
 } as const satisfies Partial<ConversationView>;
 
@@ -155,6 +156,7 @@ const CLOSED_ROW = {
   idle: false,
   waiting: false,
   waiting_on_checks: false,
+  waiting_to_join: false,
   parked: null,
 } as const satisfies Partial<ConversationEntry>;
 
@@ -303,6 +305,7 @@ export function rowFor(view: ConversationView): ConversationEntry {
     idle: false,
     waiting: false,
     waiting_on_checks: false,
+    waiting_to_join: false,
     parked: null,
     unseen: false,
   };
