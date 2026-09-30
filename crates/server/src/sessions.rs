@@ -3010,6 +3010,28 @@ impl Sessions {
             _ => None,
         };
 
+        // And, now that there is a process, the Timeline told that this session is
+        // that conversation carried on rather than a session of its own. Which is
+        // what the human has no other way to tell: they pressed one thing, and a
+        // resumed agent picking up mid-sentence and a re-primed one starting the
+        // state again from the record are both a session appearing. See
+        // [`crate::carrying`], which says the other outcome too.
+        //
+        // **Here rather than where the decision was made**, which is a whole
+        // launch earlier: everything between the two can still refuse a session,
+        // and a Notice in front of them would claim a conversation picked up where
+        // nothing ever ran.
+        if let (Named::Continuing, Some(carrying)) = (named, session.as_deref()) {
+            crate::carrying::carried_on(
+                pool,
+                nudges,
+                conversation_id,
+                pairing.profile.agent_type(),
+                carrying,
+            )
+            .await;
+        }
+
         // And the same output watched for the one thing a session says that is
         // about the account rather than about the work: that its window is
         // spent. The Profile is taken now because that is what the stop names,
@@ -3367,7 +3389,9 @@ struct Continuing {
 /// which is Verkstead's own Resume, unchanged, and nothing lost. **Each of them
 /// but the first is said on the Timeline too**, because the human pressed one
 /// thing and can see two outcomes from it and has no way to tell which happened:
-/// see [`crate::carrying`], and [`Carrying`], which is what this answers in.
+/// see [`crate::carrying`], and [`Carrying`], which is what this answers in. The
+/// *yes* is said by the launch once there is a process rather than here, there
+/// being a whole launch between this and a session.
 ///
 /// - **The record says a session is to be carried on from here.** A Conversation
 ///   that has just been moved onto this device is one whose agent was part way
@@ -3454,22 +3478,13 @@ async fn continuing(
     held: Held<'_>,
 ) -> Option<Continuing> {
     match carried_on(pool, conversation, pairing, home).await {
-        Carrying::On(continuing) => {
-            // Said on the Timeline, because the human pressed one thing and can
-            // see two outcomes: a resumed agent picks up mid-sentence and a
-            // re-primed one starts the state again from the record, and from the
-            // outside both are a session appearing. See [`crate::carrying`].
-            crate::carrying::carried_on(
-                pool,
-                nudges,
-                conversation.id,
-                pairing.profile.agent_type(),
-                &continuing.session,
-            )
-            .await;
-
-            Some(continuing)
-        }
+        // Said on the Timeline by the launch rather than here — see
+        // [`Sessions::start`], which writes it once there is a process. This is a
+        // whole launch in front of that, and a sandbox that cannot be built, a
+        // terminal that will not open and a spawn that fails each refuse a session
+        // between the two: a Notice written here would have said a conversation
+        // was picked up where nothing was ever started.
+        Carrying::On(continuing) => Some(continuing),
 
         // The resume is not going to happen, so the reader really has gone, and
         // whatever the caller held for it goes the way a relaunch has always sent

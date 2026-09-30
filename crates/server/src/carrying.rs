@@ -172,9 +172,15 @@ impl Instead {
 /// Say on `conversation_id`'s Timeline that what was started for it is
 /// Verkstead's own Resume, and which of the reasons it was.
 ///
-/// Written whether or not anybody is looking and never refused for: the session
-/// is already running by the time this is called, and a Notice that could not be
-/// written costs the telling rather than the work.
+/// Written whether or not anybody is looking and never refused for: what the
+/// arrival is taking the work up with is settled by the time this is called, and
+/// a Notice that could not be written costs the telling rather than the work.
+///
+/// **Which is not to say a session is running.** Two of the three callers are in
+/// front of one — the arrival that found no session on the record, and the launch
+/// that found it could not resume — and what they are saying is what the session
+/// they are about to start, or have just declined to make a resume of, is going to
+/// be. The third reads it off a session that has ended.
 pub(crate) async fn instead(
     pool: &SqlitePool,
     nudges: &Nudges,
@@ -198,6 +204,11 @@ pub(crate) async fn instead(
 /// mid-sentence and a re-primed one starts again from the record, and the human
 /// pressing *Transfer to…* sees a session either way — so the one that worked
 /// says so as plainly as the ones that did not.
+///
+/// **And said once there is a process**, unlike any of them: this is the only one
+/// of the two outcomes that a launch can still fail its way out of after it has
+/// been decided on, so it is written where a session is certain rather than where
+/// the decision was made. See [`crate::sessions::continuing`], which decides it.
 pub(crate) async fn carried_on(
     pool: &SqlitePool,
     nudges: &Nudges,
