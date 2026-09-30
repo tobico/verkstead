@@ -1561,6 +1561,16 @@ async fn deno_and_bun_link_out_of_their_stores_too_and_so_copy_in_a_sandbox() {
 /// Said here rather than argued in a comment, because it is the finding this
 /// stage turned up about the placeholder stage 01 added, and the next session
 /// to read `{stores}` should find it proved rather than asserted.
+///
+/// **Each directory bound at its own path**, rather than at a name of this
+/// test's choosing. A `--bind` needs its mountpoint to exist or be creatable,
+/// and under `--dev-bind / /` a mountpoint named `/the-store` is one bwrap has
+/// to `mkdir` on the real root — which fails outright anywhere `/` belongs to
+/// root, so the probe died `Can't mkdir /the-store: Permission denied` on CI
+/// while passing on a machine whose own root is a writable overlay. Bound where
+/// they already are there is nothing to create, and it is the same two mounts
+/// either way: what the kernel is being asked is about the binds and never
+/// about what they are called.
 #[test]
 fn a_hardlink_across_two_of_a_sandboxs_binds_is_refused_by_the_kernel() {
     let Some(tools) = tools("the cross-bind hardlink", &["bwrap"]) else {
@@ -1584,18 +1594,20 @@ fn a_hardlink_across_two_of_a_sandboxs_binds_is_refused_by_the_kernel() {
          of a store beside the Worktrees"
     );
 
+    let (from, to) = (store.join("in-the-store"), project.join("linked"));
+
     let tried = Command::new(bwrap)
         .args(["--dev-bind", "/", "/"])
         .arg("--bind")
         .arg(&store)
-        .arg("/the-store")
+        .arg(&store)
         .arg("--bind")
         .arg(&project)
-        .arg("/the-project")
+        .arg(&project)
         .args([
             SH,
             "-c",
-            "ln /the-store/in-the-store /the-project/linked 2>&1\n",
+            &format!("ln {} {} 2>&1\n", from.display(), to.display()),
         ])
         .stdin(Stdio::null())
         .output()
