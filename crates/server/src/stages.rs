@@ -11,11 +11,12 @@
 //!
 //! **Where** each stage of it is — *done*, *in progress*, *waiting to join*,
 //! *halted*, *waiting on* a named stage, *waiting for a place* or *to do* — is
-//! [`states`], which is what the card's rows and the pane's headings say. The same rule as [`done`] below and one word further: what
-//! a scheduler asks is whether a stage is done, so that it knows what may start,
-//! and what a human reading the roadmap asks is where each of its stages has got
-//! to. So the states that are not done are told apart there and are all one *not
-//! done* here.
+//! [`states`], which is what the card's rows and the pane's headings say. The
+//! same rule as [`done`] below and one word further: what a scheduler asks is
+//! whether a stage is done, so that it knows what may start, and what a human
+//! reading the roadmap asks is where each of its stages has got to. So the
+//! states that are not done are told apart there and are all one *not done*
+//! here.
 //!
 //! What says a stage is done is **Verkstead's own record where it has a row for
 //! that stage, and the checkbox in `ROADMAP.md` where it has none** — see

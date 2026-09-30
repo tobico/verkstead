@@ -2341,67 +2341,68 @@ ADR-0021.
 **And where it is, is a word the viewer is told.** The pinned stage card's row
 and the roadmap's details pane both say where each Stage of the roadmap has got
 to — *done*, *in progress*, *waiting to join*, *halted*, *waiting on* a named
-Stage, *waiting for a place* or *to do* — in place of the *done* and *to do* the
-card used to work out from the box. The words come off Verkstead's own reading, the same one above:
-*done* is a Stage that settled, or one the record holds nothing about whose box
-is ticked; *in progress* is one the record has in flight; *waiting to join* is one
-of those the server is **holding** before its finish, read off that register at
-the moment the page is drawn rather than off anything stored — the same register
-the sidebar's own label comes off, so a Stage cannot read one thing on its row
-there and another on the roadmap's card here, and a server that has just come
-back is holding nothing and says *in progress* again until its resume finds the
-Stage held a second time; *halted* is one whose Conversation has stopped or that
-was closed before it ever wrapped up, one word for the two because what a reader
-does about either is go and look at that Conversation — and it wins over the hold,
-a stopped Conversation being held by nothing; *waiting on* is a
-Stage of a declaring roadmap that nothing has started yet, naming the Stages its
-own line stands on that have not settled — only those, so what it says moves as
-the roadmap runs where what it *stands on* does not; *waiting for a place* is one
-that is **ready** — every Stage it stands on has settled — with nowhere to run,
-which is told apart from the one above it because a Stage waiting on a dependency
-waits on work and this one waits on the machine, and a roadmap gone quiet with
-ready work in it would otherwise read as a roadmap the scheduler forgot; and *to
-do* is everything else. The viewer works none of them out — a card that decided for itself whether
-a Stage was under way, or which of its neighbours it was behind, would be a
-second opinion about something the record already knows — and a roadmap the
-record holds nothing about reads *done* or *to do* throughout, off its boxes,
-exactly as it always has. **An undeclared roadmap's unstarted Stages read *to
-do*** whatever the record says: such a roadmap is scheduled as each Stage
-standing on the one before it, but the silence is the scheduler's reading rather
-than something the roadmap says, and *waiting on 03* about a line that declares
-nothing would be Verkstead putting a declaration in the human's mouth — an
-undeclared roadmap's ready Stage does read *waiting for a place*, that being the
-machine's fact rather than the roadmap's. **One word for both limits**, a
-roadmap's own and the server's: which of the two is holding a Stage is on the
-Timeline of the Conversation that held it, a row having no room for it, and where
-more Stages are ready than there are places the lowest-numbered take them, which
-is the scheduler's own order. Nothing about that waiting is stored — what is
-ready is worked out afresh from the declarations, the record, the boxes and the
-two limits as Settings has them every time it is asked, so raising one moves a
-Stage out of the state and a second record saying *this Stage is waiting* could
-only come to disagree. The pane
-says the state twice, on the Stage's section heading and on the line the table of
-contents reaches it by, beside what the Stage's line declares it stands on.
+Stage, *waiting for a place* or *to do* — in place of the *done* and *to do*
+the card used to work out from the box. The words come off Verkstead's own
+reading, the same one above: *done* is a Stage that settled, or one the record
+holds nothing about whose box is ticked; *in progress* is one the record has
+in flight; *waiting to join* is one of those the server is **holding** before
+its finish, read off that register at the moment the page is drawn rather than
+off anything stored — the same register the sidebar's own label comes off,
+so a Stage cannot read one thing on its row there and another on the roadmap's
+card here, and a server that has just come back is holding nothing and says *in
+progress* again until its resume finds the Stage held a second time; *halted*
+is one whose Conversation has stopped or that was closed before it ever wrapped
+up, one word for the two because what a reader does about either is go and look
+at that Conversation — and it wins over the hold, a stopped Conversation
+being held by nothing; *waiting on* is a Stage of a declaring roadmap that
+nothing has started yet, naming the Stages its own line stands on that have
+not settled — only those, so what it says moves as the roadmap runs where
+what it *stands on* does not; *waiting for a place* is one that is **ready**
+— every Stage it stands on has settled — with nowhere to run, which is told
+apart from the one above it because a Stage waiting on a dependency waits on
+work and this one waits on the machine, and a roadmap gone quiet with ready
+work in it would otherwise read as a roadmap the scheduler forgot; and *to do*
+is everything else. The viewer works none of them out — a card that decided
+for itself whether a Stage was under way, or which of its neighbours it was
+behind, would be a second opinion about something the record already knows —
+and a roadmap the record holds nothing about reads *done* or *to do* throughout,
+off its boxes, exactly as it always has. **An undeclared roadmap's unstarted
+Stages read *to do*** whatever the record says: such a roadmap is scheduled as
+each Stage standing on the one before it, but the silence is the scheduler's
+reading rather than something the roadmap says, and *waiting on 03* about a line
+that declares nothing would be Verkstead putting a declaration in the human's
+mouth — an undeclared roadmap's ready Stage does read *waiting for a place*,
+that being the machine's fact rather than the roadmap's. **One word for both
+limits**, a roadmap's own and the server's: which of the two is holding a Stage
+is on the Timeline of the Conversation that held it, a row having no room for
+it, and where more Stages are ready than there are places the lowest-numbered
+take them, which is the scheduler's own order. Nothing about that waiting is
+stored — what is ready is worked out afresh from the declarations, the record,
+the boxes and the two limits as Settings has them every time it is asked,
+so raising one moves a Stage out of the state and a second record saying *this
+Stage is waiting* could only come to disagree. The pane says the state twice, on
+the Stage's section heading and on the line the table of contents reaches it by,
+beside what the Stage's line declares it stands on.
 
 **And every Stage in flight is a row on that card.** It draws five entries of a
 longer roadmap, and which five was the ones around the first Stage not ticked
-while that was *where the work has got to*; with Stages worked side by side it is
-every Stage the record has a Conversation on — *in progress*, *waiting to join*
-or *halted* — and none of them gives way to hold the card at five, three Stages
-running being what a reader came to it for. Neither of the two waits nothing has
-started is in flight, and for the one reason: what each of them waits for is
-somewhere else. A Stage *waiting on* another waits on the work the card is
-already showing; a Stage *waiting for a place* waits on the machine, and a wide
-roadmap on a busy server has as many of those as it has roots — a card keeping a
-row for each would grow with the queue and push the record it is pinned above off
-the screen, which is the one thing the window is there to stop. Both are drawn
-where the window reaches them, as the neighbours they are, and both say their own
-word when it does. What is left of the five goes on closing the gaps between them and
-then on their neighbours, so a roadmap running in one place reads as it always
-did, and Stages too far apart to join up are drawn as stretches of the roadmap
-with an ellipsis row saying what is out of sight between them as well as at the
-ends. The count beside the heading still counts the whole roadmap, and the
-details pane still holds every Stage.
+while that was *where the work has got to*; with Stages worked side by side
+it is every Stage the record has a Conversation on — *in progress*, *waiting
+to join* or *halted* — and none of them gives way to hold the card at five,
+three Stages running being what a reader came to it for. Neither of the two
+waits nothing has started is in flight, and for the one reason: what each of
+them waits for is somewhere else. A Stage *waiting on* another waits on the work
+the card is already showing; a Stage *waiting for a place* waits on the machine,
+and a wide roadmap on a busy server has as many of those as it has roots —
+a card keeping a row for each would grow with the queue and push the record
+it is pinned above off the screen, which is the one thing the window is there
+to stop. Both are drawn where the window reaches them, as the neighbours they
+are, and both say their own word when it does. What is left of the five goes on
+closing the gaps between them and then on their neighbours, so a roadmap running
+in one place reads as it always did, and Stages too far apart to join up are
+drawn as stretches of the roadmap with an ellipsis row saying what is out of
+sight between them as well as at the ends. The count beside the heading still
+counts the whole roadmap, and the details pane still holds every Stage.
 
 **And a Stage's row leads to the Conversation working it.** Which Conversation a
 Stage is, is Verkstead's own record — the same rows that say how far each Stage
@@ -2426,9 +2427,10 @@ row hangs off is what says when. A Stage whose every box is ticked and that has
 a Stage in the chain which has not *settled* is **held before its finish**: no
 session is launched, the Timeline says which Stage it is waiting on, the
 Conversation wears the label for it and its row on the roadmap's card reads
-*waiting to join*, and it is released the moment that one settles. Nothing rebases onto a branch that is
-still moving, which is what buys the rest of it — a Stage is rebased once,
-before it has a pull request anybody has started reading. Two Stages finishing
+*waiting to join*, and it is released the moment that one settles. Nothing
+rebases onto a branch that is still moving, which is what buys the rest of it —
+a Stage is rebased once, before it has a pull request anybody has started
+reading. Two Stages finishing
 close together are let in **one at a time, in the order their tasks finished**,
 each waiting on the one in front of it joining *and* settling. In a roadmap run
 in order the Stage below has always settled first, so nothing is ever held. See

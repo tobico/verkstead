@@ -4,10 +4,10 @@
 //! stage is, off Verkstead's record of the stage Conversations, the boxes in
 //! `ROADMAP.md`, what each line declares it stands on, which stages the server is
 //! holding before their finish and how many places it has left, all together —
-//! and what the human reads is the page's to choose. The viewer picks the words and works out none of the states:
-//! a card that decided for itself whether a stage was under way, or which of its
-//! neighbours it was behind, would be a second opinion about something the record
-//! already knows.
+//! and what the human reads is the page's to choose. The viewer picks the words
+//! and works out none of the states: a card that decided for itself whether a
+//! stage was under way, or which of its neighbours it was behind, would be a
+//! second opinion about something the record already knows.
 //!
 //! In one place because the same state is written in three: the row on the
 //! pinned card, the heading of the stage's section in the details pane, and
