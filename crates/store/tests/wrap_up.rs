@@ -29,6 +29,9 @@ const OWN: i64 = 41;
 /// And the number the companion's has in the repository beside it, `#41` there
 /// being something else entirely or nothing at all — see [`beside`].
 const BESIDE: i64 = 7;
+/// The device every Conversation started here is ranked by, named the way a
+/// cluster names one (ADR-0020, *Ranks*).
+const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
 
 /// A Conversation whose work is on a pull request, which is the only state any
 /// of this is about.
@@ -42,7 +45,7 @@ async fn wrapping(pool: &SqlitePool) -> i64 {
         .unwrap()
         .expect("nothing is registered at that path yet");
 
-    let id = start_conversation(pool, repo.id, "rate-limiting")
+    let id = start_conversation(pool, repo.id, "rate-limiting", THIS_DEVICE)
         .await
         .unwrap()
         .expect("the Repo was just registered");

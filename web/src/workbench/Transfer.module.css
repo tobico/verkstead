@@ -1,0 +1,99 @@
+/* The dialog behind *Transfer to…* — see `Transfer.tsx`, which is the card the
+   actions menu's row opens over the page.
+
+   The card and where it sits are the shared `Modal`'s, as they are for the two
+   cards beside this one in `Actions.module.css`; what is here is what stands
+   inside it — the heading, the line under it, the select, whatever the
+   preflight found, and the two ways out. */
+
+/* Wide enough for a device name and a sentence about it, and no wider: this is
+   a card over a page rather than a page. */
+.transferring {
+  max-width: 32rem;
+}
+
+.transferring .title {
+  margin-top: 0;
+  font-weight: 600;
+}
+
+/* What the press would do, under the heading and above the choice: the whole of
+   what a transfer is, in the voice the menu's rows say what they do in. */
+.transferring .says {
+  margin: 0.75rem 0 1rem;
+  color: var(--ink-soft);
+}
+
+/* And what stands where the findings will be: an invitation before anything is
+   picked, and the wait while the far end is being asked. Both quiet, both one
+   line, so the card does not jump as the reading lands. */
+.transferring .waiting,
+.transferring .ready {
+  margin: 1rem 0 0;
+  color: var(--ink-soft);
+}
+
+/* Everything in the way, one to a line and drawn as prose rather than as a
+   list of codes: each is a sentence naming the machine it is about, which is
+   what makes it something to go and do. */
+.transferring .lacks {
+  margin: 1rem 0 0;
+  padding-left: 1.2rem;
+}
+
+.transferring .lacks li + li {
+  margin-top: 0.4rem;
+}
+
+.transferring .failure {
+  margin-top: 1rem;
+}
+
+/* The two ways out, laid out as the close's confirm pair are: half the row
+   each, and taller than a press on a card. */
+.transferring .out {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: 1.25rem;
+}
+
+.transferring .out button {
+  flex: 1 1 9rem;
+  padding: 0.7rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  border-radius: 0.5rem;
+  cursor: pointer;
+}
+
+/* And the press that would move the work, filled — with the way back beside it
+   painted by `.secondary` in `styles/base.css`, which is how every pair of
+   these is told apart. Stood out of the way with `:where`, which weighs
+   nothing: see `.confirming .confirmingOut` in `Actions.module.css`, which is
+   the same pair one card along. */
+.transferring .out button:not(:where(.secondary)) {
+  color: var(--paper);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+}
+
+/* Refused while the preflight holds anything, or while nothing has been picked
+   and nothing has been asked. Dimmed rather than hidden: what the human is
+   looking at is a press they cannot make yet and the reason it is above it. */
+.transferring .out button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+@media (hover: hover) {
+  .transferring .out button:not(:where(.secondary, :disabled)):hover {
+    background: var(--accent-deep);
+    border-color: var(--accent-deep);
+  }
+}
+
+/* And the press itself, painted by the rule above like every other in the row
+   and named here so that it can be found. */
+.go {
+}

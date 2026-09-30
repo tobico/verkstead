@@ -138,12 +138,23 @@ function words(row: Element): string {
 /// Here rather than in each test, because it is the one thing about a browse
 /// that is neither the dropdown nor the server: a test serving a level has to
 /// name the request the field is about to make.
-export function listingAt(path: string | null): string {
+///
+/// `device` is the member whose filesystem is being looked through, where the
+/// field is on a form about one of them — a Repo being created on the laptop is a
+/// browse of the laptop's directories. Left off for every form of this device's
+/// own, which is most of them: see `on` in `src/api/client.ts`, which is the one
+/// place either path is composed and which this follows.
+export function listingAt(path: string | null, device?: string): string {
   const asking = new URLSearchParams();
 
   if (path !== null) {
     asking.set("path", path);
   }
 
-  return `/api/ui/directories?${asking}`;
+  const under =
+    device === undefined
+      ? "/api/ui"
+      : `/api/ui/members/${encodeURIComponent(device)}`;
+
+  return `${under}/directories?${asking}`;
 }

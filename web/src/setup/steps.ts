@@ -8,7 +8,7 @@
 //! [`StepsView`], and remembers which is open under [`SETUP_STEP`].
 //!
 //! **The open step is a fact about the tab in front of you**, so it is kept on
-//! the device (`src/device.ts`) and never sent anywhere. Two people setting the
+//! the device (`remembered.ts`) and never sent anywhere. Two people setting the
 //! same machine up from two browsers are on two different steps, and neither
 //! has any business moving the other along; a phone put down mid-install picks
 //! up where it was left. It is also why there is nothing on the wire for it:
@@ -24,7 +24,7 @@
 //! human has: a Profile is an account under a harness that has to be installed
 //! first, and there is nothing to commit as until there is something to commit.
 
-import { read, write } from "../device";
+import { read, write } from "../remembered";
 import type { StepsView } from "../api/types";
 
 /// Where the wizard stands. Its own page rather than a pane of the settings —

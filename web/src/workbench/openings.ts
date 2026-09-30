@@ -27,6 +27,15 @@
 //! anything was named by a word, so the ids are put behind a segment of their
 //! own and can never collide with one.
 //!
+//! **And every one of them may stand under a device.** A Conversation lives on
+//! whichever device is doing its work, and one of a member's is opened through
+//! this one at `/devices/{device}` above its own path — the leaves nested under
+//! it unchanged, because the device is a fact about which Verkstead the page is
+//! reading rather than about which pane is open (ADR-0020). A path built with no
+//! device is the path it has always been, character for character: this device
+//! is where most of the work is, and a device segment on every URL would say
+//! nothing.
+//!
 //! A path naming something the loaded Conversation does not have leaves the
 //! pane empty, which is what the pane is when nothing is open at all: the URL
 //! is a record of what was picked rather than a promise that it is still there.
@@ -39,6 +48,7 @@
 //! turned out to be.
 
 import type { ConversationView, TimelineEvent } from "../api/types";
+import type { Device } from "../reaching";
 
 /// What the details pane is showing, as the card that opened it names itself.
 ///
@@ -83,18 +93,33 @@ export function roadmapOpened(opening: Opening | null): string | null {
     : null;
 }
 
+/// The segment a member's Conversation stands under — see [`deviceAt`], which
+/// reads it back off a path.
+const DEVICES = "/devices/";
+
 /// Where a Conversation stands, which is what every one of its details panes is
 /// nested under.
-export function pathOf(conversation: string | number): string {
-  return `/conversations/${encodeURIComponent(String(conversation))}`;
+///
+/// Under a device where it is one of a member's, and under nothing at all where
+/// it is this device's own: a local URL keeps its shape, so nothing that never
+/// heard of a cluster writes a path any different from the one it wrote before.
+export function pathOf(
+  conversation: string | number,
+  device: Device = null,
+): string {
+  const whose =
+    device === null ? "" : `${DEVICES}${encodeURIComponent(device)}`;
+
+  return `${whose}/conversations/${encodeURIComponent(String(conversation))}`;
 }
 
 /// And where one of its details panes stands.
 export function pathTo(
   conversation: string | number,
   opening: Opening,
+  device: Device = null,
 ): string {
-  const under = pathOf(conversation);
+  const under = pathOf(conversation, device);
 
   if (
     opening === "backlog" ||
@@ -121,7 +146,7 @@ export function pathTo(
 /// what tells a Conversation from a Conversation with its backlog open is what
 /// stands after the id.
 export function openingAt(pathname: string): Opening | null {
-  const segments = pathname.split("/").filter((segment) => segment !== "");
+  const segments = under(pathname);
   if (segments[0] !== "conversations") {
     return null;
   }
@@ -161,6 +186,29 @@ export function openingAt(pathname: string): Opening | null {
   }
 
   return null;
+}
+
+/// And which device a path is about, or `null` where it is this one's.
+///
+/// Read off the path for the reason what is open is: there is one account of
+/// where the page stands, and it is the URL. Which is also what a page walking
+/// between a local Conversation and a remote one is — a navigation and nothing
+/// more — so everything hanging off this follows it without being told.
+export function deviceAt(pathname: string): Device {
+  const segments = pathname.split("/").filter((segment) => segment !== "");
+
+  return segments[0] === "devices" && segments[1] !== undefined
+    ? decodeURIComponent(segments[1])
+    : null;
+}
+
+/// A path with the device taken off the front of it, in segments: what is left
+/// is the path a local Conversation stands at, which is the one shape
+/// everything here reads.
+function under(pathname: string): string[] {
+  const segments = pathname.split("/").filter((segment) => segment !== "");
+
+  return deviceAt(pathname) === null ? segments : segments.slice(2);
 }
 
 /// What a Timeline Event opens in the details pane, or `null` where it opens

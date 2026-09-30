@@ -77,11 +77,41 @@ pub enum ProfileAccount {
     OpenCode { home: String },
 }
 
+impl ProfileAccount {
+    /// Which agent runs this account, which is what its shape says.
+    ///
+    /// The discriminator read as the type it is spelled in: a reader with an
+    /// account in hand and no Profile around it — a refusal naming the harness
+    /// a row could not be run on, say — should not have to match four arms to
+    /// learn what the tag already holds.
+    pub fn agent_type(&self) -> AgentType {
+        match self {
+            ProfileAccount::Claude { .. } => AgentType::Claude,
+            ProfileAccount::Codex { .. } => AgentType::Codex,
+            ProfileAccount::Grok { .. } => AgentType::Grok,
+            ProfileAccount::OpenCode { .. } => AgentType::OpenCode,
+        }
+    }
+}
+
 /// Why a saved Profile cannot be run under as things stand.
 ///
 /// Not a way of being saved: every Profile here passed the same checks when it
 /// was written down. This is what has become of its account since — the pair
 /// for a Claude Profile, and the one home for every type that keeps one.
+///
+/// **And three of them are a mirror's**, which is the same question asked of a
+/// Profile whose account is on another machine. None of that machine's paths is
+/// judged here — they belong to no filesystem this device can read — so what is
+/// asked instead is the three things that would stop a launch away from home,
+/// in the order a launch would meet them: the home device answering at all, an
+/// account with a login to lend, and the harness to run it on this machine.
+///
+/// **Refused rather than hidden.** A row that says why it cannot be run is
+/// something to go and put right, and a row quietly missing is a human looking
+/// for a Profile they know they saved. So none of the three takes a row out of
+/// a picker, and a Pairing made against one goes on reading as a Pairing — with
+/// a broken Profile in it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum Broken {
@@ -93,6 +123,53 @@ pub enum Broken {
 
     /// The home the account was kept under is not there any more.
     HomeMissing,
+
+    /// The device this Profile is at home on has stopped answering, so its
+    /// account cannot be fetched and no root here can be built out of it.
+    ///
+    /// The first of the three a launch away from home would meet, and the one
+    /// that makes the other two answers about a moment that has passed: what
+    /// the row says of them is what that machine last said.
+    HomeUnreachable,
+
+    /// The account at home holds no login file, so there is nothing to mirror
+    /// and the Profile cannot be used away from its own device at all.
+    ///
+    /// A Claude login kept in the macOS Keychain is the case this exists for,
+    /// and a sign-out at home comes to the same thing — the file goes, the row
+    /// says the Profile has none, and the fix is a login on the machine the
+    /// account is on.
+    NoLoginAtHome,
+
+    /// The harness this Profile runs is not on *this* machine, whatever is true
+    /// of it at home.
+    ///
+    /// The onboarding probe's own finding, asked of the program a session of
+    /// this type is launched as — so a mirror reads it in that step's own word
+    /// rather than in a second vocabulary for one fact.
+    HarnessMissing,
+}
+
+/// Why a press that would have started a session was refused over a Profile:
+/// what is wrong with it, what it runs, and the machine it is at home on.
+///
+/// **Enough to say the sentence the row says.** Every one of the readings above
+/// is drawn on the Profile's own row, and a refusal saying only *a chosen
+/// profile is broken* would be a second, vaguer account of something the human
+/// is already being told precisely. So what travels is the three facts that
+/// sentence is composed out of, and the viewer composes it once for both.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct ProfileTrouble {
+    /// What is wrong with it.
+    pub broken: Broken,
+
+    /// Which harness it runs, for the trouble that is about the harness.
+    pub agent_type: AgentType,
+
+    /// And the machine the account is at home on, where that is not this one —
+    /// which is what the two troubles about a home name.
+    pub device: Option<String>,
 }
 
 /// One row of the Profile list.
@@ -123,14 +200,100 @@ pub struct ProfileEntry {
     /// nothing more.
     pub models: Vec<String>,
 
-    /// `null` while the account is where it was left, which is the ordinary
-    /// case.
+    /// `null` while the account is where it was left and there is nothing in
+    /// the way of running a session under it here, which is the ordinary case.
     pub broken: Option<Broken>,
+
+    /// Whether the account this row names holds a **login file**, which is what
+    /// says the Profile can be used away from the device it is at home on.
+    ///
+    /// Answered on the row wherever it is drawn, and by the device the account
+    /// is on: a mirror carries what that machine last said, and this device's
+    /// own rows are looked at here. A login kept somewhere that is not a file —
+    /// the macOS Keychain — leaves nothing for another device to mirror, and so
+    /// does a sign-out; either way the account is still perfectly runnable on
+    /// the machine it is on, which is why this is a fact beside [`Self::broken`]
+    /// rather than a way of being it. A *mirror* with no login at home is
+    /// broken, and that is [`Broken::NoLoginAtHome`].
+    pub login: bool,
 
     /// Whether a session under this Profile shares the account's memory store,
     /// or starts with an empty one of its own. On unless the human switched it
     /// off.
     pub memory: bool,
+
+    /// Which device this Profile is at home on, and `null` for this one's own —
+    /// which is every Profile on a Verkstead that is linked to nothing.
+    ///
+    /// The same shape a Conversation's row carries whose work it is, and for the
+    /// same reason: the name and the mark for the operating system are this
+    /// device's own reading of its membership rather than anything the far end
+    /// said, and one shape means one way of drawing a device wherever a list has
+    /// several machines' rows in it. See [`crate::RowDevice`].
+    ///
+    /// One list rather than a section per device: a Profile is a Profile, and
+    /// which machine its account sits on is a fact on the row.
+    pub device: Option<crate::RowDevice>,
+}
+
+/// One file of a Profile's account as a member across the link is handed it: a
+/// file a **Built Root** is made out of, and what is in it.
+///
+/// **The allowlist and nothing beside it.** A session away from home is given a
+/// root built out of a **mirror** of its account, so what travels is what a root
+/// is made from — the login, and what the written configuration is composed from
+/// — and nothing else of the account: no plugins, hooks, rules, skills, global
+/// instructions file, history, or any other repository's transcripts. The memory
+/// store travels on its own terms and is not on this list.
+///
+/// **Every path a mirror can hold is answered**, whether or not the account has
+/// that file: an account with no login says so with no text at all, which is what
+/// tells a mirror to take away the login it was holding rather than to leave a
+/// stale one standing.
+///
+/// **Text rather than bytes**, every file here being one a harness writes as JSON
+/// or as TOML. What a file no harness wrote holds is not a login, and it travels
+/// as nothing rather than as something a mirror would write in a login's place.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AccountFile {
+    /// Where the file sits inside the home an account of this harness is kept
+    /// in, with forward slashes: `.claude/.credentials.json`,
+    /// `.codex/config.toml`, `.local/share/opencode/auth.json`.
+    ///
+    /// The harness's own shape rather than wherever the home device's Profile
+    /// points at: a mirror is a home the device that fetched it made, and what a
+    /// root is built out of there is the account as that harness keeps one.
+    pub inside: String,
+
+    /// What is in it, or nothing where the account has no such file — a Claude
+    /// login kept in the macOS Keychain, an account nothing has logged in to
+    /// yet.
+    pub text: Option<String>,
+}
+
+/// And the **login** going the other way: what a session away from home left in
+/// it, on its way into the account it belongs to.
+///
+/// **The one file a session genuinely changes.** A harness refreshes its OAuth
+/// pair as it works, so an account lent to another device and never written back
+/// would be an account signing itself out a session at a time — and everything
+/// else a root holds is either Verkstead's own or the human's own and travels in
+/// one direction only. So this is the whole of what comes home: the login, whole,
+/// as the harness left it.
+///
+/// **Sent only where it changed.** A login the session wrote through or replaced
+/// comes home; one that is still exactly what came down is not sent at all; and
+/// one made where the account had none is handed over. Which is the same three
+/// cases a local session's ending already tells apart, and the reason this is a
+/// press rather than a file kept in step.
+///
+/// **Last write wins.** Two machines refreshing one login may sign one of them
+/// out; nothing is merged and nothing is locked, and the write that arrives later
+/// is the one the account keeps (ADR-0020, *Shared Profiles*).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AccountLogin {
+    /// What the harness left in the login file, whole and as it wrote it.
+    pub text: String,
 }
 
 /// A Profile as the human has just written it, for saving or for rewriting.
@@ -269,6 +432,14 @@ pub struct PairingView {
 /// review* as a row of its own: a Conversation that picked it is as ready to
 /// start as one that picked a Pairing, and a page that could not tell it from an
 /// empty picker would draw the placeholder over a settled choice.
+///
+/// One variant carries a Profile and the other two carry nothing, which is what
+/// the size lint is about — a Profile got bigger when it gained the device it is
+/// at home on. Left as it is: these are made one at a time on the way to being
+/// serialized, none of them is held in a collection, and a `Box` in a view type
+/// would be a pointer written into the shape the viewer is generated from for a
+/// few bytes nobody is counting.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum PickedView {
@@ -373,4 +544,89 @@ pub enum ProfileChosen {
 
     /// The Conversation is past drafting, so both its Pairings are fixed.
     NotDrafting,
+}
+
+/// What a device away from home asks the home device for, of a Profile's
+/// **memory store** (ADR-0020, *Shared Profiles*).
+///
+/// **Facts about this device's side, rather than paths for that one to use.** A
+/// memory store is keyed by the path a session ran in wherever it is keyed by
+/// anything, and every one of those paths is a different string on every
+/// machine — so what travels is what each end needs to name *its own*: which of
+/// its Repos this repository is, what this Worktree is called, and what
+/// Verkstead named the sessions of this Conversation. The device that answers
+/// joins each onto its own directories, and the device that asked joins them
+/// onto its own; neither ever writes a path the other chose. See
+/// [`MemoryFile`], which is what comes back.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct MemoryWanted {
+    /// Which of the answering device's Repos is this repository, by the id it
+    /// has **there** — the answer of the match across devices.
+    ///
+    /// `None` is *no match*, which is an answer rather than a failure: that
+    /// device holds nothing that is this repository, so there is nothing of the
+    /// Repo's memory to carry either way. The Worktree's half still travels,
+    /// being named off the Data Directory rather than off the Repo.
+    pub repo: Option<i64>,
+
+    /// And what this Conversation's Worktree directory is called, which is the
+    /// stem both machines name theirs with — the Repo and the branch, as
+    /// Verkstead spells a directory name.
+    ///
+    /// The answering device joins it onto its own worktrees directory, which is
+    /// the path it *would* have used for this work: a Worktree lives under the
+    /// Data Directory rather than under the Repo, so there is nothing to match
+    /// it by, and naming it that machine's way is what leaves the transcript
+    /// findable when the work comes home.
+    pub worktree: Option<String>,
+
+    /// And every session id Verkstead has given this Conversation, for the one
+    /// harness whose store files a session's directory under it.
+    pub sessions: Vec<String>,
+}
+
+/// One file of a memory store on its way across the link.
+///
+/// **Under a label rather than under a path.** The part of the store it belongs
+/// to is named by a word both machines hold to — the Repo's entry, the
+/// Worktree's, the sessions, the memory files, the data store — and each of
+/// them joins that word onto a path of its own. `inside` is where the file sits
+/// under that part, which is the one piece of a path that is the same on both
+/// machines.
+///
+/// **Bytes rather than text**, base64 as this travels: three of the four stores
+/// hold a SQLite database, and a store carried as text is a store that arrives
+/// broken.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemoryFile {
+    /// Which part of the store it is in.
+    pub part: String,
+
+    /// And where it is under that part, with forward slashes whichever machine
+    /// composed it — `index.sqlite`, `2026/09/29/rollout-….jsonl`.
+    pub inside: String,
+
+    /// What is in it, base64 with padding, as the standard alphabet spells it.
+    pub bytes: String,
+}
+
+/// And what a session away from home left in its memory store, on its way into
+/// the account it belongs to.
+///
+/// **The question comes back with the answer.** The device at home names its own
+/// path for each part of the store, and it names them off exactly what it was
+/// asked the first time — which of its Repos this repository is, what this
+/// Worktree is called — so a write-back carrying a different question would be
+/// writing into a different part of the store than the one it read.
+///
+/// **Only what changed is in it.** A file still exactly as it came down is not
+/// here, and neither is one the session took away: nothing is deleted at home,
+/// the rest of that account's store being somebody else's work.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemoryLeft {
+    /// The same question the store was read with.
+    pub wanted: MemoryWanted,
+
+    /// And the files, each under the part it belongs to.
+    pub files: Vec<MemoryFile>,
 }

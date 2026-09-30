@@ -401,7 +401,11 @@ pub struct StepsView {
     /// A sandbox, `git`, and at least one of the four harnesses.
     pub dependencies: bool,
 
-    /// At least one Agent Profile, however it was made.
+    /// At least one Agent Profile, however it was made — a **mirror** of a
+    /// member's among them, whose account is fetched from the device it is at
+    /// home on before every launch (ADR-0020, *Shared Profiles*). What the step
+    /// asks is whether there is an account for a session to run under, and one
+    /// of those is.
     pub accounts: bool,
 
     /// And a git author: both halves of one, because that is what git asks for.

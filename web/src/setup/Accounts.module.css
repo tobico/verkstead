@@ -47,6 +47,11 @@
   gap: 0.5rem;
   align-items: center;
   cursor: pointer;
+
+  /* The cursor already said the row was a press; this is the other half of it,
+     so a press that slid leaves no sliver of the name highlighted — see
+     `rowPress` in `src/rows.ts`. */
+  user-select: none;
 }
 
 .row[data-harness="no"] .head {

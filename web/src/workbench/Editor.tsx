@@ -32,7 +32,7 @@
 //! (ADR 0019, *Monaco, whole*). They are handed in rather than read here,
 //! because they are one answer for the whole pane — a change on the menu
 //! reaches every editor open in every group at once, with no tab reopened —
-//! and where that answer is kept is `device.ts`, per device and never sent to
+//! and where that answer is kept is `remembered.ts`, per device and never sent to
 //! the server. Everything else about an editor is VS Code's default.
 //!
 //! **The editor is fetched rather than bundled in** — see [`./editing`] and
@@ -56,7 +56,7 @@ import {
   type JSX,
 } from "solid-js";
 
-import type { Drawn } from "../device";
+import type { Drawn } from "../remembered";
 import { ErrorLine } from "../notices";
 import {
   load,

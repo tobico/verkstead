@@ -209,10 +209,36 @@ pub(crate) async fn lock(
     sets: &[i64],
     because: &'static str,
 ) {
+    locking(
+        &state.pool,
+        &state.settlements,
+        &state.nudges,
+        conversation_id,
+        sets,
+        because,
+    )
+    .await;
+}
+
+/// The same, for a caller that has the three handles rather than the state they
+/// hang off.
+///
+/// Which is a launch: the session started after an arrival is the one that finds
+/// out whether the harness's own resume can be made, and where it cannot the Sets
+/// a relaunch held open for that resume are Sets whose reader really has gone —
+/// see [`crate::sessions`]. Everything above is said of this.
+pub(crate) async fn locking(
+    pool: &sqlx::SqlitePool,
+    settlements: &store::Settlements,
+    nudges: &crate::nudge::Nudges,
+    conversation_id: i64,
+    sets: &[i64],
+    because: &'static str,
+) {
     let mut locked = false;
 
     for &set_id in sets {
-        match store::lock_set(&state.pool, &state.settlements, set_id).await {
+        match store::lock_set(pool, settlements, set_id).await {
             Ok(store::Locking::Locked(_)) => {
                 locked = true;
 
@@ -240,7 +266,7 @@ pub(crate) async fn lock(
     // has just changed there is that it no longer is. Only where something did
     // change: a nudge is every open page going back to the store.
     if locked {
-        state.nudges.announce(Nudge::Set {
+        nudges.announce(Nudge::Set {
             conversation: conversation_id,
         });
     }

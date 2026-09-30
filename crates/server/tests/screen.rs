@@ -21,6 +21,10 @@ use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_server::{open_database, router, store};
 
+/// The device every Conversation started here is ranked by, named the way a
+/// cluster names one (ADR-0020, *Ranks*).
+const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
+
 /// A router over a database with nothing in it, plus the pool the fixtures are
 /// written through and the directory keeping both alive.
 async fn app() -> (tempfile::TempDir, SqlitePool, Router) {
@@ -48,7 +52,7 @@ async fn session_that_printed(pool: &SqlitePool, printed: &str) -> (i64, i64) {
     .unwrap()
     .unwrap();
 
-    let conversation = store::start_conversation(pool, repo.id, "screen")
+    let conversation = store::start_conversation(pool, repo.id, "screen", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -189,7 +193,7 @@ async fn an_event_on_another_conversation_names_no_screen() {
 
     let (_, event) = session_that_printed(&pool, "printed\r\n").await;
 
-    let elsewhere = store::start_conversation(&pool, 1, "somewhere-else")
+    let elsewhere = store::start_conversation(&pool, 1, "somewhere-else", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();

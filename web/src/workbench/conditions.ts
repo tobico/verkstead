@@ -17,6 +17,19 @@ import type { Parked } from "../api/types";
 /// suite, and the human is waiting on all of them alike.
 export const WAITING_ON_CHECKS = "Waiting on checks";
 
+/// A roadmap stage whose tasks are all done, held before its finish until every
+/// stage already in its roadmap's chain has settled.
+///
+/// The joins are the one thing a roadmap does in single file, so this is a wait
+/// on another stage rather than on anybody here: the Timeline line beneath the
+/// label says which stage of the roadmap, and there is nothing for the reader to
+/// do about it either way.
+///
+/// *Join* rather than *stack* or *rebase*, which is the word the chain is
+/// described in throughout: what the stage is waiting for is its place in the
+/// chain, and how the branch gets there is the repository's own business.
+export const WAITING_TO_JOIN = "Waiting to join";
+
 /// A running session the Rescue is watching sit there: how long it has been
 /// idle, and how many times it has been spoken to — *idle 4 min, spoken to
 /// once*.

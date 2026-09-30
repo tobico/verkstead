@@ -1265,12 +1265,20 @@ fn inside_git(root: &Path, path: &Path) -> bool {
 /// is not a repository, a repository mid-rebase — ignores nothing, so the
 /// folder lists whole. What that costs is a `target/` drawn in the tree of a
 /// checkout that was not a checkout, and what a refusal would cost is the tree.
-fn ignored(root: &Path, asking: &[String]) -> HashSet<String> {
+///
+/// **Shared with the arriving half of a transfer**, which asks the same question
+/// of a Worktree it has just cut: the untracked files a move carries were picked
+/// out by the *sending* machine's rules, and what a checkout here shows is this
+/// machine's — see `crate::peer::checkouts`.
+pub(crate) fn ignored(root: &Path, asking: &[String]) -> HashSet<String> {
     let asked: String = asking.iter().map(|ask| format!("{ask}\0")).collect();
 
     if asked.is_empty() {
         return HashSet::new();
     }
+
+    #[cfg(test)]
+    ANSWERS.set(ANSWERS.get() + 1);
 
     // Exit 1 is the ordinary "nothing here is ignored" rather than a failure —
     // see [`crate::repos::feeding`], which is where the codes are read.
@@ -1280,6 +1288,21 @@ fn ignored(root: &Path, asking: &[String]) -> HashSet<String> {
         .filter(|path| !path.is_empty())
         .map(str::to_owned)
         .collect()
+}
+
+#[cfg(test)]
+thread_local! {
+    /// How many answers [`ignored`] has actually gone to git for on this thread,
+    /// which is what [`watchable`]'s cost is counted in — see
+    /// [`tests::a_large_ignored_directory_is_walked_past_in_a_moment`], the one
+    /// reader of it.
+    ///
+    /// **Per thread rather than per process**, because a test binary is one
+    /// process running its tests beside each other: a count shared between them
+    /// would be every walk in the suite rather than the one being asked about.
+    /// The walk is synchronous, so every answer it pays for is paid on the
+    /// thread that asked for it.
+    static ANSWERS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// How one entry is spelled to git.
@@ -2758,6 +2781,39 @@ mod tests {
 
         assert_eq!(listed.roots[0].files.len(), MAX_LISTED);
         assert!(listed.roots[0].cut);
+
+        // And a root under it is not cut, which is every ordinary checkout.
+        gone(&many);
+        let listed = list(&[root(&worktree)]);
+
+        assert!(!listed.roots[0].cut);
+    }
+
+    /// A directory taken away, waited on rather than asserted the first time.
+    ///
+    /// A walk of a directory hands its handles back when it returns, and on
+    /// Windows the machine gets round to that a moment afterwards — so a removal
+    /// straight after a listing is answered with *the process cannot access the
+    /// file because it is being used by another process* often enough to redden a
+    /// suite over nothing. The same wait the launcher suite's own copy is removed
+    /// under, for the same reason — see `Bound` in
+    /// `crates/cli/tests/launcher_windows.rs`.
+    fn gone(path: &Path) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+
+        loop {
+            match std::fs::remove_dir_all(path) {
+                Ok(()) => return,
+                Err(_) if !path.exists() => return,
+                Err(error) => assert!(
+                    std::time::Instant::now() < deadline,
+                    "{} would not be removed: {error}",
+                    path.display(),
+                ),
+            }
+
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
     }
 
     /// The marks of one root, as the paths they are drawn on paired with what
@@ -3166,9 +3222,20 @@ mod tests {
     ///
     /// The number here is a thousand directories nobody should look inside, and
     /// what the walk pays for them is one `check-ignore` answer about the one
-    /// directory above them. A second is a hundred times what that takes and is
-    /// the claim the stage makes, so the measurement is of the right thing and
-    /// nowhere near the wire.
+    /// directory above them — see [`ANSWERS`], which is the one answer this
+    /// counts.
+    ///
+    /// **Counted rather than timed**, because a clock here measures the machine
+    /// and not the walk. Every answer is a `git` process, and one spawned on the
+    /// Windows runner with the rest of the suite beside it costs the better part
+    /// of a second on its own — so a budget written in seconds is a race against
+    /// process startup, which it loses on a bad day. It would not be worth much
+    /// won, either: a walk that went into the thousand would pay three answers
+    /// and a `read_dir` per empty directory, which is milliseconds rather than
+    /// the hundredfold the seconds were chosen against. The count separates the
+    /// two whatever else the machine is doing — one answer is the walk that
+    /// looked at the one directory above them, and anything more is a walk that
+    /// went in.
     #[test]
     fn a_large_ignored_directory_is_walked_past_in_a_moment() {
         let held = tempfile::tempdir().unwrap();
@@ -3180,14 +3247,15 @@ mod tests {
 
         std::fs::create_dir(worktree.join("src")).unwrap();
 
-        let started = std::time::Instant::now();
+        ANSWERS.set(0);
         let walked = walked(&worktree, &worktree);
 
         assert_eq!(walked, ["", "src"]);
-        assert!(
-            started.elapsed() < std::time::Duration::from_secs(1),
-            "walking past an ignored directory took {:?}",
-            started.elapsed()
+        assert_eq!(
+            ANSWERS.get(),
+            1,
+            "walking past an ignored directory asked git {} times",
+            ANSWERS.get()
         );
     }
 

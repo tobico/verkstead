@@ -70,6 +70,11 @@ const CLEANUP = {
   delete: { enabled: true, days: "90" },
 };
 
+/// And how much Verkstead runs at once as a save puts it back: both numbers as
+/// the strings a form holds, carried by every section for that reason again —
+/// see [`heldAtOnce`].
+const AT_ONCE = { roadmap_stages: "1", conversations: "2" };
+
 /// The same settings with an sccache the server did find, which no fixture
 /// carries: the routers those are written from run no sessions, so they have
 /// none to hand out.
@@ -583,6 +588,7 @@ describe("changing the languages", () => {
         // Untouched by this form, and sent back as it stands: one request
         // writes the whole of `config.yaml`.
         cleanup: CLEANUP,
+        at_once: AT_ONCE,
         conflict_resolution: TOLD.conflict_resolution,
         share_on_done: TOLD.share_on_done,
         ...PATHS,
@@ -679,6 +685,7 @@ describe("changing the languages", () => {
         // Untouched by this form, and sent back as it stands: one request
         // writes the whole of `config.yaml`.
         cleanup: CLEANUP,
+        at_once: AT_ONCE,
         conflict_resolution: TOLD.conflict_resolution,
         share_on_done: TOLD.share_on_done,
         ...PATHS,

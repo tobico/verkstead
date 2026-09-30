@@ -1,4 +1,11 @@
 {
+  "at_once": {
+    "conversations": 4,
+    "conversations_configured": false,
+    "places_taken": 0,
+    "roadmap_stages": 3,
+    "roadmap_stages_configured": false
+  },
   "cleanup": {
     "delete": {
       "days": 30,

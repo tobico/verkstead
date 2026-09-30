@@ -161,11 +161,14 @@ import type {
   Resumed,
   SteerOpened,
 } from "../api/types";
+import { useDevices } from "../devices";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
+import { keyOf, useDevice, whose, type Device } from "../reaching";
 import styles from "./Actions.module.css";
 import { eagerly, pressed, pressedRows, rowFor } from "./eager";
 import { pathOf, pathTo } from "./openings";
+import { Transfer } from "./Transfer";
 
 /// Each way of being refused a stop, whichever of the two was pressed, in the
 /// words the human is told them in.
@@ -499,6 +502,32 @@ function actions(): {
   /// rows are drawn beside every page the sidebar stands on.
   const opened = useParams();
 
+  /// And which device the Conversation a press is about lives on.
+  ///
+  /// The page's where these rows are the Timeline header's — the menu acts on
+  /// the Conversation being read — and the *card's own* where they are a sidebar
+  /// card's: the list is merged from the whole cluster, so a card stands for a
+  /// Conversation on whichever machine holds it, and the pane puts a provider
+  /// naming that device around this menu. One accessor for both, because the
+  /// provider is what differs rather than the menu (see `reaching.ts`).
+  const device = useDevice();
+
+  /// And whether this Verkstead is linked to anything at all, which is what
+  /// says whether there is anywhere to transfer a Conversation *to*.
+  ///
+  /// This device's own reading of its cluster, whichever machine the page is
+  /// about — see `useDevices`. It is the same cache entry the pane header reads
+  /// to name the machine the work is on, so the row costs no fetch of its own.
+  const devices = useDevices();
+
+  /// Whether a Conversation is the one the page is standing on, which is the id
+  /// **and** the device: ids collide by construction, so a sidebar card for this
+  /// device's Conversation 4 is not the member's Conversation 4 being read
+  /// beside it.
+  const isOpen = (conversation: ConversationView): boolean =>
+    String(conversation.id) === opened.id &&
+    device() === (opened.device ?? null);
+
   /// The sidebar's own list, read under the key the sidebar reads it under — so
   /// this is the answer already in hand rather than a second fetch of it.
   ///
@@ -512,7 +541,7 @@ function actions(): {
 
     // Merged as the sidebar's is: the list is re-read constantly, and this is
     // the same cache entry.
-    freshness: { reconcile: "id" } as const,
+    freshness: { reconcile: "rank" } as const,
   }));
 
   /// And whether the ones put away are drawn among them, read the same way
@@ -545,17 +574,22 @@ function actions(): {
   /// Called before the press writes what it says, because what it reads is the
   /// list with this Conversation still on it. See `eager.ts`.
   const leaving = (conversation: ConversationView): void => {
-    if (String(conversation.id) !== opened.id) return;
+    if (!isOpen(conversation)) return;
     if (archived.data?.showing ?? false) return;
 
+    // The merged list, so the row above may be a member's — and where it is,
+    // that is where the eye goes: the list is one list, and the row over the one
+    // that has gone is whatever the ranks put there whoever owns it.
     const rows = pressedRows(conversations.data ?? [], false);
-    const at = rows.findIndex((row) => row.id === conversation.id);
+    const at = rows.findIndex(
+      (row) => row.id === conversation.id && whose(row) === device(),
+    );
     const above = at > 0 ? rows[at - 1] : undefined;
 
     // Replacing rather than pushing: the human pressed a row rather than
     // navigating, and a Back that landed on the Conversation they have just put
     // away would hand it straight back.
-    navigate(above === undefined ? "/compose" : pathOf(above.id), {
+    navigate(above === undefined ? "/compose" : pathOf(above.id, whose(above)), {
       replace: true,
     });
   };
@@ -576,11 +610,23 @@ function actions(): {
   /// accessor again from inside it would be asking about another one.
   const [confirming, setConfirming] = createSignal<{
     conversation: ConversationView;
-    ending: (id: number) => Promise<ConversationClosed>;
+    ending: (device: Device, id: number) => Promise<ConversationClosed>;
     away: boolean;
     /// The pressed row's own name, which is what the confirming button reads.
     label: string;
   } | null>(null);
+
+  /// And the Conversation whose *Transfer to…* row was pressed, while the human
+  /// is picking a device for it — `null` while nothing is.
+  ///
+  /// Held out here for the reason the two above it are: the press shuts the menu
+  /// the row was in, and what opens over the page outlives it. The Conversation
+  /// itself rather than a flag, and frozen as the confirm's is: the card is
+  /// about the Conversation the row was hit on, which on the sidebar's menu is
+  /// very often not the one being read.
+  const [transferring, setTransferring] = createSignal<ConversationView | null>(
+    null,
+  );
 
   // The menu's own way to shut, held here because what closes it is the press
   // coming back rather than the press going out.
@@ -609,7 +655,7 @@ function actions(): {
   /// than something set going — see `eager.ts`.
   const reread = (): Promise<unknown> =>
     Promise.all([
-      queries.invalidateQueries({ queryKey: ["conversation"] }),
+      queries.invalidateQueries({ queryKey: keyOf(device(), "conversation") }),
       queries.invalidateQueries({ queryKey: ["conversations"] }),
     ]);
 
@@ -617,7 +663,7 @@ function actions(): {
   /// something rather than ending it. Its refusals are the whole of what it is
   /// for, so a press that found nothing to start says so in as many words.
   const start = useMutation(() => ({
-    mutationFn: (id: number) => resume(id),
+    mutationFn: (id: number) => resume(device(), id),
     onSuccess: (outcome: Resumed) => {
       if (RESUME_REFUSAL[outcome]) {
         refuse(RESUME_REFUSAL[outcome]);
@@ -634,8 +680,10 @@ function actions(): {
   /// Both stops answer the same way, so both are pressed the same way: a
   /// refusal opens as a card over the page and the re-read behind it corrects
   /// what was drawn, and anything else is the press having landed.
-  const pressing = (stopping: (id: number) => Promise<ConversationStopped>) => ({
-    mutationFn: stopping,
+  const pressing = (
+    stopping: (device: Device, id: number) => Promise<ConversationStopped>,
+  ) => ({
+    mutationFn: (id: number) => stopping(device(), id),
     onSuccess: (outcome: ConversationStopped) => {
       if (STOP_REFUSAL[outcome]) {
         refuse(STOP_REFUSAL[outcome]);
@@ -679,7 +727,7 @@ function actions(): {
   /// that has just changed under it is a menu nobody meant to leave open.
   const click = useMutation(() => ({
     mutationFn: (conversation: ConversationView) =>
-      steerConversation(conversation.id),
+      steerConversation(device(), conversation.id),
     onSuccess: (outcome: SteerOpened, conversation: ConversationView) => {
       if (outcome === "NoSuchConversation") {
         refuse("This conversation is gone.");
@@ -691,8 +739,8 @@ function actions(): {
       // the button the press came from, which is where a narrow window is
       // walking away from.
       shut();
-      navigate(pathTo(conversation.id, "steer"), {
-        replace: String(conversation.id) === opened.id,
+      navigate(pathTo(conversation.id, "steer", device()), {
+        replace: isOpen(conversation),
       });
 
       // The conversation has stopped and is carrying a pending steer, whatever
@@ -716,7 +764,7 @@ function actions(): {
   /// `eager.ts`.
   const closing = (
     conversation: ConversationView,
-    ending: (id: number) => Promise<ConversationClosed>,
+    ending: (device: Device, id: number) => Promise<ConversationClosed>,
     away: boolean,
   ) => {
     shut();
@@ -727,12 +775,13 @@ function actions(): {
     if (away) leaving(conversation);
 
     eagerly({
+      device: device(),
       conversation: conversation.id,
       // The archive is the half the two rows differ by, and it is said here
       // rather than in a second press: the server makes both in one request,
       // which is what stops a dropped connection leaving the pair half made.
       says: away ? { closed: true, archived: true } : { closed: true },
-      post: () => ending(conversation.id),
+      post: () => ending(device(), conversation.id),
       refusal: (outcome: ConversationClosed) => CLOSE_REFUSAL[outcome],
       fell: (error: Error) =>
         `The conversation could not be closed: ${error.message}`,
@@ -754,7 +803,7 @@ function actions(): {
   /// focus back to when it is answered.
   const ends = (
     conversation: ConversationView,
-    ending: (id: number) => Promise<ConversationClosed>,
+    ending: (device: Device, id: number) => Promise<ConversationClosed>,
     away: boolean,
     label: string,
   ) => {
@@ -776,6 +825,18 @@ function actions(): {
     if (asked !== null) closing(asked.conversation, asked.ending, asked.away);
   };
 
+  /// And pressing *Transfer to…*, which opens a card and does nothing else: the
+  /// menu goes, and the dialog over the page is where the device is picked and
+  /// what that device is missing is read.
+  ///
+  /// The menu first, as a refusal does it: shutting it hands the focus back to
+  /// the button it was dropped from, which is then where the card hands the
+  /// focus back to when it is answered.
+  const transfers = (conversation: ConversationView): void => {
+    shut();
+    setTransferring(conversation);
+  };
+
   /// And putting the closed conversation away, which reads the same way: both
   /// of its refusals are a page drawn against a conversation that has moved,
   /// and both of its successes mean it is off the list.
@@ -789,9 +850,10 @@ function actions(): {
     leaving(conversation);
 
     eagerly({
+      device: device(),
       conversation: conversation.id,
       says: { archived: true },
-      post: () => archiveConversation(conversation.id),
+      post: () => archiveConversation(device(), conversation.id),
       refusal: (outcome: ConversationArchived) => ARCHIVE_REFUSAL[outcome],
       fell: (error: Error) =>
         `The conversation could not be archived: ${error.message}`,
@@ -811,9 +873,10 @@ function actions(): {
     shut();
 
     eagerly({
+      device: device(),
       conversation: conversation.id,
       says: { archived: false, row: rowFor(conversation) },
-      post: () => unarchiveConversation(conversation.id),
+      post: () => unarchiveConversation(device(), conversation.id),
       refusal: (outcome: ConversationUnarchived) => UNARCHIVE_REFUSAL[outcome],
       fell: (error: Error) =>
         `The conversation could not be unarchived: ${error.message}`,
@@ -829,7 +892,7 @@ function actions(): {
       /// with whatever a press here has already said about it laid over. Which
       /// is what stands Archive where Close was the instant Close is pressed,
       /// rather than a round trip later — see `eager.ts`.
-      const conversation = () => pressed(given());
+      const conversation = () => pressed(device(), given());
 
       return (
         <>
@@ -902,6 +965,34 @@ function actions(): {
             working={click.isPending}
             press={() => click.mutate(conversation())}
           />
+
+          {/* And moving the work to another machine of the cluster, which is
+              the one row here that ends in the Conversation being somewhere
+              else. Under Steer because it is the further move: Steer says what
+              should happen next, and this says where.
+
+              Drawn from every state but Draft and Closed, and only where this
+              Verkstead is linked to something: a Draft is moved by the device
+              select on its own composer — there is no work to carry, only a
+              Brief — a Closed Conversation has none left to move, and a machine
+              in no cluster has nowhere to move it to.
+
+              The press opens a card and nothing else: what device, and what
+              that device is missing, are the dialog's — see [`Transfer`]. */}
+          <Show
+            when={
+              (devices.data?.members.length ?? 0) > 0 &&
+              conversation().state !== "Draft" &&
+              conversation().state !== "Closed"
+            }
+          >
+            <Action
+              class={styles.transfer}
+              label="Transfer to…"
+              says="Move this conversation, its branch and its working changes to another device."
+              press={() => transfers(conversation())}
+            />
+          </Show>
 
           {/* And where Close was, on a conversation that has already had it:
               the way to put the record out of sight once there is nothing left
@@ -987,6 +1078,16 @@ function actions(): {
           keep={() => setConfirming(null)}
           close={() => confirmed()}
         />
+
+        {/* And the dialog *Transfer to…* opens: the device select, whatever the
+            preflight found missing on the device picked, and the press that
+            will move the work — see [`Transfer`]. Every way out of it but that
+            press clears the signal and does nothing else, which leaves the
+            Conversation exactly where it was. */}
+        <Transfer
+          conversation={transferring()}
+          close={() => setTransferring(null)}
+        />
       </>
     ),
   };
@@ -1049,7 +1150,13 @@ export function Actions(props: {
 export function CardActions(props: {
   /// Which card was right-clicked and where the pointer was, or `null` while
   /// nothing is open.
-  pointed: { id: number; x: number; y: number } | null;
+  ///
+  /// The device is the card's own and is on it for the reason every press in the
+  /// sidebar carries one: the list is merged from the whole cluster, so the
+  /// Conversation this menu is about is a number *on a machine*. What reads it is
+  /// the provider the pane puts around this component — see `Conversations.tsx`
+  /// — rather than anything here.
+  pointed: { id: number; device: Device; x: number; y: number } | null;
   /// Said whenever the menu should go.
   close: () => void;
 }): JSX.Element {
@@ -1070,12 +1177,15 @@ export function CardActions(props: {
     /// they were reading. Read off the key instead, the fetch is what the key
     /// says it is, whoever asks for it and whenever.
     const of = props.pointed === null ? "" : String(props.pointed.id);
+    const whose = props.pointed?.device ?? null;
 
     return {
       // The key the Conversation pane reads under, so the open one is already
-      // in hand and any other is in hand for the pane that opens it next.
-      queryKey: ["conversation", of],
-      queryFn: () => loadConversation(of),
+      // in hand and any other is in hand for the pane that opens it next. The
+      // card's own device leads it, which is what keeps a member's Conversation
+      // 4 and this device's two entries rather than one — see `reaching.ts`.
+      queryKey: keyOf(whose, "conversation", of),
+      queryFn: () => loadConversation(whose, of),
       enabled: of !== "",
 
       // Merged, as the pane's own read of this is: a Nudge landing while the

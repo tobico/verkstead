@@ -57,12 +57,13 @@
 //! its placeholder, which is the honest reading of *what you picked is gone*.
 //!
 //! [`Listbox`] is the same choice drawn out of ordinary elements, for the rows
-//! that carry a harness mark beside their words: an `<option>` holds text and
-//! nothing else, in every browser, which is the whole reason there is a second
-//! control here at all. It is the four pairing pickers, the profile form's
-//! harness type and the Repo — a control the app draws itself has to be given
-//! back everything the native one arrived with, which is the keyboard, the roles
-//! a screen reader reads it by and a row a finger can hit, so it earns its keep
+//! that carry a mark beside their words: an `<option>` holds text and nothing
+//! else, in every browser, which is the whole reason there is a second control
+//! here at all. It is the four pairing pickers, the profile form's harness type,
+//! the Repo and the device select, whose rows wear the mark for each machine's
+//! operating system — a control the app draws itself has to be given back
+//! everything the native one arrived with, which is the keyboard, the roles a
+//! screen reader reads it by and a row a finger can hit, so it earns its keep
 //! only where a row has something of its own to draw.
 //!
 //! The Repo's is the second reason to draw one: the two rows at the foot of that
@@ -94,6 +95,7 @@ import {
 } from "solid-js";
 
 import { faChevronDown } from "@fortawesome/free-solid-svg-icons";
+import type { IconDefinition } from "@fortawesome/free-solid-svg-icons";
 
 import { HarnessMark } from "./HarnessMark";
 import { Icon } from "./Icon";
@@ -335,6 +337,25 @@ export function Listbox<T>(
     /// words it belongs to is the same space in every one of them.
     mark?: (option: T) => AgentType | null;
 
+    /// Or an icon in front of the words, for the rows whose mark is not a
+    /// harness's: the device select's, where each row wears the mark for its
+    /// operating system — see `osIcon` in [`./devices.ts`](./devices.ts).
+    ///
+    /// Beside [`mark`] rather than in place of it because the two are drawn out
+    /// of different things: a harness is a brand's own drawing, carried whole
+    /// (see `HarnessMark.tsx`), and this is one of the app's own icons.
+    ///
+    /// **And one caller hands in both.** A pairing picker is cluster-wide — it
+    /// offers every member's accounts beside this device's own — so a row there
+    /// says which harness it runs *and* which machine it is on, and the two
+    /// marks stand in that order. Which is why nothing here is per row: a row
+    /// with no machine to name answers nothing, and no element is drawn for it.
+    ///
+    /// Unlabelled where it is drawn, as the same mark is on a sidebar row: what
+    /// the human is choosing between is the words, and the mark is a shape to
+    /// scan a list by.
+    icon?: (option: T) => IconDefinition | undefined;
+
     /// What the *closed* control reads, where that is not what the row it came
     /// off reads.
     ///
@@ -365,6 +386,17 @@ export function Listbox<T>(
     /// out. What the control *looks* like is this module's, all of them being
     /// one control in several places.
     class?: string;
+
+    /// Controls of the caller's own at the foot of the dropped rows, after
+    /// everything the list offers — the device select's ticks under *May be
+    /// transferred to*, and no other control's.
+    ///
+    /// **Beside the list rather than in it.** They are not rows: nothing the
+    /// keyboard walks reaches them, nothing here picks them, and a screen reader
+    /// sent into the list does not find them there — they are ordinary controls
+    /// in the box the rows came down in, reached by Tab like any other, and
+    /// pressing one leaves the rows down.
+    foot?: () => JSX.Element;
   },
 ): JSX.Element {
   const { offered, standing, shown } = showing(props);
@@ -496,6 +528,7 @@ export function Listbox<T>(
             <Reading
               of={picked()!}
               mark={props.mark}
+              icon={props.icon}
               label={props.closed ?? props.label}
             />
           </Show>
@@ -534,62 +567,81 @@ export function Listbox<T>(
             .filter(Boolean)
             .join(" ")}
           style={placing()}
-          id={list}
-          role="listbox"
+          // What a caller's sheet sizes the dropped box by — the box rather
+          // than the list inside it, which is narrower by the foot's width.
+          data-drop
         >
-          <For each={props.options}>
-            {(option, index) => (
-              <div
-                id={rowId(index())}
-                class={[
-                  styles.row,
-                  index() === walking() ? styles.walked : undefined,
-                ]
-                  .filter(Boolean)
-                  .join(" ")}
-                role="option"
-                aria-selected={
-                  props.value(option) === shown() ? "true" : "false"
-                }
-                onClick={() => take(index())}
-              >
-                <Reading of={option} mark={props.mark} label={props.label} />
-              </div>
-            )}
-          </For>
-
-          {/* And the rows that press, behind the rule that says they are not
-              more of the list. Inside it rather than beside it, because that is
-              where the keyboard is: `aria-activedescendant` names a row of the
-              list this control opened, and a row hung outside it would be one a
-              screen reader was sent to and could not find.
-
-              Never the choice, though the walk reaches them: they carry no
-              value, so `aria-selected` is false on them for as long as they are
-              drawn — a row that acts is not one the control could be showing. */}
-          <Show when={actions().length > 0}>
-            <div class={styles.rule} role="separator" />
-            <For each={actions()}>
-              {(action, index) => (
+          <div id={list} role="listbox">
+            <For each={props.options}>
+              {(option, index) => (
                 <div
-                  id={rowId(props.options.length + index())}
+                  id={rowId(index())}
                   class={[
                     styles.row,
-                    styles.action,
-                    props.options.length + index() === walking()
-                      ? styles.walked
-                      : undefined,
+                    index() === walking() ? styles.walked : undefined,
                   ]
                     .filter(Boolean)
                     .join(" ")}
                   role="option"
-                  aria-selected="false"
-                  onClick={() => take(props.options.length + index())}
+                  aria-selected={
+                    props.value(option) === shown() ? "true" : "false"
+                  }
+                  onClick={() => take(index())}
                 >
-                  <span class={styles.words}>{action.label}</span>
+                  <Reading
+                    of={option}
+                    mark={props.mark}
+                    icon={props.icon}
+                    label={props.label}
+                  />
                 </div>
               )}
             </For>
+
+            {/* And the rows that press, behind the rule that says they are not
+                more of the list. Inside it rather than beside it, because that is
+                where the keyboard is: `aria-activedescendant` names a row of the
+                list this control opened, and a row hung outside it would be one a
+                screen reader was sent to and could not find.
+
+                Never the choice, though the walk reaches them: they carry no
+                value, so `aria-selected` is false on them for as long as they are
+                drawn — a row that acts is not one the control could be showing. */}
+            <Show when={actions().length > 0}>
+              <div class={styles.rule} role="separator" />
+              <For each={actions()}>
+                {(action, index) => (
+                  <div
+                    id={rowId(props.options.length + index())}
+                    class={[
+                      styles.row,
+                      styles.action,
+                      props.options.length + index() === walking()
+                        ? styles.walked
+                        : undefined,
+                    ]
+                      .filter(Boolean)
+                      .join(" ")}
+                    role="option"
+                    aria-selected="false"
+                    onClick={() => take(props.options.length + index())}
+                  >
+                    <span class={styles.words}>{action.label}</span>
+                  </div>
+                )}
+              </For>
+            </Show>
+          </div>
+
+          {/* And the caller's own controls under it, behind the rule that says
+              they are not more of the list — see `foot` above. */}
+          <Show when={props.foot}>
+            {(foot) => (
+              <>
+                <div class={styles.rule} role="separator" />
+                {foot()()}
+              </>
+            )}
           </Show>
         </div>
       </Show>
@@ -597,19 +649,30 @@ export function Listbox<T>(
   );
 }
 
-/// One row's reading: the harness's mark, and the words beside it.
+/// One row's reading: the mark, and the words beside it.
 ///
 /// Drawn by the list and again by the closed control, out of one component,
 /// because a control showing one thing and offering the same thing drawn
 /// differently is a control the eye has to check.
+///
+/// The mark is a harness's, or one of the app's own icons, or both where a row
+/// names a machine as well as a backend — see [`Listbox`]'s `mark` and `icon`.
+/// Neither is drawn where the caller offers neither, which is most of them, and
+/// the second is left out row by row where that row has no machine to name:
+/// nothing is put in front of the words, so no row carries a gap where a mark
+/// would have been.
 function Reading<T>(props: {
   of: T;
   mark?: (option: T) => AgentType | null;
+  icon?: (option: T) => IconDefinition | undefined;
   label: (option: T) => string;
 }): JSX.Element {
   return (
     <>
       <HarnessMark of={props.mark?.(props.of) ?? null} />
+      <Show when={props.icon?.(props.of)}>
+        {(of) => <Icon of={of()} class={styles.mark!} />}
+      </Show>
       {/* The words in a span of their own, so the closed control can cut a
           reading too long for it and the rows under it never have to. */}
       <span class={styles.words}>{props.label(props.of)}</span>

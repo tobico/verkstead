@@ -4,16 +4,25 @@
 use std::path::{Path, PathBuf};
 
 use sqlx::SqlitePool;
+use verkstead_schema::Direction;
 use verkstead_store::{
-    Account, AdoptedPullRequest, Archiving, Closing, Edited, Event, Grilling, Lifecycle,
-    ProfileFacts, RowState, Switched, Unarchiving, add_companion, adopted_pull_request, adopting,
-    any_archived, archive_conversation, archived, close_conversation, conversation_branch,
-    conversations, create_profile, follow_branch, hold_pull_request, load_conversation,
-    open_database, register_repo, reinvent_branch, rename_branch, save_brief, set_base_commit,
+    Account, AdoptedPullRequest, Archiving, Closing, Decision, Driven, Edited, Event, Grilling,
+    Joined, Lifecycle, Planned, ProfileFacts, PullRequest, Queued, Recorded, RoadmapStage,
+    RowState, StageOf, StageStanding, Staged, Steer, Switched, Unarchiving, add_companion,
+    adopted_pull_request, adopting, any_archived, archive_conversation, archived, clear_stop,
+    close_conversation, conversation_branch, conversations, create_profile, driven_roadmaps,
+    follow_branch, hold_pull_request, join_queue, load_conversation, open_database, pick_direction,
+    queue_to_join, record_another_pull_request, record_pull_request, record_roadmap, register_repo,
+    reinvent_branch, rename_branch, roadmap_planner, save_brief, set_base_commit,
     set_grilling_pairing, set_state, set_target, settle_naming, show_archived, showing_archived,
-    start_adoption, start_conversation, start_grilling, start_tinkering,
-    start_unnamed_conversation, state, switch_repo, target, timeline, unarchive_conversation,
+    stacks_on, stage_chain, stage_roadmap, stage_standings, start_adoption, start_conversation,
+    start_grilling, start_stage, start_tinkering, start_unnamed_conversation, state,
+    steer_conversation, stop, switch_repo, target, timeline, unarchive_conversation,
 };
+
+/// The device every Conversation started here is ranked by, named the way a
+/// cluster names one (ADR-0020, *Ranks*).
+const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
 
 /// A pool over a fresh database, plus the directory keeping it alive.
 async fn fresh_pool() -> (tempfile::TempDir, SqlitePool) {
@@ -93,7 +102,7 @@ async fn moves(pool: &SqlitePool, id: i64) -> Vec<Lifecycle> {
 /// A drafting Conversation with a Brief written, ready to be grilled.
 async fn drafted(pool: &SqlitePool) -> i64 {
     let repo_id = repo(pool, "verkstead").await;
-    let id = start_conversation(pool, repo_id, "rate-limiting")
+    let id = start_conversation(pool, repo_id, "rate-limiting", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -106,7 +115,7 @@ async fn a_started_conversation_holds_its_repo_its_branch_and_the_default_rule()
     let (_dir, pool) = fresh_pool().await;
     let repo_id = repo(&pool, "verkstead").await;
 
-    let id = start_conversation(&pool, repo_id, "amber-kestrel")
+    let id = start_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE)
         .await
         .unwrap()
         .expect("the Repo is registered, so the Conversation should start");
@@ -130,7 +139,7 @@ async fn a_started_conversation_has_an_empty_brief_on_its_timeline() {
     let (_dir, pool) = fresh_pool().await;
     let repo_id = repo(&pool, "verkstead").await;
 
-    let id = start_conversation(&pool, repo_id, "amber-kestrel")
+    let id = start_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -143,12 +152,12 @@ async fn a_conversation_cannot_be_started_against_a_repo_that_is_not_registered(
     let (_dir, pool) = fresh_pool().await;
 
     assert!(
-        start_conversation(&pool, 404, "amber-kestrel")
+        start_conversation(&pool, 404, "amber-kestrel", THIS_DEVICE)
             .await
             .unwrap()
             .is_none()
     );
-    assert!(conversations(&pool).await.unwrap().is_empty());
+    assert!(conversations(&pool, false).await.unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -157,16 +166,16 @@ async fn conversations_are_listed_newest_first_with_the_repo_they_are_against() 
     let verkstead = repo(&pool, "verkstead").await;
     let askance = repo(&pool, "askance").await;
 
-    start_conversation(&pool, verkstead, "amber-kestrel")
+    start_conversation(&pool, verkstead, "amber-kestrel", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
-    start_conversation(&pool, askance, "quiet-harbour")
+    start_conversation(&pool, askance, "quiet-harbour", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
 
-    let listed: Vec<(String, String)> = conversations(&pool)
+    let listed: Vec<(String, String)> = conversations(&pool, false)
         .await
         .unwrap()
         .into_iter()
@@ -186,7 +195,7 @@ async fn conversations_are_listed_newest_first_with_the_repo_they_are_against() 
 async fn a_brief_is_rewritten_in_place_rather_than_added_to() {
     let (_dir, pool) = fresh_pool().await;
     let repo_id = repo(&pool, "verkstead").await;
-    let id = start_conversation(&pool, repo_id, "amber-kestrel")
+    let id = start_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -215,7 +224,7 @@ async fn a_brief_is_rewritten_in_place_rather_than_added_to() {
 async fn a_drafting_conversations_branch_and_base_commit_are_the_humans_to_change() {
     let (_dir, pool) = fresh_pool().await;
     let repo_id = repo(&pool, "verkstead").await;
-    let id = start_conversation(&pool, repo_id, "amber-kestrel")
+    let id = start_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -243,7 +252,7 @@ async fn a_drafting_conversations_branch_and_base_commit_are_the_humans_to_chang
 async fn a_conversation_can_be_started_on_a_name_nobody_has_settled_on() {
     let (_dir, pool) = fresh_pool().await;
     let repo_id = repo(&pool, "verkstead").await;
-    let id = start_unnamed_conversation(&pool, repo_id, "amber-kestrel")
+    let id = start_unnamed_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -261,11 +270,11 @@ async fn starting_the_work_leaves_an_invented_branch_name_to_be_replaced() {
     let (_dir, pool) = fresh_pool().await;
     let repo_id = repo(&pool, "verkstead").await;
 
-    let invented = start_unnamed_conversation(&pool, repo_id, "amber-kestrel")
+    let invented = start_unnamed_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
-    let typed = start_conversation(&pool, repo_id, "rate-limiting")
+    let typed = start_conversation(&pool, repo_id, "rate-limiting", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -317,11 +326,11 @@ async fn a_branch_stops_waiting_to_be_named_by_being_renamed_or_by_being_settled
     let (_dir, pool) = fresh_pool().await;
     let repo_id = repo(&pool, "verkstead").await;
 
-    let renamed = start_unnamed_conversation(&pool, repo_id, "amber-kestrel")
+    let renamed = start_unnamed_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
-    let left = start_unnamed_conversation(&pool, repo_id, "brave-otter")
+    let left = start_unnamed_conversation(&pool, repo_id, "brave-otter", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -364,7 +373,7 @@ async fn a_branch_stops_waiting_to_be_named_by_being_renamed_or_by_being_settled
 async fn a_row_says_whether_its_branch_is_still_to_be_named() {
     let (_dir, pool) = fresh_pool().await;
     let repo_id = repo(&pool, "verkstead").await;
-    let id = start_unnamed_conversation(&pool, repo_id, "amber-kestrel")
+    let id = start_unnamed_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -379,14 +388,14 @@ async fn a_row_says_whether_its_branch_is_still_to_be_named() {
     .await
     .unwrap();
 
-    let rows = conversations(&pool).await.unwrap();
+    let rows = conversations(&pool, false).await.unwrap();
     let row = rows.iter().find(|row| row.id == id).unwrap();
     assert!(row.naming);
     assert!(!row.branch_named);
 
     settle_naming(&pool, id).await.unwrap();
 
-    let rows = conversations(&pool).await.unwrap();
+    let rows = conversations(&pool, false).await.unwrap();
     assert!(!rows.iter().find(|row| row.id == id).unwrap().naming);
 }
 
@@ -401,11 +410,11 @@ async fn following_a_rename_moves_the_name_and_not_whose_it_is() {
     let (_dir, pool) = fresh_pool().await;
     let repo_id = repo(&pool, "verkstead").await;
 
-    let verksteads = start_unnamed_conversation(&pool, repo_id, "amber-kestrel")
+    let verksteads = start_unnamed_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
-    let theirs = start_conversation(&pool, repo_id, "throttling")
+    let theirs = start_conversation(&pool, repo_id, "throttling", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -448,7 +457,7 @@ async fn following_a_rename_moves_the_name_and_not_whose_it_is() {
 async fn handing_back_a_name_after_a_rename_leaves_the_branch_that_exists() {
     let (_dir, pool) = fresh_pool().await;
     let repo_id = repo(&pool, "verkstead").await;
-    let id = start_unnamed_conversation(&pool, repo_id, "amber-kestrel")
+    let id = start_unnamed_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -470,7 +479,7 @@ async fn handing_back_a_name_after_a_rename_leaves_the_branch_that_exists() {
 async fn handing_the_branch_name_back_leaves_the_one_it_started_on() {
     let (_dir, pool) = fresh_pool().await;
     let repo_id = repo(&pool, "verkstead").await;
-    let id = start_unnamed_conversation(&pool, repo_id, "amber-kestrel")
+    let id = start_unnamed_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -492,7 +501,7 @@ async fn handing_the_branch_name_back_leaves_the_one_it_started_on() {
 async fn inventing_another_name_replaces_the_one_the_conversation_started_on() {
     let (_dir, pool) = fresh_pool().await;
     let repo_id = repo(&pool, "verkstead").await;
-    let id = start_unnamed_conversation(&pool, repo_id, "amber-kestrel")
+    let id = start_unnamed_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -511,11 +520,11 @@ async fn inventing_another_name_replaces_the_one_the_conversation_started_on() {
 async fn inventing_another_name_leaves_a_name_the_human_settled() {
     let (_dir, pool) = fresh_pool().await;
     let repo_id = repo(&pool, "verkstead").await;
-    let theirs = start_conversation(&pool, repo_id, "throttling")
+    let theirs = start_conversation(&pool, repo_id, "throttling", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
-    let typed = start_unnamed_conversation(&pool, repo_id, "amber-kestrel")
+    let typed = start_unnamed_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -548,7 +557,7 @@ async fn inventing_another_name_leaves_a_name_the_human_settled() {
 async fn clearing_the_base_commit_restores_the_default_branch_rule() {
     let (_dir, pool) = fresh_pool().await;
     let repo_id = repo(&pool, "verkstead").await;
-    let id = start_conversation(&pool, repo_id, "amber-kestrel")
+    let id = start_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -577,7 +586,7 @@ async fn clearing_the_base_commit_restores_the_default_branch_rule() {
 async fn nothing_about_a_conversation_past_drafting_can_be_edited() {
     let (_dir, pool) = fresh_pool().await;
     let repo_id = repo(&pool, "verkstead").await;
-    let id = start_conversation(&pool, repo_id, "amber-kestrel")
+    let id = start_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -635,7 +644,7 @@ async fn a_conversation_and_its_brief_survive_the_database_being_reopened() {
 
     let pool = open_database(&database).await.unwrap();
     let repo_id = repo(&pool, "verkstead").await;
-    let id = start_conversation(&pool, repo_id, "amber-kestrel")
+    let id = start_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -662,7 +671,7 @@ async fn a_conversation_and_its_brief_survive_the_database_being_reopened() {
 async fn nothing_started_means_nothing_listed() {
     let (_dir, pool) = fresh_pool().await;
 
-    assert!(conversations(&pool).await.unwrap().is_empty());
+    assert!(conversations(&pool, false).await.unwrap().is_empty());
 }
 
 /// Moving a draft onto another Repo, and the three things that follow from it:
@@ -676,7 +685,7 @@ async fn switching_a_drafts_repo_resets_its_base_and_drops_only_the_companion_it
     let askance = repo(&pool, "askance").await;
     let notes = repo(&pool, "notes").await;
 
-    let id = start_conversation(&pool, verkstead, "amber-kestrel")
+    let id = start_conversation(&pool, verkstead, "amber-kestrel", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -773,7 +782,7 @@ async fn a_repo_switch_is_refused_while_a_roadmap_is_being_adopted() {
     let verkstead = repo(&pool, "verkstead").await;
     let askance = repo(&pool, "askance").await;
 
-    let id = start_adoption(&pool, verkstead, "amber-kestrel", "mvp")
+    let id = start_adoption(&pool, verkstead, "amber-kestrel", "mvp", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -884,7 +893,7 @@ async fn a_held_pull_request_is_the_target_where_nothing_else_names_one() {
 /// Which is the only way there is to one now — the start that made these is
 /// gone, and the row is written at the press. See [`hold_pull_request`].
 async fn held_by(pool: &sqlx::SqlitePool, repo_id: i64) -> i64 {
-    let id = start_unnamed_conversation(pool, repo_id, "amber-kestrel")
+    let id = start_unnamed_conversation(pool, repo_id, "amber-kestrel", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -901,11 +910,11 @@ async fn a_conversation_started_any_other_way_is_holding_no_pull_request() {
     let (_dir, pool) = fresh_pool().await;
     let verkstead = repo(&pool, "verkstead").await;
 
-    let ordinary = start_unnamed_conversation(&pool, verkstead, "amber-kestrel")
+    let ordinary = start_unnamed_conversation(&pool, verkstead, "amber-kestrel", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
-    let roadmap = start_adoption(&pool, verkstead, "quiet-heron", "mvp")
+    let roadmap = start_adoption(&pool, verkstead, "quiet-heron", "mvp", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -1318,7 +1327,7 @@ async fn archiving_a_conversation_whose_state_word_is_unreadable_says_it_is_not_
         archive_conversation(&pool, id).await.unwrap(),
         Archiving::Archived
     );
-    assert!(conversations(&pool).await.unwrap().is_empty());
+    assert!(conversations(&pool, false).await.unwrap().is_empty());
 }
 
 /// And the sidebar still draws it, carrying the word it could not read.
@@ -1331,13 +1340,13 @@ async fn the_list_carries_a_row_whose_state_word_is_unreadable() {
     let (_dir, pool) = fresh_pool().await;
     let readable = drafted(&pool).await;
     let repo_id = repo(&pool, "askance").await;
-    let broken = start_conversation(&pool, repo_id, "amber-kestrel")
+    let broken = start_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
     corrupt_the_state(&pool, broken).await;
 
-    let rows = conversations(&pool).await.unwrap();
+    let rows = conversations(&pool, false).await.unwrap();
 
     assert_eq!(
         rows.iter().map(|row| row.id).collect::<Vec<_>>(),
@@ -1367,7 +1376,7 @@ async fn archiving_a_closed_conversation_takes_it_off_the_list() {
         Archiving::Archived
     );
 
-    assert!(conversations(&pool).await.unwrap().is_empty());
+    assert!(conversations(&pool, false).await.unwrap().is_empty());
 
     let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
     assert_eq!(conversation.state, Lifecycle::Closed);
@@ -1394,7 +1403,7 @@ async fn what_was_archived_is_still_archived_after_a_restart() {
 
     let pool = open_database(&path).await.unwrap();
 
-    assert!(conversations(&pool).await.unwrap().is_empty());
+    assert!(conversations(&pool, false).await.unwrap().is_empty());
     assert_eq!(
         archive_conversation(&pool, id).await.unwrap(),
         Archiving::AlreadyArchived
@@ -1438,7 +1447,7 @@ async fn a_conversation_that_is_not_closed_cannot_be_archived() {
         Archiving::NotClosed
     );
 
-    assert_eq!(conversations(&pool).await.unwrap().len(), 1);
+    assert_eq!(conversations(&pool, false).await.unwrap().len(), 1);
 }
 
 #[tokio::test]
@@ -1467,7 +1476,7 @@ async fn unarchiving_puts_a_conversation_back_on_the_list() {
 
     assert!(!archived(&pool, id).await.unwrap());
 
-    let list = conversations(&pool).await.unwrap();
+    let list = conversations(&pool, false).await.unwrap();
     assert_eq!(list.len(), 1);
     assert_eq!(list[0].state, RowState::Known(Lifecycle::Closed));
 }
@@ -1491,7 +1500,7 @@ async fn what_was_unarchived_is_still_unarchived_after_a_restart() {
 
     let pool = open_database(&path).await.unwrap();
 
-    assert_eq!(conversations(&pool).await.unwrap().len(), 1);
+    assert_eq!(conversations(&pool, false).await.unwrap().len(), 1);
     assert_eq!(
         unarchive_conversation(&pool, id).await.unwrap(),
         Unarchiving::NotArchived
@@ -1509,7 +1518,7 @@ async fn unarchiving_one_that_is_not_archived_is_not_an_error() {
         unarchive_conversation(&pool, id).await.unwrap(),
         Unarchiving::NotArchived
     );
-    assert_eq!(conversations(&pool).await.unwrap().len(), 1);
+    assert_eq!(conversations(&pool, false).await.unwrap().len(), 1);
 }
 
 #[tokio::test]
@@ -1522,8 +1531,8 @@ async fn unarchiving_a_conversation_that_is_not_there_says_so() {
     );
 }
 
-/// The human's standing choice to be shown what they have put away: with it
-/// on, an archived Conversation is on the list in its ordinary place.
+/// The human's standing choice to be shown what they have put away: asked for
+/// with it on, an archived Conversation is on the list in its ordinary place.
 #[tokio::test]
 async fn showing_the_archived_puts_them_back_in_the_list() {
     let (_dir, pool) = fresh_pool().await;
@@ -1531,21 +1540,41 @@ async fn showing_the_archived_puts_them_back_in_the_list() {
     close_conversation(&pool, id).await.unwrap();
     archive_conversation(&pool, id).await.unwrap();
 
-    assert!(!showing_archived(&pool).await.unwrap());
-    assert!(conversations(&pool).await.unwrap().is_empty());
+    assert!(conversations(&pool, false).await.unwrap().is_empty());
 
-    show_archived(&pool, true).await.unwrap();
-
-    assert!(showing_archived(&pool).await.unwrap());
-    let list = conversations(&pool).await.unwrap();
+    let list = conversations(&pool, true).await.unwrap();
     assert_eq!(list.len(), 1);
     assert_eq!(list[0].id, id);
     assert!(archived(&pool, id).await.unwrap());
+}
 
+/// And the list is drawn at the position it is handed rather than at the one
+/// this machine's own switch is in.
+///
+/// Which is what makes one switch govern a merged list: the device the browser
+/// opened asks each of its members with its own position, and a member answers
+/// it without its own row being touched — see `crate::merging` and
+/// [`showing_archived`].
+#[tokio::test]
+async fn the_list_is_drawn_at_the_position_it_is_handed_rather_than_the_stored_one() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = drafted(&pool).await;
+    close_conversation(&pool, id).await.unwrap();
+    archive_conversation(&pool, id).await.unwrap();
+
+    // This machine's own switch is on, and a read that asked for it off is
+    // answered with the row left out all the same.
+    show_archived(&pool, true).await.unwrap();
+
+    assert!(conversations(&pool, false).await.unwrap().is_empty());
+    assert_eq!(conversations(&pool, true).await.unwrap().len(), 1);
+
+    // And the other way round, the row being the one thing neither read moves.
     show_archived(&pool, false).await.unwrap();
 
+    assert_eq!(conversations(&pool, true).await.unwrap().len(), 1);
+    assert!(conversations(&pool, false).await.unwrap().is_empty());
     assert!(!showing_archived(&pool).await.unwrap());
-    assert!(conversations(&pool).await.unwrap().is_empty());
 }
 
 /// And whether there is anything behind that switch at all, which is what the
@@ -1566,7 +1595,7 @@ async fn whether_anything_is_archived_is_read_apart_from_the_switch() {
     archive_conversation(&pool, id).await.unwrap();
 
     assert!(any_archived(&pool).await.unwrap());
-    assert!(conversations(&pool).await.unwrap().is_empty());
+    assert!(conversations(&pool, false).await.unwrap().is_empty());
 
     show_archived(&pool, true).await.unwrap();
     assert!(any_archived(&pool).await.unwrap());
@@ -1608,8 +1637,10 @@ async fn the_choice_to_show_them_survives_a_restart() {
 
     let pool = open_database(&path).await.unwrap();
 
-    assert!(showing_archived(&pool).await.unwrap());
-    assert_eq!(conversations(&pool).await.unwrap().len(), 1);
+    let showing = showing_archived(&pool).await.unwrap();
+
+    assert!(showing);
+    assert_eq!(conversations(&pool, showing).await.unwrap().len(), 1);
 }
 
 /// Where the worktree went outlives the process that made it — it is a directory
@@ -1649,7 +1680,7 @@ async fn an_adopting_conversation_records_the_roadmap_it_is_adopting() {
     let (_dir, pool) = fresh_pool().await;
     let repo_id = repo(&pool, "verkstead").await;
 
-    let id = start_adoption(&pool, repo_id, "spring-otter", "mvp")
+    let id = start_adoption(&pool, repo_id, "spring-otter", "mvp", THIS_DEVICE)
         .await
         .unwrap()
         .expect("the Repo is registered, so the Conversation should start");
@@ -1669,7 +1700,7 @@ async fn a_conversation_started_the_ordinary_way_is_adopting_nothing() {
     let (_dir, pool) = fresh_pool().await;
     let repo_id = repo(&pool, "verkstead").await;
 
-    let id = start_conversation(&pool, repo_id, "rate-limiting")
+    let id = start_conversation(&pool, repo_id, "rate-limiting", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -1690,12 +1721,12 @@ async fn an_adoption_cannot_be_started_against_a_repo_that_is_not_registered() {
     let (_dir, pool) = fresh_pool().await;
 
     assert!(
-        start_adoption(&pool, 404, "spring-otter", "mvp")
+        start_adoption(&pool, 404, "spring-otter", "mvp", THIS_DEVICE)
             .await
             .unwrap()
             .is_none()
     );
-    assert!(conversations(&pool).await.unwrap().is_empty());
+    assert!(conversations(&pool, false).await.unwrap().is_empty());
 }
 
 /// The mark is a row like every other, so it is there after a restart — a page
@@ -1704,7 +1735,7 @@ async fn an_adoption_cannot_be_started_against_a_repo_that_is_not_registered() {
 async fn the_roadmap_being_adopted_survives_the_database_being_reopened() {
     let (dir, pool) = fresh_pool().await;
     let repo_id = repo(&pool, "verkstead").await;
-    let id = start_adoption(&pool, repo_id, "spring-otter", "mvp")
+    let id = start_adoption(&pool, repo_id, "spring-otter", "mvp", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -1717,5 +1748,937 @@ async fn the_roadmap_being_adopted_survives_the_database_being_reopened() {
     assert_eq!(
         adopting(&reopened, id).await.unwrap().as_deref(),
         Some("mvp")
+    );
+}
+
+/// Starting a stage records which roadmap it is a stage of **and which stage of
+/// it**, in the one transaction that makes it a stage.
+///
+/// Both halves of one fact, on the one row — the label as the roadmap's own line
+/// labels it, zero-padding kept, because that is the form everything else about a
+/// roadmap names a stage in. Nothing derives it from the branch, which is why the
+/// branch here is named for a stage the label does not match: what is stored is
+/// what the caller read off the roadmap.
+#[tokio::test]
+async fn starting_a_stage_records_which_stage_of_which_roadmap_it_is() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = drafted(&pool).await;
+
+    assert_eq!(
+        start_stage(
+            &pool,
+            id,
+            "c0ffee",
+            Path::new("/data/worktrees/stage"),
+            Some("roadmaps/mvp/04-wrap-up"),
+            RoadmapStage {
+                roadmap: "mvp",
+                label: "05",
+            },
+            &[],
+        )
+        .await
+        .unwrap(),
+        Staged::Started,
+    );
+
+    assert_eq!(
+        stage_roadmap(&pool, id).await.unwrap(),
+        Some(StageOf {
+            roadmap: "mvp".to_owned(),
+            stage: Some("05".to_owned()),
+        }),
+    );
+}
+
+/// A row holding a roadmap and no stage is not the same answer as no row at all,
+/// and the read says which.
+///
+/// Three shapes and all three are told apart here: a stage Verkstead recorded
+/// the label for, a stage from between the two changes whose row holds the
+/// roadmap alone, and a Conversation nothing ever recorded a roadmap against.
+/// Which of the middle one's two meanings it carries — a stage from before, or
+/// the Conversation that wrote the roadmap — is read from what is stored beside
+/// it, and [`stacks_on`] is that reading's first half.
+#[tokio::test]
+async fn a_stage_with_no_label_is_told_from_a_conversation_with_no_row() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo_id = repo(&pool, "verkstead").await;
+
+    let before = start_conversation(&pool, repo_id, "rate-limiting", THIS_DEVICE)
+        .await
+        .unwrap()
+        .unwrap();
+
+    start_stage(
+        &pool,
+        before,
+        "c0ffee",
+        Path::new("/data/worktrees/before"),
+        None,
+        RoadmapStage {
+            roadmap: "mvp",
+            label: "03",
+        },
+        &[],
+    )
+    .await
+    .unwrap();
+
+    // Which is what a stage started between ADR-0017 and the label looks like:
+    // the roadmap on the record and nothing said about which stage.
+    sqlx::query("UPDATE stage_roadmaps SET stage = NULL WHERE conversation_id = ?")
+        .bind(before)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        stage_roadmap(&pool, before).await.unwrap(),
+        Some(StageOf {
+            roadmap: "mvp".to_owned(),
+            stage: None,
+        }),
+        "a roadmap and no label, which is a row rather than nothing",
+    );
+    assert_eq!(
+        stacks_on(&pool, before).await.unwrap(),
+        Some(None),
+        "and a stage all the same, which is what says the empty label is a \
+         stage's rather than a roadmap-writer's",
+    );
+
+    let never = start_conversation(&pool, repo_id, "amber-kestrel", THIS_DEVICE)
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        stage_roadmap(&pool, never).await.unwrap(),
+        None,
+        "and a Conversation nothing recorded a roadmap against has no row at all",
+    );
+    assert_eq!(stacks_on(&pool, never).await.unwrap(), None);
+}
+
+/// A Conversation that has picked a direction, which is the one thing a pick
+/// needs: [`pick_direction`] is refused for anything but a grilling.
+async fn directed(pool: &SqlitePool, repo_id: i64, branch: &str, direction: Direction) -> i64 {
+    let id = start_conversation(pool, repo_id, branch, THIS_DEVICE)
+        .await
+        .unwrap()
+        .unwrap();
+
+    start_grilling(
+        pool,
+        id,
+        "c0ffee",
+        &Path::new("/data/worktrees").join(branch.replace('/', "-")),
+        &[],
+    )
+    .await
+    .unwrap();
+
+    pick_direction(pool, id, direction).await.unwrap();
+
+    id
+}
+
+/// A stage Conversation of `roadmap`, started as a stage and left implementing.
+///
+/// The branch is named after the label rather than read off it, which is what the
+/// record is for: nothing here or anywhere else works a label out from a branch.
+async fn stage(pool: &SqlitePool, repo_id: i64, roadmap: &str, label: &str) -> i64 {
+    let id = start_conversation(
+        pool,
+        repo_id,
+        &format!("roadmaps/{roadmap}/{label}"),
+        THIS_DEVICE,
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    start_stage(
+        pool,
+        id,
+        "c0ffee",
+        &PathBuf::from("/data/worktrees").join(format!("{roadmap}-{label}")),
+        None,
+        RoadmapStage { roadmap, label },
+        &[],
+    )
+    .await
+    .unwrap();
+
+    id
+}
+
+/// A steer into `target` and nothing else with it, which is how a test walks a
+/// stage up the ladder: the move is written the way every move is, so the
+/// Timeline says where it has been.
+fn steer(target: Lifecycle) -> Steer<'static> {
+    Steer {
+        target,
+        pairings: &[],
+        brief: None,
+        instruction: None,
+        direction: None,
+        worktree: None,
+        base: None,
+        companions: &[],
+        opened: &[],
+        checkouts: &[],
+        said: None,
+        recorded: Recorded::default(),
+        scratch: &[],
+    }
+}
+
+/// What the record says about each stage of a roadmap, which is the reading both
+/// of Verkstead's own readings of a roadmap are handed.
+///
+/// Every one of the three answers, and each of them from a Conversation that got
+/// where it is the way a real one does: still implementing, finished, closed from
+/// a wrap-up, and closed before there was one. And settled read as *ever in Done*
+/// rather than *in Done now*, which is what the two halves at the foot of this
+/// are.
+#[tokio::test]
+async fn the_record_says_which_stages_settled_which_are_in_flight_and_which_were_abandoned() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo_id = repo(&pool, "verkstead").await;
+
+    let done = stage(&pool, repo_id, "mvp", "01").await;
+    steer_conversation(&pool, done, steer(Lifecycle::Done))
+        .await
+        .unwrap();
+
+    let wrapped_up_then_closed = stage(&pool, repo_id, "mvp", "02").await;
+    steer_conversation(&pool, wrapped_up_then_closed, steer(Lifecycle::Wrapping))
+        .await
+        .unwrap();
+    close_conversation(&pool, wrapped_up_then_closed)
+        .await
+        .unwrap();
+
+    let closed_part_way = stage(&pool, repo_id, "mvp", "03").await;
+    close_conversation(&pool, closed_part_way).await.unwrap();
+
+    // And one nothing has finished with, left implementing, which is where every
+    // stage starts.
+    let implementing = stage(&pool, repo_id, "mvp", "04").await;
+
+    let standings = stage_standings(&pool, repo_id).await.unwrap();
+
+    assert_eq!(
+        standings.of("mvp", "01"),
+        Some(StageStanding::Settled),
+        "a stage in Done has settled, whether or not its pull request has merged",
+    );
+    assert_eq!(
+        standings.of("mvp", "02"),
+        Some(StageStanding::Settled),
+        "and so has one closed from a wrap-up: the human saying they are finished with it",
+    );
+    assert_eq!(
+        standings.of("mvp", "03"),
+        Some(StageStanding::Abandoned),
+        "one closed before it ever wrapped up is neither settled nor in flight",
+    );
+    assert_eq!(
+        standings.of("mvp", "04"),
+        Some(StageStanding::InFlight),
+        "and one still being implemented is in flight",
+    );
+    assert_eq!(
+        standings.of("mvp", "05"),
+        None,
+        "and a stage the record holds nothing about is nothing at all, which is \
+         what leaves its box to speak for it",
+    );
+
+    // And settled once is settled: a stage steered out of Done — put back to work,
+    // or followed up on months after it merged — has finished its work all the
+    // same. Whether its branch is moving again is the chain's question rather than
+    // this reading's, and reading it as in flight is what stopped the adoption
+    // dead at a stage that was done.
+    steer_conversation(&pool, done, steer(Lifecycle::Implementing))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        stage_standings(&pool, repo_id)
+            .await
+            .unwrap()
+            .of("mvp", "01"),
+        Some(StageStanding::Settled),
+    );
+
+    // Where *never in Done* is the whole of what in flight means: the stage still
+    // being implemented has been nowhere else, and steering it into Wrapping — one
+    // rung short — leaves it there.
+    steer_conversation(&pool, implementing, steer(Lifecycle::Wrapping))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        stage_standings(&pool, repo_id)
+            .await
+            .unwrap()
+            .of("mvp", "04"),
+        Some(StageStanding::InFlight),
+    );
+}
+
+/// And whether each of them has **stopped**, which is the reading beside the
+/// standing rather than a fourth answer inside it: a stage that stopped is in
+/// flight — it holds its place, its branch and its worktree — and what the stop
+/// changes is what a human reading the roadmap is told about it.
+#[tokio::test]
+async fn the_record_says_which_stages_have_stopped_beside_where_each_of_them_got_to() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo_id = repo(&pool, "verkstead").await;
+
+    // One going and one stopped, both in flight.
+    stage(&pool, repo_id, "mvp", "01").await;
+    let halted = stage(&pool, repo_id, "mvp", "02").await;
+
+    stop(
+        &pool,
+        halted,
+        Decision::Verkstead,
+        "The session fell over.",
+        None,
+    )
+    .await
+    .unwrap();
+
+    let standings = stage_standings(&pool, repo_id).await.unwrap();
+
+    assert_eq!(
+        standings.of("mvp", "02"),
+        Some(StageStanding::InFlight),
+        "a stopped stage is still in flight: nothing about the stop settles it or \
+         gives up its place",
+    );
+    assert!(standings.stopped("mvp", "02"));
+    assert!(
+        !standings.stopped("mvp", "01"),
+        "and the one nothing has stopped is going on",
+    );
+    assert!(
+        !standings.stopped("mvp", "03"),
+        "as is a stage the record holds nothing about, there being nothing there \
+         that could have stopped",
+    );
+
+    // And Resume takes it back, the stop being the standing state of a run rather
+    // than something that happened to it once.
+    clear_stop(&pool, halted).await.unwrap();
+
+    assert!(
+        !stage_standings(&pool, repo_id)
+            .await
+            .unwrap()
+            .stopped("mvp", "02"),
+    );
+}
+
+/// Two Conversations answer to one label where a stage was attempted twice, and
+/// the roadmap has one line for it either way: settled counts over in flight, and
+/// in flight over abandoned.
+#[tokio::test]
+async fn the_furthest_of_two_attempts_at_one_stage_is_what_the_record_says() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo_id = repo(&pool, "verkstead").await;
+
+    // Abandoned, and taken up again: somebody is on it now.
+    let abandoned = stage(&pool, repo_id, "mvp", "01").await;
+    close_conversation(&pool, abandoned).await.unwrap();
+    let second = stage(&pool, repo_id, "mvp", "01").await;
+
+    assert_eq!(
+        stage_standings(&pool, repo_id)
+            .await
+            .unwrap()
+            .of("mvp", "01"),
+        Some(StageStanding::InFlight),
+        "in flight over abandoned, the second attempt being the live one",
+    );
+
+    // And once that one finishes, the stage has settled — whichever order the
+    // rows come back in.
+    steer_conversation(&pool, second, steer(Lifecycle::Done))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        stage_standings(&pool, repo_id)
+            .await
+            .unwrap()
+            .of("mvp", "01"),
+        Some(StageStanding::Settled),
+    );
+}
+
+/// And the stop travels with the standing that is believed: the attempt whose
+/// standing wins is the one whose stop is reported, because a stop belonging to
+/// an attempt nobody is reading is nothing to say about the stage.
+#[tokio::test]
+async fn the_stop_reported_is_the_one_on_the_attempt_the_record_believes() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo_id = repo(&pool, "verkstead").await;
+
+    // The first attempt stopped and was closed part-way through; the second is
+    // somebody's now, and going.
+    let first = stage(&pool, repo_id, "mvp", "01").await;
+    stop(
+        &pool,
+        first,
+        Decision::Verkstead,
+        "The session fell over.",
+        None,
+    )
+    .await
+    .unwrap();
+    close_conversation(&pool, first).await.unwrap();
+
+    stage(&pool, repo_id, "mvp", "01").await;
+
+    let standings = stage_standings(&pool, repo_id).await.unwrap();
+
+    assert_eq!(standings.of("mvp", "01"), Some(StageStanding::InFlight));
+    assert!(
+        !standings.stopped("mvp", "01"),
+        "the live attempt is the one being read, and nothing has stopped it",
+    );
+}
+
+/// And which **Conversation** each standing came from comes back with it, that being
+/// what a register of the running server is asked about a stage by: the registers
+/// keep Conversations where a roadmap keeps labels.
+#[tokio::test]
+async fn the_reading_names_the_conversation_each_stage_is() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo_id = repo(&pool, "verkstead").await;
+
+    let first = stage(&pool, repo_id, "mvp", "01").await;
+    let second = stage(&pool, repo_id, "mvp", "02").await;
+
+    let standings = stage_standings(&pool, repo_id).await.unwrap();
+
+    assert_eq!(standings.conversation("mvp", "01"), Some(first));
+    assert_eq!(standings.conversation("mvp", "02"), Some(second));
+    assert_eq!(
+        standings.conversation("mvp", "03"),
+        None,
+        "a stage the record holds no row for is a stage with no Conversation to \
+         name — worked by hand, or by the old tools",
+    );
+}
+
+/// And it is the Conversation of the attempt the record **believes**, exactly as the
+/// stop is: a stage attempted twice is two Conversations answering to one label, and
+/// what is said about the stage and which Conversation it is said about have to be
+/// the one attempt's.
+#[tokio::test]
+async fn the_conversation_named_is_the_one_the_record_believes() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo_id = repo(&pool, "verkstead").await;
+
+    // Abandoned part-way through, and then started again — so the second attempt
+    // is the one in flight and the one to name.
+    let abandoned = stage(&pool, repo_id, "mvp", "01").await;
+    close_conversation(&pool, abandoned).await.unwrap();
+
+    let second = stage(&pool, repo_id, "mvp", "01").await;
+
+    let standings = stage_standings(&pool, repo_id).await.unwrap();
+
+    assert_eq!(standings.of("mvp", "01"), Some(StageStanding::InFlight));
+    assert_eq!(
+        standings.conversation("mvp", "01"),
+        Some(second),
+        "the live attempt is the one being read, so it is the one named",
+    );
+
+    // And where the two stand the same way, it is the later of them: rows arrive in
+    // the order the Conversations were started, and the second attempt is the one
+    // somebody is on now.
+    let third = stage(&pool, repo_id, "mvp", "02").await;
+    let fourth = stage(&pool, repo_id, "mvp", "02").await;
+
+    let standings = stage_standings(&pool, repo_id).await.unwrap();
+
+    assert_eq!(standings.of("mvp", "02"), Some(StageStanding::InFlight));
+    assert!(third < fourth);
+    assert_eq!(standings.conversation("mvp", "02"), Some(fourth));
+}
+
+/// The reading is one Repo's. A Conversation belongs to one Repo and two Repos may
+/// hold roadmaps of the same name, so a stage of `mvp` over there answers for
+/// nothing here.
+#[tokio::test]
+async fn one_repos_stages_do_not_answer_for_anothers() {
+    let (_dir, pool) = fresh_pool().await;
+    let ours = repo(&pool, "verkstead").await;
+    let theirs = repo(&pool, "askance").await;
+
+    let elsewhere = stage(&pool, theirs, "mvp", "01").await;
+    steer_conversation(&pool, elsewhere, steer(Lifecycle::Done))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        stage_standings(&pool, ours).await.unwrap().of("mvp", "01"),
+        None,
+        "the other Repo's finished stage 01 says nothing about this Repo's",
+    );
+    assert_eq!(
+        stage_standings(&pool, theirs)
+            .await
+            .unwrap()
+            .of("mvp", "01"),
+        Some(StageStanding::Settled),
+    );
+}
+
+/// And a row holding a roadmap and no label is no stage's standing: it is a stage
+/// from before the label was written down, or the Conversation that wrote the
+/// roadmap, and the boxes go on speaking for whatever it was.
+#[tokio::test]
+async fn a_row_with_no_label_stands_for_no_stage() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo_id = repo(&pool, "verkstead").await;
+
+    let before = stage(&pool, repo_id, "mvp", "01").await;
+    steer_conversation(&pool, before, steer(Lifecycle::Done))
+        .await
+        .unwrap();
+
+    sqlx::query("UPDATE stage_roadmaps SET stage = NULL WHERE conversation_id = ?")
+        .bind(before)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        stage_standings(&pool, repo_id).await.unwrap(),
+        verkstead_store::StageStandings::default(),
+        "a roadmap with no label against it puts nothing in the reading",
+    );
+}
+
+/// One pull request opened on a stage's branch, which is what joins it to the
+/// chain.
+///
+/// The number is the caller's, so two pull requests in one test cannot be
+/// confused for each other, and the branch is the Conversation's: what a chain
+/// holds is branches, and this is the one the finish pushed.
+async fn opened(pool: &SqlitePool, repo_id: i64, id: i64, number: i64) {
+    let branch = conversation_branch(pool, id)
+        .await
+        .unwrap()
+        .expect("a Conversation is on a branch from the moment it exists");
+
+    record_pull_request(
+        pool,
+        id,
+        repo_id,
+        &PullRequest {
+            number,
+            title: format!("Stage {number}"),
+            url: format!("https://github.com/tobico/verkstead/pull/{number}"),
+            head: Some(branch),
+            base: None,
+            repo: None,
+        },
+    )
+    .await
+    .unwrap();
+}
+
+/// The chain is the stages that opened a pull request, bottom to top, in the
+/// order they opened one — and nothing else.
+///
+/// Which is the whole of what a join is: a stage joins its roadmap's chain when
+/// its finish pushes its branch and opens a pull request on it, so the pull
+/// request is the record of the join and the Timeline Event it hangs off is the
+/// record of when. A stage still working its backlog has pushed nothing and is
+/// no link of anything.
+///
+/// The order is the order they *finished* rather than the order the roadmap
+/// numbers them in, which is the case worth writing down: stage 02 finishing
+/// first puts stage 02 at the foot of the chain, and stage 01 joins on top of
+/// it.
+#[tokio::test]
+async fn a_roadmaps_chain_is_the_stages_that_opened_a_pull_request_in_that_order() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo_id = repo(&pool, "verkstead").await;
+
+    let first = stage(&pool, repo_id, "mvp", "02").await;
+    let second = stage(&pool, repo_id, "mvp", "01").await;
+
+    // And one still working its backlog, which has pushed nothing and opened
+    // nothing: a stage nothing can rebase onto is no link of the chain.
+    stage(&pool, repo_id, "mvp", "03").await;
+
+    assert_eq!(
+        stage_chain(&pool, repo_id, "mvp").await.unwrap(),
+        Vec::new(),
+        "a roadmap whose stages have opened nothing has no chain yet",
+    );
+
+    opened(&pool, repo_id, first, 42).await;
+    opened(&pool, repo_id, second, 43).await;
+
+    assert_eq!(
+        stage_chain(&pool, repo_id, "mvp").await.unwrap(),
+        vec![
+            Joined {
+                conversation_id: first,
+                stage: "02".to_owned(),
+                branch: "roadmaps/mvp/02".to_owned(),
+            },
+            Joined {
+                conversation_id: second,
+                stage: "01".to_owned(),
+                branch: "roadmaps/mvp/01".to_owned(),
+            },
+        ],
+        "the order they joined in, which is the order they finished in",
+    );
+}
+
+/// A stage that opens a second pull request keeps the place its first one gave
+/// it.
+///
+/// A stack is what a finished roadmap leaves behind, so a Conversation may have
+/// more than one pull request recorded against it — the rest of a stack, a
+/// companion repository's. What says when this stage joined is the first of
+/// them, and a later row must not float it back to the top of the chain above
+/// stages that joined while it was wrapping up.
+#[tokio::test]
+async fn a_stage_joins_the_chain_where_its_first_pull_request_put_it() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo_id = repo(&pool, "verkstead").await;
+
+    let below = stage(&pool, repo_id, "mvp", "01").await;
+    let above = stage(&pool, repo_id, "mvp", "02").await;
+
+    opened(&pool, repo_id, below, 42).await;
+    opened(&pool, repo_id, above, 43).await;
+
+    record_another_pull_request(
+        &pool,
+        below,
+        repo_id,
+        &PullRequest {
+            number: 44,
+            title: "The rest of the stack".to_owned(),
+            url: "https://github.com/tobico/verkstead/pull/44".to_owned(),
+            head: Some("roadmaps/mvp/01".to_owned()),
+            base: None,
+            repo: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        stage_chain(&pool, repo_id, "mvp")
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|link| link.stage)
+            .collect::<Vec<_>>(),
+        vec!["01".to_owned(), "02".to_owned()],
+        "the first pull request is what says when a stage joined",
+    );
+}
+
+/// The chain is one Repo's and one roadmap's. Two Repos may hold roadmaps of
+/// the same name, and one Repo holds every roadmap it has ever run — so a stage
+/// of `mvp` over there, and a stage of `processes` over here, are links of
+/// neither chain.
+#[tokio::test]
+async fn a_chain_holds_no_other_repos_stages_and_no_other_roadmaps() {
+    let (_dir, pool) = fresh_pool().await;
+    let ours = repo(&pool, "verkstead").await;
+    let theirs = repo(&pool, "askance").await;
+
+    let mine = stage(&pool, ours, "mvp", "01").await;
+    opened(&pool, ours, mine, 42).await;
+
+    let beside = stage(&pool, ours, "processes", "01").await;
+    opened(&pool, ours, beside, 43).await;
+
+    let elsewhere = stage(&pool, theirs, "mvp", "01").await;
+    opened(&pool, theirs, elsewhere, 44).await;
+
+    assert_eq!(
+        stage_chain(&pool, ours, "mvp")
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|link| link.conversation_id)
+            .collect::<Vec<_>>(),
+        vec![mine],
+        "one roadmap of one Repo, and neither of the other two",
+    );
+}
+
+/// The queue to join is the stages whose tasks have finished, in the order they
+/// finished them — which is the order they take their places in.
+///
+/// One stage at a time joins a roadmap's chain, and which of two whose boxes were
+/// both ticked goes first cannot be the order a server happened to notice them
+/// in. So the place is a row, and it is the row's own order that answers.
+///
+/// The numbers the roadmap gives the stages say nothing about it: stage 03
+/// finishing its tasks first is stage 03 joining first.
+#[tokio::test]
+async fn a_roadmaps_queue_to_join_is_the_order_the_stages_tasks_finished_in() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo_id = repo(&pool, "verkstead").await;
+
+    let first = stage(&pool, repo_id, "mvp", "03").await;
+    let second = stage(&pool, repo_id, "mvp", "01").await;
+
+    // And one still working its backlog, which has taken no place at all.
+    stage(&pool, repo_id, "mvp", "02").await;
+
+    assert_eq!(
+        join_queue(&pool, repo_id, "mvp").await.unwrap(),
+        Vec::new(),
+        "a roadmap none of whose stages has finished its tasks has nobody queued",
+    );
+
+    queue_to_join(&pool, first).await.unwrap();
+    queue_to_join(&pool, second).await.unwrap();
+
+    assert_eq!(
+        join_queue(&pool, repo_id, "mvp").await.unwrap(),
+        vec![
+            Queued {
+                conversation_id: first,
+                stage: "03".to_owned(),
+            },
+            Queued {
+                conversation_id: second,
+                stage: "01".to_owned(),
+            },
+        ],
+        "the order their tasks finished in, whatever the roadmap numbers them",
+    );
+}
+
+/// And a stage taken up again keeps the place it already had.
+///
+/// The wait may be long, and a restart takes every stage left mid-run up from
+/// where it stands — so a stage held before its finish is asked the same question
+/// a second time and a third. A place written afresh each time would be a queue a
+/// restart reordered, which is the whole reason it is a stored fact.
+#[tokio::test]
+async fn a_stage_taken_up_again_keeps_the_place_the_queue_gave_it() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo_id = repo(&pool, "verkstead").await;
+
+    let first = stage(&pool, repo_id, "mvp", "01").await;
+    let second = stage(&pool, repo_id, "mvp", "02").await;
+
+    queue_to_join(&pool, first).await.unwrap();
+    queue_to_join(&pool, second).await.unwrap();
+
+    // Which is what a restart does: the stage in front is taken up again, looks
+    // at the queue again, and asks for a place it already has.
+    queue_to_join(&pool, first).await.unwrap();
+
+    assert_eq!(
+        join_queue(&pool, repo_id, "mvp")
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|queued| queued.conversation_id)
+            .collect::<Vec<_>>(),
+        vec![first, second],
+        "the same order it would have been without the restart",
+    );
+}
+
+/// The queue is one Repo's and one roadmap's, and holds only the rows that say
+/// which stage they are.
+///
+/// [`stage_chain`]'s reasons, and [`stage_standings`]'s: two Repos may hold
+/// roadmaps of the same name, one Repo holds every roadmap it has ever run, and a
+/// row with no label stands for no stage — the Conversation that *wrote* a
+/// roadmap has one, and it joins nothing.
+#[tokio::test]
+async fn a_queue_holds_no_other_repos_stages_no_other_roadmaps_and_no_unlabelled_row() {
+    let (_dir, pool) = fresh_pool().await;
+    let ours = repo(&pool, "verkstead").await;
+    let theirs = repo(&pool, "askance").await;
+
+    let mine = stage(&pool, ours, "mvp", "01").await;
+    queue_to_join(&pool, mine).await.unwrap();
+
+    let beside = stage(&pool, ours, "processes", "01").await;
+    queue_to_join(&pool, beside).await.unwrap();
+
+    let elsewhere = stage(&pool, theirs, "mvp", "01").await;
+    queue_to_join(&pool, elsewhere).await.unwrap();
+
+    // The Conversation that wrote the roadmap: a `stage_roadmaps` row with the
+    // roadmap and no label.
+    let wrote = start_conversation(&pool, ours, "roadmaps/mvp", THIS_DEVICE)
+        .await
+        .unwrap()
+        .unwrap();
+    record_roadmap(&pool, wrote, Some("mvp")).await.unwrap();
+    queue_to_join(&pool, wrote).await.unwrap();
+
+    assert_eq!(
+        join_queue(&pool, ours, "mvp")
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|queued| queued.conversation_id)
+            .collect::<Vec<_>>(),
+        vec![mine],
+        "one roadmap of one Repo, and no row that is not a stage of it",
+    );
+}
+
+/// The Conversation that *wrote* a roadmap comes back by its branch, which is the
+/// foot of that roadmap's chain while its pull request is unmerged.
+///
+/// What says a row is that Conversation's is the roadmap with no stage label
+/// beside it *and* the Roadmap direction — so a stage of the same roadmap is not
+/// it, and neither is an unlabelled row left by a Conversation headed somewhere
+/// else, which is what a stage started before the label was written down is.
+#[tokio::test]
+async fn the_branch_a_roadmap_was_planned_on_is_its_own_conversations() {
+    let (_dir, pool) = fresh_pool().await;
+    let ours = repo(&pool, "verkstead").await;
+    let theirs = repo(&pool, "askance").await;
+
+    // A stage of it, which holds a label and is nobody's planning branch.
+    stage(&pool, ours, "mvp", "01").await;
+
+    // A row with no label and another direction: a stage Verkstead started
+    // before it wrote the label down.
+    let before = directed(&pool, ours, "mvp/02-grilling", Direction::TaskList).await;
+    record_roadmap(&pool, before, Some("mvp")).await.unwrap();
+
+    // Somebody else's repository, planning a roadmap of the same name.
+    let elsewhere = directed(&pool, theirs, "the-mvp-roadmap", Direction::Roadmap).await;
+    record_roadmap(&pool, elsewhere, Some("mvp")).await.unwrap();
+
+    assert_eq!(
+        roadmap_planner(&pool, ours, "mvp").await.unwrap(),
+        None,
+        "nothing in this Repo has planned it: a label is not it, and neither is a direction \
+         of something else",
+    );
+
+    let wrote = directed(&pool, ours, "roadmaps/mvp", Direction::Roadmap).await;
+    record_roadmap(&pool, wrote, Some("mvp")).await.unwrap();
+
+    assert_eq!(
+        roadmap_planner(&pool, ours, "mvp").await.unwrap(),
+        Some(Planned {
+            conversation_id: wrote,
+            branch: "roadmaps/mvp".to_owned(),
+        }),
+        "both halves of the foot: the Conversation that planned it, and the branch it \
+         planned it on",
+    );
+
+    assert_eq!(
+        roadmap_planner(&pool, ours, "public-release")
+            .await
+            .unwrap(),
+        None,
+        "and one roadmap's planning branch says nothing about another's",
+    );
+
+    // And the name a session renamed the branch to is the name that comes back,
+    // for the reason the chain's links come back under theirs: what the record
+    // holds now is what git holds now.
+    follow_branch(&pool, wrote, "roadmaps/the-mvp")
+        .await
+        .unwrap();
+
+    assert_eq!(
+        roadmap_planner(&pool, ours, "mvp")
+            .await
+            .unwrap()
+            .map(|planned| planned.branch)
+            .as_deref(),
+        Some("roadmaps/the-mvp"),
+    );
+}
+
+/// The roadmaps being driven come back **oldest first**, which is the order the
+/// free places on the server are handed out in.
+///
+/// Oldest is the roadmap's own age — the Conversation that wrote it — rather
+/// than its name, the Repo it is in or how long any stage of it has been
+/// waiting. So the order here is deliberately none of the three the rows would
+/// otherwise fall into: the younger roadmap is in the Repo registered first and
+/// is named first alphabetically, and it still comes second.
+#[tokio::test]
+async fn the_roadmaps_being_driven_come_back_oldest_first() {
+    let (_dir, pool) = fresh_pool().await;
+    let ours = repo(&pool, "verkstead").await;
+    let theirs = repo(&pool, "askance").await;
+
+    // The older of the two, and the one that would sort last on every other
+    // reading: its Repo was registered second and its name begins with an `r`.
+    let older = directed(&pool, theirs, "roadmaps/rate-limiting", Direction::Roadmap).await;
+    record_roadmap(&pool, older, Some("rate-limiting"))
+        .await
+        .unwrap();
+
+    // The younger, planned after it. Two stages of it as well, which say nothing
+    // about its age: what a roadmap is aged off is the Conversation that wrote
+    // it, and a stage started this morning does not make the roadmap young.
+    let younger = directed(&pool, ours, "roadmaps/brain-chat", Direction::Roadmap).await;
+    record_roadmap(&pool, younger, Some("brain-chat"))
+        .await
+        .unwrap();
+
+    stage(&pool, ours, "brain-chat", "01").await;
+    stage(&pool, ours, "brain-chat", "02").await;
+
+    assert_eq!(
+        driven_roadmaps(&pool).await.unwrap(),
+        vec![
+            Driven {
+                repo_id: theirs,
+                roadmap: "rate-limiting".to_owned(),
+            },
+            Driven {
+                repo_id: ours,
+                roadmap: "brain-chat".to_owned(),
+            },
+        ],
+        "the roadmap written first is served first, whatever the names and the Repos are",
+    );
+
+    // And a roadmap nobody planned ages off the first stage of it anybody
+    // adopted, there being no planning Conversation to ask. Adopted now, so it
+    // is the youngest of the three.
+    stage(&pool, ours, "public-release", "07").await;
+
+    assert_eq!(
+        driven_roadmaps(&pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|driven| driven.roadmap)
+            .collect::<Vec<_>>(),
+        ["rate-limiting", "brain-chat", "public-release"],
+        "a roadmap adopted stage by stage is as old as the stage that adopted it",
     );
 }

@@ -35,6 +35,16 @@
 //! a failure: the store is not there for the first seconds of a session, and
 //! the writer holds the lock from time to time after that.
 //!
+//! **With one exception, which is an arrival** — see [`carried`]. The memory
+//! sync carries this store whole, so the row of a session whose conversation is
+//! to be carried on lands still recording the *sending* device's Worktree, and
+//! opencode resumes a session in the directory that row names. So that one
+//! column is brought onto this device's Worktree before the harness is started,
+//! and nothing else in the database is written, ever. It is a write made
+//! between two sessions rather than beside one: the session that wrote the row
+//! is on the machine the work has left, and the session about to read it has
+//! not been launched.
+//!
 //! **And a store this build cannot read leaves the session Capture-only.** The
 //! layout is opencode's own and it moves between releases — a table renamed, a
 //! column gone. None of that may fail a session, because the Capture is a
@@ -83,6 +93,14 @@ pub(crate) struct Reader {
     /// `None` for the first polls of a session's life, which is the store not
     /// existing yet and then the session row not being in it yet.
     session: Option<String>,
+
+    /// And whether that id has been handed over yet — see
+    /// [`Reader::found_itself`], which is what puts it on the record.
+    ///
+    /// True from the start for a reader made to **carry a session on**, whose id
+    /// was on the record before this session was launched and is what the
+    /// harness was told to resume.
+    named: bool,
 
     /// The highest sequence number already taken, which is the cursor.
     taken: i64,
@@ -134,10 +152,56 @@ impl Reader {
             launched: to_the_second(launched),
             reading: None,
             session: None,
+            named: false,
             taken: NOTHING_TAKEN,
             refused: 0,
             unreadable: false,
         }
+    }
+
+    /// And read the session `session` of that store, **past the record `taken`**
+    /// — the reader of a session whose conversation is being carried on.
+    ///
+    /// Nothing is looked for: the session is the one the launch proved was in the
+    /// store, and the cursor is where the session on the other machine left off,
+    /// read before this one started (see [`crate::transcript::Carried`]). A reader
+    /// that began at the store's first record would draw the whole of the crossed
+    /// conversation onto this Event a second time.
+    ///
+    /// So the Worktree and the moment are nothing to it, neither being asked of a
+    /// store whose session is in hand, and the name is already on the record: it
+    /// is what the harness was told to resume.
+    pub(crate) fn resuming(database: PathBuf, session: String, taken: i64) -> Reader {
+        Reader {
+            database,
+            worktree: PathBuf::new(),
+            launched: 0,
+            reading: None,
+            session: Some(session),
+            named: true,
+            taken,
+            refused: 0,
+            unreadable: false,
+        }
+    }
+
+    /// The id the store turned out to have this session under, **the once**.
+    ///
+    /// opencode takes no session id at launch, so the Capture was opened under a
+    /// name nothing ever uses and what identifies the session is the row it wrote
+    /// about itself. The moment [`whose`] answers, that row's id is the session's
+    /// name — the id `opencode --session` takes — and the caller puts it on the
+    /// record, which is what leaves a device that never ran the session able to
+    /// carry its conversation on.
+    ///
+    /// `None` on every poll but that one: before the store answers there is no
+    /// name to give, and afterwards it has already been written down.
+    pub(crate) fn found_itself(&mut self) -> Option<String> {
+        let session = self.session.clone().filter(|_| !self.named)?;
+
+        self.named = true;
+
+        Some(session)
     }
 
     /// Take whatever the session has written since the last poll, as the lines
@@ -282,6 +346,119 @@ fn opened(database: &Path) -> SqlitePool {
 /// Under the cadence it is polled on, so that a poll blocked all the way
 /// through is a poll that has finished by the time the next one is due.
 const WAIT_FOR_THE_WRITER: Duration = Duration::from_millis(250);
+
+/// The session `session` of the store at `database`, **brought onto this
+/// device's `worktree`** and read as something a resume could carry on from:
+/// the last record of it that crossed.
+///
+/// **The one write this module makes, and the only one Verkstead makes into
+/// opencode's store.** Everything else here is a reader of somebody else's
+/// database (ADR-0006), and this is the exception the arriving half of a
+/// transfer needs: the memory sync carries the whole store, so the row for a
+/// carried session lands still recording the *sending* device's Worktree — and
+/// opencode resumes a session **in the directory that row names**, checked
+/// against 1.18.31, which started in the path the row held rather than in the
+/// one it was launched from. A resume left alone would open in a directory this
+/// machine has not got.
+///
+/// **One column, because one column is what says where the work is.** The
+/// project the row hangs off names a worktree of its own and the row keeps a
+/// second, relative spelling of its directory beside it, and 1.18.31 honoured
+/// neither over this one — so what is written is the column the finder above
+/// reads and nothing else. A narrower write is a smaller claim to know somebody
+/// else's schema.
+///
+/// **And the cursor comes back with it**, read here rather than measured when
+/// the store is first polled, for the reason a log's length is: a cursor taken
+/// at the first poll would already have this session's own opening records
+/// behind it, and the Transcript would begin part way through the turn.
+///
+/// `None` is every way this is not the resume's to make, and each of them is
+/// Verkstead's own Resume with nothing written: a store that did not come
+/// across, a store whose shape this build does not recognise — the failure mode
+/// the whole module has, said here as a write refused rather than a read — and a
+/// store holding no row of that id at all.
+pub(crate) async fn carried(database: &Path, session: &str, worktree: &Path) -> Option<i64> {
+    if !is_file(database).await {
+        return None;
+    }
+
+    let writing = opened_to_write(database);
+    let brought = brought(&writing, session, worktree).await;
+
+    // Closed rather than dropped, because what comes next is opencode opening
+    // the same database: a connection still open is a writer still holding it.
+    writing.close().await;
+
+    match brought {
+        Ok(taken) => taken,
+
+        Err(error) => {
+            tracing::info!(
+                error = ?error,
+                database = %database.display(),
+                session,
+                "the store of a carried OpenCode session is not a shape this build can bring \
+                 onto this device's Worktree, so the session is re-primed rather than resumed",
+            );
+
+            None
+        }
+    }
+}
+
+/// The write itself, with what went wrong left to the caller to judge — see
+/// [`carried`], whose middle this is.
+async fn brought(
+    writing: &SqlitePool,
+    session: &str,
+    worktree: &Path,
+) -> Result<Option<i64>, sqlx::Error> {
+    // opencode's own spelling again, and the same column [`whose`] reads: the
+    // day it moves is the day this write is refused and the resume falls
+    // through, which is the failure this is written to have.
+    let brought = sqlx::query("UPDATE session SET directory = ? WHERE id = ?")
+        .bind(worktree.to_string_lossy().into_owned())
+        .bind(session)
+        .execute(writing)
+        .await?;
+
+    if brought.rows_affected() == 0 {
+        // A store with no row of that id: the sync did not reach it, or the
+        // session was never written down. Nothing was touched, there being
+        // nothing to touch.
+        return Ok(None);
+    }
+
+    let (taken,): (Option<i64>,) =
+        sqlx::query_as("SELECT MAX(seq) FROM event WHERE aggregate_id = ?")
+            .bind(session)
+            .fetch_one(writing)
+            .await?;
+
+    // A session whose records did not cross is one whose whole conversation is
+    // still to come, which is where a reader of it starts anyway.
+    Ok(Some(taken.unwrap_or(NOTHING_TAKEN)))
+}
+
+/// Open the store to make that one write.
+///
+/// [`opened`]'s options but for the one that matters, and made in its own call
+/// rather than by relaxing that one: a reader that could be handed a writable
+/// connection by mistake is a reader that could write, and the whole of this
+/// module but [`carried`] is a reader.
+fn opened_to_write(database: &Path) -> SqlitePool {
+    let options = SqliteConnectOptions::new()
+        .filename(database)
+        .read_only(false)
+        .create_if_missing(false)
+        .busy_timeout(WAIT_FOR_THE_WRITER);
+
+    SqlitePoolOptions::new()
+        .max_connections(1)
+        .acquire_timeout(WAIT_FOR_THE_WRITER)
+        .connect_lazy_with(options)
+}
 
 /// Which of the store's sessions is the one launched in `worktree` at or after
 /// `launched`.

@@ -24,12 +24,13 @@
 //! invented name.
 
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
-import { createSignal, type JSX, Show } from "solid-js";
+import { createSignal, For, type JSX, Show } from "solid-js";
 
 import { adoptRoadmap } from "../api/client";
 import type { Adopted, ConversationView } from "../api/types";
 import { Empty, ErrorLine, Note } from "../notices";
-import { companionRefusal } from "./Timeline";
+import { keyOf, useDevice } from "../reaching";
+import { companionRefusal, profileRefusal } from "./Timeline";
 import styles from "./Adoption.module.css";
 
 /// Each way of being refused an adoption, in the words of what to go and do
@@ -49,8 +50,6 @@ export const ADOPT_REFUSAL: Record<Extract<Adopted, string>, string> = {
   NoImplementationProfile:
     "Choose an implementation profile and model first, on the brief.",
   NoReviewProfile: "Choose a review profile and model first, on the brief.",
-  ProfileBroken:
-    "A chosen profile's claude pair is not where it was left, so there is no account to run under.",
   NoGitAuthor:
     "No git author is configured, so Verkstead cannot commit on the branch. Set one in Settings before starting work.",
   FetchFailed:
@@ -58,11 +57,11 @@ export const ADOPT_REFUSAL: Record<Extract<Adopted, string>, string> = {
   NoBaseCommit: "The repo has nothing to branch from any more.",
   NoRoadmap: "There is no roadmap by that name at the base commit.",
   RoadmapComplete:
-    "Every stage of that roadmap is ticked off, so there is nothing left to start.",
+    "Every stage of that roadmap is done, so there is nothing left to start.",
   NoBrief:
     "The next stage names a brief that is not there at the base commit, which is the roadmap's own to fix.",
   StageInFlight:
-    "The next stage is marked as in progress on a branch that still exists, so somebody is already on it.",
+    "Somebody is already on the next stage: Verkstead's record says so, or it is marked in progress on a branch that still exists.",
   BranchExists:
     "The stage's own branch already exists, and Verkstead did not make it.",
   WorktreeRefused: "Git would not make the worktree. The server log says why.",
@@ -80,10 +79,26 @@ export const ADOPT_REFUSAL: Record<Extract<Adopted, string>, string> = {
 /// carry what they carry: git will not make a branch under a path another branch
 /// is a file at, and which name that is is the whole of what there is to go and
 /// do about it.
+///
+/// A roadmap that declares badly carries a whole sentence rather than a name,
+/// and it is the server's own: the same words a running roadmap leaves on a
+/// timeline, and the ones the roadmap's own session is refused by at
+/// `verkstead done`, so one fault reads as one fault wherever the human meets
+/// it. Nothing here rewords it — which line of `ROADMAP.md` and what is wrong
+/// with it is the whole of what there is to go and do about it, and only the
+/// judgement knows.
 export function adoptRefusal(outcome: Adopted): string {
   if (typeof outcome === "object") {
     if ("Companion" in outcome) {
       return `${outcome.Companion.repo}: ${companionRefusal(outcome.Companion.why)}`;
+    }
+
+    if ("ProfileBroken" in outcome) {
+      return profileRefusal(outcome.ProfileBroken);
+    }
+
+    if ("Misdeclared" in outcome) {
+      return `That roadmap declares badly, so nothing of it can start: ${outcome.Misdeclared.why}.`;
     }
 
     return `A branch named ${outcome.BranchInTheWay.by} stands in the way of the stage's own branch, and Verkstead did not make it.`;
@@ -97,21 +112,26 @@ export function Adoption(props: {
   adopting: NonNullable<ConversationView["adopting"]>;
 }): JSX.Element {
   const queries = useQueryClient();
+  const device = useDevice();
 
   const [refused, setRefused] = createSignal<Adopted | null>(null);
 
   const adopt = useMutation(() => ({
-    mutationFn: () => adoptRoadmap(props.conversation.id),
+    mutationFn: () => adoptRoadmap(device(), props.conversation.id),
     onSuccess: (outcome: Adopted) => {
       // Whatever it came back with, the page is read again: what adopting did
       // is a conversation that has moved, and what refused it is a repository
       // that has moved — and reading it again is the correction either way.
       setRefused(outcome === "Adopted" ? null : outcome);
 
-      void queries.invalidateQueries({ queryKey: ["conversation"] });
+      void queries.invalidateQueries({
+        queryKey: keyOf(device(), "conversation"),
+      });
       void queries.invalidateQueries({ queryKey: ["conversations"] });
-      void queries.invalidateQueries({ queryKey: ["abandoned-roadmaps"] });
-      void queries.invalidateQueries({ queryKey: ["profiles"] });
+      void queries.invalidateQueries({
+        queryKey: keyOf(device(), "abandoned-roadmaps"),
+      });
+      void queries.invalidateQueries({ queryKey: keyOf(device(), "profiles") });
     },
   }));
 
@@ -149,6 +169,28 @@ export function Adoption(props: {
               conversation's brief, and the work is done on{" "}
               <code>{stage().branch}</code>, branched from the base commit.
             </Note>
+
+            {/* And every stage the press would start beside it, which is what
+                makes the offer honest: a declaring roadmap starts every stage
+                whose dependencies have settled, so what is named here is what
+                pressing does rather than the lowest of it. */}
+            <Show when={props.adopting.beside.length}>
+              <p class={styles.stage}>And beside it:</p>
+              <ul class={styles.beside}>
+                <For each={props.adopting.beside}>
+                  {(beside) => (
+                    <li>
+                      Stage {beside.label}: {beside.title} — on{" "}
+                      <code>{beside.branch}</code>
+                    </li>
+                  )}
+                </For>
+              </ul>
+              <Note>
+                Each of those starts as a conversation of its own, off the same
+                base commit and with the same profiles and repos alongside.
+              </Note>
+            </Show>
           </>
         )}
       </Show>

@@ -23,6 +23,7 @@ import sheet from "../src/set/Sheet.module.css";
 import { draftKey } from "../src/set/filling";
 import { answering, sent } from "./reading";
 import { json, readable } from "./serving";
+import { slidPress } from "./sliding";
 import following from "./fixtures/set-following-up.json" with { type: "json" };
 import investigating from "./fixtures/set-investigating.json" with {
   type: "json",
@@ -165,6 +166,24 @@ describe("the option on an investigation's Set", () => {
 });
 
 describe("ticking it", () => {
+  /// A press on the option's words that slid before it was let go — see
+  /// [`slidPress`](./sliding.ts), which says what is staged and why.
+  function slidWords(page: ParentNode): void {
+    slidPress(page.querySelector(`.${sheet.endingName}`)!);
+  }
+
+  it("ticks on a press that slid over its words, not only on a still one", async () => {
+    const { page } = await answering(FOLLOWING_UP);
+
+    slidWords(page);
+    expect(option(page).checked).toBe(true);
+
+    // And once: a gesture counted twice would tick the box and untick it again,
+    // so this press would be ticking rather than clearing.
+    slidWords(page);
+    expect(option(page).checked).toBe(false);
+  });
+
   it("ticks on a click and clears on a second", async () => {
     const { page } = await answering(FOLLOWING_UP);
 
