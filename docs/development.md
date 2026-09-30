@@ -173,17 +173,19 @@ One directory is made outside it: the **Build Cache**, at
 `--build-cache-dir` says otherwise. Every session gets it writable, with
 `CARGO_HOME` inside it, so a crate is downloaded once for the machine rather
 than once per Conversation; with `sccache` on the `PATH` the server was started
-from, every session is told to compile through it as `RUSTC_WRAPPER` and the
-compiling is cached too, on all three platforms. The dev shell carries one, so a
+from, every session is told to compile through it as `RUSTC_WRAPPER` — and a
+CMake build as its compiler launcher — and the compiling is cached too, on all
+three platforms. The dev shell carries one, so a
 checkout run gets the whole thing. It is on with nothing configured, and the
 settings page is where a language is switched off, or its compiled store given
 a size.
 
 **None of those variable names are Rust's by name in the server.** A language
-is a **descriptor** — data, in one grammar — and the five Verkstead ships are
+is a **descriptor** — data, in one grammar — and the six Verkstead ships are
 `crates/server/languages.yaml`, embedded in the binary and read by
 `crates/server/src/languages.rs`, which is the module's documentation as well
-as its data: Rust, and the four package stores — Go, Node, Python and .NET —
+as its data: Rust and C/C++, which compile, and the four package stores — Go,
+Node, Python and .NET —
 whose eleven tools download into this directory the same way. What a session is
 given is whatever the loaded descriptors say, with the `languages:` map in
 `config.yaml` merged over the built-ins key by key. `{cache}` in one of them is
@@ -200,7 +202,9 @@ with the built-ins as its worked examples, is
 
 The sccache **server** is Verkstead's own, not the sessions'. It comes up as a
 child of the running server the first time a session starts while a language
-naming the `sccache` capability is switched on — Rust's descriptor names it —
+naming the `sccache` capability is switched on — Rust's and C/C++'s both name
+it, the second setting CMake's two compiler-launcher variables and not `CC` or
+`CXX` —
 in a sandbox holding `<data-dir>/worktrees` and the build
 cache and nothing else — so `ps` shows one more sandboxed child beside each
 session's, and it goes when the server does. **The switch rather than the
@@ -214,6 +218,11 @@ on a Mac and the session account on Windows without any half saying which.
 Every session's `sccache` is only the client half reaching it. Sessions starting
 their own is what this replaces: they all bind one port, and the loser's
 compiles then run in the winner's sandbox where its worktree is not reachable.
+It is started with `SCCACHE_BASEDIRS` naming every worktree, so a C/C++
+compile hashed with its absolute paths hits across Conversations; sccache reads
+that once, so a new worktree restarts it only while no session holds it. What
+C/C++ covers and what it does not — generators, `/Zi`, a build directory
+outside the worktree — is [adoption.md](adoption.md#cc-through-the-compile-server).
 
 **Windows had neither half for a while**, and the reason has gone. A session
 there ran inside an AppContainer, which is refused every connection to the local
@@ -285,8 +294,8 @@ sandbox_binds:
 ```
 
 `languages` is one entry per language, merged key by key over the descriptors
-embedded in the binary — the five Verkstead ships are Rust and the four package
-stores, and a save from the settings page writes an entry for each: `enabled`
+embedded in the binary — the six Verkstead ships are Rust, C/C++ and the four
+package stores, and a save from the settings page writes an entry for each: `enabled`
 and `size` are the two the page writes, and everything else in an entry is the
 installer's. `dotnet: enabled: false` above is a machine that builds no .NET and
 would rather not have NuGet's three variables in every session. `gleam` is a
@@ -383,7 +392,7 @@ fine-grained one GitHub named no scopes for at all. `"github_token"` is
 `"Keep"` to leave the configured one alone, which is what a save of the author
 fields sends, and `"Clear"` to take it away.
 
-`"languages"` is one entry per **descriptor** the server loaded — the five
+`"languages"` is one entry per **descriptor** the server loaded — the six
 Verkstead ships and whatever `config.yaml` added — sent as values rather than as
 an action, and the whole list every time, because a save writes the whole file.
 It carries the two keys the page draws, the switch and the size, where an empty

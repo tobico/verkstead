@@ -860,7 +860,10 @@ Conversation. The other half, the compiled objects, wants an `sccache` on the
 `PATH` the server was started from: with one there, every session's `rustc`
 goes through the single Compile Server Verkstead runs, and a dependency is
 compiled once for the machine too. The workbench's Language support page says
-which of the two you have.
+which of the two you have. A C/C++ Repo goes through the same server only where
+CMake is told `-G Ninja`: the Visual Studio generator it picks by default
+ignores the launcher variables (see [C/C++ through the Compile
+Server](#cc-through-the-compile-server)).
 
 **The toolchain a session builds with is the one you installed.** `rustup`'s
 shims are on your `PATH` already, and the rustup home they resolve a toolchain
@@ -876,12 +879,13 @@ directory — is [development.md](development.md#quickstart).
 ## Languages
 
 A language is a **descriptor**: data, in one grammar, saying what to call it,
-what says a checkout builds it, and what variables a session is given. Five
-ship — Rust, Go, Node, Python and .NET — and there is nothing special about any
-of them: each is an entry in a YAML file embedded in the binary, written
-exactly the way you would write one. So the built-ins below are both what
-Verkstead does and the worked examples of the grammar. What each of the other
-four shares, tool by tool, is [at the end of this
+what says a checkout builds it, and what variables a session is given. Six
+ship — Rust, C/C++, Go, Node, Python and .NET — and there is nothing special
+about any of them: each is an entry in a YAML file embedded in the binary,
+written exactly the way you would write one. So the built-ins below are both
+what Verkstead does and the worked examples of the grammar. What C/C++ covers
+is [its own section](#cc-through-the-compile-server), and what each of the
+other four shares, tool by tool, is [at the end of this
 section](#what-each-language-shares).
 
 This is the whole of Rust's, as it ships:
@@ -1032,9 +1036,101 @@ whole of `config.yaml` and puts your entry back exactly as it was — so the fix
 is in the file, and the next session reads it. Settings are read at every
 session spawn: nothing restarts.
 
+### C/C++ through the Compile Server
+
+C/C++ is the second descriptor naming the `sccache` capability, and it names
+the same one Rust's does: one **Compile Server** for the machine, one store and
+one size, so there is no second server and no size field of its own on the
+settings page. Its box turns C and C++ compiles through that server on and off.
+This is the whole of it:
+
+```yaml
+languages:
+  cpp:
+    label: C/C++
+    detect:
+      - CMakeLists.txt
+      - native/CMakeLists.txt
+      - cpp/CMakeLists.txt
+      - meson.build
+    capabilities:
+      sccache:
+        env:
+          CMAKE_C_COMPILER_LAUNCHER: "{sccache}"
+          CMAKE_CXX_COMPILER_LAUNCHER: "{sccache}"
+```
+
+C++ has no one manifest, so `detect` is the build files a checkout ordinarily
+has one of — and, as for every language, it drives the composer's warning and
+nothing else. With no sccache on the server the capability is left out whole,
+and a session gets neither launcher.
+
+**What is covered is CMake**, 3.17 and later, with the **Makefile or Ninja**
+generator. CMake reads the two launcher variables out of the environment when a
+build directory is **first configured**, and caches what it read — so a build
+directory configured before C/C++ was switched on keeps compiling without the
+server until it is configured afresh (delete it, or its `CMakeCache.txt`).
+**Meson** is covered without Verkstead doing anything: it finds an `sccache` on
+the `PATH` for itself, and a session's `PATH` has the server's.
+
+**What is not covered:**
+
+- **Plain Makefiles and Bazel.** Neither reads anything a descriptor could set
+  without reaching past C++ projects, so they compile uncached.
+- **CMake's Visual Studio and Xcode generators**, which ignore the launcher
+  variables. Visual Studio is CMake's default on Windows, so **a Windows Repo
+  is cached only where it configures with Ninja** (`-G Ninja`).
+- **MSVC debug information in `/Zi` form**, which sccache cannot cache; `/Z7`
+  it can. That is a project's compile flags, and Verkstead leaves them alone.
+
+**Why `CC` and `CXX` are left alone.** Setting them would have reached every
+Makefile too — and every build that compiles C and is not a C++ project at all:
+a Rust crate's C build script, a Python or Node native extension, Go with cgo.
+Beside a launcher, they can wrap one compile in sccache twice. The launcher
+variables are read by CMake and nothing else, so they change nothing that is not
+a CMake project. This was asked for and withdrawn once its reach was laid out
+([ADR 0021](adr/0021-language-descriptors.md)); a Repo that wants its own
+Makefile cached can still name `sccache` as its compiler itself.
+
+**A second Conversation hits the first one's objects** because the Compile
+Server is told every Worktree as a base directory. sccache hashes a C or C++
+compile with its absolute paths, and every Conversation's Worktree is a path of
+its own, so without that every Conversation would compile everything again.
+Three things are worth knowing about it:
+
+- It needs **sccache 0.14.0 or later**, the first to honour
+  `SCCACHE_BASEDIRS`. An older one ignores the variable: nothing fails, and a
+  C/C++ build in a second Conversation simply misses. Rust is unaffected
+  either way, its dependencies being compiled out of one `CARGO_HOME` at one
+  path from every Worktree.
+- The server reads the list **once, as it starts**, and is restarted to take in
+  a new Worktree only while no session is running — restarting it under a
+  build would fail that build. So on a machine that is never quiet a new
+  Conversation's builds miss until it is.
+- An object served from another Conversation's compile carries **that
+  Worktree's path in its debug information**. A debugger opened on it looks for
+  the source there.
+
+**If a compile fails rather than missing the cache**, it is one of two limits of
+the server's own Sandbox, which holds the Worktrees, the Build Cache and the
+system, and nothing else:
+
+- **A build directory outside the Worktree.** The server writes each object
+  where the compile names it, and a directory it cannot reach — the session's
+  own `/tmp`, say — is an error, not a miss. Configure the build directory
+  inside the Worktree (`cmake -B build`). The same holds for Rust's `target/`
+  and a `CARGO_TARGET_DIR` pointing elsewhere.
+- **A compiler reached only through the Conversation's own binds.** The server
+  runs the compiler, and it sees none of a Conversation's **Sandbox
+  Configuration**: a toolchain bound into one Conversation is one the server
+  cannot run. A compiler the machine itself has installed — what every Sandbox
+  reaches, a dev shell's under `/nix` included — or one inside the Worktree is
+  fine.
+
 ### What each language shares
 
-Rust's descriptor is above. The other four are the **package stores**: every
+Rust's descriptor is above, and C/C++'s is the section before this one. The
+other four are the **package stores**: every
 tool that installs from one ecosystem's registry is in that ecosystem's entry
 rather than one of its own, so one box on the **Language support** pane turns
 the lot of them on or off, and a session gets every variable of a language that

@@ -515,9 +515,9 @@ _Avoid_: tool server, integration, plugin, extension, connector
 **Descriptor**:
 What a language *is* to Verkstead: **data**, in one grammar, saying a label for
 the settings page, the manifests that detect it in a Repo, the variables a
-session is given, and the **capabilities** it names. Five ship — Rust, and the
-four **package stores**, Go, Node, Python and .NET — and there is nothing
-special about any of them: the built-ins are a YAML file embedded in the
+session is given, and the **capabilities** it names. Six ship — Rust and
+C/C++, which compile, and the four **package stores**, Go, Node, Python and
+.NET — and there is nothing special about any of them: the built-ins are a YAML file embedded in the
 binary, written the way an installer writes one, so they are the grammar's own
 worked examples rather than a second shape nobody ever sees. **One entry per
 ecosystem rather than per tool**, which is what makes Node six tools and Python
@@ -527,7 +527,7 @@ from one registry.
 settings file that started programs would be one whose sandbox somebody then
 had to describe in YAML too. Behaviour is a **capability** built
 into the server and switched on by name — `sccache`, which is the **Compile
-Server**, and Rust's descriptor names it. A capability's variables are set only
+Server**, and Rust's and C/C++'s descriptors both name it. A capability's variables are set only
 where this server can offer it, so a language keeps its own on a machine that
 cannot and loses only the capability's; and a name this server has never heard
 of is a capability it cannot offer rather than a file it refuses, so a
@@ -609,7 +609,7 @@ the size hanging off the one whose store an sccache bounds. The one control
 there that only ever *closes* a hole — the **Sandbox
 Configuration** beside it opens them, and does so only for what somebody typed.
 Without an sccache it is still a cache — the crate downloads are shared — and
-the composer says so on a repository that builds Rust. **Both halves on all
+the composer says so on a repository that builds Rust or C/C++. **Both halves on all
 three platforms**, which was not always so: for a while Windows had only ever
 the downloads, a session there running behind a boundary refused the loopback
 an sccache client reaches the **Compile Server** over, so that nothing
@@ -621,7 +621,10 @@ _Avoid_: sccache, cargo cache, artifact cache, shared target dir
 
 **Compile Server**:
 The one `sccache` server the machine compiles through, run by Verkstead in a
-**Sandbox of its own**. An sccache server is what actually executes `rustc`, and
+**Sandbox of its own**, for Rust and for C/C++ alike — one server, one store
+and one size, C/C++ being a second descriptor naming the same capability rather
+than a second server. An sccache server is what actually executes `rustc` and
+the C and C++ compilers, and
 every Sandbox shares the host's network — so sessions left to start their own
 all reach for one port, and whichever lost the race has its compiles run inside
 another session's Sandbox, where its Worktree is not bound and the build fails.
@@ -643,7 +646,24 @@ Its Sandbox holds the Worktrees
 directory — all of it, so a Conversation grilled later is one it can already
 compile for — and the Build Cache, and nothing else Verkstead keeps: `rustc`
 runs proc macros while it compiles, so the database and the settings files stay
-outside its reach.
+outside its reach. **So a build's output has to be somewhere it can write**: a
+compile names where its object goes and the server writes it there, which is
+why a build directory outside the Worktree — the session's own `/tmp`, say — is
+a compile that **fails** rather than one that misses, for a CMake build
+directory and Rust's `target/` alike; and a compiler a session reaches only
+through its Conversation's own binds is one the server cannot run.
+**Told every Worktree as a base directory** (`SCCACHE_BASEDIRS`), because a
+C/C++ compile is hashed with its absolute paths and every Conversation's
+Worktree is a path of its own: that is what makes one Conversation's object a
+hit in the next. It reads the list once, as it starts, so a Worktree made since
+is taken in only when it can be restarted without pulling the rug from under a
+running session — a busy machine misses until it is quiet. sccache honours the
+variable from 0.14.0; an older one ignores it, and a second Conversation's
+C/C++ build misses without anything failing.
+**C/C++ reaches it through CMake's two compiler-launcher variables and nothing
+else** — not `CC` and `CXX`, which reach builds that are not C++ projects at
+all and can wrap one compile twice beside a launcher (ADR-0021). What that
+covers, and what it does not, is the installer's documentation's.
 _Avoid_: daemon, sccache daemon, build server, compiler service
 
 **Log Directory**:

@@ -615,6 +615,19 @@ languages:
     #
     # With no sccache on the server this capability is left out whole, so a
     # session is given neither launcher rather than one naming nothing.
+    #
+    # **What gets nothing**: plain Makefiles and Bazel, and CMake's Visual
+    # Studio and Xcode generators, which ignore the launchers — Visual Studio
+    # being CMake's default on Windows, a Repo there is cached only where it
+    # configures with Ninja. MSVC's `/Zi` debug info is not something sccache
+    # caches either; `/Z7` is.
+    #
+    # **A second Conversation hits** because the Compile Server is told every
+    # Worktree as `SCCACHE_BASEDIRS`, sccache hashing a C/C++ compile with its
+    # absolute paths — sccache 0.14.0 and later; see `build_cache.rs`. And the
+    # server writes each object where the compile names it, so a build
+    # directory outside the Worktree fails rather than missing. The whole of
+    # that, for an installer, is `docs/adoption.md`.
     capabilities:
       sccache:
         env:
