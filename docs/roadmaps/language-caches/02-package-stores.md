@@ -55,8 +55,9 @@ The grilling of 2026-09-30, which is what the open questions above were left to.
 
 - **The eleven tools are four descriptors** — `go`, `node`, `python`, `dotnet` —
   so one box on the **Language support** pane covers an ecosystem. Node, Deno
-  and Bun are one language, not three: turning Node off turns all five
-  JavaScript tools off. Rejected: an entry per runtime, and an entry per tool.
+  and Bun are one language, not three: turning Node off turns all six
+  JavaScript tools off — npm, pnpm, both yarns, deno and bun. Rejected: an entry
+  per runtime, and an entry per tool.
 - **One scenario per tool, not two.** Two installs at once in two Sandboxes,
   then a third denied its registry. That proves the store was read and that two
   writers did not damage it in three installs rather than five.
@@ -76,6 +77,15 @@ The grilling of 2026-09-30, which is what the open questions above were left to.
   a venv holds absolute paths, so a shared one is broken in every Worktree but
   the one that built it. A descriptor's value does not have to be a path, so
   this needs no new placeholder.
+
+  *Half of that premise did not survive the stage.* poetry's default place for a
+  venv really is `{cache-dir}/virtualenvs`, so its variable is what keeps a
+  Conversation's environment out of the shared store. pipenv's is not: it keeps
+  environments under `WORKON_HOME` in the session's own home, so a shared cache
+  was never a shared venv there. `PIPENV_VENV_IN_PROJECT` is set anyway, and
+  deliberately — it buys an environment that outlives the session, and one
+  sentence then covers both of these tools rather than two. See
+  `crates/server/languages.yaml`.
 
 ## Proposed tasks (provisional)
 

@@ -1131,6 +1131,21 @@ a `bunfig.toml`, and a Repo that must have a store of its own passes
 installs. Nothing a descriptor can do changes that: the grammar sets variables,
 and there is no rung below the environment to set one on.
 
+**The one Repo that loses something it cannot ask back for is a Yarn Berry Repo
+doing zero-installs.** A Repo that writes `enableGlobalCache: false` is asking
+Berry to keep its cache in the checkout — vendored, committed, installed from
+without a registry. What that switch actually does is send Berry from
+`globalFolder/cache` back to `cacheFolder`, and `cacheFolder` is
+`YARN_CACHE_FOLDER`, which is the variable the session set for Yarn Classic. So
+that Repo lands in a shared directory rather than its own, and **Berry has no
+command-line flag that moves the cache back** — the paragraph above does not
+apply to it, there being nothing to pass. What it keeps is an install that works
+out of a store; what it gives up is the project-local cache it would have had
+without Verkstead. `YARN_ENABLE_GLOBAL_CACHE` would settle it either way and is
+deliberately not set: moving a store is what a descriptor is for, and overriding
+a Repo's policy switch is not. A Repo that has to have the vendored cache turns
+**Node** off on the settings page.
+
 ## A day's work
 
 **Once per machine: the first start asks.** A Verkstead that cannot do anything
