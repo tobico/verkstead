@@ -2249,6 +2249,8 @@ async fn a_session_gets_the_shared_cargo_home_and_the_compiler_wrapper() {
         Note 'nuget-http' $env:NUGET_HTTP_CACHE_PATH
         Note 'nuget-scratch' $env:NUGET_SCRATCH
         Note 'maven-opts' $env:MAVEN_OPTS
+        Note 'gradle-home' $env:GRADLE_USER_HOME
+        Note 'gradle-opts' $env:GRADLE_OPTS
 
         # Run the thing it was pointed at, which is the only way to ask whether
         # the boundary really lets a session open it.
@@ -2418,6 +2420,19 @@ async fn a_session_gets_the_shared_cargo_home_and_the_compiler_wrapper() {
         ),
         "Maven's local repository is under the one shared cache, written the \
          way this platform writes a path",
+    );
+
+    // And Gradle's two: one Gradle home under the shared cache, and no daemon,
+    // since a daemon registered in a shared home is one another session's
+    // build can attach to and run as the wrong session.
+    assert_eq!(
+        fixture.written("gradle-home").await,
+        cache.path().join("gradle").display().to_string(),
+        "the Gradle home is under the one shared cache",
+    );
+    assert_eq!(
+        fixture.written("gradle-opts").await,
+        "-Dorg.gradle.daemon=false"
     );
 
     let downloaded = cache.path().join("cargo").join("downloaded.crate");

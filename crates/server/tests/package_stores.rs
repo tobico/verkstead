@@ -5071,3 +5071,518 @@ async fn a_build_cache_with_a_space_in_its_path_leaves_maven_working_and_unshare
         "and nothing of it went under the Build Cache, which it was not given",
     );
 }
+
+/// What every `gradle` in this suite is told, beside the two variables the
+/// descriptor sets, which are the two this is here to prove. A plain console,
+/// so that what a failure has to be read out of is lines rather than a
+/// progress bar redrawn.
+const GRADLE_FLAGS: &str = "--console=plain";
+
+/// What a Gradle build in a proof prints for the Sandbox it ran in: a file in
+/// that Sandbox's own `/tmp`, which no other Sandbox can read.
+///
+/// **This is the whole of how a build is caught in the wrong Sandbox.** Every
+/// Sandbox is handed a `/tmp` of its own, so a build that prints another
+/// session's marker is running in that other session's processes, which is
+/// what a daemon shared through the Gradle home would be.
+fn marking(marker: &str) -> String {
+    format!("printf '%s\\n' '{marker}' > /tmp/marker\n")
+}
+
+/// A Gradle build in a Conversation's Worktree, with two tasks.
+///
+/// `say` resolves the jar [`maven_registry`] serves, from `from`, and calls
+/// into it: a build that prints [`OUT_OF_THE_STORE`] ran code that came out of
+/// the Gradle home. Then it prints the Sandbox's [`marking`]. **Served rather
+/// than laid out**, because Gradle does not cache a `file://` repository at
+/// all: a build reading one reads it in place, and the store would never be
+/// filled.
+///
+/// `mark` prints the marker and resolves nothing, for the proofs about the
+/// daemon rather than the store. `runFiles` is Kotlin's, and resolves nothing
+/// either: see
+/// [`a_kotlin_compile_daemons_run_files_stay_in_the_sandbox_that_started_it`].
+///
+/// Either task, given `-Pmeet=<dir> -Pme=<name> -Pother=<name>`, **meets the
+/// other session's build before it finishes**: it leaves its own name in
+/// `<dir>` and waits for the other's. Which is what makes two builds really
+/// run at once rather than probably: neither ends until both have got as far
+/// as their task. The meeting place is under the Build Cache, the one
+/// directory both Sandboxes are bound.
+fn gradle_consumer(worktree: &Path, from: Option<&str>) {
+    let repositories = from.map_or_else(String::new, |url| {
+        format!(
+            "repositories {{\n\
+             \x20 maven {{ url = uri('{url}'); allowInsecureProtocol = true }}\n\
+             }}\n"
+        )
+    });
+
+    std::fs::write(
+        worktree.join("settings.gradle"),
+        "rootProject.name = 'app'\n",
+    )
+    .unwrap();
+    std::fs::write(
+        worktree.join("build.gradle"),
+        format!(
+            "{repositories}\
+             configurations {{ greet }}\n\
+             dependencies {{ greet '{MAVEN_GROUP}:{MAVEN_GREET}:{MAVEN_VERSION}' }}\n\
+             \n\
+             def meeting = {{\n\
+             \x20 if (!project.hasProperty('meet')) return\n\
+             \x20 def meet = new File(project.property('meet'))\n\
+             \x20 new File(meet, project.property('me')).text = 'here'\n\
+             \x20 def other = new File(meet, project.property('other'))\n\
+             \x20 def deadline = System.currentTimeMillis() + 120_000\n\
+             \x20 while (!other.exists()) {{\n\
+             \x20   if (System.currentTimeMillis() > deadline) throw new GradleException('the other build never came')\n\
+             \x20   sleep 100\n\
+             \x20 }}\n\
+             \x20 println 'met: ' + project.property('other')\n\
+             }}\n\
+             \n\
+             tasks.register('say') {{\n\
+             \x20 def jars = configurations.greet\n\
+             \x20 doLast {{\n\
+             \x20   def loader = new URLClassLoader(jars.files.collect {{ it.toURI().toURL() }} as URL[])\n\
+             \x20   println 'said: ' + loader.loadClass('example.greet.Greet').getMethod('hello').invoke(null)\n\
+             \x20   println 'marker: ' + new File('/tmp/marker').text.trim()\n\
+             \x20   meeting()\n\
+             \x20 }}\n\
+             }}\n\
+             \n\
+             tasks.register('mark') {{\n\
+             \x20 doLast {{\n\
+             \x20   println 'marker: ' + new File('/tmp/marker').text.trim()\n\
+             \x20   meeting()\n\
+             \x20 }}\n\
+             }}\n\
+             \n\
+             tasks.register('runFiles') {{\n\
+             \x20 doLast {{\n\
+             \x20   def runs = new File(System.getProperty('user.home'), '.kotlin/daemon')\n\
+             \x20   runs.mkdirs()\n\
+             \x20   def marker = new File('/tmp/marker').text.trim()\n\
+             \x20   new File(runs, marker + '.run').text = 'here'\n\
+             \x20   println 'run-files=' + runs\n\
+             \x20   meeting()\n\
+             \x20   println 'seen=' + runs.list().sort().join(',')\n\
+             \x20 }}\n\
+             }}\n"
+        ),
+    )
+    .unwrap();
+}
+
+/// What `gradle --status` says when the Gradle home it reads has no daemon
+/// registered in it — which is the registry in the shared home, since that is
+/// the home a session is given.
+const NO_DAEMONS: &str = "No Gradle daemons are running.";
+
+/// Gradle: two Sandboxes building at once against one Gradle home, each in its
+/// own Sandbox, a third building with `--offline` and the registry off the air,
+/// and the control that says the third proved something.
+///
+/// **Each in its own Sandbox is the half the daemon is about.** Both builds
+/// print the marker only their own Sandbox's `/tmp` holds, and both are still
+/// inside their task when the other reaches its own, because they meet there
+/// — so neither could have been the other's daemon's without printing the
+/// wrong marker. And after both, the shared home has no daemon registered in
+/// it, which is what a session given `-Dorg.gradle.daemon=false` leaves
+/// behind: its build ran in a single-use daemon that was gone when it ended.
+///
+/// The third resolves the jar out of `caches/modules-2` in the shared home and
+/// runs it, and the control fails in Gradle's own words for a module it has
+/// nowhere to get.
+#[tokio::test]
+async fn two_gradle_builds_at_once_each_in_its_own_sandbox_fill_one_home_and_a_third_builds_out_of_it()
+ {
+    let Some(found) = tools("Gradle", &["gradle", "mvn", "javac", "zip"]) else {
+        return;
+    };
+    let [gradle, mvn, javac, zip] = &found[..] else {
+        unreachable!("four tools were asked for");
+    };
+
+    let machine = machine(4).await;
+    let cache = machine.cache();
+    let dir = cache.dir().expect("the fixture's cache has a directory");
+
+    let registry = maven_registry(&machine.registries.join("gradle"), mvn, javac, zip);
+
+    for nth in 0..4 {
+        gradle_consumer(machine.worktree(nth), Some(&registry.url));
+    }
+
+    let meet = dir.join("meeting");
+    std::fs::create_dir_all(&meet).unwrap();
+
+    let building = |marker: &str, other: &str| {
+        format!(
+            "set -e\n\
+             {marking}\
+             '{gradle}' {GRADLE_FLAGS} say -Pmeet='{meet}' -Pme={marker} -Pother={other}\n\
+             '{gradle}' --status\n",
+            marking = marking(marker),
+            gradle = gradle.display(),
+            meet = meet.display(),
+        )
+    };
+
+    let first = starting(
+        &machine.sandbox(0, &cache, reaching_nothing()),
+        &building("first", "second"),
+    );
+    let second = starting(
+        &machine.sandbox(1, &cache, reaching_nothing()),
+        &building("second", "first"),
+    );
+
+    let first = finished(first);
+    let second = finished(second);
+
+    first.worked("the first session's build fills the Gradle home");
+    second.worked("and the second one racing it finishes just as well");
+
+    for (ran, marker, other) in [(&first, "first", "second"), (&second, "second", "first")] {
+        assert!(
+            ran.said.contains(&format!("marker: {marker}\n"))
+                && ran.said.contains(&format!("met: {other}\n")),
+            "the {marker} build ran in the {marker} session's own Sandbox, and was still \
+             running when the {other} one reached its task. It said:\n{}",
+            ran.said,
+        );
+        assert!(
+            ran.said.contains(NO_DAEMONS),
+            "and once it was over the shared Gradle home had no daemon registered in it, \
+             so there was nothing for another session to attach to. It said:\n{}",
+            ran.said,
+        );
+    }
+
+    assert!(
+        dir.join("gradle/caches/modules-2/files-2.1")
+            .join(MAVEN_GROUP)
+            .join(MAVEN_GREET)
+            .is_dir(),
+        "and what they downloaded is in the Gradle home the descriptor named, which \
+         is the one the third session is about to be given. It said:\n{}",
+        first.said,
+    );
+
+    // And the proof. The registry stops answering and Gradle is told not to
+    // look: what is left to build out of is the home the two filled.
+    registry.shut();
+
+    let offline = format!(
+        "set -e\n{marking}'{gradle}' {GRADLE_FLAGS} --offline say\n",
+        marking = marking("third"),
+        gradle = gradle.display(),
+    );
+
+    let third = installing(&machine.sandbox(2, &cache, reaching_nothing()), &offline);
+
+    third.worked(
+        "a third session builds offline with the registry gone, which it can only do out \
+         of the shared Gradle home",
+    );
+    assert!(
+        third.said.contains(&format!("said: {OUT_OF_THE_STORE}")),
+        "and the jar it ran really came out of the store. It said:\n{}",
+        third.said,
+    );
+
+    let control = installing(
+        &machine.sandbox(3, &machine.empty_cache(), reaching_nothing()),
+        &offline,
+    );
+
+    assert!(
+        !control.worked,
+        "an empty Gradle home and no registry has to fail, or the build above \
+         proved nothing about either. It said:\n{}",
+        control.said,
+    );
+    assert!(
+        control.said.contains("No cached version of")
+            && control.said.contains("available for offline mode"),
+        "and it fails for want of anywhere to get the jar, in Gradle's own words, \
+         rather than for some other reason. It said:\n{}",
+        control.said,
+    );
+}
+
+/// And **a Repo asking for a daemon still gets none**, nor does a session that
+/// asks for one in the shared home.
+///
+/// Gradle reads `org.gradle.daemon` out of a project's `gradle.properties` and
+/// out of the Gradle home's, and the home's outranks the project's. The
+/// descriptor's `-Dorg.gradle.daemon=false` is a system property of the
+/// client, out of `GRADLE_OPTS`, and it outranks both. With
+/// `org.gradle.jvmargs` beside the request as well: a Repo naming JVM options
+/// is one whose build Gradle runs in a daemon forked for it, and that daemon is
+/// a single-use one that goes when the build does.
+///
+/// **The home's file is the one a session could write.** It is shared, so a
+/// session asking for a daemon there would be asking on behalf of every other
+/// session on the machine. It still gets none.
+///
+/// One Sandbox and one build after another: each is followed by
+/// `gradle --status`, which reads the registry in the shared home.
+#[tokio::test]
+async fn a_repo_or_the_shared_home_asking_for_a_daemon_still_gets_none() {
+    let Some(found) = tools("Gradle", &["gradle"]) else {
+        return;
+    };
+    let [gradle] = &found[..] else {
+        unreachable!("one tool was asked for");
+    };
+
+    let machine = machine(1).await;
+    let cache = machine.cache();
+
+    gradle_consumer(machine.worktree(0), None);
+
+    let asking = [
+        ("gradle.properties", "org.gradle.daemon=true\n"),
+        (
+            "gradle.properties",
+            "org.gradle.daemon=true\norg.gradle.jvmargs=-Xmx384m -Dasked=yes\n",
+        ),
+        (
+            "\"$GRADLE_USER_HOME\"/gradle.properties",
+            "org.gradle.daemon=true\n",
+        ),
+        (
+            "\"$GRADLE_USER_HOME\"/gradle.properties",
+            "org.gradle.daemon=true\norg.gradle.jvmargs=-Xmx384m -Dasked=yes\n",
+        ),
+    ];
+
+    for (file, asks) in asking {
+        let ran = installing(
+            &machine.sandbox(0, &cache, reaching_nothing()),
+            &format!(
+                "set -e\n\
+                 rm -f gradle.properties \"$GRADLE_USER_HOME\"/gradle.properties\n\
+                 mkdir -p \"$GRADLE_USER_HOME\"\n\
+                 printf '%s' '{asks}' > {file}\n\
+                 {marking}\
+                 '{gradle}' {GRADLE_FLAGS} mark\n\
+                 '{gradle}' --status\n",
+                marking = marking("asking"),
+                gradle = gradle.display(),
+            ),
+        );
+
+        ran.worked(&format!(
+            "a build whose {file} asks for a daemon still works"
+        ));
+        assert!(
+            ran.said.contains(NO_DAEMONS),
+            "and {file} saying\n{asks}left no daemon registered in the shared Gradle \
+             home. It said:\n{}",
+            ran.said,
+        );
+    }
+}
+
+/// The control, which says the suite can see what the descriptor is there to
+/// stop: **with the daemon left on, a second session's build lands in the
+/// first session's daemon**, in the first session's Sandbox, where the second
+/// one's Worktree is not bound.
+///
+/// Two ways back to a daemon, both with the Gradle home still shared:
+///
+/// - `GRADLE_OPTS` taken out, which is Gradle's own default, and what the
+///   descriptor says without its second variable.
+/// - And an explicit `--daemon`, with `GRADLE_OPTS` in place. The command line
+///   beats the variable, and **that is accepted rather than defeated**: the
+///   failure is loud, and the way to close it for good is the daemon of
+///   Verkstead's own. This line is here so that it stays a known hole rather
+///   than a surprise.
+///
+/// The first session builds, leaves its daemon up and waits. The second builds
+/// while it waits and fails, in Gradle's words, to change into a directory its
+/// daemon cannot see.
+#[tokio::test]
+async fn with_the_daemon_back_on_a_second_sessions_build_lands_in_the_firsts_sandbox() {
+    let Some(found) = tools("Gradle", &["gradle"]) else {
+        return;
+    };
+    let [gradle] = &found[..] else {
+        unreachable!("one tool was asked for");
+    };
+
+    for (how, back_on, flag) in [
+        ("with GRADLE_OPTS taken out", "unset GRADLE_OPTS\n", ""),
+        ("with --daemon on the command line", "", "--daemon"),
+    ] {
+        let machine = machine(2).await;
+        let cache = machine.cache();
+        let dir = cache.dir().expect("the fixture's cache has a directory");
+
+        for nth in 0..2 {
+            gradle_consumer(machine.worktree(nth), None);
+        }
+
+        let meet = dir.join("meeting");
+        std::fs::create_dir_all(&meet).unwrap();
+
+        // A wait of two minutes at most, in the shell, on a file the other
+        // Sandbox leaves under the Build Cache.
+        let waiting = |on: &str| {
+            format!(
+                "i=0; while [ ! -e '{meet}/{on}' ]; do i=$((i+1)); \
+                 [ $i -gt 1200 ] && exit 3; sleep 0.1; done\n",
+                meet = meet.display(),
+            )
+        };
+
+        let first = starting(
+            &machine.sandbox(0, &cache, reaching_nothing()),
+            &format!(
+                "set -e\n\
+                 {marking}\
+                 {back_on}\
+                 '{gradle}' {GRADLE_FLAGS} {flag} mark\n\
+                 touch '{meet}/built'\n\
+                 {waiting}",
+                marking = marking("first"),
+                gradle = gradle.display(),
+                meet = meet.display(),
+                waiting = waiting("done"),
+            ),
+        );
+
+        let second = installing(
+            &machine.sandbox(1, &cache, reaching_nothing()),
+            &format!(
+                "{waiting}\
+                 {marking}\
+                 {back_on}\
+                 '{gradle}' {GRADLE_FLAGS} {flag} mark\n\
+                 echo \"built=$?\"\n\
+                 touch '{meet}/done'\n",
+                marking = marking("second"),
+                gradle = gradle.display(),
+                meet = meet.display(),
+                waiting = waiting("built"),
+            ),
+        );
+
+        let first = finished(first);
+
+        first.worked(&format!("{how}, the first session builds, in a daemon"));
+        assert!(
+            first.said.contains("marker: first"),
+            "in its own Sandbox. It said:\n{}",
+            first.said,
+        );
+
+        assert_ne!(
+            line(&second, "built"),
+            "0",
+            "{how}, the second session's build cannot work: it reached the first \
+             session's daemon. It said:\n{}",
+            second.said,
+        );
+        assert!(
+            second
+                .said
+                .contains("Could not set process working directory")
+                && second.said.contains("could not setcwd()"),
+            "and it fails because the daemon it reached is in the first session's \
+             Sandbox, where the second session's Worktree is not there to change \
+             into. It said:\n{}",
+            second.said,
+        );
+    }
+}
+
+/// And **Kotlin's compile daemon stays in the Sandbox that started it**, which
+/// is what makes a Kotlin build on Gradle need nothing of its own.
+///
+/// A Kotlin build compiles in a daemon of the Kotlin Gradle plugin's, which
+/// outlives the build and is reached over the loopback, the way Gradle's is.
+/// What a second build finds it by is its *run files*. Measured with the
+/// Kotlin Gradle plugin 2.2.20 in a Sandbox with the shared Gradle home, the
+/// plugin starts the daemon with `--daemon-runFilesPath <user.home>/.kotlin/daemon`
+/// — **the JVM's `user.home`**, which is the account's home out of the password
+/// database rather than the session's `HOME`, and in no case under the Gradle
+/// home.
+///
+/// No Sandbox binds the account's home, so that path is a directory of each
+/// Sandbox's own, made in the root it was built on. This is that, observed
+/// from inside Gradle's own JVM, where the plugin reads it: two builds at
+/// once, each leaving a run file where the plugin would and meeting before
+/// they look. Each finds its own and not the other's.
+///
+/// **A proxy for the plugin rather than the plugin itself**, because it
+/// resolves from the Gradle Plugin Portal, which nothing in this file reaches.
+/// What is proven is the directory; which directory the plugin names is the
+/// measurement above.
+#[tokio::test]
+async fn a_kotlin_compile_daemons_run_files_stay_in_the_sandbox_that_started_it() {
+    let Some(found) = tools("Gradle", &["gradle"]) else {
+        return;
+    };
+    let [gradle] = &found[..] else {
+        unreachable!("one tool was asked for");
+    };
+
+    let machine = machine(2).await;
+    let cache = machine.cache();
+    let dir = cache.dir().expect("the fixture's cache has a directory");
+
+    for nth in 0..2 {
+        gradle_consumer(machine.worktree(nth), None);
+    }
+
+    let meet = dir.join("meeting");
+    std::fs::create_dir_all(&meet).unwrap();
+
+    let running = |marker: &str, other: &str| {
+        format!(
+            "set -e\n\
+             {marking}\
+             '{gradle}' {GRADLE_FLAGS} runFiles -Pmeet='{meet}' -Pme={marker} -Pother={other}\n",
+            marking = marking(marker),
+            gradle = gradle.display(),
+            meet = meet.display(),
+        )
+    };
+
+    let first = starting(
+        &machine.sandbox(0, &cache, reaching_nothing()),
+        &running("first", "second"),
+    );
+    let second = starting(
+        &machine.sandbox(1, &cache, reaching_nothing()),
+        &running("second", "first"),
+    );
+
+    let first = finished(first);
+    let second = finished(second);
+
+    for (ran, marker) in [(&first, "first"), (&second, "second")] {
+        ran.worked(&format!("the {marker} session's build runs"));
+
+        let runs = line(ran, "run-files");
+
+        assert!(
+            !Path::new(&runs).starts_with(dir),
+            "the {marker} session's Kotlin run files are not under the Build Cache, \
+             where the Gradle home is: they are at {runs}",
+        );
+        assert_eq!(
+            line(ran, "seen"),
+            format!("{marker}.run"),
+            "and the {marker} session sees only its own run file there, while the \
+             other session's build is still running with one of its own. It said:\n{}",
+            ran.said,
+        );
+    }
+}

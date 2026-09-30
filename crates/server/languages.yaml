@@ -643,16 +643,21 @@ languages:
           CMAKE_CXX_COMPILER_LAUNCHER: "{sccache}"
 
   jvm:
-    # The JVM: Maven now, and Gradle beside it. One entry for the ecosystem the
+    # The JVM: Maven and Gradle. One entry for the ecosystem the
     # way Node's is for six tools, since a Repo on the JVM picks one build tool
     # or the other and the settings page is better off with one box for both
     # (ADR-0021). Kotlin needs nothing of its own: it builds through one of
     # these two and resolves out of the same stores.
     label: JVM
 
-    # Maven's manifest. Gradle's are added with Gradle.
+    # Maven's manifest and Gradle's four: a build script in either DSL, and a
+    # settings file, which is all a multi-project build has at its root.
     detect:
       - pom.xml
+      - build.gradle
+      - build.gradle.kts
+      - settings.gradle
+      - settings.gradle.kts
 
     # **Maven has no variable for its local repository**, so this is
     # `MAVEN_OPTS`, the JVM options `mvn` starts Maven's own JVM with, and three
@@ -716,3 +721,44 @@ languages:
     # home.
     env:
       MAVEN_OPTS: "-Dmaven.repo.local={cache}/maven/repository -Daether.syncContext.named.factory=file-lock -Daether.syncContext.named.nameMapper=file-gav"
+
+      # **Gradle's home is shared whole**, because Gradle has no way to move
+      # only its caches out of it. `GRADLE_USER_HOME` is everything: the
+      # dependencies under `caches/modules-2`, the distributions `gradlew`
+      # downloads under `wrapper/dists`, toolchain JDKs under `jdks/`, and the
+      # rest of `caches/`.
+      #
+      # **Shared whole means its `gradle.properties` and `init.d/` too.** An
+      # init script one session writes there runs in every other session's
+      # builds, which is the case of one session planting a package another
+      # installs, and it is accepted as that.
+      GRADLE_USER_HOME: "{cache}/gradle"
+
+      # **And no daemon.** A Gradle daemon registers itself under the Gradle
+      # home and is reached over the loopback, which every Sandbox shares. So
+      # with one home a second session's `gradle` finds the first session's
+      # idle daemon and runs its build *there*, in the first session's
+      # Sandbox, where the second one's Worktree is not bound. Observed with
+      # 8.14.4: "Could not set process working directory ... could not
+      # setcwd()". This is the hazard the Compile Server exists to remove for
+      # sccache.
+      #
+      # `-Dorg.gradle.daemon=false` is a system property of the client, and it
+      # beats `org.gradle.daemon=true` in a Repo's `gradle.properties` and in
+      # the shared home's, with `org.gradle.jvmargs` beside it or not. Gradle
+      # then runs the build in a single-use daemon forked inside the session's
+      # own Sandbox, gone when the build ends, and registers nothing. Each
+      # build pays for a JVM starting up, which is the price.
+      #
+      # **An explicit `--daemon` on the command line still beats it**, and
+      # registers in the shared home again. That is accepted rather than worked
+      # around: the failure it causes is loud, and a daemon of Verkstead's own
+      # is what would close it for good. `-Dorg.gradle.daemon.registry.base`
+      # closes it too, and was turned down: it is undocumented.
+      #
+      # **Kotlin needs nothing of its own.** The Kotlin Gradle plugin's compile
+      # daemon outlives a build as well, but it is found by run files under the
+      # JVM's `user.home`, `~/.kotlin/daemon` (measured with 2.2.20). That is
+      # the account's home rather than `HOME` or the Gradle home, and no
+      # Sandbox binds it, so each Sandbox's is its own.
+      GRADLE_OPTS: "-Dorg.gradle.daemon=false"

@@ -1451,7 +1451,18 @@ mod tests {
         let jvm = built_in().get(JVM).expect("and the JVM is the seventh");
 
         assert_eq!(jvm.label(), Some("JVM"));
-        assert_eq!(jvm.detect, vec![String::from("pom.xml")]);
+        assert_eq!(
+            jvm.detect,
+            [
+                "pom.xml",
+                "build.gradle",
+                "build.gradle.kts",
+                "settings.gradle",
+                "settings.gradle.kts"
+            ]
+            .map(String::from),
+            "Maven's manifest and Gradle's four",
+        );
         assert!(
             !jvm.names(SCCACHE),
             "and nothing on the JVM compiles through sccache",
@@ -1460,8 +1471,8 @@ mod tests {
 
     /// A session of a machine with an sccache: Rust's four variables, in the
     /// order it has always had them, then Go's two, Node's seven, Python's
-    /// six, .NET's three, C/C++'s two launchers and the JVM's one, and the two
-    /// directories they name open underneath.
+    /// six, .NET's three, C/C++'s two launchers and the JVM's three, and the
+    /// two directories they name open underneath.
     ///
     /// Rust's four lead and are unchanged, which is the promise the descriptors
     /// landed on: a language added to the file is variables after the ones a
@@ -1513,6 +1524,11 @@ mod tests {
                     String::from("/verkstead/bin/sccache")
                 ),
                 (String::from("MAVEN_OPTS"), maven_opts()),
+                (String::from("GRADLE_USER_HOME"), cached("gradle")),
+                (
+                    String::from("GRADLE_OPTS"),
+                    String::from("-Dorg.gradle.daemon=false")
+                ),
             ],
         );
 
@@ -1564,9 +1580,14 @@ mod tests {
                 (String::from("NUGET_HTTP_CACHE_PATH"), cached("nuget/http")),
                 (String::from("NUGET_SCRATCH"), cached("nuget/scratch")),
                 (String::from("MAVEN_OPTS"), maven_opts()),
+                (String::from("GRADLE_USER_HOME"), cached("gradle")),
+                (
+                    String::from("GRADLE_OPTS"),
+                    String::from("-Dorg.gradle.daemon=false")
+                ),
             ],
             "Go's two, Node's seven, Python's six, .NET's three and the JVM's \
-             one are in no capability, so a machine with no sccache gets the \
+             three are in no capability, so a machine with no sccache gets the \
              whole of what those descriptors say — and C/C++'s two launchers are the whole \
              of its capability, so it gets neither",
         );
@@ -1604,9 +1625,9 @@ mod tests {
         );
         assert_eq!(
             given.env().len(),
-            19,
+            21,
             "which is Go's two, Node's seven, Python's six, .NET's three and the \
-             JVM's one, and nothing else"
+             JVM's three, and nothing else"
         );
         assert!(!given.sccache());
         assert!(
@@ -1860,6 +1881,7 @@ mod tests {
         joined("NUGET_PACKAGES", &cache.join("nuget"), "packages");
         joined("NUGET_HTTP_CACHE_PATH", &cache.join("nuget"), "http");
         joined("NUGET_SCRATCH", &cache.join("nuget"), "scratch");
+        joined("GRADLE_USER_HOME", cache, "gradle");
 
         // And the first value that is a path *inside* a line of flags: Maven's
         // local repository has no variable of its own. The path in it is the
@@ -1936,6 +1958,18 @@ mod tests {
             None,
             "and a line of flags with that path inside it is left out, rather \
              than handed to a tool that would split it at the space",
+        );
+        assert_eq!(
+            named("GRADLE_USER_HOME"),
+            Some(under(Path::new("/home/Jo Doe/.cache/verkstead"), "gradle")),
+            "so Gradle, whose home is a variable of its own, is shared on such a \
+             machine where Maven is not",
+        );
+        assert_eq!(
+            named("GRADLE_OPTS").as_deref(),
+            Some("-Dorg.gradle.daemon=false"),
+            "and its daemon is off there too: a line of words naming no directory \
+             has nothing in it to split",
         );
 
         // And the same line with no space to split on is given as ever.

@@ -5618,6 +5618,8 @@ async fn the_build_cache_is_writable_inside_and_the_stores_are_in_it() {
             say nuget-http "${{NUGET_HTTP_CACHE_PATH-unset}}"
             say nuget-scratch "${{NUGET_SCRATCH-unset}}"
             say maven-opts "${{MAVEN_OPTS-unset}}"
+            say gradle-home "${{GRADLE_USER_HOME-unset}}"
+            say gradle-opts "${{GRADLE_OPTS-unset}}"
             "#,
             dir = quoted(&fixture.cache_dir()),
         ),
@@ -5722,6 +5724,16 @@ async fn the_build_cache_is_writable_inside_and_the_stores_are_in_it() {
         "Maven's local repository is inside the same bind, and it is locked \
          with files every session can see",
     );
+
+    // And Gradle's two: one Gradle home for every session, and no daemon, since
+    // a daemon registered in a shared home is one another session's build can
+    // attach to and run inside the wrong Sandbox.
+    assert_eq!(
+        reported["gradle-home"],
+        fixture.cache_dir().join("gradle").display().to_string(),
+        "the Gradle home is inside the same bind",
+    );
+    assert_eq!(reported["gradle-opts"], "-Dorg.gradle.daemon=false");
 }
 
 /// And the stores beside the Worktrees, which are the second bind a session
@@ -5932,6 +5944,8 @@ async fn a_build_cache_switched_off_is_no_bind_and_no_variables() {
             say nuget-http "${{NUGET_HTTP_CACHE_PATH-unset}}"
             say nuget-scratch "${{NUGET_SCRATCH-unset}}"
             say maven-opts "${{MAVEN_OPTS-unset}}"
+            say gradle-home "${{GRADLE_USER_HOME-unset}}"
+            say gradle-opts "${{GRADLE_OPTS-unset}}"
             dir {beside} stores
             file /verkstead/bin/sccache binary
             "#,
@@ -5969,6 +5983,8 @@ async fn a_build_cache_switched_off_is_no_bind_and_no_variables() {
     assert_eq!(reported["nuget-http"], "unset");
     assert_eq!(reported["nuget-scratch"], "unset");
     assert_eq!(reported["maven-opts"], "unset");
+    assert_eq!(reported["gradle-home"], "unset");
+    assert_eq!(reported["gradle-opts"], "unset");
     assert_eq!(
         reported["stores"], "absent",
         "and the directory beside the Worktrees closes with it, both of the \

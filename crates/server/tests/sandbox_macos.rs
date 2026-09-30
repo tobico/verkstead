@@ -3296,6 +3296,8 @@ async fn the_build_cache_is_writable_inside_and_the_stores_are_in_it() {
             say nuget-http "${{NUGET_HTTP_CACHE_PATH-unset}}"
             say nuget-scratch "${{NUGET_SCRATCH-unset}}"
             say maven-opts "${{MAVEN_OPTS-unset}}"
+            say gradle-home "${{GRADLE_USER_HOME-unset}}"
+            say gradle-opts "${{GRADLE_OPTS-unset}}"
             dir {beside} stores
             "#,
             dir = quoted(&fixture.cache_dir()),
@@ -3411,6 +3413,16 @@ async fn the_build_cache_is_writable_inside_and_the_stores_are_in_it() {
         "Maven's local repository is inside the same policy, and locked with \
          files every session can see",
     );
+
+    // And Gradle's two: one Gradle home for every session, and no daemon, since
+    // a daemon registered in a shared home is one another session's build can
+    // attach to over the loopback, and run inside the wrong boundary.
+    assert_eq!(
+        reported["gradle-home"],
+        fixture.cache_dir().join("gradle").display().to_string(),
+        "the Gradle home is inside the same policy",
+    );
+    assert_eq!(reported["gradle-opts"], "-Dorg.gradle.daemon=false");
 }
 
 /// And with an sccache the server resolved: a session finds it beside the
