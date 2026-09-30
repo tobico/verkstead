@@ -383,8 +383,8 @@ describe("the languages as the pane draws them", () => {
 
   /// And greyed again while the box is unticked, which is the other half of the
   /// pattern: the configuration hanging off a checkbox means nothing while the
-  /// checkbox is off. Both boxes naming the Compile Server, because with one of
-  /// them on the size is that one's — see the two tests below.
+  /// checkbox is off. Both boxes naming the Compile Server, because with C/C++
+  /// on the size is still live under Rust's — see the two tests below.
   it("greys the size while the box is unticked", async () => {
     theSettings(off(off(compiling(TOLD)), CPP));
     const { container } = mountPane();
@@ -495,18 +495,21 @@ describe("the languages as the pane draws them", () => {
     ).toBeTruthy();
   });
 
-  /// And with Rust off, C/C++ is what the server is sized by, so the field is
-  /// its — the same answer the server gives about which size it starts at.
-  it("moves the size to C/C++ when Rust is switched off", async () => {
+  /// And with Rust off the size stays Rust's, live while C/C++ still compiles
+  /// through the server — the same answer the server gives about which size it
+  /// starts at. Moved to C/C++, it would be the store shrinking to C/C++'s
+  /// default on a press about something else.
+  it("keeps the size on Rust, live, when Rust is off and C/C++ is on", async () => {
     theSettings(off(compiling(TOLD)));
-    mountPane();
+    const { container } = mountPane();
 
     await waitFor(() => expect(theCheck().checked).toBe(false));
 
     expect(screen.getAllByLabelText(/How large/)).toHaveLength(1);
-    expect(screen.getByLabelText(/How large/).id).toBe(`language-size-${CPP}`);
+    expect(screen.getByLabelText(/How large/).id).toBe(`language-size-${RUST}`);
+    expect(theGroup(container).disabled).toBe(false);
     expect(
-      screen.getByText(/Shares the Compile Server with C\/C\+\+/),
+      screen.getByText(/Shares the Compile Server with Rust/),
     ).toBeTruthy();
   });
 
@@ -621,12 +624,7 @@ describe("changing the languages", () => {
   /// a `50` as the store size, which is a number nobody pressed Save on. The
   /// Cleanup pane's two durations hold the same rule.
   it("sends the server's size when the box is ticked, not what is typed", async () => {
-    // Answered with C/C++ off too, so the field stays on Rust's box: with
-    // C/C++ on it would be C/C++'s size the pane drew instead.
-    const fetching = theSettings(
-      compiling(TOLD),
-      json(answering(off(off(TOLD), CPP))),
-    );
+    const fetching = theSettings(compiling(TOLD), json(answering(off(TOLD))));
     mountPane();
 
     const field = await waitFor(() => screen.getByLabelText(/How large/));
@@ -634,9 +632,7 @@ describe("changing the languages", () => {
 
     fireEvent.click(theCheck());
 
-    await waitFor(() =>
-      expect(languagesSent(fetching)[0]?.size).toBe("50G"),
-    );
+    await waitFor(() => expect(languagesSent(fetching)[0]?.size).toBe("50G"));
 
     // And what was typed is still there to finish typing: the tick did not
     // commit it, so the field did not let go of it either.
@@ -771,7 +767,10 @@ describe("changing the languages", () => {
   it("says so when the save fails", async () => {
     serving(whenever("/api/ui/settings", json(TOLD)), () =>
       Promise.resolve(
-        new Response("nope", { status: 503, statusText: "Service Unavailable" }),
+        new Response("nope", {
+          status: 503,
+          statusText: "Service Unavailable",
+        }),
       ),
     );
     mountPane();

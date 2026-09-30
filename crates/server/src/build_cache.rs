@@ -1736,8 +1736,9 @@ mod tests {
     /// is nothing to serve and nothing is started.
     ///
     /// **Both languages naming it off**, because either one on is a session
-    /// compiling through it: Rust off and C/C++ on is the server wanted at
-    /// C/C++'s size — see `languages::tests`, where that is asked of the switch.
+    /// compiling through it: Rust off and C/C++ on is the server wanted, at
+    /// Rust's size still — see `languages::tests`, where that is asked of the
+    /// switch.
     #[test]
     fn a_cache_switched_off_starts_no_compile_server() {
         let cache = BuildCache::at(

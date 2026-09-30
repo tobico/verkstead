@@ -575,9 +575,10 @@ languages:
     # C and C++, and the second descriptor naming the Compile Server (ADR-0021).
     # Not a second server: one sccache for the machine, one store and one size,
     # which is why this entry names the capability Rust's does and sets no
-    # store of its own. The first switched-on language naming it is the one
-    # that sizes it — Rust, where Rust is on — and the settings page draws the
-    # size field on that one alone.
+    # store of its own. The first language naming it is the one that sizes it
+    # — Rust, whether or not Rust is on, so switching Rust off does not shrink
+    # the store to this entry's size — and the settings page draws the size
+    # field on that one alone.
     label: C/C++
 
     # C++ has no one manifest, so this is the build files a checkout ordinarily

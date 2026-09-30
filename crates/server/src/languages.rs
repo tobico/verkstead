@@ -386,16 +386,18 @@ impl Languages {
         given
     }
 
-    /// The store size asked for by the first switched-on descriptor naming
-    /// `capability`, and `None` where none of them does — which is what says
-    /// whether the behaviour behind it is wanted on this machine at all.
+    /// The store size the behaviour behind `capability` is started at, and
+    /// `None` where no switched-on descriptor names it — which is what says
+    /// whether that behaviour is wanted on this machine at all.
     ///
     /// The size comes back with the answer because the one capability there is
     /// wants one: the Compile Server is started with a size, and that size is a
-    /// switched-on language's rather than a number the server holds. Where two
-    /// of them name it — C/C++ beside Rust — the first written is
-    /// the one that sizes the store, because there is one store and one server
-    /// for the machine.
+    /// language's rather than a number the server holds. Where two of them name
+    /// it — C/C++ beside Rust — **the first written sizes the store whether or
+    /// not it is switched on**, because there is one store and one server for
+    /// the machine. Were it the first switched-*on* one instead, switching Rust
+    /// off would restart the server at C/C++'s size — the default, where nobody
+    /// had set one — and sccache would trim the store down to it as it started.
     ///
     /// Asked of the switch rather than of a Repo. The Compile Server comes up
     /// wherever a language naming [`SCCACHE`] is enabled and there is an sccache
@@ -404,9 +406,15 @@ impl Languages {
     /// Verkstead's up the client inside starts one in its own Sandbox — which
     /// is the hazard the Compile Server exists to remove.
     pub fn wanting(&self, capability: &str) -> Option<&str> {
-        self.iter().find_map(|(_, descriptor)| {
-            (descriptor.enabled() && descriptor.names(capability)).then(|| descriptor.size())
-        })
+        let naming = || {
+            self.iter()
+                .map(|(_, descriptor)| descriptor)
+                .filter(|descriptor| descriptor.names(capability))
+        };
+
+        let sizer = naming().next()?;
+
+        naming().any(Descriptor::enabled).then(|| sizer.size())
     }
 
     /// Whether any descriptor loaded here names the directory beside the
@@ -1576,20 +1584,22 @@ mod tests {
         assert!(given.dirs().is_empty());
     }
 
-    /// C/C++ on its own wants the Compile Server, at its own size — nothing
-    /// starts it by detection, so the switch is the whole of what brings it up.
-    /// And beside Rust it changes nothing of Rust's: Rust is written first, so
-    /// its variables lead and its size is the one the server is started at.
+    /// C/C++ on its own wants the Compile Server — nothing starts it by
+    /// detection, so the switch is the whole of what brings it up — at the one
+    /// size, which is Rust's whether or not Rust is on. And beside Rust it
+    /// changes nothing of Rust's: Rust is written first, so its variables lead
+    /// and its size is the one the server is started at.
     #[test]
     fn cpp_on_its_own_wants_the_compile_server_and_beside_rust_changes_nothing() {
         let alone = built_in().merged(&written(
-            "languages:\n  rust:\n    enabled: false\n  cpp:\n    size: 12G\n",
+            "languages:\n  rust:\n    enabled: false\n    size: 60G\n  cpp:\n    size: 12G\n",
         ));
 
         assert_eq!(
             alone.wanting(SCCACHE),
-            Some("12G"),
-            "with Rust off, C/C++ is the language that sizes the one server",
+            Some("60G"),
+            "with Rust off the one server is still sized by Rust's entry: switching \
+             Rust off is not the store shrinking to C/C++'s size",
         );
 
         let given = alone.given(&machine(true));

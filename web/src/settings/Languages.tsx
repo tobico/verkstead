@@ -68,10 +68,12 @@
 //!
 //! **One Compile Server, one size, one field.** Two built-ins name the sccache
 //! capability — Rust and C/C++ — and the server runs one Compile Server between
-//! them, sized by the first switched-on language that names it. So the field is
-//! drawn on that one alone, and every other language naming the capability says
-//! instead which language's cache it compiles through — see [`sizer`]. Switch
-//! Rust off and the field moves to C/C++, because C/C++ is then what sizes it.
+//! them, sized by the first language that names it whether or not that one is
+//! switched on. So the field is drawn on that one alone, and every other
+//! language naming the capability says instead which language's cache it
+//! compiles through — see [`sizer`]. Switch Rust off and the field stays under
+//! Rust, live while C/C++ is on: the store is still Rust's size, and a field
+//! that moved to C/C++ would be the store shrinking to C/C++'s default.
 //!
 //! **And a language with no field for its size still sends one.** `size` is a
 //! key of every entry whoever wrote it, and only the language whose store an
@@ -187,34 +189,35 @@ function warned(told: SettingsView | undefined): boolean {
 
 /// Whether the size hanging off a checkbox means anything.
 ///
-/// The checkbox being on, an sccache being there to read it, and the entry this
-/// would be written into being one the server could read: the size is sccache's
-/// own word, so a server without one has nowhere to put it, and an entry that
-/// would not load is one nothing can be written into. All three are the group's
-/// *off*, and the group is drawn greyed rather than taken away — a field that
-/// vanished would say the setting had, and it has not.
-function sizeable(language: LanguageView): boolean {
+/// A language naming the Compile Server being on — this one's box or another's,
+/// because the one size is this one's while either compiles through it — an
+/// sccache being there to read it, and the entry this would be written into
+/// being one the server could read: the size is sccache's own word, so a server
+/// without one has nowhere to put it, and an entry that would not load is one
+/// nothing can be written into. All three are the group's *off*, and the group
+/// is drawn greyed rather than taken away — a field that vanished would say the
+/// setting had, and it has not.
+function sizeable(
+  told: SettingsView | undefined,
+  language: LanguageView,
+): boolean {
   return (
-    language.enabled &&
+    (told?.languages ?? []).some(
+      (other) => other.compiling !== null && other.enabled,
+    ) &&
     language.compiling === "Cached" &&
     language.unread === null
   );
 }
 
 /// The language whose size the one Compile Server is started at: the first
-/// switched-on language naming the sccache capability, which is the answer the
-/// server's own `Languages::wanting` gives, over the list in the order the server
-/// sent it.
-///
-/// And where every one of them is off, the first of them all, so the field is
-/// still drawn — greyed, as a size under an unticked box is — on exactly one
-/// language rather than on none.
+/// language naming the sccache capability, switched on or not, which is the
+/// answer the server's own `Languages::wanting` gives, over the list in the
+/// order the server sent it.
 function sizer(told: SettingsView | undefined): LanguageView | undefined {
-  const naming = (told?.languages ?? []).filter(
+  return (told?.languages ?? []).find(
     (language) => language.compiling !== null,
   );
-
-  return naming.find((language) => language.enabled) ?? naming[0];
 }
 
 /// What is said under a language whose entry in `config.yaml` was not used.
@@ -498,7 +501,7 @@ export function LanguagesPane(props: {
                         sizer(set())?.name === language.name
                       }
                     >
-                      <Nested on={sizeable(language)}>
+                      <Nested on={sizeable(set(), language)}>
                         <form
                           class={styles.sizing}
                           onSubmit={(ev) => commit(ev, language)}
