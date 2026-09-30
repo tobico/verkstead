@@ -461,7 +461,7 @@ function Compose(props: {
       // left here would be one this device offered to attach to whatever it
       // composed next.
       setServers([]);
-      leaveRefusals(outcome.conversation, outcome.refused);
+      leaveRefusals(outcome.conversation, outcome.refused, outcome.stopped);
 
       void queries.invalidateQueries({ queryKey: ["conversations"] });
       navigate(pathOf(outcome.conversation));

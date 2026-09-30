@@ -1107,6 +1107,26 @@ base_commit: string | null, };
 export type CompileCaching = "Cached" | "NoSccache";
 
 /**
+ * What a take-up's press says beyond which Draft is making it.
+ *
+ * Empty on a first press, which is every press that has not been stopped — so
+ * this is a body of nothing until a [`TakenUp::WouldDiscard`] gives it
+ * something to carry.
+ */
+export type Confirming = { 
+/**
+ * The Conversations whose uncommitted changes may go: the ones a
+ * [`TakenUp::WouldDiscard`] named, sent back by the press that confirms
+ * them.
+ *
+ * **What may be lost rather than what will be.** The server reads every
+ * checkout again on this press, so a Conversation that is clean by then is
+ * closed without this having meant anything, and one that is dirty and not
+ * named here stops the press all over again.
+ */
+discarding: Array<number>, };
+
+/**
  * How a merge conflict between a pull request and its base branch is resolved.
  *
  * Two words for two ways of putting the base's work on a branch that has
@@ -1259,8 +1279,27 @@ unseen: boolean, };
  * where it goes, so the source is not something to be refused for. What is left
  * to be wrong about is the *target* — a state whose work cannot be set going
  * from what the record holds.
+ *
+ * **Which one other Conversation's state is among**, and only one: a steer into
+ * a state something runs in wants the branch, and the pull request this
+ * Conversation is on may by now be somebody else's — see [`Self::AlreadyHeld`]
+ * and [`Self::WouldDiscard`], and ADR-0020. That is still a fact about whether
+ * the target's work can be set going rather than about where the work has got
+ * to here.
  */
-export type ConversationSteered = "Steered" | "NoSuchConversation" | "NoPullRequest" | "NoInstruction" | "NoFollowUpBrief" | "NoInvestigationBrief" | "EmptyBrief" | "NoPairing" | "NoSuchProfile" | "NoSuchModel" | "NoBaseCommit" | "WorktreeRefused" | "NoSuchCompanionRepo" | { "Companion": { 
+export type ConversationSteered = "Steered" | "NoSuchConversation" | "NoPullRequest" | "NoInstruction" | "NoFollowUpBrief" | "NoInvestigationBrief" | "EmptyBrief" | "NoPairing" | "NoSuchProfile" | "NoSuchModel" | { "AlreadyHeld": { 
+/**
+ * The Conversation that has it, for the way there.
+ */
+conversation: number, } } | { "WouldDiscard": { 
+/**
+ * Every Conversation that would lose something.
+ *
+ * A list rather than one, for the shape's sake: a steer is about the
+ * Conversation's own pull request and nobody else's, so there is one of
+ * them here. Stacks are a Fix Merge Issues start's to clear.
+ */
+uncommitted: Array<Uncommitted>, } } | "NoBaseCommit" | "WorktreeRefused" | "NoSuchCompanionRepo" | { "Companion": { 
 /**
  * The Repo's registered name.
  */
@@ -5228,7 +5267,27 @@ added: Array<CompanionAddition>,
  * Nothing anywhere else reads it, for [`Self::added`]'s reason: a target
  * nothing runs in has no sandbox to open up.
  */
-upgraded: Array<CompanionUpgrade>, };
+upgraded: Array<CompanionUpgrade>, 
+/**
+ * And the Conversation whose uncommitted changes may go with the close that
+ * makes way for this steer, sent back by the submit that confirms it.
+ *
+ * **The take-up's [`Confirming::discarding`] on the other press** — see
+ * ADR-0020. A steer back into a state something runs in closes the
+ * Conversation that took this pull request over and has finished with it, and
+ * a close takes the Worktree away with whatever was left uncommitted in it.
+ * So a submit stopped over that comes back naming who would lose something —
+ * [`ConversationSteered::WouldDiscard`] — and the submit after it names them
+ * here, which is the human saying to go ahead.
+ *
+ * **What may be lost rather than what will be.** The server reads the
+ * checkouts again on that submit, so a Conversation that is clean by then is
+ * closed without this having meant anything, and one that is dirty and not
+ * named here stops the submit all over again.
+ *
+ * Empty on a first submit, which is every submit that has not been stopped.
+ */
+discarding: Array<number>, };
 
 /**
  * Where a steer can send a Conversation.
@@ -5329,7 +5388,16 @@ why: string, } } | "Fork" | { "AlreadyHeld": {
 /**
  * The Conversation that has it, for the way there.
  */
-conversation: number, } } | "NoImplementationProfile" | "NoReviewProfile" | "ProfileBroken" | "FetchFailed" | "NoHeadBranch" | "BranchAhead" | "BranchDiverged" | "FastForwardFailed" | { "CheckedOutElsewhere": { 
+conversation: number, } } | { "WouldDiscard": { 
+/**
+ * Every Conversation that would lose something, in the order they
+ * would be closed in.
+ *
+ * A list rather than one: a stack is taken up a link at a time, and
+ * every Conversation standing on a link of it is closed by the one
+ * press.
+ */
+uncommitted: Array<Uncommitted>, } } | "NoImplementationProfile" | "NoReviewProfile" | "ProfileBroken" | "FetchFailed" | "NoHeadBranch" | "BranchAhead" | "BranchDiverged" | "FastForwardFailed" | { "CheckedOutElsewhere": { 
 /**
  * Where it is checked out, as git named it.
  */
@@ -5659,6 +5727,24 @@ named: string | null, } } | { "Refused": { why: string, } };
  * would match nothing and fall back to matching by position, silently.
  */
 export type Turn = { "kind": "Prose" } & Prose | { "kind": "Reasoning" } & Reasoning | { "kind": "ToolUse" } & ToolUse | { "kind": "ToolResult" } & ToolResult | { "kind": "Put" } & Put | { "kind": "Unread" } & Unread;
+
+/**
+ * A Conversation a take-up would close that has something uncommitted in it.
+ *
+ * What [`TakenUp::WouldDiscard`] is made of, and what the composer draws under
+ * the press: the id is the way there, and the branch is what the human knows
+ * it by — a Conversation is called by its branch everywhere it is listed, once
+ * anybody has named one.
+ */
+export type Uncommitted = { 
+/**
+ * The Conversation, for the way there.
+ */
+conversation: number, 
+/**
+ * The branch it goes under.
+ */
+branch: string, };
 
 /**
  * Something nothing here knows how to draw, in the conversation where it was

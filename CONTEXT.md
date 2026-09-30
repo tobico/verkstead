@@ -2279,12 +2279,45 @@ that branch as the base.
 **A pull request is taken up** by a **Review** or **Fix Merge Issues**
 Conversation at Start, named in the Target field rather than picked off a list —
 the list of every open pull request read off GitHub when the compose page opened
-is gone with the menu level. One a Conversation already holds, Closed included,
-is refused by name and leads to that Conversation instead, the branch being that
-Conversation's — *holds* meaning the pull request that Conversation was pointed
-at or its finish step opened, rather than one it records beside that to watch,
-which is what a stack's neighbours are; one from a fork is refused too, its
-head branch being nowhere origin can be pushed to. Taking it up puts the
+is gone with the menu level. **One open Conversation per pull request**, open
+being neither Done nor Closed: one another Conversation is still at work on is
+refused by name and leads to that Conversation instead, the branch being that
+Conversation's, and one whose Conversation has *finished* with it closes that
+Conversation — by the ordinary Close, so its worktree goes with it, which is what
+frees the branch — and takes the pull request up over the top of it, saying on the
+new Conversation's Timeline whose it was. A holder already Closed or Archived has
+nothing to give up and is passed over. **The one thing that close is asked about
+is what it would discard**: where a Conversation about to be closed has
+uncommitted changes — modified, staged, or untracked and not ignored, in its own
+worktree or a companion checkout it may write in, which is the reading
+`verkstead done` takes of one — the press stops, naming every such Conversation by
+its branch and linking to it, nothing being closed and nothing made; the press
+under it then reads *Start anyway*, and that one closes and takes up. The
+checkouts are read again on that second press rather than trusted from the first,
+so a Conversation the confirmation does not name and that is holding something
+stops it all over again with the list as it stands. A clean holder is closed with
+no question and asking on every start was rejected as a question with one answer
+nearly every time — but a checkout that has *gone* and one git merely will not
+answer about are two different things, and the difference is the directory: the
+first holds nothing, and the second is work nobody can read sitting in a
+directory the close takes by force, so it is named and asked about like any
+other. Which is the way round `verkstead done` reads it too, and the safe way
+round of it: reading a checkout as holding something costs one more press, and
+reading it as clean costs the work.
+*Holds* means the pull request that
+Conversation was pointed at or its finish step opened, rather than one it records
+beside that to watch, which is what a stack's neighbours are; asked which
+Conversation is on a pull request several have recorded, the answer is the open
+one, and the newest where none is. One from a fork is refused too, its
+head branch being nowhere origin can be pushed to. Every refusal that costs
+nothing comes first, so nothing is closed for a start that was going to be
+refused anyway — and a close is never undone: a take-up refused after one says so
+on the server log, and a **Steer** is the way back into what was closed. **The
+rule runs both ways**, so that Steer reads it in the other direction: a
+Conversation steered back into work on its pull request closes the one that took
+it over and has finished with it, and is refused where that one is still at work —
+see **Steer**. Taking
+it up puts the
 Conversation on the pull request's head branch, named for it and never
 invented — made off origin's, or a local one fast-forwarded where it is behind;
 one ahead, diverged, not on origin at all or checked out anywhere else is refused
@@ -2309,14 +2342,34 @@ checks for all of them, and the Timeline says what the stack is from the bottom
 and which of it belongs to a Conversation of its own — which it usually does,
 that being what a stacked stage leaves behind. Recorded without being claimed:
 the pull request the Conversation was pointed at is the one it is on, the
-neighbours are watched, and a press pointed straight at one of them is refused
-by the Conversation that took *it* up, exactly as it always was. A lone pull
+neighbours are watched, and a press pointed straight at one of them meets the
+Conversation that took *it* up — refused where it is still at work, and closed
+where it has finished, exactly as a lone pull request's holder is. A lone pull
 request finds a chain of itself, and nothing is said about a stack there is
 none of — but a `gh` that would not answer the question is said, that and a
 lone pull request leaving the same record otherwise and nothing walking a
-second time. **Over a bare branch the walk waits**, there being nothing to walk
-from until the `submitting` session has opened one: it runs where that pull
-request is recorded, with a Notice of its own.
+second time.
+
+**And the neighbours make way, by the rule the named pull request's own holder
+follows.** A conflict low in a stack is fixed by one `gh stack sync`, which
+rebases and force-pushes every branch of the chain, and git will not move a
+branch that is checked out anywhere else — so whoever is *standing* on a link
+gives it up before the start goes through: the Conversation the pull request is
+on, and any Conversation whose worktree has that branch checked out. Each Done
+one is closed, a Closed or Archived one has nothing to give up, and one still at
+work refuses the whole start naming it, **before anything is closed** — all or
+nothing, a sync that cannot move one branch being a sync that moves none. A
+checkout that is no Conversation's is refused over by where it is, the way the
+branch being taken up already is. Neighbours holding uncommitted changes join the
+one list the named pull request's holder is in, so a stack of five is asked about
+once, and the Timeline names what was closed where it already says what the stack
+is and whose each link was. Which is why the chain is read before anything is
+recorded or closed: the press needs to know the links to know who is standing on
+them. **Over a bare branch the walk waits**, there being nothing to walk from
+until the `submitting` session has opened one: it runs where that pull request is
+recorded, with a Notice of its own — and with nobody left to ask, a neighbour
+holding uncommitted changes stops the run with a Notice exactly as one still at
+work does, rather than dispatching a sync that cannot move the branch.
 
 **A branch is taken up the same way, with nothing at the end of it.** A Target
 that is neither a URL nor a `#number` is a branch: nothing is asked of GitHub,
@@ -2558,6 +2611,23 @@ the record holds with nothing on disk is checked out again beside it, which is
 what a steered Draft and a Conversation steered back out of Closed both need:
 without it either would reach a running state with companions the sandbox skips
 in silence.
+
+**And somebody else may be standing on the branch, so a steer asks who.** There
+is one *open* Conversation per pull request, so a Conversation closed to make way
+for a **Review** or a **Fix Merge Issues** — or closed by hand long before — is
+steered back onto a pull request that has been taken over since, and git holds
+one checkout per branch. A steer into a state something runs in asks who else is
+on that pull request before it plans a checkout: a Conversation that has finished
+with it is closed by the ordinary Close and the steer carries on, one already
+Closed or Archived has nothing to give up, and one still at work refuses the
+steer, naming it and leading there. **The close is asked about where it would
+discard something**, exactly as at the take-up: the submit stops naming the
+Conversation that would lose it, the pending steer stands, and the submit under
+it reads *Steer anyway*. What was closed is named on this Conversation's own
+Timeline, because the human submitted a form about one Conversation and a
+different one moved. Into **Done** nothing runs and nothing is asked — and
+stacks are not walked here, a steer being about the Conversation's own pull
+request and the neighbours being a Fix Merge Issues start's to clear.
 
 **What a target takes is what it has to be about.** Grilling takes a new Brief,
 optional, empty being the round starting on the one already there; and a choice

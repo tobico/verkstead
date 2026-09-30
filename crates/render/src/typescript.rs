@@ -20,7 +20,7 @@ use crate::{
     AbandonedRepo, Adopted, AnswerAttached, AnswerAttachmentRemoved, Attached, AttachmentRemoved,
     BacklogPane, BaseBranchChoice, BaseRecorded, BranchRename, BranchRenamed, BriefEdit,
     BriefSaved, Capture, CommitPane, CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed,
-    CompanionModeChoice, CompanionModeChosen, CompanionRemoved, ConversationArchived,
+    CompanionModeChoice, CompanionModeChosen, CompanionRemoved, Confirming, ConversationArchived,
     ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
     ConversationUnarchived, ConversationView, Created, Creation, DirectoryListing, FileDeleted,
     FileDeleting, FileListsView, FileMade, FileMaking, FileReading, FileRenamed, FileRenaming,
@@ -199,6 +199,11 @@ fn the_viewers_types_are_written_from_these() {
     // reasons of its own, a branch that is already there being the point rather
     // than the trouble.
     TakenUp::export_all(&config).unwrap();
+
+    // And the one request shape any of those three presses takes: which closes
+    // the human has agreed to, sent by the press that confirms a take-up the
+    // last one stopped over uncommitted changes.
+    Confirming::export_all(&config).unwrap();
 
     // Nothing here for how the work gets built: the recommendation and its
     // reasoning ride on the `SetView` above, the pick goes back as a field of

@@ -114,7 +114,28 @@ pub enum Lifecycle {
     Closed,
 }
 
+/// What [`Lifecycle::Closed`] was called while the press was Abort.
+///
+/// A migration rewrites every row it can reach — see [`super::migrations`] — so
+/// this is the word in the ones it never did: a database restored from a backup
+/// taken before it ran, or a row somebody wrote by hand. Named once here because
+/// two places read it, and a query that knew one spelling of Closed and not the
+/// other would answer about a Conversation it had taken for open.
+pub(crate) const ABORTED: &str = "aborted";
+
 impl Lifecycle {
+    /// Both words a shut Conversation's column may hold: Done and Closed, and
+    /// Closed's own older spelling.
+    ///
+    /// What a query orders by rather than reads. [`Self::read`] turns a word into
+    /// a state and SQL cannot, so anywhere SQL has to know whether a row is still
+    /// at work it compares against these — see
+    /// [`super::pull_requests::conversation_on_pull_request`], where a word left
+    /// out of the list would sort as though the Conversation were open.
+    pub(crate) fn shut() -> [&'static str; 3] {
+        [Self::Done.stored(), Self::Closed.stored(), ABORTED]
+    }
+
     /// The word the column holds. Lowercase and spelled out, so the table reads
     /// as something rather than as a number nobody can look up.
     pub(crate) fn stored(self) -> &'static str {
@@ -148,7 +169,8 @@ impl Lifecycle {
             "follow-up" => Self::FollowUp,
             "investigating" => Self::Investigating,
             "done" => Self::Done,
-            "closed" | "aborted" => Self::Closed,
+            "closed" => Self::Closed,
+            word if word == ABORTED => Self::Closed,
             other => bail!("a Conversation is in the unknown state {other:?}"),
         })
     }
@@ -2253,6 +2275,42 @@ pub async fn recorded_worktrees(pool: &SqlitePool) -> Result<Vec<PathBuf>> {
         .into_iter()
         .map(|(path,)| PathBuf::from(path))
         .collect())
+}
+
+/// Which Conversation is working in `path`, where one is — in its own Worktree
+/// or in a companion's.
+///
+/// What a take-up asks about a branch git says is checked out somewhere. Git
+/// holds one checkout per branch and a stack sync moves every branch of a chain,
+/// so whoever is standing on a link of it has to make way; git names the
+/// directory, and this is what turns a directory into somebody to ask.
+///
+/// **Both tables**, because both are directories a Conversation was given to
+/// work in and both go back when it is closed. A companion checkout of the same
+/// repository is unusual and is a checkout all the same: what git refuses over is
+/// the directory, whichever column its path was written in.
+///
+/// `None` is a checkout that is nobody's here — the human's own clone, or a
+/// worktree somebody made by hand — which is nothing Verkstead may close and so
+/// nothing it can make way with.
+pub async fn conversation_at_worktree(
+    pool: &SqlitePool,
+    path: &std::path::Path,
+) -> Result<Option<i64>> {
+    let named = path.to_string_lossy().into_owned();
+
+    let row: Option<(i64,)> = sqlx::query_as(
+        "SELECT conversation_id FROM worktrees WHERE path = ?
+         UNION
+         SELECT conversation_id FROM companion_worktrees WHERE path = ?",
+    )
+    .bind(&named)
+    .bind(&named)
+    .fetch_optional(pool)
+    .await
+    .with_context(|| format!("reading which Conversation is working in {named}"))?;
+
+    Ok(row.map(|(id,)| id))
 }
 
 /// Every Conversation whose work has not stopped, by id.

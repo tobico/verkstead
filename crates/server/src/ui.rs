@@ -35,7 +35,7 @@ use verkstead_render::{
     BaseBranchChoice, BranchRename, BriefEdit, BuildCacheView, CheckRollup, CleanupStepView,
     CleanupView, CommentedOn, CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed,
     CompanionModeChoice, CompanionModeChosen, CompanionRemoved, CompanionView, CompileCaching,
-    ConflictResolution, ConversationArchived, ConversationClosed, ConversationEntry,
+    Confirming, ConflictResolution, ConversationArchived, ConversationClosed, ConversationEntry,
     ConversationSteered, ConversationStopped, ConversationUnarchived, ConversationView, Creation,
     Cursor, FileDeleted, FileDeleting, FileListsView, FileMade, FileMaking, FileReading,
     FileRenamed, FileRenaming, FileRootsView, FileStatusView, FileWrite, FileWritten,
@@ -4074,12 +4074,23 @@ async fn adopt(State(state): State<AppState>, Path(id): Path<String>) -> HttpRes
 /// checked the same way: what the page named was read off GitHub a moment ago,
 /// and a branch somebody has pushed to, taken or checked out since is answered
 /// here rather than there.
-async fn take_up(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+///
+/// **And the one press of the three that takes a body**: a take-up may close the
+/// Conversation that had the pull request, and a close takes its Worktree with
+/// whatever was left uncommitted in it. So a press that was stopped over that
+/// comes back naming what the human is agreeing to lose — see
+/// [`verkstead_render::Confirming`], which is empty on every press that was not
+/// stopped.
+async fn take_up(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(confirming): Json<Confirming>,
+) -> HttpResponse {
     let Ok(id) = id.parse::<i64>() else {
         return Json(TakenUp::NoSuchConversation).into_response();
     };
 
-    match crate::conversations::take_up(&state, id).await {
+    match crate::conversations::take_up(&state, id, &confirming.discarding).await {
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "taking a pull request up failed");

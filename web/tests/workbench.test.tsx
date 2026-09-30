@@ -2784,8 +2784,8 @@ describe("the page of a draft from before, holding a pull request", () => {
   });
 
   /// And its Start is the Review's own: one *Start work* under the box, reaching
-  /// the take-up route with nothing in the body. There is no press of its own on
-  /// this page any more, and no pane behind one.
+  /// the take-up route with nothing in the body but an empty list. There is no
+  /// press of its own on this page any more, and no pane behind one.
   it("starts through the take-up route, like every other Review", async () => {
     const fetching = theHolding(
       // Nothing is chosen on the fixture, so the server would say it is not
@@ -2811,7 +2811,7 @@ describe("the page of a draft from before, holding a pull request", () => {
     await waitFor(() =>
       expect(
         sent(fetching, `/api/ui/conversations/${HOLDING.id}/take-up`),
-      ).toEqual({}),
+      ).toEqual({ discarding: [] }),
     );
 
     expect(writes(fetching, `/api/ui/conversations/${HOLDING.id}/grill`)).toBe(
@@ -7193,8 +7193,10 @@ describe("starting the work", () => {
   /// the endpoint that checks the pull request out and moves the conversation
   /// into wrapping.
   ///
-  /// Nothing in the body, for the grill route's reason: which conversation is in
-  /// the path, and what its brief names is read by the server at the press.
+  /// Nothing in the body but an empty list, for the grill route's reason: which
+  /// conversation is in the path, and what its brief names is read by the server
+  /// at the press. The list is what a press that has been stopped sends back, and
+  /// a first press has been stopped over nothing.
   it("posts to the take-up route where the process is a review", async () => {
     const fetching = theWorkbenchWith(
       { process: "Review" },
@@ -7217,7 +7219,7 @@ describe("starting the work", () => {
     await waitFor(() =>
       expect(
         sent(fetching, `/api/ui/conversations/${OPEN.id}/take-up`),
-      ).toEqual({}),
+      ).toEqual({ discarding: [] }),
     );
     expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/grill`)).toBe(0);
   });
@@ -7247,7 +7249,7 @@ describe("starting the work", () => {
     await waitFor(() =>
       expect(
         sent(fetching, `/api/ui/conversations/${OPEN.id}/take-up`),
-      ).toEqual({}),
+      ).toEqual({ discarding: [] }),
     );
     expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/grill`)).toBe(0);
   });
@@ -7288,10 +7290,10 @@ describe("starting the work", () => {
     },
   );
 
-  /// And the one that carries a conversation leads there: there is one
-  /// conversation per piece of work, so what this refusal offers is the one that
-  /// already has the pull request rather than a second wrap-up over its branch.
-  it("leads to the conversation that already holds the pull request", async () => {
+  /// And the one that carries a conversation leads there: there is one open
+  /// conversation per pull request, so what this refusal offers is the one still
+  /// at work on it rather than a second wrap-up over its branch.
+  it("leads to the conversation still at work on the pull request", async () => {
     theWorkbenchWith(
       { process: "Review" },
       whenever(
@@ -7307,9 +7309,101 @@ describe("starting the work", () => {
     );
 
     const way = await waitFor(() =>
-      screen.getByRole("link", { name: "another conversation's" }),
+      screen.getByRole("link", { name: "Another conversation" }),
     );
     expect(way.getAttribute("href")).toBe("/conversations/77");
+    expect(screen.getByText(/still at work on that pull request/)).toBeTruthy();
+  });
+
+  /// And the one that is not a refusal at all draws every conversation it names
+  /// as a link, and turns the press into the one that goes ahead.
+  ///
+  /// A start that would close a finished conversation holding uncommitted changes
+  /// stops and asks: the links are who would lose something, and the button is
+  /// how the human answers. The press after it sends those conversations back,
+  /// which is what says the losses are agreed to.
+  it("names what a start would discard, and presses through it", async () => {
+    const fetching = theWorkbenchWith(
+      { process: "Review" },
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/take-up`,
+        json({
+          WouldDiscard: {
+            uncommitted: [{ conversation: 77, branch: "rate-limiting" }],
+          },
+        } satisfies TakenUp),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const start = await drawn(
+      container,
+      `.${composer.startGrilling} .${composer.start}`,
+    );
+    expect(start.textContent).toContain("Start work");
+
+    fireEvent.click(start);
+
+    const way = await waitFor(() =>
+      screen.getByRole("link", { name: "rate-limiting" }),
+    );
+    expect(way.getAttribute("href")).toBe("/conversations/77");
+    expect(
+      screen.getByText(/uncommitted changes in its worktree would go with it/),
+    ).toBeTruthy();
+
+    // And the press now reads as going ahead, which is the whole of the second
+    // answer: the same start with what it would discard named back.
+    await waitFor(() => expect(start.textContent).toContain("Start anyway"));
+
+    fireEvent.click(start);
+
+    await waitFor(() =>
+      expect(
+        sent(fetching, `/api/ui/conversations/${OPEN.id}/take-up`, 1),
+      ).toEqual({ discarding: [77] }),
+    );
+  });
+
+  /// And a stack named in the one list reads as several conversations rather than
+  /// as one with several names.
+  ///
+  /// Which is the case the list is for: every conversation standing on a link of a
+  /// chain is named by the one press, so a sentence about *the worktree* would be
+  /// four conversations sharing one.
+  it("names a whole stack of them as several", async () => {
+    theWorkbenchWith(
+      { process: "FixMergeIssues" },
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/take-up`,
+        json({
+          WouldDiscard: {
+            uncommitted: [
+              { conversation: 77, branch: "stage-01" },
+              { conversation: 78, branch: "stage-03" },
+            ],
+          },
+        } satisfies TakenUp),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${composer.startGrilling} .${composer.start}`),
+    );
+
+    for (const branch of ["stage-01", "stage-03"]) {
+      const way = await waitFor(() => screen.getByRole("link", { name: branch }));
+      expect(way.getAttribute("href")).toBeTruthy();
+    }
+
+    expect(
+      screen.getByText(
+        /would each be closed to make way, and the uncommitted changes in their worktrees would go with them/,
+      ),
+    ).toBeTruthy();
   });
 
   /// And a conversation that is ready says nothing at all: what the press does
@@ -11476,6 +11570,9 @@ describe("steering a conversation", () => {
         follow_up: "Does it count the 429s it sends?",
         // Nor is the question beside it: each payload goes under its own target.
         investigation: null,
+        // And nothing to discard: the list is what a submit that has been
+        // stopped sends back, and a first submit has been stopped over nothing.
+        discarding: [],
       }),
     );
   });
@@ -11561,6 +11658,7 @@ describe("steering a conversation", () => {
         instruction: null,
         follow_up: null,
         investigation: "Where does the 429 count come from?",
+        discarding: [],
       }),
     );
   });
@@ -11738,6 +11836,7 @@ describe("steering a conversation", () => {
         instruction: "Note the window the count is against.",
         follow_up: null,
         investigation: null,
+        discarding: [],
       }),
     );
   });
@@ -11808,6 +11907,7 @@ describe("steering a conversation", () => {
         instruction: null,
         follow_up: null,
         investigation: null,
+        discarding: [],
       }),
     );
   });
@@ -11870,6 +11970,7 @@ describe("steering a conversation", () => {
         instruction: null,
         follow_up: null,
         investigation: null,
+        discarding: [],
       }),
     );
   });
@@ -12028,6 +12129,7 @@ describe("steering a conversation", () => {
         instruction: null,
         follow_up: null,
         investigation: null,
+        discarding: [],
       }),
     );
 
@@ -12118,6 +12220,88 @@ describe("steering a conversation", () => {
     const refused = await drawn(document.body, `.${steerForm.steerConversation} .${steerForm.failure}`);
 
     expect(refused.textContent).toBe(STEER_REFUSAL.NoSuchConversation);
+  });
+
+  /// And the refusal about the pull request leads to the conversation that has
+  /// it, which is the whole of what makes it actionable.
+  ///
+  /// There is one open conversation per pull request, so a conversation steered
+  /// back onto one somebody is still wrapping up is refused and the way on is
+  /// that conversation rather than a second one beside it.
+  it("leads to the conversation still at work on the pull request", async () => {
+    theGrillingSteering(
+      { ready_to_stop: true, working: false },
+      whenever(STEERING, PRESSED, "POST"),
+      whenever(
+        STEER_SUBMIT,
+        json({ AlreadyHeld: { conversation: 77 } } satisfies ConversationSteered),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const pane = await openSteer(container);
+    fireEvent.click(await drawn(pane, `.${steerForm.steerButtons} .${steerForm.steer}`));
+
+    const way = await waitFor(() =>
+      screen.getByRole("link", { name: "Another conversation" }),
+    );
+
+    expect(way.getAttribute("href")).toBe("/conversations/77");
+    expect(
+      screen.getByText(/still at work on this pull request/),
+    ).toBeTruthy();
+  });
+
+  /// And the one that is not a refusal at all draws the conversation it names as
+  /// a link, and turns the press into the one that goes ahead.
+  ///
+  /// A steer that would close a finished conversation holding uncommitted
+  /// changes stops and asks: the link is who would lose something, and the button
+  /// is how the human answers. The submit after it sends that conversation back,
+  /// which is what says the loss is agreed to — and the pending steer stood
+  /// through it, or there would have been no form left to submit.
+  it("names what a steer would discard, and presses through it", async () => {
+    const fetching = theGrillingSteering(
+      { ready_to_stop: true, working: false },
+      whenever(STEERING, PRESSED, "POST"),
+      whenever(
+        STEER_SUBMIT,
+        json({
+          WouldDiscard: {
+            uncommitted: [{ conversation: 77, branch: "rate-limiting" }],
+          },
+        } satisfies ConversationSteered),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const pane = await openSteer(container);
+    const press = await drawn(pane, `.${steerForm.steerButtons} .${steerForm.steer}`);
+
+    fireEvent.click(press);
+
+    const way = await waitFor(() =>
+      screen.getByRole("link", { name: "rate-limiting" }),
+    );
+
+    expect(way.getAttribute("href")).toBe("/conversations/77");
+    expect(
+      screen.getByText(/uncommitted changes in its worktree would go with it/),
+    ).toBeTruthy();
+
+    // And the press now reads as going ahead, which is the whole of the second
+    // answer: the same steer with what it would discard named back.
+    await waitFor(() => expect(press.textContent).toContain("Steer anyway"));
+
+    fireEvent.click(press);
+
+    await waitFor(() =>
+      expect(sent(fetching, STEER_SUBMIT, 1)).toMatchObject({
+        discarding: [77],
+      }),
+    );
   });
 
   /// The form is drawn from the pending steer rather than opened empty, which is
