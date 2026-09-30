@@ -3161,10 +3161,16 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // page draws of it is its label and its box, which is what the fixture the
     // viewer's tests read has to carry: Rust alone would prove only that the
     // page can draw the language it was written around.
+    //
+    // **With a size on it**, which is the key the page draws no field for here:
+    // nothing reads this one's size, its descriptor naming no sccache
+    // capability, and a save still has to put it back. So the fixture carries a
+    // size somebody configured that the pane never shows — see `held.ts`, which
+    // is what sends it.
     std::fs::write(
         told_dir.path().join("config.yaml"),
-        "languages:\n  gleam:\n    label: Gleam\n    detect:\n      - gleam.toml\n    \
-         env:\n      GLEAM_CACHE: \"{cache}/gleam\"\n",
+        "languages:\n  gleam:\n    label: Gleam\n    size: 8G\n    detect:\n      \
+         - gleam.toml\n    env:\n      GLEAM_CACHE: \"{cache}/gleam\"\n",
     )
     .unwrap();
 
@@ -3177,14 +3183,16 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         &serde_json::json!({
             "git_author": { "name": "Ada Lovelace", "email": "ada@example.com" },
             "github_token": { "Set": { "token": "ghp_0123456789abcdef" } },
-            // Every language the page was given, which is how it saves: a size
-            // the human typed on the one whose store an sccache bounds, so the
-            // fixture carries the configured half rather than only the defaults
-            // — `settings-unset.json` above is the other half — and the
-            // installer's own carried along with nothing typed on it.
+            // Every language the page was given, which is how it saves: the
+            // switch and the size of each, and the size of **every** one of them
+            // whether the pane drew a field for it or not — see `held.ts`'s
+            // `asEdit`. So the fixture carries a size the human typed on the one
+            // whose store an sccache bounds, a size an installer wrote on one
+            // nothing here reads, and `settings-unset.json` above for the
+            // defaults.
             "languages": [
                 { "name": "rust", "enabled": true, "size": "50G" },
-                { "name": "gleam", "enabled": true, "size": "" },
+                { "name": "gleam", "enabled": true, "size": "8G" },
             ],
             // And a Cleanup somebody has been through: both durations typed and
             // the delete turned on, for the reason the size above is typed —

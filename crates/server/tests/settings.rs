@@ -46,9 +46,9 @@ use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
 use tower::ServiceExt;
 use verkstead_render::{
-    CompileCaching, CompilingView, ConflictResolution, IgnoreRule, LanguageView, McpHeader,
-    McpServer, PathResolution, PathSource, RuleField, RunningOn, ServerField, SettingsSaved,
-    SettingsView, Verified,
+    CompileCaching, ConflictResolution, IgnoreRule, LanguageView, McpHeader, McpServer,
+    PathResolution, PathSource, RuleField, RunningOn, ServerField, SettingsSaved, SettingsView,
+    Verified,
 };
 use verkstead_server::sandbox::SandboxConfig;
 use verkstead_server::{Gh, open_database, router_asking_github, router_installed};
@@ -198,6 +198,31 @@ fn languages_unset() -> serde_json::Value {
 /// press and the size's.
 fn rust(enabled: bool, size: &str) -> serde_json::Value {
     serde_json::json!([{ "name": "rust", "enabled": enabled, "size": size }])
+}
+
+/// Every language the last read listed, as the page puts them back.
+///
+/// The page's own rule, which is `held.ts`'s `asEdit`: the switch where the
+/// read left it, and the size where somebody configured one — for **every**
+/// language, including the ones it drew no size field for. A test that sent
+/// only the languages it was interested in would be a test that could not see
+/// a save emptying the others.
+fn as_the_page_saves(told: &SettingsView) -> serde_json::Value {
+    serde_json::Value::Array(
+        told.languages
+            .iter()
+            .map(|language| {
+                serde_json::json!({
+                    "name": language.name,
+                    "enabled": language.enabled,
+                    "size": match language.size_configured {
+                        true => language.size.clone(),
+                        false => String::new(),
+                    },
+                })
+            })
+            .collect(),
+    )
 }
 
 /// The Cleanup as a save that is not about it sends it: both rows where nobody
@@ -626,12 +651,12 @@ fn rust_told(settings: &SettingsView) -> &LanguageView {
         .unwrap_or_else(|| panic!("Rust is built in, so every read lists it: {settings:?}"))
 }
 
-/// And the store an sccache bounds under it, which is what hangs the size off
-/// Rust's box rather than off the section.
-fn rust_store(settings: &SettingsView) -> &CompilingView {
+/// And whether the store Rust's size bounds is an sccache's, which is what
+/// hangs a size field off Rust's box rather than off the section.
+fn rust_compiling(settings: &SettingsView) -> CompileCaching {
     rust_told(settings)
         .compiling
-        .as_ref()
+        .clone()
         .expect("Rust's descriptor names the sccache capability")
 }
 
@@ -655,14 +680,13 @@ async fn a_language_nobody_has_configured_is_on_at_the_default_size() {
     );
     assert!(rust.enabled, "on is what an untouched setting means");
 
-    let store = rust_store(&told);
-    assert_eq!(store.size, "30G");
+    assert_eq!(rust.size, "30G");
     assert!(
-        !store.size_configured,
+        !rust.size_configured,
         "the default is shown rather than chosen"
     );
     assert_ne!(
-        store.cached,
+        rust_compiling(&told),
         CompileCaching::Cached,
         "this router runs no sessions, so it has no sccache to hand any"
     );
@@ -692,8 +716,8 @@ async fn a_languages_switch_and_size_go_in_and_come_back() {
     .await;
 
     assert!(!rust_told(&saved.settings).enabled);
-    assert_eq!(rust_store(&saved.settings).size, "5G");
-    assert!(rust_store(&saved.settings).size_configured);
+    assert_eq!(rust_told(&saved.settings).size, "5G");
+    assert!(rust_told(&saved.settings).size_configured);
 
     // In the file the next session reads, rather than only in the answer — and
     // under the map the page writes now rather than under the key it replaced.
@@ -708,7 +732,7 @@ async fn a_languages_switch_and_size_go_in_and_come_back() {
 
     let read_back = settings(&app).await;
     assert!(!rust_told(&read_back).enabled);
-    assert_eq!(rust_store(&read_back).size, "5G");
+    assert_eq!(rust_told(&read_back).size, "5G");
 }
 
 /// A language an installer wrote a descriptor for is on the page, under the
@@ -872,7 +896,7 @@ async fn a_save_carries_the_old_key_into_the_map_and_writes_it_away() {
     // rule: an install that wrote one keeps exactly what it said.
     let told = settings(&app).await;
     assert!(!rust_told(&told).enabled);
-    assert_eq!(rust_store(&told).size, "5G");
+    assert_eq!(rust_told(&told).size, "5G");
 
     // And the page saves what it was just given, the way every pane does.
     let saved = save(
@@ -892,7 +916,7 @@ async fn a_save_carries_the_old_key_into_the_map_and_writes_it_away() {
     .await;
 
     assert!(!rust_told(&saved.settings).enabled, "nothing changed");
-    assert_eq!(rust_store(&saved.settings).size, "5G");
+    assert_eq!(rust_told(&saved.settings).size, "5G");
 
     let written = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
     assert!(
@@ -1032,7 +1056,7 @@ async fn a_save_carrying_the_cleanup_as_it_stands_leaves_it() {
     )
     .await;
 
-    assert_eq!(rust_store(&saved.settings).size, "5G");
+    assert_eq!(rust_told(&saved.settings).size, "5G");
     assert!(!saved.settings.cleanup.trim.enabled, "the switch stands");
     assert_eq!(saved.settings.cleanup.delete.days, 90, "and the duration");
 }
@@ -1217,7 +1241,7 @@ async fn a_save_carrying_the_switch_as_it_stands_leaves_it() {
     )
     .await;
 
-    assert_eq!(rust_store(&saved.settings).size, "5G");
+    assert_eq!(rust_told(&saved.settings).size, "5G");
     assert!(saved.settings.share_on_done, "the switch stands");
 }
 
@@ -1317,7 +1341,7 @@ async fn a_save_carrying_the_instructions_as_they_stand_leaves_them() {
     )
     .await;
 
-    assert_eq!(rust_store(&saved.settings).size, "5G");
+    assert_eq!(rust_told(&saved.settings).size, "5G");
     assert_eq!(
         saved.settings.instructions, "Prefer the smallest change.",
         "the text stands",
@@ -1331,22 +1355,61 @@ async fn a_save_carrying_the_instructions_as_they_stand_leaves_them() {
 }
 
 /// And a language an installer wrote a descriptor for rides along the same way,
-/// every key of it.
+/// every key of it — **its size included**.
 ///
 /// The page draws two keys of an entry — the switch and the size — and an
 /// installer owns the rest: the label, the manifests and the variables. One
 /// request writes the whole of `config.yaml`, so a save built out of what the
 /// page sent would take a language off the machine at the next session.
+///
+/// The size is the one of the two that has to be *sent* to survive, and the
+/// only field on the page a language may have no box for: nothing here reads
+/// Gleam's, there being no sccache capability in its descriptor, so the pane
+/// draws none. A page that sent only the sizes it drew would be a save that
+/// emptied this one — which is why the save below is every language the read
+/// listed, exactly as the pane's own `asEdit` puts them back.
 #[tokio::test]
 async fn a_save_leaves_an_installers_own_descriptor_exactly_as_the_file_had_it() {
     let (dir, app) = app().await;
 
-    let descriptor = "languages:\n  gleam:\n    label: Gleam\n    detect:\n      \
-                      - gleam.toml\n    env:\n      GLEAM_CACHE: \"{cache}/gleam\"\n";
+    let descriptor = "languages:\n  gleam:\n    label: Gleam\n    size: 8G\n    \
+                      detect:\n      - gleam.toml\n    env:\n      \
+                      GLEAM_CACHE: \"{cache}/gleam\"\n";
 
     hand_edit(dir.path(), "config.yaml", descriptor);
 
-    save_author(&app, "Ada", "ada@example.com").await;
+    let told = settings(&app).await;
+    let gleam = told
+        .languages
+        .iter()
+        .find(|language| language.name == "gleam")
+        .unwrap_or_else(|| panic!("the descriptor in the file is on the page: {told:?}"));
+
+    assert_eq!(
+        (gleam.size.as_str(), gleam.size_configured),
+        ("8G", true),
+        "the size an installer wrote reaches the page even with no field for it",
+    );
+    assert!(
+        gleam.compiling.is_none(),
+        "which is what says there is no field: nothing reads this one's size"
+    );
+
+    save(
+        &app,
+        &serde_json::json!({
+            "git_author": { "name": "Ada", "email": "ada@example.com" },
+            "github_token": "Keep",
+            "languages": as_the_page_saves(&told),
+            "cleanup": cleanup_unset(),
+            "conflict_resolution": "Merge",
+            "share_on_done": false,
+            "sandbox_binds": [],
+            "ignored_comments": "Keep",
+            "instructions": "",
+        }),
+    )
+    .await;
 
     let written = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
 
@@ -1355,6 +1418,7 @@ async fn a_save_leaves_an_installers_own_descriptor_exactly_as_the_file_had_it()
     for key in [
         "gleam",
         "Gleam",
+        "8G",
         "gleam.toml",
         "GLEAM_CACHE",
         "{cache}/gleam",
@@ -1364,6 +1428,17 @@ async fn a_save_leaves_an_installers_own_descriptor_exactly_as_the_file_had_it()
             "and so is `{key}`, which the page never drew: {written}",
         );
     }
+
+    // And off the file rather than only out of the answer, which is what the
+    // next session reads.
+    let read_back = settings(&app).await;
+    let gleam = read_back
+        .languages
+        .iter()
+        .find(|language| language.name == "gleam")
+        .unwrap();
+
+    assert_eq!((gleam.size.as_str(), gleam.size_configured), ("8G", true));
 }
 
 /// Save a text and leave everything else alone, which is what the instructions
@@ -1445,8 +1520,8 @@ async fn a_size_cleared_is_the_default_again_and_not_a_size_of_nothing() {
     )
     .await;
 
-    assert_eq!(rust_store(&saved.settings).size, "30G");
-    assert!(!rust_store(&saved.settings).size_configured);
+    assert_eq!(rust_told(&saved.settings).size, "30G");
+    assert!(!rust_told(&saved.settings).size_configured);
 }
 
 /// The Sandbox binds half of the page: every Sandbox Configuration bind, from

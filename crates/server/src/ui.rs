@@ -35,7 +35,7 @@ use verkstead_render::{
     BaseBranchChoice, BranchRename, BriefEdit, CheckRollup, CleanupStepView, CleanupView,
     CommentedOn, CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed,
     CompanionModeChoice, CompanionModeChosen, CompanionRemoved, CompanionView, CompileCaching,
-    CompilingView, ConflictResolution, ConversationArchived, ConversationClosed, ConversationEntry,
+    ConflictResolution, ConversationArchived, ConversationClosed, ConversationEntry,
     ConversationSteered, ConversationStopped, ConversationUnarchived, ConversationView, Creation,
     Cursor, FileDeleted, FileDeleting, FileListsView, FileMade, FileMaking, FileReading,
     FileRenamed, FileRenaming, FileRootsView, FileStatusView, FileWrite, FileWritten,
@@ -5271,17 +5271,18 @@ fn compile_caching(cached: bool) -> CompileCaching {
 /// descriptors were written.
 ///
 /// What is drawn of one is the three things a page can say about a language it
-/// has never heard of — what to call it, whether it is on, and the size of the
-/// store an sccache bounds — because that is exactly what a descriptor is:
-/// there is no editor here, and an installer who wants more writes
-/// `config.yaml`.
+/// has never heard of — what to call it, whether it is on, and how big its
+/// store may grow — because that is exactly what a descriptor is: there is no
+/// editor here, and an installer who wants more writes `config.yaml`.
 ///
 /// The label falls back to the name the file keys it by, so the page always has
-/// a word to draw. The size hangs off the language whose descriptor names the
-/// sccache capability rather than standing beside the list, because it is that
-/// descriptor's own `size` — and `cached` rides along inside it for the reason
-/// it always did: it is the server's own environment, which is the same answer
-/// for every language that asks.
+/// a word to draw. **The size is every language's**, because it is a key of
+/// every entry and a save puts both of the page's keys back for all of them:
+/// a size only the file knows about would be a size the next save emptied.
+/// What `compiling` says is whether anything reads it — the language names the
+/// sccache capability — and, where something does, whether that compiling is
+/// really being cached, which is the server's own environment and the same
+/// answer for every language that asks.
 ///
 /// And a language whose entry in `config.yaml` would not load is on the list
 /// like any other, carrying the reason and what it is running on instead — see
@@ -5296,20 +5297,18 @@ fn languages(loaded: &crate::languages::Languages, caches_compiles: bool) -> Vec
             name: name.to_owned(),
             label: descriptor.label().unwrap_or(name).to_owned(),
             enabled: descriptor.enabled(),
+            // The default where nobody has typed one, with the flag beside it
+            // saying which of the two this is — a field showing a value nobody
+            // chose should say so, and it says so as a placeholder.
+            size: descriptor.size().to_owned(),
+            size_configured: descriptor.size_configured().is_some(),
+            // And whether anything reads that size. Not out of the files at
+            // all where something does: this is the server's own environment
+            // and its own platform, and the one thing on this page the human
+            // cannot set.
             compiling: descriptor
                 .names(crate::languages::SCCACHE)
-                .then(|| CompilingView {
-                    // The default where nobody has typed one, with the flag
-                    // beside it saying which of the two this is — a field
-                    // showing a value nobody chose should say so, and it says
-                    // so as a placeholder.
-                    size: descriptor.size().to_owned(),
-                    size_configured: descriptor.size_configured().is_some(),
-                    // Not out of the files at all: this is the server's own
-                    // environment and its own platform, and the one thing on
-                    // this page the human cannot set.
-                    cached: compile_caching(caches_compiles),
-                }),
+                .then(|| compile_caching(caches_compiles)),
             // And why this language's entry in `config.yaml` was not used,
             // where it was not — with what it is running on meanwhile, which is
             // whether anything is actually broken. Asked of the built-ins

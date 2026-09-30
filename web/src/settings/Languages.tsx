@@ -66,6 +66,14 @@
 //! disabled for a second reason as well, and the reason is the warning above it:
 //! the size is sccache's own, so a server with no sccache has nothing to read it.
 //!
+//! **And a language with no field for its size still sends one.** `size` is a
+//! key of every entry whoever wrote it, and only the language whose store an
+//! sccache bounds has anything here reading it — so a save built out of the
+//! fields drawn would write `config.yaml` with every other language's size gone,
+//! a key nobody was ever shown being emptied by a press about something else.
+//! What every save sends is what the server last gave it, per language, for both
+//! keys — see [`heldLanguages`].
+//!
 //! Everything goes through the one settings endpoint, which writes both files:
 //! the author rides along as it stands and the token is left alone, so saving a
 //! store size cannot lose either.
@@ -160,7 +168,7 @@ function warned(told: SettingsView | undefined): boolean {
     (language) =>
       language.enabled &&
       language.compiling !== null &&
-      language.compiling.cached !== "Cached",
+      language.compiling !== "Cached",
   );
 }
 
@@ -175,7 +183,7 @@ function warned(told: SettingsView | undefined): boolean {
 function sizeable(language: LanguageView): boolean {
   return (
     language.enabled &&
-    language.compiling?.cached === "Cached" &&
+    language.compiling === "Cached" &&
     language.unread === null
   );
 }
@@ -311,8 +319,7 @@ export function LanguagesPane(props: {
   /// else nothing at all — because an unconfigured size is drawn as the
   /// placeholder underneath rather than as text in the box.
   const size = (language: LanguageView) =>
-    typed()[language.name] ??
-    (language.compiling?.size_configured ? language.compiling.size : "");
+    typed()[language.name] ?? (language.size_configured ? language.size : "");
 
   /// What a save is asked to do: every language as it is to stand, and the one
   /// whose size was just pressed Save on, where one was.
@@ -460,7 +467,7 @@ export function LanguagesPane(props: {
                               spellcheck={false}
                               // The default, so an empty box reads as the size
                               // nobody has chosen rather than as no size at all.
-                              placeholder={language.compiling?.size}
+                              placeholder={language.size}
                               value={size(language)}
                               onInput={(ev) =>
                                 setTyped((held) => ({

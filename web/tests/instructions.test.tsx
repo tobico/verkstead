@@ -46,10 +46,14 @@ const UNSET = unset as SettingsView;
 /// beside the built-in. Carried by every section for the reason the paths are:
 /// one request writes the whole of `config.yaml`, so a list left out would be a
 /// list emptied. See [`heldLanguages`].
+///
+/// Gleam's size is one the language pane itself draws no field for, nothing here
+/// reading it — and it is sent all the same, because it is a key of that entry
+/// whoever wrote it.
 const LANGUAGES = {
   languages: [
     { name: "rust", enabled: true, size: "50G" },
-    { name: "gleam", enabled: true, size: "" },
+    { name: "gleam", enabled: true, size: "8G" },
   ],
 };
 

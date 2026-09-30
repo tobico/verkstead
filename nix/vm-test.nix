@@ -701,12 +701,11 @@ testers.runNixOSTest {
 
         def sized(language):
             """A language's size as a save says it: what somebody typed, and the
-            empty string for the default being shown — which is also every
-            language that has no store an sccache bounds."""
-            compiling = language["compiling"]
-
-            if compiling and compiling["size_configured"]:
-                return compiling["size"]
+            empty string for the default being shown. Every language's, whether
+            the pane draws a field for it or not — a save that sent only the
+            sizes it drew would empty the rest."""
+            if language["size_configured"]:
+                return language["size"]
 
             return ""
 

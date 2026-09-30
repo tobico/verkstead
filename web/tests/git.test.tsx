@@ -293,12 +293,13 @@ describe("what Next saves", () => {
       // be a wizard nobody could finish.
       ignored_comments: "Keep",
       mcp_servers: "Keep",
-      // Every language the read listed, as the two keys the page writes: one
+      // Every language the read listed, as the two keys the page writes — sizes
+      // included, whether the language pane draws a field for one or not: one
       // request writes the whole of `config.yaml`, so a wizard that left them
       // out would be a wizard that emptied them.
       languages: [
         { name: "rust", enabled: true, size: "50G" },
-        { name: "gleam", enabled: true, size: "" },
+        { name: "gleam", enabled: true, size: "8G" },
       ],
       cleanup: {
         trim: { enabled: true, days: "5" },

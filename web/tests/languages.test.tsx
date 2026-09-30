@@ -74,9 +74,7 @@ function compiling(standing: SettingsView): SettingsView {
     ...standing,
     languages: standing.languages.map((language) => ({
       ...language,
-      compiling: language.compiling
-        ? { ...language.compiling, cached: "Cached" }
-        : null,
+      compiling: language.compiling ? "Cached" : null,
     })),
   };
 }
@@ -515,10 +513,11 @@ describe("changing the languages", () => {
         ignored_comments: "Keep",
         mcp_servers: "Keep",
         // Every language, because one request writes the whole file — the one
-        // that was pressed as it is now to stand, and the rest as they were.
+        // that was pressed as it is now to stand, and the rest as they were,
+        // sizes included, whether this pane drew a field for one or not.
         languages: [
           { name: RUST, enabled: false, size: "50G" },
-          { name: GLEAM, enabled: true, size: "" },
+          { name: GLEAM, enabled: true, size: "8G" },
         ],
         // Untouched by this form, and sent back as it stands: one request
         // writes the whole of `config.yaml`.
@@ -548,7 +547,7 @@ describe("changing the languages", () => {
     await waitFor(() =>
       expect(languagesSent(fetching)).toEqual([
         { name: RUST, enabled: true, size: "50G" },
-        { name: GLEAM, enabled: false, size: "" },
+        { name: GLEAM, enabled: false, size: "8G" },
       ]),
     );
   });
@@ -606,7 +605,7 @@ describe("changing the languages", () => {
         mcp_servers: "Keep",
         languages: [
           { name: RUST, enabled: true, size: "80G" },
-          { name: GLEAM, enabled: true, size: "" },
+          { name: GLEAM, enabled: true, size: "8G" },
         ],
         // Untouched by this form, and sent back as it stands: one request
         // writes the whole of `config.yaml`.
@@ -635,6 +634,33 @@ describe("changing the languages", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(languagesSent(fetching)[0]?.size).toBe(""));
+  });
+
+  /// And a size the pane drew no field for is sent all the same.
+  ///
+  /// One request writes the whole of `config.yaml`, and `size` is a key of every
+  /// language's entry — not only of the one whose store an sccache bounds, which
+  /// is the only one with a box for it here. A tick that sent what it had drawn
+  /// would write the file with the installer's own size gone, which is a key
+  /// nobody was ever shown being emptied by a press about something else.
+  it("sends the size of a language it drew no field for", async () => {
+    const fetching = theSettings(compiling(TOLD), json(answering(off(TOLD))));
+    mountPane();
+
+    await waitFor(() => expect(theCheck().checked).toBe(true));
+    expect(
+      screen.queryAllByLabelText(/How large/),
+      "only the language whose store an sccache bounds has a field",
+    ).toHaveLength(1);
+
+    fireEvent.click(theCheck());
+
+    await waitFor(() =>
+      expect(languagesSent(fetching)).toEqual([
+        { name: RUST, enabled: false, size: "50G" },
+        { name: GLEAM, enabled: true, size: "8G" },
+      ]),
+    );
   });
 
   /// What the pane saved is what the card goes back to saying, because the

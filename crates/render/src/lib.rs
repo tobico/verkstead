@@ -82,11 +82,10 @@ pub use remote::{RemoteBanner, RemoteView, ServeEdit, ServePress, ServeView};
 pub use repos::{Created, Creation, Registered, Registration, RepoEntry, RepoRemoved, RepoView};
 pub use settings::{
     Author, BindEntry, CleanupEdit, CleanupStepEdit, CleanupStepView, CleanupView, CompileCaching,
-    CompilingView, ConflictResolution, HeaderEdit, IgnoreRule, IgnoredCommentsEdit, LanguageEdit,
-    LanguageView, McpHeader, McpHeaderEdit, McpServer, McpServerEdit, McpServersEdit,
-    PathResolution, PathSource, PathsView, RuleField, RuleRefused, RunningOn, ServerField,
-    ServerRefused, ServerTried, SettingsEdit, SettingsSaved, SettingsView, TokenEdit, TokenSaved,
-    Tried, UnreadEntry, Verified,
+    ConflictResolution, HeaderEdit, IgnoreRule, IgnoredCommentsEdit, LanguageEdit, LanguageView,
+    McpHeader, McpHeaderEdit, McpServer, McpServerEdit, McpServersEdit, PathResolution, PathSource,
+    PathsView, RuleField, RuleRefused, RunningOn, ServerField, ServerRefused, ServerTried,
+    SettingsEdit, SettingsSaved, SettingsView, TokenEdit, TokenSaved, Tried, UnreadEntry, Verified,
 };
 pub use sharing::{
     CommentedOn, MissedOut, SHARE_MARKER, ShareCommented, SharePublished, SharedCommit,

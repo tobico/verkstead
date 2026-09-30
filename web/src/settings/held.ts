@@ -80,8 +80,12 @@ export function heldInstructions(told: SettingsView | undefined): {
 ///
 /// A size nobody typed goes back as the empty string rather than as the default
 /// it is being shown as — see [`heldCleanup`], which says the same about a
-/// duration — and so does a language with no size of its own, there being no
-/// size to send.
+/// duration.
+///
+/// **Every language's size, whether the pane draws a field for it or not.** It
+/// draws one only under a language whose store an sccache bounds, and a save
+/// built out of the fields alone would write `config.yaml` with every other
+/// language's `size` gone — a key of an entry the page never showed anybody.
 ///
 /// **The size here is the server's rather than the field's**, which is what the
 /// language checkboxes want of it. A box saves itself the moment it is ticked,
@@ -100,7 +104,7 @@ function asEdit(language: SettingsView["languages"][number]): LanguageEdit {
   return {
     name: language.name,
     enabled: language.enabled,
-    size: language.compiling?.size_configured ? language.compiling.size : "",
+    size: language.size_configured ? language.size : "",
   };
 }
 

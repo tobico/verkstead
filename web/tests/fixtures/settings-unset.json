@@ -21,14 +21,12 @@
   "instructions": "",
   "languages": [
     {
-      "compiling": {
-        "cached": "NoSccache",
-        "size": "30G",
-        "size_configured": false
-      },
+      "compiling": "NoSccache",
       "enabled": true,
       "label": "Rust",
       "name": "rust",
+      "size": "30G",
+      "size_configured": false,
       "unread": null
     }
   ],

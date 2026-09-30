@@ -1056,35 +1056,6 @@ base_commit: string | null, };
 export type CompileCaching = "Cached" | "NoSccache";
 
 /**
- * How big a language's compiled store may grow, and whether a session's
- * compiling is being cached at all.
- */
-export type CompilingView = { 
-/**
- * How big it may grow, in sccache's own words — `30G`, `500M`. Always a
- * value: the default is what an untouched setting means, and the field
- * shows it rather than standing empty.
- */
-size: string, 
-/**
- * Whether that size is one somebody typed, rather than the default being
- * shown. What lets the field draw the default as a placeholder — a value
- * nobody chose should not look like a choice.
- */
-size_configured: boolean, 
-/**
- * Whether a session's *compiling* is cached as well as its downloads, and
- * where it is not, why not.
- *
- * Read-only, and the one fact here nobody can set from a page: it is the
- * server's own environment and its own platform. Anything but
- * [`CompileCaching::Cached`] means a session's downloads are still shared
- * and its dependencies are compiled every time, which is a slow build
- * rather than a broken one.
- */
-cached: CompileCaching, };
-
-/**
  * How a merge conflict between a pull request and its base branch is resolved.
  *
  * Two words for two ways of putting the base's work on a branch that has
@@ -2503,12 +2474,16 @@ why: string, };
  *
  * The size is a string because it is sccache's own word for one, and an empty
  * one is *no size configured* rather than a size of nothing — which is what
- * clearing the field means and what puts the default back. A language with no
- * size field of its own sends the empty string, which is the same nothing.
+ * clearing the field means and what puts the default back.
+ *
+ * **Sent for every language, whether the page drew a field for it or not.**
+ * It draws one only where something reads a size, and a save built out of the
+ * fields alone would write the file with every other language's size gone —
+ * see [`LanguageView::size`], which is where this comes back from.
  *
  * Whether compiling is cached is not here. It is the server's own
  * circumstance rather than anything a page can decide, so it travels one way
- * only — see [`CompilingView::cached`].
+ * only — see [`LanguageView::compiling`].
  */
 export type LanguageEdit = { 
 /**
@@ -2520,8 +2495,12 @@ name: string, enabled: boolean, size: string, };
 
 /**
  * One language as the settings page draws it: what to call it, whether
- * sessions get it, and — for the one whose store an sccache bounds — how big
- * that store may grow.
+ * sessions get it, and how big its store may grow.
+ *
+ * **Every key of an entry that a save writes is here, the size included.**
+ * One request writes the whole of `config.yaml`, so a page that only knew the
+ * sizes it drew a field for would be a save that emptied the rest — see
+ * [`LanguageEdit`], which is those same two keys going the other way.
  *
  * The switch is never null. Nothing configured is on, so what comes back is
  * where the switch *sits* rather than whether anybody has touched it — a page
@@ -2545,23 +2524,47 @@ label: string,
  */
 enabled: boolean, 
 /**
- * The store an sccache bounds, for the language whose descriptor names
- * that capability — null for every other, which is what says there is no
- * size to draw under its box.
+ * How big its store may grow, in sccache's own words — `30G`, `500M`.
+ * Always a value: the default is what an untouched setting means, and a
+ * field shows it rather than standing empty.
+ *
+ * **Every language's, not only the one with a field for it.** It is a key
+ * of that language's entry whoever wrote it, and the page sends both keys
+ * of every entry back; what decides whether there is a field is
+ * `compiling` below.
+ */
+size: string, 
+/**
+ * Whether that size is one somebody typed, rather than the default being
+ * shown. What lets a field draw the default as a placeholder — a value
+ * nobody chose should not look like a choice — and what says which of the
+ * two a save is putting back.
+ */
+size_configured: boolean, 
+/**
+ * Whether the size above is an sccache's to read, and where it is, whether
+ * that compiling is really being cached — null for a language whose
+ * descriptor names no such capability, which is what says nothing on this
+ * page reads its size and there is no field to draw.
  *
  * Hung off the language rather than standing beside the list, because it
- * is the language's: it is that descriptor's own `size`, and the server
- * runs one Compile Server sized by whichever switched-on language asks
- * for it.
+ * is the language's: the server runs one Compile Server, sized by
+ * whichever switched-on language asks for it.
+ *
+ * Read-only, and the one fact here nobody can set from a page: it is the
+ * server's own environment and its own platform. Anything but
+ * [`CompileCaching::Cached`] means a session's downloads are still shared
+ * and its dependencies are compiled every time, which is a slow build
+ * rather than a broken one.
  */
-compiling: CompilingView | null, 
+compiling: CompileCaching | null, 
 /**
  * And why this language's entry in `config.yaml` was not used, where it
  * was not — null for the ordinary case, which is every language on a
  * machine whose file reads.
  *
- * Read-only, like the one fact inside `compiling` is: what it reports is
- * the file rather than a setting, and the fix is in the file. Which is
+ * Read-only, the way `compiling` above is: what it reports is the file
+ * rather than a setting, and the fix is in the file. Which is
  * what makes it the one thing on this page that turns a language's
  * controls off — see [`UnreadEntry`].
  */

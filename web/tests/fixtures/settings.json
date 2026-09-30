@@ -29,14 +29,12 @@
   "instructions": "Prefer the smallest change that does the job.\n\nSay what you could not finish rather than finishing something else.\n",
   "languages": [
     {
-      "compiling": {
-        "cached": "NoSccache",
-        "size": "50G",
-        "size_configured": true
-      },
+      "compiling": "NoSccache",
       "enabled": true,
       "label": "Rust",
       "name": "rust",
+      "size": "50G",
+      "size_configured": true,
       "unread": null
     },
     {
@@ -44,6 +42,8 @@
       "enabled": true,
       "label": "Gleam",
       "name": "gleam",
+      "size": "8G",
+      "size_configured": true,
       "unread": null
     }
   ],
