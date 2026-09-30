@@ -107,6 +107,7 @@ import {
   onCleanup,
   type JSX,
 } from "solid-js";
+import { Dynamic } from "solid-js/web";
 
 import { ran, reading } from "../agents";
 import { listProfiles } from "../api/client";
@@ -128,6 +129,7 @@ import type {
   ProfileEntry,
   PullRequestEvent,
   QuestionSetEvent,
+  StageEntry,
   StageListEvent,
   StageListReached,
   SteerEvent,
@@ -384,6 +386,16 @@ export function Timeline(props: {
   /// there is nothing to draw and nowhere to go.
   back?: () => void;
 
+  /// The way to another Conversation entirely, which the roadmap's card uses: a
+  /// stage in flight on it leads to the Conversation working that stage — see
+  /// [`StageRow`].
+  ///
+  /// Optional for `back`'s reason, and absent in the same place: a share is one
+  /// Conversation and nothing around it, so there is nowhere to go — and a share
+  /// carries no roadmap to be led out of anyway, every pinned card being left off
+  /// one.
+  go?: (conversation: number) => void;
+
   details: () => void;
 
   /// Which Event the details pane is showing, and how to change it.
@@ -558,6 +570,7 @@ export function Timeline(props: {
           selected={props.selected}
           select={props.select}
           details={props.details}
+          go={props.go}
         />
 
         {/* And under the pinned cards, at the foot of the block: where the work
@@ -752,6 +765,7 @@ export function Timeline(props: {
                       selected={props.selected}
                       select={props.select}
                       details={props.details}
+                      go={props.go}
                     />
                   )}
                 </Match>
@@ -849,6 +863,10 @@ function Pinned(props: {
   selected: Opening | null;
   select: (opening: Opening) => void;
   details: () => void;
+
+  /// Handed down to the roadmap's card, wherever in the deck it is — see
+  /// [`StageRow`].
+  go?: (conversation: number) => void;
 }): JSX.Element {
   return (
     <Show when={props.conversation.pinned.length > 0}>
@@ -862,6 +880,7 @@ function Pinned(props: {
               selected={props.selected}
               select={props.select}
               details={props.details}
+              go={props.go}
             />
           }
         >
@@ -871,6 +890,7 @@ function Pinned(props: {
             selected={props.selected}
             select={props.select}
             details={props.details}
+            go={props.go}
           />
         </Show>
       </div>
@@ -934,6 +954,8 @@ function Carousel(props: {
   selected: Opening | null;
   select: (opening: Opening) => void;
   details: () => void;
+  /// And straight down to it as well — see [`Pinned`].
+  go?: (conversation: number) => void;
 }): JSX.Element {
   const cards = () => props.conversation.pinned;
 
@@ -1076,6 +1098,7 @@ function Carousel(props: {
                     selected={props.selected}
                     select={props.select}
                     details={props.details}
+                    go={props.go}
                   />
                 </div>
               )}
@@ -1188,6 +1211,10 @@ function Card(props: {
   selected: Opening | null;
   select: (opening: Opening) => void;
   details: () => void;
+
+  /// For the roadmap's card, which is the one of the four with a row that leads
+  /// somewhere other than the details pane — see [`StageRow`].
+  go?: (conversation: number) => void;
 }): JSX.Element {
   return (
     <Switch>
@@ -1229,6 +1256,7 @@ function Card(props: {
               props.select(opensRoadmap(stages().name));
               props.details();
             }}
+            go={props.go}
           />
         )}
       </Match>
@@ -1360,6 +1388,11 @@ function StageListRow(props: {
   selected: Opening | null;
   select: (opening: Opening) => void;
   details: () => void;
+
+  /// Handed on to the rows that lead to a Conversation, so the copy here and the
+  /// pinned copy above lead to the same ones: they are the one roadmap read
+  /// once — see [`StageList`].
+  go?: (conversation: number) => void;
 }): JSX.Element {
   return (
     <For each={props.reached.roadmaps}>
@@ -1371,6 +1404,7 @@ function StageListRow(props: {
             props.select(opensRoadmap(stages.name));
             props.details();
           }}
+          go={props.go}
         />
       )}
     </For>
@@ -1514,9 +1548,14 @@ function TaskList(props: {
 ///
 /// It opens the same way too, and what it opens is not the list again: each
 /// entry names a brief beside `ROADMAP.md` that says what that stage is for, and
-/// those are what the details pane holds — see `Roadmap.tsx`. The whole card is
-/// the press, as a document's card is, because there is nothing else on it to
-/// press.
+/// those are what the details pane holds — see `Roadmap.tsx`.
+///
+/// **Except the rows the record names a Conversation for**, which are the one
+/// thing on this card that is a press of its own: a stage the record knows is
+/// somebody's leads to the Conversation working it, where a reader following a
+/// roadmap wants to go rather than to a brief they have read. Every other row,
+/// and the head above them, open the roadmap the way the whole surface always
+/// did — see [`StageRow`].
 ///
 /// Which roadmap this is, is the one this branch has written to: a repository
 /// keeps its finished roadmaps, and a conversation is about the one it touched.
@@ -1526,6 +1565,12 @@ function StageList(props: {
   stages: StageListEvent;
   selected: boolean;
   open: () => void;
+
+  /// The way to a Conversation, for the rows that lead to one. Absent where
+  /// there is nowhere to go: a share has no list of Conversations to reach, and
+  /// carries no roadmap either — see [`Timeline`], where the same absence is the
+  /// way back out.
+  go?: (conversation: number) => void;
 }): JSX.Element {
   const done = () =>
     props.stages.stages.filter((stage) => settled(stage.state)).length;
@@ -1566,18 +1611,7 @@ function StageList(props: {
               <For each={stretch.entries}>
                 {(stage) => (
                   <li classList={{ [styles.done!]: settled(stage.state) }}>
-                    <Box done={settled(stage.state)} />
-                    <span class={styles.what}>{stage.title}</span>
-                    {/* Where the stage is, in the words the server's reading
-                        settled — drawn rather than kept for the readers that
-                        need words, which is the one place this row parts company
-                        with a task's. A box can say two of the states there are,
-                        and one of them names stages, so the word is what the row
-                        says and the box rides along. */}
-                    <span class={styles.state}>{stageState(stage.state)}</span>
-                    {/* At the far end of the row, as a task's is, and for the
-                        reason a task's is. */}
-                    <span class={styles.n}>{stage.number}</span>
+                    <StageRow stage={stage} go={props.go} />
                   </li>
                 )}
               </For>
@@ -1587,6 +1621,76 @@ function StageList(props: {
         <Hidden count={shown().after} />
       </ol>
     </Openable>
+  );
+}
+
+/// One stage's row: its box, its title, where it is and the number it answers
+/// to — and, where the record names the Conversation working it, the press that
+/// goes there.
+///
+/// A `button` where it leads somewhere and a plain `span` where it does not, so
+/// the column is one shape whichever of its rows lead anywhere and what changes
+/// is only whether a row is a target of its own. `CardButton`'s own bargain one
+/// level down: a surface with nothing behind it is drawn as the surface rather
+/// than as something that can be pressed and then refuses. The row that leads
+/// nowhere keeps no tab stop and hears no key; the pointer over it is the card's
+/// own, the card being a press wherever the hand is on it.
+///
+/// Two kinds of row lead nowhere, and they are the rows that always read rather
+/// than pressed: a stage nothing has started, and one worked by hand or by the
+/// old tools, which Verkstead's record holds nothing about. Both fall through to
+/// the card, which opens the roadmap's briefs from anywhere on it.
+///
+/// And the press it does have, it keeps: the whole surface of the card is the
+/// press that opens the roadmap, so a click would open the pane on its way up,
+/// and the card's own Enter would take the key off this button before the
+/// browser could make a click of it — the card is an `article` standing in for a
+/// button and answers both itself, see `CardButton.tsx`. Stopping the two here is
+/// what makes this the row's press rather than the card's.
+///
+/// Nothing is said about where it goes beyond the row's own words, as nothing is
+/// said on the card about the pane it opens: what a reader has in front of them
+/// is a roadmap, and the row is the stage.
+function StageRow(props: {
+  stage: StageEntry;
+  go: ((conversation: number) => void) | undefined;
+}): JSX.Element {
+  /// Which Conversation this row leads to, or `null` where it leads nowhere —
+  /// the record naming none, or there being nowhere to go from this Timeline at
+  /// all.
+  const leads = (): number | null =>
+    props.go === undefined ? null : props.stage.conversation;
+
+  return (
+    <Dynamic
+      component={leads() === null ? "span" : "button"}
+      class={styles.stage}
+      type={leads() === null ? undefined : "button"}
+      onClick={(event: MouseEvent) => {
+        const conversation = leads();
+        if (conversation === null) return;
+
+        event.stopPropagation();
+        props.go?.(conversation);
+      }}
+      onKeyDown={(event: KeyboardEvent) => {
+        if (leads() !== null && (event.key === "Enter" || event.key === " ")) {
+          event.stopPropagation();
+        }
+      }}
+    >
+      <Box done={settled(props.stage.state)} />
+      <span class={styles.what}>{props.stage.title}</span>
+      {/* Where the stage is, in the words the server's reading settled — drawn
+          rather than kept for the readers that need words, which is the one
+          place this row parts company with a task's. A box can say two of the
+          states there are, and one of them names stages, so the word is what
+          the row says and the box rides along. */}
+      <span class={styles.state}>{stageState(props.stage.state)}</span>
+      {/* At the far end of the row, as a task's is, and for the reason a
+          task's is. */}
+      <span class={styles.n}>{props.stage.number}</span>
+    </Dynamic>
   );
 }
 

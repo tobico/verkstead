@@ -15291,6 +15291,53 @@ function stated(states: StageState[]): StageEntry[] {
   return ROADMAP.stages.map((stage, at) => ({ ...stage, state: states[at]! }));
 }
 
+/// And with the Conversations the record holds for them: the three stages
+/// anything of Verkstead's ever started, and the fourth — which nothing has —
+/// naming none.
+///
+/// Every standing rather than only the one in flight, because each of the three
+/// is a Conversation the reader can go and look at: the settled one's is where
+/// its pull request and its review are, and the stopped one's is what they have
+/// to do something about.
+const WORKING: (number | null)[] = [21, 22, 23, null];
+
+/// Those four stages as the record has them, states and Conversations both.
+const LED: StageEntry[] = stated([
+  { state: "Done" },
+  { state: "InProgress" },
+  { state: "Halted" },
+  { state: "ToDo" },
+]).map((stage, at) => ({ ...stage, conversation: WORKING[at]! }));
+
+/// The rows of one card, in the roadmap's own order: a button where the row leads
+/// to a Conversation and a plain span where it leads nowhere.
+function rowsOf(card: Element): HTMLElement[] {
+  return [
+    ...card.querySelectorAll<HTMLElement>(
+      `.${timeline.stages} li .${timeline.stage}`,
+    ),
+  ];
+}
+
+/// That roadmap in both of the places its card is drawn from — the pinned block
+/// and the row on the record where it landed — because the two are the one
+/// reading and so lead to the one set of Conversations.
+function ledBoth(stages: StageEntry[]): Partial<ConversationView> {
+  return {
+    pinned: [{ StageList: { ...ROADMAP, stages } }],
+    timeline: STAGED.timeline.map((event) =>
+      "StageList" in event
+        ? {
+            StageList: {
+              ...event.StageList,
+              roadmaps: [{ ...ROADMAP, stages }],
+            },
+          }
+        : event,
+    ),
+  };
+}
+
 /// The workbench with that conversation open.
 function theStaged(
   over: Partial<ConversationView> = {},
@@ -15328,6 +15375,11 @@ describe("the pinned stage list", () => {
   /// The roadmap's rows read the way the backlog's do, number at the far end —
   /// with the state between the title and it, which is the one thing a stage's
   /// row carries that a task's does not draw.
+  ///
+  /// One level inside the list item rather than on it, which is where a stage's
+  /// row parts company with a task's a second time: the row is the press that
+  /// leads to a stage's Conversation where there is one, so the parts hang off
+  /// the row rather than off the item it sits in.
   it("puts the number at the right edge of each row", async () => {
     theStaged();
     const { container } = mount(`/conversations/${STAGED.id}`);
@@ -15335,8 +15387,8 @@ describe("the pinned stage list", () => {
     const list = await drawn(container, `.${timeline.pinned} .${timeline.stageList}`);
 
     expect(
-      [...list.querySelectorAll(`.${timeline.stages} li`)].map((row) =>
-        [...row.children].map((part) => part.className),
+      [...list.querySelectorAll(`.${timeline.stages} li .${timeline.stage}`)].map(
+        (row) => [...row.children].map((part) => part.className),
       ),
     ).toEqual(
       ROADMAP.stages.map(() => [
@@ -15536,8 +15588,12 @@ describe("the pinned stage list", () => {
 
   /// Pinned beside the backlog and the pull request, and drawn the same way:
   /// above the record and again on it, with nothing to pin or unpin. What it
-  /// does have is the one press its whole surface is — the briefs its stages
-  /// name, in the details pane.
+  /// does have is the press its whole surface is — the briefs its stages name,
+  /// in the details pane.
+  ///
+  /// And nothing else on a roadmap Verkstead's record holds nothing about, which
+  /// this fixture is: every row of it leads nowhere, so the surface is the whole
+  /// of what can be pressed, exactly as it was before any row led anywhere.
   it("is drawn above the record and is one press and nothing else", async () => {
     theStaged();
     const { container } = mount(`/conversations/${STAGED.id}`);
@@ -15545,10 +15601,132 @@ describe("the pinned stage list", () => {
     const list = await drawn(container, `.${timeline.pinned} .${timeline.stageList}`);
 
     expect(list.closest(`.${timeline.timeline}`)).toBeNull();
+    expect(ROADMAP.stages.every((stage) => stage.conversation === null)).toBe(
+      true,
+    );
     expect(list.querySelectorAll("button")).toHaveLength(0);
     expect(list.textContent).not.toContain("Pin");
     expect(list.getAttribute("role")).toBe("button");
     expect(list.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  /// And a row the record names a Conversation for goes there instead: a stage in
+  /// flight is a Conversation of its own, and that is where a reader following the
+  /// roadmap wants to be rather than at a brief they have already read.
+  ///
+  /// Which Conversation that is, is Verkstead's own record, arriving on the row
+  /// beside the state that came off the same row of it — the card works out
+  /// neither.
+  it("leads a stage's row to the conversation working it", async () => {
+    theStaged(ledBoth(LED));
+    const { container, history } = mount(`/conversations/${STAGED.id}`);
+
+    const list = await drawn(container, `.${timeline.pinned} .${timeline.stageList}`);
+
+    fireEvent.click(rowsOf(list)[1]!);
+
+    await waitFor(() => expect(history.get()).toBe("/conversations/22"));
+  });
+
+  /// And a stage that has **settled** keeps its link where the record has the
+  /// Conversation: the stage is over and that Conversation is still where its pull
+  /// request and its review are.
+  it("keeps the link on a stage that has settled", async () => {
+    theStaged(ledBoth(LED));
+    const { container, history } = mount(`/conversations/${STAGED.id}`);
+
+    const list = await drawn(container, `.${timeline.pinned} .${timeline.stageList}`);
+
+    fireEvent.click(rowsOf(list)[0]!);
+
+    await waitFor(() => expect(history.get()).toBe("/conversations/21"));
+  });
+
+  /// And a **halted** stage keeps it for the other reason: what a reader does about
+  /// one is go and look at that Conversation, which is the whole of why the word is
+  /// *halted* rather than anything about the work.
+  it("keeps the link on a stage that has stopped", async () => {
+    theStaged(ledBoth(LED));
+    const { container, history } = mount(`/conversations/${STAGED.id}`);
+
+    const list = await drawn(container, `.${timeline.pinned} .${timeline.stageList}`);
+
+    fireEvent.click(rowsOf(list)[2]!);
+
+    await waitFor(() => expect(history.get()).toBe("/conversations/23"));
+  });
+
+  /// And a stage the record holds no Conversation for is not a press at all — a
+  /// stage nothing has started, and one worked by hand or by the old tools. The
+  /// card under it goes on opening the roadmap from it, which is what every row of
+  /// this card did before any of them led anywhere.
+  it("makes no press of a stage the record holds no conversation for", async () => {
+    theStaged(ledBoth(LED), whenever(THE_ROADMAP, json(ROADMAP_PANE)));
+    const { container, history } = mount(`/conversations/${STAGED.id}`);
+
+    const list = await drawn(container, `.${timeline.pinned} .${timeline.stageList}`);
+
+    expect(rowsOf(list).map((row) => row.tagName)).toEqual([
+      "BUTTON",
+      "BUTTON",
+      "BUTTON",
+      "SPAN",
+    ]);
+
+    fireEvent.click(rowsOf(list)[3]!);
+
+    await waitFor(() =>
+      expect(history.get()).toBe(
+        `/conversations/${STAGED.id}/roadmaps/${ROADMAP.name}`,
+      ),
+    );
+  });
+
+  /// And the card's own head still opens the roadmap, whatever its rows lead to:
+  /// the surface is the press it always was, and the rows that lead somewhere are
+  /// what has been taken out of it.
+  it("opens the roadmap from the card's head all the same", async () => {
+    theStaged(ledBoth(LED), whenever(THE_ROADMAP, json(ROADMAP_PANE)));
+    const { container, history } = mount(`/conversations/${STAGED.id}`);
+
+    const head = await drawn(
+      container,
+      `.${timeline.pinned} .${timeline.stageList} .${timeline.eventHead}`,
+    );
+
+    fireEvent.click(head);
+
+    await waitFor(() =>
+      expect(history.get()).toBe(
+        `/conversations/${STAGED.id}/roadmaps/${ROADMAP.name}`,
+      ),
+    );
+  });
+
+  /// And the two cards one roadmap is drawn as — the pinned one and the one at the
+  /// row where it landed — lead to the same Conversations, being the one reading in
+  /// two places.
+  it("leads the copy on the record to the same conversations", async () => {
+    theStaged(ledBoth(LED));
+    const { container, history } = mount(`/conversations/${STAGED.id}`);
+
+    const listed = await drawn(
+      container,
+      `.${timeline.timeline} .${timeline.stageList}`,
+    );
+    const above = await drawn(
+      container,
+      `.${timeline.pinned} .${timeline.stageList}`,
+    );
+
+    // The same rows are presses on both of them, and say the same things.
+    expect(rowsOf(listed).map((row) => [row.tagName, row.textContent])).toEqual(
+      rowsOf(above).map((row) => [row.tagName, row.textContent]),
+    );
+
+    fireEvent.click(rowsOf(listed)[1]!);
+
+    await waitFor(() => expect(history.get()).toBe("/conversations/22"));
   });
 
   /// And on the record at the row that says the roadmap landed, drawn from the
@@ -15663,6 +15841,10 @@ function stagesOfTen(done: number): StageListEvent {
       number: task.number,
       title: task.title,
       state: task.done ? ({ state: "Done" } as const) : ({ state: "ToDo" } as const),
+      // Nothing of Verkstead's started any of these, which is what a roadmap
+      // whose window is the whole of what is being read wants: a row that leads
+      // nowhere is a row and nothing else.
+      conversation: null,
     })),
   };
 }
@@ -15865,6 +16047,7 @@ function stagesOf(states: StageState[]): StageListEvent {
       number: `${at + 1}`.padStart(2, "0"),
       title: `Stage ${at + 1}`,
       state,
+      conversation: null,
     })),
   };
 }

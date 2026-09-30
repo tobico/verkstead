@@ -1656,8 +1656,8 @@ pub struct StageListEvent {
     pub stages: Vec<StageEntry>,
 }
 
-/// One stage of a roadmap: the number it answers to, what it is called, and
-/// where it is.
+/// One stage of a roadmap: the number it answers to, what it is called, where it
+/// is, and the Conversation working it where there is one.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct StageEntry {
@@ -1674,6 +1674,23 @@ pub struct StageEntry {
     /// together. A task's box is still a box, there being no record beside a
     /// backlog to say anything else about it: see [`TaskEntry::done`].
     pub state: StageState,
+
+    /// **Which Conversation** the stage is, where Verkstead's record holds one —
+    /// which is what the card's row leads to, that Conversation being where the
+    /// stage is being worked and where its pull request and its review end up.
+    ///
+    /// Off the same row the state came from, so a row cannot lead to one
+    /// Conversation while saying where another had got to: where a stage was
+    /// attempted twice, this is the attempt whose standing is the one believed —
+    /// see the store's `StageStandings`, which answers both off the one row.
+    ///
+    /// `null` where the record holds no row for the stage, which is a row that
+    /// leads nowhere and reads as every row did before this. Two kinds of stage:
+    /// one nothing has started — every state but [`Done`](StageState::Done),
+    /// [`InProgress`](StageState::InProgress), [`WaitingToJoin`](StageState::WaitingToJoin)
+    /// and [`Halted`](StageState::Halted) — and one worked by hand or by the old
+    /// tools, whose box is the whole of what says it is over.
+    pub conversation: Option<i64>,
 }
 
 /// Where one stage of a roadmap is, as the card's row and the pane's heading say

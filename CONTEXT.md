@@ -2397,6 +2397,21 @@ with an ellipsis row saying what is out of sight between them as well as at the
 ends. The count beside the heading still counts the whole roadmap, and the
 details pane still holds every Stage.
 
+**And a Stage's row leads to the Conversation working it.** Which Conversation a
+Stage is, is Verkstead's own record — the same rows that say how far each Stage
+of a roadmap got — and it rides on the row beside the state that came off the
+same row of it, so a row cannot lead to one Conversation while saying where
+another had got to: where a Stage was attempted twice, the link follows the
+standing that is believed. Every standing keeps its link, a settled Stage's
+Conversation being where its pull request and its review still are, and a halted
+one's being what the reader has to go and look at. A Stage the record holds no
+row for is **not a press** — one nothing has started, and one worked by hand or
+by the old tools — and the card under it opens the roadmap from that row exactly
+as it does from its head and from everywhere else on it. Which is the one place
+a card in the workbench has a second target on it: everywhere else the whole
+surface is the one press, and what earns it here is that this card is a list of
+work rather than one thing.
+
 **And it joins its roadmap's chain at its finish, not before.** A roadmap is one
 chain of branches in the order its Stages finish, and a Stage joins it when its
 finish pushes its branch and opens its pull request — so the pull request

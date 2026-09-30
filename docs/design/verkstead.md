@@ -997,7 +997,22 @@ Timeline events:
   on their neighbours, and stages too far apart to join up are drawn as
   stretches with an ellipsis row saying what is out of sight between them as
   well as at the ends. A stage waiting on another is not in flight: what it
-  waits for is the work the card is already showing.
+  waits for is the work the card is already showing. **And a stage's row leads
+  to the Conversation working it** (*settled 2026-09-30, building
+  parallel-stages/06-every-stage-in-flight*), which is the one place a card in
+  this app has a second target on it: everywhere else the whole surface is the
+  one press, and a pull request's way out to GitHub was taken off its card for
+  exactly that. What earns it here is that the card is a list of work rather
+  than one thing — a reader following a roadmap wants the Conversation a stage
+  is being worked in, not a brief they have read — and the target is the row,
+  which is the thing they were already reading. Which Conversation a stage is,
+  is the record's, off the same row its state came from, so a row cannot lead to
+  one Conversation while saying where another had got to; every standing the
+  record holds keeps its link, a settled stage's being where its pull request
+  and its review are. A stage the record holds no row for — one nothing has
+  started, one worked by hand or by the old tools — is not a press, and the card
+  under it opens the roadmap as it does from its head and from everywhere else
+  on it.
 - **A session's liveness is a mark rather than a word**, and the same mark
   everywhere it is said — the sidebar card, the agent-output row and the
   details pane above the record. A slowly turning ring while the session is

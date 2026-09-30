@@ -56,6 +56,7 @@
         "name": "mvp",
         "stages": [
           {
+            "conversation": null,
             "number": "01",
             "state": {
               "state": "Done"
@@ -63,6 +64,7 @@
             "title": "Workbench"
           },
           {
+            "conversation": null,
             "number": "02",
             "state": {
               "state": "Done"
@@ -70,6 +72,7 @@
             "title": "Grilling"
           },
           {
+            "conversation": null,
             "number": "03",
             "state": {
               "state": "ToDo"
@@ -77,6 +80,7 @@
             "title": "Implementation"
           },
           {
+            "conversation": null,
             "number": "04",
             "state": {
               "state": "ToDo"
@@ -150,6 +154,7 @@
             "name": "mvp",
             "stages": [
               {
+                "conversation": null,
                 "number": "01",
                 "state": {
                   "state": "Done"
@@ -157,6 +162,7 @@
                 "title": "Workbench"
               },
               {
+                "conversation": null,
                 "number": "02",
                 "state": {
                   "state": "Done"
@@ -164,6 +170,7 @@
                 "title": "Grilling"
               },
               {
+                "conversation": null,
                 "number": "03",
                 "state": {
                   "state": "ToDo"
@@ -171,6 +178,7 @@
                 "title": "Implementation"
               },
               {
+                "conversation": null,
                 "number": "04",
                 "state": {
                   "state": "ToDo"

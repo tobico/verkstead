@@ -1488,6 +1488,13 @@ fn roadmap(
             number: entry.label.to_owned(),
             title: entry.title.to_owned(),
             state,
+            // And which Conversation it is, off the same row that state came
+            // from — the row the card's own leads to. Wherever the record holds
+            // one, which is every stage anything of Verkstead's ever started: a
+            // settled stage keeps it, that Conversation being where its pull
+            // request and its review are. `None` is a stage the record knows
+            // nothing about, and is a row that leads nowhere.
+            conversation: record.conversation(&name, entry.label),
         })
         .collect();
 
@@ -3373,17 +3380,108 @@ Turns this askance clone into Verkstead.
         );
     }
 
+    /// And every row of the card carries **which Conversation** the stage is,
+    /// wherever the record holds one: the row leads there, and a stage the record
+    /// knows nothing about leads nowhere.
+    ///
+    /// Every standing there is, because every one of them is a Conversation the
+    /// reader can go and look at — a settled stage's is where its pull request and
+    /// its review are, and an abandoned one's is what was walked away from. Only
+    /// the stage with no row at all has nothing to name.
+    #[test]
+    fn every_row_names_the_conversation_the_record_holds_for_the_stage() {
+        let repo = Repo::with(&[]);
+        repo.write("mvp", FOUR);
+
+        assert_eq!(
+            conversations(&repo.lists_with(&store::StageStandings::from_rows([
+                ("mvp", "01", store::StageStanding::Settled, false, 7),
+                ("mvp", "02", store::StageStanding::InFlight, false, 9),
+                ("mvp", "03", store::StageStanding::Abandoned, false, 11),
+            ]))),
+            [Some(7), Some(9), Some(11), None],
+            "the three the record has rows for lead to their own Conversations, \
+             and stage 04 — which only a ticked box speaks for — leads nowhere",
+        );
+    }
+
+    /// And where a stage was **attempted twice**, the row leads to the Conversation
+    /// its state is about: the record already says which of two standings to believe
+    /// for one label, and the Conversation comes off that same row.
+    #[test]
+    fn a_row_leads_to_the_conversation_its_state_is_about() {
+        let repo = Repo::with(&[]);
+        repo.write("mvp", FOUR);
+
+        let twice = store::StageStandings::from_rows([
+            ("mvp", "01", store::StageStanding::Abandoned, false, 5),
+            ("mvp", "01", store::StageStanding::InFlight, false, 8),
+        ]);
+
+        assert_eq!(states(&repo.lists_with(&twice))[0], StageState::InProgress);
+        assert_eq!(
+            conversations(&repo.lists_with(&twice))[0],
+            Some(8),
+            "in flight beats abandoned, so the row says *in progress* and leads to \
+             the Conversation that is on it rather than to the one before it",
+        );
+    }
+
+    /// And the card names the same Conversations on the roadmap's own Timeline as on
+    /// a stage's, the two being the one reading in two places: the record is what
+    /// both are drawn from, and the boxes the branches disagree about say nothing
+    /// about which Conversation a stage is.
+    #[test]
+    fn the_card_names_the_same_conversations_on_both_timelines() {
+        let planner = Repo::with(&[]);
+        planner.write("mvp", FOUR);
+
+        let stage = Repo::with(&[]);
+        stage.write("mvp", &FOUR.replace("- [ ] 02", "- [x] 02"));
+
+        let record = store::StageStandings::from_rows([
+            ("mvp", "01", store::StageStanding::Settled, false, 7),
+            ("mvp", "02", store::StageStanding::InFlight, false, 9),
+        ]);
+
+        assert_eq!(
+            conversations(&planner.lists_with(&record)),
+            conversations(&stage.lists_with(&record)),
+        );
+        assert_eq!(
+            conversations(&planner.lists_with(&record)),
+            [Some(7), Some(9), None, None],
+        );
+    }
+
     /// The states of one reading's one roadmap, in the roadmap's own order.
     #[track_caller]
     fn states(lists: &[StageListEvent]) -> Vec<StageState> {
+        only_list(lists)
+            .stages
+            .iter()
+            .map(|stage| stage.state.clone())
+            .collect()
+    }
+
+    /// And the Conversations it names, in that same order.
+    #[track_caller]
+    fn conversations(lists: &[StageListEvent]) -> Vec<Option<i64>> {
+        only_list(lists)
+            .stages
+            .iter()
+            .map(|stage| stage.conversation)
+            .collect()
+    }
+
+    /// The one roadmap a reading about one roadmap came back with.
+    #[track_caller]
+    fn only_list(lists: &[StageListEvent]) -> &StageListEvent {
         let [list] = lists else {
             panic!("this reading should have come back with one roadmap: {lists:?}");
         };
 
-        list.stages
-            .iter()
-            .map(|stage| stage.state.clone())
-            .collect()
+        list
     }
 
     /// One *waiting on*, by the labels it names.
