@@ -237,14 +237,7 @@ async fn read_every_member(state: &AppState) {
         }
     };
 
-    pruned(
-        state,
-        &members
-            .iter()
-            .map(|member| member.device.clone())
-            .collect::<Vec<_>>(),
-    )
-    .await;
+    pruned(state).await;
 
     for member in members {
         read_member(state, &member.device).await;
@@ -264,8 +257,14 @@ async fn read_every_member(state: &AppState) {
 /// that reads differently everywhere it is drawn — and the account mirror of
 /// each goes with the row, an unlink being the one press that says this machine
 /// holds nothing of that device's.
-async fn pruned(state: &AppState, members: &[String]) {
-    match store::forget_mirrors_of_departed(&state.pool, members).await {
+///
+/// **And the membership is read by the delete rather than handed to it**, which
+/// is why this takes no list: the one above reads the membership to know whom to
+/// dial, and a member linked between that reading and this would be one whose
+/// mirrors went for having been absent from it. See
+/// [`store::forget_mirrors_of_departed`].
+async fn pruned(state: &AppState) {
+    match store::forget_mirrors_of_departed(&state.pool).await {
         Ok(gone) if gone.is_empty() => {}
 
         Ok(gone) => {

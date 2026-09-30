@@ -995,26 +995,27 @@ pub async fn forget_mirrors_except(
 /// not one whose accounts this device has any business offering. A member that
 /// is merely not answering is not this — its rows are every bit as much its own
 /// as they were yesterday, and they stay.
-pub async fn forget_mirrors_of_departed(pool: &SqlitePool, members: &[String]) -> Result<Vec<i64>> {
+///
+/// **And the membership it prunes against is the one in the transaction that
+/// deletes**, read here as a statement rather than handed in as a list. A list
+/// handed in is a membership as it was when the caller read it, and what stands
+/// between the two readings is however long the caller took — so a device linked
+/// in that window is one whose mirrors this would take away for having been
+/// absent from a reading made before it arrived. It is the same reason
+/// [`forget_mirrors_except`] asks for the rows it is about inside its own
+/// transaction: what a delete is authorised by has to be what is true when it
+/// runs.
+pub async fn forget_mirrors_of_departed(pool: &SqlitePool) -> Result<Vec<i64>> {
     let mut tx = super::writing(pool, "forgetting a departed device's Profiles").await?;
 
-    let linked = placeholders(members.len());
-
-    let looking = format!(
+    let gone: Vec<(i64,)> = sqlx::query_as(
         "SELECT id FROM profiles
-         WHERE home_device IS NOT NULL AND home_device NOT IN ({linked})",
-    );
-
-    let mut asking = sqlx::query_as::<_, (i64,)>(&looking);
-
-    for device in members {
-        asking = asking.bind(device);
-    }
-
-    let gone: Vec<(i64,)> = asking
-        .fetch_all(&mut *tx)
-        .await
-        .context("looking for the Profiles of devices this one is no longer linked to")?;
+         WHERE home_device IS NOT NULL
+           AND home_device NOT IN (SELECT device FROM members)",
+    )
+    .fetch_all(&mut *tx)
+    .await
+    .context("looking for the Profiles of devices this one is no longer linked to")?;
 
     let gone: Vec<i64> = gone.into_iter().map(|(id,)| id).collect();
 
