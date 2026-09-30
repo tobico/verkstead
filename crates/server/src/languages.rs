@@ -1467,6 +1467,12 @@ mod tests {
             !jvm.names(SCCACHE),
             "and nothing on the JVM compiles through sccache",
         );
+        assert!(
+            !jvm.env
+                .iter()
+                .any(|(_, value)| value.as_deref().is_some_and(|v| v.contains("caching"))),
+            "and nothing about Gradle's build cache: whether it is on is the Repo's to say",
+        );
     }
 
     /// A session of a machine with an sccache: Rust's four variables, in the

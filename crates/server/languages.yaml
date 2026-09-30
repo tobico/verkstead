@@ -756,6 +756,17 @@ languages:
       # is what would close it for good. `-Dorg.gradle.daemon.registry.base`
       # closes it too, and was turned down: it is undocumented.
       #
+      # **Gradle's build cache is the Repo's to switch on.** Its local
+      # directory is `caches/build-cache-1` inside the home above (measured
+      # with 8.14.4), so every Repo with `org.gradle.caching=true` already
+      # shares one cache for the machine, and a task one Conversation built
+      # comes `FROM-CACHE` in another. Nothing here says
+      # `-Dorg.gradle.caching=true`, because a system property would beat a
+      # Repo that wrote `org.gradle.caching=false` on purpose, and caching
+      # changes how a build behaves, not only where it writes. A Repo whose
+      # `settings.gradle` points `buildCache.local` somewhere of its own keeps
+      # that too.
+      #
       # **Kotlin needs nothing of its own.** The Kotlin Gradle plugin's compile
       # daemon outlives a build as well, but it is found by run files under the
       # JVM's `user.home`, `~/.kotlin/daemon` (measured with 2.2.20). That is

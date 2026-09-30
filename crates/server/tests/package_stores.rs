@@ -5586,3 +5586,150 @@ async fn a_kotlin_compile_daemons_run_files_stay_in_the_sandbox_that_started_it(
         );
     }
 }
+
+/// A Gradle build with one cacheable task, `shout`, which writes its input out
+/// in capitals under `build/`.
+///
+/// The input is declared relative, so the task's cache key is the same in any
+/// Conversation's Worktree whatever its path: what one Conversation stored is
+/// what another would look up. `caching` is the Repo's
+/// `org.gradle.caching=true` in its `gradle.properties`, and `own` its
+/// `settings.gradle` pointing `buildCache.local` at a directory of its own
+/// checkout.
+fn gradle_cacheable(worktree: &Path, caching: bool, own: bool) {
+    let settings = if own {
+        "rootProject.name = 'app'\n\
+         buildCache { local { directory = file('own-build-cache') } }\n"
+    } else {
+        "rootProject.name = 'app'\n"
+    };
+
+    std::fs::write(worktree.join("settings.gradle"), settings).unwrap();
+    std::fs::write(
+        worktree.join("gradle.properties"),
+        if caching {
+            "org.gradle.caching=true\n"
+        } else {
+            ""
+        },
+    )
+    .unwrap();
+    std::fs::write(worktree.join("greeting.txt"), "hello from the cache\n").unwrap();
+    std::fs::write(
+        worktree.join("build.gradle"),
+        "tasks.register('shout') {\n\
+         \x20 def from = file('greeting.txt')\n\
+         \x20 def to = layout.buildDirectory.file('shout.txt')\n\
+         \x20 inputs.file(from).withPathSensitivity(PathSensitivity.RELATIVE)\n\
+         \x20 outputs.file(to)\n\
+         \x20 outputs.cacheIf { true }\n\
+         \x20 doLast { to.get().asFile.text = from.text.toUpperCase() }\n\
+         }\n",
+    )
+    .unwrap();
+}
+
+/// Gradle's build cache: **shared between Conversations for a Repo that
+/// switches it on, and switched on for none by Verkstead.**
+///
+/// The local build cache lives under the Gradle home, at
+/// `caches/build-cache-1` (measured with 8.14.4), and the descriptor shares
+/// that home. So a Repo with `org.gradle.caching=true` already has one cache
+/// for the machine, and the descriptor needs nothing more to give it one.
+/// It sets nothing about caching, because `-Dorg.gradle.caching=true` in
+/// `GRADLE_OPTS` would beat a Repo that wrote `org.gradle.caching=false` on
+/// purpose.
+///
+/// Four Conversations, one after another, each in a fresh Worktree with no
+/// `build/` in it:
+///
+/// 1. A Repo that switches caching on runs `shout`, and its output is stored
+///    in the shared home.
+/// 2. The same Repo in a second Conversation takes `shout` `FROM-CACHE`.
+/// 3. The same build with caching left off runs `shout`, with the entry it
+///    would have hit sitting in the cache: Verkstead switched nothing on.
+/// 4. And a Repo whose `settings.gradle` points `buildCache.local` at its own
+///    directory keeps it. `shout` runs, rather than coming out of the shared
+///    cache, and its output is stored in the Repo's directory.
+#[tokio::test]
+async fn a_task_one_conversation_caches_comes_from_the_cache_in_another_only_where_the_repo_asked()
+{
+    let Some(found) = tools("Gradle", &["gradle"]) else {
+        return;
+    };
+    let [gradle] = &found[..] else {
+        unreachable!("one tool was asked for");
+    };
+
+    let machine = machine(4).await;
+    let cache = machine.cache();
+    let dir = cache.dir().expect("the fixture's cache has a directory");
+
+    gradle_cacheable(machine.worktree(0), true, false);
+    gradle_cacheable(machine.worktree(1), true, false);
+    gradle_cacheable(machine.worktree(2), false, false);
+    gradle_cacheable(machine.worktree(3), true, true);
+
+    let shouting = format!(
+        "set -e\n'{gradle}' {GRADLE_FLAGS} shout\ncat build/shout.txt\n",
+        gradle = gradle.display(),
+    );
+    let shout =
+        |nth: usize| installing(&machine.sandbox(nth, &cache, reaching_nothing()), &shouting);
+
+    let ran = "> Task :shout\n";
+    let from_the_cache = "> Task :shout FROM-CACHE\n";
+
+    let first = shout(0);
+
+    first.worked("the first Conversation's build runs `shout`");
+    assert!(
+        first.said.contains(ran) && first.said.contains("HELLO FROM THE CACHE"),
+        "and runs it, with nothing in the cache yet to take it from. It said:\n{}",
+        first.said,
+    );
+
+    let stored = dir.join("gradle/caches/build-cache-1");
+    assert!(
+        holds_anything(&stored),
+        "and the output is stored in the build cache under the shared Gradle home, at \
+         {}. It said:\n{}",
+        stored.display(),
+        first.said,
+    );
+
+    let second = shout(1);
+
+    second.worked("a second Conversation's build of the same Repo works");
+    assert!(
+        second.said.contains(from_the_cache) && second.said.contains("HELLO FROM THE CACHE"),
+        "and takes `shout` from the cache the first Conversation filled, in a Worktree \
+         of its own with nothing built in it. It said:\n{}",
+        second.said,
+    );
+
+    let unasked = shout(2);
+
+    unasked.worked("a Repo that does not switch caching on builds");
+    assert!(
+        unasked.said.contains(ran) && !unasked.said.contains("FROM-CACHE"),
+        "and runs `shout` itself, with the entry it would have hit in the shared \
+         cache: nothing a session is given switches caching on. It said:\n{}",
+        unasked.said,
+    );
+
+    let own = shout(3);
+
+    own.worked("a Repo with a build cache of its own builds");
+    assert!(
+        own.said.contains(ran) && !own.said.contains("FROM-CACHE"),
+        "and runs `shout` rather than taking it from the shared cache, because the \
+         Repo's `buildCache.local` wins over the Gradle home's. It said:\n{}",
+        own.said,
+    );
+    assert!(
+        holds_anything(&machine.worktree(3).join("own-build-cache")),
+        "and stores its output in the directory the Repo named. It said:\n{}",
+        own.said,
+    );
+}
