@@ -37,7 +37,9 @@
 //! a directory nobody could account for. So there is a last call — see
 //! [`arrived`] — which the sending device makes once the mark is written, and
 //! *that* is the one this device acts on: a Notice saying which machine the work
-//! came from, and **Resume** pressed by this device for itself.
+//! came from, the conversation the agent was part way through written down for
+//! whatever is launched next to carry on — see [`carries_on`] — and **Resume**
+//! pressed by this device for itself.
 //!
 //! **Gated to members like everything else on this listener.** Writing a
 //! Conversation into somebody's database is not a stranger's press:
@@ -390,6 +392,13 @@ pub(crate) async fn written(
 /// question a Conversation that has just arrived poses. See
 /// [`crate::resume::on_arrival`], where the refusals are written down.
 ///
+/// **With the conversation the agent was having written down in front of it**, so
+/// that the session Resume starts carries it on rather than opening one of its own
+/// — see [`carries_on`]. Written whether or not anything starts here: a
+/// Conversation that arrives stopped by a decision waits for a press, and the
+/// press the human makes the next morning is still the one that picks this
+/// conversation up.
+///
 /// **And where the work has come home, this is where it stops being a copy.** A
 /// Conversation this device had handed on wears the mark saying where the live
 /// record is, and it goes on wearing it through every leg of the return — each of
@@ -458,9 +467,58 @@ pub(crate) async fn arrived(
         .nudges
         .announce(verkstead_schema::Nudge::Conversation { conversation: id });
 
+    carries_on(&state, id).await;
+
     crate::resume::on_arrival(&state, id, &named).await;
 
     StatusCode::OK.into_response()
+}
+
+/// Write down the conversation the work arrived part way through, so that the
+/// session started here carries it on rather than opening one of its own
+/// (ADR-0020, *Transfer*).
+///
+/// **The newest session on the record is the one the agent was having.** The
+/// slice landed a leg ago, so every name Verkstead gave this Conversation's
+/// sessions is here in order, and the last of them is the one that was running
+/// when the work moved — see [`store::the_last_session`].
+///
+/// **Here rather than inside the Resume**, because a Conversation may arrive with
+/// nothing started for it: one stopped by a decision waits for a press, and the
+/// press the human makes the next morning is still the one that carries this
+/// conversation on. So what says the conversation is there to be taken up is
+/// written down, and the first launch that reads it is the one that takes it —
+/// see [`crate::sessions`].
+///
+/// **And whether it can be taken up is the launch's question rather than this
+/// one.** Whether the harness has a resume line, whether the Pairing about to run
+/// is the harness that session ran on, and whether the log came across with the
+/// memory sync are all facts about the launch — and the last of them is not
+/// settled until a member's account has answered. So this writes down what there
+/// is, and nothing here refuses.
+///
+/// A Conversation with no named session is one there is nothing to carry on:
+/// every backend Verkstead names no session for, and every Conversation whose
+/// work had not started when it moved. Said in the log and nowhere else — what
+/// follows is the ordinary Resume, which is what the Timeline already reads as.
+async fn carries_on(state: &AppState, id: i64) {
+    match store::the_last_session(&state.pool, id).await {
+        Ok(Some(continued)) => {
+            if let Err(error) = store::continue_on_arrival(&state.pool, id, &continued).await {
+                tracing::error!(error = ?error, conversation_id = id, "recording the conversation the arriving work was part way through failed, so the session started here will be re-primed instead");
+            }
+        }
+
+        Ok(None) => tracing::info!(
+            conversation_id = id,
+            "the Conversation that arrived here has no named session to carry on from, so what \
+             starts for it is a session of its own",
+        ),
+
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading the newest session of an arriving Conversation failed, so the session started here will be re-primed instead");
+        }
+    }
 }
 
 /// Which of this device's Agent Profiles each one the record names is, where

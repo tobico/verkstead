@@ -51,9 +51,13 @@
 //! nothing over there may be *started* while any of it could still be taken back.
 //! Once this device's own copy is marked, the far end is told the move is over —
 //! and what it does about that word is put a Notice on its Timeline saying where
-//! the work came from and press its own Resume. This copy says the matching thing
-//! about where the work went. A failure at that last step is not the move's: the
-//! work is there either way, and what it costs is a press on Resume over there.
+//! the work came from, write down the conversation the agent was part way through,
+//! and press its own Resume. The session that press starts is that conversation
+//! carried on where the harness has a resume of its own and the log came across,
+//! and a fresh one re-primed from the record where it does not. This copy says the
+//! matching thing about where the work went. A failure at that last step is not
+//! the move's: the work is there either way, and what it costs is a press on
+//! Resume over there.
 
 pub(crate) mod checkouts;
 

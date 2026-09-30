@@ -211,6 +211,10 @@ const CONVERSATION_KEYED: &[&str] = &[
     // with the row for the reason the two above it do: what it names is a device
     // this Conversation is not going to reach any more.
     "transfers",
+    // And the session a launch here would carry on from, which goes with the row
+    // for the same reason again: it names a conversation nothing on this device
+    // is going to resume.
+    "continued_sessions",
     // The archiving that authorised all of this, and the trim mark under it.
     "archived_conversations",
     "trimmed_conversations",

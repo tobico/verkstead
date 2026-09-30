@@ -453,10 +453,11 @@ story across two databases rather than as a Conversation that appeared from
 nowhere. And it presses **Resume** for itself: the one standing way in, which asks
 what *ought* to be running now from the state the Conversation is in and what the
 branch has written, which is exactly the question a Conversation that has just
-landed poses. What that gives is a fresh session re-primed from the record —
-Verkstead's own Resume rather than the harness's, continuing the agent's own
-context being a thing for later. The refusals are Resume's own and land as a stop
-with a Notice naming the arrival. **A stop somebody decided on crosses and is left
+landed poses. What the *session* it starts is, is the **Carried Conversation**
+below: the harness's own resume where there is one to reach for, and Verkstead's
+own — a fresh session re-primed from the record — where there is not. The refusals
+are Resume's own and land as a stop with a Notice naming the arrival. **A stop
+somebody decided on crosses and is left
 exactly where it stands**, the way a restart leaves one: moving work onto another
 machine is not somebody deciding differently about a brake the human pulled. And
 what a relaunched grilling does to the Sets the gone session was idling on, it does
@@ -502,6 +503,56 @@ register yet is waited for too. The account is home before the slice and the bun
 leave, or the far end would launch under a login the source had not finished
 returning.
 _Avoid_: migrate, hand off, sync, failover
+
+**Carried Conversation**:
+The conversation a transferred agent was having, picked up on the device the work
+landed on (ADR-0020, *Transfer*). A **Transfer** runs at the turn's end, so the
+agent is part way through its own thinking when the work moves — and where its
+harness has a resume of its own, the session started on arrival is that resume
+rather than a fresh one: the same session id, against the log the **Memory sync**
+carried over, primed with the note below and nothing else. Where it cannot be
+made, Verkstead's own **Resume** stands exactly as it did.
+**The harness's resume where it has one, and Claude's is the one there is.** Its
+line is the resume flag and the session id, written where the id a fresh session
+would be named by goes: the two are mutually exclusive, a conversation carried on
+keeping the id it already had. The three after it key their store by the directory
+the session ran in somewhere the sync does not rewrite, so each wants a relocation
+of its own before there is a log on the far end to resume against.
+**What it carries on from is the last session of this Conversation**, which is the
+newest name on the record: that is the conversation the agent was having when the
+work moved. The arrival writes it down once the record has landed, and the first
+launch after that takes it up and spends it — so the session that lands in the
+moment after an arrival is the one that carries a conversation on, and the session
+after that is an ordinary session of the work. **And a Steer spends it too**: a
+Conversation that arrives stopped by a decision waits for a press, the press may be
+a steer rather than a Resume, and a steer is the human saying what is to happen
+instead — so what it launches is primed with their words rather than with a note
+about a move.
+**And the Capture is written down under that same id**, rather than under a fresh
+one. What the name is *for* is finding the log the harness keeps, and a resumed
+claude goes on writing the log it resumed — so a row naming anything else would be
+a **Transcript** read out of the wrong file.
+**Three things leave it Verkstead's Resume**, each of them said in the log and
+nothing more: no session on the record, a **Pairing** on a harness other than the
+one that session ran on — a Conversation whose Profile was changed under it has a
+log no other backend can read — and a log that is not there. The last is proved
+rather than assumed: Claude's store crosses as a labelled part each machine names
+its own path for, so it should land under this device's own encoding of this
+device's Worktree path with nothing to do — but the part the home device named it
+off is *its* worktrees directory joined onto the stem this Worktree carries, and a
+stem that came out differently here is a part asked for under a name the sending
+device never used.
+**The Note is the whole of what a carried conversation is primed with.** The
+session has its own context and is mid-turn in its own thinking, so being told the
+Brief again is worse than being told nothing: what it is sent is the two things it
+cannot know, which are the device the work now runs on and the **Worktree**'s new
+path. Not the ordinary re-prime with the note over it.
+**And the Transcript opens where the carried log ends.** Each **Event** holds its
+own session's words, and the resumed session appends to the same file — so the
+following of it starts at the end of what crossed, rather than drawing the whole of
+the conversation on the sending device onto the new Event.
+_Avoid_: resumed session (that is ambiguous with Verkstead's **Resume**),
+rehydrate, replay, continuation
 
 **Worktree**:
 The checkout a Conversation's work is done in, made when the work starts along
@@ -2601,6 +2652,13 @@ more than one matches. What is followed is the sequence number of the last
 record taken rather than a byte offset into a file, and each record still
 reaches the Transcript verbatim, with the kind opencode filed it under and its
 place in that sequence around it.
+
+**And a session carrying a conversation on is followed from where the session
+before it left off.** A resumed harness appends to the log it resumed — see
+**Carried Conversation** — so nothing is looked for: the log is the one the launch
+proved was there, and the following of it opens at the end of what crossed. Each
+Event holds its own session's words, so a following that began at the top would
+draw the same conversation twice across the two machines.
 
 **And a record may be written over and over.** opencode writes a part of a
 message again every time it grows — an empty sentence, the sentence so far, the

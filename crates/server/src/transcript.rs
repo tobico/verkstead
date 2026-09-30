@@ -28,6 +28,13 @@
 //! that records this Worktree and was created after this session was launched,
 //! which is Codex's rule against a store of another shape.
 //!
+//! **And a session continuing an earlier one's conversation is followed from
+//! where that one left off.** A resumed Claude session appends to the log it is
+//! resuming, so nothing is looked for at all: the log is the one the launch proved
+//! was there, and the following of it opens at the end of what crossed — see
+//! [`Carried`]. Each Event holds its own session's words, so a Tail that began at
+//! the top would draw the same conversation twice across the two machines.
+//!
 //! Lines go to the store exactly as they were written, and nothing here parses
 //! one — a database's records included, which reach it as their payload
 //! verbatim with the kind and the sequence the store filed them under around
@@ -195,6 +202,14 @@ impl Tail {
     /// OpenCode session with neither is a session with nothing to look for —
     /// see [`Search`]. `home` is the Conversation's own, which is where a root
     /// a session was built is on the host — see [`crate::sandbox::Home`].
+    ///
+    /// **And `carried` is the record a resumed session is already part way
+    /// through** — see [`Carried`]. A session continuing the conversation an
+    /// earlier one was having appends to that one's log, so nothing is looked
+    /// for: the log is the one the launch proved was there, and the following of
+    /// it opens at the end of what the session on the other machine wrote. Each
+    /// Event holds its own session's words, and a Tail that began at the top
+    /// would write the whole of the crossed conversation onto this one.
     pub(crate) fn of(
         conversation: i64,
         profile: &store::Profile,
@@ -202,7 +217,25 @@ impl Tail {
         worktree: Option<&Path>,
         launched: SystemTime,
         home: &crate::sandbox::Home,
+        carried: Option<Carried>,
     ) -> Tail {
+        if let Some(carried) = carried {
+            return Tail {
+                conversation,
+                // Nothing to look for, the log being in hand: the search is what
+                // finds one, and this one was found before the session started.
+                search: Search::Nowhere,
+                following: Following::Log(Log {
+                    log: carried.log,
+                    read: carried.read,
+                    partial: Vec::new(),
+                }),
+                pending: Vec::new(),
+                latest: None,
+                turns: None,
+            };
+        }
+
         // One arm per agent type rather than one path every type is assumed to
         // keep: where a backend puts its record, and what it calls it, is that
         // backend's own business, and a backend arriving with a fourth answer
@@ -215,10 +248,7 @@ impl Tail {
             // host the log is in the account; an unshared `projects/` is the
             // root's own directory, so the log is there and nowhere else.
             (store::Account::Claude { claude_dir, .. }, _) => Search::Named {
-                projects: match profile.memory {
-                    true => claude_dir.join("projects"),
-                    false => home.claude_projects(),
-                },
+                projects: claude_projects(claude_dir, profile.memory, home),
                 session: session.to_owned(),
             },
 
@@ -503,6 +533,79 @@ impl Tail {
                 moved
             }
         }
+    }
+}
+
+/// The record a **resumed** session is already part way through: the log the
+/// harness goes on appending to, and how much of it the session on the other
+/// machine wrote.
+///
+/// Read before the session starts rather than measured when the log is first
+/// polled, and that is the whole point of it being a value: a length taken at the
+/// first poll would already have this session's opening lines in it, and the
+/// Transcript would begin part way through the turn.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Carried {
+    /// The log itself, where the launch found it.
+    pub(crate) log: PathBuf,
+
+    /// And how far into it the session on the other machine had got, which is
+    /// where this one's Transcript opens.
+    pub(crate) read: u64,
+}
+
+/// The log of the session named `session`, as something a session launched under
+/// `profile` could carry on from — see [`Carried`].
+///
+/// **Claude's alone, because it is the one harness whose store this build carries
+/// a conversation on from.** The three after it key a store by the directory a
+/// session ran in somewhere the memory sync does not rewrite, so each needs a
+/// relocation of its own before there is a log here to find; until then a launch
+/// under one of them has nothing to carry on from, which is Verkstead's own Resume
+/// and nothing lost.
+///
+/// **`None` is a log that is not there**, and that is the answer a Conversation
+/// whose store did not come across gets. Claude's store crosses as a labelled part
+/// that each machine names its own path for, so it should land under this device's
+/// own encoding of this device's Worktree path with nothing further to do — and
+/// the part the home device named it off is that device's worktrees directory
+/// joined onto the stem this Worktree carries, so a stem that came out differently
+/// here is a part that was asked for under a name the sending device never used.
+/// Proved rather than assumed, which is what this call is.
+///
+/// Looked for the way the Transcript looks for one — see [`named`] — because that
+/// is also the way *claude* looks for one: a session id is resolved across the
+/// whole of `projects/` rather than under the entry for the directory the session
+/// is being started in (checked against claude 2.1.278, which resumes a log filed
+/// under another directory's entry).
+pub(crate) async fn carried(
+    profile: &store::Profile,
+    session: &str,
+    home: &crate::sandbox::Home,
+) -> Option<Carried> {
+    let store::Account::Claude { claude_dir, .. } = &profile.account else {
+        return None;
+    };
+
+    let log = named(&claude_projects(claude_dir, profile.memory, home), session).await?;
+
+    let read = tokio::fs::metadata(&log).await.ok()?.len();
+
+    Some(Carried { log, read })
+}
+
+/// Where Claude Code keeps its logs for a session run under a Profile: under the
+/// directory the account is where that Profile shares its memory, and under the
+/// session's own root on the host where it does not.
+///
+/// One answer for the two callers rather than one apiece — the Tail that follows
+/// a session's log, and [`carried`], which asks whether the log of an earlier one
+/// is here — because a resume that looked somewhere else would be resuming
+/// against a log nothing then followed.
+fn claude_projects(claude_dir: &Path, memory: bool, home: &crate::sandbox::Home) -> PathBuf {
+    match memory {
+        true => claude_dir.join("projects"),
+        false => home.claude_projects(),
     }
 }
 

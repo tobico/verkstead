@@ -683,6 +683,10 @@ pub const STAYS_BEHIND: &[&str] = &[
     // has made yet.
     "transferred",
     "transfers",
+    // And which session a launch here carries on from, which is this device's own
+    // reading of an arrival: it is written in the leg after the record lands, out
+    // of what landed — see [`super::continuations`].
+    "continued_sessions",
     // The two tables a Verkstead of before kept a stopped Conversation in.
     // Nothing writes either any more and the stop itself crosses on the row —
     // see [`Marks`].

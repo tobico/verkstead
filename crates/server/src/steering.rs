@@ -2336,18 +2336,28 @@ pub(crate) fn steered(state: Lifecycle) -> Option<SteerTarget> {
 }
 
 /// Take the stop the press wrote away, along with any request to stop that has
-/// not landed yet.
+/// not landed yet — and the conversation an arrival left to be carried on.
 ///
-/// Both, for the reason a Resume clears both: the request is what the *next*
-/// launch turns into a stop, so one left behind would stop the Conversation all
-/// over again on the far side of the steer. See [`crate::resume`], which does
-/// the same two things for the same reason.
+/// The first two, for the reason a Resume clears both: the request is what the
+/// *next* launch turns into a stop, so one left behind would stop the
+/// Conversation all over again on the far side of the steer. See
+/// [`crate::resume`], which does the same two things for the same reason.
 ///
-/// Nothing to clear is an ordinary outcome. A steer from a state nothing drives
-/// found nothing to stop at the click, and there is nothing here to take away.
+/// **And the third because a steer is the human replacing what a session is
+/// doing.** A Conversation that arrived stopped by a decision waits for a press,
+/// and the press may be a steer rather than a Resume — which is somebody saying
+/// what is to happen instead. What the steer launches is primed with their words;
+/// a conversation left standing to be carried on would have primed it with a note
+/// about a move and nothing else. See [`store::take_up_the_conversation`], which
+/// is read and spent in one step here as it is at a launch.
+///
+/// Nothing to clear is an ordinary outcome for all three. A steer from a state
+/// nothing drives found nothing to stop at the click, and nearly every
+/// Conversation has never been moved anywhere.
 async fn clear(state: &AppState, conversation_id: i64) -> anyhow::Result<()> {
     store::clear_stop(&state.pool, conversation_id).await?;
     store::forget_stop(&state.pool, conversation_id).await?;
+    store::take_up_the_conversation(&state.pool, conversation_id).await?;
 
     Ok(())
 }

@@ -99,3 +99,39 @@ pub async fn session_ids(pool: &SqlitePool, conversation: i64) -> Result<Vec<Str
 
     Ok(named.into_iter().map(|(session_id,)| session_id).collect())
 }
+
+/// Write down that the session printing into `event_id` is the one Verkstead
+/// named `session_id` after all: a session resuming an earlier conversation runs
+/// under the name that conversation already had.
+///
+/// **Written over the name the Capture was opened under**, because the two facts
+/// are known at two different moments. A Capture is opened before the slow part of
+/// a launch — a boundary written, an account and a memory store fetched over a
+/// link — so that the slow part has somewhere to say what it is doing; and whether
+/// this session can continue an earlier one turns on that very store having come
+/// across, which is not settled until the fetching is done. So the row the opening
+/// writes is the name a fresh session would have run under, and a launch that comes
+/// out a resume writes the name it is continuing over it.
+///
+/// Still before there is a process, which is what the row has to be true of: what
+/// reads it is the lookup that finds the log this Event's Transcript is read from,
+/// and the log a resumed session writes into is the one it resumed.
+///
+/// Takes the pool rather than a connection, unlike [`name_session`]: this is its
+/// own write, after the transaction that opened the Capture and before the session
+/// is spawned.
+pub async fn continued_as(pool: &SqlitePool, event_id: i64, session_id: &str) -> Result<()> {
+    sqlx::query(
+        "INSERT INTO session_names (event_id, session_id) VALUES (?, ?)
+         ON CONFLICT(event_id) DO UPDATE SET session_id = excluded.session_id",
+    )
+    .bind(event_id)
+    .bind(session_id)
+    .execute(pool)
+    .await
+    .with_context(|| {
+        format!("recording that the session of Event {event_id} continues an earlier one")
+    })?;
+
+    Ok(())
+}

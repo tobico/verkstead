@@ -22,18 +22,18 @@ use std::time::Duration;
 use sqlx::SqlitePool;
 use verkstead_schema::{QuestionSet, Response};
 use verkstead_store::{
-    Account, Adding, Ask, Commit, CompanionMode, CompanionWorktree, Decision, Edited, Lifecycle,
-    Merging, Origin, Pairing, PendingAddition, PendingForm, PendingUpgrade, Process, ProfileFacts,
-    PullRequest, Rollup, Settlements, Standing, Summary, WaitingOn, add_companion, append_capture,
-    append_transcript, archive_conversation, ask, ask_to_transfer, attach, attach_mcp_server,
-    close_conversation, create_profile, end_session, lock_set, nothing_else, open_database,
-    open_pending_steer, pick_direction, record_addressed_comments, record_backlog,
-    record_check_rollup, record_commit, record_conflict_fix_attempt, record_delivery,
-    record_fix_attempt, record_merging, record_pull_request, record_share, record_share_comment,
-    record_standing, register_repo, save_brief, save_pending_steer, set_grilling_pairing,
-    set_process, set_target, settle_wrap_up, skip_review, stamp_unseen, start_capture,
-    start_conversation, start_grilling, start_implementing, stop, submit_response,
-    trim_conversation, unarchive_conversation,
+    Account, Adding, AgentType, Ask, Commit, CompanionMode, CompanionWorktree, Continued, Decision,
+    Edited, Lifecycle, Merging, Origin, Pairing, PendingAddition, PendingForm, PendingUpgrade,
+    Process, ProfileFacts, PullRequest, Rollup, Settlements, Standing, Summary, WaitingOn,
+    add_companion, append_capture, append_transcript, archive_conversation, ask, ask_to_transfer,
+    attach, attach_mcp_server, close_conversation, continue_on_arrival, create_profile,
+    end_session, lock_set, nothing_else, open_database, open_pending_steer, pick_direction,
+    record_addressed_comments, record_backlog, record_check_rollup, record_commit,
+    record_conflict_fix_attempt, record_delivery, record_fix_attempt, record_merging,
+    record_pull_request, record_share, record_share_comment, record_standing, register_repo,
+    save_brief, save_pending_steer, set_grilling_pairing, set_process, set_target, settle_wrap_up,
+    skip_review, stamp_unseen, start_capture, start_conversation, start_grilling,
+    start_implementing, stop, submit_response, trim_conversation, unarchive_conversation,
 };
 
 /// The device every Conversation started here is ranked by, named the way a
@@ -628,6 +628,21 @@ async fn written_straight_in(pool: &SqlitePool, id: i64, companion: i64, event: 
     ask_to_transfer(pool, id, "0011223344556677889900aabbccddee")
         .await
         .unwrap();
+
+    // And the conversation a session launched here would carry on from, which is
+    // the same kind of row again: it is written when work arrives and spent by the
+    // first launch after it, so nothing could have left one on a Conversation that
+    // went on to be closed — and the walk has to reach it anyway.
+    continue_on_arrival(
+        pool,
+        id,
+        &Continued {
+            session_id: "d3b07384-d9a0-4c9b-8f2a-1b7c5e6f0a12".to_owned(),
+            agent_type: AgentType::Claude,
+        },
+    )
+    .await
+    .unwrap();
 
     sqlx::query("INSERT INTO worktrees (conversation_id, path) VALUES (?, '/state/worktrees/x')")
         .bind(id)

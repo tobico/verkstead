@@ -1163,6 +1163,35 @@ pub(crate) fn naming(prompt: &str, naming: bool) -> String {
     )
 }
 
+/// The whole of what a **resumed** session is primed with: the note saying the
+/// work has been moved onto this machine (ADR-0020, *Transfer*).
+///
+/// **The note alone, rather than the note over the ordinary re-prime.** This
+/// session is the one that was running on the other device, carried on: it has its
+/// own context, it is part way through its own turn, and the Brief, the handoff and
+/// the digest of what has been settled are all already in it. Being told again what
+/// it already knows is worse than being told nothing — so what it is sent is the
+/// one thing it cannot know, which is that the ground has moved under it.
+///
+/// **Two facts, and they are the two that changed.** The `machine` the work now
+/// runs on, and the `worktree` it is now checked out at — the directory the agent
+/// has been editing all along, at a path that is this device's rather than the
+/// other one's. Everything else about the work is what it was.
+///
+/// Written as a statement rather than an instruction. There is nothing for the
+/// session to do about a move, and a prompt that told it to start again would be
+/// undoing the whole point of resuming it.
+pub(crate) fn moved(machine: &str, worktree: &Path) -> String {
+    format!(
+        "This Conversation has been moved onto another machine and you are running on it \
+         now: **{machine}**. Nothing about the work has changed — this is the \
+         conversation above carried on rather than a new one.\n\nWhat has changed is \
+         where the work sits on disk: your worktree is at `{}` now, the same checkout \
+         at a path of this machine's. Carry on from where you were.\n",
+        worktree.display(),
+    )
+}
+
 /// The opening line and the one thing said beside it wherever a session is
 /// started: how to reach the human.
 ///

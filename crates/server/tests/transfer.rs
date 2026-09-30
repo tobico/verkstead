@@ -930,6 +930,41 @@ impl Verkstead {
         }
     }
 
+    /// The **Transcript** of the session at `at` on that Conversation's Timeline,
+    /// once it holds anything — which is the record read out of the log the
+    /// backend itself wrote, rather than out of what it printed.
+    ///
+    /// By its place on the Timeline rather than by an Event id, because that is
+    /// what a test about two sessions has to say: on the far end of a move the
+    /// first is the session that crossed with the record and the second is the one
+    /// this device started.
+    ///
+    /// Waited for, because a log is followed on the relay's own cadence rather
+    /// than as it is written.
+    async fn transcript_of(&self, conversation: i64, at: usize) -> Vec<String> {
+        let deadline = Instant::now() + WAITING;
+        let mut held = Vec::new();
+
+        loop {
+            if let Some(event) = self.sessions_on(conversation).await.get(at).copied() {
+                held = lines_of(&self.pool, event).await;
+            }
+
+            if !held.is_empty() {
+                return held;
+            }
+
+            assert!(
+                Instant::now() < deadline,
+                "session {at} of Conversation {conversation} never wrote a Transcript. \
+                 The whole store holds: {:?}",
+                transcripts(&self.pool).await,
+            );
+
+            tokio::time::sleep(LOOKING).await;
+        }
+    }
+
     /// Where the account called `name` keeps its login on this device, which is a
     /// real file under a real account directory.
     fn login_of(&self, name: &str) -> PathBuf {
@@ -1019,6 +1054,84 @@ printf 'prompt=%s\r\n' "$2"
 printf 'login=%s\r\n' "$(cat "$HOME/.claude/.credentials.json" 2>/dev/null)"
 "#
     .to_owned()
+}
+
+/// The line claude writes into a session's log as it opens one, which stands here
+/// for the interview the session on A is part way through.
+///
+/// Shaped the way claude's own lines are — one JSON object per line, the agent's
+/// own words inside — because what reads it back is the Transcript, which keeps a
+/// line exactly as the backend wrote it.
+const THE_QUESTION_IT_WAS_ON: &str = r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Where should the counter live?"}]}}"#;
+
+/// And the line the session on B writes into the same log, which is the one thing
+/// only a session that really resumed could have written.
+const CARRYING_ON: &str = r#"{"type":"assistant","message":{"content":[{"type":"text","text":"So, back to the counter."}]}}"#;
+
+/// What stands where claude goes on **A** when the question is the resume: a
+/// session that writes the log claude would have written of the conversation it is
+/// having, and then waits at the gate the test opens.
+///
+/// **The log is written where claude would have written it and named what claude
+/// would have named it**: under the `projects/` entry for the directory the session
+/// was started in, by the harness's own rule — every character outside
+/// `[a-zA-Z0-9]` a hyphen — and called after the session id Verkstead told it to
+/// run under, which it reads off its own command line. So what crosses with the
+/// memory sync is a store of the shape the far end has to find a log in, and
+/// nothing here is told where to put one.
+fn writes_a_log_and_waits_at(gate: &Path) -> String {
+    format!(
+        r#"
+entry=$(printf '%s' "$PWD" | tr -c 'a-zA-Z0-9' '-')
+session=
+take=
+for word in "$@"; do
+  if [ -n "$take" ]; then session=$word; take=; fi
+  if [ "$word" = "--session-id" ]; then take=yes; fi
+done
+
+mkdir -p "$HOME/.claude/projects/$entry"
+printf '%s\n' '{asked}' > "$HOME/.claude/projects/$entry/$session.jsonl"
+
+{waiting}
+"#,
+        asked = THE_QUESTION_IT_WAS_ON,
+        waiting = waits_at(gate),
+    )
+}
+
+/// And what stands where claude goes on **B** when the question is the resume: a
+/// session that says what it was launched with, and appends to the log it was told
+/// to carry on.
+///
+/// **Every word of its own line, one per line**, because what is being asked of
+/// this end is the line rather than anything the agent did with it: whether the
+/// session was told to resume, and under which name.
+///
+/// And the append, which is what a resumed claude does — it goes on writing the
+/// log it resumed, under the same name and in the same file. What that proves is
+/// the other half: the Transcript of this session holds this line and not the one
+/// the session on A wrote into the same file.
+fn carries_on() -> String {
+    format!(
+        r#"
+printf 'carried on\r\n'
+for word in "$@"; do printf 'arg=%s\r\n' "$word"; done
+
+entry=$(printf '%s' "$PWD" | tr -c 'a-zA-Z0-9' '-')
+session=
+take=
+for word in "$@"; do
+  if [ -n "$take" ]; then session=$word; take=; fi
+  if [ "$word" = "--resume" ]; then take=yes; fi
+done
+
+if [ -n "$session" ]; then
+  printf '%s\n' '{carrying}' >> "$HOME/.claude/projects/$entry/$session.jsonl"
+fi
+"#,
+        carrying = CARRYING_ON,
+    )
 }
 
 /// Set `core.autocrlf` on a repository, the way the machine it is on would have
@@ -1213,23 +1326,45 @@ async fn drafted(
     spill: &Path,
     repositories: Repositories,
 ) -> (Verkstead, Verkstead, Holding, i64) {
-    drafted_running(&waits_at(gate), spill, repositories).await
+    drafted_running(&waits_at(gate), &re_primed(), spill, repositories).await
 }
 
-/// The same with the session on A saying what this test needs of it, which is the
-/// one thing that differs between the setups.
+/// And the same again with both machines' sessions doing what a **resume** needs
+/// of them: A's writing the log claude would have written of the interview it is
+/// part way through, and B's saying what it was launched with and appending to the
+/// log it was told to carry on.
 ///
-/// **B's is never the same script.** Nothing was ever launched on the far end
-/// before this stage; now its own Resume starts a session the moment the work
+/// Every test about carrying a conversation on starts here.
+async fn ready_to_carry_on(gate: &Path, spill: &Path) -> (Verkstead, Verkstead, Holding, i64) {
+    let (a, b, holding, conversation) = drafted_running(
+        &writes_a_log_and_waits_at(gate),
+        &carries_on(),
+        spill,
+        Repositories::Apart,
+    )
+    .await;
+
+    a.grills(conversation).await;
+
+    (a, b, holding, conversation)
+}
+
+/// The same with each machine's session saying what this test needs of it, which
+/// is the one thing that differs between the setups.
+///
+/// **B's is never the same script as A's.** Nothing was ever launched on the far
+/// end before this stage; now its own Resume starts a session the moment the work
 /// lands, and a suite whose two machines printed the same words could not say
-/// which of them had run. See [`re_primed`].
+/// which of them had run. See [`re_primed`], which is B's in every setup but the
+/// one about carrying a conversation on — see [`carries_on`].
 async fn drafted_running(
-    stub: &str,
+    on_a: &str,
+    on_b: &str,
     spill: &Path,
     repositories: Repositories,
 ) -> (Verkstead, Verkstead, Holding, i64) {
-    let a = Verkstead::running(A, stub, spill).await;
-    let b = Verkstead::running(B, &re_primed(), spill).await;
+    let a = Verkstead::running(A, on_a, spill).await;
+    let b = Verkstead::running(B, on_b, spill).await;
 
     a.linked_to(&b.device, B_MACHINE, B_OS, vec![b.at()]).await;
 
@@ -2726,20 +2861,26 @@ const RENAMED: &str = "rate-limiting";
 /// to the account it is running as — see [`refreshes_its_login_at`].
 const REFRESHED: &str = "sk-ant-oat01-refreshed-mid-turn";
 
-/// **A running grilling on the source continues as a re-primed grilling on the
-/// far end**, started by that device's own Resume.
+/// **A grilling whose log did not cross comes up re-primed on the far end**,
+/// started by that device's own Resume.
 ///
-/// Which is the whole of what an arrival is. Resume is the one standing way in —
-/// it asks what *ought* to be running now, from the lifecycle the Conversation is
-/// in and what the branch has written — and a Conversation that has just landed
-/// poses exactly that question. What it gives is a fresh session primed from the
-/// record: Verkstead's own Resume rather than the harness's, which is stage 10.
+/// Which is the fallback, and it is exactly what an arrival was before there was a
+/// resume to reach for: Resume is the one standing way in — it asks what *ought* to
+/// be running now, from the lifecycle the Conversation is in and what the branch
+/// has written — and a Conversation that has just landed poses exactly that
+/// question. What it gives is a fresh session primed from the record.
+///
+/// **And what makes it the fallback here is that the session on A wrote no log.**
+/// Nothing crossed for the far end to resume against, and a claude told to resume
+/// a session it holds no log for refuses to start rather than opening one — so the
+/// far end opens one of its own instead, which is this. The other way round is
+/// [`a_grilling_transferred_mid_interview_carries_on_from_the_question_it_was_on`].
 ///
 /// Read off the session B started rather than off a flag: the prompt it was
 /// launched on carries the Brief and what the grilling has already settled, and
 /// neither of those was on this machine a moment ago.
 #[tokio::test]
-async fn a_running_grilling_continues_as_a_re_primed_grilling_over_there() {
+async fn a_grilling_whose_log_did_not_cross_comes_up_re_primed_over_there() {
     let spill = tempfile::tempdir().unwrap();
     let gate = spill.path().join("go");
     let (a, b, _holding, conversation) = ready_to_move(&gate, spill.path()).await;
@@ -2792,6 +2933,113 @@ async fn a_running_grilling_continues_as_a_re_primed_grilling_over_there() {
         said.contains("In Redis"),
         "and with what the grilling had already settled, which is the digest a \
          relaunch carries: {said:?}",
+    );
+
+    assert_eq!(
+        b.view(there).await.state,
+        Lifecycle::Grilling,
+        "and it is still a grilling: what moved is where the work is being done \
+         rather than how far it has got",
+    );
+}
+
+/// **A grilling transferred mid-interview carries on from the question it was on**,
+/// as the harness's own resume of the very session that was running on A.
+///
+/// Which is the whole of the stage, end to end and on two machines: the session on
+/// A writes the log claude writes; the memory sync carries that log over as a
+/// labelled part each machine names its own path for; and the launch on B finds it
+/// there, tells claude to resume it, and primes it with the note and nothing else.
+///
+/// **Four things are read, and each is something only a resume could have left.**
+/// The line B's session was launched on names the resume and the id the session on
+/// A ran under — never a fresh one, a conversation carried on keeping the id it
+/// already had. Its prompt is the note alone: the machine and the Worktree's new
+/// path, and none of the Brief the session already has in its own context. The
+/// Capture of that session is written down under the old id too, or the log of the
+/// session actually running could not be found. And its Transcript holds what it
+/// said and not what the session on A had already written into the same file.
+#[tokio::test]
+async fn a_grilling_transferred_mid_interview_carries_on_from_the_question_it_was_on() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let (a, b, _holding, conversation) = ready_to_carry_on(&gate, spill.path()).await;
+
+    // A turn genuinely in flight, and a log with the interview in it: the session
+    // writes one as it starts, so waiting for it to say it is grilling is waiting
+    // for the log to be there.
+    a.printed(conversation, "grilling").await;
+
+    let running = session_names(&a.pool)
+        .await
+        .pop()
+        .expect("the name Verkstead gave the session on A")
+        .1;
+
+    assert_eq!(
+        a.transcript_of(conversation, 0).await,
+        vec![THE_QUESTION_IT_WAS_ON.to_owned()],
+        "the interview is on A's Transcript, read out of the log the session wrote",
+    );
+
+    assert_eq!(a.transfers(conversation, B).await, "\"Transferring\"");
+
+    // The turn ends, and the move follows it.
+    std::fs::write(&gate, "go").unwrap();
+
+    let there = a
+        .view_saying(conversation, |drawn| drawn.transferred.is_some())
+        .await
+        .transferred
+        .expect("the mark the move wrote")
+        .id;
+
+    let said = b.latest_capture_saying(there, "carried on").await;
+
+    assert!(
+        said.contains("arg=--resume"),
+        "B's session was told to resume rather than to open one: {said:?}",
+    );
+    assert!(
+        said.contains(&format!("arg={running}")),
+        "and to resume the session that was running on A, which is {running}: {said:?}",
+    );
+    assert!(
+        !said.contains("arg=--session-id"),
+        "and it was not named as well, the two being mutually exclusive: {said:?}",
+    );
+
+    assert!(
+        said.contains(&b.worktree(there).await.display().to_string()),
+        "the note names the Worktree's new path: {said:?}",
+    );
+    assert!(
+        said.contains(&this_machine().0),
+        "and the machine the work now runs on: {said:?}",
+    );
+    assert!(
+        !said.contains("Rate limiting"),
+        "and nothing else: the Brief is already in the context this session kept, \
+         and being told it again would be worse than being told nothing: {said:?}",
+    );
+
+    assert_eq!(
+        session_names(&b.pool)
+            .await
+            .into_iter()
+            .map(|(_, name)| name)
+            .collect::<Vec<String>>(),
+        vec![running.clone(), running.clone()],
+        "both of B's Events name that session: the one that crossed, and the one \
+         resuming it — which is what leaves the log of the session actually \
+         running findable",
+    );
+
+    assert_eq!(
+        b.transcript_of(there, 1).await,
+        vec![CARRYING_ON.to_owned()],
+        "and the resumed session's Transcript holds what it said and not what the \
+         session on A had already written into the same log",
     );
 
     assert_eq!(
@@ -3418,6 +3666,18 @@ async fn session_names(pool: &SqlitePool) -> Vec<(i64, String)> {
         .enumerate()
         .map(|(at, (name,))| (at as i64, name))
         .collect()
+}
+
+/// The Transcript of one session, by the Event it printed into.
+async fn lines_of(pool: &SqlitePool, event: i64) -> Vec<String> {
+    let rows: Vec<(String,)> =
+        sqlx::query_as("SELECT line FROM transcript_lines WHERE event_id = ? ORDER BY seq")
+            .bind(event)
+            .fetch_all(pool)
+            .await
+            .unwrap();
+
+    rows.into_iter().map(|(line,)| line).collect()
 }
 
 /// And every Transcript line, the same way.

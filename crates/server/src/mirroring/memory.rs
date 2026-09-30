@@ -8,7 +8,7 @@
 //! entries for *this* Repo and this Worktree come over the link into the account
 //! mirror the root is built from, and as the session ends what is in them goes
 //! back. That is what makes a session run on B readable on A afterwards, and what
-//! a harness's own resume will later stand on. **Switched off, nothing syncs** —
+//! a harness's own resume stands on after a Transfer. **Switched off, nothing syncs** —
 //! the session starts on an empty store exactly as it would at home, and neither
 //! direction carries anything.
 //!

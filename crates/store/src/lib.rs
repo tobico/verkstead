@@ -37,6 +37,7 @@ mod captures;
 mod cleanup;
 mod commits;
 mod companions;
+mod continuations;
 mod conversations;
 mod deferrals;
 mod deliveries;
@@ -98,6 +99,9 @@ pub use commits::{
 pub use companions::{
     Adding, Change, Companion, CompanionMode, CompanionWorktree, Configured, Joining, Opening,
     Removing, add_companion, companions, configure_companion, remove_companion,
+};
+pub use continuations::{
+    Continued, continue_on_arrival, take_up_the_conversation, the_last_session,
 };
 pub use conversations::{
     AdoptedPullRequest, Base, Chosen, Closable, ClosableCompanion, Closing, Conversation,
@@ -161,7 +165,7 @@ pub use repos::{
     registered_repo, registered_repo_at, registered_repos, unregister_repo,
 };
 pub use session_endings::{Ended, end_session, session_ending};
-pub use session_names::{session_id, session_ids};
+pub use session_names::{continued_as, session_id, session_ids};
 pub use session_pairings::RanUnder;
 pub use shares::{Share, record_share, record_share_comment, share, share_commented};
 pub use slices::{
@@ -785,6 +789,11 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // And how each of them ended — what it exited with and how long it lived —
     // which hangs off the same Event once more, one session ending once.
     session_endings::apply_schema(pool).await?;
+
+    // And which of those sessions a launch on this device carries on from, which
+    // hangs off the Conversation and names a session by the name above — see
+    // [`continuations`]. After the names, so the two read in that order.
+    continuations::apply_schema(pool).await?;
 
     // And the record those sessions kept of themselves, which hangs off the
     // same Event again — one session is one Event, and one Event is one

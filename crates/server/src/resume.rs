@@ -775,10 +775,15 @@ async fn waiting_for_a_press(state: &AppState, conversation_id: i64) -> anyhow::
 /// driving, in a state something ought to be driving — which is exactly the
 /// condition a restart leaves behind and exactly the one the button is drawn on.
 /// So the recompute is asked of the record as it now stands here: the lifecycle
-/// that crossed, and the branch in the Worktree this device has just cut. What
-/// that gives is a fresh session re-primed from the record, which is Verkstead's
-/// own Resume; continuing the agent's own context where the harness has one is
-/// stage 10 and is not this.
+/// that crossed, and the branch in the Worktree this device has just cut.
+///
+/// **What the session it starts *is*, is not this decision.** Where the harness
+/// has a resume of its own and the log the memory sync carried over is really
+/// here, the launch continues the conversation the agent was having on the other
+/// machine rather than opening one — see [`crate::sessions`], which decides that
+/// where the log is, and [`crate::peer::transfers`], which writes down what there
+/// is to carry on from. Where it cannot, what this gives is what it has always
+/// given: a fresh session re-primed from the record.
 ///
 /// `from` is the machine the work came off, by the name this device knows it by:
 /// it goes into the Notice a refusal writes, a Conversation that arrived and
