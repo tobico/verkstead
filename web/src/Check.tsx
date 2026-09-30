@@ -24,6 +24,7 @@
 
 import type { JSX } from "solid-js";
 
+import { rowPress } from "./rows";
 import styles from "./Check.module.css";
 
 /// A labelled checkbox.
@@ -48,7 +49,15 @@ export function Check(props: {
   flip: (on: boolean) => void;
 }): JSX.Element {
   return (
-    <label class={styles.check} title={props.title}>
+    // The whole row is one thing to press, and the row answers the press rather
+    // than the box it would have been forwarded to — see [`rowPress`], and what
+    // a hand that slid a pixel over the words used to get instead. A disabled
+    // box is refused there, as the browser refuses one.
+    <label
+      class={styles.check}
+      title={props.title}
+      onClick={rowPress(() => props.flip(!props.on))}
+    >
       <input
         type="checkbox"
         // Solid sets `checked` as a property rather than an attribute, which is
@@ -58,6 +67,8 @@ export function Check(props: {
         disabled={props.disabled}
         // The box the browser has just ticked, and then straight back where
         // `on` says it stands — what moves it is the caller's answer arriving.
+        // A press anywhere else in the row never gets here: the row has it, and
+        // asks for the opposite of `on` because nothing moved the box to read.
         onChange={(ev) => {
           const asked = ev.currentTarget.checked;
           ev.currentTarget.checked = props.on;

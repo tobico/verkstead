@@ -9,14 +9,14 @@
 //! Two shapes under the settings, because there are two kinds of thing the
 //! pane draws:
 //!
-//! - `desktop`, `git`, `languages`, `instructions`, `mcp-servers`,
+//! - `desktop`, `git`, `languages`, `instructions`, `mcp-servers`, `at-once`,
 //!   `sandbox-binds`, `cleanup`, `remote` and `repos` — what the desktop app
 //!   does about its own window, everything git is told, the languages a session
 //!   gets build support for, the text every session is given, the MCP servers a
-//!   Conversation may attach, the extra paths every sandbox gets, what becomes of
-//!   an archived Conversation, whether this machine can be reached from a phone,
-//!   and the Repos that are registered, each named by a word. There is one of
-//!   each of them, and a word says so.
+//!   Conversation may attach, how much Verkstead runs at once, the extra paths
+//!   every sandbox gets, what becomes of an archived Conversation, whether this
+//!   machine can be reached from a phone, and the Repos that are registered,
+//!   each named by a word. There is one of each of them, and a word says so.
 //! - `profiles/:id` — an Agent Profile, which arrives with an id of its own,
 //!   and `profiles/new` for the blank form that adds one.
 //!
@@ -49,9 +49,10 @@
 /// The openings named by a word rather than by an id: what the desktop app does
 /// about its own window, everything git is told, the languages a session gets
 /// build support for, the text every session is given, the MCP servers a
-/// Conversation may attach, the extra paths every sandbox gets, what becomes of
-/// an archived Conversation, how this machine is reached from a phone and which
-/// Repos are registered — the things there is exactly one of on this page.
+/// Conversation may attach, how much Verkstead runs at once, the extra paths
+/// every sandbox gets, what becomes of an archived Conversation, how this
+/// machine is reached from a phone and which Repos are registered — the things
+/// there is exactly one of on this page.
 ///
 /// A list rather than a word written wherever one is needed, because three
 /// separate things read it and all three have to agree: the [`Opening`] below is
@@ -70,6 +71,7 @@ export const WORDS = [
   "languages",
   "instructions",
   "mcp-servers",
+  "at-once",
   "sandbox-binds",
   "cleanup",
   "remote",

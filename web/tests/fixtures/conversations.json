@@ -13,6 +13,7 @@
     "unseen": false,
     "waiting": false,
     "waiting_on_checks": false,
+    "waiting_to_join": false,
     "working": false
   },
   {
@@ -29,6 +30,7 @@
     "unseen": false,
     "waiting": false,
     "waiting_on_checks": false,
+    "waiting_to_join": false,
     "working": false
   },
   {
@@ -45,6 +47,7 @@
     "unseen": false,
     "waiting": true,
     "waiting_on_checks": false,
+    "waiting_to_join": false,
     "working": false
   },
   {
@@ -61,6 +64,7 @@
     "unseen": false,
     "waiting": false,
     "waiting_on_checks": false,
+    "waiting_to_join": false,
     "working": false
   },
   {
@@ -77,6 +81,7 @@
     "unseen": false,
     "waiting": false,
     "waiting_on_checks": false,
+    "waiting_to_join": false,
     "working": false
   }
 ]

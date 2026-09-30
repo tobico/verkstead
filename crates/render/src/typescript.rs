@@ -20,7 +20,7 @@ use crate::{
     AbandonedRepo, Adopted, AnswerAttached, AnswerAttachmentRemoved, AskingDevice, Attached,
     AttachmentRemoved, BacklogPane, BaseBranchChoice, BaseRecorded, BranchRename, BranchRenamed,
     BriefEdit, BriefSaved, Capture, CommitPane, CompanionAdded, CompanionBaseRecorded,
-    CompanionBranchRenamed, CompanionModeChoice, CompanionModeChosen, CompanionRemoved,
+    CompanionBranchRenamed, CompanionModeChoice, CompanionModeChosen, CompanionRemoved, Confirming,
     ConversationArchived, ConversationClosed, ConversationEntry, ConversationSteered,
     ConversationStopped, ConversationUnarchived, ConversationView, Created, Creation,
     DeviceIdentity, DevicesView, DirectoryListing, DiscoveredDevice, DroppedRow, FileDeleted,
@@ -82,8 +82,8 @@ fn the_viewers_types_are_written_from_these() {
     // different sentence to put in front of the human.
     ConversationEntry::export_all(&config).unwrap();
 
-    // And what is offered beside the sidebar: the Repos holding roadmaps
-    // nothing is driving, which writes the roadmap inside it.
+    // And what is offered beside the sidebar: the Repos holding roadmaps with a
+    // stage that could be started, which writes the roadmap inside it.
     AbandonedRepo::export_all(&config).unwrap();
     ConversationView::export_all(&config).unwrap();
     NewConversation::export_all(&config).unwrap();
@@ -205,6 +205,11 @@ fn the_viewers_types_are_written_from_these() {
     // reasons of its own, a branch that is already there being the point rather
     // than the trouble.
     TakenUp::export_all(&config).unwrap();
+
+    // And the one request shape any of those three presses takes: which closes
+    // the human has agreed to, sent by the press that confirms a take-up the
+    // last one stopped over uncommitted changes.
+    Confirming::export_all(&config).unwrap();
 
     // Nothing here for how the work gets built: the recommendation and its
     // reasoning ride on the `SetView` above, the pick goes back as a field of

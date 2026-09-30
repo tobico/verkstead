@@ -64,6 +64,7 @@ import { PaneSticky } from "../Panes";
 import { QuietButton } from "../QuietButton";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine, Note } from "../notices";
+import { rowPress } from "../rows";
 import { PaneHead } from "../workbench/PaneHead";
 import {
   MAC,
@@ -339,7 +340,26 @@ function Pane(props: { reach: Bridge; back: () => void }): JSX.Element {
                   <For each={POSITIONS}>
                     {(position) => (
                       <div class={styles.position}>
-                        <label>
+                        {/* The row answers its own press rather than the one a
+                            label would have forwarded to the radio, which a
+                            hand that slid a pixel never got — see `rowPress`.
+                            A position the tray being off has taken away is
+                            refused there, its radio being disabled, and a
+                            press on the position already saved asks for
+                            nothing, which is what a `change` would not have
+                            fired for. */}
+                        <label
+                          onClick={rowPress(() => {
+                            const stood = stands();
+
+                            if (stood.whenClosed === position) {
+                              return;
+                            }
+
+                            showing(stood);
+                            save.mutate({ whenClosed: position });
+                          })}
+                        >
                           <input
                             type="radio"
                             name="desktop-when-closed"

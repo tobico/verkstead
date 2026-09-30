@@ -15,6 +15,7 @@
 //! which a column could not hold at all.
 
 use std::borrow::Cow;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -114,7 +115,28 @@ pub enum Lifecycle {
     Closed,
 }
 
+/// What [`Lifecycle::Closed`] was called while the press was Abort.
+///
+/// A migration rewrites every row it can reach — see [`super::migrations`] — so
+/// this is the word in the ones it never did: a database restored from a backup
+/// taken before it ran, or a row somebody wrote by hand. Named once here because
+/// two places read it, and a query that knew one spelling of Closed and not the
+/// other would answer about a Conversation it had taken for open.
+pub(crate) const ABORTED: &str = "aborted";
+
 impl Lifecycle {
+    /// Both words a shut Conversation's column may hold: Done and Closed, and
+    /// Closed's own older spelling.
+    ///
+    /// What a query orders by rather than reads. [`Self::read`] turns a word into
+    /// a state and SQL cannot, so anywhere SQL has to know whether a row is still
+    /// at work it compares against these — see
+    /// [`super::pull_requests::conversation_on_pull_request`], where a word left
+    /// out of the list would sort as though the Conversation were open.
+    pub(crate) fn shut() -> [&'static str; 3] {
+        [Self::Done.stored(), Self::Closed.stored(), ABORTED]
+    }
+
     /// The word the column holds. Lowercase and spelled out, so the table reads
     /// as something rather than as a number nobody can look up.
     pub(crate) fn stored(self) -> &'static str {
@@ -148,7 +170,8 @@ impl Lifecycle {
             "follow-up" => Self::FollowUp,
             "investigating" => Self::Investigating,
             "done" => Self::Done,
-            "closed" | "aborted" => Self::Closed,
+            "closed" => Self::Closed,
+            word if word == ABORTED => Self::Closed,
             other => bail!("a Conversation is in the unknown state {other:?}"),
         })
     }
@@ -1396,7 +1419,7 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
 
     // And which roadmap that stage belongs to. Beside the branch it stands on
     // rather than a column on it, for the reason that table is beside
-    // `conversations`: there is no migration machinery here, and a database
+    // `conversations`: that table is `STRICT` and left alone, and a database
     // written before this arrives with the table empty — which is every stage
     // started before Verkstead recorded the fact, and those are read as having
     // none rather than backfilled from anything.
@@ -1411,15 +1434,69 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     //
     // The directory name under `docs/roadmaps/` and nothing else, which is the
     // whole of what [`adopting`] keeps and for the same reason.
+    //
+    // And beside it, **which stage of that roadmap** — `05`, the label as the
+    // roadmap's own line writes it, zero-padding and all. A column rather than a
+    // table of its own, which is where this parts company with the ADR above it:
+    // ADR-0017 read the store's convention as *every new fact is a table* because
+    // there was no migration machinery to add a column with, and there is now —
+    // [`super::migrations`] carries a column arriving as a one-time rewrite
+    // eleven times over, `STRICT` tables among them. So the stage sits beside the
+    // roadmap, where the row that says *this Conversation is a stage of
+    // something* already is, rather than in a second table keyed the same way
+    // holding the other half of one fact.
+    //
+    // Empty is a stage from before Verkstead wrote the label down, and empty is
+    // also the Conversation that *wrote* a roadmap: it has a roadmap recorded
+    // against it because writing the roadmap was the selection, and it is not a
+    // stage of anything. Which of the two such a row is, is told by what is
+    // stored beside it and never by a branch name — a stage has a
+    // `stage_branches` row and a roadmap's own Conversation has the Roadmap
+    // direction, which is how the carry-on in the server already tells them
+    // apart. See [`stage_roadmap`], which is where both come back.
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS stage_roadmaps (
              conversation_id INTEGER PRIMARY KEY REFERENCES conversations(id),
-             roadmap         TEXT NOT NULL
+             roadmap         TEXT NOT NULL,
+             stage           TEXT
          ) STRICT",
     )
     .execute(pool)
     .await
     .context("creating the stage roadmaps table")?;
+
+    // And the order the stages of a roadmap finished their tasks in, which is
+    // the order they are let into its chain. One row per stage, written the
+    // first time it reaches its finish step and never again — see
+    // [`queue_to_join`] and [`join_queue`], and the server's `joins` module,
+    // where the queue is what decides who goes next.
+    //
+    // A stage **joins** the chain at its finish, and the joins are the one thing
+    // a roadmap does in single file: a second stage whose boxes are all ticked
+    // waits on the first one joining *and* settling. So which of the two goes
+    // first has to be a fact that outlives the process which noticed it — a wait
+    // may be long, and a server that came back holding a queue of its own making
+    // could let them in the other way round.
+    //
+    // The place is the row's own id rather than a clock, because what is wanted
+    // is an order rather than a time: two stages whose last box was ticked in the
+    // same millisecond still finished one after the other, and a total order has
+    // no tie to break. Nothing is stored beside it — when a stage *joined* is
+    // already recorded by the pull request the join opened, and when its tasks
+    // finished is of no interest here except as a place in this queue.
+    //
+    // A table of its own rather than a column on [`stage_roadmaps`], unlike the
+    // stage label beside it: what holds the order is an `AUTOINCREMENT` id, so
+    // the row is keyed on the place rather than on the Conversation.
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS stage_joinings (
+             place           INTEGER PRIMARY KEY AUTOINCREMENT,
+             conversation_id INTEGER NOT NULL UNIQUE REFERENCES conversations(id)
+         ) STRICT",
+    )
+    .execute(pool)
+    .await
+    .context("creating the stage joinings table")?;
 
     // The model half of a Conversation's Pairings, one row per role. A
     // table of its own for the reason the direction is one: there is no
@@ -2420,6 +2497,42 @@ pub async fn recorded_worktrees(pool: &SqlitePool) -> Result<Vec<PathBuf>> {
         .into_iter()
         .map(|(path,)| PathBuf::from(path))
         .collect())
+}
+
+/// Which Conversation is working in `path`, where one is — in its own Worktree
+/// or in a companion's.
+///
+/// What a take-up asks about a branch git says is checked out somewhere. Git
+/// holds one checkout per branch and a stack sync moves every branch of a chain,
+/// so whoever is standing on a link of it has to make way; git names the
+/// directory, and this is what turns a directory into somebody to ask.
+///
+/// **Both tables**, because both are directories a Conversation was given to
+/// work in and both go back when it is closed. A companion checkout of the same
+/// repository is unusual and is a checkout all the same: what git refuses over is
+/// the directory, whichever column its path was written in.
+///
+/// `None` is a checkout that is nobody's here — the human's own clone, or a
+/// worktree somebody made by hand — which is nothing Verkstead may close and so
+/// nothing it can make way with.
+pub async fn conversation_at_worktree(
+    pool: &SqlitePool,
+    path: &std::path::Path,
+) -> Result<Option<i64>> {
+    let named = path.to_string_lossy().into_owned();
+
+    let row: Option<(i64,)> = sqlx::query_as(
+        "SELECT conversation_id FROM worktrees WHERE path = ?
+         UNION
+         SELECT conversation_id FROM companion_worktrees WHERE path = ?",
+    )
+    .bind(&named)
+    .bind(&named)
+    .fetch_optional(pool)
+    .await
+    .with_context(|| format!("reading which Conversation is working in {named}"))?;
+
+    Ok(row.map(|(id,)| id))
 }
 
 /// Every Conversation whose work has not stopped, by id.
@@ -5462,6 +5575,12 @@ pub async fn record_backlog(pool: &SqlitePool, id: i64) -> Result<Landed> {
 /// run taken up again sees the same roadmap on the same branch, and the name is
 /// settled once — see [`Landed::Already`], which says the same thing about the
 /// Timeline row beside it.
+///
+/// **And no stage label**, which is the one thing this row does not hold: the
+/// Conversation that wrote a roadmap is not a stage of it, and the stage that
+/// starts when this branch settles is a Conversation of its own with a row of
+/// its own — see [`start_stage`]. So the slot stands empty here, and that is
+/// what tells this row from a stage's; see [`StageOf::stage`].
 pub async fn record_roadmap(pool: &SqlitePool, id: i64, wrote: Option<&str>) -> Result<Landed> {
     let landed = landed(pool, id, Event::StageList).await?;
 
@@ -5484,6 +5603,23 @@ pub async fn record_roadmap(pool: &SqlitePool, id: i64, wrote: Option<&str>) -> 
     }
 
     Ok(landed)
+}
+
+/// Which stage of which roadmap a Conversation is being started as.
+///
+/// Two halves of one fact, passed together rather than as two strings in a row
+/// for the reason [`Base`]'s two are: both are read off the one roadmap entry the
+/// stage was taken from, and a caller that put them the other way round would
+/// record a roadmap called `05`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RoadmapStage<'a> {
+    /// The roadmap's directory name under `docs/roadmaps/` — `mvp`.
+    pub roadmap: &'a str,
+
+    /// And which stage of it, as the roadmap's own line labels it — `05`, with
+    /// the roadmap's zero-padding kept. Off the roadmap entry and never off a
+    /// branch name, which is the guess this record exists to stop.
+    pub label: &'a str,
 }
 
 /// Start a roadmap stage's Conversation working: its base commit, its worktree,
@@ -5512,13 +5648,19 @@ pub async fn record_roadmap(pool: &SqlitePool, id: i64, wrote: Option<&str>) -> 
 /// transaction that makes the Conversation a stage, and read back by whatever
 /// starts a session in it — the first one, and any the human asks for again.
 ///
-/// `roadmap` is the one this stage belongs to, by its directory name under
-/// `docs/roadmaps/`. Written in this transaction for the reason `stacks_on` is:
-/// it is Verkstead's own decision, taken once at the moment the stage starts —
-/// by a human adopting the roadmap or by the stage before it carrying on — and
-/// it is what the wrap-up reads to know where to carry on to. A stage that said
-/// it was under way without saying whose roadmap it was would be one nothing
-/// could continue.
+/// `of` is which stage of which roadmap this is — see [`RoadmapStage`], which is
+/// why the two travel together. Written in this transaction for the reason
+/// `stacks_on` is: it is Verkstead's own decision, taken once at the moment the
+/// stage starts — by a human adopting the roadmap or by the stage before it
+/// carrying on — and it is what the wrap-up reads to know where to carry on to.
+/// A stage that said it was under way without saying whose roadmap it was would
+/// be one nothing could continue.
+///
+/// Both halves come off the roadmap entry the stage was read from and from
+/// nowhere else — never from the branch, which is the guess this record exists
+/// to stop. Every stage start has a label, so the pair is what a stage's row
+/// holds and an empty slot beside a roadmap means something else; the
+/// `stage_roadmaps` statement in `apply_schema` is where that is written down.
 ///
 /// `companions` is where the stage's inherited companion repos were checked
 /// out, written in this transaction for [`start_grilling`]'s reason: a stage
@@ -5531,7 +5673,7 @@ pub async fn start_stage<'a>(
     base: impl Into<Base<'a>>,
     worktree: &Path,
     stacks_on: Option<&str>,
-    roadmap: &str,
+    of: RoadmapStage<'_>,
     companions: &[super::CompanionWorktree],
 ) -> Result<Staged> {
     let base = base.into();
@@ -5586,12 +5728,13 @@ pub async fn start_stage<'a>(
         .await
         .with_context(|| format!("recording what the branch of Conversation {id} stands on"))?;
 
-    sqlx::query("INSERT INTO stage_roadmaps (conversation_id, roadmap) VALUES (?, ?)")
+    sqlx::query("INSERT INTO stage_roadmaps (conversation_id, roadmap, stage) VALUES (?, ?, ?)")
         .bind(id)
-        .bind(roadmap)
+        .bind(of.roadmap)
+        .bind(of.label)
         .execute(&mut *tx)
         .await
-        .with_context(|| format!("recording which roadmap Conversation {id} is a stage of"))?;
+        .with_context(|| format!("recording which stage of which roadmap Conversation {id} is"))?;
 
     super::companions::record_worktrees(&mut tx, id, companions).await?;
 
@@ -5739,27 +5882,663 @@ pub async fn stacks_on(pool: &SqlitePool, id: i64) -> Result<Option<Option<Strin
     Ok(row.map(|(stacks_on,)| stacks_on))
 }
 
-/// Which roadmap a Conversation is a stage of, where Verkstead recorded one.
+/// What Verkstead recorded about a Conversation being a stage of a roadmap:
+/// which roadmap, and which stage of it.
+///
+/// Two halves of one fact, so one row and one read — the `stage_roadmaps`
+/// statement in `apply_schema` is where the second is a column rather than a
+/// table of its own, and why.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StageOf {
+    /// The roadmap's directory name under `docs/roadmaps/` — `mvp`. Always
+    /// there: a row with no roadmap is a row nothing writes.
+    pub roadmap: String,
+
+    /// Which stage of it, as the roadmap's own line labels it — `05`, with the
+    /// roadmap's zero-padding kept.
+    ///
+    /// `None` where nothing said: a stage Verkstead started before it wrote the
+    /// label down, or the Conversation that *wrote* the roadmap, which has one
+    /// recorded against it and is not a stage of anything. Which of those a row
+    /// is, is told by what is stored beside it — [`stacks_on`] and
+    /// [`Conversation::direction`] — and never by a branch name.
+    pub stage: Option<String>,
+}
+
+/// Which stage of which roadmap a Conversation is, where Verkstead recorded it.
 ///
 /// A read of its own beside the row for [`adopting`]'s reason, and the one the
 /// wrap-up asks before it carries anything on: the answer decides which roadmap
 /// is read, and nothing else is.
 ///
-/// `None` means three different things and the caller tells them apart from
-/// what is stored beside this — see [`stacks_on`], which says whether this is a
-/// stage at all, and [`Conversation::direction`], which says whether it is the
-/// Conversation that wrote a roadmap. A stage started before this was recorded
-/// answers `None` and is not backfilled from the branch: a name guessed off a
-/// branch is the guess this table exists to stop.
-pub async fn stage_roadmap(pool: &SqlitePool, id: i64) -> Result<Option<String>> {
-    let row: Option<(String,)> =
-        sqlx::query_as("SELECT roadmap FROM stage_roadmaps WHERE conversation_id = ?")
+/// `None` — no row at all — means three different things and the caller tells
+/// them apart from what is stored beside this: see [`stacks_on`], which says
+/// whether this is a stage at all, and [`Conversation::direction`], which says
+/// whether it is the Conversation that wrote a roadmap. A stage started before
+/// this was recorded answers `None` and is not backfilled from the branch: a
+/// name guessed off a branch is the guess this table exists to stop.
+///
+/// A row with a roadmap and no stage is a fourth thing and is not `None`: see
+/// [`StageOf::stage`].
+pub async fn stage_roadmap(pool: &SqlitePool, id: i64) -> Result<Option<StageOf>> {
+    let row: Option<(String, Option<String>)> =
+        sqlx::query_as("SELECT roadmap, stage FROM stage_roadmaps WHERE conversation_id = ?")
             .bind(id)
             .fetch_optional(pool)
             .await
-            .with_context(|| format!("reading which roadmap Conversation {id} is a stage of"))?;
+            .with_context(|| {
+                format!("reading which stage of which roadmap Conversation {id} is")
+            })?;
 
-    Ok(row.map(|(roadmap,)| roadmap))
+    Ok(row.map(|(roadmap, stage)| StageOf { roadmap, stage }))
+}
+
+/// How far the record says one stage Conversation got.
+///
+/// Three answers rather than two, because *did it settle* and *is somebody on it*
+/// are not each other's opposite: a stage whose Conversation was closed part-way
+/// through is neither, and what happens to it is neither reading's business.
+///
+/// The human's own two halves are what decide the first: a Conversation that
+/// reached Done has settled, and one Closed from a wrap-up has settled too,
+/// because closing a Conversation that got as far as a pull request is the human
+/// saying they are finished with it. Nothing here is about a pull request having
+/// merged — a stage whose branch is still open is a stage the one after it stacks
+/// on, which is the whole of how a roadmap runs.
+///
+/// Nor is it about the run having **stopped**, which is a fact about the same row
+/// and not a fourth answer here: a stopped stage is in flight and holds everything
+/// an in-flight stage holds. See [`StageStandings::stopped`], which is where the
+/// reading beside this one is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StageStanding {
+    /// Its work is finished: it reached Done at some point, or it was closed
+    /// having reached Wrapping or Done.
+    ///
+    /// **Once rather than now**, which is what keeps a stage that has finished
+    /// from reading as open again. A Steer into Follow-up is offered from Done and
+    /// one into Implementing puts a settled stage back to work, so a stage merged
+    /// months ago that somebody is following something up on would otherwise read
+    /// as in flight — and a stage that is not done is what the adoption stops at,
+    /// which took the whole roadmap out of the notice and had the press refuse
+    /// about a stage nobody was on.
+    ///
+    /// Whether its branch is **moving again** is a different question, and it is
+    /// asked where it matters rather than answered here: nothing may rebase onto a
+    /// branch that has started moving, which is the chain's own reading to make
+    /// when the chain is built.
+    Settled,
+
+    /// Somebody — or some unattended run — is on it and it has not finished yet:
+    /// implementing, wrapping up, waiting on a question. Anything that is not
+    /// Closed and has never reached Done.
+    InFlight,
+
+    /// Closed without ever having wrapped up: abandoned part-way through.
+    ///
+    /// Neither of the other two, and nothing reading the record starts it again:
+    /// what it left behind is a branch, and the branch is what refuses the stage
+    /// wherever one is offered.
+    Abandoned,
+}
+
+impl StageStanding {
+    /// Which of two standings for one label is the one to believe.
+    ///
+    /// Two Conversations answer to one stage where a stage was attempted twice —
+    /// one closed, another started after it — and the roadmap has one line for
+    /// it either way. Settled wins, because a stage that settled once is done
+    /// whatever else was tried; in flight beats abandoned, because somebody is on
+    /// it now.
+    fn over(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Settled, _) | (_, Self::Settled) => Self::Settled,
+            (Self::InFlight, _) | (_, Self::InFlight) => Self::InFlight,
+            _ => Self::Abandoned,
+        }
+    }
+}
+
+/// What Verkstead's record says about the stages of one Repo's roadmaps: which
+/// of them settled, which are in flight, and which were abandoned — and, of the
+/// ones in flight, which have **stopped**.
+///
+/// One Repo's worth, read in one go, because that is the shape every reading
+/// wants: the carry-on asks about the one roadmap the record named, the adoption
+/// walks every roadmap of every registered Repo and would otherwise ask the
+/// database once per roadmap inside each of them, and the card and the pane the
+/// human opens are two views of one Repo's roadmap. And one Repo's worth rather
+/// than the whole table, because a Conversation belongs to one Repo and two Repos
+/// may hold roadmaps of the same name — a stage of `mvp` over there answers for
+/// nothing here.
+///
+/// A value rather than a query, so that the readings stay readings: none of them
+/// asks the database, and what they are handed is this.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StageStandings(HashMap<String, HashMap<String, Held>>);
+
+impl StageStandings {
+    /// What the record says about stage `label` of `roadmap`, or `None` where it
+    /// holds no row for it.
+    ///
+    /// `None` is the answer that matters as much as the other three: a stage
+    /// worked by hand or by the old tools has no row, and its box is all there is
+    /// to go on.
+    pub fn of(&self, roadmap: &str, label: &str) -> Option<StageStanding> {
+        self.held(roadmap, label).map(|held| held.standing)
+    }
+
+    /// And whether the Conversation that standing came from has **stopped**:
+    /// nothing is being driven until somebody presses Resume.
+    ///
+    /// Beside the standing rather than a fourth word inside it, because the
+    /// schedulers want nothing to do with it: a stage that stopped is still in
+    /// flight — it holds its place, its branch and its worktree — and what the
+    /// stop changes is only what a human reading the roadmap is told. See the
+    /// server's `stages` module, which is where the two are put together into the
+    /// word the card says.
+    ///
+    /// `false` where the record holds no row for the stage: a stage it knows
+    /// nothing about has nothing that could have stopped.
+    pub fn stopped(&self, roadmap: &str, label: &str) -> bool {
+        self.held(roadmap, label).is_some_and(|held| held.stopped)
+    }
+
+    /// And **which Conversation** that standing came from, which is what a
+    /// reading holding a register of this process asks a label by: the registers
+    /// are keyed by Conversation and a roadmap keeps labels, so this is the one
+    /// thing that joins the two.
+    ///
+    /// Beside the standing for [`StageStandings::stopped`]'s reason, and off the
+    /// same row as it: where a stage was attempted twice, this is the Conversation
+    /// whose standing is the one believed, so what is said about a stage and which
+    /// Conversation it is said about cannot come apart.
+    ///
+    /// `None` where the record holds no row for the stage — one worked by hand or
+    /// by the old tools, which is a stage with no Conversation to name.
+    pub fn conversation(&self, roadmap: &str, label: &str) -> Option<i64> {
+        self.held(roadmap, label).map(|held| held.conversation_id)
+    }
+
+    /// One built from rows rather than from a database, for the readings' own
+    /// tests: what they take is a value, so what a test hands them is one too.
+    ///
+    /// The Conversation comes last, as the row's tail: it is what a register is
+    /// asked by rather than anything a reading decides with, so a test about the
+    /// words alone has nothing to say about it.
+    pub fn from_rows<'a>(
+        rows: impl IntoIterator<Item = (&'a str, &'a str, StageStanding, bool, i64)>,
+    ) -> Self {
+        let mut standings = Self::default();
+
+        for (roadmap, label, standing, stopped, conversation_id) in rows {
+            standings.record(roadmap, label, standing, stopped, conversation_id);
+        }
+
+        standings
+    }
+
+    /// What is kept about stage `label` of `roadmap`, which is what each of the
+    /// two readings above takes its half of.
+    fn held(&self, roadmap: &str, label: &str) -> Option<Held> {
+        self.0.get(roadmap)?.get(label).copied()
+    }
+
+    /// Put one stage Conversation's standing in, behind whatever a second
+    /// Conversation answering to the same label already said — see [`Held::over`].
+    fn record(
+        &mut self,
+        roadmap: &str,
+        label: &str,
+        standing: StageStanding,
+        stopped: bool,
+        conversation_id: i64,
+    ) {
+        let held = Held {
+            standing,
+            stopped,
+            conversation_id,
+        };
+
+        self.0
+            .entry(roadmap.to_owned())
+            .or_default()
+            .entry(label.to_owned())
+            .and_modify(|kept| *kept = kept.over(held))
+            .or_insert(held);
+    }
+}
+
+/// What is kept about one stage label: which Conversation it is, how far that
+/// Conversation got, and whether it has stopped.
+///
+/// One value rather than three maps, because the three are one row's and have to
+/// stay one row's — where a stage was attempted twice, the stop that counts and
+/// the Conversation that is named both belong to the attempt whose standing is
+/// believed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Held {
+    standing: StageStanding,
+    stopped: bool,
+    conversation_id: i64,
+}
+
+impl Held {
+    /// Which of two readings of one label is the one to believe: the standing
+    /// [`StageStanding::over`] picks, and the row that standing came off.
+    ///
+    /// Where the two attempts stand **differently**, the believed one's whole row
+    /// stands — its stop and its Conversation with it.
+    ///
+    /// Where they stand the **same** way, the row is the later attempt's: rows
+    /// arrive in the order the Conversations were started, so the second attempt
+    /// is the one somebody is on now. Except the stop, where a stop on either is a
+    /// stop: two Conversations answering to one label with one of them halted is a
+    /// stage somebody has to go and look at, whichever of the two they find first.
+    fn over(self, other: Self) -> Self {
+        if self.standing == other.standing {
+            return Self {
+                stopped: self.stopped || other.stopped,
+                ..other
+            };
+        }
+
+        if self.standing.over(other.standing) == self.standing {
+            self
+        } else {
+            other
+        }
+    }
+}
+
+/// What the record says about every stage Conversation of `repo_id`'s roadmaps.
+///
+/// The read behind [`StageStandings`], and the one thing that joins Verkstead's
+/// record to the boxes a repository keeps: the record decides what is done
+/// wherever it has a row for the stage, and the boxes decide wherever it has
+/// none — see the server's `stages` module, which is where the two are put
+/// together.
+///
+/// Only the rows that hold a label, which is what a stage Conversation's own row
+/// holds. A row with a roadmap and no label says nothing about any stage — it is a
+/// stage from before the label was written down, or the Conversation that wrote
+/// the roadmap — so it is left out of this and the box goes on speaking for
+/// whichever it was; see [`StageOf::stage`].
+///
+/// **Where each of them has been** is the Timeline's to answer, every move being
+/// written on it — see [`moved`] — and the state column says where it is now. It
+/// takes both, and the two questions the Timeline is asked are different ones: a
+/// Conversation that ever reached **Done** has finished its work, whatever it was
+/// steered into afterwards, and one that is **Closed** settled where it ever
+/// reached Wrapping or Done and was abandoned where it did not.
+///
+/// And **whether it stopped** comes off the Conversation's own stop columns, read
+/// in the same breath because it is another column on the same row — see
+/// [`StageStandings::stopped`], which is what it is for. Read for every row rather
+/// than for the ones in flight alone: which standing a stop belongs to is settled
+/// where two attempts at one label are weighed against each other, and a query
+/// that had already thrown half of them away could not weigh them.
+///
+/// And **which Conversation** each row is comes back with it, for the same reason
+/// and to the same end — see [`StageStandings::conversation`]: what a register of
+/// this process is asked about a stage is the Conversation, and this is the read
+/// that holds the roadmap and the label beside it.
+pub async fn stage_standings(pool: &SqlitePool, repo_id: i64) -> Result<StageStandings> {
+    let rows: Vec<(String, String, String, bool, bool, bool, i64)> = sqlx::query_as(
+        "SELECT r.roadmap, r.stage, c.state,
+                EXISTS (
+                    SELECT 1 FROM timeline_events e
+                    WHERE e.conversation_id = c.id AND e.kind = ? AND e.body = ?
+                ),
+                EXISTS (
+                    SELECT 1 FROM timeline_events e
+                    WHERE e.conversation_id = c.id AND e.kind = ? AND e.body IN (?, ?)
+                ),
+                c.stopped_at IS NOT NULL,
+                r.conversation_id
+         FROM stage_roadmaps r
+         JOIN conversations c ON c.id = r.conversation_id
+         WHERE c.repo_id = ? AND r.stage IS NOT NULL
+         ORDER BY r.conversation_id",
+    )
+    .bind(Event::Moved(Lifecycle::Done).kind())
+    .bind(Lifecycle::Done.stored())
+    .bind(Event::Moved(Lifecycle::Wrapping).kind())
+    .bind(Lifecycle::Wrapping.stored())
+    .bind(Lifecycle::Done.stored())
+    .bind(repo_id)
+    .fetch_all(pool)
+    .await
+    .with_context(|| format!("reading what Repo {repo_id}'s roadmap stages have got to"))?;
+
+    let mut standings = StageStandings::default();
+
+    for (roadmap, label, state, finished, wrapped, stopped, conversation_id) in rows {
+        let standing = match (Lifecycle::read(&state)?, finished, wrapped) {
+            // In Done, however it got there — including a database in which the
+            // move was never written.
+            (Lifecycle::Done, ..) => StageStanding::Settled,
+            (Lifecycle::Closed, _, true) => StageStanding::Settled,
+            (Lifecycle::Closed, _, false) => StageStanding::Abandoned,
+            // Somewhere else, having been in Done before: the work finished and
+            // something was taken up about it afterwards. Which is a stage done —
+            // see [`StageStanding::Settled`], where *once rather than now* is.
+            (_, true, _) => StageStanding::Settled,
+            _ => StageStanding::InFlight,
+        };
+
+        standings.record(&roadmap, &label, standing, stopped, conversation_id);
+    }
+
+    Ok(standings)
+}
+
+/// One stage that has **joined** its roadmap's chain: the Conversation it is,
+/// which stage of the roadmap, and the branch it joined with.
+///
+/// See [`stage_chain`], which is where the order they are in comes from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Joined {
+    /// The stage's Conversation, which is what [`StageStandings`] answers about
+    /// it under the label below.
+    pub conversation_id: i64,
+
+    /// Which stage of the roadmap, as the roadmap's own line labels it — `05`,
+    /// with the roadmap's zero-padding kept.
+    pub stage: String,
+
+    /// And the branch it joined with, as the Conversation's record names it
+    /// now: the name a session renamed it to where one did, and the name it was
+    /// cut under where none has.
+    pub branch: String,
+}
+
+/// One roadmap's **chain**, bottom to top: the stages of it that have joined,
+/// in the order they joined.
+///
+/// A stage **joins** the chain when its finish pushes its branch and opens its
+/// pull request — see
+/// [ADR-0021](../../../../docs/adr/0021-parallel-stages.md), *The chain*. So
+/// what says a stage has joined is the pull request recorded against it, and
+/// what says *when* is the Timeline Event the first of them hangs off: the row
+/// is written in the same transaction as the move into Wrapping, and a stage
+/// that opened one has a branch for the next one to rebase onto.
+///
+/// Nothing is stored for this beyond that. A join is a fact that already has a
+/// record — the pull request — and a second row saying so could come to
+/// disagree with it.
+///
+/// The **foot** of the chain is the roadmap's own branch while its pull request
+/// is unmerged, and it is not in here: it is not a stage, nothing waits on it
+/// settling, and where a new stage is cut from is decided where a stage is
+/// started rather than read back here. What this answers is which stages are in
+/// the chain and in what order, which is what the hold in front of a finish
+/// asks — see the server's `joins` module.
+///
+/// One Repo's and one roadmap's, for the reason [`stage_standings`] is one
+/// Repo's: two Repos may hold roadmaps of the same name, and a stage of `mvp`
+/// over there is no link of this chain. The Conversation's own repository's
+/// pull request and no other, so a companion repository's pull request — opened
+/// against a different Repo in the same breath — is not a second join.
+///
+/// A stage attempted twice is two Conversations answering to one label, and
+/// each of them that opened a pull request is a link: what is in the chain is a
+/// branch rather than a label, and both of those branches are there.
+pub async fn stage_chain(pool: &SqlitePool, repo_id: i64, roadmap: &str) -> Result<Vec<Joined>> {
+    let rows: Vec<(i64, String, String)> = sqlx::query_as(
+        "SELECT r.conversation_id, r.stage, COALESCE(c.named_branch, c.branch)
+         FROM stage_roadmaps r
+         JOIN conversations c ON c.id = r.conversation_id
+         JOIN pull_requests p
+           ON p.conversation_id = r.conversation_id AND p.repo_id = c.repo_id
+         WHERE c.repo_id = ? AND r.roadmap = ? AND r.stage IS NOT NULL
+         GROUP BY r.conversation_id
+         ORDER BY MIN(p.event_id)",
+    )
+    .bind(repo_id)
+    .bind(roadmap)
+    .fetch_all(pool)
+    .await
+    .with_context(|| format!("reading the chain of the {roadmap} roadmap in Repo {repo_id}"))?;
+
+    Ok(rows
+        .into_iter()
+        .map(|(conversation_id, stage, branch)| Joined {
+            conversation_id,
+            stage,
+            branch,
+        })
+        .collect())
+}
+
+/// A roadmap's **own Conversation**: the one that wrote it, and the branch it
+/// wrote it on.
+///
+/// The **foot** of the chain, and the one thing about a roadmap there was no read
+/// for. [`stage_chain`] answers for the stages that have joined; while none has,
+/// the newest the roadmap has ever been written down is on the branch of the
+/// Conversation that planned it, whose pull request is very likely still open — so
+/// the default branch does not hold it and neither does any stage.
+///
+/// What says a row is that Conversation's rather than a stage's is **a roadmap
+/// with no stage label beside it and the Roadmap direction** — see
+/// [`StageOf::stage`], where the two rows that hold no label are told apart, and
+/// the `stage_roadmaps` statement in `apply_schema`. A stage started before the
+/// label was written down holds no label either and is not this one: it has the
+/// direction its own work runs under.
+///
+/// One Repo's, for the reason [`stage_chain`] is one Repo's: two Repos may hold
+/// roadmaps of the same name, and the Conversation that planned `mvp` over there
+/// says nothing about this one. The newest where somehow there are two — a roadmap
+/// planned twice is two Conversations, and the later of them is the one whose
+/// declarations are the newest.
+///
+/// **Both halves of the one fact**, because both are wanted and by different
+/// readers: the branch is where the roadmap is newest written while no stage has
+/// joined, and the Conversation is the foot a start with **no settle behind it**
+/// takes its Pairings, its companions and its base from — see the server's
+/// `places` module, which is the look that makes such a start.
+pub async fn roadmap_planner(
+    pool: &SqlitePool,
+    repo_id: i64,
+    roadmap: &str,
+) -> Result<Option<Planned>> {
+    let row: Option<(i64, String)> = sqlx::query_as(
+        "SELECT r.conversation_id, COALESCE(c.named_branch, c.branch)
+         FROM stage_roadmaps r
+         JOIN conversations c ON c.id = r.conversation_id
+         JOIN directions d ON d.conversation_id = r.conversation_id
+         WHERE c.repo_id = ? AND r.roadmap = ? AND r.stage IS NULL AND d.direction = ?
+         ORDER BY r.conversation_id DESC
+         LIMIT 1",
+    )
+    .bind(repo_id)
+    .bind(roadmap)
+    .bind(direction_stored(Direction::Roadmap))
+    .fetch_optional(pool)
+    .await
+    .with_context(|| {
+        format!("reading the Conversation the {roadmap} roadmap in Repo {repo_id} was written on")
+    })?;
+
+    Ok(row.map(|(conversation_id, branch)| Planned {
+        conversation_id,
+        branch,
+    }))
+}
+
+/// The Conversation that **wrote** a roadmap: which one it is, and the branch it
+/// wrote it on.
+///
+/// See [`roadmap_planner`], which is the read, and [`Joined`], which is the same
+/// pair of facts about a stage that has joined the chain above it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Planned {
+    /// The Conversation the roadmap was planned in.
+    pub conversation_id: i64,
+
+    /// And the branch it was planned on, as the record names it now: the name a
+    /// session renamed it to where one did, and the name it was cut under where
+    /// none has.
+    pub branch: String,
+}
+
+/// One roadmap Verkstead is **driving**: which Repo it is in, and what it is
+/// called.
+///
+/// See [`driven_roadmaps`], which is the read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Driven {
+    /// The Repo whose `docs/roadmaps/` holds it — which is what every other
+    /// reading of a roadmap is asked about, two Repos being free to hold
+    /// roadmaps of the same name.
+    pub repo_id: i64,
+
+    /// And its directory name under `docs/roadmaps/` — `mvp`.
+    pub roadmap: String,
+}
+
+/// Every roadmap Verkstead has started something of, in a Repo that is still
+/// registered.
+///
+/// What the look for a free place walks — see the server's `places` module. A
+/// roadmap is one Verkstead is driving from the moment anything of it is
+/// recorded against a Conversation: the roadmap's own Conversation, or a stage
+/// of it. Nothing is stored beyond that, and deliberately — what each of them
+/// has left is read afresh off the declarations, the record and the boxes at
+/// every look, so a row saying *this roadmap is still going* could only come to
+/// disagree with them.
+///
+/// **A roadmap in an unregistered Repo is not among them.** Unregistering is
+/// Verkstead being told to stop offering that repository for new work, and a
+/// stage it started unasked is new work — see [`registered_repos`], which is
+/// where the same flag keeps it off every other list.
+///
+/// One row per roadmap rather than per Conversation, **oldest roadmap first**.
+/// Where more places are wanted than there are free, the order this comes back
+/// in is the order they are handed out in: the effort begun first is served
+/// before the one begun after it, so a roadmap somebody started weeks ago does
+/// not wait behind one started this morning for as long as the new one has
+/// something ready.
+///
+/// **A roadmap's age is its own Conversation's**, rather than how long any stage
+/// of it has been waiting. The lowest Conversation id anything of it is recorded
+/// against, which for a roadmap somebody planned is the Conversation that wrote
+/// it: that row is written as the roadmap lands on its branch, before any stage
+/// of it exists — see [`record_roadmap`] and [`start_stage`], which are the two
+/// writes. For a roadmap adopted stage by stage it is the first stage adopted,
+/// there being no planning Conversation to ask. The id rather than a timestamp
+/// because it is `AUTOINCREMENT`: the order the rows were made in, without a
+/// clock's resolution coming into it.
+///
+/// **Nothing is stored for the ordering**, which is what keeps it from going
+/// stale. A timestamp saying when a stage was first held back would be a second
+/// record beside a readiness that is worked out afresh at every look, and the
+/// two would disagree the moment a dependency settled under it.
+///
+/// Within a roadmap the order is the roadmap's own rather than this reading's —
+/// see the server's `stages::ready`, which answers lowest-numbered first.
+pub async fn driven_roadmaps(pool: &SqlitePool) -> Result<Vec<Driven>> {
+    let rows: Vec<(i64, String)> = sqlx::query_as(
+        "SELECT c.repo_id, r.roadmap
+         FROM stage_roadmaps r
+         JOIN conversations c ON c.id = r.conversation_id
+         WHERE c.repo_id NOT IN (SELECT repo_id FROM unregistered_repos)
+         GROUP BY c.repo_id, r.roadmap
+         ORDER BY MIN(r.conversation_id)",
+    )
+    .fetch_all(pool)
+    .await
+    .context("reading which roadmaps Verkstead is driving")?;
+
+    Ok(rows
+        .into_iter()
+        .map(|(repo_id, roadmap)| Driven { repo_id, roadmap })
+        .collect())
+}
+
+/// One stage **queued to join** its roadmap's chain: the Conversation it is, and
+/// which stage of the roadmap.
+///
+/// See [`join_queue`], which is where the order they are in comes from, and
+/// [`queue_to_join`], which is what puts one in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Queued {
+    /// The stage's Conversation, which is what [`StageStandings`] answers about
+    /// it under the label below and what [`stage_chain`] names where it has
+    /// joined already.
+    pub conversation_id: i64,
+
+    /// Which stage of the roadmap, as the roadmap's own line labels it — `05`,
+    /// with the roadmap's zero-padding kept.
+    pub stage: String,
+}
+
+/// Write down that this stage has finished its tasks, and so take its place in
+/// the queue to join its roadmap's chain.
+///
+/// Called where a stage's every box is ticked and its finish is the next step,
+/// which is once per stage — and written **once**: a stage taken up again after a
+/// restart, or after a run that stopped mid-wait, keeps the place its first read
+/// of the backlog gave it. The joins are the one thing a roadmap does in single
+/// file, and the order they happen in is the order the tasks finished rather than
+/// the order a resume happened to reach the stages in.
+///
+/// Nothing checks that the Conversation is a stage. What makes a row mean
+/// anything is the `stage_roadmaps` row [`join_queue`] joins it to, so a queued
+/// Conversation that is a stage of nothing is read back by nobody.
+pub async fn queue_to_join(pool: &SqlitePool, conversation_id: i64) -> Result<()> {
+    sqlx::query("INSERT OR IGNORE INTO stage_joinings (conversation_id) VALUES (?)")
+        .bind(conversation_id)
+        .execute(pool)
+        .await
+        .with_context(|| format!("queueing Conversation {conversation_id} to join its chain"))?;
+
+    Ok(())
+}
+
+/// One roadmap's **queue** to join: the stages of it whose tasks have finished,
+/// in the order they finished them.
+///
+/// What [`stage_chain`] is to the stages that have joined, this is to the stages
+/// that are on their way in — including the ones already in the chain, which
+/// stay in the order they queued in. A stage waits on every stage in front of it
+/// here, and one that has joined is waited on until it *settles*: a stage that
+/// has just joined is a branch still moving, and nothing rebases onto one. See
+/// the server's `joins` module, which is where the two readings are put
+/// together.
+///
+/// Only the rows that hold a label, exactly as [`stage_standings`] is: the queue
+/// says which stage of the roadmap is in front, and a row with no label stands
+/// for no stage.
+///
+/// One Repo's and one roadmap's, for [`stage_chain`]'s reason: two Repos may
+/// hold roadmaps of the same name, and a stage of `mvp` over there is nobody's
+/// turn here.
+pub async fn join_queue(pool: &SqlitePool, repo_id: i64, roadmap: &str) -> Result<Vec<Queued>> {
+    let rows: Vec<(i64, String)> = sqlx::query_as(
+        "SELECT j.conversation_id, r.stage
+         FROM stage_joinings j
+         JOIN stage_roadmaps r ON r.conversation_id = j.conversation_id
+         JOIN conversations c ON c.id = j.conversation_id
+         WHERE c.repo_id = ? AND r.roadmap = ? AND r.stage IS NOT NULL
+         ORDER BY j.place",
+    )
+    .bind(repo_id)
+    .bind(roadmap)
+    .fetch_all(pool)
+    .await
+    .with_context(|| {
+        format!("reading the queue to join the {roadmap} roadmap's chain in Repo {repo_id}")
+    })?;
+
+    Ok(rows
+        .into_iter()
+        .map(|(conversation_id, stage)| Queued {
+            conversation_id,
+            stage,
+        })
+        .collect())
 }
 
 /// Put a move on a Conversation's Timeline.

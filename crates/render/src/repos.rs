@@ -167,9 +167,9 @@ pub struct RepoView {
     /// this Repo now, and what has been.
     pub finished: i64,
 
-    /// The roadmaps in it that nothing is driving, as the notice under the
-    /// new-conversation box finds them. Empty where there are none, which is
-    /// most repositories most days.
+    /// The roadmaps in it with a stage that could be started now, as the notice
+    /// under the new-conversation box finds them. Empty where there are none,
+    /// which is most repositories most days.
     pub roadmaps: Vec<AbandonedRoadmap>,
 }
 
