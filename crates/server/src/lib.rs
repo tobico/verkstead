@@ -112,6 +112,10 @@ mod investigations;
 /// keyed with.
 pub mod key;
 mod limits;
+/// Trying a declared MCP server as it is saved, which is the one place one is
+/// ever spoken to from here — see ADR-0021, where an unreachable server never
+/// holds a launch.
+mod mcp;
 /// Watching a pull request go on merging after the work on it is Done — see
 /// [`checks`] for the watcher that covers a wrap-up, which this takes over from.
 mod merges;

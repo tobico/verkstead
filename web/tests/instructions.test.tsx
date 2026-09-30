@@ -49,6 +49,7 @@ const REST = {
   // The rules ride along as an action rather than a value: nothing this form
   // does says anything about them — see [`IgnoredCommentsEdit`].
   ignored_comments: "Keep",
+  mcp_servers: "Keep",
   rust_build_cache: {
     enabled: TOLD.rust_build_cache.enabled,
     size: TOLD.rust_build_cache.size,
@@ -108,6 +109,8 @@ function saying(standing: SettingsView, instructions: string): SettingsSaved {
     settings: { ...standing, instructions },
     verified: null,
     refused: [],
+    refused_servers: [],
+    tried: [],
   };
 }
 

@@ -249,6 +249,12 @@ export function CleanupPane(props: {
         // own save refused over a pattern it never showed anybody — see
         // [`IgnoredCommentsEdit`].
         ignored_comments: "Keep",
+        // And the declared MCP servers left where they are, for the reason
+        // beside it: they are the other setting that travels as an action, and a
+        // section that spoke for them could have its own save refused over a
+        // name somebody hand-edited into the file weeks ago — see
+        // [`McpServersEdit`].
+        mcp_servers: "Keep",
       });
     },
     onSuccess: (saved: SettingsSaved, asked: Asked) => {

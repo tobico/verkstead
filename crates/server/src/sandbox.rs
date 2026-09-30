@@ -3530,6 +3530,29 @@ pub struct Sandbox {
     /// file at all.
     instructions: String,
 
+    /// And the MCP servers this Conversation attached, each as its name, the
+    /// URL it is reached at and the headers it is spoken to with, read at the
+    /// same moment and for the same reason.
+    ///
+    /// Written into the Built Root, which is the whole of how a session is
+    /// launched with one — into a Claude root's `.claude.json` copy (see
+    /// [`root::config`]) and into the configuration file Verkstead writes for
+    /// each of the other three (see [`root::Root::written`]). One declaration,
+    /// in whichever form that harness reads. Which servers comes off the
+    /// Conversation and what each of them *is* comes off the settings, so a URL
+    /// corrected there reaches the next session and a name nothing declares any
+    /// more is simply not in this list — see
+    /// [`crate::settings::Config::attached_among`].
+    ///
+    /// **The header values are in it**, which is why it is built where the
+    /// token beside it is: they are in `secrets.yaml`, kept from the page and
+    /// the wire rather than from the agent, and a session cannot send a header
+    /// it was not handed.
+    ///
+    /// Empty is the ordinary Conversation, and the root it built before there
+    /// were any.
+    mcp_servers: Vec<crate::settings::AttachedServer>,
+
     /// Where the session inside reaches Verkstead: this Conversation's own base
     /// URL, which is what `verkstead ask` puts its Sets to.
     server: String,
@@ -3824,6 +3847,11 @@ impl Sandbox {
             github_token: secrets.github_token().map(str::to_owned),
             git_author: config.git_author().clone(),
             instructions: config.instructions().to_owned(),
+            // Resolved here rather than carried as names, so that the one
+            // reading of the settings a launch makes is the one every part of
+            // it works off — and so that a name the settings no longer declare
+            // is gone before anything can be built around it.
+            mcp_servers: config.attached_among(&conversation.mcp_servers, secrets),
             server: reachable.asking_from(homes.platform(), conversation.id),
             binds,
             shell: None,
@@ -4545,6 +4573,13 @@ impl Sandbox {
     /// joined, so it is never the account's file and nothing of it is written
     /// back.
     ///
+    /// **Which is where a Codex, a Grok Build or an OpenCode session is
+    /// launched with the Conversation's MCP servers**, each in the form that
+    /// harness reads: the account's own are still left out of it, and
+    /// Verkstead's go in beside what it carries — see [`Sandbox::mcp_servers`],
+    /// read as the sandbox was built. A Claude session's go in its
+    /// `.claude.json` copy instead — see [`Sandbox::config_described`].
+    ///
     /// **And the settings page's instructions text beside it**, as the file
     /// that harness reads for global instructions — see
     /// [`root::Root::instructed`]. Written on the same terms and for the same
@@ -4563,7 +4598,7 @@ impl Sandbox {
                 surface.made(Access::Built(built.join(directory)));
             }
 
-            let (path, contents) = root.written(built);
+            let (path, contents) = root.written(built, &self.mcp_servers);
             surface.made(Access::Written { path, contents });
 
             // And the settings page's one text, as the file this harness reads
@@ -4684,6 +4719,11 @@ impl Sandbox {
     /// account's own, written as the session starts — see
     /// [`root::Root::config`].
     ///
+    /// **And the Conversation's MCP servers in it**, which is the whole of how
+    /// a session is launched with one: the account's are taken out of the copy
+    /// and Verkstead's own are written in their place — see
+    /// [`Sandbox::mcp_servers`], read as the sandbox was built.
+    ///
     /// **Copied rather than linked**, so the trust seeded into it is written
     /// into the session's copy and not into the account's file. What the
     /// session changes in it is merged back as it ends — see
@@ -4710,7 +4750,7 @@ impl Sandbox {
         if builds {
             surface.made(Access::Written {
                 path: copy.clone(),
-                contents: root.config(config_file),
+                contents: root.config(config_file, &self.mcp_servers),
             });
         }
 

@@ -181,15 +181,16 @@ export function Git(): JSX.Element {
   /// exactly as it stands — one request writes the whole file, so a section
   /// left out would be a section emptied.
   ///
-  /// The ignore rules go as `Keep`, which is the one thing a save can be
-  /// refused over: this step has never drawn a rule, and a wizard turned down
-  /// over a pattern somebody hand-edited into the file would be a wizard nobody
-  /// could finish.
+  /// The ignore rules and the declared MCP servers go as `Keep`, which are the
+  /// two things a save can be refused over: this step has never drawn either,
+  /// and a wizard turned down over a pattern or a name somebody hand-edited into
+  /// the file would be a wizard nobody could finish.
   const edit = (): SettingsEdit => ({
     git_author: { name: authorName().trim(), email: authorEmail().trim() },
     github_token: tokenEdit(),
     share_on_done: told()?.share_on_done ?? false,
     ignored_comments: "Keep",
+    mcp_servers: "Keep",
     ...heldConfig(told()),
   });
 

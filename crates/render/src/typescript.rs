@@ -30,11 +30,11 @@ use crate::{
     ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails, PushKey, Registered, Registration,
     RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoPairingsView, RepoRemoved, RepoSwitched,
     RepoView, Resolved, Resumed, RoadmapPane, RoleChoice, Screen, ServeEdit, ServePress,
-    SetReading, SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished,
-    SharedConversation, ShowArchived, ShowingArchived, Shown, Started, SteerCancelled, SteerForm,
-    SteerOpened, SteerSaved, SteerSubmission, Submitted, Subscribed, Subscription, TakenUp,
-    TargetNamed, TargetRecorded, TerminalClosed, TerminalOpened, TerminalsView, TranscriptView,
-    Unsubscribe, UpdateNotice, Watching,
+    ServerAttached, ServerRemoved, SetReading, SettingsEdit, SettingsSaved, SettingsView,
+    ShareCommented, SharePublished, SharedConversation, ShowArchived, ShowingArchived, Shown,
+    Started, SteerCancelled, SteerForm, SteerOpened, SteerSaved, SteerSubmission, Submitted,
+    Subscribed, Subscription, TakenUp, TargetNamed, TargetRecorded, TerminalClosed, TerminalOpened,
+    TerminalsView, TranscriptView, Unsubscribe, UpdateNotice, Watching,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -170,6 +170,13 @@ fn the_viewers_types_are_written_from_these() {
     // fixes an Answer's files is the Set settling rather than the Brief.
     AnswerAttached::export_all(&config).unwrap();
     AnswerAttachmentRemoved::export_all(&config).unwrap();
+
+    // And the MCP servers attached at that same control, which are the one
+    // thing put on a Conversation that is a reference rather than a thing: what
+    // is written down is a name, and what each chip says about it comes back
+    // inside the view above.
+    ServerAttached::export_all(&config).unwrap();
+    ServerRemoved::export_all(&config).unwrap();
 
     // And the two actions that make and unmake what a Conversation works in.
     // Neither takes a request shape — which Conversation is in the path, and

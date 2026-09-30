@@ -408,6 +408,38 @@ columns: Array<string>, options: Array<OptionView>, };
 export type Attached = { "Attached": { attachment: AttachmentView, } } | "NoSuchConversation" | "NotDrafting" | "TooLarge" | "NotAName";
 
 /**
+ * One MCP server a Conversation has attached, as the composer draws it: the
+ * name it was attached under, and whether anything is still declared by it.
+ *
+ * **The name is the whole of what the Conversation holds** — a reference to a
+ * declaration on the settings page, looked up afresh wherever it is needed —
+ * so this is that name with one fact read beside it rather than a copy of the
+ * declaration. The URL is not here and never will be: the page has no use for
+ * it, and the headers beside it are secrets.
+ *
+ * [`Self::declared`] is what tells a working chip from one whose declaration
+ * has been deleted. A chip pointing at nothing is drawn saying so rather than
+ * quietly disappearing: the human attached it on purpose, and a row that went
+ * missing on its own would be the one thing about the Conversation nobody was
+ * told had changed.
+ */
+export type AttachedServerView = { 
+/**
+ * What it is called, which is what it is: lowercase letters, digits and
+ * hyphens — see `McpServer` in `crate::settings`, where one is declared.
+ */
+name: string, 
+/**
+ * Whether the settings still declare a server of that name.
+ *
+ * Read at the moment the Conversation is, as everything about a
+ * declaration is: a server deleted from the settings turns this false on
+ * every Conversation that attached it, and declaring one of that name
+ * again turns it back.
+ */
+declared: boolean, };
+
+/**
  * What a file was attached to.
  *
  * The pills under a Brief are the Brief's own files and the pills under a
@@ -1707,6 +1739,21 @@ shared: ShareView | null,
  */
 attachments: Array<AttachmentView>, 
 /**
+ * And the MCP servers it has attached, in the order they were attached in
+ * — the order the chips are drawn in, beside those pills.
+ *
+ * Empty is the ordinary Conversation, which is nearly all of them. Beside
+ * the files because it is the same act at the same control, and settled in
+ * the same place and at the same moment: the composer while the Brief
+ * drafts, frozen when the work starts.
+ *
+ * **Names rather than declarations**, and never a URL or a header — see
+ * [`AttachedServerView`]. Which is what lets a share carry the chips: what
+ * travels is what the work was given a server *called*, and everything
+ * about reaching it stays in this installation's settings.
+ */
+mcp_servers: Array<AttachedServerView>, 
+/**
  * The steer somebody has started on this Conversation and not yet decided,
  * where there is one.
  *
@@ -2405,6 +2452,15 @@ at: string,
 html: string, };
 
 /**
+ * What is to become of one header's value.
+ *
+ * [`TokenEdit`]'s three actions, once per header and for the same reason: the
+ * value is write-only, so a blank box is the human not touching it rather than
+ * the human emptying it. Correcting a URL leaves every key where it is.
+ */
+export type HeaderEdit = "Keep" | { "Set": { value: string, } } | "Clear";
+
+/**
  * One class of comment nobody wants an agent addressing.
  *
  * Two patterns, either of which may be empty for *no constraint on that part*
@@ -2520,6 +2576,82 @@ html: string, };
  * to say.
  */
 export type Marked = "Untracked" | "Changed";
+
+/**
+ * One header of a declaration, as the page is told about it: its name, and
+ * whether there is a value kept to send in it.
+ *
+ * **Whether, and nothing more.** That is exactly what the token's own view
+ * gives — see [`TokenSaved`] — and it is what the page has to know to draw the
+ * box: a header with a value kept says so and offers to replace or clear it, a
+ * header declared and never given one says that instead. Neither says what the
+ * value is.
+ */
+export type McpHeader = { name: string, 
+/**
+ * Whether anything is kept to send in it. False is a header the
+ * declaration names with nothing behind it — which is a header nothing is
+ * sent in, rather than one sent empty.
+ */
+set: boolean, };
+
+/**
+ * One header on a declaration a save is sending: its name, and what is to
+ * become of the value sent in it.
+ */
+export type McpHeaderEdit = { name: string, value: HeaderEdit, };
+
+/**
+ * One MCP server declared for this installation, as the page is told about it:
+ * a name, the URL it is reached at, and the names of the headers it is spoken
+ * to with.
+ *
+ * **The names of the headers, and no part of a value.** Every header value is
+ * a secret and goes the way the GitHub token goes — written where a secret is
+ * written and never returned. What the page has to draw is which headers a
+ * server has, so that one can be kept, rewritten or taken away; what it does
+ * with a value is send a new one. So this is not the shape a save sends, unlike
+ * [`IgnoreRule`], which is the same both ways: see [`McpServerEdit`].
+ *
+ * **The name is the identity** — lowercase letters, digits and hyphens, unique
+ * among the declarations, and never changed. It is what a Conversation's chip
+ * refers to and what the agent sees in front of the server's tool names, so a
+ * renamed declaration would be one every chip pointing at it had lost.
+ *
+ * **HTTP only.** There is no command, no arguments and no transport to choose:
+ * a stdio server is a child process an agent starts inside its own sandbox, and
+ * it was turned down in the grilling this was settled in.
+ */
+export type McpServer = { name: string, url: string, 
+/**
+ * The headers it is spoken to with, in the order they are sent. Empty is a
+ * server that wants none.
+ */
+headers: Array<McpHeader>, };
+
+/**
+ * And one as a save sends it: the same two halves, and an action per header
+ * rather than a value.
+ *
+ * Its own shape because a value never comes back. What the page was shown is
+ * the header names — see [`McpServer`] — so what it can say about a value is
+ * what is to *become* of it, which is the token's three actions said once per
+ * header.
+ *
+ * The whole list of headers, in the order they are to be read back in: a header
+ * taken off the row is one the declaration no longer names, and one added is a
+ * name with a value to set.
+ */
+export type McpServerEdit = { name: string, url: string, headers: Array<McpHeaderEdit>, };
+
+/**
+ * What is to become of the declared MCP servers on a save.
+ *
+ * An action for the reason [`IgnoredCommentsEdit`] is one: they are the other
+ * thing on this page a save can be refused over, so a section that is not about
+ * them says nothing about them and cannot be turned down by one.
+ */
+export type McpServersEdit = "Keep" | { "Set": { servers: Array<McpServerEdit>, } };
 
 /**
  * And whether it merges into its base.
@@ -3957,6 +4089,77 @@ trouble: string, } | { "press": "Trouble", trouble: string, };
 export type ServeView = { "serve": "Off" } | { "serve": "On", address: string, } | { "serve": "Unreadable", trouble: string, };
 
 /**
+ * What became of attaching a declared MCP server to a Conversation.
+ *
+ * [`Attached`]'s two refusals, and one of its own. There is no *already
+ * attached*: a server the Conversation holds already is taken out of the menu,
+ * and the state a second press asks for is the state there is.
+ */
+export type ServerAttached = "Attached" | "NoSuchConversation" | "NotDrafting" | "NoSuchServer";
+
+/**
+ * Which of a declaration's two halves something is about.
+ */
+export type ServerField = "Name" | "Url";
+
+/**
+ * One declaration a save was turned down over, by where it stood in what was
+ * sent.
+ *
+ * By position rather than by name, for the reason [`RuleRefused`] is by
+ * position: the row it names is the row the human is looking at, and one of the
+ * two things that can be wrong with a name is that it is the same as another's.
+ */
+export type ServerRefused = { 
+/**
+ * Where it stood among the declarations that were sent, counting from zero.
+ */
+server: number, 
+/**
+ * Which of its two boxes the error is drawn at. Never absent, unlike a
+ * rule's: every way a declaration goes wrong is a way one of its two halves
+ * does, so there is always a box to say it at.
+ */
+field: ServerField, 
+/**
+ * Why, in words to put on the row.
+ */
+why: string, };
+
+/**
+ * And of taking one off again.
+ *
+ * No *no such server*, for [`AttachmentRemoved`]'s reason twice over: a chip
+ * that is not there is the state the × asked for, and a chip whose declaration
+ * has been deleted is exactly the one the human is most likely to be pressing.
+ */
+export type ServerRemoved = "Removed" | "NoSuchConversation" | "NotDrafting";
+
+/**
+ * What came of trying one declared server as it was saved.
+ *
+ * The token's [`Verified`] said about a server, and for the reason that is
+ * carried back with a save rather than fetched afterwards: the moment a URL is
+ * typed is the moment a wrong one is worth saying something about, and the
+ * human is looking at the page then.
+ *
+ * **It is saved either way.** The outcome is told rather than enforced — a
+ * server that cannot be reached today is still declared, because it may be
+ * reachable tomorrow or only from inside a session's network. And it is tried
+ * here and nowhere else: an unreachable server never holds a launch, which is
+ * ADR-0021's.
+ */
+export type ServerTried = { 
+/**
+ * The declaration this is about, by the name it was saved under.
+ */
+server: string, 
+/**
+ * And what came of it.
+ */
+outcome: Tried, };
+
+/**
  * One stored Question Set as the browser receives it: the document where this
  * build can still read what was asked, and the record itself where it cannot.
  *
@@ -4152,6 +4355,18 @@ sandbox_binds: Array<string>,
  */
 ignored_comments: IgnoredCommentsEdit, 
 /**
+ * And what is to become of the declared MCP servers, which is an action for
+ * the reason the rules above it are one: they are the other thing here a
+ * save can be refused over, and a section that rode them along as values
+ * could have its own save turned down by a name somebody hand-edited into
+ * the file weeks ago.
+ *
+ * The whole list where it is sent, in the order it is to be read back in:
+ * a row taken off the page is a declaration taken out of the file, and a
+ * row whose URL was rewritten is that declaration with the new one.
+ */
+mcp_servers: McpServersEdit, 
+/**
  * And the text every session is given, as a value again — the plainest one
  * here. What is sent is what `config.yaml` holds afterwards, so a box
  * cleared on the page is the key taken out of the file.
@@ -4195,7 +4410,31 @@ verified: Verified | null,
  * with it — draw the errors at the rows and leave what the human typed
  * where it is.
  */
-refused: Array<RuleRefused>, };
+refused: Array<RuleRefused>, 
+/**
+ * And the declarations that would not be written down, or empty where the
+ * save landed — which is every save that did not send any.
+ *
+ * Its own list rather than the one above, because the two name different
+ * things: a rule is refused by where it stood among the rules, and a
+ * declaration by where it stood among the declarations. A save turned down
+ * over either is the whole request refused and neither file touched, so
+ * what this says and what `refused` says are both drawn over what the human
+ * still has in front of them.
+ */
+refused_servers: Array<ServerRefused>, 
+/**
+ * And what came of speaking to each declaration that *was* written down,
+ * in the order they were declared — empty on every save that said nothing
+ * about them, and on one that was turned down, nothing having been written
+ * to speak to.
+ *
+ * By name rather than by position, unlike the two lists above: this is
+ * only ever about declarations that landed, so each of them has a name
+ * that is a name and no two share one — see [`McpServer`], where the name
+ * is the identity.
+ */
+tried: Array<ServerTried>, };
 
 /**
  * The settings as they stand, read off the two files at the moment they are
@@ -4249,6 +4488,17 @@ paths: PathsView,
  * quietly left out of the read would be one the human could not correct.
  */
 ignored_comments: Array<IgnoreRule>, 
+/**
+ * And the MCP servers declared for this installation, in the order they
+ * were written down — empty on a Verkstead nobody has declared any on,
+ * which is a Conversation with nothing to attach.
+ *
+ * Exactly as the file holds them, a name the page would have refused
+ * included: this is what the section draws back into its rows, and a
+ * declaration quietly left out of the read would be one the human could
+ * neither use nor correct.
+ */
+mcp_servers: Array<McpServer>, 
 /**
  * And the one text every session is given, whatever harness runs it —
  * empty on a Verkstead nobody has typed one into, which is a session told
@@ -5381,6 +5631,24 @@ whole: boolean,
  * and the shape of it is [`Cursor`]'s business alone.
  */
 cursor: string, };
+
+/**
+ * Whether a declaration answered, and what it called itself or why it did not.
+ *
+ * **Nothing the server sent back is quoted in a refusal.** What it is spoken
+ * to with are the header values, which are secrets — see [`McpHeader`] — and a
+ * service that echoed one into an error message would otherwise put it on the
+ * page. So a refusal is Verkstead's own words about which of the three ways it
+ * went wrong, and the one thing carried over from the server itself is the
+ * name it gives for itself, which is what `initialize` is asked for.
+ */
+export type Tried = { "Reached": { 
+/**
+ * The name it gives for itself, where it gives one — `serverInfo.name`
+ * in what it answered. `null` on a server that named itself nothing,
+ * which is one that is reachable and says so in fewer words.
+ */
+named: string | null, } } | { "Refused": { why: string, } };
 
 /**
  * One thing that was said, or done, or put.

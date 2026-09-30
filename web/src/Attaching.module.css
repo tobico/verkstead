@@ -107,3 +107,92 @@
 .picker {
   display: none;
 }
+
+/* A chip: what is attached at this control that is not a file — an MCP server
+   the Conversation has, which is a reference by name to something declared on
+   the settings page rather than bytes sitting in its directory. See `Chip` in
+   `Attaching.tsx`.
+
+   The pill's shape, because it is in the pill's row and it is the same act: a
+   thing the human put on the work, with the same × on it. What tells it apart
+   at a glance is the fill and the edge it takes — the accent's, at the weight a
+   quiet mark is drawn in — and the plug in front of the name. Two differences
+   rather than one, so the row still reads apart for somebody who cannot tell
+   the two colours from each other. */
+.attachment.server {
+  color: var(--accent);
+  background: var(--card);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+/* The mark that says what kind of thing it is, in front of the name and at the
+   size of the line rather than of a heading: what it is doing is telling the
+   chip from the pill beside it. */
+.plug {
+  flex: 0 0 auto;
+  font-size: 0.85em;
+}
+
+/* The name. Not monospace and not cut, unlike a file's: a declaration's name is
+   lowercase letters, digits and hyphens by the settings page's own rule, so
+   there is neither an extension to keep nor a length to lose. */
+.serverName {
+  min-width: 0;
+}
+
+/* And the chip whose declaration has gone. The accent comes off it — there is
+   nothing on the other end of the reference to point at — and it stands in the
+   ink a thing that is no longer true is said in, with the words beside the name
+   saying which. It keeps its ×, that being the whole point of drawing it at
+   all. */
+.attachment.server.missing {
+  color: var(--ink-soft);
+  border-color: var(--edge);
+  border-style: dashed;
+}
+
+/* The paperclip where it is the trigger of a menu rather than a button of its
+   own — see `AttachMenu` in `Attaching.tsx`. The menu chrome is `Menu.module.css`
+   and the trigger's paint is the caller's, which here is this: the pressable
+   icon's, said again on a button this module does not own. See
+   `IconButton.module.css`, which is the one the plain shape of this control
+   draws — the two stand in the same row on the same page and have to read as
+   one control in two states. */
+.clip > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.6rem;
+  font-size: 1.1rem;
+  line-height: 1;
+  color: var(--ink-soft);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 0.4rem;
+}
+
+/* Darkened while the menu is down, and under the pointer: the same two moments
+   the pressable icon takes a fill for. */
+.clip > button[aria-expanded="true"] {
+  color: var(--ink);
+  background: var(--card);
+}
+
+@media (hover: hover) {
+  .clip > button:not(:disabled):hover {
+    color: var(--ink);
+    background: var(--card);
+  }
+}
+
+/* Hung from the trigger's near edge rather than its far one, the paperclip
+   standing at the near edge of its row — and never wider than the window it
+   comes down over. Capped and scrolling inside the cap, an installation being
+   free to declare more servers than a phone has room for. */
+.clip > [role="menu"] {
+  right: auto;
+  left: 0;
+  width: min(18rem, calc(100vw - 2.5rem));
+  max-height: min(24rem, 70vh);
+  overflow-y: auto;
+}

@@ -1004,6 +1004,70 @@ pub(crate) fn attached(
     )
 }
 
+/// The same prompt again, with the MCP servers the Conversation attached named
+/// under it.
+///
+/// One listing, on **every** session prompt of the Conversation, for the
+/// reason the companions' and the attached files' listings are on every one:
+/// a server is attached to the Conversation rather than to a round of it, and
+/// every session of it is launched with them. Appended where every session is
+/// launched from rather than written into each prompt builder, so a builder
+/// added later cannot forget it.
+///
+/// `servers` is what the Conversation's chips came to at this launch — the
+/// ones the settings still declare, in the order they were attached — so a
+/// name whose declaration has gone is not named here any more than it is
+/// configured. A Conversation with none is the prompt unchanged, which is most
+/// of them.
+///
+/// **And how the tools are named, which is the harness's answer.** What the
+/// agent sees in front of a server's tools is the one thing about an MCP server
+/// a session cannot work out for itself, and it is the one thing about this
+/// that is not the same everywhere — so it is said here, by the harness this
+/// session is being launched on. All four are launched with servers, so all
+/// four are told — see [`tools_named`].
+///
+/// Neutral, as the two listings above it are: each server is named and nothing
+/// here says what to do with any of it. The Brief says what the work is, and
+/// the human attached the server because they had a use for it.
+pub(crate) fn served(prompt: &str, servers: &[String], agent: store::AgentType) -> String {
+    if servers.is_empty() {
+        return prompt.to_owned();
+    }
+
+    let naming = tools_named(agent);
+
+    let listed: Vec<String> = servers.iter().map(|name| format!("- `{name}`")).collect();
+
+    format!(
+        "{}\n\n# MCP servers\n\nThis session was launched with the MCP servers the human \
+         attached to this Conversation. Their tools are named `{naming}`.\n\n{}\n",
+        prompt.trim_end(),
+        listed.join("\n"),
+    )
+}
+
+/// What a harness puts in front of an MCP server's tool names.
+///
+/// Each read off a real run against a server that recorded what it was asked,
+/// rather than off anybody's documentation — the harness's own version in
+/// brackets:
+///
+/// - Claude Code (2.1.268) and Codex (0.155.1) both name a tool
+///   `mcp__<server>__<tool>`. Codex reaches it through a namespace of that
+///   first half rather than a flat name, which comes to the same thing from
+///   inside the session.
+/// - Grok Build (1.0.34) drops the prefix: `<server>__<tool>`, which is the
+///   name its `use_tool` takes.
+/// - OpenCode (1.18.31) joins the two with one underscore: `<server>_<tool>`.
+fn tools_named(agent: store::AgentType) -> &'static str {
+    match agent {
+        store::AgentType::Claude | store::AgentType::Codex => "mcp__<server>__<tool>",
+        store::AgentType::Grok => "<server>__<tool>",
+        store::AgentType::OpenCode => "<server>_<tool>",
+    }
+}
+
 /// What an origin is called where its files are listed under it.
 ///
 /// One line rather than a heading of its own: there are two origins, and a
@@ -4281,6 +4345,133 @@ mod tests {
         let prompt = next_task(&mounted(), "# Rate limiting\n\nThe API has none.\n", None);
 
         assert_eq!(attached(&prompt, &[], &[], &attachments_inside()), prompt);
+    }
+
+    /// The MCP servers the Conversation attached, named under a heading of
+    /// their own with the one thing a session cannot work out for itself:
+    /// what its harness puts in front of their tool names.
+    #[test]
+    fn every_attached_server_is_named_with_how_its_tools_are_named() {
+        let prompt = served(
+            &next_task(&mounted(), "# Rate limiting\n\nThe API has none.\n", None),
+            &["docs".to_owned(), "tickets".to_owned()],
+            store::AgentType::Claude,
+        );
+
+        assert!(
+            prompt.contains("# The Brief this started from"),
+            "the work is still what the session is being told about: {prompt:?}"
+        );
+        assert_eq!(
+            prompt.matches("# MCP servers").count(),
+            1,
+            "one listing, whatever the prompt was built by: {prompt:?}"
+        );
+        assert!(
+            prompt.contains("`mcp__<server>__<tool>`"),
+            "and how Claude names their tools: {prompt:?}"
+        );
+        assert!(
+            prompt.contains("- `docs`\n- `tickets`"),
+            "each server named, in the order they were attached: {prompt:?}"
+        );
+    }
+
+    /// The section is on every session prompt of the Conversation, whichever
+    /// builder made it: a server is attached to the Conversation rather than to
+    /// a round of it, and every session of it is launched with them.
+    #[test]
+    fn the_servers_are_on_a_grillings_prompt_and_a_wrap_ups_alike() {
+        for built in [
+            grilling(&mounted(), "# Rate limiting\n"),
+            reviewing(&mounted(), "# Rate limiting\n", None, None, None),
+        ] {
+            let prompt = served(&built, &["docs".to_owned()], store::AgentType::Claude);
+
+            assert!(
+                prompt.contains("- `docs`"),
+                "the server is named whatever the session is for: {prompt:?}"
+            );
+        }
+    }
+
+    /// And a Conversation with none attached is the prompt as it stands, which
+    /// is most of them: a heading over an empty list would tell a session that
+    /// something had been configured.
+    #[test]
+    fn a_conversation_with_no_servers_is_started_on_the_prompt_as_it_stands() {
+        let prompt = next_task(&mounted(), "# Rate limiting\n\nThe API has none.\n", None);
+
+        for agent in [
+            store::AgentType::Claude,
+            store::AgentType::Codex,
+            store::AgentType::Grok,
+            store::AgentType::OpenCode,
+        ] {
+            assert_eq!(served(&prompt, &[], agent), prompt);
+        }
+    }
+
+    /// Every harness is launched with them, so every harness is told — each in
+    /// the naming its own tools come out under, which is the one thing about
+    /// this that is not the same everywhere.
+    #[test]
+    fn each_harness_is_told_the_naming_its_own_tools_come_out_under() {
+        let prompt = next_task(&mounted(), "# Rate limiting\n", None);
+
+        for (agent, naming) in [
+            (store::AgentType::Claude, "`mcp__<server>__<tool>`"),
+            (store::AgentType::Codex, "`mcp__<server>__<tool>`"),
+            (store::AgentType::Grok, "`<server>__<tool>`"),
+            (store::AgentType::OpenCode, "`<server>_<tool>`"),
+        ] {
+            let said = served(&prompt, &["docs".to_owned()], agent);
+
+            assert!(
+                said.contains(naming),
+                "{agent:?} names its tools {naming}: {said:?}"
+            );
+            assert!(
+                said.contains("- `docs`"),
+                "and the server is named whichever harness runs it: {said:?}"
+            );
+        }
+    }
+
+    /// And the three namings are told apart rather than one standing in for
+    /// another: `<server>__<tool>` is inside `mcp__<server>__<tool>`, so a
+    /// harness given the longer one would pass a test that only looked for the
+    /// shorter.
+    #[test]
+    fn the_shorter_naming_is_not_the_longer_one_read_loosely() {
+        let prompt = served("", &["docs".to_owned()], store::AgentType::Grok);
+
+        assert!(
+            !prompt.contains("mcp__"),
+            "grok's tools carry no `mcp__` in front of them: {prompt:?}"
+        );
+
+        let prompt = served("", &["docs".to_owned()], store::AgentType::OpenCode);
+
+        assert!(
+            !prompt.contains("__"),
+            "and opencode joins the two halves with one underscore: {prompt:?}"
+        );
+    }
+
+    /// And it says what is there and nothing about what to do with it, as the
+    /// two listings above it do: the human attached a server because they had a
+    /// use for it, and the Brief is what says what that is.
+    #[test]
+    fn the_servers_listing_tells_a_session_nothing_about_what_to_do_with_them() {
+        let prompt = served("", &["docs".to_owned()], store::AgentType::Claude);
+
+        for instructed in ["you should", "use it", "make sure", "read the", "call it"] {
+            assert!(
+                !prompt.to_lowercase().contains(instructed),
+                "the listing is neutral, and {instructed:?} is not: {prompt:?}"
+            );
+        }
     }
 
     /// A size is said in whichever unit keeps it to a few digits, because what

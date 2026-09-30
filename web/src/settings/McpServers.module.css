@@ -1,0 +1,225 @@
+/* The MCP servers declared for this installation — see `McpServers.tsx`.
+
+   Two halves in two panes, like the sections around it: the card carries how
+   many are declared, and the rows that rewrite them stand in the details pane
+   beside it.
+
+   What a card *is* is `CardButton.module.css`'s, and what a field is is
+   `styles/base.css`'s. The rows are the shape the ignore rules' are on the Git
+   pane — a bordered block per declaration, its boxes tighter inside it than the
+   pane's own fields are, because what is being read is the one declaration
+   rather than two questions. */
+
+.serversCard {
+  margin-bottom: 1.5rem;
+}
+
+.serversCard h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.1rem;
+}
+
+/* How it stands, in a line: the same quiet the sections above it say what is
+   configured in. */
+.standing {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+/* And the details pane: the line saying what a declaration is, the rows, and the
+   press. */
+.servers {
+  margin-top: 0.85rem;
+}
+
+.rows {
+  margin: 0.85rem 0;
+  padding: 0;
+  list-style: none;
+}
+
+.row {
+  padding: 0.65rem 0.8rem;
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+  background: var(--paper);
+}
+
+.row + .row {
+  margin-top: 0.5rem;
+}
+
+.servers label {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+/* The name of a declaration that is already made, where a new row draws a field.
+   It reads as what the agent will see in front of the server's tool names, which
+   is why it is set in the monospace a field on this page is. */
+.name {
+  margin: 0 0 0.5rem;
+  font-size: 0.95rem;
+}
+
+.servers input {
+  display: block;
+  width: 100%;
+  margin-bottom: 0.5rem;
+  font: inherit;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  color: inherit;
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  padding: 0.5rem 0.6rem;
+}
+
+/* The field being typed in, which is no pointer's doing: the border says which
+   box a name or a URL is going into. */
+.servers input:focus-visible {
+  border-color: var(--accent);
+}
+
+/* And why the save was turned down over a row, under the box it names — quiet
+   and close, the way a pattern that will not compile sits under the pattern. */
+.servers .trouble {
+  margin: -0.2rem 0 0.6rem;
+  font-size: 0.85rem;
+}
+
+/* And what came of speaking to it when it was last saved, under the same box:
+   the token's own two lines, said about a server. Reached is the green the
+   account GitHub vouched for is said in, and refused is an `ErrorLine` — a
+   declaration that will not answer is worth a colour, and it is saved either
+   way. */
+.servers .reached,
+.servers .unreached {
+  margin: -0.2rem 0 0.6rem;
+  font-size: 0.85rem;
+}
+
+.servers .reached {
+  color: var(--added);
+}
+
+/* The name it gives for itself, which is the server's own word rather than the
+   one it is declared under — set apart the way the account a token belongs to
+   is. */
+.calls {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  color: var(--ink);
+}
+
+/* The headers a declaration is spoken to with, under its URL: a block of its
+   own inside the row, because what is being read there is one declaration and
+   the headers are a list inside it. Quieter than the row's own labels — it is a
+   heading for a list rather than a label for a box. */
+.headersHead {
+  margin: 0.2rem 0 0.4rem;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+.headers {
+  margin: 0 0 0.5rem;
+  padding: 0;
+  list-style: none;
+}
+
+/* One header. Set in from the declaration's own boxes and ruled off on the left,
+   so that a row with three of them reads as one declaration rather than as four
+   things side by side. */
+.header {
+  padding-left: 0.65rem;
+  border-left: 2px solid var(--edge);
+}
+
+.header + .header {
+  margin-top: 0.5rem;
+}
+
+/* A declaration with no headers at all, which is the ordinary one: said rather
+   than drawn as a gap. */
+.none {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+/* And what the write-only box cannot say for itself: that a value is kept, or
+   that the one kept is about to be taken away. Under the box it is about, the
+   way a refusal sits under the box it names. */
+.standingBy {
+  margin: -0.2rem 0 0.5rem;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+/* The two small acts: taking a row away, and adding another. Outlines rather
+   than fills, because the Save at the foot of the form is what saves and these
+   only change what it will send — which is what `QuietButton` already draws, and
+   what the rule for a `button` below would otherwise paint over. The remove
+   takes the colour of what it does. */
+.servers .remove,
+.servers .add,
+.servers .clear {
+  padding: 0.35rem 0.75rem;
+  font-weight: inherit;
+  font-size: 0.9rem;
+  color: var(--accent);
+  background: none;
+  border-color: var(--edge);
+}
+
+.servers .remove {
+  color: var(--removed);
+}
+
+/* Taking a value away is a removal, and says so in the colour the removals on
+   this pane are in. */
+.servers .clear {
+  margin-bottom: 0.5rem;
+  color: var(--removed);
+}
+
+.buttons {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.85rem;
+}
+
+.buttons button {
+  padding: 0.5rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--paper);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.buttons button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.failure {
+  margin: 0.75rem 0 0;
+  font-size: 0.9rem;
+}
+
+@media (hover: hover) {
+  .buttons button:not(:disabled):hover {
+    background: var(--accent-deep);
+    border-color: var(--accent-deep);
+  }
+
+  .servers input:hover {
+    border-color: var(--ink-soft);
+  }
+}

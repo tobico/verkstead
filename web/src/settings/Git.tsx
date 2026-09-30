@@ -333,6 +333,9 @@ export function GitPane(props: {
     // save, and one that spoke for them could be turned down over a pattern it
     // never showed anybody — see [`ruleEdit`].
     ignored_comments: "Keep",
+    // And the declared MCP servers, for the reason beside it: they are the other
+    // setting that travels as an action, and this form has never drawn one.
+    mcp_servers: "Keep",
     ...held(),
     ...owned,
   });
@@ -491,6 +494,10 @@ export function GitPane(props: {
       // see [`ruleEdit`]. That is what stops a corrected email address being
       // refused over a pattern somebody hand-edited into the file weeks ago.
       ignored_comments: ruleEdit(),
+      // And the declared servers left where they are: this form has nothing to
+      // say about them, and one that spoke for them could be turned down over a
+      // name somebody hand-edited into the file weeks ago.
+      mcp_servers: "Keep",
       ...held(),
     });
   };

@@ -154,6 +154,10 @@ const COMPILE_SERVER_REPORT: &str = "compile-server-report";
 /// made, and the Conversation is a row the store wrote — because what the
 /// sandbox binds is read off those, and a fixture that hand-built the paths
 /// would prove the probe works rather than that the sandbox does.
+/// One MCP server as [`Grilling::declaring_headers`] is told about it: a name,
+/// the URL it is reached at, and the headers it is spoken to with.
+type Declaring<'a> = (&'a str, &'a str, &'a [(&'a str, &'a str)]);
+
 struct Grilling {
     /// Kept alive for as long as the fixture is: the directories go when these
     /// drop, and a worktree that vanished mid-probe would fail obscurely.
@@ -475,10 +479,102 @@ fi
         std::fs::write(self.settings.secrets_path(), yaml).unwrap();
     }
 
-    /// And `config.yaml`, which is who those sandboxes commit as and how their
-    /// shared build cache is set.
+    /// And `config.yaml`, which is who those sandboxes commit as, how their
+    /// shared build cache is set, and what MCP servers this installation
+    /// declares.
     fn configure(&self, yaml: &str) {
         std::fs::write(self.settings.config_path(), yaml).unwrap();
+    }
+
+    /// Declare these MCP servers and nothing else, the way the settings page
+    /// leaves `config.yaml`.
+    ///
+    /// Written again rather than added to, because that is what a save of that
+    /// section is: the declarations the page sent are the declarations there
+    /// are, so this is also how one is edited and how one is deleted.
+    fn declaring(&self, servers: &[(&str, &str)]) {
+        let with_none: Vec<_> = servers
+            .iter()
+            .map(|(name, url)| (*name, *url, &[][..]))
+            .collect();
+
+        self.declaring_headers(&with_none);
+    }
+
+    /// And the same with the headers each is spoken to with, which is the pair
+    /// of files that section writes: the names in `config.yaml` beside the
+    /// declaration, and the values in `secrets.yaml` under the server's name.
+    ///
+    /// Both written again rather than added to, for [`Grilling::declaring`]'s
+    /// reason — and the token is not written here, this being the arrangement
+    /// that lets one be saved without the other being disturbed.
+    fn declaring_headers(&self, servers: &[Declaring]) {
+        let declared: String = servers
+            .iter()
+            .map(|(name, url, headers)| {
+                let names: String = headers
+                    .iter()
+                    .map(|(header, _)| format!("      - {header}\n"))
+                    .collect();
+
+                let names = match names.is_empty() {
+                    true => String::new(),
+                    false => format!("    headers:\n{names}"),
+                };
+
+                format!("  - name: {name}\n    url: {url}\n{names}")
+            })
+            .collect();
+
+        self.configure(&format!("mcp_servers:\n{declared}"));
+
+        let kept: String = servers
+            .iter()
+            .filter(|(_, _, headers)| !headers.is_empty())
+            .map(|(name, _, headers)| {
+                let values: String = headers
+                    .iter()
+                    .map(|(header, value)| format!("    {header}: {value}\n"))
+                    .collect();
+
+                format!("  {name}:\n{values}")
+            })
+            .collect();
+
+        std::fs::write(
+            self.settings.secrets_path(),
+            match kept.is_empty() {
+                true => String::new(),
+                false => format!("mcp_headers:\n{kept}"),
+            },
+        )
+        .unwrap();
+    }
+
+    /// And attach each of them to the Conversation, the way the draft
+    /// composer's menu does.
+    ///
+    /// The Conversation is loaded again afterwards, because what it has
+    /// attached is carried on it — see the store's `Conversation::mcp_servers`
+    /// — and every sandbox built from here on is built around the copy the
+    /// fixture holds.
+    async fn attaching(&mut self, names: &[&str]) {
+        for name in names {
+            store::attach_mcp_server(&self.pool, self.conversation.id, name)
+                .await
+                .unwrap();
+        }
+
+        self.reload().await;
+    }
+
+    /// The Conversation as the record has it now, which is what a sandbox is
+    /// built around.
+    async fn reload(&mut self) {
+        self.conversation = store::load_conversation(&self.pool, self.conversation.id)
+            .await
+            .unwrap()
+            .expect("the Conversation is still there");
     }
 
     /// A Profile of the second agent type, whose whole account is one home.
@@ -3783,6 +3879,472 @@ async fn a_claude_sessions_config_trusts_the_repo_and_the_worktree_and_holds_no_
         serde_json::json!({"allowedTools": []}),
         "nor an entry's own"
     );
+}
+
+/// A Claude session is launched with the MCP servers its Conversation attached:
+/// one entry apiece in the `.claude.json` it reads, each with the transport
+/// Claude Code refuses a URL without — and nothing of them reaches the
+/// account's own file when the session ends.
+#[tokio::test]
+async fn a_claude_session_is_launched_with_the_servers_its_conversation_attached() {
+    let mut fixture = grilling().await;
+
+    std::fs::write(
+        fixture.claude_config(),
+        "{\"numStartups\": 1, \"mcpServers\": {\"the-humans\": {}}}\n",
+    )
+    .unwrap();
+
+    fixture.declaring(&[
+        ("docs", "https://mcp.example.com/docs"),
+        ("tickets", "https://mcp.example.com/tickets"),
+    ]);
+    fixture.attaching(&["tickets", "docs"]).await;
+
+    let (reported, afterwards) = probe_closing(
+        &fixture.sandbox(vec![]),
+        r#"say config "$(tr -d '\n' < "$HOME/.claude.json")""#,
+    );
+
+    let config: serde_json::Value = serde_json::from_str(&reported["config"]).unwrap();
+
+    assert_eq!(
+        config["mcpServers"],
+        serde_json::json!({
+            "tickets": {"type": "http", "url": "https://mcp.example.com/tickets"},
+            "docs": {"type": "http", "url": "https://mcp.example.com/docs"},
+        }),
+        "the session reads the Conversation's servers and none of the human's: {config}"
+    );
+
+    afterwards.close();
+
+    assert_eq!(
+        std::fs::read_to_string(fixture.claude_config()).unwrap(),
+        "{\"numStartups\": 1, \"mcpServers\": {\"the-humans\": {}}}\n",
+        "and the account's file is untouched: it has lost none of its own servers \
+         and gained none of Verkstead's"
+    );
+}
+
+/// Which servers is read off the Conversation and what each of them is off the
+/// settings, both at the moment a session is launched — so a URL corrected
+/// between two sessions is what the second is given, and a declaration deleted
+/// in the meantime is left out rather than holding the launch up.
+#[tokio::test]
+async fn a_second_session_is_given_the_declarations_as_they_stand_then() {
+    let mut fixture = grilling().await;
+
+    fixture.declaring(&[
+        ("docs", "https://mcp.example.com/docs"),
+        ("tickets", "https://mcp.example.com/tickets"),
+    ]);
+    fixture.attaching(&["docs", "tickets"]).await;
+
+    let first = servers_inside(&fixture);
+
+    assert_eq!(
+        first,
+        serde_json::json!({
+            "docs": {"type": "http", "url": "https://mcp.example.com/docs"},
+            "tickets": {"type": "http", "url": "https://mcp.example.com/tickets"},
+        }),
+        "the first session has both of them as they were declared"
+    );
+
+    // The human corrects one URL on the settings page and deletes the other
+    // declaration. Nothing about the Conversation changes: its chips are
+    // references by name, and the one whose declaration has gone is drawn as a
+    // server that is gone rather than taken off.
+    fixture.declaring(&[("docs", "https://docs.internal/mcp")]);
+
+    assert_eq!(
+        servers_inside(&fixture),
+        serde_json::json!({ "docs": {"type": "http", "url": "https://docs.internal/mcp"} }),
+        "and the next one is given the corrected URL, with the deleted declaration \
+         simply left out"
+    );
+}
+
+/// And the headers a server is spoken to with are in the root beside its URL,
+/// values and all: the harness has to send them, so the session has to be handed
+/// them.
+///
+/// That is the limit of the secrecy, and it was settled in the grilling: a
+/// header value is kept from the page and the wire rather than from the agent,
+/// which reads its own configuration — see ADR-0021. What keeps it is the root,
+/// which is no more readable than the login beside it.
+#[tokio::test]
+async fn a_claude_sessions_servers_carry_the_headers_they_are_spoken_to_with() {
+    let mut fixture = grilling().await;
+
+    fixture.declaring_headers(&[
+        (
+            "docs",
+            "https://mcp.example.com/docs",
+            &[
+                ("Authorization", "Bearer sk-averysecretkey"),
+                ("X-Tenant", "verkstead"),
+            ],
+        ),
+        ("tickets", "https://mcp.example.com/tickets", &[]),
+    ]);
+    fixture.attaching(&["docs", "tickets"]).await;
+
+    assert_eq!(
+        servers_inside(&fixture),
+        serde_json::json!({
+            "docs": {
+                "type": "http",
+                "url": "https://mcp.example.com/docs",
+                "headers": {
+                    "Authorization": "Bearer sk-averysecretkey",
+                    "X-Tenant": "verkstead",
+                },
+            },
+            // And a server that wants none is written the way it was before
+            // there were headers to write: no key at all.
+            "tickets": { "type": "http", "url": "https://mcp.example.com/tickets" },
+        }),
+    );
+}
+
+/// And a header the declaration names with nothing kept for it is left out
+/// rather than sent empty: an empty credential is not the credential the service
+/// asked for, and a request without one fails plainly where a request with an
+/// empty one fails obscurely.
+#[tokio::test]
+async fn a_header_with_no_value_kept_for_it_is_not_sent() {
+    let mut fixture = grilling().await;
+
+    fixture.configure(concat!(
+        "mcp_servers:\n",
+        "  - name: docs\n",
+        "    url: https://mcp.example.com/docs\n",
+        "    headers:\n",
+        "      - Authorization\n",
+    ));
+    fixture.attaching(&["docs"]).await;
+
+    assert_eq!(
+        servers_inside(&fixture),
+        serde_json::json!({
+            "docs": { "type": "http", "url": "https://mcp.example.com/docs" },
+        }),
+    );
+}
+
+/// And a request made with what the root carries arrives at the server with
+/// them.
+///
+/// `curl` inside the sandbox is standing in for the harness, the way it stands
+/// in for the bundled CLI where a session puts a Set: it reads the URL and the
+/// header out of the `.claude.json` the session was given and asks for them,
+/// which is what Claude Code does with that file. The server is a real listener
+/// on the host's loopback, which the sandbox shares — see
+/// [`the_network_is_the_hosts_own`].
+#[tokio::test]
+async fn a_request_to_an_attached_server_arrives_with_its_headers() {
+    let mut fixture = grilling().await;
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+
+    let asked = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("the probe connects");
+
+        let mut asked = Vec::new();
+
+        // To the end of the request line and its headers, which is all this is
+        // about — and no further, a read to the end of the stream waiting on a
+        // close the probe makes only once it has been answered.
+        loop {
+            let mut byte = [0u8; 1];
+
+            if std::io::Read::read(&mut stream, &mut byte).unwrap_or(0) == 0 {
+                break;
+            }
+
+            asked.push(byte[0]);
+
+            if asked.ends_with(b"\r\n\r\n") {
+                break;
+            }
+        }
+
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\n\r\n")
+            .unwrap();
+
+        String::from_utf8_lossy(&asked).into_owned()
+    });
+
+    fixture.declaring_headers(&[(
+        "docs",
+        &format!("http://127.0.0.1:{port}/mcp"),
+        &[("Authorization", "Bearer sk-averysecretkey")],
+    )]);
+    fixture.attaching(&["docs"]).await;
+
+    let reported = probe(
+        &fixture.sandbox(vec![]),
+        &format!(
+            r#"
+            config="$HOME/.claude.json"
+            url=$({sed} -n 's/.*"url": "\(.*\)".*/\1/p' "$config")
+            auth=$({sed} -n 's/.*"Authorization": "\(.*\)".*/\1/p' "$config")
+
+            say url "$url"
+
+            if {curl} --silent --max-time 10 --output /dev/null \
+                --header "Authorization: $auth" "$url"; then
+                say asked yes
+            else
+                say asked no
+            fi
+            "#,
+            curl = quoted(&on_the_host("curl")),
+            sed = quoted(&on_the_host("sed")),
+        ),
+    );
+
+    assert_eq!(
+        reported["url"],
+        format!("http://127.0.0.1:{port}/mcp"),
+        "the session reads the server's URL out of its own configuration"
+    );
+    assert_eq!(reported["asked"], "yes", "and reaches it");
+
+    let asked = asked.join().unwrap();
+
+    assert!(
+        asked.contains("Authorization: Bearer sk-averysecretkey"),
+        "the request arrived with the header the declaration is spoken to \
+         with: {asked}"
+    );
+}
+
+/// And a Codex session is launched with them too, in the form codex reads:
+/// a `[mcp_servers.<name>]` apiece in the `config.toml` Verkstead writes, with
+/// the headers under `http_headers`.
+///
+/// **That spelling is codex's own and the headers do arrive**: read off codex
+/// 0.155.1, driven against a server that recorded what it was asked, whose
+/// `initialize`, `tools/list` and `tools/call` each came in carrying them.
+///
+/// Beside what that file is written for — the account's provider — and with
+/// none of the account's own servers, which the allowlist leaves out as it
+/// always did.
+#[tokio::test]
+async fn a_codex_session_is_launched_with_the_servers_its_conversation_attached() {
+    let mut fixture = grilling().await;
+    let profile = fixture.codex_profile().await;
+
+    fixture.declaring_headers(&THE_TWO_DECLARED);
+    fixture.attaching(&["docs", "tickets"]).await;
+
+    let written = config_inside(&fixture, &profile, ".codex/config.toml");
+    let read: toml::Table = written.parse().expect("codex is given TOML: {written}");
+
+    assert_eq!(
+        read["mcp_servers"],
+        toml::Value::try_from(toml::toml! {
+            [docs]
+            url = "https://mcp.example.com/docs"
+            http_headers = { "Authorization" = "Bearer sk-averysecretkey", "X-Tenant" = "verkstead" }
+
+            [tickets]
+            url = "https://mcp.example.com/tickets"
+        })
+        .unwrap(),
+        "the Conversation's servers, and a server that wants no header written          the way it was before there were headers: {written}"
+    );
+
+    assert!(
+        !written.contains("the-humans"),
+        "and none of the account's own: {written}"
+    );
+    assert_eq!(
+        read["model_provider"],
+        toml::Value::String("proxy".to_owned()),
+        "beside what the file is written for: {written}"
+    );
+}
+
+/// And a Grok Build session, whose form is the same table with the headers
+/// under the name grok gives them — the whole of the difference between the
+/// two.
+///
+/// Read off grok 1.0.34 and proved the same way: a run against the recording
+/// server connected and sent them.
+#[tokio::test]
+async fn a_grok_session_is_launched_with_the_servers_its_conversation_attached() {
+    let mut fixture = grilling().await;
+    let profile = fixture.grok_profile().await;
+
+    fixture.declaring_headers(&THE_TWO_DECLARED);
+    fixture.attaching(&["docs", "tickets"]).await;
+
+    let written = config_inside(&fixture, &profile, ".grok/config.toml");
+    let read: toml::Table = written.parse().expect("grok is given TOML: {written}");
+
+    assert_eq!(
+        read["mcp_servers"],
+        toml::Value::try_from(toml::toml! {
+            [docs]
+            url = "https://mcp.example.com/docs"
+            headers = { "Authorization" = "Bearer sk-averysecretkey", "X-Tenant" = "verkstead" }
+
+            [tickets]
+            url = "https://mcp.example.com/tickets"
+        })
+        .unwrap(),
+        "the Conversation's servers, headers and all: {written}"
+    );
+
+    assert!(
+        !written.contains("the-humans"),
+        "and none of the account's own: {written}"
+    );
+    assert!(
+        written.contains("[model.the-proxy]"),
+        "beside what the file is written for: {written}"
+    );
+}
+
+/// And an OpenCode session, whose form is a JSON entry apiece under `mcp`:
+/// the transport opencode calls a remote server, the URL, its OAuth
+/// auto-detection turned off, and the headers beside them.
+///
+/// Read off opencode 1.18.31 and proved the same way. `oauth: false` is that
+/// schema's own way of saying a server authenticates by header: left to itself
+/// opencode would answer a `401` by starting a login no sandbox has a browser
+/// to finish.
+#[tokio::test]
+async fn an_opencode_session_is_launched_with_the_servers_its_conversation_attached() {
+    let mut fixture = grilling().await;
+    let profile = fixture.opencode_profile().await;
+
+    fixture.declaring_headers(&THE_TWO_DECLARED);
+    fixture.attaching(&["docs", "tickets"]).await;
+
+    let written = config_inside(&fixture, &profile, ".config/opencode/opencode.json");
+    let read: serde_json::Value = serde_json::from_str(&written).expect("opencode is given JSON");
+
+    assert_eq!(
+        read["mcp"],
+        serde_json::json!({
+            "docs": {
+                "type": "remote",
+                "url": "https://mcp.example.com/docs",
+                "oauth": false,
+                "headers": {
+                    "Authorization": "Bearer sk-averysecretkey",
+                    "X-Tenant": "verkstead",
+                },
+            },
+            "tickets": {
+                "type": "remote",
+                "url": "https://mcp.example.com/tickets",
+                "oauth": false,
+            },
+        }),
+        "the Conversation's servers: {written}"
+    );
+
+    assert!(
+        !written.contains("the-humans"),
+        "and none of the account's own: {written}"
+    );
+    assert_eq!(
+        read["provider"]["proxy"]["npm"], "@ai-sdk/openai-compatible",
+        "beside what the file is written for: {written}"
+    );
+}
+
+/// And a Conversation with nothing attached builds, for each of the three, the
+/// root it built before any of this: no key at all rather than an empty one.
+///
+/// Which is most Conversations, and every one that ran before there were
+/// servers to attach.
+#[tokio::test]
+async fn a_conversation_with_nothing_attached_builds_each_root_as_it_did() {
+    let fixture = grilling().await;
+
+    let codex = fixture.codex_profile().await;
+    let grok = fixture.grok_profile().await;
+    let opencode = fixture.opencode_profile().await;
+
+    for (profile, file, key) in [
+        (&codex, ".codex/config.toml", "mcp_servers"),
+        (&grok, ".grok/config.toml", "mcp_servers"),
+        (&opencode, ".config/opencode/opencode.json", "mcp"),
+    ] {
+        let written = config_inside(&fixture, profile, file);
+
+        assert!(
+            !written.contains(key),
+            "{file} carries no {key} for a Conversation that attached none: {written}"
+        );
+    }
+
+    assert_codex_config_carries_the_provider_alone(
+        &fixture.windows_profile().join(".codex/config.toml"),
+    );
+    assert_grok_config_carries_the_model_alone(
+        &fixture.windows_profile().join(".grok/config.toml"),
+    );
+    assert_opencode_config_carries_the_provider_alone(
+        &std::fs::read_to_string(
+            fixture
+                .windows_profile()
+                .join(".config/opencode/opencode.json"),
+        )
+        .unwrap(),
+    );
+}
+
+/// The two servers these declare: one spoken to with headers and one with
+/// none, which is the pair each harness's form has to say something about.
+const THE_TWO_DECLARED: [Declaring; 2] = [
+    (
+        "docs",
+        "https://mcp.example.com/docs",
+        &[
+            ("Authorization", "Bearer sk-averysecretkey"),
+            ("X-Tenant", "verkstead"),
+        ],
+    ),
+    ("tickets", "https://mcp.example.com/tickets", &[]),
+];
+
+/// What a session inside reads in the configuration file its harness was
+/// given, at `file` inside its HOME.
+///
+/// Asked of a command inside the sandbox rather than read off the host, for
+/// this module's reason: what is being settled is what the session gets. The
+/// newlines come back as a byte the probe's `key=value` lines cannot hold one
+/// of, and go back to being newlines here.
+fn config_inside(fixture: &Grilling, profile: &store::Profile, file: &str) -> String {
+    let reported = probe(
+        &fixture.sandbox_under(profile, LISTENING, &BuildCache::none(), vec![]),
+        &format!(
+            r#"say config "$({tr} '\n' '\036' < "$HOME/{file}")""#,
+            tr = quoted(&on_the_host("tr")),
+        ),
+    );
+
+    reported["config"].replace('\u{1e}', "\n")
+}
+
+/// What a session inside reads under `mcpServers` in its own `.claude.json`.
+fn servers_inside(fixture: &Grilling) -> serde_json::Value {
+    let reported = probe(
+        &fixture.sandbox(vec![]),
+        r#"say config "$(tr -d '\n' < "$HOME/.claude.json")""#,
+    );
+
+    serde_json::from_str::<serde_json::Value>(&reported["config"]).unwrap()["mcpServers"].clone()
 }
 
 /// What a Claude session changes in its `.claude.json` reaches the account as
