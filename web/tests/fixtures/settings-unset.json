@@ -64,6 +64,15 @@
       "size": "30G",
       "size_configured": false,
       "unread": null
+    },
+    {
+      "compiling": "NoSccache",
+      "enabled": true,
+      "label": "C/C++",
+      "name": "cpp",
+      "size": "30G",
+      "size_configured": false,
+      "unread": null
     }
   ],
   "mcp_servers": [],

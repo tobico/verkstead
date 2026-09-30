@@ -66,6 +66,7 @@ const LANGUAGES = {
     { name: "node", enabled: true, size: "" },
     { name: "python", enabled: true, size: "" },
     { name: "dotnet", enabled: true, size: "" },
+    { name: "cpp", enabled: true, size: "" },
     { name: "gleam", enabled: true, size: "8G" },
   ],
 };

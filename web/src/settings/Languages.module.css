@@ -50,6 +50,16 @@
   margin: 0.85rem 0 0;
 }
 
+/* What a language compiling through another's Compile Server says where the
+   size would be: indented as that size would be, and in the quiet the card
+   names what is on in — it is a fact about the machine, not something to do. */
+.shares {
+  margin: 0.85rem 0 0;
+  padding: 0 0 0 1.6rem;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
 /* The space above the size is the nested group's own — see `Check.module.css`,
    which is where the indent it is read by lives too. */
 

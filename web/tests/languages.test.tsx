@@ -51,6 +51,7 @@ const GO = "go";
 const NODE = "node";
 const PYTHON = "python";
 const DOTNET = "dotnet";
+const CPP = "cpp";
 const GLEAM = "gleam";
 
 /// The binds the fixture holds, as a save puts them back on the wire: the
@@ -218,7 +219,7 @@ describe("the card", () => {
 
     await waitFor(() =>
       expect(container.querySelector(`.${styles.standing}`)?.textContent).toBe(
-        "Rust, Go, Node, Python, .NET, Gleam",
+        "Rust, Go, Node, Python, .NET, C/C++, Gleam",
       ),
     );
   });
@@ -231,7 +232,7 @@ describe("the card", () => {
 
     await waitFor(() =>
       expect(container.querySelector(`.${styles.standing}`)?.textContent).toBe(
-        "Rust, Go, Node, Python, .NET",
+        "Rust, Go, Node, Python, .NET, C/C++",
       ),
     );
   });
@@ -240,7 +241,10 @@ describe("the card", () => {
   /// machine builds nothing would be a line nobody needs.
   it("says nothing under the heading while they are all off", async () => {
     theSettings(
-      off(off(off(off(off(off(TOLD), GO), NODE), PYTHON), DOTNET), GLEAM),
+      off(
+        off(off(off(off(off(off(TOLD), GO), NODE), PYTHON), DOTNET), CPP),
+        GLEAM,
+      ),
     );
     const { container } = mountCard();
 
@@ -261,11 +265,12 @@ describe("the card", () => {
     expect(container.querySelector(`.${styles.warning}`)).not.toBeNull();
   });
 
-  /// And nothing about it while the language that wanted one is switched off,
+  /// And nothing about it while the languages that want one are switched off,
   /// because the half of that warning that says the downloads are still shared
-  /// is only true while there is a cache to share them.
-  it("says nothing about sccache while the language that wants one is off", async () => {
-    theSettings(off(UNSET));
+  /// is only true while there is a cache to share them. Both of them: C/C++
+  /// compiles through the same Compile Server, so it is uncached too.
+  it("says nothing about sccache while the languages that want one are off", async () => {
+    theSettings(off(off(UNSET), CPP));
     const { container } = mountCard();
 
     await theCard(container);
@@ -276,7 +281,9 @@ describe("the card", () => {
     theSettings(compiling(UNSET));
     mountCard();
 
-    await waitFor(() => screen.getByText("Rust, Go, Node, Python, .NET"));
+    await waitFor(() =>
+      screen.getByText("Rust, Go, Node, Python, .NET, C/C++"),
+    );
     expect(screen.queryByText(/No sccache is installed/)).toBeNull();
   });
 
@@ -338,8 +345,9 @@ describe("the languages as the pane draws them", () => {
     expect(theCheck("Node").checked).toBe(true);
     expect(theCheck("Python").checked).toBe(true);
     expect(theCheck(".NET").checked).toBe(true);
+    expect(theCheck("C/C++").checked).toBe(true);
     expect(theCheck("Gleam").checked).toBe(true);
-    expect(screen.getAllByRole("checkbox")).toHaveLength(6);
+    expect(screen.getAllByRole("checkbox")).toHaveLength(7);
   });
 
   /// The box says where its language stands rather than whether anybody has
@@ -370,9 +378,10 @@ describe("the languages as the pane draws them", () => {
 
   /// And greyed again while the box is unticked, which is the other half of the
   /// pattern: the configuration hanging off a checkbox means nothing while the
-  /// checkbox is off.
+  /// checkbox is off. Both boxes naming the Compile Server, because with one of
+  /// them on the size is that one's — see the two tests below.
   it("greys the size while the box is unticked", async () => {
-    theSettings(off(compiling(TOLD)));
+    theSettings(off(off(compiling(TOLD)), CPP));
     const { container } = mountPane();
 
     await waitFor(() => expect(theCheck().checked).toBe(false));
@@ -466,8 +475,38 @@ describe("the languages as the pane draws them", () => {
     expect(screen.getAllByLabelText(/How large/)).toHaveLength(1);
   });
 
-  it("says nothing about sccache while the language is switched off", async () => {
-    theSettings(off(UNSET));
+  /// One Compile Server between the two languages naming it, so one size: the
+  /// field is on the language that sizes it, and the other says whose it is.
+  it("draws the one size on Rust and says C/C++ shares its Compile Server", async () => {
+    theSettings(compiling(TOLD));
+    mountPane();
+
+    await waitFor(() => expect(theCheck("C/C++").checked).toBe(true));
+
+    expect(screen.getAllByLabelText(/How large/)).toHaveLength(1);
+    expect(screen.getByLabelText(/How large/).id).toBe(`language-size-${RUST}`);
+    expect(
+      screen.getByText(/Shares the Compile Server with Rust/),
+    ).toBeTruthy();
+  });
+
+  /// And with Rust off, C/C++ is what the server is sized by, so the field is
+  /// its — the same answer the server gives about which size it starts at.
+  it("moves the size to C/C++ when Rust is switched off", async () => {
+    theSettings(off(compiling(TOLD)));
+    mountPane();
+
+    await waitFor(() => expect(theCheck().checked).toBe(false));
+
+    expect(screen.getAllByLabelText(/How large/)).toHaveLength(1);
+    expect(screen.getByLabelText(/How large/).id).toBe(`language-size-${CPP}`);
+    expect(
+      screen.getByText(/Shares the Compile Server with C\/C\+\+/),
+    ).toBeTruthy();
+  });
+
+  it("says nothing about sccache while the languages are switched off", async () => {
+    theSettings(off(off(UNSET), CPP));
     mountPane();
 
     await waitFor(() => expect(theCheck().checked).toBe(false));
@@ -530,6 +569,7 @@ describe("changing the languages", () => {
           { name: NODE, enabled: true, size: "" },
           { name: PYTHON, enabled: true, size: "" },
           { name: DOTNET, enabled: true, size: "" },
+          { name: CPP, enabled: true, size: "" },
           { name: GLEAM, enabled: true, size: "8G" },
         ],
         // Untouched by this form, and sent back as it stands: one request
@@ -564,6 +604,7 @@ describe("changing the languages", () => {
         { name: NODE, enabled: true, size: "" },
         { name: PYTHON, enabled: true, size: "" },
         { name: DOTNET, enabled: true, size: "" },
+        { name: CPP, enabled: true, size: "" },
         { name: GLEAM, enabled: false, size: "8G" },
       ]),
     );
@@ -575,7 +616,12 @@ describe("changing the languages", () => {
   /// a `50` as the store size, which is a number nobody pressed Save on. The
   /// Cleanup pane's two durations hold the same rule.
   it("sends the server's size when the box is ticked, not what is typed", async () => {
-    const fetching = theSettings(compiling(TOLD), json(answering(off(TOLD))));
+    // Answered with C/C++ off too, so the field stays on Rust's box: with
+    // C/C++ on it would be C/C++'s size the pane drew instead.
+    const fetching = theSettings(
+      compiling(TOLD),
+      json(answering(off(off(TOLD), CPP))),
+    );
     mountPane();
 
     const field = await waitFor(() => screen.getByLabelText(/How large/));
@@ -626,6 +672,7 @@ describe("changing the languages", () => {
           { name: NODE, enabled: true, size: "" },
           { name: PYTHON, enabled: true, size: "" },
           { name: DOTNET, enabled: true, size: "" },
+          { name: CPP, enabled: true, size: "" },
           { name: GLEAM, enabled: true, size: "8G" },
         ],
         // Untouched by this form, and sent back as it stands: one request
@@ -683,6 +730,7 @@ describe("changing the languages", () => {
         { name: NODE, enabled: true, size: "" },
         { name: PYTHON, enabled: true, size: "" },
         { name: DOTNET, enabled: true, size: "" },
+        { name: CPP, enabled: true, size: "" },
         { name: GLEAM, enabled: true, size: "8G" },
       ]),
     );
@@ -701,14 +749,14 @@ describe("changing the languages", () => {
 
     await waitFor(() => expect(theCheck().checked).toBe(true));
     expect(container.querySelector(`.${styles.standing}`)?.textContent).toBe(
-      "Rust, Go, Node, Python, .NET, Gleam",
+      "Rust, Go, Node, Python, .NET, C/C++, Gleam",
     );
 
     fireEvent.click(theCheck());
 
     await waitFor(() =>
       expect(container.querySelector(`.${styles.standing}`)?.textContent).toBe(
-        "Go, Node, Python, .NET, Gleam",
+        "Go, Node, Python, .NET, C/C++, Gleam",
       ),
     );
   });

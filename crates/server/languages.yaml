@@ -570,3 +570,53 @@ languages:
       NUGET_PACKAGES: "{cache}/nuget/packages"
       NUGET_HTTP_CACHE_PATH: "{cache}/nuget/http"
       NUGET_SCRATCH: "{cache}/nuget/scratch"
+
+  cpp:
+    # C and C++, and the second descriptor naming the Compile Server (ADR-0021).
+    # Not a second server: one sccache for the machine, one store and one size,
+    # which is why this entry names the capability Rust's does and sets no
+    # store of its own. The first switched-on language naming it is the one
+    # that sizes it — Rust, where Rust is on — and the settings page draws the
+    # size field on that one alone.
+    label: C/C++
+
+    # C++ has no one manifest, so this is the build files a checkout ordinarily
+    # has one of: CMake's at the root, or under `native/` or `cpp/` beside the
+    # rest of a project, and Meson's. For the setup card's warning and nothing
+    # else, exactly as every other descriptor's `detect` is. A relative path is
+    # joined onto the Repo's root, so the two under a directory are plain data.
+    #
+    # Meson is here although nothing below covers it: it finds an sccache on the
+    # `PATH` for itself, and with none on the server it is as uncached as CMake
+    # is, which is what the warning says.
+    detect:
+      - CMakeLists.txt
+      - native/CMakeLists.txt
+      - cpp/CMakeLists.txt
+      - meson.build
+
+    # CMake's two compiler-launcher variables, and nothing else. CMake 3.17 and
+    # later reads them out of the environment — with the Makefile and Ninja
+    # generators only, and only when a build directory is first configured, so
+    # a build directory configured before this was set goes on compiling
+    # without it until it is configured afresh.
+    #
+    # **Not `CC` and `CXX`.** Those two reach every build that compiles C, not
+    # only a C++ project's: a Rust crate's build script, a Python or Node native
+    # extension, Go with cgo. And beside a launcher they can wrap one compile
+    # twice. The launchers are read by CMake alone, so they change nothing that
+    # is not a CMake project.
+    #
+    # **And not `SCCACHE_DIR` or `SCCACHE_CACHE_SIZE`**, which are Rust's. A
+    # variable two languages set is pushed onto a session twice, and nothing
+    # here would decide between them. The client in a session never reads
+    # either while Verkstead's Compile Server is up: the server reads them, and
+    # it is given its own — see `build_cache.rs`.
+    #
+    # With no sccache on the server this capability is left out whole, so a
+    # session is given neither launcher rather than one naming nothing.
+    capabilities:
+      sccache:
+        env:
+          CMAKE_C_COMPILER_LAUNCHER: "{sccache}"
+          CMAKE_CXX_COMPILER_LAUNCHER: "{sccache}"

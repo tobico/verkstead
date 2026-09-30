@@ -2224,6 +2224,10 @@ async fn a_session_gets_the_shared_cargo_home_and_the_compiler_wrapper() {
     let fixture = grilling_caching(
         r#"
         Note 'wrapper' $env:RUSTC_WRAPPER
+        Note 'c-launcher' $env:CMAKE_C_COMPILER_LAUNCHER
+        Note 'cxx-launcher' $env:CMAKE_CXX_COMPILER_LAUNCHER
+        Note 'cc' ($(if (Test-Path Env:CC) { $env:CC } else { 'unset' }))
+        Note 'cxx' ($(if (Test-Path Env:CXX) { $env:CXX } else { 'unset' }))
         Note 'cargo-home' $env:CARGO_HOME
         Note 'sccache-dir' $env:SCCACHE_DIR
         Note 'gomodcache' $env:GOMODCACHE
@@ -2284,6 +2288,22 @@ async fn a_session_gets_the_shared_cargo_home_and_the_compiler_wrapper() {
         "a session compiles through the sccache the server found, at the path it \
          really is: the server said {wrapper:?} and this machine says {sccache:?}",
     );
+
+    // And CMake's two launchers name that same file, which is C/C++'s half of
+    // the one Compile Server: the same capability, so the same path.
+    assert_eq!(
+        fixture.written("c-launcher").await,
+        wrapper,
+        "CMake launches C through the sccache RUSTC_WRAPPER names",
+    );
+    assert_eq!(fixture.written("cxx-launcher").await, wrapper);
+    assert_eq!(
+        fixture.written("cc").await,
+        "unset",
+        "and CC and CXX are set in no case: they reach every build that \
+         compiles C, not only a CMake project's",
+    );
+    assert_eq!(fixture.written("cxx").await, "unset");
 
     let ran = fixture.written("ran").await;
 

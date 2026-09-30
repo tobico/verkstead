@@ -3273,6 +3273,10 @@ async fn the_build_cache_is_writable_inside_and_the_stores_are_in_it() {
             say cargo-home "${{CARGO_HOME-unset}}"
             say wrapper "${{RUSTC_WRAPPER-unset}}"
             say sccache-dir "${{SCCACHE_DIR-unset}}"
+            say c-launcher "${{CMAKE_C_COMPILER_LAUNCHER-unset}}"
+            say cxx-launcher "${{CMAKE_CXX_COMPILER_LAUNCHER-unset}}"
+            say cc "${{CC-unset}}"
+            say cxx "${{CXX-unset}}"
             say gomodcache "${{GOMODCACHE-unset}}"
             say gocache "${{GOCACHE-unset}}"
             say npm-cache "${{NPM_CONFIG_CACHE-unset}}"
@@ -3313,6 +3317,14 @@ async fn the_build_cache_is_writable_inside_and_the_stores_are_in_it() {
          RUSTC_WRAPPER naming a path that is not reachable would break every build"
     );
     assert_eq!(reported["sccache-dir"], "unset");
+    assert_eq!(
+        reported["c-launcher"], "unset",
+        "and no CMake launcher either: C/C++'s whole capability is left out \
+         where there is no sccache for it to name"
+    );
+    assert_eq!(reported["cxx-launcher"], "unset");
+    assert_eq!(reported["cc"], "unset", "and CC and CXX are set in no case");
+    assert_eq!(reported["cxx"], "unset");
 
     assert_eq!(
         reported["gomodcache"],
@@ -3417,6 +3429,10 @@ async fn the_sccache_the_server_resolved_is_what_rustc_is_wrapped_in() {
             say sccache-dir "${{SCCACHE_DIR-unset}}"
             say size "${{SCCACHE_CACHE_SIZE-unset}}"
             say which "$("${{RUSTC_WRAPPER}}")"
+            say c-launcher "${{CMAKE_C_COMPILER_LAUNCHER-unset}}"
+            say cxx-launcher "${{CMAKE_CXX_COMPILER_LAUNCHER-unset}}"
+            say cc "${{CC-unset}}"
+            say cxx "${{CXX-unset}}"
             dir {dir} cache
             "#,
             dir = quoted(&fixture.cache_dir()),
@@ -3435,6 +3451,18 @@ async fn the_sccache_the_server_resolved_is_what_rustc_is_wrapped_in() {
          own that leads the PATH — really there on this platform, because \
          nothing here can make a directory out of nothing"
     );
+    assert_eq!(
+        reported["c-launcher"], reported["wrapper"],
+        "and CMake launches C through the same sccache, at the same path — one \
+         Compile Server, whichever language asked"
+    );
+    assert_eq!(reported["cxx-launcher"], reported["wrapper"]);
+    assert_eq!(
+        reported["cc"], "unset",
+        "and CC and CXX are left alone: they reach every build that compiles C, \
+         not only a CMake project's"
+    );
+    assert_eq!(reported["cxx"], "unset");
     assert_eq!(
         reported["which"], "sccache 0.0.0-the-one-resolved",
         "and what a session compiles through is the binary the server resolved, \

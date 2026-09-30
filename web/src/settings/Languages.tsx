@@ -66,6 +66,13 @@
 //! disabled for a second reason as well, and the reason is the warning above it:
 //! the size is sccache's own, so a server with no sccache has nothing to read it.
 //!
+//! **One Compile Server, one size, one field.** Two built-ins name the sccache
+//! capability — Rust and C/C++ — and the server runs one Compile Server between
+//! them, sized by the first switched-on language that names it. So the field is
+//! drawn on that one alone, and every other language naming the capability says
+//! instead which language's cache it compiles through — see [`sizer`]. Switch
+//! Rust off and the field moves to C/C++, because C/C++ is then what sizes it.
+//!
 //! **And a language with no field for its size still sends one.** `size` is a
 //! key of every entry whoever wrote it, and only the language whose store an
 //! sccache bounds has anything here reading it — so a save built out of the
@@ -186,6 +193,22 @@ function sizeable(language: LanguageView): boolean {
     language.compiling === "Cached" &&
     language.unread === null
   );
+}
+
+/// The language whose size the one Compile Server is started at: the first
+/// switched-on language naming the sccache capability, which is the answer the
+/// server's own `Languages::wanting` gives, over the list in the order the server
+/// sent it.
+///
+/// And where every one of them is off, the first of them all, so the field is
+/// still drawn — greyed, as a size under an unticked box is — on exactly one
+/// language rather than on none.
+function sizer(told: SettingsView | undefined): LanguageView | undefined {
+  const naming = (told?.languages ?? []).filter(
+    (language) => language.compiling !== null,
+  );
+
+  return naming.find((language) => language.enabled) ?? naming[0];
 }
 
 /// What is said under a language whose entry in `config.yaml` was not used.
@@ -448,8 +471,27 @@ export function LanguagesPane(props: {
                     {/* The size is sccache's, so the group is off where there
                         is no sccache to read it as well as where the box is
                         unticked. A language whose store nothing bounds has no
-                        group at all — there is no size to draw. */}
-                    <Show when={language.compiling}>
+                        group at all — there is no size to draw — and nor does
+                        one that compiles through a Compile Server another
+                        language sizes: it says which, instead. */}
+                    <Show
+                      when={
+                        language.compiling !== null &&
+                        sizer(set())?.name !== language.name
+                      }
+                    >
+                      <p class={styles.shares}>
+                        Shares the Compile Server with {sizer(set())?.label},
+                        whose size bounds it.
+                      </p>
+                    </Show>
+
+                    <Show
+                      when={
+                        language.compiling !== null &&
+                        sizer(set())?.name === language.name
+                      }
+                    >
                       <Nested on={sizeable(language)}>
                         <form
                           class={styles.sizing}

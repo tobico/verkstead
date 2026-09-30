@@ -1215,7 +1215,8 @@ mod tests {
                 &configured(
                     "rust_build_cache:\n  enabled: false\nlanguages:\n  go:\n    \
                      enabled: false\n  node:\n    enabled: false\n  python:\n    \
-                     enabled: false\n  dotnet:\n    enabled: false\n"
+                     enabled: false\n  dotnet:\n    enabled: false\n  cpp:\n    \
+                     enabled: false\n"
                 )
             )
             .is_none(),
@@ -1527,6 +1528,10 @@ mod tests {
 
     /// The compile server is only ever the human's to have: switched off, there
     /// is nothing to serve and nothing is started.
+    ///
+    /// **Both languages naming it off**, because either one on is a session
+    /// compiling through it: Rust off and C/C++ on is the server wanted at
+    /// C/C++'s size — see `languages::tests`, where that is asked of the switch.
     #[test]
     fn a_cache_switched_off_starts_no_compile_server() {
         let cache = BuildCache::at(
@@ -1535,7 +1540,12 @@ mod tests {
             PathBuf::from("/var/lib/verkstead"),
         );
 
-        cache.compiling(&configured("rust_build_cache:\n  enabled: false\n"), None);
+        cache.compiling(
+            &configured(
+                "rust_build_cache:\n  enabled: false\nlanguages:\n  cpp:\n    enabled: false\n",
+            ),
+            None,
+        );
 
         assert!(cache.held().is_none());
     }

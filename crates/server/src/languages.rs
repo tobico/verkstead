@@ -116,6 +116,11 @@ pub const PYTHON: &str = "python";
 /// over one another.
 pub const DOTNET: &str = "dotnet";
 
+/// And C/C++, the second language naming [`SCCACHE`]: CMake's two launcher
+/// variables pointed at the one Compile Server Rust's `RUSTC_WRAPPER` is, and
+/// no store of its own — one server, one store and one size for the machine.
+pub const CPP: &str = "cpp";
+
 /// The one capability this server has: the **Compile Server**, which is one
 /// sccache server for the machine in a sandbox of its own — see
 /// [`crate::build_cache::BuildCache::compiling`].
@@ -388,7 +393,7 @@ impl Languages {
     /// The size comes back with the answer because the one capability there is
     /// wants one: the Compile Server is started with a size, and that size is a
     /// switched-on language's rather than a number the server holds. Where two
-    /// of them name it — C++ beside Rust, when it comes — the first written is
+    /// of them name it — C/C++ beside Rust — the first written is
     /// the one that sizes the store, because there is one store and one server
     /// for the machine.
     ///
@@ -721,7 +726,7 @@ impl Descriptor {
 ///
 /// The names are the descriptor's and the answer is the server's, which is what
 /// keeps a capability from being one language's. Rust's sccache is a
-/// `RUSTC_WRAPPER`; C++'s, when it comes, is CMake's two launcher variables
+/// `RUSTC_WRAPPER`; C/C++'s is CMake's two launcher variables
 /// pointed at the same binary — one capability, two descriptors, and nothing in
 /// the server that knows which language asked.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
@@ -1350,11 +1355,37 @@ mod tests {
             "and NuGet has no compiled half at all, so there is nothing here \
              for a Compile Server to be",
         );
+
+        let cpp = built_in().get(CPP).expect("and C/C++ is the sixth");
+
+        assert_eq!(cpp.label(), Some("C/C++"));
+        assert_eq!(
+            cpp.detect,
+            vec![
+                String::from("CMakeLists.txt"),
+                String::from("native/CMakeLists.txt"),
+                String::from("cpp/CMakeLists.txt"),
+                String::from("meson.build"),
+            ],
+            "no one manifest, so the build files a checkout ordinarily holds \
+             one of — Meson's among them, for the warning, although only \
+             CMake reads the variables",
+        );
+        assert!(
+            cpp.names(SCCACHE),
+            "the second language naming the Compile Server, which is the same \
+             capability Rust's is rather than a second server",
+        );
+        assert!(
+            cpp.env.is_empty(),
+            "and no store of its own: its objects are the one Compile Server's",
+        );
     }
 
     /// A session of a machine with an sccache: Rust's four variables, in the
-    /// order it has always had them, then Go's two, Node's seven and Python's
-    /// six, and the two directories they name open underneath.
+    /// order it has always had them, then Go's two, Node's seven, Python's
+    /// six, .NET's three and C/C++'s two launchers, and the two directories
+    /// they name open underneath.
     ///
     /// Rust's four lead and are unchanged, which is the promise the descriptors
     /// landed on: a language added to the file is variables after the ones a
@@ -1397,6 +1428,14 @@ mod tests {
                 (String::from("NUGET_PACKAGES"), cached("nuget/packages")),
                 (String::from("NUGET_HTTP_CACHE_PATH"), cached("nuget/http")),
                 (String::from("NUGET_SCRATCH"), cached("nuget/scratch")),
+                (
+                    String::from("CMAKE_C_COMPILER_LAUNCHER"),
+                    String::from("/verkstead/bin/sccache")
+                ),
+                (
+                    String::from("CMAKE_CXX_COMPILER_LAUNCHER"),
+                    String::from("/verkstead/bin/sccache")
+                ),
             ],
         );
 
@@ -1450,7 +1489,15 @@ mod tests {
             ],
             "Go's two, Node's seven, Python's six and .NET's three are in no \
              capability, so a machine with no sccache gets the whole of what \
-             those descriptors say",
+             those descriptors say — and C/C++'s two launchers are the whole \
+             of its capability, so it gets neither",
+        );
+        assert!(
+            !given
+                .env()
+                .iter()
+                .any(|(name, _)| name == "CC" || name == "CXX"),
+            "and CC and CXX are set in no case",
         );
         assert_eq!(
             given.dirs(),
@@ -1467,7 +1514,9 @@ mod tests {
     /// it closes one language's rather than the file's.
     #[test]
     fn a_language_switched_off_gives_a_session_nothing() {
-        let off = built_in().merged(&written("languages:\n  rust:\n    enabled: false\n"));
+        let off = built_in().merged(&written(
+            "languages:\n  rust:\n    enabled: false\n  cpp:\n    enabled: false\n",
+        ));
         let given = off.given(&machine(true));
 
         assert_eq!(
@@ -1484,7 +1533,8 @@ mod tests {
         assert!(!given.sccache());
         assert!(
             off.wanting(SCCACHE).is_none(),
-            "and nothing wants a Compile Server up"
+            "and with both languages naming it off, nothing wants a Compile \
+             Server up"
         );
 
         // And **both** languages that name the second directory switched off:
@@ -1524,6 +1574,86 @@ mod tests {
         assert!(given.is_empty());
         assert!(given.env().is_empty());
         assert!(given.dirs().is_empty());
+    }
+
+    /// C/C++ on its own wants the Compile Server, at its own size — nothing
+    /// starts it by detection, so the switch is the whole of what brings it up.
+    /// And beside Rust it changes nothing of Rust's: Rust is written first, so
+    /// its variables lead and its size is the one the server is started at.
+    #[test]
+    fn cpp_on_its_own_wants_the_compile_server_and_beside_rust_changes_nothing() {
+        let alone = built_in().merged(&written(
+            "languages:\n  rust:\n    enabled: false\n  cpp:\n    size: 12G\n",
+        ));
+
+        assert_eq!(
+            alone.wanting(SCCACHE),
+            Some("12G"),
+            "with Rust off, C/C++ is the language that sizes the one server",
+        );
+
+        let given = alone.given(&machine(true));
+
+        assert!(
+            given.sccache(),
+            "and the sccache is reached from the session"
+        );
+        assert_eq!(
+            given
+                .env()
+                .iter()
+                .filter(|(name, _)| name.starts_with("CMAKE_"))
+                .cloned()
+                .collect::<Vec<_>>(),
+            [
+                (
+                    String::from("CMAKE_C_COMPILER_LAUNCHER"),
+                    String::from("/verkstead/bin/sccache")
+                ),
+                (
+                    String::from("CMAKE_CXX_COMPILER_LAUNCHER"),
+                    String::from("/verkstead/bin/sccache")
+                ),
+            ],
+        );
+        assert!(
+            !given
+                .env()
+                .iter()
+                .any(|(name, _)| name.starts_with("SCCACHE_") || name == "CC" || name == "CXX"),
+            "and nothing else: the server reads its own store and size, and CC \
+             and CXX are left alone",
+        );
+
+        // And both on: Rust's four exactly as they were before this descriptor
+        // existed, and Rust's size the server's, whatever C/C++'s says.
+        let both = built_in().merged(&written(
+            "languages:\n  rust:\n    size: 5G\n  cpp:\n    size: 12G\n",
+        ));
+        let given = both.given(&machine(true));
+
+        assert_eq!(both.wanting(SCCACHE), Some("5G"));
+        assert_eq!(
+            given.env()[..4],
+            [
+                (String::from("CARGO_HOME"), cached("cargo")),
+                (
+                    String::from("RUSTC_WRAPPER"),
+                    String::from("/verkstead/bin/sccache")
+                ),
+                (String::from("SCCACHE_DIR"), cached("sccache")),
+                (String::from("SCCACHE_CACHE_SIZE"), String::from("5G")),
+            ],
+        );
+        assert_eq!(
+            given
+                .env()
+                .iter()
+                .filter(|(name, _)| name.starts_with("SCCACHE_"))
+                .count(),
+            2,
+            "each of Rust's two once, and neither pushed again by C/C++",
+        );
     }
 
     /// The size is the human's, and it reaches the variable that reads it.
