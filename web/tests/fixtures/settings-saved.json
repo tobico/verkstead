@@ -43,6 +43,15 @@
       {
         "compiling": null,
         "enabled": true,
+        "label": "Go",
+        "name": "go",
+        "size": "30G",
+        "size_configured": false,
+        "unread": null
+      },
+      {
+        "compiling": null,
+        "enabled": true,
         "label": "Gleam",
         "name": "gleam",
         "size": "8G",

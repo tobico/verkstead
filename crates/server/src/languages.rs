@@ -48,7 +48,7 @@
 //! embedded file, which is where each of the four is spelled out. A
 //! placeholder's directory is granted to a session only where a loaded
 //! descriptor names it, so the one beside the Worktrees grants nothing while
-//! Rust is the only language built in.
+//! no built-in names it.
 //!
 //! **And an entry that will not load falls back to the built-in of that name.**
 //! Two ways one fails and one answer to both: an entry naming a variable the
@@ -88,9 +88,12 @@ use serde::{Deserialize, Serialize};
 /// the documentation's worked examples rather than a second shape nobody sees.
 const BUILT_IN_YAML: &str = include_str!("../languages.yaml");
 
-/// Rust, which is the only language built in — and the name `rust_build_cache`
-/// is still read as the settings of.
+/// Rust, whose name `rust_build_cache` is still read as the settings of.
 pub const RUST: &str = "rust";
+
+/// And Go, the first of the package stores — two directories and no
+/// capability, which is the whole of what a language costs the server now.
+pub const GO: &str = "go";
 
 /// The one capability this server has: the **Compile Server**, which is one
 /// sccache server for the machine in a sandbox of its own — see
@@ -1241,7 +1244,8 @@ mod tests {
             .to_string()
     }
 
-    /// The built-ins parse, and what Rust's says is what a session gets today.
+    /// The built-ins parse, and what each of them says is what a session gets
+    /// today.
     ///
     /// The file is the documentation's worked example as well as the data, so
     /// this is what says the grammar it is written in is the one the loader
@@ -1260,12 +1264,27 @@ mod tests {
             "Rust's descriptor is what asks for the Compile Server, at the size \
              nobody has configured",
         );
+
+        let go = built_in().get(GO).expect("and Go is the second");
+
+        assert_eq!(go.label(), Some("Go"));
+        assert_eq!(go.detect, vec![String::from("go.mod")]);
+        assert!(
+            !go.names(SCCACHE),
+            "Go's compiled half is a directory, so there is no Compile Server \
+             in it to name",
+        );
     }
 
-    /// A session of a machine with an sccache: the four variables it has always
-    /// had, in the order it has always had them, and the cache open underneath.
+    /// A session of a machine with an sccache: Rust's four variables, in the
+    /// order it has always had them, then Go's two, and the cache open
+    /// underneath.
+    ///
+    /// Rust's four lead and are unchanged, which is the promise the descriptors
+    /// landed on: a language added to the file is variables after the ones a
+    /// session already had rather than a different environment.
     #[test]
-    fn a_session_is_given_what_rust_has_always_been_given() {
+    fn a_session_is_given_what_the_built_ins_say() {
         let given = built_in().given(&machine(true));
 
         assert_eq!(
@@ -1278,13 +1297,17 @@ mod tests {
                 ),
                 (String::from("SCCACHE_DIR"), cached("sccache")),
                 (String::from("SCCACHE_CACHE_SIZE"), String::from("30G")),
+                (String::from("GOMODCACHE"), cached("go/mod")),
+                (String::from("GOCACHE"), cached("go/build")),
             ],
         );
 
         assert_eq!(
             given.dirs(),
             [PathBuf::from("/var/cache/verkstead")],
-            "the Build Cache, because Rust's descriptor names it"
+            "the Build Cache once, because both descriptors name that one \
+             placeholder and a bind per store would be several holes saying \
+             the same thing"
         );
         assert!(given.sccache(), "and the sccache to reach it through");
     }
@@ -1295,26 +1318,50 @@ mod tests {
     fn without_an_sccache_the_capabilitys_variables_are_left_out() {
         let given = built_in().given(&machine(false));
 
-        assert_eq!(given.env(), [(String::from("CARGO_HOME"), cached("cargo"))],);
+        assert_eq!(
+            given.env(),
+            [
+                (String::from("CARGO_HOME"), cached("cargo")),
+                (String::from("GOMODCACHE"), cached("go/mod")),
+                (String::from("GOCACHE"), cached("go/build")),
+            ],
+            "Go's two are in no capability, so a machine with no sccache gets \
+             the whole of what Go's descriptor says",
+        );
         assert_eq!(given.dirs(), [PathBuf::from("/var/cache/verkstead")]);
         assert!(!given.sccache());
     }
 
-    /// A language switched off is no variables and no directory: the switch
-    /// closes the hole rather than leaving it open and unused.
+    /// A language switched off is no variables and no directory of *its* own:
+    /// the switch closes the hole rather than leaving it open and unused, and
+    /// it closes one language's rather than the file's.
     #[test]
     fn a_language_switched_off_gives_a_session_nothing() {
         let off = built_in().merged(&written("languages:\n  rust:\n    enabled: false\n"));
         let given = off.given(&machine(true));
 
-        assert!(given.is_empty());
-        assert!(given.env().is_empty());
-        assert!(given.dirs().is_empty());
+        assert_eq!(
+            given.env(),
+            [
+                (String::from("GOMODCACHE"), cached("go/mod")),
+                (String::from("GOCACHE"), cached("go/build")),
+            ],
+            "nothing of Rust's is left, and the language beside it is untouched",
+        );
         assert!(!given.sccache());
         assert!(
             off.wanting(SCCACHE).is_none(),
             "and nothing wants a Compile Server up"
         );
+
+        // And with every one of them off there is nothing to open at all,
+        // which is what an installation that wants none of this looks like.
+        let none = off.merged(&written("languages:\n  go:\n    enabled: false\n"));
+        let given = none.given(&machine(true));
+
+        assert!(given.is_empty());
+        assert!(given.env().is_empty());
+        assert!(given.dirs().is_empty());
     }
 
     /// The size is the human's, and it reaches the variable that reads it.
@@ -1395,6 +1442,13 @@ mod tests {
 
         joined("CARGO_HOME", cache, "cargo");
         joined("SCCACHE_DIR", cache, "sccache");
+
+        // And Go's two, which are the first values with a directory *under* a
+        // directory in them: every separator the file wrote is this platform's
+        // before anything is put in their place, rather than the first one
+        // only.
+        joined("GOMODCACHE", &cache.join("go"), "mod");
+        joined("GOCACHE", &cache.join("go"), "build");
 
         // And a descriptor of an installer's, pointed at the other directory,
         // because the two are made different ways — one is the cache as it was

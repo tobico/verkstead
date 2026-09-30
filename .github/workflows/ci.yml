@@ -121,6 +121,122 @@ jobs:
             exit 1
           fi
 
+  # The package stores, proved by really installing something inside a Sandbox
+  # — `crates/server/tests/package_stores.rs`, which is where the reasoning is.
+  #
+  # A job of its own rather than more steps in `Rust`, for two reasons. The
+  # tools are this suite's alone and installing them would slow every other
+  # check down; and this is the one job whose business is *having* them, which
+  # is what `VERKSTEAD_TEST_STORES` below says — with it set, a proof skipped
+  # for want of its tool fails rather than printing a line nobody reads. The
+  # `Rust` job runs the same suite as part of the workspace and skips whatever
+  # this runner image has not got, which is the developer's experience and the
+  # right one there.
+  #
+  # It runs beside the other jobs rather than after them, so what it costs the
+  # workflow is its own wall clock and not a minute of anybody else's.
+  #
+  # **And what that comes to.** Measured over the four green runs on `main`
+  # before this job existed, 2026-09-24 to 2026-09-29: the workflow took 16m31s,
+  # 16m49s, 18m57s and 21m50s end to end, and what set every one of those was a
+  # Windows leg — 869 s to 1307 s, against `Rust`'s steady 855–896 s. So the
+  # figure to watch is not this job's own minutes but whether they pass the
+  # Windows legs, and a job that builds one crate's test target and runs a
+  # handful of small installs does not come close. The measurement after it
+  # landed is in this branch's pull request.
+  package-stores:
+    name: Package stores
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      # The same pin as every other job, for the same reason.
+      - name: Install Rust 1.95.0
+        uses: dtolnay/rust-toolchain@1.95.0
+
+      # A key of its own: this job builds one test target of one crate, and a
+      # cache shared with the `Rust` job would have the two evicting each
+      # other.
+      - uses: Swatinem/rust-cache@v2.9.2
+        with:
+          key: package-stores
+
+      # The same bubblewrap the `Rust` job installs, and for the same reason —
+      # see the comment there for why the sysctl goes off as well. Every proof
+      # here runs its install *inside* a sandbox, so without this there is
+      # nothing to install into.
+      - name: Install bubblewrap
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      # **Go, unpacked where a session can reach it.** Not
+      # `actions/setup-go`, and not the runner image's tool cache it installs
+      # from: a session's sandbox is opened onto `/nix`, `/usr`, `/bin`,
+      # `/lib`, `/lib64`, `/etc` and `/run/current-system` and nothing else —
+      # `LINUX_SYSTEM` in `crates/server/src/sandbox.rs` — so a `go` under
+      # `/opt/hostedtoolcache` is a `go` no proof here can run. Every one of
+      # them would skip, on the one job where a skip is a failure.
+      #
+      # The whole tree under `/usr/local` rather than a link to one: `go`
+      # resolves its own `GOROOT` from where its binary really is, so a
+      # symlink from inside a bind into the tool cache lands back outside it.
+      #
+      # Pinned to a release, like every other tool this file installs.
+      - name: Install Go 1.26.8
+        run: |
+          curl -sSfL -o "$RUNNER_TEMP/go.tar.gz" https://go.dev/dl/go1.26.8.linux-amd64.tar.gz
+          sudo tar -C /usr/local -xzf "$RUNNER_TEMP/go.tar.gz"
+          echo /usr/local/go/bin >> "$GITHUB_PATH"
+
+      # And the same question asked of every tool on the list, in a line naming
+      # the one that fails it rather than as a test failure about a shell that
+      # could not find a program — the reason the sandbox-surface step in the
+      # `Rust` job is written the way it is.
+      #
+      # Both halves: installed at all, and installed somewhere a session is
+      # opened onto. The second is the one that catches a runner image moving a
+      # tool, which is how this job would go quietly green while proving
+      # nothing.
+      - name: Every tool a proof installs with is inside the sandbox's binds
+        run: |
+          status=0
+
+          for tool in go zip; do
+            found=$(command -v "$tool" || true)
+
+            if [ -z "$found" ]; then
+              echo "::error::this runner has no $tool, which a package-store proof installs with"
+              status=1
+              continue
+            fi
+
+            real=$(readlink -f "$found")
+
+            case "$real" in
+              /nix/*|/usr/*|/bin/*|/lib/*|/lib64/*|/etc/*|/run/current-system/*)
+                echo "$tool: $real"
+                ;;
+              *)
+                echo "::error::$tool is at $real, which no session's sandbox binds — see LINUX_SYSTEM in crates/server/src/sandbox.rs"
+                status=1
+                ;;
+            esac
+          done
+
+          exit $status
+
+      # `--nocapture` so that a proof's own account of itself is in the log:
+      # what an install printed is the whole of what explains a failure, and a
+      # captured one is a line about an exit status.
+      - name: The proofs
+        run: cargo test -p verkstead-server --test package_stores -- --nocapture
+        env:
+          # What makes a skipped proof a failure here. Any value does; this one
+          # says what it is for.
+          VERKSTEAD_TEST_STORES: required
+
   # What the same sandbox comes to on a Mac, asked of a Mac. What a session may
   # reach is one description said once, and `sandbox-exec` is the second
   # rendering of it — so what settles whether that rendering holds is a probe

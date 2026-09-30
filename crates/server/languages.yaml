@@ -48,8 +48,8 @@
 #              says there is one at all.
 #
 # A placeholder's directory is made, and granted writable to a session, only
-# where a loaded descriptor names it. With Rust alone, nothing names `{stores}`
-# and no session is opened onto one.
+# where a loaded descriptor names it. Of the languages below none names
+# `{stores}`, so no session is opened onto one.
 #
 # **Write `/` between the placeholder and what is under it, on every platform.**
 # A descriptor is one file read on three, so the grammar has one separator: what
@@ -86,3 +86,41 @@ languages:
           RUSTC_WRAPPER: "{sccache}"
           SCCACHE_DIR: "{cache}/sccache"
           SCCACHE_CACHE_SIZE: "{size}"
+
+  go:
+    # The second language Verkstead ships knowing about, and the first of the
+    # package stores (ADR-0021). Nothing in the server changed to add it: it is
+    # this entry, the proofs beside it, and `go` in the dev shell and in CI.
+    label: Go
+
+    # The module file, at the root of a checkout, for the setup card's warning
+    # and nothing else — the variables below are every session's, exactly as
+    # Rust's are.
+    detect:
+      - go.mod
+
+    # Go keeps the two halves this stage cares about in two directories, and
+    # names one variable for each — `go help environment`, checked against
+    # go1.26 as this entry was written:
+    #
+    #   GOMODCACHE  "the directory where the go command will store downloaded
+    #               modules". The downloads, which is what stops two
+    #               Conversations fetching one module twice.
+    #   GOCACHE     "the directory where the go command will store cached
+    #               information for reuse in future builds". Compiled output,
+    #               which for Go is nothing but a directory — there is no
+    #               Compile Server to run and no capability to name.
+    #
+    # Both under `{cache}` rather than `{stores}`: `go build` compiles out of
+    # the module cache where the module already is, so nothing is linked into
+    # the Worktree and the two are free to be different filesystems. Both are
+    # documented as safe for several `go` commands at once, which is the other
+    # half of what a shared store has to be — see
+    # <https://go.dev/ref/mod#module-cache>.
+    #
+    # And neither holds anything that is a session's own: a login is `~/.netrc`
+    # and `GOPATH/bin` is a third directory, so what is shared here is
+    # downloads and compiled objects and nothing else.
+    env:
+      GOMODCACHE: "{cache}/go/mod"
+      GOCACHE: "{cache}/go/build"

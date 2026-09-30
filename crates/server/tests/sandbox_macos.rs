@@ -3221,19 +3221,23 @@ async fn the_configured_binds_beside_a_read_only_companion_are_still_writable() 
     );
 }
 
-/// The shared Rust build cache, with nothing configured — which is the feature
-/// on, because a human who has never opened the settings page should not be the
-/// one paying for every dependency to be compiled twice.
+/// The shared build cache, with nothing configured — which is the feature on,
+/// because a human who has never opened the settings page should not be the one
+/// paying for every dependency to be compiled twice.
 ///
-/// The directory is writable at the same path inside, and `CARGO_HOME` points
-/// into it: that is the half of the cache that works with no sccache anywhere,
-/// and it is what stops two Conversations downloading one crate twice.
+/// The directory is writable at the same path inside, and every built-in
+/// language's stores point into it: `CARGO_HOME`, which is the half of Rust's
+/// cache that works with no sccache anywhere, and Go's two — the downloads and
+/// the compiled objects, which for Go is a directory and nothing more.
+///
+/// That is what stops two Conversations downloading one crate, or one module,
+/// twice.
 #[tokio::test]
 #[cfg_attr(
     not(target_os = "macos"),
     ignore = "the boundary this probes is a Mac's"
 )]
-async fn the_build_cache_is_writable_inside_and_cargos_home_is_in_it() {
+async fn the_build_cache_is_writable_inside_and_the_stores_are_in_it() {
     let fixture = grilling().await;
     let cache = fixture.cache(false);
 
@@ -3245,6 +3249,8 @@ async fn the_build_cache_is_writable_inside_and_cargos_home_is_in_it() {
             say cargo-home "${{CARGO_HOME-unset}}"
             say wrapper "${{RUSTC_WRAPPER-unset}}"
             say sccache-dir "${{SCCACHE_DIR-unset}}"
+            say gomodcache "${{GOMODCACHE-unset}}"
+            say gocache "${{GOCACHE-unset}}"
             "#,
             dir = quoted(&fixture.cache_dir()),
         ),
@@ -3265,6 +3271,18 @@ async fn the_build_cache_is_writable_inside_and_cargos_home_is_in_it() {
          RUSTC_WRAPPER naming a path that is not reachable would break every build"
     );
     assert_eq!(reported["sccache-dir"], "unset");
+
+    assert_eq!(
+        reported["gomodcache"],
+        fixture.cache_dir().join("go/mod").display().to_string(),
+        "and the modules every session downloads are in the same bind",
+    );
+    assert_eq!(
+        reported["gocache"],
+        fixture.cache_dir().join("go/build").display().to_string(),
+        "beside the compiled output Go shares, which needs no compile server: \
+         it is a directory, and the one bind is what opens it",
+    );
 }
 
 /// And with an sccache the server resolved: a session finds it beside the

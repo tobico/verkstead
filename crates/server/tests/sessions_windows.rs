@@ -2184,6 +2184,10 @@ fn whose(pid: u32) -> String {
 /// servers are counted here as well: the one Verkstead started, and none the
 /// session started inside itself for want of it. That hazard is exactly the
 /// ordinary case, a manifest one directory down from the root.
+///
+/// **And Go's two directories beside them**, which is this platform's half of
+/// what the package stores promise: the same one grant, with a second
+/// language's store under it, written the way Windows writes a path.
 #[tokio::test]
 async fn a_session_gets_the_shared_cargo_home_and_the_compiler_wrapper() {
     // Held for as long as this fixture is up. A session handed a cache is a
@@ -2200,6 +2204,8 @@ async fn a_session_gets_the_shared_cargo_home_and_the_compiler_wrapper() {
         Note 'wrapper' $env:RUSTC_WRAPPER
         Note 'cargo-home' $env:CARGO_HOME
         Note 'sccache-dir' $env:SCCACHE_DIR
+        Note 'gomodcache' $env:GOMODCACHE
+        Note 'gocache' $env:GOCACHE
 
         # Run the thing it was pointed at, which is the only way to ask whether
         # the boundary really lets a session open it.
@@ -2208,6 +2214,9 @@ async fn a_session_gets_the_shared_cargo_home_and_the_compiler_wrapper() {
 
         [void][System.IO.Directory]::CreateDirectory($env:CARGO_HOME)
         [System.IO.File]::WriteAllText((Under $env:CARGO_HOME 'downloaded.crate'), 'here')
+
+        [void][System.IO.Directory]::CreateDirectory($env:GOMODCACHE)
+        [System.IO.File]::WriteAllText((Under $env:GOMODCACHE 'downloaded.zip'), 'here')
         "#,
         Some(cache.path()),
         Builds::Nothing,
@@ -2249,6 +2258,22 @@ async fn a_session_gets_the_shared_cargo_home_and_the_compiler_wrapper() {
          directory",
     );
 
+    // And Go's two, composed the same way out of the same directory: the
+    // downloads and the compiled output, which for Go is a directory and no
+    // capability at all — so this platform's session is given both of them
+    // whether or not there is an sccache on the machine.
+    assert_eq!(
+        fixture.written("gomodcache").await,
+        cache.path().join("go").join("mod").display().to_string(),
+        "a session's module downloads go under the same shared cache",
+    );
+
+    assert_eq!(
+        fixture.written("gocache").await,
+        cache.path().join("go").join("build").display().to_string(),
+        "and what it compiles out of them goes beside them",
+    );
+
     let downloaded = cache.path().join("cargo").join("downloaded.crate");
 
     until_there(&downloaded).await;
@@ -2257,6 +2282,18 @@ async fn a_session_gets_the_shared_cargo_home_and_the_compiler_wrapper() {
         std::fs::read_to_string(&downloaded).unwrap().trim(),
         "here",
         "and the session really wrote it, from inside its boundary",
+    );
+
+    let module = cache.path().join("go").join("mod").join("downloaded.zip");
+
+    until_there(&module).await;
+
+    assert_eq!(
+        std::fs::read_to_string(&module).unwrap().trim(),
+        "here",
+        "and the grant reaches the second language's store as well as the \
+         first's: one directory written for the session account, with every \
+         store this machine shares underneath it",
     );
 
     let started: Vec<u32> = servers().difference(&already).copied().collect();

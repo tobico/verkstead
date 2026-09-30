@@ -155,6 +155,15 @@
               # network by reaching a listener the test itself is holding open,
               # which is the sharing proved without touching the internet.
               curl
+              # What `crates/server/tests/package_stores.rs` proves a shared
+              # package store with. That suite really installs a module inside
+              # a Sandbox, twice at once and then with the registry denied,
+              # because a descriptor naming `GOMODCACHE` cannot say whether Go
+              # still reads it — see ADR-0021. A checkout without this stays
+              # green, the proof skipping in a line that names the tool; the
+              # dev shell carries it so that the maintainer, who builds only
+              # Rust, is not the one who never runs it.
+              go
               # What a ticked `gh` row unpacks on an Intel Mac, which has no
               # Homebrew to install one with — see
               # `crates/server/src/onboarding/install.rs`'s `GH_RELEASE`. Both

@@ -5549,15 +5549,19 @@ async fn the_settings_held_binds_compose_the_way_the_installations_do() {
     );
 }
 
-/// The shared Rust build cache, with nothing configured — which is the feature
-/// on, because a human who has never opened the settings page should not be the
-/// one paying for every dependency to be compiled twice.
+/// The shared build cache, with nothing configured — which is the feature on,
+/// because a human who has never opened the settings page should not be the one
+/// paying for every dependency to be compiled twice.
 ///
-/// The directory is writable at the same path inside, and `CARGO_HOME` points
-/// into it: that is the half of the cache that works with no sccache anywhere,
-/// and it is what stops two Conversations downloading one crate twice.
+/// The directory is writable at the same path inside, and every built-in
+/// language's stores point into it: `CARGO_HOME`, which is the half of Rust's
+/// cache that works with no sccache anywhere, and Go's two — the downloads and
+/// the compiled objects, which for Go is a directory and nothing more.
+///
+/// That is what stops two Conversations downloading one crate, or one module,
+/// twice.
 #[tokio::test]
-async fn the_build_cache_is_writable_inside_and_cargos_home_is_in_it() {
+async fn the_build_cache_is_writable_inside_and_the_stores_are_in_it() {
     let fixture = grilling().await;
     let cache = fixture.cache(false);
 
@@ -5569,6 +5573,8 @@ async fn the_build_cache_is_writable_inside_and_cargos_home_is_in_it() {
             say cargo-home "${{CARGO_HOME-unset}}"
             say wrapper "${{RUSTC_WRAPPER-unset}}"
             say sccache-dir "${{SCCACHE_DIR-unset}}"
+            say gomodcache "${{GOMODCACHE-unset}}"
+            say gocache "${{GOCACHE-unset}}"
             "#,
             dir = quoted(&fixture.cache_dir()),
         ),
@@ -5589,6 +5595,18 @@ async fn the_build_cache_is_writable_inside_and_cargos_home_is_in_it() {
          RUSTC_WRAPPER naming a path that is not mounted would break every build"
     );
     assert_eq!(reported["sccache-dir"], "unset");
+
+    assert_eq!(
+        reported["gomodcache"],
+        fixture.cache_dir().join("go/mod").display().to_string(),
+        "and the modules every session downloads are in the same bind",
+    );
+    assert_eq!(
+        reported["gocache"],
+        fixture.cache_dir().join("go/build").display().to_string(),
+        "beside the compiled output Go shares, which needs no compile server: \
+         it is a directory, and the one bind is what opens it",
+    );
 }
 
 /// And with an sccache the server resolved: it is mounted beside the
@@ -5641,10 +5659,19 @@ async fn the_sccache_the_server_resolved_is_what_rustc_is_wrapped_in() {
 /// The switch is the human's, in `config.yaml` and on the settings page, and it
 /// is read as each sandbox is built — so turning it off is a next session with
 /// no bind and none of the variables.
+///
+/// **Every language off rather than one of them**, which is what closing the
+/// hole takes now that there is more than one: the bind is the Build Cache
+/// itself, and a language still on is a language whose store is inside it. What
+/// one switch on its own comes to — that language's variables gone and the rest
+/// untouched — is the descriptors' own question, and
+/// `build_cache::a_cache_that_is_switched_off_gives_a_sandbox_nothing` is where
+/// it is asked.
 #[tokio::test]
 async fn a_build_cache_switched_off_is_no_bind_and_no_variables() {
     let fixture = grilling().await;
-    fixture.configure("rust_build_cache:\n  enabled: false\n");
+    fixture
+        .configure("rust_build_cache:\n  enabled: false\nlanguages:\n  go:\n    enabled: false\n");
 
     // The server still resolved one, sccache and all: what is being shown is
     // that the switch decides, not that there was nothing to hand out.
@@ -5659,6 +5686,8 @@ async fn a_build_cache_switched_off_is_no_bind_and_no_variables() {
             say wrapper "${{RUSTC_WRAPPER-unset}}"
             say sccache-dir "${{SCCACHE_DIR-unset}}"
             say size "${{SCCACHE_CACHE_SIZE-unset}}"
+            say gomodcache "${{GOMODCACHE-unset}}"
+            say gocache "${{GOCACHE-unset}}"
             file /verkstead/bin/sccache binary
             "#,
             dir = quoted(&fixture.cache_dir()),
@@ -5673,6 +5702,8 @@ async fn a_build_cache_switched_off_is_no_bind_and_no_variables() {
     assert_eq!(reported["wrapper"], "unset");
     assert_eq!(reported["sccache-dir"], "unset");
     assert_eq!(reported["size"], "unset");
+    assert_eq!(reported["gomodcache"], "unset");
+    assert_eq!(reported["gocache"], "unset");
     assert_eq!(
         reported["binary"], "absent",
         "and the sccache goes with it: there is nothing left for it to compile into"

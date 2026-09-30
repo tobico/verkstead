@@ -16,7 +16,7 @@ Roadmap stage: [02: Package stores](docs/roadmaps/language-caches/02-package-sto
 
 ## Tasks
 
-- [ ] 01: Go, and the proof a store was read — [details](01-go-and-the-store-proof.md)
+- [x] 01: Go, and the proof a store was read — [details](01-go-and-the-store-proof.md)
 - [ ] 02: npm, pnpm and yarn — [details](02-npm-pnpm-and-yarn.md)
 - [ ] 03: deno and bun — [details](03-deno-and-bun.md)
 - [ ] 04: pip and uv — [details](04-pip-and-uv.md)

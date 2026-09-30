@@ -66,16 +66,18 @@ const BESIDE = "/var/cache/verkstead-cargo";
 
 /// The languages the fixture holds, as a save puts them back on the wire: the
 /// two keys the page writes, per language the read listed — the installer's own
-/// beside the built-in. Carried by every section for the reason the paths are:
-/// one request writes the whole of `config.yaml`, so a list left out would be a
-/// list emptied. See [`heldLanguages`].
+/// beside the ones Verkstead ships. Carried by every section for the reason the
+/// paths are: one request writes the whole of `config.yaml`, so a list left out
+/// would be a list emptied. See [`heldLanguages`].
 ///
 /// Gleam's size is one the language pane itself draws no field for, nothing here
 /// reading it — and it is sent all the same, because it is a key of that entry
-/// whoever wrote it.
+/// whoever wrote it. Go's goes out empty, which is what a size nobody has
+/// configured comes to: the default is the server's to say, not this form's.
 const LANGUAGES = {
   languages: [
     { name: "rust", enabled: true, size: "50G" },
+    { name: "go", enabled: true, size: "" },
     { name: "gleam", enabled: true, size: "8G" },
   ],
 };

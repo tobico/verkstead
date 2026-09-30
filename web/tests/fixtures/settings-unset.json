@@ -28,6 +28,15 @@
       "size": "30G",
       "size_configured": false,
       "unread": null
+    },
+    {
+      "compiling": null,
+      "enabled": true,
+      "label": "Go",
+      "name": "go",
+      "size": "30G",
+      "size_configured": false,
+      "unread": null
     }
   ],
   "mcp_servers": [],

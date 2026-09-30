@@ -413,7 +413,7 @@ impl BuildCache {
 
         // And the directory beside it, **only where a loaded descriptor names
         // it** — see [`crate::languages`], and the `{stores}` placeholder in
-        // the descriptors. With Rust the only language on this machine nothing
+        // the descriptors. With only the languages Verkstead ships, nothing
         // names it, nothing is made here and no session is opened onto one.
         //
         // Asked of every descriptor rather than of the enabled ones, because
@@ -1181,7 +1181,8 @@ mod tests {
     }
 
     /// The switch is the human's and is read every time, so a cache that exists
-    /// still hands out nothing while it is off.
+    /// still hands out nothing while every language is off — and a language
+    /// switched off takes its own variables out and leaves the rest.
     #[test]
     fn a_cache_that_is_switched_off_gives_a_sandbox_nothing() {
         let cache = BuildCache::at(
@@ -1190,7 +1191,30 @@ mod tests {
             PathBuf::from("/var/lib/verkstead"),
         );
 
-        assert!(shared(&cache, &configured("rust_build_cache:\n  enabled: false\n")).is_none());
+        let rust_off = shared(&cache, &configured("rust_build_cache:\n  enabled: false\n"))
+            .expect("the language beside it is still on");
+
+        assert_eq!(
+            variable(&rust_off, "CARGO_HOME"),
+            None,
+            "nothing of the language that is off"
+        );
+        assert_eq!(
+            variable(&rust_off, "GOMODCACHE"),
+            Some(cached("go/mod").as_str()),
+            "and the whole of the one that is on"
+        );
+
+        assert!(
+            shared(
+                &cache,
+                &configured(
+                    "rust_build_cache:\n  enabled: false\nlanguages:\n  go:\n    enabled: false\n"
+                )
+            )
+            .is_none(),
+            "and with every one of them off there is nothing to open the cache for",
+        );
     }
 
     /// And a server with no cache at all hands out nothing whatever the
@@ -1395,8 +1419,12 @@ mod tests {
     fn the_key_that_was_there_before_the_map_still_switches_rust() {
         let cache = compiling_cache();
 
-        assert!(
-            shared(&cache, &configured("rust_build_cache:\n  enabled: false\n")).is_none(),
+        let off = shared(&cache, &configured("rust_build_cache:\n  enabled: false\n"))
+            .expect("the language beside it is still on");
+
+        assert_eq!(
+            variable(&off, "CARGO_HOME"),
+            None,
             "an install that turned it off before the map existed is still off",
         );
 

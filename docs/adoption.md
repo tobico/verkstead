@@ -993,8 +993,8 @@ The other two are not a choice. `{size}` is that entry's own `size` key, and
 means anything inside the `sccache` capability, which is what says there is one
 at all. A placeholder's directory is made, and opened to a session, only where
 a loaded descriptor names it: on an install whose `config.yaml` says nothing,
-Rust is the only descriptor loaded, nothing names `{stores}`, and no session
-is opened onto it.
+the descriptors Verkstead ships are the only ones loaded, none of them names
+`{stores}`, and no session is opened onto it.
 
 **What an entry that will not load costs you is the entry, and nothing else.**
 Two ways one fails. Naming a variable the Sandbox sets itself — `PATH`, `HOME`,

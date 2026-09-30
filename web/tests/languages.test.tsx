@@ -7,9 +7,8 @@
 //! change them in the details pane it opens. Each is mounted on its own, and the
 //! pair together only where the round trip is what is being asked about.
 //!
-//! **The page is drawn from what the server loaded**, so the fixture carries two
-//! languages: the built-in one and a descriptor an installer wrote into
-//! `config.yaml`. A box under a label nothing in the viewer knows is the whole
+//! **The page is drawn from what the server loaded**, so the fixture carries the
+//! descriptors Verkstead ships and one an installer wrote into `config.yaml`. A box under a label nothing in the viewer knows is the whole
 //! of what this section is for, and a suite that only ever saw Rust would prove
 //! only that the page can draw the language it was written around.
 //!
@@ -48,6 +47,7 @@ const UNSET = unset as SettingsView;
 /// The built-in descriptor, and the one an installer wrote — by the names
 /// `config.yaml` keys them under, which is what a save names back.
 const RUST = "rust";
+const GO = "go";
 const GLEAM = "gleam";
 
 /// The binds the fixture holds, as a save puts them back on the wire: the
@@ -215,7 +215,7 @@ describe("the card", () => {
 
     await waitFor(() =>
       expect(container.querySelector(`.${styles.standing}`)?.textContent).toBe(
-        "Rust, Gleam",
+        "Rust, Go, Gleam",
       ),
     );
   });
@@ -228,7 +228,7 @@ describe("the card", () => {
 
     await waitFor(() =>
       expect(container.querySelector(`.${styles.standing}`)?.textContent).toBe(
-        "Rust",
+        "Rust, Go",
       ),
     );
   });
@@ -236,7 +236,7 @@ describe("the card", () => {
   /// And nothing at all under the heading where none are: a card saying a
   /// machine builds nothing would be a line nobody needs.
   it("says nothing under the heading while they are all off", async () => {
-    theSettings(off(off(TOLD), GLEAM));
+    theSettings(off(off(off(TOLD), GO), GLEAM));
     const { container } = mountCard();
 
     const face = await theCard(container);
@@ -271,7 +271,7 @@ describe("the card", () => {
     theSettings(compiling(UNSET));
     mountCard();
 
-    await waitFor(() => screen.getByText("Rust"));
+    await waitFor(() => screen.getByText("Rust, Go"));
     expect(screen.queryByText(/No sccache is installed/)).toBeNull();
   });
 
@@ -329,8 +329,9 @@ describe("the languages as the pane draws them", () => {
     mountPane();
 
     await waitFor(() => expect(theCheck("Rust").checked).toBe(true));
+    expect(theCheck("Go").checked).toBe(true);
     expect(theCheck("Gleam").checked).toBe(true);
-    expect(screen.getAllByRole("checkbox")).toHaveLength(2);
+    expect(screen.getAllByRole("checkbox")).toHaveLength(3);
   });
 
   /// The box says where its language stands rather than whether anybody has
@@ -517,6 +518,7 @@ describe("changing the languages", () => {
         // sizes included, whether this pane drew a field for one or not.
         languages: [
           { name: RUST, enabled: false, size: "50G" },
+          { name: GO, enabled: true, size: "" },
           { name: GLEAM, enabled: true, size: "8G" },
         ],
         // Untouched by this form, and sent back as it stands: one request
@@ -547,6 +549,7 @@ describe("changing the languages", () => {
     await waitFor(() =>
       expect(languagesSent(fetching)).toEqual([
         { name: RUST, enabled: true, size: "50G" },
+        { name: GO, enabled: true, size: "" },
         { name: GLEAM, enabled: false, size: "8G" },
       ]),
     );
@@ -605,6 +608,7 @@ describe("changing the languages", () => {
         mcp_servers: "Keep",
         languages: [
           { name: RUST, enabled: true, size: "80G" },
+          { name: GO, enabled: true, size: "" },
           { name: GLEAM, enabled: true, size: "8G" },
         ],
         // Untouched by this form, and sent back as it stands: one request
@@ -658,6 +662,7 @@ describe("changing the languages", () => {
     await waitFor(() =>
       expect(languagesSent(fetching)).toEqual([
         { name: RUST, enabled: false, size: "50G" },
+        { name: GO, enabled: true, size: "" },
         { name: GLEAM, enabled: true, size: "8G" },
       ]),
     );
@@ -676,14 +681,14 @@ describe("changing the languages", () => {
 
     await waitFor(() => expect(theCheck().checked).toBe(true));
     expect(container.querySelector(`.${styles.standing}`)?.textContent).toBe(
-      "Rust, Gleam",
+      "Rust, Go, Gleam",
     );
 
     fireEvent.click(theCheck());
 
     await waitFor(() =>
       expect(container.querySelector(`.${styles.standing}`)?.textContent).toBe(
-        "Gleam",
+        "Go, Gleam",
       ),
     );
   });

@@ -299,6 +299,7 @@ describe("what Next saves", () => {
       // out would be a wizard that emptied them.
       languages: [
         { name: "rust", enabled: true, size: "50G" },
+        { name: "go", enabled: true, size: "" },
         { name: "gleam", enabled: true, size: "8G" },
       ],
       cleanup: {

@@ -93,13 +93,14 @@ const PATHS = {
 };
 
 /// And the languages as a save puts them back: the two keys the page writes,
-/// per language the read listed — the installer's own beside the built-in, with
-/// a size the language pane draws no field for sent along like any other.
-/// Carried by every section for the reason the paths are — see
-/// [`heldLanguages`].
+/// per language the read listed — the installer's own beside the ones Verkstead
+/// ships, with a size the language pane draws no field for sent along like any
+/// other, and an empty one where nobody has configured a size at all. Carried by
+/// every section for the reason the paths are — see [`heldLanguages`].
 const LANGUAGES = {
   languages: [
     { name: "rust", enabled: true, size: "50G" },
+    { name: "go", enabled: true, size: "" },
     { name: "gleam", enabled: true, size: "8G" },
   ],
 };
