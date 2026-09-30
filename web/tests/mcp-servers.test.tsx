@@ -69,6 +69,10 @@ const REST = {
   // [`heldLanguages`].
   languages: [
     { name: "rust", enabled: true, size: "50G" },
+    { name: "go", enabled: true, size: "" },
+    { name: "node", enabled: true, size: "" },
+    { name: "python", enabled: true, size: "" },
+    { name: "dotnet", enabled: true, size: "" },
     { name: "gleam", enabled: true, size: "8G" },
   ],
   cleanup: {
@@ -342,7 +346,13 @@ describe("the pane", () => {
         // The read this pane sent from is the one nobody has been to, so what
         // rides along is that file rather than the told one.
         git_author: UNSET.git_author,
-        languages: [{ name: "rust", enabled: true, size: "" }],
+        languages: [
+          { name: "rust", enabled: true, size: "" },
+          { name: "go", enabled: true, size: "" },
+          { name: "node", enabled: true, size: "" },
+          { name: "python", enabled: true, size: "" },
+          { name: "dotnet", enabled: true, size: "" },
+        ],
         cleanup: {
           trim: { enabled: true, days: "" },
           delete: { enabled: false, days: "" },
