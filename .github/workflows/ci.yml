@@ -300,11 +300,21 @@ jobs:
       # have these installed — the same check pip's own proof turns off with
       # `--target`.
       #
+      # **And `--ignore-installed`, which is a second thing entirely.** That
+      # flag lets pip *write* into the system interpreter; it does not let pip
+      # take anything out of it, and a dpkg-installed distribution has no
+      # `RECORD` for pip to uninstall by. poetry's `dulwich` wants
+      # `urllib3>=2.2.2` and this image carries Debian's 2.0.7, so without this
+      # the step dies on `Cannot uninstall urllib3 2.0.7, RECORD file not
+      # found` and every proof below it is skipped. Nothing is upgraded in
+      # place: what pip installs lands beside what the distribution owns, which
+      # on a runner is the right way round and on anything else would not be.
+      #
       # The same releases the dev shell's nixpkgs carries, so that a proof that
       # passes here is a proof of the versions a developer ran it against.
       - name: Install poetry 2.4.1 and pipenv 2026.5.1
         run: |
-          sudo python3 -m pip install --break-system-packages \
+          sudo python3 -m pip install --break-system-packages --ignore-installed \
             poetry==2.4.1 pipenv==2026.5.1
 
       # And the same question asked of every tool on the list, in a line naming
