@@ -519,16 +519,16 @@ harness has a resume of its own, the session started on arrival is that resume
 rather than a fresh one: the same session id, against the log the **Memory sync**
 carried over, primed with the note below and nothing else. Where it cannot be
 made, Verkstead's own **Resume** stands exactly as it did.
-**The harness's resume where it has one, and Claude's, Grok Build's and Codex's are
-the three there are.** Claude's line and Grok Build's are the resume flag and the
-session id, written where the id a fresh session would be named by goes: the two
-are mutually exclusive, a conversation carried on keeping the id it already had.
-**Codex's is a subcommand** rather than a flag, which changes the shape of the line
-rather than what is on the end of it — the word comes straight after the binary and
-the session id and the prompt are its positionals, with the model and every
-configuration override the ordinary line carries come across onto it. OpenCode is
-named by nothing at launch, so there is no id on the record to resume by until the
-**Transcript** search has found the backend's own and written it down.
+**The harness's resume, and all four of them have one.** Claude's line, Grok
+Build's and OpenCode's are the resume flag and the session id, written where the id
+a fresh session would be named by goes: the two are mutually exclusive, a
+conversation carried on keeping the id it already had. **Codex's is a subcommand**
+rather than a flag, which changes the shape of the line rather than what is on the
+end of it — the word comes straight after the binary and the session id and the
+prompt are its positionals, with the model and every configuration override the
+ordinary line carries come across onto it. What separates the four is not whether
+they can be resumed but whether Verkstead knows the id to resume by, and whether
+their store has to be put right first.
 **And the id Codex resumes by is one Verkstead never picked.** It takes no session
 id at launch, so nothing known before the session starts names its log — but a
 rollout names *itself*, in the same opening line the Transcript search reads the
@@ -552,6 +552,23 @@ rather than by working out what grok would have called one. Which leaves a devic
 that has never run grok in this Worktree with nowhere to put it: that is
 Verkstead's own Resume, and the session it starts leaves the directory there for
 the visit after it.
+**And OpenCode is both of those at once: named by nothing, and keyed by the
+directory.** Its id is the store's own, as Codex's is — opencode keeps a row per
+session in one database rather than a log apiece, and the reader that follows those
+records already finds the row recording this Worktree that appeared after this
+session was launched. That row carries the id, and it goes on the record beside the
+session the moment the row is found. Its resume is the session flag with that id,
+the prompt under its own flag as it already is, and the model and the approvals
+unchanged.
+**What it needs put right is one column.** The sync carries the whole database,
+because narrowing further means writing rows of a schema that is opencode's own and
+moves between releases — so what travels with it is the working directory recorded
+against every session in it, this Conversation's included, and opencode resumes a
+session in the directory its row names rather than in the one it was started in. So
+that row is brought onto this device's Worktree path as the database lands, and
+nothing else in the file is ever written. A database whose shape this build does not
+recognise, and one holding no row of that id, each leave the store exactly as it
+arrived: that is Verkstead's own Resume again.
 **What it carries on from is the last session of this Conversation**, which is the
 newest name on the record: that is the conversation the agent was having when the
 work moved. The arrival writes it down once the record has landed, and the first
@@ -580,7 +597,9 @@ front of it: a store with no directory of this Worktree's, a session directory t
 did not cross, and a move the filesystem refused are each a log that is not there.
 Codex's is a rollout nothing in the store answers to — one that never crossed, and
 one whose opening line said nothing about which session it was, which is a session
-that was never named on the record at all.
+that was never named on the record at all. OpenCode's is the same said of a row: a
+store that did not come across, a store holding no row of that id, and one whose
+shape this build cannot write into.
 **The Note is the whole of what a carried conversation is primed with.** The
 session has its own context and is mid-turn in its own thinking, so being told the
 Brief again is worse than being told nothing: what it is sent is what it cannot
@@ -3268,6 +3287,13 @@ narrower means reading and writing rows of a schema that is opencode's own and
 moves between releases, which is the dependency the records reader deliberately
 does not take — it is allowed to stop reading where this would have to go on
 writing. So the bound on a store is what stands in front of a big one.
+**One column of one row is the exception**, and it is an arrival's rather than a
+sync's: the session a **Carried Conversation** is resumed as has the directory
+its row records brought onto this device's Worktree before the harness starts,
+because opencode resumes a session where that row says. It is written the way
+everything else here fails — a store whose shape this build does not recognise is
+left alone and the resume falls through — and nothing else in the database is
+ever written.
 **Which path each part is named off is two different answers.** The Repo's goes
 through the match across devices — see **Repo**, where origin then name is the
 rule — and **no match is an answer**: there is nothing of that Repo to pull, the

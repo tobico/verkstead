@@ -100,6 +100,16 @@ const GROK_MODEL: &str = "grok-4.6";
 /// cannot name.
 const CODEX_MODEL: &str = "gpt-5-codex";
 
+/// And an **OpenCode** account's, for the tests that run on the harness whose
+/// store is a database rather than a tree. The whole string is what the human
+/// typed on the Profile, provider and all.
+const OPENCODE_MODEL: &str = "opencode/big-pickle";
+
+/// The one database an OpenCode account keeps every session it runs in, said
+/// from the home the account is: opencode's own data directory under it, and
+/// inside that the name the sandbox pinned.
+const OPENCODE_STORE: &str = ".local/share/opencode/opencode.db";
+
 /// What every repository in this suite is called. Neither end has an origin, so
 /// the match is by name — which is the ordinary case for two clones nobody has
 /// pushed anywhere.
@@ -521,6 +531,47 @@ impl Verkstead {
         self.profile_called(ACCOUNT).await.id
     }
 
+    /// And an **OpenCode** account of this device's own, saved over the home
+    /// opencode resolves its two XDG directories inside.
+    ///
+    /// Here because OpenCode is the harness whose store is one database rather
+    /// than a tree: what it takes to resume one is a row brought onto this
+    /// device's Worktree inside a file that crossed whole, which is a thing only
+    /// an OpenCode Profile can be tested on.
+    async fn opencode_account(&self) -> i64 {
+        let home = self.elsewhere.path().join(ACCOUNT).join("opencode");
+
+        // The two directories that *are* the account, which is what a Profile of
+        // this type is judged by — a home that has never had opencode run in it
+        // has neither.
+        std::fs::create_dir_all(home.join(".config/opencode")).unwrap();
+        std::fs::create_dir_all(home.join(".local/share/opencode")).unwrap();
+        std::fs::write(
+            home.join(".local/share/opencode/auth.json"),
+            "{\"access\":\"the-desk\"}",
+        )
+        .unwrap();
+
+        let said = press(
+            &self.workbench,
+            PROFILES,
+            Some(
+                &serde_json::json!({
+                    "name": ACCOUNT,
+                    "account": { "agent_type": "OpenCode", "home": home },
+                    "models": [OPENCODE_MODEL],
+                    "memory": true,
+                })
+                .to_string(),
+            ),
+        )
+        .await;
+
+        assert_eq!(said, "\"Saved\"", "saving the OpenCode account");
+
+        self.profile_called(ACCOUNT).await.id
+    }
+
     /// Where this device's Grok account keeps its sessions, which is the store the
     /// relocation files a carried one into.
     fn grok_sessions(&self) -> PathBuf {
@@ -529,6 +580,32 @@ impl Verkstead {
             .join(ACCOUNT)
             .join(".grok")
             .join("sessions")
+    }
+
+    /// And where this device's own OpenCode account keeps the one database every
+    /// session it runs is written into.
+    fn opencode_at_home(&self) -> PathBuf {
+        self.elsewhere
+            .path()
+            .join(ACCOUNT)
+            .join("opencode")
+            .join(OPENCODE_STORE)
+    }
+
+    /// And where the **mirror** of a member's OpenCode account keeps it on this
+    /// device, which is where the memory sync lands a carried store: a home of
+    /// this device's own per Profile, under the Data Directory.
+    ///
+    /// Which is the one path in this suite read off the server's own arithmetic
+    /// rather than off a directory the test made — because the store a resume is
+    /// resolved against is the one that arrived, and nothing about the arrival is
+    /// the test's to place.
+    fn opencode_mirrored(&self, profile_id: i64) -> PathBuf {
+        self._dir
+            .path()
+            .join("accounts")
+            .join(profile_id.to_string())
+            .join(OPENCODE_STORE)
     }
 
     /// The row of this device's Profiles with that name, once there is one —
@@ -1439,6 +1516,59 @@ printf '%s\n' '{asked}' >> "$log"
     )
 }
 
+/// And what stands where **opencode** goes, on either machine: one script for
+/// both of the launches a device makes, because whether a launch opens a
+/// conversation or carries one on is what the line says.
+///
+/// **It writes no store**, which is the one way this stub differs from the three
+/// before it: opencode's store is a database, and there is no `sqlite3` on the
+/// system profile for a shell script to write one with. So the store is written
+/// from outside the sandbox by the test, the way `tests/sessions.rs` writes one
+/// for the reader that follows it — and what the stub is left saying is the half
+/// only it can say, which is the line it was launched on.
+///
+/// **A launch it was told to resume** says every word of that line, one per line.
+/// Its `--session` is the whole of what this suite is asking after: the flag, and
+/// the id nothing on either machine chose.
+///
+/// **A launch it was not told to resume** says what it was primed with instead.
+///
+/// **And either way it waits at the gate**, which is the one thing this stub
+/// needs that the three before it did not: what a continued session adds to its
+/// conversation is written into the store from outside, so the session it is
+/// written of has to still be running to follow it. For the opening launch the
+/// wait is the ordinary one — the turn in flight a move has to run to the end of.
+///
+/// `opening` is the word the second of those prints, and it is a different one on
+/// each machine for [`drafted_running`]'s reason: a suite whose two devices
+/// printed the same words could not say which of them had run. Its prompt is `$3`
+/// rather than `$2` — opencode is the one backend that takes its Brief under a
+/// flag, so everything after the model is one place along.
+fn opencode_that_carries_on_at(gate: &Path, opening: &str) -> String {
+    format!(
+        r#"
+session=
+take=
+for word in "$@"; do
+  if [ -n "$take" ]; then session=$word; take=; fi
+  if [ "$word" = "--session" ]; then take=yes; fi
+done
+
+if [ -n "$session" ]; then
+  printf 'carried on\r\n'
+  printf 'arg=%s\r\n' "$0"
+  for word in "$@"; do printf 'arg=%s\r\n' "$word"; done
+else
+  printf '{opening}\r\n'
+  printf 'prompt=%s\r\n' "$3"
+fi
+
+{waiting}
+"#,
+        waiting = waits_at(gate),
+    )
+}
+
 /// Set `core.autocrlf` on a repository, the way the machine it is on would have
 /// it — and respell whatever is checked out of it so the trees agree with the
 /// switch.
@@ -1734,6 +1864,49 @@ async fn ready_to_carry_codex_on(
     a.grills(conversation).await;
 
     (a, b, holding, conversation)
+}
+
+/// And the same again on **OpenCode**, the harness whose store is one database:
+/// both machines run the one script that opens a conversation or carries one on
+/// as its line says, each waiting at a gate of its own.
+///
+/// What the store holds is the test's to write — see
+/// [`opencode_that_carries_on_at`] — so this hands back the Profile A's account
+/// is, which is where A's store goes, and B's mirror of it, which is where the
+/// carried one lands.
+///
+/// Every test about carrying an OpenCode conversation on starts here.
+async fn ready_to_carry_opencode_on(
+    here: &Path,
+    there: &Path,
+    spill: &Path,
+) -> (Verkstead, Verkstead, Holding, i64, i64) {
+    let a = Verkstead::running(A, &opencode_that_carries_on_at(here, OPENED_HERE), spill).await;
+    let b = Verkstead::running(
+        B,
+        &opencode_that_carries_on_at(there, RE_PRIMED_THERE),
+        spill,
+    )
+    .await;
+
+    a.linked_to(&b.device, B_MACHINE, B_OS, vec![b.at()]).await;
+
+    let (machine, os) = this_machine();
+    b.linked_to(&a.device, &machine, &os, vec![a.at()]).await;
+
+    let theirs = a.repo().await;
+    b.cloned_from(&theirs).await;
+
+    let account = a.opencode_account().await;
+
+    let holding = b.holding();
+    let mirror = b.profile_called(ACCOUNT).await.id;
+
+    let conversation = a.drafting_under_on(account, OPENCODE_MODEL).await;
+
+    a.grills(conversation).await;
+
+    (a, b, holding, conversation, mirror)
 }
 
 /// The same with each machine's session saying what this test needs of it, which
@@ -3888,6 +4061,377 @@ async fn a_codex_rollout_that_named_no_session_falls_through_to_verksteads_resum
         re_primed.contains("Rate limiting"),
         "which means the session was primed off the record, Brief and all: \
          {re_primed:?}",
+    );
+}
+
+/// The kind of record opencode opens a session with, and the two this suite
+/// writes under it — the interview the session on A is part way through, and the
+/// one only a session that really carried on could have added.
+///
+/// Written as opencode writes them, which is a kind it filed the record under and
+/// the payload as JSON: what reads them back is the Transcript, which keeps a
+/// record exactly as the store held it with that kind and its place in the
+/// sequence around it.
+const OPENCODE_KIND: &str = "message.part.updated.1";
+const OPENCODE_ASKED: &str = r#"{"part":{"type":"text","text":"Where should the counter live?"}}"#;
+const OPENCODE_CARRYING_ON: &str = r#"{"part":{"type":"text","text":"So, back to the counter."}}"#;
+
+/// And how each of those reads once it is on the Transcript, which is the kind
+/// and the sequence Verkstead writes around what the store held.
+fn opencode_line(seq: i64, data: &str) -> String {
+    format!(r#"{{"kind":"{OPENCODE_KIND}","seq":{seq},"record":{data}}}"#)
+}
+
+/// The session id **opencode's store gives a session**, which is the difficulty
+/// this harness shares with Codex: Verkstead names no OpenCode session, so the
+/// only place this string exists before the store is written is here.
+///
+/// Shaped as opencode shapes one, and nothing depends on the shape: what matters
+/// is that it is not a name anything on either machine could have chosen.
+const OPENCODE_CHOSE: &str = "ses_f0ef23221ffeeSzlvZxHdDFSqE";
+
+/// An OpenCode store at `database`, made where opencode would have made one and
+/// holding only the columns Verkstead reads.
+///
+/// Its own file rather than the account's directory, because the two stores a
+/// test about a transfer touches are in two different places: A's account, and
+/// B's mirror of it under the Data Directory.
+async fn opencode_store(database: &Path) -> SqlitePool {
+    std::fs::create_dir_all(database.parent().unwrap()).unwrap();
+
+    let store = SqlitePool::connect_with(
+        sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(database)
+            .create_if_missing(true)
+            // The mode opencode keeps its own store in, which is what has to
+            // cross and what has to open on the machine it lands on.
+            .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal),
+    )
+    .await
+    .unwrap();
+
+    sqlx::Executor::execute(
+        &store,
+        "CREATE TABLE session (
+             id           TEXT PRIMARY KEY,
+             parent_id    TEXT,
+             directory    TEXT NOT NULL,
+             time_created INTEGER NOT NULL
+         );
+         CREATE TABLE event (
+             id           TEXT PRIMARY KEY,
+             aggregate_id TEXT NOT NULL,
+             seq          INTEGER NOT NULL,
+             type         TEXT NOT NULL,
+             data         TEXT NOT NULL
+         );",
+    )
+    .await
+    .unwrap();
+
+    store
+}
+
+/// A session in that store, opened in `directory` now.
+async fn opencode_session(store: &SqlitePool, session: &str, directory: &Path) {
+    let created = std::time::SystemTime::now()
+        .duration_since(std::time::SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64;
+
+    sqlx::query(
+        "INSERT INTO session (id, parent_id, directory, time_created) VALUES (?, NULL, ?, ?)",
+    )
+    .bind(session)
+    .bind(directory.display().to_string())
+    .bind(created)
+    .execute(store)
+    .await
+    .unwrap();
+}
+
+/// And a record it wrote inside one.
+async fn opencode_record(store: &SqlitePool, session: &str, seq: i64, data: &str) {
+    sqlx::query("INSERT INTO event (id, aggregate_id, seq, type, data) VALUES (?, ?, ?, ?, ?)")
+        .bind(format!("{session}-{seq}"))
+        .bind(session)
+        .bind(seq)
+        .bind(OPENCODE_KIND)
+        .bind(data)
+        .execute(store)
+        .await
+        .unwrap();
+}
+
+/// And which directory a store says one of its sessions is working in, which is
+/// the one column an arrival writes and the one a resume is resolved against.
+///
+/// Waited for, because the store it is asked of is one that crossed a link: the
+/// row is there once the memory sync has landed the file and the launch has
+/// brought it onto this device's Worktree.
+async fn opencode_directory_of(database: &Path, session: &str) -> String {
+    let deadline = Instant::now() + WAITING;
+    let mut last = None;
+
+    loop {
+        if database.is_file() {
+            let reading = SqlitePool::connect_with(
+                sqlx::sqlite::SqliteConnectOptions::new()
+                    .filename(database)
+                    .read_only(true)
+                    .create_if_missing(false),
+            )
+            .await;
+
+            if let Ok(reading) = reading {
+                let found: Option<(String,)> =
+                    sqlx::query_as("SELECT directory FROM session WHERE id = ?")
+                        .bind(session)
+                        .fetch_optional(&reading)
+                        .await
+                        .unwrap_or(None);
+
+                reading.close().await;
+
+                if let Some((directory,)) = found {
+                    return directory;
+                }
+
+                last = Some("no row of that id");
+            } else {
+                last = Some("the store would not open");
+            }
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "the store at {} never held a row for {session}: {last:?}",
+            database.display(),
+        );
+
+        tokio::time::sleep(LOOKING).await;
+    }
+}
+
+/// **An OpenCode grilling transferred mid-interview carries on in the row the
+/// carried store kept of it** — the last harness, and the one whose store is a
+/// database rather than a tree.
+///
+/// opencode takes no session id at launch either, so its name is the store's own:
+/// the reader that follows a session's records finds the row this Worktree's
+/// session wrote, and the id that row is under goes on the record beside the
+/// session, exactly where the id Verkstead picked would have gone for the two
+/// backends that take one. From there a device that never ran the session can
+/// resume it, and the resume is the shortest line here — the session flag, the
+/// id, and everything else about the launch unchanged.
+///
+/// **And its store is the one that has to be written into.** The memory sync
+/// carries the whole database, because narrowing further means writing rows of a
+/// schema that is opencode's own; what travels with it is the working directory
+/// recorded against the session, which is the sending device's. opencode resumes
+/// a session in the directory its row names, so that one column is brought onto
+/// this device's Worktree as the database lands, and nothing else in it is
+/// touched.
+///
+/// **Four things are read, and each is something only this could have left.** The
+/// name on A's record is the one the store gave the session rather than the one
+/// the Capture opened under. The line B's session was launched on carries that id
+/// under opencode's own session flag, with the model, the Brief's flag and the
+/// approvals all still on it. The row in the store that landed on B says B's
+/// Worktree. And B's Transcript holds what the session there added and not what
+/// the session on A had already written into the same session — which is the
+/// cursor having crossed with the row.
+#[tokio::test]
+async fn an_opencode_grilling_transferred_mid_interview_carries_on_in_the_row_the_store_kept() {
+    let spill = tempfile::tempdir().unwrap();
+    let here = spill.path().join("go-here");
+    let there = spill.path().join("go-there");
+    let (a, b, _holding, conversation, mirror) =
+        ready_to_carry_opencode_on(&here, &there, spill.path()).await;
+
+    // A turn genuinely in flight, and then the store the session would have been
+    // writing while it ran — from outside the sandbox, there being no sqlite3 in
+    // it for the stub to write one with.
+    a.printed(conversation, OPENED_HERE).await;
+
+    let worktree = a.worktree(conversation).await;
+    let writing = opencode_store(&a.opencode_at_home()).await;
+
+    opencode_session(&writing, OPENCODE_CHOSE, &worktree).await;
+    opencode_record(&writing, OPENCODE_CHOSE, 0, OPENCODE_ASKED).await;
+
+    // Let go of it before the work moves, so what crosses is a store nobody on
+    // this machine is holding open.
+    writing.close().await;
+
+    assert_eq!(
+        a.transcript_of(conversation, 0).await,
+        vec![opencode_line(0, OPENCODE_ASKED)],
+        "the interview is on A's Transcript, read out of the row opencode wrote — \
+         the record whole, with the kind it was filed under and its place in the \
+         sequence around it",
+    );
+
+    assert_eq!(
+        session_names(&a.pool)
+            .await
+            .into_iter()
+            .map(|(_, name)| name)
+            .collect::<Vec<String>>(),
+        vec![OPENCODE_CHOSE.to_owned()],
+        "and A's record calls that session what the store calls it, which is the \
+         only name it has: the Capture was opened under one nothing uses",
+    );
+
+    // The turn ends, and the move follows it.
+    std::fs::write(&here, "go").unwrap();
+
+    let there_id = handed_on(&a, conversation, B).await;
+
+    came_home(&b, there_id).await;
+
+    let said = b.latest_capture_saying(there_id, "carried on").await;
+
+    assert!(
+        said.contains("arg=--session"),
+        "B's session was told to continue one rather than to open one, and told \
+         by the flag opencode takes: {said:?}",
+    );
+    assert!(
+        said.contains(&format!("arg={OPENCODE_CHOSE}")),
+        "and to continue the session the store named, which is {OPENCODE_CHOSE}: \
+         {said:?}",
+    );
+    assert!(
+        !said.contains("arg=--fork"),
+        "and to continue it rather than branch off it, which is what the flag \
+         beside it would have meant: {said:?}",
+    );
+    assert!(
+        said.contains(&format!("arg={OPENCODE_MODEL}")) && said.contains("arg=--auto"),
+        "and the rest of the ordinary line came across onto it, model and \
+         approvals both: {said:?}",
+    );
+
+    let over_there = b.worktree(there_id).await;
+
+    assert!(
+        said.contains("arg=--prompt") && said.contains(&over_there.display().to_string()),
+        "the note goes under opencode's own prompt flag as the Brief does, and it \
+         names the Worktree's new path: {said:?}",
+    );
+    assert!(
+        !said.contains("Rate limiting"),
+        "and nothing else: the Brief is already in the context this session kept: \
+         {said:?}",
+    );
+
+    assert_eq!(
+        opencode_directory_of(&b.opencode_mirrored(mirror), OPENCODE_CHOSE).await,
+        over_there.display().to_string(),
+        "and the row in the store that landed here says the Worktree the work is \
+         now in rather than the one it left, which is where opencode resumes a \
+         session",
+    );
+
+    assert_eq!(
+        session_names(&b.pool)
+            .await
+            .into_iter()
+            .map(|(_, name)| name)
+            .collect::<Vec<String>>(),
+        vec![OPENCODE_CHOSE.to_owned(), OPENCODE_CHOSE.to_owned()],
+        "both of B's Events name that session: the one that crossed, and the one \
+         continuing it — which is what leaves the records of the session actually \
+         running findable",
+    );
+
+    // What the session on B added to the conversation it picked up, written the
+    // way A's was and into the store that arrived.
+    let adding = SqlitePool::connect_with(
+        sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(b.opencode_mirrored(mirror))
+            .create_if_missing(false),
+    )
+    .await
+    .expect("the store the memory sync landed on B opens");
+
+    opencode_record(&adding, OPENCODE_CHOSE, 1, OPENCODE_CARRYING_ON).await;
+    adding.close().await;
+
+    assert_eq!(
+        b.transcript_of(there_id, 1).await,
+        vec![opencode_line(1, OPENCODE_CARRYING_ON)],
+        "and the continued session's Transcript holds what it added and not what \
+         the session on A had already written into the same session — the cursor \
+         having crossed with the row, rather than this Event opening at the top of \
+         a conversation it did not have",
+    );
+
+    assert_eq!(
+        b.view(there_id).await.state,
+        Lifecycle::Grilling,
+        "and it is still a grilling: what moved is where the work is being done \
+         rather than how far it has got",
+    );
+}
+
+/// **And a store with no row for the session leaves Verkstead's own Resume doing
+/// exactly what it does today, with nothing written into it.**
+///
+/// Which is the fallback this harness needs both halves of, because its resume is
+/// the one that writes: a database this build cannot read refuses the write and a
+/// database holding no row of that id changes nothing, and neither may leave the
+/// store it was asked of any different from how it arrived.
+///
+/// The session here is one the reader never found — its row records some other
+/// Worktree, which is a session of another Conversation's — so nothing was ever
+/// written onto the record but the name the Capture opened under, and no store
+/// answers to that. Nothing is lost by it: the far end re-primes off the record,
+/// Brief and all, the way stage 09 left it.
+#[tokio::test]
+async fn an_opencode_store_with_no_row_for_the_session_falls_through_to_verksteads_resume() {
+    let spill = tempfile::tempdir().unwrap();
+    let here = spill.path().join("go-here");
+    let there = spill.path().join("go-there");
+    let (a, b, _holding, conversation, mirror) =
+        ready_to_carry_opencode_on(&here, &there, spill.path()).await;
+
+    a.printed(conversation, OPENED_HERE).await;
+
+    // A store with a session of another Conversation's in it and none of this
+    // one's, which is a Conversation whose own session was never found.
+    let elsewhere = PathBuf::from("/srv/worktrees/tables");
+    let writing = opencode_store(&a.opencode_at_home()).await;
+
+    opencode_session(&writing, "ses_elsewhere", &elsewhere).await;
+    writing.close().await;
+
+    std::fs::write(&here, "go").unwrap();
+
+    let there_id = handed_on(&a, conversation, B).await;
+
+    came_home(&b, there_id).await;
+
+    let re_primed = b.latest_capture_saying(there_id, RE_PRIMED_THERE).await;
+
+    assert!(
+        !re_primed.contains("arg=--session"),
+        "no row of A's store was ever this session's, so there is nothing for a \
+         resume to be asked by and Verkstead's own Resume stands: {re_primed:?}",
+    );
+    assert!(
+        re_primed.contains("Rate limiting"),
+        "which means the session was primed off the record, Brief and all: \
+         {re_primed:?}",
+    );
+
+    assert_eq!(
+        opencode_directory_of(&b.opencode_mirrored(mirror), "ses_elsewhere").await,
+        elsewhere.display().to_string(),
+        "and the store that landed here is as it arrived: a resume that found no \
+         row of its own leaves somebody else's alone rather than writing a guess \
+         over it",
     );
 }
 

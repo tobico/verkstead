@@ -693,12 +693,12 @@ struct Line {
     /// is on the end of it.
     ///
     /// `None` where Verkstead does not carry a conversation on from a session of
-    /// this backend, which is OpenCode alone. It is not named at launch, so there
-    /// is no id on the record to resume by until the Transcript search has found
-    /// the backend's own and written it down; it also keys its store by the
-    /// directory the session ran in, so it needs a relocation of its own on top of
-    /// that. Until then a launch under it opens a session of its own, which is
-    /// Verkstead's own Resume and nothing lost.
+    /// this backend, which is now no backend at all: all four have a resume, and
+    /// what separated them was never that but whether Verkstead knew the id to
+    /// resume by and whether their store had to be put right first. It stays an
+    /// `Option` because a fifth backend lands here before either of those is
+    /// answered for it, and until they are a launch under it opens a session of
+    /// its own, which is Verkstead's own Resume and nothing lost.
     resume: Option<Resume>,
 
     /// The flags and configuration overrides that go last, after the prompt.
@@ -712,9 +712,9 @@ struct Line {
 /// [`Line::resume`].
 ///
 /// **Two shapes rather than one spelling**, because the backends do not agree on
-/// what a resume *is*. For two of them it is another option on the same line, and
-/// the id goes where the id would have gone. For codex it is a subcommand: the
-/// line is `codex resume <session-id> <prompt>`, so the word comes ahead of
+/// what a resume *is*. For three of them it is another option on the same line,
+/// and the id goes where the id would have gone. For codex it is a subcommand:
+/// the line is `codex resume <session-id> <prompt>`, so the word comes ahead of
 /// everything the ordinary line says and the id is a positional in front of the
 /// prompt rather than a value after a flag.
 ///
@@ -725,7 +725,8 @@ struct Line {
 /// up logged out and sitting on a trust prompt.
 enum Resume {
     /// A flag and the id, written where the session id it is mutually exclusive
-    /// with would have gone. Claude's and Grok Build's, both spelled `--resume`.
+    /// with would have gone. Claude's and Grok Build's, both spelled `--resume`,
+    /// and OpenCode's, spelled `--session`.
     Flag(&'static str),
 
     /// A subcommand and the id, written in front of the line rather than on the
@@ -790,8 +791,7 @@ enum Named {
 /// the same at-work label — is what to reach for the day the Capture has to be
 /// that record instead.
 ///
-/// **And Claude, Grok Build and Codex are the backends Verkstead continues a
-/// conversation
+/// **And every one of the four is a backend Verkstead continues a conversation
 /// on.** Claude's resume is `--resume <session-id>`, written where the session id it
 /// is mutually exclusive with would have gone — after the prompt, which stays
 /// exactly where it already is, and which claude takes alongside the flag as the
@@ -876,6 +876,33 @@ enum Named {
 /// session named — which is why its log is found rather than named, as codex's
 /// is. Everything else about the account is in the directories the Profile
 /// named — see [`crate::sandbox`].
+///
+/// **And that same flag is its resume**, the shortest line here staying the
+/// shortest: `--session <session-id>` where the name a session that took one
+/// would have gone, the prompt under its own flag exactly where it already is,
+/// and the model and the approvals unchanged. Nothing is added and nothing comes
+/// off — opencode has no equivalent of codex's question about which directory to
+/// resume in, because it does not ask: it resumes in the directory the session's
+/// own row records, which is why that row is what has to be put right. `--fork`
+/// beside the flag is what would make it a conversation branched rather than
+/// carried on, and it is never passed (opencode 1.18.31's own help, and driven to
+/// prove the rest of this).
+///
+/// **Its id is the store's own, as Codex's is.** opencode names no session on the
+/// line, so what goes after the flag is the id the row in its store turned out to
+/// be under — read as the records reader finds that row and written onto the
+/// record there, which is what leaves a device that never ran the session able to
+/// resume it. See [`crate::transcript::found_in_the_store`].
+///
+/// **And its store is the one that has to be written into rather than moved
+/// about.** opencode keeps a row per session in one database and the memory sync
+/// carries the file whole, so the row of a carried session lands still recording
+/// the *sending* device's Worktree — and a resume against it would open in a
+/// directory this machine has not got, the row's own directory being where
+/// opencode resumes. So that one column is brought onto this device's Worktree
+/// before the line is built at all, and a store this build cannot write leaves
+/// the row alone and falls through to Verkstead's own Resume. See
+/// [`crate::records::carried`].
 fn line(agent_type: store::AgentType, worktree: Option<&Path>) -> Line {
     match agent_type {
         store::AgentType::Claude => Line {
@@ -939,7 +966,7 @@ fn line(agent_type: store::AgentType, worktree: Option<&Path>) -> Line {
             model: "-m",
             prompt: Some("--prompt"),
             names_the_session: false,
-            resume: None,
+            resume: Some(Resume::Flag("--session")),
             tail: vec!["--auto".to_owned()],
         },
     }
@@ -3300,7 +3327,7 @@ struct Continuing {
     /// else — see [`skills::moved`].
     note: String,
 
-    /// And the log it will go on appending to, with how much of it the session on
+    /// And the record it will go on adding to, with how much of it the session on
     /// the other machine wrote.
     carried: crate::transcript::Carried,
 }
@@ -3321,8 +3348,10 @@ struct Continuing {
 ///   Conversation whose Profile was changed under it has a log no other backend
 ///   could read.
 /// - **That harness has a resume line at all** — see [`Line::resume`], which is
-///   Claude's, Grok Build's and Codex's, and for now nobody else's.
-/// - **And the log is really on this machine, where the harness will look for it.**
+///   now every one of the four, and is still asked because a fifth backend lands
+///   without one.
+/// - **And the record is really on this machine, where the harness will look for
+///   it.**
 ///   Claude's store crosses with the memory sync as a labelled part each machine
 ///   names its own path for, so it should land under this device's own encoding of
 ///   this device's Worktree path with nothing further to do — but a claude told to
@@ -3333,7 +3362,11 @@ struct Continuing {
 ///   that has never run grok in this Worktree being the plain case of that. Codex's
 ///   crosses to the path it left and needs nothing moved, but nothing names it
 ///   either: the rollout the id belongs to is searched for in the store, and a
-///   rollout that never crossed is a `None` like the rest. See
+///   rollout that never crossed is a `None` like the rest. And OpenCode's crosses
+///   as one database with a row per session, so the same call looks for the row
+///   and brings the directory it records onto this device's Worktree — a store
+///   that did not cross, a row of that id that is not in it and a shape this
+///   build cannot write each being a `None` with nothing written. See
 ///   [`crate::transcript::carried`].
 ///
 /// `home` is the Conversation's own, which is where the log of a session whose
@@ -3349,7 +3382,8 @@ struct Continuing {
 /// opened with buys is nothing, there being no session of that name anywhere. Nothing
 /// to Claude's either way, whose parts are the two `projects/` entries, and nothing
 /// to Codex's, whose rollouts are picked out by the Worktree they name rather than
-/// by any id at all.
+/// by any id at all — nor to OpenCode's, which crosses as the one database and has
+/// no part narrower than that to ask for.
 ///
 /// **And this is where a relaunch's holding off is made good**, which is the one
 /// thing a launch does that is not about the launch. A relaunch locks every
@@ -3468,8 +3502,8 @@ async fn carried_on(
         tracing::info!(
             conversation_id = conversation.id,
             session = continued.session_id,
-            "the log of the session this Conversation arrived mid-conversation with is not on \
-             this machine under this device's own name for the Worktree, so the session is \
+            "the record of the session this Conversation arrived mid-conversation with is not \
+             on this machine under this device's own name for the Worktree, so the session is \
              re-primed rather than resumed",
         );
 
@@ -4472,30 +4506,49 @@ mod tests {
         );
     }
 
-    /// And a harness Verkstead does not carry a conversation on from is told
-    /// neither: no resume, because it has no line for one, and no name either,
-    /// because the name belongs to a session it is not opening.
+    /// And a continued **OpenCode** session is told it by that backend's own
+    /// spelling of the flag, on the shortest line here staying the shortest: the
+    /// model, the note under the prompt flag, the session flag with the id where
+    /// the name would have gone, and the approvals.
     ///
-    /// Which is the fallback said on the line. What a launch under one of these
-    /// really gets is Verkstead's own Resume — the decision is made before the
-    /// line is built, and never comes out this way — and this holds the line to
-    /// saying nothing it could not mean.
+    /// **Nothing is added and nothing comes off**, which is what separates this
+    /// resume from Codex's. opencode does not ask which directory to resume in: it
+    /// resumes in the one its own row records, so what is put right is that row
+    /// rather than the line — see [`crate::records::carried`]. And `--fork` beside
+    /// the flag is never passed, that being a conversation branched rather than
+    /// one carried on.
+    ///
+    /// The id is the store's own here, as Codex's is: opencode names no session at
+    /// launch, so what goes after the flag is what its row turned out to be under.
     #[test]
-    fn a_harness_with_no_resume_line_is_told_neither() {
+    fn a_continued_opencode_session_is_told_to_continue_the_one_it_carries_on() {
         let state = tempfile::tempdir().unwrap();
-
-        let argv = agents(vec!["agent".to_owned()], state.path()).resumed(
+        let argv = agents(vec!["opencode".to_owned()], state.path()).resumed(
             &opencode_pairing(),
-            "# Rate limiting\n",
-            Some("d3b07384-d9a0-4c9b-8f2a-1b7c5e6f0a12"),
+            "This Conversation has been moved onto another machine\n",
+            Some("ses_f0ef23221ffeeSzlvZxHdDFSqE"),
             worktree(),
         );
 
+        assert_eq!(
+            argv,
+            vec![
+                "opencode".to_owned(),
+                "-m".to_owned(),
+                "opencode/big-pickle".to_owned(),
+                "--prompt".to_owned(),
+                "This Conversation has been moved onto another machine\n".to_owned(),
+                "--session".to_owned(),
+                "ses_f0ef23221ffeeSzlvZxHdDFSqE".to_owned(),
+                "--auto".to_owned(),
+            ],
+            "the session flag stands where a name would have, and the rest of the \
+             line is the one an opening launch gets: {argv:?}",
+        );
         assert!(
-            !argv
-                .iter()
-                .any(|argument| argument.contains("d3b07384-d9a0-4c9b-8f2a-1b7c5e6f0a12")),
-            "nothing on the line names the session: {argv:?}",
+            !argv.iter().any(|argument| argument == "--fork"),
+            "and nothing branches the conversation rather than carrying it on: \
+             {argv:?}",
         );
     }
 

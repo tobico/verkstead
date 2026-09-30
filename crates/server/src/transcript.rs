@@ -28,14 +28,15 @@
 //! that records this Worktree and was created after this session was launched,
 //! which is Codex's rule against a store of another shape.
 //!
-//! **And what the search finds is what gives a Codex session its name.** It is the
-//! one backend Verkstead cannot name, so the Capture is opened under a name nothing
-//! ever uses — and a rollout names *itself*, in the line the finder is reading
-//! anyway. So the moment the log is found, the id it says it is of goes on the
-//! record beside the session, where the id Verkstead picked would have gone for the
-//! backends that take one. Which is what lets a machine that never ran the session
-//! carry its conversation on: the resume is by that id and nothing else. See
-//! [`names_itself`].
+//! **And what the search finds is what gives the two unnamed backends their
+//! names.** Codex and opencode each choose their own, so the Capture is opened
+//! under a name nothing ever uses — and a rollout names *itself*, in the line the
+//! finder is reading anyway, while a store answers with the id of the row the
+//! finder matched. So the moment the record is found, the id it turns out to be
+//! of goes on the record beside the session, where the id Verkstead picked would
+//! have gone for the backends that take one. Which is what lets a machine that
+//! never ran the session carry its conversation on: the resume is by that id and
+//! nothing else. See [`names_itself`] and [`found_in_the_store`].
 //!
 //! **And a session continuing an earlier one's conversation is followed from
 //! where that one left off.** A resumed session appends to the log it is resuming,
@@ -44,14 +45,18 @@
 //! [`Carried`]. Each Event holds its own session's words, so a Tail that began at
 //! the top would draw the same conversation twice across the two machines.
 //!
-//! **Which is the one thing here that writes into a harness's own store.** A store
-//! keyed by the directory a session ran in arrives from another machine still keyed
-//! by that machine's own path for it, and a harness that resolves a resume against
-//! the directory it is started in would never look where the sync put the log — so
-//! before the log of a carried Grok session is anything to resume against, the
-//! directory holding it is moved under this store's own name for this Worktree. See
-//! [`relocated`]. It is still the store's own directories that say which name that
-//! is: what the reader never does is compute one.
+//! **Which is the one thing here that writes into a harness's own store**, and it
+//! is two of the four that need it. A store keyed by the directory a session ran
+//! in arrives from another machine still keyed by that machine's own path for it,
+//! and a harness that resolves a resume against that path would never look where
+//! the sync put the record — so before the log of a carried Grok session is
+//! anything to resume against, the directory holding it is moved under this
+//! store's own name for this Worktree (see [`relocated`]), and before a carried
+//! OpenCode session is, the directory its row records is brought onto this
+//! device's Worktree (see [`records::carried`]). Grok's is still the store's own
+//! directories saying which name to use: what the reader never does is compute
+//! one. opencode's is one column of one row, and nothing else of that database is
+//! ever written.
 //!
 //! Lines go to the store exactly as they were written, and nothing here parses
 //! one — a database's records included, which reach it as their payload
@@ -248,14 +253,23 @@ impl Tail {
         if let Some(carried) = carried {
             return Tail {
                 conversation,
-                // Nothing to look for, the log being in hand: the search is what
-                // finds one, and this one was found before the session started.
+                // Nothing to look for, the record being in hand: the search is
+                // what finds one, and this one was found before the session
+                // started.
                 search: Search::Nowhere,
-                following: Following::Log(Log {
-                    log: carried.log,
-                    read: carried.read,
-                    partial: Vec::new(),
-                }),
+                following: match carried {
+                    Carried::Log { log, read } => Following::Log(Log {
+                        log,
+                        read,
+                        partial: Vec::new(),
+                    }),
+
+                    Carried::Records {
+                        database,
+                        session,
+                        taken,
+                    } => Following::Records(records::Reader::resuming(database, session, taken)),
+                },
                 pending: Vec::new(),
                 latest: None,
                 turns: None,
@@ -317,12 +331,7 @@ impl Tail {
             // sandbox pinned rather than the one opencode would have chosen for
             // itself — see [`crate::sandbox`].
             (store::Account::OpenCode { home: account }, Some(worktree)) => Search::Records {
-                database: match profile.memory {
-                    true => account
-                        .join(crate::sandbox::OPENCODE_DATA_INSIDE_HOME)
-                        .join(crate::sandbox::OPENCODE_DB_FILE),
-                    false => home.opencode_database(),
-                },
+                database: opencode_database(account, profile.memory, home),
                 worktree: worktree.to_owned(),
                 launched,
             },
@@ -376,7 +385,21 @@ impl Tail {
         let arrived = match &mut self.following {
             Following::Looking => Vec::new(),
             Following::Log(log) => log.take().await,
-            Following::Records(records) => records.take().await,
+
+            Following::Records(records) => {
+                let arrived = records.take().await;
+
+                // And the moment the store answers to a session is the moment
+                // that session has a name: opencode takes none at launch either,
+                // so the row is found rather than named and the id it turns out
+                // to be under is written down here. Once, the reader saying so
+                // on the poll that found it and no other.
+                if let Some(session) = records.found_itself() {
+                    found_in_the_store(pool, event_id, &session).await;
+                }
+
+                arrived
+            }
         };
 
         self.pending.extend(arrived);
@@ -575,20 +598,42 @@ impl Tail {
 /// polled, and that is the whole point of it being a value: a length taken at the
 /// first poll would already have this session's opening lines in it, and the
 /// Transcript would begin part way through the turn.
+/// **Two shapes, for the two shapes a backend keeps a record in** — see
+/// [`Following`], whose pair these are the crossed halves of. A file of lines is
+/// carried on from a byte offset into it; a store is carried on from the last
+/// record of the session that crossed.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Carried {
-    /// The log itself, where the launch found it.
-    pub(crate) log: PathBuf,
+pub(crate) enum Carried {
+    /// A log file, where the launch found it, and how far into it the session on
+    /// the other machine had got.
+    Log {
+        /// The log itself.
+        log: PathBuf,
 
-    /// And how far into it the session on the other machine had got, which is
-    /// where this one's Transcript opens.
-    pub(crate) read: u64,
+        /// And how much of it crossed, which is where this session's Transcript
+        /// opens.
+        read: u64,
+    },
+
+    /// A session inside a store, and the last record of it that crossed.
+    Records {
+        /// The database, where the launch proved the session was in it.
+        database: PathBuf,
+
+        /// Which session of that store it is, which is the id the harness is
+        /// told to resume.
+        session: String,
+
+        /// And the highest sequence number already in it, which is where this
+        /// session's Transcript opens.
+        taken: i64,
+    },
 }
 
 /// The log of the session named `session`, as something a session launched under
 /// `profile` could carry on from — see [`Carried`].
 ///
-/// **Three harnesses, and each looks for its log the way its own resume does.**
+/// **Four harnesses, and each looks for its record the way its own resume does.**
 /// Claude's lands where this device would have written one, so it is the lookup
 /// the Transcript makes. Grok Build's arrives still filed under the *sending*
 /// device's name for the *sending* device's Worktree, so it is relocated before
@@ -596,9 +641,12 @@ pub(crate) struct Carried {
 /// by the date it was written rather than by anywhere, so it crosses to the same
 /// relative path it left and nothing has to be put right — but nothing names it
 /// either, codex having taken no session id at launch, so it is **searched for by
-/// the id it gives itself**: see [`declares`], and [`in_the_store`]. OpenCode has
-/// no resume line yet and nothing looks for its log: a launch under it opens a
-/// session of its own, which is Verkstead's own Resume and nothing lost.
+/// the id it gives itself**: see [`declares`], and [`in_the_store`]. And
+/// OpenCode's is not a log at all but a row of the one database its account keeps,
+/// which crosses whole — so what is looked for is the row, and what has to be put
+/// right is the directory it records, opencode resuming a session in the directory
+/// its row names rather than in the one it was started in. See
+/// [`records::carried`].
 ///
 /// **`None` is a log that is not there**, and that is the answer a Conversation
 /// whose store did not come across gets. Claude's store crosses as a labelled part
@@ -631,30 +679,56 @@ pub(crate) async fn carried(
     worktree: &Path,
     home: &crate::sandbox::Home,
 ) -> Option<Carried> {
-    let log = match &profile.account {
+    match &profile.account {
         store::Account::Claude { claude_dir, .. } => {
-            named(&claude_projects(claude_dir, profile.memory, home), session).await?
+            as_far_as_it_got(
+                named(&claude_projects(claude_dir, profile.memory, home), session).await?,
+            )
+            .await
         }
 
         store::Account::Grok { home: account } => {
-            relocated(
-                &grok_sessions(account, profile.memory, home),
-                session,
-                worktree,
+            as_far_as_it_got(
+                relocated(
+                    &grok_sessions(account, profile.memory, home),
+                    session,
+                    worktree,
+                )
+                .await?,
             )
-            .await?
+            .await
         }
 
         store::Account::Codex { home: account } => {
-            in_the_store(&codex_rollouts(account, profile.memory, home), session).await?
+            as_far_as_it_got(
+                in_the_store(&codex_rollouts(account, profile.memory, home), session).await?,
+            )
+            .await
         }
 
-        store::Account::OpenCode { .. } => return None,
-    };
+        store::Account::OpenCode { home: account } => {
+            let database = opencode_database(account, profile.memory, home);
+            let taken = records::carried(&database, session, worktree).await?;
 
+            Some(Carried::Records {
+                database,
+                session: session.to_owned(),
+                taken,
+            })
+        }
+    }
+}
+
+/// A log that is there, as the record a resumed session is already part way
+/// through: the file and how much of it crossed.
+///
+/// The length is taken here rather than at the first poll for [`Carried`]'s
+/// reason. `None` is a log that went between being found and being measured,
+/// which is the fallback like every other way of not finding one.
+async fn as_far_as_it_got(log: PathBuf) -> Option<Carried> {
     let read = tokio::fs::metadata(&log).await.ok()?.len();
 
-    Some(Carried { log, read })
+    Some(Carried::Log { log, read })
 }
 
 /// The log of a carried Grok session, **under this device's own name for this
@@ -834,6 +908,22 @@ fn grok_sessions(account: &Path, memory: bool, home: &crate::sandbox::Home) -> P
     match memory {
         true => account.join(SESSIONS),
         false => home.grok_sessions(),
+    }
+}
+
+/// And where OpenCode keeps the one database it writes every session of an
+/// account into, which is the same two answers again — see [`claude_projects`].
+///
+/// The name of the file is the one the sandbox pinned rather than the one
+/// opencode would have chosen for itself, so that this opens a store Verkstead
+/// chose rather than guessing which of opencode's several it is — see
+/// [`crate::sandbox`].
+fn opencode_database(account: &Path, memory: bool, home: &crate::sandbox::Home) -> PathBuf {
+    match memory {
+        true => account
+            .join(crate::sandbox::OPENCODE_DATA_INSIDE_HOME)
+            .join(crate::sandbox::OPENCODE_DB_FILE),
+        false => home.opencode_database(),
     }
 }
 
@@ -1078,6 +1168,27 @@ async fn names_itself(pool: &SqlitePool, event_id: i64, log: &Path) {
 
     if let Err(error) = store::found_as(pool, event_id, &session).await {
         tracing::error!(error = ?error, event_id, session, "writing down what a Codex session calls itself failed, so nothing on another device could carry its conversation on");
+    }
+}
+
+/// And the same for an OpenCode session, whose name is the id its own row in the
+/// store turned out to be under — see [`records::Reader::found_itself`].
+///
+/// **The other backend Verkstead cannot name**, and the same answer as Codex's
+/// for the same reason: the session id is opencode's own, so the Capture was
+/// opened under a name nothing ever uses and the row found in the store is where
+/// the real one is read. From here on it is a name like any other — the id
+/// `opencode --session` takes, and the one a device that never ran this session
+/// is told to resume by.
+///
+/// No reading of somebody else's format, which is the difference: the finder
+/// asked the store which session this is and the store answered with its id, so
+/// there is nothing here to fail at. What can fail is the write, and it fails the
+/// way Codex's does — the session keeps a name no harness answers to, and a
+/// resume of it finds no row and falls through to Verkstead's own Resume.
+async fn found_in_the_store(pool: &SqlitePool, event_id: i64, session: &str) {
+    if let Err(error) = store::found_as(pool, event_id, session).await {
+        tracing::error!(error = ?error, event_id, session, "writing down which session of its store an OpenCode session is failed, so nothing on another device could carry its conversation on");
     }
 }
 
