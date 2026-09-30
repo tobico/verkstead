@@ -51,6 +51,22 @@
   min-width: 0;
 }
 
+/* A mark drawn out of one of the app's own icons rather than out of a harness's
+   brand — the device select's, where each row wears the mark for its operating
+   system. A harness's brings its own box (`HarnessMark.module.css`); an icon is
+   sized against the line it stands in, and what it needs saying about it here is
+   that it is not what gives way when the words run long.
+
+   Quiet, as the same mark is on a sidebar row and in the Devices section: the
+   words are what is being chosen between, and this is a shape to scan the list
+   by. */
+.mark {
+  flex: none;
+  width: 1em;
+  height: 1em;
+  color: var(--ink-soft);
+}
+
 /* The words of whichever row is being drawn. They take what the mark beside them
    leaves, and the closed control is the one place they can be cut: the rows
    under it are as wide as it is and wrap instead, a reading being what the human

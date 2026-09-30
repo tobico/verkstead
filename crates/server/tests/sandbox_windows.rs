@@ -83,6 +83,10 @@ use verkstead_server::skills::Skills;
 use verkstead_server::store;
 use verkstead_server::store::Lifecycle;
 
+/// The device every Conversation started here is ranked by, named the way a
+/// cluster names one (ADR-0020, *Ranks*).
+const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
+
 /// Where the server this Conversation belongs to would be listening, which is
 /// what a session inside is told to put its Question Sets to.
 ///
@@ -418,10 +422,11 @@ impl Grilling {
     /// point — a boundary that kept two Conversations apart by anything else
     /// would be one this fixture could not tell from a boundary that did not.
     async fn beside(&self, branch: &str) -> store::Conversation {
-        let id = store::start_conversation(&self.pool, self.conversation.repo.id, branch)
-            .await
-            .unwrap()
-            .expect("the second Conversation starts");
+        let id =
+            store::start_conversation(&self.pool, self.conversation.repo.id, branch, THIS_DEVICE)
+                .await
+                .unwrap()
+                .expect("the second Conversation starts");
 
         store::set_grilling_pairing(&self.pool, id, self.profile.id, self.profile.model())
             .await
@@ -963,7 +968,7 @@ async fn grilling() -> Grilling {
     .unwrap()
     .expect("the Profile saves");
 
-    let id = store::start_conversation(&pool, repo_row.id, "rate-limiting")
+    let id = store::start_conversation(&pool, repo_row.id, "rate-limiting", THIS_DEVICE)
         .await
         .unwrap()
         .expect("the Conversation starts");

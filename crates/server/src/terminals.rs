@@ -445,6 +445,53 @@ pub(crate) async fn open(state: &AppState, conversation_id: i64) -> anyhow::Resu
         return Ok(TerminalOpened::NoProfile);
     };
 
+    // And where that Profile is a member's, the account it names is on that
+    // machine: a mirror of it is fetched here before the shell is built out of
+    // it, exactly as a session's launch fetches one — see
+    // [`crate::mirroring::account`]. A terminal is the human working where the
+    // agent worked, so what it is given of the account is what the agent was
+    // given.
+    //
+    // A home that is not answering refuses the press, the way a sandbox that
+    // cannot be built does: a shell opened around the home machine's own paths
+    // would be one writing this account's store wherever those paths happen to
+    // land here.
+    //
+    // And what its ending puts back the same way a session's does: the login is the
+    // one file of a root that is changed by being *used*, and a human who typed a
+    // login into this shell typed it into somebody else's account — see
+    // [`crate::mirroring::account::Lending`].
+    let (pairing, lending) = match crate::mirroring::account::fetched(
+        state.devices.as_ref(),
+        agents.homes(),
+        &pairing.profile,
+    )
+    .await
+    {
+        Ok(None) => (pairing, None),
+
+        Ok(Some(crate::mirroring::account::Mirrored { profile, lent })) => (
+            store::Pairing { profile, ..pairing },
+            Some(crate::mirroring::account::Lending::of(
+                &state.pool,
+                state.devices.as_ref(),
+                lent,
+            )),
+        ),
+
+        Err(why) => {
+            tracing::error!(
+                conversation_id,
+                profile = pairing.profile.id,
+                "the account this terminal would run under is on another device and could not \
+                 be fetched, so none was opened: {}",
+                why.saying,
+            );
+
+            return Ok(TerminalOpened::Refused);
+        }
+    };
+
     let built = tokio::task::spawn_blocking({
         let agents = agents.clone();
         let conversation = conversation.clone();
@@ -577,6 +624,7 @@ pub(crate) async fn open(state: &AppState, conversation_id: i64) -> anyhow::Resu
         terminal,
         child,
         afterwards,
+        lending,
         screen,
         closed,
         over,
@@ -609,11 +657,18 @@ pub(crate) async fn open(state: &AppState, conversation_id: i64) -> anyhow::Resu
 /// same reason the terminal is: it is asked once the shell has gone, and the
 /// shell is what it is about — a file it replaced rather than wrote in place,
 /// in the profile it shared with the Conversation's sessions. See [`Closing`].
+///
+/// **And `lending` beside it where the account was a mirror**, which is the same
+/// ending reaching one hop further: the login this shell leaves goes into the
+/// account on the device it is at home on — see
+/// [`crate::mirroring::account::Lending`]. Nothing at all for an account of this
+/// device's own, which is every terminal on a Verkstead linked to nothing.
 #[expect(
     clippy::too_many_arguments,
     reason = "\
     one terminal's whole self: what it runs on, what runs on it, what it leaves \
-    to see to, what it draws on, and a word each way about its ending"
+    to see to here and away, what it draws on, and a word each way about its \
+    ending"
 )]
 async fn follow(
     terminals: Terminals,
@@ -622,6 +677,7 @@ async fn follow(
     terminal: Arc<Terminal>,
     mut child: Child,
     afterwards: Closing,
+    lending: Option<crate::mirroring::account::Lending>,
     screen: Live,
     mut closing: oneshot::Receiver<()>,
     over: oneshot::Sender<()>,
@@ -718,6 +774,15 @@ async fn follow(
             number,
             "seeing to what a terminal wrote to its account ended badly"
         );
+    }
+
+    // And where that account was a mirror, the login it now holds goes into the
+    // account on the device it is at home on — the way a session's ending writes one
+    // back, and after the close for its reason. A human who logged in at this shell
+    // logged in to somebody else's account, and an account lent out and never
+    // written back is one signing itself out a session at a time.
+    if let Some(lending) = lending {
+        lending.written_home(conversation_id).await;
     }
 
     tracing::info!(conversation_id, number, "a terminal has ended");

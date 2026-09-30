@@ -103,6 +103,7 @@ import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
 import { PaneHead } from "../workbench/PaneHead";
 import {
+  heldAtOnce,
   heldCleanup,
   heldInstructions,
   heldLanguages,
@@ -344,6 +345,8 @@ export function LanguagesPane(props: {
         // And what becomes of an archived Conversation, likewise — see
         // [`heldCleanup`].
         cleanup: heldCleanup(told()),
+        // And how much Verkstead runs at once, likewise — see [`heldAtOnce`].
+        at_once: heldAtOnce(told()),
         // And so is how a conflict is resolved, which is the section under it
         // on the page.
         conflict_resolution: told()?.conflict_resolution ?? "Merge",

@@ -35,6 +35,13 @@
 //! row: two pages that asked these questions apart would come to word them
 //! differently.
 //!
+//! **And one of them is not drawn on a Conversation at all.** The device select
+//! — [`DeviceSelect`], which stands left of the Repo — is about where a piece of
+//! work will be *done*, which is a question only while there is nothing doing it
+//! yet: the compose page asks it, and the composer of a saved draft asks it to
+//! move one. It lives here with the rest because it is one control drawn in
+//! several places, which is what this file is for.
+//!
 //! The role pairings are separate choices because they are genuinely separate
 //! accounts — grill on fable, implement on opus, review on whatever did not
 //! build it — and because the implementation session cannot simply carry the
@@ -49,6 +56,7 @@
 //! See [`AgentOptions`] and [`./agent.ts`](./agent.ts).
 
 import { faChevronDown } from "@fortawesome/free-solid-svg-icons";
+import type { IconDefinition } from "@fortawesome/free-solid-svg-icons";
 import { A } from "@solidjs/router";
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import {
@@ -56,16 +64,19 @@ import {
   Match,
   Show,
   Switch,
+  createEffect,
   createSignal,
   type Accessor,
   type JSX,
 } from "solid-js";
 
 import { HarnessMark } from "../HarnessMark";
+import { Check } from "../Check";
 import { Icon } from "../Icon";
 import { Menu } from "../Menu";
 import { Switch as Toggle } from "../Switch";
 import { DEFAULT_PROFILE, type AgentType } from "../agents";
+import { deviceShown, osIcon, useDevices } from "../devices";
 import {
   addCompanion,
   chooseGrillingPairing,
@@ -82,6 +93,7 @@ import {
   setCompanionBase,
   setCompanionMode,
   nameTarget,
+  permitDevice,
   switchRepo,
 } from "../api/client";
 import type {
@@ -94,8 +106,11 @@ import type {
   CompanionModeChosen,
   CompanionRemoved,
   CompanionView,
+  BriefEvent,
   ConversationView,
+  DeviceIdentity,
   PairingView,
+  Permitting,
   Process,
   ProcessPicked,
   ProfileChosen,
@@ -104,11 +119,14 @@ import type {
   RepoSwitched,
   TargetRecorded,
 } from "../api/types";
+import { brokenReading } from "../broken";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine, Note } from "../notices";
 import * as pairing from "../pairing";
 import { Listbox, Picker, type Action } from "../picking";
-import { BROKEN } from "../profiles/ProfileList";
+import { Moving } from "./Moving";
+import { keyOf, useDevice } from "../reaching";
+import type { Device } from "../reaching";
 import { CreateRepo, OpenRepo } from "../repos/RepoList";
 import { reading, type Picked } from "./agent";
 import { AUTOMATIC, chosen } from "./naming";
@@ -240,9 +258,22 @@ export const CHOICE_REFUSAL: Record<ProfileChosen, string> = {
 
 export function Setup(props: {
   conversation: ConversationView;
+
+  /// The round's Brief, for the one control in this row that is about where the
+  /// work will be *done* rather than about the work: moving the draft onto
+  /// another device replays the Brief onto it — see [`Moving`].
+  brief: BriefEvent;
 }): JSX.Element {
   return (
     <section class={styles.options} aria-label="Setup">
+      {/* Which device will do the work, ahead of the repository because the
+          repository is one of that device's: a Repo id is one Verkstead's own,
+          so the question above the Repo is *whose registry*. Not drawn at all
+          where there is no cluster, which leaves the row exactly as it has
+          always been — see [`DeviceSelect`], and `Moving.tsx` for what a pick
+          does on a draft that already exists. */}
+      <Moving conversation={props.conversation} brief={props.brief} />
+
       {/* The repository first, because it is what everything after it is a fact
           about — and one dropdown for the whole of it: the branch, the branch
           it comes off, and the repos the work runs alongside are all answers to
@@ -455,6 +486,347 @@ export function RepoOptions(props: {
   );
 }
 
+/// Which device of the cluster the work will be done on: the first option in the
+/// row, left of the Repo.
+///
+/// **Not drawn at all where there is no other device**, which is nearly every
+/// Verkstead: the row is the row it has always been, with no select, no label and
+/// no gap. A column of one answer repeated is the rule the sidebar's rows and the
+/// pane headers are already drawn under — see `deviceShown` in
+/// [`../devices.ts`](../devices.ts).
+///
+/// With a member linked it lists this device first and then each of them, each
+/// wearing the mark a device wears wherever it is drawn: a WSL reads as Linux,
+/// and an operating system this build has no mark for still draws a row.
+///
+/// **A member that is not answering is listed like any other.** What this offers
+/// is the cluster's membership rather than a reachability probe — the row says a
+/// machine is linked, which is still true of one that did not answer the last
+/// dial, and a call that cannot be made is refused by the Relay in its own
+/// words. Unlinking is the Remote access pane's, where an unreachable row is
+/// dimmed and says so.
+///
+/// **A device the membership no longer holds reads as this one**, where what it
+/// is showing is a pick. That pick is remembered in the browser rather than on
+/// the server (see `draftingOn` in `../remembered.ts`), so it outlives the
+/// cluster it was made in: the correction goes up to whoever owns the pick, which
+/// drops what named the machine along with it. Drawn or not — a cluster that has
+/// shrunk to nothing takes the select away, and the page must not be left pointed
+/// at a machine that has gone.
+///
+/// **And nothing is corrected where it is showing a fact** — see
+/// [`Self.remembered`]. A saved draft is *on* a device, which is the record's own
+/// account of itself rather than anything this browser decided; there is nothing
+/// there to put right, and a correction sent up would be this control asking for
+/// a move nobody made.
+///
+/// One control, and what a pick *does* is the page's own, exactly as it is for
+/// every other control in this row: the compose page moves what it is composing,
+/// a saved draft's composer replays it, and the Transfer dialog sets a preflight
+/// going.
+///
+/// **And one caller picks a device to send work *to*** — see `Transfer.tsx`,
+/// which is why [`Self.without`] and [`Self.nothing`] are here: that dialog
+/// offers every device but the one the Conversation is already on, and starts
+/// with nothing picked rather than with a machine it would move to if the human
+/// pressed Go without looking.
+export function DeviceSelect(props: {
+  /// The control's own id, for the `<label>` that names it.
+  ///
+  /// Defaulted because nearly every page draws one of these, and named where two
+  /// stand on a page at once: the sidebar's Transfer dialog is opened over the
+  /// compose page often enough, and two controls under one id is a label that
+  /// names whichever the browser finds first.
+  id?: string;
+
+  /// Which device is picked — `null` for this one, which is what a browser that
+  /// has never picked reads as, and `undefined` for nothing picked at all.
+  ///
+  /// The two are not one state: every page that composes is *on* a device from
+  /// the moment it is drawn, and the one that sends work somewhere has not been
+  /// told where yet.
+  chosen: Device | undefined;
+  disabled?: boolean;
+
+  /// The one device that is not offered, where there is one — `null` for this
+  /// device itself.
+  ///
+  /// For the Transfer dialog, whose whole question is *which other machine*: a
+  /// Conversation cannot be moved onto the device it is already on, and a row
+  /// offering it would be a press with nothing behind it. Undefined offers every
+  /// device, which is what composing does.
+  without?: Device;
+
+  /// What the control reads while nothing is picked, where the standing words
+  /// would say the wrong thing — an invitation rather than a record of a choice
+  /// not made, as the Repo select's is.
+  nothing?: string;
+
+  /// Whether what is chosen is a pick this browser is holding, which is what
+  /// makes it worth correcting when the device it names leaves the cluster.
+  ///
+  /// The compose page's is, and says nothing: a draft nobody has created is on
+  /// whichever machine this browser last pointed at. A saved draft's composer
+  /// passes `false` — the device is where the Conversation *is*, and the only
+  /// thing that moves it is a move.
+  remembered?: boolean;
+
+  /// The ticks under *May be transferred to*, where the caller keeps a list —
+  /// see [`Ticks`], which is what they are drawn from. At the foot of the
+  /// rows, so a pick and the ticks are one control's panel.
+  ticks?: Ticks;
+
+  pick: (device: Device) => void;
+}): JSX.Element {
+  // This device's own, whichever machine the page is about: the membership is
+  // the hub's own finding about its cluster — see `useDevices`.
+  const devices = useDevices();
+
+  /// Every device that can be picked: this one, and then each member in the
+  /// order the membership lists them — less the one the caller has ruled out.
+  const options = (): DeviceIdentity[] => {
+    const view = devices.data;
+    if (view === undefined) return [];
+
+    return [view.this, ...view.members.map((member) => member.identity)].filter(
+      (device) =>
+        props.without === undefined ||
+        device.device !== (props.without ?? view.this.device),
+    );
+  };
+
+  /// What the control is showing, as a row writes it: this device's own id where
+  /// nothing has been picked, the empty string where nothing is picked *at all*,
+  /// and nothing until the membership has landed — a control showing a device it
+  /// has not read about yet would be one whose first correction was made against
+  /// an empty list.
+  const showing = (): string => {
+    const view = devices.data;
+    if (view === undefined || props.chosen === undefined) return "";
+
+    return props.chosen ?? view.this.device;
+  };
+
+  // And the correction, which runs whether or not the control is drawn: a pick
+  // this browser is holding for a device that has left the cluster is a page
+  // pointed at a machine nothing can reach, and taking the select away — which
+  // is what the last member being unlinked does — would leave it pointed there
+  // for good.
+  //
+  // A pick and nothing else. What a saved draft's composer shows here is where
+  // the Conversation is, which is not this browser's to put right — see
+  // `remembered` above.
+  createEffect(() => {
+    const view = devices.data;
+    if (
+      props.remembered !== false &&
+      view !== undefined &&
+      props.chosen !== undefined &&
+      props.chosen !== null &&
+      deviceShown(view, props.chosen) === null
+    ) {
+      props.pick(null);
+    }
+  });
+
+  return (
+    <Show when={(devices.data?.members.length ?? 0) > 0}>
+      <div class={styles.deviceSelect}>
+        <Listbox
+          id={props.id ?? "conversation-device"}
+          class={styles.deviceSelectPick}
+          heading={{ words: "Device", class: styles.optionLabel }}
+          options={options()}
+          value={(device) => device.device}
+          label={(device) => device.name}
+          icon={(device) => osIcon(device.os)}
+          nothing={props.nothing}
+          chosen={showing()}
+          disabled={props.disabled}
+          // This device's own id back to `null`, so that *this device* is the
+          // value it is everywhere else — see `Device` in `../reaching.ts`.
+          pick={(device) =>
+            props.pick(device === devices.data?.this.device ? null : device)
+          }
+          foot={
+            props.ticks === undefined
+              ? undefined
+              : () => <MayBeTransferredTo ticks={props.ticks!} />
+          }
+        />
+      </div>
+    </Show>
+  );
+}
+
+/// What the ticks under *May be transferred to* are drawn from (ADR-0020, *The
+/// agent's call*): which other devices of the cluster the agent doing this work
+/// may move it onto itself.
+///
+/// **The ticks are the consent**, so nothing asks again when the agent calls
+/// `verkstead transfer`. The device it was drafted on is always permitted, so a
+/// session that has moved can go home; it is never a tick.
+export type Ticks = {
+  /// Where the work is being done — the device the select is pointing at while
+  /// drafting, the one the Conversation is on in the Transfer dialog — which is
+  /// not offered: it is where the work already is. `null` for this device.
+  here: Device;
+
+  /// The device the Conversation was drafted on, by id, where that is not
+  /// [`Self.here`]: drawn as permitted with no tick to take away.
+  drafted: string | null;
+
+  /// The devices ticked, by id. One the cluster no longer holds is not drawn.
+  ticked: string[];
+
+  /// Tick one, or untick it — the caller's to write down.
+  tick: (device: string, permit: boolean) => void;
+
+  /// Why the last tick was not taken, where it was not.
+  refused?: string;
+};
+
+/// The ticks themselves: one per device of the cluster but the one the work is
+/// on, under a heading that says what ticking one means.
+///
+/// Membership first, ticks second: a device is drawn because the cluster holds
+/// it, so a tick naming one that has been unlinked is never drawn, and the order
+/// is the select's own above it.
+function MayBeTransferredTo(props: { ticks: Ticks }): JSX.Element {
+  const devices = useDevices();
+
+  /// Every device but the one the work is on, in the select's order.
+  const others = (): DeviceIdentity[] => {
+    const view = devices.data;
+    if (view === undefined) return [];
+
+    const here = props.ticks.here ?? view.this.device;
+
+    return [view.this, ...view.members.map((member) => member.identity)].filter(
+      (device) => device.device !== here,
+    );
+  };
+
+  return (
+    <fieldset class={styles.ticks}>
+      <legend class={styles.ticksHeading}>May be transferred to</legend>
+
+      <For each={others()}>
+        {(device) => (
+          <Show
+            when={device.device !== props.ticks.drafted}
+            fallback={
+              // The drafting device, which reads as permitted and will not take
+              // an untick: a session that has moved can always go home.
+              <Check
+                label={
+                  <>
+                    <Icon of={osIcon(device.os)} class={styles.tickMark!} />{" "}
+                    {device.name}
+                    <span class={styles.tickNote}> — drafted here, always</span>
+                  </>
+                }
+                on
+                disabled
+                title="Where this work was drafted is always somewhere it may go back to."
+                flip={() => undefined}
+              />
+            }
+          >
+            <Check
+              label={
+                <>
+                  <Icon of={osIcon(device.os)} class={styles.tickMark!} />{" "}
+                  {device.name}
+                </>
+              }
+              on={props.ticks.ticked.includes(device.device)}
+              flip={(on) => props.ticks.tick(device.device, on)}
+            />
+          </Show>
+        )}
+      </For>
+
+      <Show when={props.ticks.refused}>
+        {(refused) => <ErrorLine class={styles.failure}>{refused()}</ErrorLine>}
+      </Show>
+    </fieldset>
+  );
+}
+
+/// The ticks of a Conversation that exists, each saved the moment it is
+/// touched — a saved draft's composer and the Transfer dialog.
+///
+/// **What the last answer left, over what the Conversation said.** The dialog is
+/// opened over the Conversation as it was read when the row was pressed, which
+/// nothing reads again while the card is up; so a tick the server took is held
+/// here as the list it now is, and a refused one leaves the list where it stood
+/// and says why under it. The record is invalidated all the same, for the pane
+/// behind the card.
+export function useConversationTicks(
+  conversation: () => ConversationView,
+): Ticks {
+  const queries = useQueryClient();
+  const device = useDevice();
+
+  const [answered, setAnswered] = createSignal<string[] | null>(null);
+  const [refused, setRefused] = createSignal<string | undefined>(undefined);
+
+  const ticked = (): string[] => answered() ?? conversation().permitted;
+
+  const save = useMutation(() => ({
+    mutationFn: (asked: { device: string; permit: boolean }) =>
+      permitDevice(device(), conversation().id, asked.device, asked.permit),
+
+    onSuccess: (outcome: Permitting, asked) => {
+      if (outcome !== "Recorded") {
+        setRefused(TICK_REFUSAL[outcome]);
+        return;
+      }
+
+      setRefused(undefined);
+      setAnswered(
+        asked.permit
+          ? [...ticked().filter((one) => one !== asked.device), asked.device]
+          : ticked().filter((one) => one !== asked.device),
+      );
+
+      void queries.invalidateQueries({
+        queryKey: keyOf(device(), "conversation"),
+      });
+    },
+
+    onError: (error: Error) =>
+      setRefused(`The tick could not be saved: ${error.message}`),
+  }));
+
+  return {
+    get here() {
+      return device();
+    },
+    get drafted() {
+      return conversation().drafted_on;
+    },
+    get ticked() {
+      return ticked();
+    },
+    tick: (ticking, permit) => save.mutate({ device: ticking, permit }),
+    get refused() {
+      return refused();
+    },
+  };
+}
+
+/// What a refused tick says, in the words the ticks are drawn beside.
+export const TICK_REFUSAL: Record<Permitting, string> = {
+  Recorded: "",
+  NotAMember: "That device is not linked to this one any more.",
+  DraftedThere: "Where the work was drafted is always permitted.",
+  WorkIsHere: "The work is on that device already.",
+  Elsewhere: "This work has moved to another device, where its ticks are kept.",
+  NoSuchConversation: "This conversation is gone.",
+};
+
 /// The Repo option before there is a repo to be about: the same label over the
 /// same kind of value as the three beside it, listing what is registered.
 ///
@@ -477,9 +849,11 @@ export function RepoSelect(props: {
   disabled?: boolean;
   pick: (repoId: number) => void;
 }): JSX.Element {
+  const device = useDevice();
+
   const repos = useReading(() => ({
-    queryKey: ["repos"],
-    queryFn: listRepos,
+    queryKey: keyOf(device(), "repos"),
+    queryFn: () => listRepos(device()),
 
     // Merged by the id each row carries flat, for [`RepoChoice`]'s reason: a
     // Nudge landing while the human has the rows down must not take their
@@ -599,25 +973,31 @@ function RepoPicker(props: {
   disabled: boolean;
 }): JSX.Element {
   const queries = useQueryClient();
+  const device = useDevice();
 
   const [refused, setRefused] = createSignal<RepoSwitched | null>(null);
 
   const move = useMutation(() => ({
-    mutationFn: (repoId: number) => switchRepo(props.conversation.id, repoId),
+    mutationFn: (repoId: number) =>
+      switchRepo(device(), props.conversation.id, repoId),
     onSuccess: (outcome: RepoSwitched) => {
       if (outcome !== "Switched") {
         setRefused(outcome);
         // Refused about one of the two lists this control was drawn over: the
         // registry it picked out of, or the Conversation the pick was about.
-        void queries.invalidateQueries({ queryKey: ["repos"] });
-        void queries.invalidateQueries({ queryKey: ["conversation"] });
+        void queries.invalidateQueries({ queryKey: keyOf(device(), "repos") });
+        void queries.invalidateQueries({
+          queryKey: keyOf(device(), "conversation"),
+        });
         return;
       }
 
       setRefused(null);
       // The whole panel is about the repo that has just changed — and so is the
       // sidebar row and every pane head, which read the same record.
-      void queries.invalidateQueries({ queryKey: ["conversation"] });
+      void queries.invalidateQueries({
+        queryKey: keyOf(device(), "conversation"),
+      });
       void queries.invalidateQueries({ queryKey: ["conversations"] });
     },
   }));
@@ -675,9 +1055,11 @@ export function RepoChoice(props: {
   /// control.
   children?: JSX.Element;
 }): JSX.Element {
+  const device = useDevice();
+
   const repos = useReading(() => ({
-    queryKey: ["repos"],
-    queryFn: listRepos,
+    queryKey: keyOf(device(), "repos"),
+    queryFn: () => listRepos(device()),
 
     // Merged by the id each row carries flat, for [`CompanionChoice`]'s reason:
     // a Nudge landing while the human has the dropdown open must not take their
@@ -887,6 +1269,8 @@ function UncachedCompiles(props: {
 /// it, and an invitation to go and save one is no use behind a trigger nobody
 /// has a reason to press.
 function AgentOption(props: { conversation: ConversationView }): JSX.Element {
+  const device = useDevice();
+
   return (
     <ProfileChoices>
       {(saved) => (
@@ -917,7 +1301,7 @@ function AgentOption(props: { conversation: ConversationView }): JSX.Element {
                   chosen={pairing.chosen(props.conversation.grilling_pairing)}
                   pairing={props.conversation.grilling_pairing}
                   choose={(id, picked) =>
-                    chooseGrillingPairing(id, pairing.choice(picked))
+                    chooseGrillingPairing(device(), id, pairing.choice(picked))
                   }
                 />
               </Show>
@@ -932,7 +1316,7 @@ function AgentOption(props: { conversation: ConversationView }): JSX.Element {
                   )}
                   pairing={props.conversation.implementation_pairing}
                   choose={(id, picked) =>
-                    chooseImplementationPairing(id, pairing.choice(picked))
+                    chooseImplementationPairing(device(), id, pairing.choice(picked))
                   }
                 />
               </Show>
@@ -949,7 +1333,7 @@ function AgentOption(props: { conversation: ConversationView }): JSX.Element {
                   chosen={pairing.settled(props.conversation.review_pairing)}
                   pairing={pairing.under(props.conversation.review_pairing)}
                   choose={(id, picked) =>
-                    chooseReviewPairing(id, pairing.role(picked))
+                    chooseReviewPairing(device(), id, pairing.role(picked))
                   }
                 />
               </Show>
@@ -1050,9 +1434,11 @@ export function AgentOptions(props: {
 export function ProfileChoices(props: {
   children: (saved: Accessor<ProfileEntry[]>) => JSX.Element;
 }): JSX.Element {
+  const device = useDevice();
+
   const profiles = useReading(() => ({
-    queryKey: ["profiles"],
-    queryFn: listProfiles,
+    queryKey: keyOf(device(), "profiles"),
+    queryFn: () => listProfiles(device()),
 
     // Merged by the id each row carries flat, for the pickers below: a rebuilt
     // `<option>` is a new element in a `<select>` the human may have open, and
@@ -1100,6 +1486,13 @@ export function ProfileChoices(props: {
 /// nobody. **Whether there is one, and what it says, is the table's** — see
 /// [`away`](./processes.ts), which the caller asks of each picker it draws
 /// exactly as it asks [`uses`] whether to draw it at all.
+///
+/// **And the list is the cluster's.** Every device offers every member's
+/// accounts beside its own, so a row of a member's says which machine it is on
+/// and wears that machine's mark after the harness's — two accounts called
+/// "work" are two machines', and the words alone would not say which. Nothing
+/// at all on this device's own rows, which is every row where there is no
+/// cluster.
 function PairingPicker(props: {
   conversation: ConversationView;
   saved: ProfileEntry[];
@@ -1111,6 +1504,7 @@ function PairingPicker(props: {
   choose: (id: number, picked: string) => Promise<ProfileChosen>;
 }): JSX.Element {
   const queries = useQueryClient();
+  const device = useDevice();
 
   const [refused, setRefused] = createSignal<ProfileChosen | null>(null);
 
@@ -1121,12 +1515,16 @@ function PairingPicker(props: {
         setRefused(outcome);
         // Chosen from a list this option read a moment ago: reading it again
         // is both the correction and the explanation.
-        void queries.invalidateQueries({ queryKey: ["profiles"] });
+        void queries.invalidateQueries({
+          queryKey: keyOf(device(), "profiles"),
+        });
         return;
       }
 
       setRefused(null);
-      void queries.invalidateQueries({ queryKey: ["conversation"] });
+      void queries.invalidateQueries({
+        queryKey: keyOf(device(), "conversation"),
+      });
     },
   }));
 
@@ -1151,8 +1549,8 @@ function PairingPicker(props: {
       </Show>
 
       {/* What is wrong with the one that is chosen, said where it is chosen. */}
-      <Show when={props.pairing?.profile.broken}>
-        {(broken) => <ErrorLine class={styles.broken}>{BROKEN[broken()]}</ErrorLine>}
+      <Show when={props.pairing && brokenReading(props.pairing.profile)}>
+        {(why) => <ErrorLine class={styles.broken}>{why()}</ErrorLine>}
       </Show>
       <Show when={refused()}>
         {(outcome) => (
@@ -1203,7 +1601,15 @@ export function RolePicker(props: {
       ? // No mark: the row is not an account, so there is no harness for one to
         // be of — see [`Row`]. And nothing shorter to read on the trigger: the
         // words are already the whole of what the choice is.
-        [{ value: pairing.NONE, label: props.away, shown: props.away, mark: null }]
+        [
+          {
+            value: pairing.NONE,
+            label: props.away,
+            shown: props.away,
+            mark: null,
+            on: undefined,
+          },
+        ]
       : []),
     ...pairing.pairings(props.saved).map((row) => ({
       value: pairing.value(row),
@@ -1215,6 +1621,12 @@ export function RolePicker(props: {
       // to say which backend and a quarter of the box to say the rest in.
       shown: pairing.shown(row, props.saved),
       mark: row.profile.account.agent_type,
+      // And the mark for the machine the account is on, after the harness's,
+      // where that machine is not this one: this picker is cluster-wide, and a
+      // member's account is scanned for by the shape its operating system wears
+      // exactly as a sidebar row of that machine's work is. Nothing at all for
+      // this device's own, which is every row where there is no cluster.
+      on: row.profile.device ? osIcon(row.profile.device.os) : undefined,
     })),
   ];
 
@@ -1251,6 +1663,7 @@ export function RolePicker(props: {
         label={(row) => row.label}
         closed={(row) => row.shown}
         mark={(row) => row.mark}
+        icon={(row) => row.on}
         chosen={props.chosen}
         pick={(picked) => props.pick(picked)}
         disabled={props.disabled}
@@ -1277,6 +1690,11 @@ type Row = {
   /// glanced at where a row is read down — see `shown` in `../pairing.ts`.
   shown: string;
   mark: AgentType | null;
+
+  /// And the mark for the machine the account is at home on, after the
+  /// harness's, where it is not this one. `undefined` is this device's own — and
+  /// the row that runs nothing, which is on no machine at all.
+  on: IconDefinition | undefined;
 };
 
 /// The branch the work will be done on: empty until the human names one, and
@@ -1299,6 +1717,7 @@ type Row = {
 /// said, and what it did is the name in the field and in the sidebar.
 function BranchName(props: { conversation: ConversationView }): JSX.Element {
   const queries = useQueryClient();
+  const device = useDevice();
 
   // What has been typed, or nothing if nothing has been: the field follows the
   // Conversation until the first keystroke and follows itself after it, so a
@@ -1335,7 +1754,8 @@ function BranchName(props: { conversation: ConversationView }): JSX.Element {
   };
 
   const rename = useMutation(() => ({
-    mutationFn: (branch: string) => renameBranch(props.conversation.id, branch),
+    mutationFn: (branch: string) =>
+      renameBranch(device(), props.conversation.id, branch),
     onSuccess: (outcome: BranchRenamed) => {
       if (outcome !== "Renamed") {
         setRefused(outcome);
@@ -1343,7 +1763,9 @@ function BranchName(props: { conversation: ConversationView }): JSX.Element {
       }
 
       setRefused(null);
-      void queries.invalidateQueries({ queryKey: ["conversation"] });
+      void queries.invalidateQueries({
+        queryKey: keyOf(device(), "conversation"),
+      });
       void queries.invalidateQueries({ queryKey: ["conversations"] });
     },
     // Whatever became of it, the field may have been typed into while it was in
@@ -1595,9 +2017,11 @@ export function BasePicker(props: {
   /// control.
   children?: JSX.Element;
 }): JSX.Element {
+  const device = useDevice();
+
   const branches = useReading(() => ({
-    queryKey: ["repos", props.repo.id, "branches"],
-    queryFn: () => listBranches(props.repo.id),
+    queryKey: keyOf(device(), "repos", props.repo.id, "branches"),
+    queryFn: () => listBranches(device(), props.repo.id),
 
     // Merged by position, there being no key on a string: a branch that is
     // still there is the same string, so the option drawn for it survives a
@@ -1654,25 +2078,33 @@ export function BasePicker(props: {
 /// The branch the work itself comes off.
 function BaseBranch(props: { conversation: ConversationView }): JSX.Element {
   const queries = useQueryClient();
+  const device = useDevice();
 
   const [refused, setRefused] = createSignal<BaseRecorded | null>(null);
 
   const record = useMutation(() => ({
     mutationFn: (branch: string | null) =>
-      setBaseBranch(props.conversation.id, branch),
+      setBaseBranch(device(), props.conversation.id, branch),
     onSuccess: (outcome: BaseRecorded) => {
       if (outcome !== "Recorded") {
         setRefused(outcome);
         // Picked out of a list this panel read a moment ago: reading it again
         // is both the correction and the explanation.
         void queries.invalidateQueries({
-          queryKey: ["repos", props.conversation.repo.id, "branches"],
+          queryKey: keyOf(
+            device(),
+            "repos",
+            props.conversation.repo.id,
+            "branches",
+          ),
         });
         return;
       }
 
       setRefused(null);
-      void queries.invalidateQueries({ queryKey: ["conversation"] });
+      void queries.invalidateQueries({
+        queryKey: keyOf(device(), "conversation"),
+      });
     },
   }));
 
@@ -1719,6 +2151,7 @@ function BaseBranch(props: { conversation: ConversationView }): JSX.Element {
 /// a repository out would leave the human hunting for one that is registered.
 function AddCompanion(props: { conversation: ConversationView }): JSX.Element {
   const queries = useQueryClient();
+  const device = useDevice();
 
   const [refused, setRefused] = createSignal<CompanionAdded | null>(null);
 
@@ -1729,20 +2162,25 @@ function AddCompanion(props: { conversation: ConversationView }): JSX.Element {
   const [picked, setPicked] = createSignal("");
 
   const add = useMutation(() => ({
-    mutationFn: (repoId: number) => addCompanion(props.conversation.id, repoId),
+    mutationFn: (repoId: number) =>
+      addCompanion(device(), props.conversation.id, repoId),
     onSuccess: (outcome: CompanionAdded) => {
       if (outcome !== "Added") {
         setRefused(outcome);
         // Every refusal is about one of two lists this control was drawn over:
         // the registered Repos, or the conversation the row would hang off.
         // Reading both again is the correction and the explanation together.
-        void queries.invalidateQueries({ queryKey: ["repos"] });
-        void queries.invalidateQueries({ queryKey: ["conversation"] });
+        void queries.invalidateQueries({ queryKey: keyOf(device(), "repos") });
+        void queries.invalidateQueries({
+          queryKey: keyOf(device(), "conversation"),
+        });
         return;
       }
 
       setRefused(null);
-      void queries.invalidateQueries({ queryKey: ["conversation"] });
+      void queries.invalidateQueries({
+        queryKey: keyOf(device(), "conversation"),
+      });
     },
     onSettled: () => setPicked(""),
   }));
@@ -1790,9 +2228,11 @@ export function CompanionChoice(props: {
   /// What the caller has to say under it, the refusals above all.
   children?: JSX.Element;
 }): JSX.Element {
+  const device = useDevice();
+
   const repos = useReading(() => ({
-    queryKey: ["repos"],
-    queryFn: listRepos,
+    queryKey: keyOf(device(), "repos"),
+    queryFn: () => listRepos(device()),
 
     // Merged by the id each row carries flat: a rebuilt `<option>` is a new
     // element in a `<select>` the human may have open, and a Nudge landing
@@ -1888,19 +2328,22 @@ function Companion(props: {
   companion: CompanionView;
 }): JSX.Element {
   const queries = useQueryClient();
+  const device = useDevice();
 
   const [refused, setRefused] = createSignal<CompanionRemoved | null>(null);
 
   const forget = useMutation(() => ({
     mutationFn: () =>
-      removeCompanion(props.conversation.id, props.companion.repo.id),
+      removeCompanion(device(), props.conversation.id, props.companion.repo.id),
     onSuccess: (outcome: CompanionRemoved) => {
       setRefused(outcome === "Removed" ? null : outcome);
 
       // Either way: what came back is about a conversation this panel read a
       // moment ago, so reading it again is both the correction and — where the
       // row is simply gone — the whole of what there was to do.
-      void queries.invalidateQueries({ queryKey: ["conversation"] });
+      void queries.invalidateQueries({
+        queryKey: keyOf(device(), "conversation"),
+      });
     },
   }));
 
@@ -1984,12 +2427,18 @@ function CompanionBase(props: {
   companion: CompanionView;
 }): JSX.Element {
   const queries = useQueryClient();
+  const device = useDevice();
 
   const [refused, setRefused] = createSignal<CompanionBaseRecorded | null>(null);
 
   const record = useMutation(() => ({
     mutationFn: (branch: string | null) =>
-      setCompanionBase(props.conversation.id, props.companion.repo.id, branch),
+      setCompanionBase(
+        device(),
+        props.conversation.id,
+        props.companion.repo.id,
+        branch,
+      ),
     onSuccess: (outcome: CompanionBaseRecorded) => {
       if (outcome !== "Recorded") {
         setRefused(outcome);
@@ -1997,14 +2446,23 @@ function CompanionBase(props: {
         // the companion repository's branches, or the conversation the row
         // hangs off. Reading both again is the correction and the explanation.
         void queries.invalidateQueries({
-          queryKey: ["repos", props.companion.repo.id, "branches"],
+          queryKey: keyOf(
+            device(),
+            "repos",
+            props.companion.repo.id,
+            "branches",
+          ),
         });
-        void queries.invalidateQueries({ queryKey: ["conversation"] });
+        void queries.invalidateQueries({
+          queryKey: keyOf(device(), "conversation"),
+        });
         return;
       }
 
       setRefused(null);
-      void queries.invalidateQueries({ queryKey: ["conversation"] });
+      void queries.invalidateQueries({
+        queryKey: keyOf(device(), "conversation"),
+      });
     },
   }));
 
@@ -2045,12 +2503,18 @@ function CompanionAccess(props: {
   companion: CompanionView;
 }): JSX.Element {
   const queries = useQueryClient();
+  const device = useDevice();
 
   const [refused, setRefused] = createSignal<CompanionModeChosen | null>(null);
 
   const choose = useMutation(() => ({
     mutationFn: (mode: CompanionMode) =>
-      setCompanionMode(props.conversation.id, props.companion.repo.id, mode),
+      setCompanionMode(
+        device(),
+        props.conversation.id,
+        props.companion.repo.id,
+        mode,
+      ),
     onSuccess: (outcome: CompanionModeChosen) => {
       setRefused(outcome === "Chosen" ? null : outcome);
 
@@ -2058,7 +2522,9 @@ function CompanionAccess(props: {
       // moment ago, and the switch draws what the record says rather than what
       // was pressed — so reading it again is both the correction and the way
       // the flip lands.
-      void queries.invalidateQueries({ queryKey: ["conversation"] });
+      void queries.invalidateQueries({
+        queryKey: keyOf(device(), "conversation"),
+      });
     },
   }));
 
@@ -2108,6 +2574,7 @@ function CompanionBranch(props: {
   companion: CompanionView;
 }): JSX.Element {
   const queries = useQueryClient();
+  const device = useDevice();
 
   const [named, setNamed] = createSignal<string | null>(null);
   const [refused, setRefused] = createSignal<CompanionBranchRenamed | null>(
@@ -2143,6 +2610,7 @@ function CompanionBranch(props: {
   const rename = useMutation(() => ({
     mutationFn: (branch: string) =>
       renameCompanionBranch(
+        device(),
         props.conversation.id,
         props.companion.repo.id,
         branch,
@@ -2164,7 +2632,9 @@ function CompanionBranch(props: {
         setAsked(null);
       }
 
-      void queries.invalidateQueries({ queryKey: ["conversation"] });
+      void queries.invalidateQueries({
+        queryKey: keyOf(device(), "conversation"),
+      });
     },
     // Whatever became of it, the field may have been typed into while it was in
     // flight — so the moment one save is done the next is considered.

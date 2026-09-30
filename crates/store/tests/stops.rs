@@ -16,6 +16,10 @@ use verkstead_store::{
     start_conversation, start_grilling, stop, stop_as_asked, stopped, timeline,
 };
 
+/// The device every Conversation started here is ranked by, named the way a
+/// cluster names one (ADR-0020, *Ranks*).
+const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
+
 /// A pool over a fresh database, plus the directory keeping it alive.
 async fn fresh_pool() -> (tempfile::TempDir, SqlitePool) {
     let dir = tempfile::tempdir().unwrap();
@@ -33,7 +37,7 @@ async fn conversation(pool: &SqlitePool) -> i64 {
         .expect("nothing was registered at that path yet")
         .id;
 
-    start_conversation(pool, repo, "rate-limiting")
+    start_conversation(pool, repo, "rate-limiting", THIS_DEVICE)
         .await
         .unwrap()
         .expect("the Repo was just registered")
@@ -218,7 +222,7 @@ async fn every_kind_of_stop_reads_back_as_itself() {
         (Decision::Deliberate, "deliberate", "stopped-long-ago"),
         (Decision::Circumstance, "circumstance", "left-mid-run"),
     ] {
-        let id = start_conversation(&pool, repo, branch)
+        let id = start_conversation(&pool, repo, branch, THIS_DEVICE)
             .await
             .unwrap()
             .expect("the Repo was just registered");
@@ -404,7 +408,7 @@ async fn a_stop_from_outside_the_human_is_waiting_on_them_in_the_sidebar() {
     };
 
     assert!(
-        !waiting(conversations(&pool).await.unwrap()),
+        !waiting(conversations(&pool, false).await.unwrap()),
         "a Conversation being grilled is not waiting on anybody",
     );
 
@@ -413,14 +417,14 @@ async fn a_stop_from_outside_the_human_is_waiting_on_them_in_the_sidebar() {
         .unwrap();
 
     assert!(
-        waiting(conversations(&pool).await.unwrap()),
+        waiting(conversations(&pool, false).await.unwrap()),
         "and one Verkstead pulled the brake on is",
     );
 
     clear_stop(&pool, id).await.unwrap();
 
     assert!(
-        !waiting(conversations(&pool).await.unwrap()),
+        !waiting(conversations(&pool, false).await.unwrap()),
         "and starting to drive again takes the dot with it, leaving the Notice \
          where it is",
     );
@@ -449,7 +453,7 @@ async fn the_humans_own_stop_is_not_waiting_on_them_in_the_sidebar() {
         (Decision::Circumstance, "left-mid-run"),
         (Decision::Verkstead, "brake-pulled"),
     ] {
-        let id = start_conversation(&pool, repo, branch)
+        let id = start_conversation(&pool, repo, branch, THIS_DEVICE)
             .await
             .unwrap()
             .expect("the Repo was just registered");
@@ -466,7 +470,7 @@ async fn the_humans_own_stop_is_not_waiting_on_them_in_the_sidebar() {
 
         stop(&pool, id, kind, SAID, None).await.unwrap();
 
-        let waiting = conversations(&pool)
+        let waiting = conversations(&pool, false)
             .await
             .unwrap()
             .into_iter()
@@ -518,14 +522,14 @@ async fn a_closed_conversation_is_not_waiting_on_them_whatever_stopped_it() {
     };
 
     assert!(
-        waiting(conversations(&pool).await.unwrap()),
+        waiting(conversations(&pool, false).await.unwrap()),
         "Verkstead pulled the brake, so until it is closed this is waiting on them",
     );
 
     close_conversation(&pool, id).await.unwrap();
 
     assert!(
-        !waiting(conversations(&pool).await.unwrap()),
+        !waiting(conversations(&pool, false).await.unwrap()),
         "and closing takes the dot away, whatever the stop was",
     );
     assert!(

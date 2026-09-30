@@ -136,6 +136,10 @@ async fn mirror(conversation: &store::Conversation, branch: &str) {
 mod tests {
     use std::path::PathBuf;
 
+    /// The device every Conversation started here is ranked by, named the way a
+    /// cluster names one (ADR-0020, *Ranks*).
+    const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
+
     use super::*;
     use crate::worktrees;
 
@@ -371,17 +375,18 @@ mod tests {
         /// companion per entry of `companions` — each entry being that
         /// companion's branch name, where empty is *mirroring*.
         async fn conversation(&mut self, branch: &str, companions: &[&str]) -> i64 {
-            let id = store::start_unnamed_conversation(&self.pool, self.repo_id, branch)
-                .await
-                .unwrap()
-                .unwrap();
+            let id =
+                store::start_unnamed_conversation(&self.pool, self.repo_id, branch, THIS_DEVICE)
+                    .await
+                    .unwrap()
+                    .unwrap();
 
             self.start(id, branch, companions).await
         }
 
         /// And the same on a name the human typed.
         async fn named_conversation(&mut self, branch: &str) -> i64 {
-            let id = store::start_conversation(&self.pool, self.repo_id, branch)
+            let id = store::start_conversation(&self.pool, self.repo_id, branch, THIS_DEVICE)
                 .await
                 .unwrap()
                 .unwrap();

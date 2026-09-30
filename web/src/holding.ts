@@ -12,7 +12,7 @@
 //! picked is a handle the browser gave this page and nothing that outlives it.
 //! So a reload keeps the brief and loses the files, and the row of pills simply
 //! is not there any more — see `workbench/composing.ts` for what *is* kept, and
-//! `device.ts` for where it is kept.
+//! `remembered.ts` for where it is kept.
 //!
 //! A piece of its own rather than a fold in the compose page, because that page
 //! is not the only thing that will hold files until there is somewhere to send
@@ -24,6 +24,7 @@ import { createSignal } from "solid-js";
 
 import { attachFile } from "./api/client";
 import type { Attached } from "./api/types";
+import type { Device } from "./reaching";
 
 /// One file being held: the file itself, and the key its pill is drawn under.
 ///
@@ -60,7 +61,11 @@ export type Holding = {
   /// in the order they were chosen — holding nothing afterwards, whatever became
   /// of them. What came back refused is returned for the page to say; what never
   /// landed throws.
-  flush: (conversation: number) => Promise<Array<Rejected>>;
+  ///
+  /// On the device that Conversation was made on, which is the device the page
+  /// was drafting onto: what is held here is a `File` the browser handed this
+  /// page, so it goes wherever the work went.
+  flush: (device: Device, conversation: number) => Promise<Array<Rejected>>;
 };
 
 /// A page's holding, made where the page is.
@@ -78,14 +83,20 @@ export function holding(): Holding {
   const drop = (key: number) =>
     setHeld((was) => was.filter((one) => one.key !== key));
 
-  const flush = async (conversation: number): Promise<Array<Rejected>> => {
+  const flush = async (
+    device: Device,
+    conversation: number,
+  ): Promise<Array<Rejected>> => {
     const rejected: Array<Rejected> = [];
 
     // One at a time rather than all at once, and in the order the row had them:
     // a name already taken counts up on its way in, so which of two `notes.md`s
     // becomes `notes-2.md` is decided by which of them was chosen first.
     for (const one of held()) {
-      const outcome = await attachFile(conversation, one.file);
+      // Wherever the Conversation was made: the compose page drafts onto
+      // whichever device of the cluster will do the work, and a file it is
+      // holding belongs to the Brief it was picked beside.
+      const outcome = await attachFile(device, conversation, one.file);
       if (typeof outcome === "string") {
         rejected.push({ name: one.file.name, refused: outcome });
       }

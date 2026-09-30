@@ -100,11 +100,13 @@
    read to tell which is which. The line under the name is lifted to `--ink`
    below all the same — left soft it would be dimmed twice, and the card is what
    should recede and not the words in it. */
-.conversationRow.ended .open {
+.conversationRow.ended .open,
+.conversationRow.unreachable .open {
   opacity: 0.45;
 }
 
-.conversationRow.ended .meta {
+.conversationRow.ended .meta,
+.conversationRow.unreachable .meta {
   color: var(--ink);
 }
 
@@ -124,7 +126,8 @@
 /* What a finished card that is also the open one dims: its contents, taken the
    same distance down the whole card goes when it is not open. The children
    rather than the card, so the fill behind them reads at full strength. */
-.conversationRow.selected.ended .open > * {
+.conversationRow.selected.ended .open > *,
+.conversationRow.selected.unreachable .open > * {
   opacity: 0.45;
 }
 
@@ -162,6 +165,27 @@
   gap: 0 0.75rem;
   font-size: 0.85rem;
   color: var(--ink-soft);
+}
+
+/* Which machine the work is on, first on that line and drawn only where the
+   list is a cluster's. The mark and the name are one item rather than two, so
+   a line that wraps takes them over together — a Linux mark left at the end of
+   one line with its hostname on the next would be a mark for whatever came
+   after it. */
+.conversationRow .device {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+/* The mark itself, sized against the line it stands in rather than in pixels:
+   this line is smaller than the Devices section's, and a mark written down in
+   rem would be the one thing on it that did not shrink with it. */
+.conversationRow .os {
+  flex: none;
+  width: 1em;
+  height: 1em;
 }
 
 /* What a card does under the pointer is `CardButton.module.css`'s, and this is

@@ -133,6 +133,7 @@ async fn save_author(app: &Router, name: &str, email: &str) -> SettingsSaved {
             "github_token": "Keep",
             "languages": languages_unset(),
             "cleanup": cleanup_unset(),
+            "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
             "sandbox_binds": [],
@@ -154,6 +155,7 @@ async fn save_token(app: &Router, token: &str) -> SettingsSaved {
             "github_token": { "Set": { "token": token } },
             "languages": languages_unset(),
             "cleanup": cleanup_unset(),
+            "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
             "sandbox_binds": [],
@@ -173,6 +175,7 @@ async fn clear_token(app: &Router) -> SettingsSaved {
             "github_token": "Clear",
             "languages": languages_unset(),
             "cleanup": cleanup_unset(),
+            "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
             "sandbox_binds": [],
@@ -240,6 +243,39 @@ fn cleanup_unset() -> serde_json::Value {
     })
 }
 
+/// And how much Verkstead runs at once as a save that is not about it sends it:
+/// both fields empty, which is nobody having said and the defaults asked for
+/// back.
+fn at_once_unset() -> serde_json::Value {
+    serde_json::json!({ "roadmap_stages": "", "conversations": "" })
+}
+
+/// Save how much Verkstead runs at once and leave everything else alone, which
+/// is what a press on that pane sends: the field it was pressed from and the one
+/// beside it, because one request writes the whole of `config.yaml`.
+async fn save_at_once(app: &Router, roadmap_stages: &str, conversations: &str) -> SettingsSaved {
+    save(
+        app,
+        &serde_json::json!({
+            "git_author": { "name": "", "email": "" },
+            "github_token": "Keep",
+            "languages": languages_unset(),
+            "cleanup": cleanup_unset(),
+            "at_once": {
+                "roadmap_stages": roadmap_stages,
+                "conversations": conversations,
+            },
+            "conflict_resolution": "Merge",
+            "share_on_done": false,
+            "sandbox_binds": [],
+            "ignored_comments": "Keep",
+            "mcp_servers": "Keep",
+            "instructions": "",
+        }),
+    )
+    .await
+}
+
 /// Save a Cleanup and leave everything else alone, which is what the Cleanup
 /// pane's own two presses send.
 async fn save_cleanup(app: &Router, trim: (bool, &str), delete: (bool, &str)) -> SettingsSaved {
@@ -253,6 +289,7 @@ async fn save_cleanup(app: &Router, trim: (bool, &str), delete: (bool, &str)) ->
                 "trim": { "enabled": trim.0, "days": trim.1 },
                 "delete": { "enabled": delete.0, "days": delete.1 },
             },
+            "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
             "sandbox_binds": [],
@@ -376,6 +413,7 @@ async fn the_token_appears_in_no_answer_this_endpoint_gives() {
             "github_token": { "Set": { "token": "ghp_averysecrettoken" } },
             "languages": languages_unset(),
             "cleanup": cleanup_unset(),
+            "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
             "sandbox_binds": [],
@@ -604,6 +642,7 @@ async fn a_save_carrying_the_binds_as_they_stand_leaves_them() {
             "github_token": "Keep",
             "languages": languages_unset(),
             "cleanup": cleanup_unset(),
+            "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
             "sandbox_binds": ["/var/cache/verkstead-node"],
@@ -705,6 +744,7 @@ async fn a_languages_switch_and_size_go_in_and_come_back() {
             "github_token": "Keep",
             "languages": rust(false, "5G"),
             "cleanup": cleanup_unset(),
+            "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
             "sandbox_binds": [],
@@ -857,6 +897,7 @@ async fn an_entry_that_would_not_load_says_so_on_the_page_and_stays_in_the_file(
                 { "name": "gleam", "enabled": false, "size": "" },
             ],
             "cleanup": cleanup_unset(),
+            "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
             "sandbox_binds": [],
@@ -907,6 +948,7 @@ async fn a_save_carries_the_old_key_into_the_map_and_writes_it_away() {
             "github_token": "Keep",
             "languages": rust(false, "5G"),
             "cleanup": cleanup_unset(),
+            "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
             "sandbox_binds": [],
@@ -1048,6 +1090,7 @@ async fn a_save_carrying_the_cleanup_as_it_stands_leaves_it() {
                 "trim": { "enabled": false, "days": "5" },
                 "delete": { "enabled": true, "days": "90" },
             },
+            "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
             "sandbox_binds": [],
@@ -1061,6 +1104,164 @@ async fn a_save_carrying_the_cleanup_as_it_stands_leaves_it() {
     assert_eq!(rust_told(&saved.settings).size, "5G");
     assert!(!saved.settings.cleanup.trim.enabled, "the switch stands");
     assert_eq!(saved.settings.cleanup.delete.days, 90, "and the duration");
+}
+
+/// How much Verkstead runs at once where nobody has said: three stages of one
+/// roadmap and four Conversations across the server, each drawn as the default
+/// rather than as a choice.
+#[tokio::test]
+async fn a_limit_nobody_has_configured_is_three_stages_and_four_conversations() {
+    let (_dir, app) = app().await;
+
+    let at_once = settings(&app).await.at_once;
+
+    assert_eq!(at_once.roadmap_stages, 3);
+    assert!(
+        !at_once.roadmap_stages_configured,
+        "the default is shown rather than chosen"
+    );
+    assert_eq!(at_once.conversations, 4);
+    assert!(
+        !at_once.conversations_configured,
+        "and the server's places likewise"
+    );
+}
+
+/// And what a save of them says: both numbers go into the file the scheduler
+/// reads at every start, and come back off it — including from a router started
+/// afresh on the same directory, which is what a restart is.
+#[tokio::test]
+async fn the_limits_go_in_and_come_back() {
+    let (dir, app) = app().await;
+
+    let saved = save_at_once(&app, "1", "2").await;
+
+    assert_eq!(saved.settings.at_once.roadmap_stages, 1);
+    assert!(saved.settings.at_once.roadmap_stages_configured);
+    assert_eq!(saved.settings.at_once.conversations, 2);
+    assert!(saved.settings.at_once.conversations_configured);
+
+    // In the file the carry-on and the look read, rather than only in the answer.
+    let written = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
+    assert!(
+        written.contains("at_once:")
+            && written.contains("roadmap_stages: 1")
+            && written.contains("conversations: 2"),
+        "both numbers are in config.yaml: {written}"
+    );
+
+    assert_eq!(settings(&app).await.at_once.roadmap_stages, 1);
+    assert_eq!(settings(&app).await.at_once.conversations, 2);
+
+    let restarted = restarted(dir.path()).await;
+    let after = settings(&restarted).await.at_once;
+
+    assert_eq!(after.roadmap_stages, 1);
+    assert_eq!(after.conversations, 2);
+}
+
+/// Each of the two is its own setting: a save that names one and clears the other
+/// leaves the machine told exactly that much.
+#[tokio::test]
+async fn the_servers_places_are_a_setting_apart_from_the_roadmaps() {
+    let (_dir, app) = app().await;
+
+    let saved = save_at_once(&app, "", "1").await;
+
+    assert_eq!(saved.settings.at_once.conversations, 1);
+    assert!(saved.settings.at_once.conversations_configured);
+    assert_eq!(
+        saved.settings.at_once.roadmap_stages, 3,
+        "and the limit beside it is the default it always was",
+    );
+    assert!(!saved.settings.at_once.roadmap_stages_configured);
+}
+
+/// Clearing a field is asking for the default back rather than for a roadmap — or
+/// a server — with no places, and so is anything that is not a whole number of at
+/// least one, because what the server can make nothing of is nothing configured.
+#[tokio::test]
+async fn a_limit_cleared_is_the_default_again() {
+    let (_dir, app) = app().await;
+
+    save_at_once(&app, "2", "2").await;
+
+    for typed in ["", "  ", "none", "0"] {
+        let saved = save_at_once(&app, typed, typed).await;
+
+        assert_eq!(
+            saved.settings.at_once.roadmap_stages, 3,
+            "nothing a roadmap could run in {typed:?}",
+        );
+        assert!(!saved.settings.at_once.roadmap_stages_configured);
+        assert_eq!(
+            saved.settings.at_once.conversations, 4,
+            "nothing a server could run in {typed:?}",
+        );
+        assert!(!saved.settings.at_once.conversations_configured);
+    }
+}
+
+/// A save from another section carries both limits as they stand, and that is
+/// what leaves them alone: one request writes the whole of `config.yaml`.
+#[tokio::test]
+async fn a_save_carrying_the_limit_as_it_stands_leaves_it() {
+    let (_dir, app) = app().await;
+
+    save_at_once(&app, "1", "2").await;
+
+    let saved = save(
+        &app,
+        &serde_json::json!({
+            "git_author": { "name": "", "email": "" },
+            "github_token": "Keep",
+            "languages": rust(true, "5G"),
+            "cleanup": cleanup_unset(),
+            "at_once": { "roadmap_stages": "1", "conversations": "2" },
+            "conflict_resolution": "Merge",
+            "share_on_done": false,
+            "sandbox_binds": [],
+            "ignored_comments": "Keep",
+            "mcp_servers": "Keep",
+            "instructions": "",
+        }),
+    )
+    .await;
+
+    assert_eq!(saved.settings.languages[0].size, "5G");
+    assert_eq!(
+        saved.settings.at_once.roadmap_stages, 1,
+        "and the limit stands"
+    );
+    assert!(saved.settings.at_once.roadmap_stages_configured);
+    assert_eq!(
+        saved.settings.at_once.conversations, 2,
+        "and the one beside it"
+    );
+    assert!(saved.settings.at_once.conversations_configured);
+}
+
+/// And how many of the server's places are taken rides back with the limit they
+/// are measured against — nought on a server with nothing running, which is what
+/// one of these benches is.
+///
+/// The one number on this page out of neither file. What it is for is the server
+/// whose places are all held by stages waiting on answers: that starts nothing
+/// more until one is answered, and it has to read as held rather than as stalled.
+#[tokio::test]
+async fn how_many_places_are_taken_rides_back_with_the_limit() {
+    let (_dir, app) = app().await;
+
+    assert_eq!(settings(&app).await.at_once.places_taken, 0);
+    assert_eq!(
+        save_at_once(&app, "", "1")
+            .await
+            .settings
+            .at_once
+            .places_taken,
+        0,
+        "and a save answers with it too, the answer being a fresh read",
+    );
 }
 
 /// How a conflict is resolved where nobody has said: a merge, which is the half
@@ -1092,6 +1293,7 @@ async fn how_a_conflict_is_resolved_goes_in_and_comes_back() {
             "github_token": "Keep",
             "languages": languages_unset(),
             "cleanup": cleanup_unset(),
+            "at_once": at_once_unset(),
             "conflict_resolution": "Rebase",
             "share_on_done": false,
             "sandbox_binds": [],
@@ -1129,6 +1331,7 @@ async fn how_a_conflict_is_resolved_goes_in_and_comes_back() {
             "github_token": "Keep",
             "languages": languages_unset(),
             "cleanup": cleanup_unset(),
+            "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
             "sandbox_binds": [],
@@ -1172,6 +1375,7 @@ async fn sharing_on_done_goes_in_and_comes_back() {
             "github_token": "Keep",
             "languages": languages_unset(),
             "cleanup": cleanup_unset(),
+            "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": true,
             "sandbox_binds": [],
@@ -1214,6 +1418,7 @@ async fn a_save_carrying_the_switch_as_it_stands_leaves_it() {
             "github_token": "Keep",
             "languages": languages_unset(),
             "cleanup": cleanup_unset(),
+            "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": true,
             "sandbox_binds": [],
@@ -1233,6 +1438,7 @@ async fn a_save_carrying_the_switch_as_it_stands_leaves_it() {
             "github_token": "Keep",
             "languages": rust(true, "5G"),
             "cleanup": cleanup_unset(),
+            "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": true,
             "sandbox_binds": [],
@@ -1333,6 +1539,7 @@ async fn a_save_carrying_the_instructions_as_they_stand_leaves_them() {
             "github_token": "Keep",
             "languages": rust(true, "5G"),
             "cleanup": cleanup_unset(),
+            "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
             "sandbox_binds": [],
@@ -1404,6 +1611,7 @@ async fn a_save_leaves_an_installers_own_descriptor_exactly_as_the_file_had_it()
             "github_token": "Keep",
             "languages": as_the_page_saves(&told),
             "cleanup": cleanup_unset(),
+            "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
             "sandbox_binds": [],
@@ -1454,6 +1662,7 @@ async fn save_instructions(app: &Router, instructions: &str) -> SettingsSaved {
             "github_token": "Keep",
             "languages": languages_unset(),
             "cleanup": cleanup_unset(),
+            "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
             "sandbox_binds": [],
@@ -1496,6 +1705,7 @@ async fn a_size_cleared_is_the_default_again_and_not_a_size_of_nothing() {
             "github_token": "Keep",
             "languages": rust(true, "5G"),
             "cleanup": cleanup_unset(),
+            "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
             "sandbox_binds": [],
@@ -1513,6 +1723,7 @@ async fn a_size_cleared_is_the_default_again_and_not_a_size_of_nothing() {
             "github_token": "Keep",
             "languages": rust(true, "  "),
             "cleanup": cleanup_unset(),
+            "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
             "sandbox_binds": [],
@@ -1565,6 +1776,7 @@ async fn save_paths(app: &Router, binds: &[&str]) -> SettingsSaved {
             "github_token": "Keep",
             "languages": languages_unset(),
             "cleanup": cleanup_unset(),
+            "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
             "sandbox_binds": binds,
@@ -1795,6 +2007,7 @@ async fn save_rules(app: &Router, rules: serde_json::Value) -> SettingsSaved {
             "github_token": "Keep",
             "languages": languages_unset(),
             "cleanup": cleanup_unset(),
+            "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
             "sandbox_binds": [],
@@ -1959,6 +2172,7 @@ async fn a_refused_save_writes_nothing_at_all() {
             "github_token": { "Set": { "token": "ghp_thetoken" } },
             "languages": languages_unset(),
             "cleanup": cleanup_unset(),
+            "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
             "sandbox_binds": [],
@@ -2076,6 +2290,7 @@ async fn save_servers(app: &Router, servers: serde_json::Value) -> SettingsSaved
             "github_token": "Keep",
             "languages": languages_unset(),
             "cleanup": cleanup_unset(),
+            "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
             "sandbox_binds": [],
@@ -2329,6 +2544,7 @@ async fn a_save_refused_over_a_name_writes_nothing_at_all() {
             "github_token": { "Set": { "token": "ghp_thetoken" } },
             "languages": languages_unset(),
             "cleanup": cleanup_unset(),
+            "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
             "sandbox_binds": [],
@@ -2539,6 +2755,7 @@ async fn a_header_value_appears_in_no_answer_this_endpoint_gives() {
             "github_token": "Keep",
             "languages": languages_unset(),
             "cleanup": cleanup_unset(),
+            "at_once": at_once_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
             "sandbox_binds": [],
@@ -3293,6 +3510,7 @@ mod trying {
                 "github_token": "Keep",
                 "languages": super::languages_unset(),
                 "cleanup": super::cleanup_unset(),
+                "at_once": super::at_once_unset(),
                 "conflict_resolution": "Merge",
                 "share_on_done": false,
                 "sandbox_binds": [],

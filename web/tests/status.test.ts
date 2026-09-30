@@ -142,6 +142,25 @@ describe("the status word", () => {
     });
   });
 
+  /// And a stage whose tasks are all done says the same kind of thing one
+  /// state earlier: nothing is running, nothing has stopped, and what it waits
+  /// on is the stage below it settling.
+  it("says a stage is waiting to join its roadmap's chain", () => {
+    expect(status(like({ waiting_to_join: true }))).toEqual({
+      word: "Waiting to join",
+      state: "Implementing",
+      attention: false,
+    });
+  });
+
+  /// Under the stop as well, for the reason the checks are: a stage with a
+  /// resume to make has stopped, and the chain is not what is holding it.
+  it("says Stopped over the chain where there is a resume to make", () => {
+    expect(
+      status(like({ waiting_to_join: true, ready_to_resume: true })).word,
+    ).toBe("Stopped");
+  });
+
   /// Under the stop, though — a wrap-up with a resume to make has stopped, and
   /// the checks are not what is holding it.
   it("says Stopped over the checks where there is a resume to make", () => {
@@ -251,5 +270,43 @@ describe("the status word", () => {
       state: "Implementing",
       attention: false,
     });
+  });
+
+  /// A Conversation on its way to another machine, which is what the head of
+  /// its timeline says from the press until the work lands — named, because
+  /// *transferring* on its own is half a sentence. Quietly: the human pressed
+  /// it themselves.
+  it("says where a conversation being moved is going", () => {
+    expect(status(like({ transferring: "the-laptop" }))).toEqual({
+      word: "Transferring to the-laptop",
+      state: "Implementing",
+      attention: false,
+    });
+  });
+
+  /// Over everything else there is to say, including the two the accent is
+  /// spent on: whatever else is true of it, what this conversation is doing is
+  /// leaving. And over the states nothing drives, because a Done conversation
+  /// moves like any other — a Draft and a Closed one are refused the press
+  /// rather than drawn without the word.
+  it("says it over every other word, and on a conversation that is done", () => {
+    expect(
+      status(
+        like({
+          transferring: "the-laptop",
+          waiting: true,
+          blocked_on: 12,
+          working: true,
+        }),
+      ).word,
+    ).toBe("Transferring to the-laptop");
+
+    expect(status(like({ state: "Done", transferring: "the-laptop" }))).toEqual(
+      {
+        word: "Transferring to the-laptop",
+        state: "Done",
+        attention: false,
+      },
+    );
   });
 });

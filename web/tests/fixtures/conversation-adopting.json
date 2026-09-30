@@ -1,5 +1,6 @@
 {
   "adopting": {
+    "beside": [],
     "roadmap": "mvp",
     "stage": {
       "branch": "roadmaps/mvp/04-wrap-up",
@@ -18,6 +19,7 @@
   "companions": [],
   "compiles_uncached": false,
   "direction": null,
+  "drafted_on": "aa00bb11cc22dd33ee44ff5566778899",
   "driven": false,
   "grilling_pairing": null,
   "id": 1,
@@ -26,6 +28,7 @@
   "naming": false,
   "parked": null,
   "pending_steer": null,
+  "permitted": [],
   "pinned": [],
   "process": "Develop",
   "ready_to_continue": false,
@@ -56,9 +59,12 @@
       }
     }
   ],
+  "transferred": null,
+  "transferring": null,
   "trimmed": false,
   "waiting": false,
   "waiting_on_checks": false,
+  "waiting_to_join": false,
   "working": false,
   "worktree": null
 }

@@ -16,6 +16,7 @@ import { describe, expect, it } from "vitest";
 
 import type { ConversationView } from "../src/api/types";
 import {
+  deviceAt,
   landing,
   lastOpening,
   openingAt,
@@ -237,5 +238,67 @@ describe("where opening a conversation lands", () => {
 
     expect(lastOpening(steering.timeline)).toBeNull();
     expect(landing(steering)).toBe("steer");
+  });
+});
+
+/// And the device a Conversation lives on, which is the segment above its own
+/// path: a member's is opened through this device at `/devices/{device}/…`
+/// (ADR-0020), and this device's own is written exactly as it always was.
+describe("the device a path stands on", () => {
+  /// The Device Id a member is named by, which is what the URL carries: sixteen
+  /// random hex bytes, so nothing about it could ever read as one of the words
+  /// beside it.
+  const MEMBER = "8f2a1c0b4d6e7f902b13c4d5e6f70819";
+
+  it("writes a member's Conversation under the device", () => {
+    expect(pathOf(3, MEMBER)).toBe(`/devices/${MEMBER}/conversations/3`);
+  });
+
+  /// And every pane of it under that, which is the whole of the nesting: the
+  /// device says which Verkstead, the leaf says which pane, and neither has
+  /// anything to say about the other.
+  it("nests every pane of it under that path", () => {
+    expect(PATHS.map(([opening]) => pathTo("3", opening, MEMBER))).toEqual(
+      PATHS.map(([, path]) => `/devices/${MEMBER}${path}`),
+    );
+  });
+
+  /// The one promise the local half of this makes: a path built with no device
+  /// is the path it has always been, character for character. This device is
+  /// where most of the work is, and a device segment on every URL would say
+  /// nothing.
+  it("leaves a path with no device exactly as it was", () => {
+    expect(pathOf(3, null)).toBe(pathOf(3));
+    expect(PATHS.map(([opening]) => pathTo("3", opening, null))).toEqual(
+      PATHS.map(([, path]) => path),
+    );
+  });
+
+  it("reads the device back off a path it wrote", () => {
+    expect(deviceAt(pathOf(3, MEMBER))).toBe(MEMBER);
+    expect(
+      PATHS.map(([opening]) => deviceAt(pathTo("3", opening, MEMBER))),
+    ).toEqual(PATHS.map(() => MEMBER));
+  });
+
+  /// And says there is none where there is none, which is every path this
+  /// device has ever written.
+  it("says nothing of a path that names no device", () => {
+    expect(deviceAt(pathOf(3))).toBeNull();
+    expect(deviceAt("/")).toBeNull();
+    expect(deviceAt("/settings")).toBeNull();
+    expect(deviceAt("/devices")).toBeNull();
+  });
+
+  /// What is open is read the same way under a device as without one: the
+  /// segment is taken off the front, and what is left is the path this device
+  /// writes for its own.
+  it("reads what is open under a device exactly as it does without one", () => {
+    expect(
+      PATHS.map(([, path]) => openingAt(`/devices/${MEMBER}${path}`)),
+    ).toEqual(PATHS.map(([opening]) => opening));
+
+    expect(openingAt(pathOf(3, MEMBER))).toBeNull();
+    expect(openingAt(`/devices/${MEMBER}/conversations/3/nowhere`)).toBeNull();
   });
 });

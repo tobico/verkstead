@@ -26,14 +26,30 @@ select **07** exports, and it needs the Repo matching and mirror Profiles of
 
 ## Stages
 
-- [ ] 01: Device identity and the peer listener — [brief](01-device-identity-and-the-peer-listener.md)
-- [ ] 02: Linking — [brief](02-linking.md)
-- [ ] 03: Discovery — [brief](03-discovery.md)
-- [ ] 04: The relay — [brief](04-the-relay.md)
-- [ ] 05: Ranks — [brief](05-ranks.md)
-- [ ] 06: The merged list — [brief](06-the-merged-list.md)
-- [ ] 07: Drafting on a device — [brief](07-drafting-on-a-device.md)
-- [ ] 08: Shared Profiles — [brief](08-shared-profiles.md)
-- [ ] 09: Transfer — [brief](09-transfer.md)
-- [ ] 10: Resuming the harness — [brief](10-resuming-the-harness.md)
-- [ ] 11: The agent's call — [brief](11-the-agents-call.md)
+- [x] 01: Device identity and the peer listener — [brief](01-device-identity-and-the-peer-listener.md)
+- [x] 02: Linking — [brief](02-linking.md)
+- [x] 03: Discovery — [brief](03-discovery.md)
+- [x] 04: The relay — [brief](04-the-relay.md)
+- [x] 05: Ranks — [brief](05-ranks.md)
+- [x] 06: The merged list — [brief](06-the-merged-list.md)
+- [x] 07: Drafting on a device — [brief](07-drafting-on-a-device.md)
+- [x] 08: Shared Profiles — [brief](08-shared-profiles.md)
+- [x] 09: Transfer — [brief](09-transfer.md)
+- [x] 10: Resuming the harness — [brief](10-resuming-the-harness.md)
+- [x] 11: The agent's call — [brief](11-the-agents-call.md)
+
+## Left to do, from a rebase rather than from a stage
+
+**A compose page cannot point at a pull request.** Stage 07 gave it a *Wrap up a
+pull request* row — a pull request loaded into the box, drafted onto whichever
+device would do the work — and `main` retired that level while this roadmap was
+in flight: the Review Process reaches the same work through the **Target** field
+instead. So the row, the band it drew over the box and the suite behind it went
+with the level when the stack was rebased, and nothing replaced them.
+
+What is missing is only the *loading*. A draft can still be pointed at a pull
+request by typing into the Target field, and the device select above it still
+says where the work will be done — so this is a way in that has gone rather than
+a thing that cannot be done. Whoever picks it up decides whether the compose
+page gets a row that fills the Target field from a list of open pull requests,
+and whether that list is worth a `gh` call per registered Repo again.

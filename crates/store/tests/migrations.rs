@@ -61,6 +61,12 @@
 //! could have written into it, so it comes in empty — which is what an empty slot
 //! means on every other one of the form's fields too.
 //!
+//! And one more column added holding nothing: the record of which roadmap a
+//! Conversation is a stage of says which stage of it now. The label arrives with
+//! the column and nothing can recover one — a label read off the branch is the
+//! guess the record exists to stop — so every stage from before has the roadmap
+//! it always had and no stage beside it.
+//!
 //! And six more rebuilt, for one repository holding more than one pull request —
 //! a stack. The record of what was opened, the check rollup, the merge reading,
 //! the standing, what the wrap-up had settled and what its checks had been given
@@ -70,6 +76,12 @@
 //! comes in empty: nothing wrote a head down, and nothing can recover one. The
 //! goes spent on a conflict stay keyed by the repository, that being per stack,
 //! and so are the one thing here that no rewrite touches.
+//! And one column added empty on purpose, which is the one arrival an open cannot
+//! finish: where a Conversation sits in the sidebar is a Rank, and a Rank names
+//! the device that issued it — an id read out of the very pool the open is
+//! running on. So the column arrives and nothing fills it here; what does is
+//! `rank_the_conversations`, at the first start that has an identity in hand, and
+//! what it does with the rows is tested in `ranks.rs`.
 //!
 //! Both old shapes are written here by hand rather than by the code that used to
 //! write them: that code has gone, and what has to keep working is a database
@@ -81,16 +93,21 @@ use std::path::PathBuf;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Account, Clash, Commit, Decision, Event, Finished, Lifecycle, Merging, Pairing, ProfileFacts,
-    PullRequest, RanUnder, Rollup, Saving, Standing, WaitingOn, asked_to_stop, check_rollup,
-    clear_stop, commit_repo, conflict_fix_attempts, conversations, create_profile, finish_wrap_up,
-    fix_attempts, load_conversation, load_profile, merging, open_database, open_pending_steer,
-    pending_steer, profiles, pull_request, pull_request_repo, pull_requests,
-    record_another_pull_request, record_check_rollup, record_commit, record_conflict_fix_attempt,
-    record_fix_attempt, recorded_commits, register_repo, save_pending_steer, settle_wrap_up, stack,
-    standing, start_capture, start_conversation, start_grilling, start_unnamed_conversation, stop,
-    stopped, timeline, update_profile, wrap_up_settled,
+    Account, Clash, Commit, Decision, Event, Finished, Lifecycle, Merging, Mirror, Pairing,
+    ProfileFacts, PullRequest, RanUnder, RoadmapStage, Rollup, Saving, StageOf, Standing,
+    WaitingOn, asked_to_stop, check_rollup, clear_stop, commit_repo, conflict_fix_attempts,
+    conversations, create_profile, finish_wrap_up, fix_attempts, load_conversation, load_profile,
+    merging, open_database, open_pending_steer, pending_steer, profiles, pull_request,
+    pull_request_repo, pull_requests, record_another_pull_request, record_check_rollup,
+    record_commit, record_conflict_fix_attempt, record_fix_attempt, record_mirror,
+    recorded_commits, register_repo, save_brief, save_pending_steer, settle_wrap_up, stack,
+    stage_roadmap, standing, start_capture, start_conversation, start_grilling, start_stage,
+    start_unnamed_conversation, stop, stopped, timeline, update_profile, wrap_up_settled,
 };
+
+/// The device every Conversation started here is ranked by, named the way a
+/// cluster names one (ADR-0020, *Ranks*).
+const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
 
 /// A database with the old table in it, and a Conversation to hang stops off.
 ///
@@ -105,7 +122,7 @@ async fn before(dir: &Path) -> (SqlitePool, i64) {
         .unwrap()
         .id;
 
-    let id = start_conversation(&pool, repo, "rate-limiting")
+    let id = start_conversation(&pool, repo, "rate-limiting", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -304,7 +321,7 @@ async fn a_stop_that_was_open_becomes_the_one_stop_it_now_is() {
     );
 
     assert!(
-        conversations(&pool)
+        conversations(&pool, false)
             .await
             .unwrap()
             .into_iter()
@@ -336,7 +353,7 @@ async fn a_stop_that_was_settled_stops_nothing() {
 
     assert!(stopped(&pool, id).await.unwrap().is_none());
     assert!(
-        !conversations(&pool)
+        !conversations(&pool, false)
             .await
             .unwrap()
             .into_iter()
@@ -419,7 +436,7 @@ async fn a_database_made_today_has_nothing_to_rewrite() {
         .await
         .unwrap();
 
-    assert!(conversations(&pool).await.unwrap().is_empty());
+    assert!(conversations(&pool, false).await.unwrap().is_empty());
 }
 
 /// A database whose stops were kept in tables beside the Conversations, as one
@@ -438,7 +455,7 @@ async fn beside(dir: &Path) -> (SqlitePool, i64) {
         .unwrap()
         .id;
 
-    let id = start_conversation(&pool, repo, "rate-limiting")
+    let id = start_conversation(&pool, repo, "rate-limiting", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -595,7 +612,7 @@ async fn an_open_pause_reads_back_as_a_stop_with_reset_words() {
     );
 
     assert!(
-        conversations(&pool)
+        conversations(&pool, false)
             .await
             .unwrap()
             .into_iter()
@@ -870,7 +887,7 @@ async fn commits_of_before(dir: &Path) -> (i64, i64) {
         .unwrap()
         .id;
 
-    let id = start_conversation(&pool, repo, "rate-limiting")
+    let id = start_conversation(&pool, repo, "rate-limiting", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -1053,7 +1070,7 @@ async fn pull_requests_of_before(dir: &Path) -> (i64, i64) {
         .unwrap()
         .id;
 
-    let id = start_conversation(&pool, repo, "rate-limiting")
+    let id = start_conversation(&pool, repo, "rate-limiting", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -1236,7 +1253,7 @@ async fn pull_request_readings_of_before(dir: &Path) -> (i64, i64, i64) {
         .unwrap()
         .id;
 
-    let id = start_conversation(&pool, repo, "rate-limiting")
+    let id = start_conversation(&pool, repo, "rate-limiting", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -1522,7 +1539,7 @@ async fn wrap_up_of_before(dir: &Path) -> (i64, i64) {
         .unwrap()
         .id;
 
-    let id = start_conversation(&pool, repo, "rate-limiting")
+    let id = start_conversation(&pool, repo, "rate-limiting", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -1837,7 +1854,7 @@ async fn wrap_up_bookkeeping_of_before(dir: &Path) -> (i64, i64, i64) {
         .unwrap()
         .id;
 
-    let id = start_conversation(&pool, repo, "rate-limiting")
+    let id = start_conversation(&pool, repo, "rate-limiting", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -2155,7 +2172,7 @@ async fn a_conversation_from_before_the_review_role_opens_with_it_unchosen() {
         .unwrap()
         .id;
 
-    let id = start_conversation(&pool, repo, "rate-limiting")
+    let id = start_conversation(&pool, repo, "rate-limiting", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -2220,7 +2237,7 @@ async fn a_conversation_from_before_the_branch_name_had_an_owner_keeps_its_name(
         .unwrap()
         .id;
 
-    let id = start_conversation(&pool, repo, "rate-limiting")
+    let id = start_conversation(&pool, repo, "rate-limiting", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -2274,7 +2291,7 @@ async fn a_conversation_from_before_the_base_branch_was_kept_records_none() {
         .unwrap()
         .id;
 
-    let id = start_conversation(&pool, repo, "rate-limiting")
+    let id = start_conversation(&pool, repo, "rate-limiting", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -2340,7 +2357,7 @@ async fn a_commit_from_before_merges_were_told_apart_is_no_merge() {
         .unwrap()
         .id;
 
-    let id = start_conversation(&pool, repo, "rate-limiting")
+    let id = start_conversation(&pool, repo, "rate-limiting", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -2420,7 +2437,7 @@ async fn a_conversation_from_before_the_naming_instruction_is_waiting_on_nobody(
     // The one that would be waiting if anything were: started on a name
     // Verkstead invented, and past drafting, which is where the instruction goes
     // out.
-    let id = start_unnamed_conversation(&pool, repo, "brave-otter")
+    let id = start_unnamed_conversation(&pool, repo, "brave-otter", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -2706,6 +2723,245 @@ async fn the_profiles_of_before_the_memory_switch_share_their_memory() {
     );
 }
 
+/// A database whose Profile names were unique across every device, which is
+/// every Verkstead before a member's account could be written down here.
+///
+/// The table is written out as that Verkstead declared it — the name `UNIQUE` on
+/// the column, and no room at all for a device to be named — with two Profiles
+/// in it and the models of each hung off, so that what is copied across is the
+/// row and what points at the row alike.
+async fn profiles_named_across_every_device(dir: &Path) {
+    let pool = open_database(&dir.join("verkstead.db")).await.unwrap();
+
+    sqlx::query("DROP TABLE profiles")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    sqlx::query(
+        "CREATE TABLE profiles (
+             id          INTEGER PRIMARY KEY AUTOINCREMENT,
+             name        TEXT UNIQUE,
+             claude_dir  TEXT NOT NULL,
+             config_file TEXT NOT NULL,
+             model       TEXT NOT NULL,
+             agent_type  TEXT NOT NULL,
+             memory      INTEGER NOT NULL DEFAULT 1
+         ) STRICT",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // Both rules as that Verkstead held them: the name over every row, and one
+    // unnamed Profile per harness.
+    sqlx::query(
+        "CREATE UNIQUE INDEX profiles_one_unnamed_per_agent
+         ON profiles (agent_type) WHERE name IS NULL",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    for (id, name) in [(1, Some("work")), (2, None)] {
+        sqlx::query(
+            "INSERT INTO profiles (id, name, claude_dir, config_file, model, agent_type, memory)
+             VALUES (?, ?, ?, ?, 'claude-opus-5', 'claude', 1)",
+        )
+        .bind(id)
+        .bind(name)
+        .bind(format!(
+            "/watched/accounts/{}/.claude",
+            name.unwrap_or("here")
+        ))
+        .bind(format!(
+            "/watched/accounts/{}/.claude.json",
+            name.unwrap_or("here")
+        ))
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "INSERT INTO profile_models (profile_id, position, model)
+             VALUES (?, 0, 'claude-opus-5')",
+        )
+        .bind(id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    pool.close().await;
+}
+
+/// Every saved Profile keeps its name and stays this device's own, and a
+/// member's account called the same thing goes in beside it — which is the whole
+/// of what the rewrite is for.
+#[tokio::test]
+async fn the_profiles_of_before_the_mirrors_take_a_members_beside_them() {
+    let dir = tempfile::tempdir().unwrap();
+    profiles_named_across_every_device(dir.path()).await;
+
+    for opening in [
+        "it opens, which is most of what this is about",
+        "it opens again, and the table is not rebuilt twice",
+    ] {
+        let pool = open_database(&dir.path().join("verkstead.db"))
+            .await
+            .unwrap();
+
+        let saved = profiles(&pool).await.unwrap();
+        assert_eq!(saved.len(), 2, "{opening}");
+        assert_eq!(saved[0].name, None, "the unnamed one sorts first");
+        assert_eq!(saved[1].name.as_deref(), Some("work"));
+        assert_eq!(
+            saved[1].id, 1,
+            "the ids come across, being what points here"
+        );
+        assert_eq!(saved[1].account, claude("work"));
+        assert_eq!(saved[1].models, ["claude-opus-5"]);
+        assert!(
+            saved.iter().all(|profile| profile.mirror.is_none()),
+            "and every one of them is still this device's own: {opening}",
+        );
+
+        pool.close().await;
+    }
+
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    // A member's account called what this device already calls one of its own,
+    // and a member's unnamed Claude account beside this device's: two rows the
+    // old table's rules would each have refused.
+    for (at_home, name) in [(7, Some("work")), (9, None)] {
+        record_mirror(
+            &pool,
+            &Mirror {
+                device: "0011223344556677889900aabbccddee".to_owned(),
+                id: at_home,
+                login: true,
+            },
+            &ProfileFacts {
+                name: name.map(str::to_owned),
+                account: claude("theirs"),
+                models: vec!["claude-opus-5".to_owned()],
+                memory: true,
+            },
+        )
+        .await
+        .unwrap();
+    }
+
+    assert_eq!(profiles(&pool).await.unwrap().len(), 4);
+
+    // And both rules still hold over this device's own rows.
+    assert_eq!(
+        create_profile(
+            &pool,
+            &ProfileFacts {
+                name: Some("work".to_owned()),
+                account: claude("second"),
+                models: vec!["claude-opus-5".to_owned()],
+                memory: true,
+            }
+        )
+        .await
+        .unwrap(),
+        Err(Clash::NameTaken),
+    );
+
+    assert_eq!(
+        create_profile(
+            &pool,
+            &ProfileFacts {
+                name: None,
+                account: claude("second"),
+                models: vec!["claude-opus-5".to_owned()],
+                memory: true,
+            }
+        )
+        .await
+        .unwrap(),
+        Err(Clash::DefaultTaken),
+    );
+}
+
+/// And whether a member's account has a login at home survives every rewrite
+/// the open puts the table through.
+///
+/// **Which is not a thing to take away and put back.** The column arrives on an
+/// old table by `ALTER`, and the rewrite that lets two devices call an account
+/// the same thing remakes the table — so it carries the column across rather
+/// than dropping it and asking for it again: the pool hands the pragma that
+/// looks for a column and the `ALTER` that adds it to whichever connections are
+/// free, and one that has not caught up with the drop refuses it as one it
+/// already has.
+///
+/// Opened twice for the reason every rewrite here is: the second open must find
+/// nothing to do.
+#[tokio::test]
+async fn a_mirrors_login_at_home_survives_the_rewrites() {
+    let dir = tempfile::tempdir().unwrap();
+    profiles_named_across_every_device(dir.path()).await;
+
+    for opening in ["it opens", "it opens again"] {
+        let pool = open_database(&dir.path().join("verkstead.db"))
+            .await
+            .unwrap();
+
+        let declared: Option<(String,)> = sqlx::query_as(
+            "SELECT type FROM pragma_table_info('profiles') WHERE name = 'home_login'",
+        )
+        .fetch_optional(&pool)
+        .await
+        .unwrap();
+
+        assert_eq!(
+            declared,
+            Some(("INTEGER".to_owned(),)),
+            "the rewritten table carries the column: {opening}",
+        );
+
+        pool.close().await;
+    }
+
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    let id = record_mirror(
+        &pool,
+        &Mirror {
+            device: "0011223344556677889900aabbccddee".to_owned(),
+            id: 7,
+            login: false,
+        },
+        &ProfileFacts {
+            name: Some("keychain".to_owned()),
+            account: claude("theirs"),
+            models: vec!["claude-opus-5".to_owned()],
+            memory: true,
+        },
+    )
+    .await
+    .unwrap();
+
+    let written = profiles(&pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|profile| profile.id == id)
+        .expect("the mirror that was just written down");
+
+    assert!(
+        !written.mirror.expect("a mirror").login,
+        "and a mirror written into it says the account at home has no login",
+    );
+}
+
 /// A database made fresh has the switch in its own table, rather than waiting
 /// on a migration to add it.
 #[tokio::test]
@@ -2726,6 +2982,27 @@ async fn a_fresh_database_declares_the_memory_switch() {
     assert_eq!(declared, ("INTEGER".to_owned(), 1, "1".to_owned()));
 }
 
+/// And a fresh database declares where a Conversation sits in the sidebar,
+/// nullable: the column is a Rank's, and the rank itself is written by the start
+/// that makes the row rather than by anything here — see `ranks.rs`.
+#[tokio::test]
+async fn a_fresh_database_declares_the_rank_column() {
+    let dir = tempfile::tempdir().unwrap();
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    let declared: (String, i64) = sqlx::query_as(
+        "SELECT type, \"notnull\" FROM pragma_table_info('conversations')
+         WHERE name = 'rank'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    assert_eq!(declared, ("TEXT".to_owned(), 0));
+}
+
 /// A database whose every session record had to name a Profile, which is every
 /// Verkstead before a Profile could go unnamed.
 ///
@@ -2744,7 +3021,7 @@ async fn sessions_of_before(dir: &Path) -> i64 {
         .unwrap()
         .id;
 
-    let id = start_conversation(&pool, repo, "rate-limiting")
+    let id = start_conversation(&pool, repo, "rate-limiting", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -2915,7 +3192,7 @@ async fn a_half_written_steer_from_before_investigating_has_no_question_on_it() 
         .unwrap()
         .id;
 
-    let id = start_conversation(&pool, repo, "rate-limiting")
+    let id = start_conversation(&pool, repo, "rate-limiting", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -2986,7 +3263,7 @@ async fn pull_requests_before_the_base_branch(dir: &Path) -> (i64, i64) {
         .unwrap()
         .id;
 
-    let id = start_conversation(&pool, repo, "rate-limiting")
+    let id = start_conversation(&pool, repo, "rate-limiting", THIS_DEVICE)
         .await
         .unwrap()
         .unwrap();
@@ -3132,4 +3409,83 @@ async fn a_pull_request_recorded_after_the_column_arrives_names_its_base() {
             (43, Some("rate-limiting-2".to_owned())),
         ],
     );
+}
+
+/// And a stage recorded before Verkstead wrote down *which* stage it was keeps
+/// the roadmap it had, with nothing said about the stage.
+///
+/// The label arrives with the column, so every row this reaches was written when
+/// the record held the roadmap alone — and there is nothing to recover one from:
+/// the branch the stage was worked on names a stage, and reading it off there is
+/// the guess the record exists to stop. So the column comes in empty, which is
+/// the record saying nobody wrote a label, and the roadmap beside it is exactly
+/// where it was left.
+///
+/// The column is taken off rather than an old database stood up, which is the
+/// same state read from the other side: what a stage from before this looks like
+/// is a stage whose row says the roadmap and no more.
+#[tokio::test]
+async fn a_stage_recorded_before_the_label_keeps_its_roadmap_and_no_stage() {
+    let dir = tempfile::tempdir().unwrap();
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    let repo = register_repo(&pool, Path::new("/watched/verkstead"), "verkstead", "main")
+        .await
+        .unwrap()
+        .unwrap()
+        .id;
+
+    let id = start_conversation(&pool, repo, "rate-limiting", THIS_DEVICE)
+        .await
+        .unwrap()
+        .unwrap();
+
+    save_brief(&pool, id, "# 05. Wrap up\n").await.unwrap();
+
+    start_stage(
+        &pool,
+        id,
+        "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
+        Path::new("/data/worktrees/verkstead-stage"),
+        Some("roadmaps/mvp/04-implementation"),
+        RoadmapStage {
+            roadmap: "mvp",
+            label: "05",
+        },
+        &[],
+    )
+    .await
+    .unwrap();
+
+    // The column off, which is the whole of what says this database is one from
+    // before: the record held which roadmap and never which stage of it.
+    sqlx::query("ALTER TABLE stage_roadmaps DROP COLUMN stage")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    pool.close().await;
+
+    for opening in [
+        "it opens, which is most of what this is about",
+        "it opens again",
+    ] {
+        let pool = open_database(&dir.path().join("verkstead.db"))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            stage_roadmap(&pool, id).await.unwrap(),
+            Some(StageOf {
+                roadmap: "mvp".to_owned(),
+                stage: None,
+            }),
+            "{opening}: the roadmap where it was left, and no stage — nothing \
+             knows which one this was and the branch is not asked",
+        );
+
+        pool.close().await;
+    }
 }

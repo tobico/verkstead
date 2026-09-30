@@ -86,6 +86,25 @@ impl Serve {
             // database somewhere nobody looks.
             .env_remove("VERKSTEAD_WATCHED_PATHS")
             .env_remove("VERKSTEAD_DATA_DIR")
+            // And a peer listener on a port the machine picks, for the reason
+            // the workbench port is a free one: the default is `0.0.0.0:8423`,
+            // and every server started here would otherwise be fighting the
+            // last one for it — and whatever real Verkstead this machine is
+            // running. `:0` rather than a port found and released here, because
+            // a port found and released is a port something else can take in
+            // between. In the environment rather than on the command line so
+            // that it is out of the way of the tests which read the flags back,
+            // and before the caller's own so that a test about the variable
+            // still wins.
+            .env("VERKSTEAD_PEER_LISTEN", "127.0.0.1:0")
+            // And nothing advertised on the LAN, which is on by default and is
+            // one thing a test has no business doing: what a real Verkstead
+            // three desks away would hear is a device with a fresh id and a
+            // hostname, gone again when the test ends. The switch rather than a
+            // port of its own, because mDNS is spoken on 5353 wherever it is
+            // spoken at all — see `crates/server/tests/advertising.rs`, which is
+            // where the advertisement is read back off a port nobody else is on.
+            .env("VERKSTEAD_NO_ADVERTISING", "1")
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -249,6 +268,40 @@ impl Serve {
             );
             std::thread::sleep(Duration::from_millis(50));
         }
+    }
+
+    /// Ask it to stop the way a service manager does, and hand back how it went
+    /// and what it said.
+    ///
+    /// A signal rather than [`Serve::stop`]'s kill, which is the difference this
+    /// is here for: a server asked to stop ends of its own accord — the one
+    /// ordered stop it has — where a killed one dies where it stands and leaves
+    /// its advertisement to run out on its own TTL (ADR-0020).
+    ///
+    /// `kill` rather than a crate: sending a signal is two lines of libc and a
+    /// dependency to carry on three platforms for the one test on this one that
+    /// wants it.
+    #[cfg(unix)]
+    fn asked_to_stop(&mut self) -> (std::process::ExitStatus, String) {
+        let child = self.child.take().expect("stopped once");
+
+        let signalled = Command::new("kill")
+            .arg("-TERM")
+            .arg(child.id().to_string())
+            .status()
+            .expect("a `kill` to send the signal with");
+
+        assert!(
+            signalled.success(),
+            "the test could not send `verkstead serve` a SIGTERM"
+        );
+
+        let output = child.wait_with_output().unwrap();
+
+        (
+            output.status,
+            String::from_utf8_lossy(&output.stdout).into_owned(),
+        )
     }
 
     /// Stop serving and hand back what the server said on its way up.
@@ -677,6 +730,147 @@ fn the_directories_default_to_the_platform_directories() {
     );
 }
 
+/// The peer listener, from outside the process: a caller dials the port over
+/// TLS and reads back what this Verkstead says it is (ADR-0020).
+///
+/// The whole of the stage's demonstration in one test. The certificate is
+/// self-signed and made out to the device id rather than to an address, so
+/// verification is off here exactly as it is off for the first call a device
+/// linking to another one makes: what proves the far end in a cluster is the
+/// fingerprint compared afterwards, and there is no certificate authority
+/// anywhere in it to check a chain against.
+#[test]
+fn the_peer_listener_answers_the_identity_over_tls() {
+    let tmp = tempfile::tempdir().unwrap();
+    let data_dir = tmp.path().join("peered");
+    let port = free_port();
+    let peer_port = free_port();
+    let mut serving = Serve::start(
+        tmp.path(),
+        port,
+        &[
+            "--listen",
+            &format!("127.0.0.1:{port}"),
+            "--peer-listen",
+            &format!("127.0.0.1:{peer_port}"),
+            "--data-dir",
+            data_dir.to_str().unwrap(),
+        ],
+        &[],
+    );
+
+    let caller = ureq::Agent::config_builder()
+        .tls_config(
+            ureq::tls::TlsConfig::builder()
+                .disable_verification(true)
+                .build(),
+        )
+        .build()
+        .new_agent();
+
+    let answered = caller
+        .get(&format!(
+            "https://127.0.0.1:{peer_port}/api/peer/v1/identity"
+        ))
+        .call()
+        .expect("the peer listener should complete a handshake and answer")
+        .body_mut()
+        .read_to_string()
+        .unwrap();
+
+    let identity: serde_json::Value =
+        serde_json::from_str(&answered).expect("the identity is JSON");
+
+    let logged = uncoloured(&serving.stop());
+
+    let device = identity["device"].as_str().expect("an id is a string");
+
+    assert!(
+        logged.contains(device),
+        "the id read over the wire should be the one the startup line printed, \
+         got {device} and:\n{logged}"
+    );
+    assert!(
+        logged.contains(identity["fingerprint"].as_str().unwrap()),
+        "and so should the fingerprint, which is what an operator compares two \
+         machines by, got:\n{logged}"
+    );
+    assert!(
+        logged.contains(&format!("peer_listen=127.0.0.1:{peer_port}")),
+        "and the line says where the peer listener is, which is the other half of \
+         what somebody linking to this machine has to type, got:\n{logged}"
+    );
+}
+
+/// And the environment says the same thing the flag does, as it does for the
+/// workbench's own address.
+#[test]
+fn the_peer_address_comes_from_the_environment_too() {
+    let tmp = tempfile::tempdir().unwrap();
+    let data_dir = tmp.path().join("peer-env");
+    let port = free_port();
+    let peer_port = free_port();
+    let mut serving = Serve::start(
+        tmp.path(),
+        port,
+        &["--data-dir", data_dir.to_str().unwrap()],
+        &[
+            ("VERKSTEAD_LISTEN", &format!("127.0.0.1:{port}")),
+            ("VERKSTEAD_PEER_LISTEN", &format!("127.0.0.1:{peer_port}")),
+        ],
+    );
+
+    let logged = uncoloured(&serving.stop());
+
+    assert!(
+        logged.contains(&format!("peer_listen=127.0.0.1:{peer_port}")),
+        "the variable is how a unit file says it, got:\n{logged}"
+    );
+}
+
+/// A signal is an ordered stop: the server ends of its own accord, saying so,
+/// rather than dying where it stands (ADR-0020, *Discovery*).
+///
+/// **The one ordered stop this server has, and what it is for is the goodbye.**
+/// A signal is where the advertisement is withdrawn — the packet that takes this
+/// device's row off every other machine's list at once instead of leaving it to
+/// run out on its TTL. What that packet *is* is read back off the wire by
+/// `crates/server/tests/withdrawing.rs`, which can raise a signal at itself and
+/// browse for the result; what this asks is the half that suite cannot, which is
+/// that a real `verkstead serve` hears one at all and comes back rather than
+/// being killed by it.
+///
+/// Nothing is advertised here — the harness turns that off, a test having no
+/// business announcing devices to whatever LAN the runner is on — so what is
+/// being watched is the stop itself.
+#[cfg(unix)]
+#[test]
+fn a_signal_is_an_ordered_stop() {
+    let tmp = tempfile::tempdir().unwrap();
+    let data_dir = tmp.path().join("stopped");
+    let port = free_port();
+    let mut serving = Serve::with_flags(tmp.path(), port, &data_dir);
+
+    let (status, logged) = serving.asked_to_stop();
+    let logged = uncoloured(&logged);
+
+    assert!(
+        status.success(),
+        "a server that heard the signal returns rather than being killed by it, got \
+         {status} and:\n{logged}"
+    );
+    assert!(
+        logged.contains("verkstead has been asked to stop"),
+        "and it says so on its way out, which is what says the signal was heard rather \
+         than that the process happened to end, got:\n{logged}"
+    );
+    assert!(
+        logged.contains("SIGTERM"),
+        "naming the signal, because SIGINT from a terminal and SIGTERM from a service \
+         manager are the same stop arriving two ways, got:\n{logged}"
+    );
+}
+
 #[test]
 fn the_help_describes_the_flags_and_their_defaults() {
     let help = stdout(&run(&["serve", "--help"]));
@@ -687,6 +881,11 @@ fn the_help_describes_the_flags_and_their_defaults() {
         "VERKSTEAD_LISTEN",
         "VERKSTEAD_DATA_DIR",
         "127.0.0.1:8422",
+        "--peer-listen",
+        "VERKSTEAD_PEER_LISTEN",
+        "0.0.0.0:8423",
+        "--no-advertising",
+        "VERKSTEAD_NO_ADVERTISING",
         "verkstead.db",
     ] {
         assert!(

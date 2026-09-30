@@ -205,6 +205,7 @@ import type {
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
 import { whenFilesMove } from "../nudge";
+import { keyOf, useDevice } from "../reaching";
 import styles from "./Tree.module.css";
 
 /// Each way a folder can come back holding nothing, in the words of what it is.
@@ -552,6 +553,8 @@ export function Tree(props: {
   held: Accessor<Record<string, FolderListing>>;
   setHeld: Setter<Record<string, FolderListing>>;
 }): JSX.Element {
+  const device = useDevice();
+
   /// The worktrees this conversation has.
   ///
   /// Merged by path rather than frozen: a companion added to a drafting
@@ -560,8 +563,8 @@ export function Tree(props: {
   /// *inside* a root is not in this reading at all, so a re-read costs a row
   /// apiece and disturbs nothing that is open.
   const roots = useReading(() => ({
-    queryKey: ["file-roots", props.conversation],
-    queryFn: () => listFileRoots(props.conversation),
+    queryKey: keyOf(device(), "file-roots", props.conversation),
+    queryFn: () => listFileRoots(device(), props.conversation),
     freshness: { reconcile: "path" },
   }));
 
@@ -579,8 +582,8 @@ export function Tree(props: {
   /// folder listings beside it, because there is one of it for the whole pane
   /// and nothing about it is worth keeping across a swap.
   const status = useReading(() => ({
-    queryKey: ["file-status", props.conversation],
-    queryFn: () => readFileStatus(props.conversation),
+    queryKey: keyOf(device(), "file-status", props.conversation),
+    queryFn: () => readFileStatus(device(), props.conversation),
     freshness: { reconcile: "path" },
   }));
 
@@ -726,7 +729,7 @@ export function Tree(props: {
     const still = (): boolean => reading().includes(path);
 
     return (
-      listFolder(props.conversation, path)
+      listFolder(device(), props.conversation, path)
         .then((listing) => {
           if (!still()) return;
 
@@ -790,7 +793,7 @@ export function Tree(props: {
   /// about a row the tree is no longer drawing, and putting it back would be a
   /// Nudge undoing a press.
   const again = (path: string): Promise<void> =>
-    listFolder(props.conversation, path)
+    listFolder(device(), props.conversation, path)
       .then((listing) => {
         setHeld((was) => {
           if (was[path] === undefined || same(was[path], listing)) {
@@ -837,7 +840,7 @@ export function Tree(props: {
   // does not throw away the walk down to a file. Let go of with the tree, so a
   // pane that is not drawn reads nothing.
   createEffect(() => {
-    onCleanup(whenFilesMove(props.conversation, follow));
+    onCleanup(whenFilesMove(device(), props.conversation, follow));
   });
 
   // And once the moment it is drawn, because a tree that was not drawn was
@@ -981,8 +984,8 @@ export function Tree(props: {
 
     const at = `${asked.at}/${name}`;
     const asking = asked.folder
-      ? makeFolder(props.conversation, at)
-      : makeFile(props.conversation, at);
+      ? makeFolder(device(), props.conversation, at)
+      : makeFile(device(), props.conversation, at);
 
     void asking
       .then((made) => {
@@ -1028,7 +1031,7 @@ export function Tree(props: {
     working = true;
     setSaid(null);
 
-    void renamePath(props.conversation, asked.over, name)
+    void renamePath(device(), props.conversation, asked.over, name)
       .then((done) => {
         if (typeof done === "string" || !("Renamed" in done)) {
           setSaid(renamedRefusal(done));
@@ -1059,7 +1062,7 @@ export function Tree(props: {
     working = true;
     setRefused(null);
 
-    void deletePath(props.conversation, asked.over)
+    void deletePath(device(), props.conversation, asked.over)
       .then((done) => {
         if (done !== "Deleted") {
           setRefused(deletedRefusal(done));

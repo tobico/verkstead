@@ -43,8 +43,9 @@ use verkstead_render::{
     Adopted, Attached, AttachedServerView, AttachmentRemoved, AttachmentView, BaseRecorded,
     BranchRenamed, BriefSaved, CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed,
     CompanionMode, CompanionModeChosen, CompanionRefusal, CompanionRemoved, ConversationClosed,
-    GrillingStarted, PairingView, PickedView, Process, ProcessPicked, RepoPairingsView,
-    RepoSwitched, ServerAttached, ServerRemoved, Started, TakenUp, TargetRecorded, Worktree,
+    ConversationMove, GrillingStarted, PairingView, PickedView, Process, ProcessPicked,
+    ProfileEntry, ProfileTrouble, RepoPairingsView, RepoSwitched, ServerAttached, ServerRemoved,
+    Started, TakenUp, TargetRecorded, Uncommitted, Worktree,
 };
 use verkstead_schema::{Direction, Nudge};
 
@@ -76,7 +77,9 @@ use crate::worktrees;
 /// grilled with — see [`prefill`].
 pub(crate) async fn start(state: &AppState, repo_id: i64) -> Result<Started> {
     Ok(
-        match store::start_unnamed_conversation(&state.pool, repo_id, &branch_name()).await? {
+        match store::start_unnamed_conversation(&state.pool, repo_id, &branch_name(), &state.device)
+            .await?
+        {
             Some(id) => {
                 prefill(state, id, repo_id).await;
                 Started::Started { id }
@@ -114,7 +117,9 @@ pub(crate) async fn start_adopting(
     base: Option<&str>,
 ) -> Result<Started> {
     Ok(
-        match store::start_adoption(&state.pool, repo_id, &branch_name(), roadmap).await? {
+        match store::start_adoption(&state.pool, repo_id, &branch_name(), roadmap, &state.device)
+            .await?
+        {
             Some(id) => {
                 if let Some(base) = base {
                     fix(state, id, base).await;
@@ -247,9 +252,9 @@ pub(crate) async fn pairing_prefill(state: &AppState, repo_id: i64) -> Result<Re
         // the grilling picker has no row to prefill onto since *No grilling*
         // retired, so a Repo remembering one arrives exactly as a Repo with
         // nothing remembered for the role does.
-        grilling: usable(remembered.grilling).await?,
-        implementation: usable(remembered.implementation).await?,
-        review: prefilled(remembered.review).await?,
+        grilling: usable(state, remembered.grilling).await?,
+        implementation: usable(state, remembered.implementation).await?,
+        review: prefilled(state, remembered.review).await?,
     })
 }
 
@@ -284,24 +289,35 @@ async fn unremembered(state: &AppState) -> Result<RepoPairingsView> {
     };
 
     Ok(RepoPairingsView {
-        grilling: filled(last.grilling, &profiles, store::Role::Grilling).await?,
-        implementation: filled(last.implementation, &profiles, store::Role::Implementation).await?,
-        review: under(filled(last.review, &profiles, store::Role::Review).await?),
+        grilling: filled(state, last.grilling, &profiles, store::Role::Grilling).await?,
+        implementation: filled(
+            state,
+            last.implementation,
+            &profiles,
+            store::Role::Implementation,
+        )
+        .await?,
+        review: under(filled(state, last.review, &profiles, store::Role::Review).await?),
     })
 }
 
 /// One role of [`unremembered`]: the last start's pick where it is a usable
 /// Pairing, and the platform default where it is anything else.
 async fn filled(
+    state: &AppState,
     copied: store::Picked,
     profiles: &[store::Profile],
     role: store::Role,
 ) -> Result<Option<PairingView>> {
-    if let Some(pairing) = usable(copied).await? {
+    if let Some(pairing) = usable(state, copied).await? {
         return Ok(Some(pairing));
     }
 
-    usable(crate::pairing_defaults::platform_default(profiles, role)).await
+    usable(
+        state,
+        crate::pairing_defaults::platform_default(profiles, role),
+    )
+    .await
 }
 
 /// One role's memory as a picker would show it, for the one role that can
@@ -309,12 +325,12 @@ async fn filled(
 ///
 /// The row is not judged — there is no Profile to have gone — so it comes back
 /// as itself, and everything else goes through [`usable`].
-async fn prefilled(remembered: store::Picked) -> Result<PickedView> {
+async fn prefilled(state: &AppState, remembered: store::Picked) -> Result<PickedView> {
     if remembered.skipped() {
         return Ok(PickedView::Skipped);
     }
 
-    Ok(match usable(remembered).await? {
+    Ok(match usable(state, remembered).await? {
         Some(pairing) => PickedView::Under(pairing),
         None => PickedView::Nothing,
     })
@@ -337,7 +353,7 @@ async fn prefilled(remembered: store::Picked) -> Result<PickedView> {
 /// What comes back is the Pairing whole, both halves settled: it is what one
 /// caller writes onto a new Conversation and what the other hands to a page, and
 /// neither of them should have to put the two together again.
-async fn usable(remembered: store::Picked) -> Result<Option<PairingView>> {
+async fn usable(state: &AppState, remembered: store::Picked) -> Result<Option<PairingView>> {
     let Some(model) = remembered
         .pairing()
         .and_then(|pairing| pairing.model.clone())
@@ -345,7 +361,8 @@ async fn usable(remembered: store::Picked) -> Result<Option<PairingView>> {
         return Ok(None);
     };
 
-    let Some(pairing) = crate::profiles::pairing(remembered.pairing().cloned()).await? else {
+    let Some(pairing) = crate::profiles::pairing(state, remembered.pairing().cloned()).await?
+    else {
         return Ok(None);
     };
 
@@ -845,6 +862,81 @@ pub(crate) async fn detach(
     store::detach(&state.pool, id, attachment).await?;
 
     Ok(AttachmentRemoved::Removed)
+}
+
+/// One attached file, for reading it back: the name it is stored under and
+/// where it stands on disk.
+///
+/// **The one read of an attachment there is.** Everything else about them is
+/// written and taken away — the row and the bytes go up together and come off
+/// together — and what wants a file back is the compose page moving a saved
+/// draft onto another device (ADR-0020, *Drafting on a device*): a file on the
+/// old device's Data Directory is read off it and put on the new Conversation
+/// through the route a paperclip uses.
+///
+/// Refused by nothing but the pair naming no row. The Brief's freeze is what
+/// stops a file being *changed*, and a Conversation past drafting is one whose
+/// files are worth reading like any other — a Share's row of pills names them,
+/// and a session in the worktree reads them off the disk.
+///
+/// The path is not opened here: what a reader does with it is hand it to the
+/// browser as it arrives — see `read_attachment` in [`crate::ui`] — so a file
+/// the row names and the directory no longer holds is that reader's to refuse.
+pub(crate) async fn attached_file(
+    state: &AppState,
+    id: i64,
+    attachment: i64,
+) -> Result<Option<(String, PathBuf)>> {
+    let Some(found) = store::attachment(&state.pool, id, attachment).await? else {
+        return Ok(None);
+    };
+
+    let path = Attachments::under(&state.data_dir).file(id, &found.name);
+
+    Ok(Some((found.name, path)))
+}
+
+/// The draft's work has moved to another device: say so on its Timeline, and
+/// close it.
+///
+/// **Two acts in one request because they are one act.** A move is the compose
+/// page's replay run against a Conversation that already exists — the Brief, the
+/// branch and the files replayed onto a Conversation made on the other device —
+/// and the last thing it does is finish with the draft here. A close alone would
+/// leave a Closed draft that says nothing about where its work went, which is
+/// exactly what the human coming back to it weeks later needs to read; a notice
+/// alone would leave two drafts of one piece of work.
+///
+/// **The notice first, so that it is on the record whatever the close does.**
+/// Closing walks a session, a worktree per checkout and a directory, and the
+/// words are what this request is here for — a notice written after a close that
+/// failed would be a move nothing recorded. Nothing between them can be lost the
+/// other way round: a Closed Conversation takes a notice like any other.
+///
+/// **Named by the machine rather than by its id**, which is what the browser
+/// sends along — see [`ConversationMove`]. The device the work
+/// went to is a member of *the browser's* device rather than necessarily of this
+/// one: a laptop moves a draft from the desktop to the WSL beside it, and the
+/// desktop may never have been linked to the WSL. So the name comes with the id
+/// from the one machine that knows both, and the id is written beside it for
+/// whoever reads this back against a cluster whose names have moved.
+pub(crate) async fn moved(
+    state: &AppState,
+    id: i64,
+    to: &ConversationMove,
+) -> Result<ConversationClosed> {
+    let said = format!(
+        "This draft's work moved to **{}** — it is Conversation {} there. \
+         Nothing was left to do here, so this one is closed.\n\n\
+         The device is `{}`.",
+        to.name, to.conversation, to.device,
+    );
+
+    if !store::note(&state.pool, id, &said).await? {
+        return Ok(ConversationClosed::NoSuchConversation);
+    }
+
+    close(state, id).await
 }
 
 /// The Brief's files, in the shape the workbench draws them.
@@ -1395,10 +1487,10 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     // Read as rows rather than judged off the ids, which is the same reading the
     // pane gets — a Profile whose pair has gone is not one to launch a session
     // under, and the id alone cannot say so.
-    let grilling = crate::profiles::pairing(conversation.grilling_pairing.clone()).await?;
+    let grilling = crate::profiles::pairing(state, conversation.grilling_pairing.clone()).await?;
     let implementation =
-        crate::profiles::pairing(conversation.implementation_pairing.clone()).await?;
-    let review = crate::profiles::picked(conversation.review_pairing.clone()).await?;
+        crate::profiles::pairing(state, conversation.implementation_pairing.clone()).await?;
+    let review = crate::profiles::picked(state, conversation.review_pairing.clone()).await?;
 
     // What kind of work this is, which decides three things below: which roles
     // the press waits on, where it lands the Conversation, and which session it
@@ -1762,7 +1854,17 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
             .map(|skills| skills::grilling(skills, &brief))
         && let Err(error) = state
             .sessions
-            .start(pool, &state.nudges, &conversation, &pairing, &prompt)
+            .start(
+                pool,
+                &state.nudges,
+                state.devices.as_ref(),
+                &conversation,
+                &pairing,
+                &prompt,
+                // Nothing held: this is a Conversation's first session, so there
+                // is nothing anybody left open for it.
+                crate::sessions::Held::nothing(&state.settlements),
+            )
             .await
     {
         tracing::error!(error = ?error, conversation_id = id, "a grilling session could not be started");
@@ -1921,6 +2023,54 @@ impl Unmade {
             Unmade::Own => TakenUp::WorktreeRefused,
             Unmade::Companion { repo, why } => TakenUp::Companion { repo, why },
         }
+    }
+
+    /// And said on a Timeline, which is where the halt goes for a stage started
+    /// *beside* a press rather than by one: the press has already succeeded, so
+    /// there is nothing left to refuse and the human is owed a sentence instead.
+    ///
+    /// The repository named for a companion, for the reason the two answers above
+    /// name it: which of several repositories it was is the whole of what makes it
+    /// a different thing to go and look at.
+    fn said(&self) -> String {
+        match self {
+            Unmade::Own => "git would not make its worktree".to_owned(),
+            Unmade::Companion { repo, why } => format!(
+                "it works alongside `{repo}`, the companion repository it inherits from this \
+                 Conversation, and {}",
+                refusal(why),
+            ),
+        }
+    }
+}
+
+/// The clause that goes after a companion repository's name on a Timeline.
+///
+/// The same sentences `continuing`'s own halt says, the two refusals being the same
+/// five questions asked of the same repositories — what differs is only which
+/// press was standing behind them. Said rather than left to the server log for
+/// its reason too: a branch in the way is named, because which branch it is is
+/// the whole of what there is to go and move.
+fn refusal(why: &CompanionRefusal) -> String {
+    match why {
+        CompanionRefusal::FetchFailed => {
+            "git would not fetch from that repository's remote — so what its checkout would come \
+             off cannot be trusted to be what origin is holding, and the server log says why the \
+             fetch failed"
+                .to_owned()
+        }
+        CompanionRefusal::NoBaseCommit => {
+            "what its checkout comes off resolves to no commit there".to_owned()
+        }
+        CompanionRefusal::BranchExists => {
+            "the branch this stage would cut in it is already a branch of that repository"
+                .to_owned()
+        }
+        CompanionRefusal::BranchInTheWay { by } => format!(
+            "`{by}` is already a branch of that repository, which stands in the way of the branch \
+             this stage would cut in it"
+        ),
+        CompanionRefusal::WorktreeRefused => "git would not make its checkout".to_owned(),
     }
 }
 
@@ -2130,9 +2280,19 @@ fn recorded(planned: &[Checkout]) -> Vec<store::CompanionWorktree> {
         .collect()
 }
 
-/// Take a roadmap Verkstead did not write and start its next stage: one press,
-/// and a drafting Conversation becomes the stage's own, on the stage's own
-/// branch, with a planning session running in it.
+/// Take a roadmap Verkstead did not write and start every stage of it that may
+/// start now: one press, and a drafting Conversation becomes the lowest of them,
+/// on that stage's own branch, with a planning session running in it — and each
+/// of the rest starts beside it as a Conversation of its own.
+///
+/// **Every** rather than the lowest, up to as many of one roadmap at a time as
+/// `at_once.roadmap_stages` says: the press stands in for whatever would
+/// otherwise have started them, so what it starts is what a settle would have.
+/// Which stages those are is [`crate::stages::startable`]'s answer, and it is the
+/// same answer the notice and the page were drawn by — so what the human was
+/// offered is what pressing does. The rest are [`alongside`]'s, each given the
+/// same Pairings, the same companions and the same base commit the human settled
+/// here, because the press is the one act that settles all of that.
 ///
 /// The human's press stands in for the settling predecessor that starts every
 /// other stage — see [`crate::continuing`], which does the same job at the other
@@ -2212,10 +2372,10 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
     // All of them, rather than only the one the work runs under: a stage
     // inherits every one from its predecessor, so what this one is adopted with
     // is what every stage after it starts with.
-    let grilling = crate::profiles::pairing(conversation.grilling_pairing.clone()).await?;
+    let grilling = crate::profiles::pairing(state, conversation.grilling_pairing.clone()).await?;
     let implementation =
-        crate::profiles::pairing(conversation.implementation_pairing.clone()).await?;
-    let review = crate::profiles::picked(conversation.review_pairing.clone()).await?;
+        crate::profiles::pairing(state, conversation.implementation_pairing.clone()).await?;
+    let review = crate::profiles::picked(state, conversation.review_pairing.clone()).await?;
 
     if let Some(refusal) = unready(grilling.as_ref(), implementation.as_ref(), &review) {
         return Ok(refusal.adopting());
@@ -2231,6 +2391,14 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
         return Ok(Adopted::NoGitAuthor);
     };
 
+    // And how many stages of one roadmap run side by side, off the same file and
+    // at the same moment: the press starts every ready stage there is a place for,
+    // so a limit changed from a phone is in force at this press. The same setting
+    // the carry-on reads at every settle — see [`crate::settings::AtOnce`] — and
+    // the same one the notice and the page were drawn by, so what was offered is
+    // what this starts.
+    let at_once = config.at_once().roadmap_stages();
+
     // Where the stage branches from. The override where the human fixed one —
     // which is how an unmerged predecessor is stacked on, that being their move
     // rather than Verkstead's — and the default branch as origin holds it where
@@ -2240,6 +2408,12 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
     let default = conversation.repo.default_branch.clone();
 
     let repo = conversation.repo.path.clone();
+
+    // And what Verkstead's record says about this Repo's stages, which is half of
+    // what says a stage is done — the boxes being the other half, and the two
+    // together being what the notice and the page were drawn by. Read out here
+    // because the reading below asks nothing of the database.
+    let record = store::stage_standings(pool, conversation.repo.id).await?;
 
     // The reading, off the runtime's threads: fetching, resolving a commit and
     // reading a roadmap out of a git directory are all blocking calls.
@@ -2279,13 +2453,14 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
             // taken from either, because a roadmap is a document anybody may
             // have moved since. Which clause refused it is the answer to the
             // button: each of them is a different thing to go and do about it.
-            match crate::stages::startable(&repo, &commit, &roadmap) {
+            match crate::stages::startable(&repo, &commit, &roadmap, &record, at_once) {
                 Startable::Stage(abandoned) => {
                     let stacks_on = predecessor(&repo, &commit, &named, &default);
 
-                    Ok((commit, named, abandoned.stage, stacks_on))
+                    Ok((commit, named, abandoned.stage, abandoned.beside, stacks_on))
                 }
                 Startable::NoRoadmap => Err(Adopted::NoRoadmap),
+                Startable::Misdeclared { why } => Err(Adopted::Misdeclared { why }),
                 Startable::Complete => Err(Adopted::RoadmapComplete),
                 Startable::InFlight => Err(Adopted::StageInFlight),
                 Startable::NoBrief => Err(Adopted::NoBrief),
@@ -2299,7 +2474,7 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
     // `named` comes back out rather than being worked out again up here: what an
     // unpicked base resolved through is decided inside, after the fetch, and the
     // Timeline is owed the name the branch actually came off.
-    let (commit, named, stage, stacks_on) = match read {
+    let (commit, named, stage, beside, stacks_on) = match read {
         Ok(read) => read,
         Err(refusal) => return Ok(refusal),
     };
@@ -2332,6 +2507,9 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
         let data_dir = state.data_dir.clone();
         let companions = conversation.companions.clone();
         let checkouts = state.checkouts.clone();
+        // Cloned rather than moved: the stages started beside this one clear the
+        // list their own branches inherit as the same person.
+        let author = author.clone();
 
         move || {
             let mut planned = vec![Checkout {
@@ -2389,16 +2567,19 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
         named: Some(&named),
     };
 
-    // The roadmap goes in with it, which is what makes this adoption stick: the
-    // human picked it here, and every wrap-up from here reads that name rather
-    // than working one out from the branch.
+    // The roadmap goes in with it, and which stage of it this is, which is what
+    // makes this adoption stick: the human picked it here, and every wrap-up from
+    // here reads those rather than working anything out from the branch.
     match store::start_stage(
         pool,
         id,
         base,
         &path,
         stacks_on.as_deref(),
-        &stage.roadmap,
+        store::RoadmapStage {
+            roadmap: &stage.roadmap,
+            label: &stage.label,
+        },
         &checkouts,
     )
     .await?
@@ -2466,11 +2647,398 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
     tokio::spawn(crate::runner::plan_stage(
         state.clone(),
         id,
-        stacks_on,
+        stacks_on.clone(),
         driving,
     ));
 
+    // And every stage the press starts beside this one, each as a Conversation of
+    // its own and each its own act: one that halts says so on this Timeline and
+    // the next is attempted anyway, which is the carry-on's rule and for the
+    // carry-on's reason. This one has started, and nothing here can undo that.
+    //
+    // After it rather than beside it, so that the Conversation the human composed
+    // is the one that starts first whatever the others come to — and so that each
+    // of these inherits a Conversation that is already a stage.
+    for stage in beside {
+        alongside(
+            state,
+            &conversation,
+            id,
+            stage,
+            &commit,
+            &named,
+            stacks_on.as_deref(),
+            &author,
+        )
+        .await;
+    }
+
     Ok(Adopted::Adopted)
+}
+
+/// Start one more ready stage of the adopted roadmap, as a Conversation of its
+/// own against the same Repo.
+///
+/// The other half of *Continue a roadmap starts every ready stage*: the press
+/// settles the Pairings, the companions and the base for all of them at once, so
+/// a stage started beside the first gets exactly what the first got — the same
+/// Pairings, the same companion rows, the same base commit and the same
+/// predecessor to stack on. It has no draft moment of its own, which is the one
+/// thing it shares with a stage an unattended settle starts.
+///
+/// [`crate::continuing::start`]'s order, for its reasons: the record, then git,
+/// then the store. What differs is where the branch comes from — that is settled
+/// by the press rather than worked out from a chain — and where a halt is said:
+/// there is a human at this button, but it is the press that has already
+/// succeeded, so what stops one of these is a notice on the Timeline of the
+/// Conversation they pressed it on rather than an answer to the press.
+///
+/// **Nothing left behind, and nothing left unsaid.** A halt at any point closes
+/// the half-made Conversation and unmakes whatever checkouts it got as far as,
+/// exactly as a refused press does — see [`make`], which unwinds its own, and
+/// [`unwind`], which is what takes them back once it has not. And every one of
+/// those halts says so on the pressed Timeline, through [`halted`]: a stage the
+/// pane named a moment ago is not something to let vanish into the server log.
+///
+/// The one halt that cannot promise the first half is the blocking task coming
+/// apart, there being no plan back out here to unwind — which says so in as many
+/// words rather than claiming otherwise.
+#[allow(clippy::too_many_arguments)]
+async fn alongside(
+    state: &AppState,
+    adopting: &store::Conversation,
+    pressed: i64,
+    stage: crate::stages::Stage,
+    commit: &str,
+    named: &str,
+    stacks_on: Option<&str>,
+    author: &Author,
+) {
+    let branch = stage.branch();
+
+    // The row first, because everything after it is written against the id — and
+    // a Repo taken off the registry between the press and here is the one thing
+    // that refuses it.
+    let started =
+        store::start_conversation(&state.pool, adopting.repo.id, &branch, &state.device).await;
+
+    let id = match started {
+        Ok(Some(id)) => id,
+        Ok(None) => {
+            tracing::error!(
+                pressed,
+                "the Repo the stage would be against has gone, so nothing was started"
+            );
+
+            return halted(
+                state,
+                pressed,
+                &stage,
+                "the Repo it would be against has been taken off the registry since the press",
+            )
+            .await;
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, pressed, "starting a stage beside the adopted one failed");
+
+            return halted(
+                state,
+                pressed,
+                &stage,
+                &format!("its own Conversation could not be started: {error}"),
+            )
+            .await;
+        }
+    };
+
+    // Everything the human settled on the composer, on the new row: the Pairings,
+    // the stage brief as its Brief, and the companions. The one inheritance
+    // funnel, shared with the stage an unattended settle starts — see
+    // [`crate::continuing::settle`].
+    if let Err(error) = crate::continuing::settle(state, id, adopting, &stage).await {
+        tracing::error!(error = ?error, pressed, stage = id, "preparing a stage beside the adopted one failed");
+
+        crate::continuing::gave_up(state, id).await;
+
+        return halted(
+            state,
+            pressed,
+            &stage,
+            &format!(
+                "it could not be given everything it inherits from this Conversation: {error}"
+            ),
+        )
+        .await;
+    }
+
+    // And the rows that inheritance wrote, read back rather than the ones they
+    // were copied from: what a stage works alongside is a companion **mirroring**
+    // its own branch, and a name the human typed on the composer is the first
+    // stage's alone — see [`crate::continuing::settle`], which is where the typed
+    // name is dropped. Planning off the draft's rows would cut one companion
+    // branch for every stage this press starts, which is two review units on one
+    // branch and git refusing the second of them.
+    let inherited = match store::load_conversation(&state.pool, id).await {
+        Ok(Some(inherited)) => inherited.companions,
+        Ok(None) => {
+            tracing::error!(
+                pressed,
+                stage = id,
+                "a stage started beside the adopted one has gone"
+            );
+
+            return halted(
+                state,
+                pressed,
+                &stage,
+                "the Conversation it had just been given has gone from the record",
+            )
+            .await;
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, pressed, stage = id, "reading back what a stage beside the adopted one inherited failed");
+
+            crate::continuing::gave_up(state, id).await;
+
+            return halted(
+                state,
+                pressed,
+                &stage,
+                &format!("what it inherits could not be read back: {error}"),
+            )
+            .await;
+        }
+    };
+
+    let path = worktrees::worktree_path(&state.data_dir, id, &adopting.repo.name, &branch);
+
+    // Every checkout it needs, planned before any of it is made and made under
+    // the same lock the press held for its own — see [`crate::AppState::checkouts`].
+    // Off the same base commit: what the human settled on the composer is the
+    // base of every stage this press starts.
+    let made = tokio::task::spawn_blocking({
+        let repo = adopting.repo.path.clone();
+        let path = path.clone();
+        let branch = branch.clone();
+        let commit = commit.to_owned();
+        let named = named.to_owned();
+        let data_dir = state.data_dir.clone();
+        let companions = inherited;
+        let checkouts = state.checkouts.clone();
+        let author = author.clone();
+
+        move || {
+            let mut planned = vec![Checkout {
+                companion: None,
+                repo,
+                path,
+                holds: Holds::Cut(branch.clone()),
+                commit,
+            }];
+
+            for companion in companions {
+                let beside = plan(&data_dir, id, &branch, companion, &planned)?;
+
+                planned.push(beside);
+            }
+
+            let making = checkouts.blocking_lock_owned();
+
+            make(&planned)?;
+
+            let cleared = clearing(&planned, &named, &author)?;
+
+            // The plan itself comes back out, which is what lets a halt below
+            // this take the checkouts back: everything above unwinds its own, and
+            // from here on they are made and nothing else knows what they are.
+            Ok::<_, Unmade>((planned, cleared, making))
+        }
+    })
+    .await;
+
+    let (planned, cleared, making) = match made {
+        Ok(Ok(made)) => made,
+        Ok(Err(unmade)) => {
+            crate::continuing::gave_up(state, id).await;
+
+            return halted(state, pressed, &stage, &unmade.said()).await;
+        }
+
+        // The one halt here that cannot promise nothing was left behind: a task
+        // that came apart got as far as whatever it got as far as, and there is no
+        // plan back out here to unwind. The Conversation is closed all the same,
+        // which is what leaves the directories to the sweep of orphaned worktrees.
+        Err(error) => {
+            tracing::error!(error = ?error, pressed, stage = id, "making a stage's worktrees beside the adopted one failed");
+
+            crate::continuing::say(
+                state,
+                pressed,
+                &format!(
+                    "Stage {} of the `{}` roadmap — *{}* — was ready to start beside this one, \
+                     and making its checkouts failed outright. Nothing was started for it and \
+                     the server log says what happened; a directory it got as far as making is \
+                     one the sweep of orphaned worktrees takes.",
+                    stage.label, stage.roadmap, stage.title,
+                ),
+            )
+            .await;
+
+            return crate::continuing::gave_up(state, id).await;
+        }
+    };
+
+    let checkouts = recorded(&planned);
+
+    let base = store::Base {
+        commit,
+        named: Some(named),
+    };
+
+    let staged = store::start_stage(
+        &state.pool,
+        id,
+        base,
+        &path,
+        stacks_on,
+        store::RoadmapStage {
+            roadmap: &stage.roadmap,
+            label: &stage.label,
+        },
+        &checkouts,
+    )
+    .await;
+
+    // And the last halt there is, which is the one the checkouts are already made
+    // for: taken back here rather than left standing, because a stage that never
+    // got set working is a Drafting row nothing would ever pick up and a pair of
+    // directories nothing would ever open. Still under `making`, so the sweep never
+    // sees them half-taken.
+    match staged {
+        Ok(store::Staged::Started) => {}
+        Ok(refused) => {
+            tracing::error!(
+                pressed,
+                stage = id,
+                refused = ?refused,
+                "a stage started beside the adopted one could not be set working",
+            );
+
+            unwind(state, id, planned).await;
+
+            return halted(
+                state,
+                pressed,
+                &stage,
+                "its Conversation could not be set working, the record having moved under the \
+                 press",
+            )
+            .await;
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, pressed, stage = id, "recording a stage beside the adopted one failed");
+
+            unwind(state, id, planned).await;
+
+            return halted(
+                state,
+                pressed,
+                &stage,
+                &format!("it could not be recorded as under way: {error}"),
+            )
+            .await;
+        }
+    }
+
+    // Recorded, so the sweep would keep them. What follows says so on two
+    // Timelines and launches a session, and none of it makes a directory.
+    drop(making);
+
+    if let Some(notice) = cleared.notice(named) {
+        crate::continuing::say(state, id, &notice).await;
+    }
+
+    // Both Timelines: its own, because the branch it is on was nobody's choice
+    // but this; and the pressed one, because that is where the human was standing
+    // when it happened.
+    crate::continuing::say(state, id, &adopted(&stage, &branch, stacks_on, named)).await;
+    crate::continuing::say(
+        state,
+        pressed,
+        &format!(
+            "Stage {} of the `{}` roadmap — *{}* — started beside it, as a Conversation of its \
+             own on `{branch}`.",
+            stage.label, stage.roadmap, stage.title,
+        ),
+    )
+    .await;
+
+    tracing::info!(
+        pressed,
+        stage = id,
+        branch,
+        label = stage.label,
+        roadmap = stage.roadmap,
+        "a stage of the roadmap started beside the adopted one",
+    );
+
+    state.nudges.announce(Nudge::Conversations);
+
+    let driving = state.drivers.driving(id);
+
+    tokio::spawn(crate::runner::plan_stage(
+        state.clone(),
+        id,
+        stacks_on.map(str::to_owned),
+        driving,
+    ));
+}
+
+/// Take a made stage back: its checkouts, and the half-made Conversation with
+/// them.
+///
+/// The unwind for a halt **after** [`make`] has succeeded, which is the one place
+/// nothing else does it — everything above that point unwinds its own, and from
+/// there the directories and their branches exist and only the plan knows where.
+/// Directory and branch together, for [`unmake`]'s reason: a branch cut moments
+/// ago by a start that then refused holds nothing worth keeping.
+///
+/// Off the runtime's threads, the way the making was — a `git worktree remove`
+/// and a branch delete apiece — and the Conversation closed after them, so that
+/// what the sweep of orphaned worktrees might read as nobody's is gone before the
+/// row that claimed it is.
+async fn unwind(state: &AppState, id: i64, planned: Vec<Checkout>) {
+    if let Err(error) = tokio::task::spawn_blocking(move || unmake(&planned)).await {
+        tracing::error!(error = ?error, stage = id, "taking a half-made stage's worktrees back failed");
+    }
+
+    crate::continuing::gave_up(state, id).await;
+}
+
+/// Say on the pressed Conversation's Timeline that a stage which would have
+/// started beside it did not, and why.
+///
+/// Where a halt goes for these: the press itself has already succeeded, so there
+/// is no answer left to refuse — and the Conversation the human pressed it on is
+/// the one they are looking at. The stage that would have carried it has been
+/// closed by the time this is said, so there is no Timeline of its own worth
+/// saying it on.
+///
+/// **Every path out of [`alongside`] that is not a start says this**, which is
+/// what the press owes a human who was shown *and beside it* a moment ago: a
+/// stage that simply never appeared, with the reason in the server log alone, is
+/// the one thing an offer that names its stages must never come to.
+async fn halted(state: &AppState, pressed: i64, stage: &crate::stages::Stage, why: &str) {
+    crate::continuing::say(
+        state,
+        pressed,
+        &format!(
+            "Stage {} of the `{}` roadmap — *{}* — was ready to start beside this one, and {why}. \
+             Nothing was started for it, and nothing was left behind.",
+            stage.label, stage.roadmap, stage.title,
+        ),
+    )
+    .await;
 }
 
 /// What an adopting Conversation's Timeline is told: which stage of which
@@ -2478,10 +3046,14 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
 ///
 /// [`crate::continuing::begun`]'s wording, with the two things adoption changes
 /// taken out of it. *With nobody asked* goes, because somebody did: a human
-/// pressed this. What stays is both halves: an adopted stage stacks on the base
-/// the human fixed it to, wherever that base is a predecessor there is anything
-/// left to stack on, and the half it did not take is as much worth saying as
-/// the half it did.
+/// pressed this. What stays is both halves: an adopted stage is cut from the
+/// base the human fixed it to, wherever that base is a predecessor there is
+/// anything left to stand on, and the half it did not take is as much worth
+/// saying as the half it did.
+///
+/// **Cut from** rather than *stacks on*, for [`crate::continuing::begun`]'s
+/// reason: where the stage ends up in its roadmap's chain is settled at its
+/// finish, when it joins — see [`crate::joins`].
 fn adopted(
     stage: &crate::stages::Stage,
     branch: &str,
@@ -2498,14 +3070,15 @@ fn adopted(
 
     match stacks_on {
         Some(predecessor) => format!(
-            "{started} Its branch `{branch}` stacks on `{predecessor}`, the base this \
-             Conversation was fixed to, the way this repository's `{}` records.",
+            "{started} Its branch `{branch}` was cut from `{predecessor}`, the base this \
+             Conversation was fixed to, and it joins its roadmap's chain at its finish the way \
+             this repository's `{}` records.",
             crate::stages::GIT_WORKFLOW,
         ),
         None => format!(
-            "{started} Its branch `{branch}` came off `{from}` and stacks on nothing: the base \
-             is the default branch, or work already in it, or this repository's `{}` records no \
-             way to stack a roadmap stage on the one before it.",
+            "{started} Its branch `{branch}` came off `{from}` and was cut from nothing else: \
+             the base is the default branch, or work already in it, or this repository's `{}` \
+             records no way to stack a roadmap stage on the one before it.",
             crate::stages::GIT_WORKFLOW,
         ),
     }
@@ -2592,9 +3165,35 @@ fn predecessor(repo: &Path, commit: &str, named: &str, default: &str) -> Option<
 /// answered before anything that costs a call to GitHub or to git. Then GitHub,
 /// which answers what the Target names — a number's pull request, or whichever
 /// one is open on a branch — and with that in hand the record says whether
-/// somebody is already on it: one Conversation per piece of work, so a pull
-/// request another Conversation is on is refused naming it and the refusal leads
-/// there, however the Target named it. Then git.
+/// somebody is already on it. Then git.
+///
+/// **One *open* Conversation per pull request**, open being neither Done nor
+/// Closed — see ADR-0020. So a pull request another Conversation has on its
+/// record is two different things: a Conversation still at work on it refuses
+/// this start and the refusal leads there, and a Conversation that has finished
+/// with it is closed to make way, by the ordinary [`close`], and the take-up
+/// carries on over the top of it. Either way, however the Target named the work.
+/// See [`making_way`] — and [`refused_having_made_way`] for what a refusal
+/// reached over a close that has already happened says.
+///
+/// **And a stack's neighbours make way by the same rule.** Where the Process
+/// walks a chain, what a conflict in it dispatches is one session told to run
+/// `gh stack sync`, which rebases and force-pushes every branch of the chain —
+/// and git will not move a branch that is checked out elsewhere. So whoever is
+/// standing on a link is asked to give it up: the Conversation the pull request
+/// is on, and whoever has that branch checked out, which is what git will
+/// actually refuse over. All or nothing — one link still at work refuses the
+/// whole start with every Done Conversation left Done — and the chain is read
+/// before anything is closed for that reason. See [`crate::stacks::walk`] and
+/// [`standing_on`].
+///
+/// **And a close discards what was uncommitted, so that is asked about first and
+/// nothing else is.** A press over a holder with changes in a checkout it may
+/// write in comes back as [`TakenUp::WouldDiscard`] naming it, having closed
+/// nothing and made nothing; the press after it carries those Conversations in
+/// `discarding`, which is the human saying to go ahead. Read at the press rather
+/// than taken from the one before — see [`to_lose`]. One list for the whole
+/// stack, so a chain of five is asked about once.
 ///
 /// **Two roles rather than three, and one where the Process never reviews.** The
 /// work on a pull request is built, so there is no round for a grilling to open
@@ -2633,7 +3232,7 @@ fn predecessor(repo: &Path, commit: &str, named: &str, default: &str) -> Option<
 /// transaction, which is how every wrapping Conversation gets there; a take-up
 /// is that ending reached by the other door. A branch has no such record to make,
 /// so [`store::take_up`] makes the move itself — see [`store::Landing`].
-pub(crate) async fn take_up(state: &AppState, id: i64) -> Result<TakenUp> {
+pub(crate) async fn take_up(state: &AppState, id: i64, discarding: &[i64]) -> Result<TakenUp> {
     let pool = &state.pool;
 
     let Some(conversation) = store::load_conversation(pool, id).await? else {
@@ -2667,8 +3266,8 @@ pub(crate) async fn take_up(state: &AppState, id: i64) -> Result<TakenUp> {
     // reads them: a Profile whose pair has gone is not one to run a session
     // under, and the id alone cannot say so.
     let implementation =
-        crate::profiles::pairing(conversation.implementation_pairing.clone()).await?;
-    let review = crate::profiles::picked(conversation.review_pairing.clone()).await?;
+        crate::profiles::pairing(state, conversation.implementation_pairing.clone()).await?;
+    let review = crate::profiles::picked(state, conversation.review_pairing.clone()).await?;
 
     // And how many of them this Process waits on, which is the one thing about
     // the press its own row decides: a **Review** reads the branch under the
@@ -2708,29 +3307,139 @@ pub(crate) async fn take_up(state: &AppState, id: i64) -> Result<TakenUp> {
         },
     };
 
-    // And whether somebody is already on it. There is one Conversation per piece
-    // of work, so a pull request another Conversation has on its record is a
-    // refusal that leads there rather than a second wrap-up over the same
-    // branch. Asked of the record rather than of git, and asked before the fetch:
-    // it is a row, and it is the last thing that costs nothing.
+    // And whether somebody is already on it. There is one *open* Conversation per
+    // pull request, so a pull request another Conversation has on its record is a
+    // refusal where that Conversation is still at work, and a Conversation to
+    // close where it has finished — see [`making_way`], which is where the whole
+    // of that reading is. Asked of the record rather than of git, and asked before
+    // the fetch: it is a row, and it is the last thing that costs nothing.
     //
     // **Asked of a branch too, and that is the whole of why the question above it
     // is asked.** A branch is the other name for the same piece of work — the
     // `submitting` session a branch take-up sends is told by its own skill that a
     // pull request already on the branch *is the job done* — so a branch would
-    // otherwise be the way round this refusal rather than a case it does not
-    // cover. A Conversation that has finished with a pull request and been Closed
-    // has let go of its worktree and kept its branch, so [`settled`] has nothing
-    // to say about the one case that matters most.
+    // otherwise be the way round both readings rather than a case neither covers.
+    //
+    // **And it is the last thing before git for a second reason now.** A Done
+    // holder keeps its Worktree, and git holds one checkout per branch: leaving it
+    // standing would refuse this take-up all over again as
+    // [`TakenUp::CheckedOutElsewhere`], so the close has to be finished before
+    // [`settled`] is asked anything. Which is why everything above this line is
+    // above it — nothing is closed for a start that was going to be refused
+    // anyway, for its Profiles, its Target, a fork or a pull request GitHub has
+    // nothing open under.
+    //
+    // **And the chain around it is read before any of that**, where this Process
+    // walks one. A conflict low in a stack is fixed by a sync that rebases and
+    // force-pushes every branch of the chain, and git will not move a branch that
+    // is checked out somewhere — so who is standing on the *neighbours* is as much
+    // a part of whether this start can happen as who is standing on the one named.
+    // Recording the chain stays where it was, after the take-up's own pull request
+    // is on the record; what moves ahead is knowing the links. See
+    // [`crate::stacks::walk`].
+    let walked = match number {
+        Some(number) if walks_the_stack(conversation.process) => {
+            crate::stacks::walk(state, &conversation.repo, number).await
+        }
+        _ => crate::stacks::Walked::Nothing,
+    };
+
+    let mut giving_way = Vec::new();
+    let mut named_holder = None;
+
     if let Some(number) = number
         && let Some(other) =
             store::conversation_on_pull_request(pool, conversation.repo.id, number).await?
         && other != id
     {
-        return Ok(TakenUp::AlreadyHeld {
-            conversation: other,
+        match making_way(state, other).await? {
+            MadeWay::ToClose(holder) => {
+                named_holder = Some(holder.id);
+                giving_way.push(holder);
+            }
+            MadeWay::NothingToGiveUp => {}
+            MadeWay::StillAtWork => {
+                return Ok(TakenUp::AlreadyHeld {
+                    conversation: other,
+                });
+            }
+        }
+    }
+
+    // And the neighbours by the same rule, all or nothing: one link still at work
+    // refuses the whole start with every Done Conversation left Done, because
+    // closing four of five would be four Conversations given up for a sync that
+    // still cannot run. See [`standing_on`].
+    if let Some(number) = number {
+        let neighbours = walked.neighbours(number);
+
+        if !neighbours.is_empty() {
+            let standing =
+                standing_on(state, id, &conversation.repo, &neighbours, &giving_way).await?;
+
+            match standing.refused {
+                Some(WillNotMakeWay::StillAtWork { conversation }) => {
+                    return Ok(TakenUp::AlreadyHeld { conversation });
+                }
+                Some(WillNotMakeWay::CheckedOutElsewhere { at }) => {
+                    return Ok(TakenUp::CheckedOutElsewhere { at });
+                }
+                None => giving_way.extend(standing.giving_way),
+            }
+        }
+    }
+
+    // And the one thing a close cannot give back: a Worktree goes by force, so
+    // whatever was left uncommitted in it goes with it. The human is asked about
+    // that and about nothing else — see ADR-0020 — so a holder whose checkouts
+    // are clean is closed without a word, and one that is holding something stops
+    // the press until a press that names it says to go ahead.
+    //
+    // Read here rather than trusted from the press that stopped: the confirmation
+    // says which Conversations *may* lose something, and what they are holding by
+    // now is this moment's question. Which is also why it is read after everything
+    // that could refuse the start — nothing is asked about a press that was never
+    // going to go through.
+    let holding = to_lose(&giving_way, discarding).await;
+
+    if !holding.is_empty() {
+        return Ok(TakenUp::WouldDiscard {
+            uncommitted: holding,
         });
     }
+
+    // Nothing left to ask about, so the way is made: each holder closed by the
+    // ordinary Close, and its branch kept for the Timeline of the Conversation
+    // taking over.
+    //
+    // Two lists rather than one, because the Timeline says them in two places: the
+    // Conversation that had the pull request this start names goes in the sentence
+    // about the take-up itself, and the ones that were standing on the rest of the
+    // chain go in the note that already says what the stack is and whose each link
+    // was — see [`taken`] and [`crate::stacks::record`].
+    let mut made_way = None;
+    let mut closed = Vec::new();
+    let mut branches = Vec::new();
+
+    for holder in giving_way {
+        let holder_id = holder.id;
+
+        if let Some(branch) = close_to_make_way(state, holder).await? {
+            if named_holder == Some(holder_id) {
+                made_way = Some(branch.clone());
+            }
+
+            closed.push(holder_id);
+            branches.push(branch);
+        }
+    }
+
+    // And from here on a refusal is one reached over a close that has already
+    // happened, which is a thing to say rather than a thing to undo — see
+    // [`refused_having_made_way`]. Every branch that was closed, rather than the
+    // named pull request's holder alone: a stack's neighbours are closed here too,
+    // and a refusal after that moved as many Conversations as it closed.
+    let refused = |refusal: TakenUp| refused_having_made_way(refusal, id, &branches);
 
     // The branch the work is on: a pull request's head, or the name the field
     // held. Which is what everything below this turns on — the checkout, the
@@ -2798,7 +3507,7 @@ pub(crate) async fn take_up(state: &AppState, id: i64) -> Result<TakenUp> {
 
     let (commit, checkouts, making) = match made {
         Ok(made) => made,
-        Err(refusal) => return Ok(refusal),
+        Err(refusal) => return Ok(refused(refusal)),
     };
 
     // And now the store, in the order the record is read in: the branch it is
@@ -2876,8 +3585,8 @@ pub(crate) async fn take_up(state: &AppState, id: i64) -> Result<TakenUp> {
 
     match store::take_up(pool, id, &head, base, &path, &checkouts, entering).await? {
         store::Taking::Recorded => {}
-        store::Taking::NoSuchConversation => return Ok(TakenUp::NoSuchConversation),
-        store::Taking::NotDrafting => return Ok(TakenUp::NotDrafting),
+        store::Taking::NoSuchConversation => return Ok(refused(TakenUp::NoSuchConversation)),
+        store::Taking::NotDrafting => return Ok(refused(TakenUp::NotDrafting)),
     }
 
     if let Target::PullRequest(held) = &taking {
@@ -2908,8 +3617,8 @@ pub(crate) async fn take_up(state: &AppState, id: i64) -> Result<TakenUp> {
 
         match store::record_pull_request(pool, id, conversation.repo.id, &pull_request).await? {
             store::Wrapping::Started => {}
-            store::Wrapping::NoSuchConversation => return Ok(TakenUp::NoSuchConversation),
-            store::Wrapping::NothingToWrap => return Ok(TakenUp::NotDrafting),
+            store::Wrapping::NoSuchConversation => return Ok(refused(TakenUp::NoSuchConversation)),
+            store::Wrapping::NothingToWrap => return Ok(refused(TakenUp::NotDrafting)),
         }
     }
 
@@ -2917,15 +3626,32 @@ pub(crate) async fn take_up(state: &AppState, id: i64) -> Result<TakenUp> {
     // some watchers, and none of them makes a directory.
     drop(making);
 
-    // And the rest of the stack, where this Process is one that walks: GitHub's
-    // chain both ways from the pull request just recorded, every link of it
-    // recorded beside it — see [`crate::stacks`]. Here rather than after the
-    // note, because what it found is part of what the note says; and after the
-    // checkouts are let go, because it goes to the network and makes no
-    // directory.
-    let stack = crate::stacks::walked(state, id).await;
+    // And the rest of the stack, where this Process is one that walks: the chain
+    // read at the press, every link of it now recorded beside the one taken up —
+    // see [`crate::stacks`]. Here rather than after the note, because what it
+    // found is part of what the note says; and here rather than where it was
+    // read, because a link recorded before this Conversation had a pull request
+    // of its own would be the pull request its work is on.
+    let stack = match number {
+        Some(number) => {
+            crate::stacks::record(state, id, &conversation.repo, number, &walked, &closed).await
+        }
+        None => None,
+    };
 
-    if let Err(error) = store::note(pool, id, &taken(&taking, &named, narrowed, stack)).await {
+    // The branch given up, with the pull request it was given up over beside it:
+    // a holder is only ever found through a number, so where there is one there is
+    // the other — and a branch take-up needs the number said, its own sentence
+    // having recorded no pull request of its own.
+    let note = taken(
+        &taking,
+        &named,
+        made_way.as_deref().zip(number),
+        narrowed,
+        stack,
+    );
+
+    if let Err(error) = store::note(pool, id, &note).await {
         tracing::error!(error = ?error, conversation_id = id, "recording what was taken up failed");
     }
 
@@ -2969,6 +3695,530 @@ pub(crate) async fn take_up(state: &AppState, id: i64) -> Result<TakenUp> {
     crate::wrapping::watching(state, id, crate::wrapping::Reviewing::AsFound);
 
     Ok(TakenUp::TakenUp)
+}
+
+/// What became of asking the Conversation that has this pull request to make way.
+///
+/// One open Conversation per pull request, open being neither Done nor Closed —
+/// see ADR-0020. So the holder's state is the whole of what a press over somebody
+/// else's pull request turns on, and these are the three answers it can give.
+///
+/// **Both doors ask it.** A take-up is pointed at a pull request that is already
+/// somebody's, and a Steer takes a Conversation back onto the pull request it is
+/// on and finds somebody else there — see [`crate::steering::submit`]. The rule
+/// is the same rule read in either direction, so this is one reading rather than
+/// two.
+pub(crate) enum MadeWay {
+    /// It had finished with it, so it is a Conversation to close and the press
+    /// carries on over the top of it.
+    ///
+    /// The record rather than the id, because what happens to it next is two
+    /// readings of it: what it is holding uncommitted — see [`to_lose`], which
+    /// wants its Worktree and its companions' — and the branch it goes under,
+    /// which is what the Timeline of the Conversation taking over names it by.
+    ///
+    /// Read rather than closed, because a close is the one thing here that cannot
+    /// be taken back: nothing is closed until everything that would be lost by
+    /// closing has been asked about.
+    ToClose(Box<store::Conversation>),
+
+    /// It was Closed already — or Archived, which is a Closed Conversation off
+    /// the sidebar rather than a state of its own. Nothing to give up and nothing
+    /// to do: the press carries on and the holder is left exactly as it was.
+    NothingToGiveUp,
+
+    /// It is still at work on it, which is the refusal: two live wrap-ups pushing
+    /// to one branch is what the rule is for, so the way on is that Conversation
+    /// rather than a second one over the same branch.
+    StillAtWork,
+}
+
+/// Read the Conversation that has this pull request, and say whether it can make
+/// way.
+///
+/// **A holder the record has lost makes way by not being there.** Nothing is
+/// standing on the branch and nothing is offering presses over the pull request,
+/// which is the whole of what the close was for.
+///
+/// **And a holder whose state word will not parse is read as still at work**,
+/// which is [`store::Lifecycle`]'s own reading of a word this Verkstead does not
+/// know: it is not Done, so it is not a Conversation to close. Which is the safe
+/// way round of it — the refusal leads the human to the Conversation, where the
+/// pane's own escape hatch can end it, and closing a record nothing can read on
+/// the strength of a press somewhere else would be Verkstead guessing.
+///
+/// Nothing is closed here. What closing costs is read first — see [`to_lose`] —
+/// and the close itself is [`close_to_make_way`].
+pub(crate) async fn making_way(state: &AppState, other: i64) -> Result<MadeWay> {
+    let holder = match store::load_conversation(&state.pool, other).await {
+        Ok(Some(holder)) => holder,
+        Ok(None) => return Ok(MadeWay::NothingToGiveUp),
+        Err(error) => {
+            tracing::error!(
+                error = ?error,
+                conversation_id = other,
+                "the Conversation holding a pull request could not be read, so it is taken as \
+                 still at work on it and the press is refused",
+            );
+
+            return Ok(MadeWay::StillAtWork);
+        }
+    };
+
+    match holder.state {
+        store::Lifecycle::Closed => Ok(MadeWay::NothingToGiveUp),
+        store::Lifecycle::Done => Ok(MadeWay::ToClose(Box::new(holder))),
+        _ => Ok(MadeWay::StillAtWork),
+    }
+}
+
+/// Every Conversation about to be closed that is holding something a close would
+/// throw away — or none at all, where this press has said each of them may lose
+/// it.
+///
+/// **The reading is `verkstead done`'s**, which is the reading of a Worktree
+/// Verkstead already has: modified, staged, or untracked and not ignored, in the
+/// Conversation's own checkout and in each companion it may write in — see
+/// [`crate::diffs::writable`] and [`crate::diffs::changed`]. What a session may
+/// write in is what is asked about, here as there.
+///
+/// **A checkout that has gone holds nothing, and one git merely will not answer
+/// about holds something.** Those are two different things and the difference is
+/// the directory: a Worktree that is not there any more is a Conversation with
+/// nothing left to lose, and one that is there while `git status` fails — an
+/// `index.lock` something else is holding, a registration pruned out from under
+/// it — is a directory with work in it that nobody can read. The close takes it
+/// by force either way, so the unreadable one is named and asked about rather
+/// than passed over. Which is the way round `verkstead done` reads it too, and
+/// the safe way round here: reading a checkout as holding something costs one
+/// more press, and reading it as clean costs the work.
+///
+/// **And the same where the reading itself could not be run**, which is a worker
+/// that went down under it: nothing was read, so nothing can be said to be clean,
+/// and every Conversation about to be closed is named.
+///
+/// **`discarding` says which Conversations may lose something rather than which
+/// do.** The press that was stopped named them, the press that confirms sends
+/// them back, and this reads the checkouts again either way: a Conversation that
+/// has been written in since is not on that list and stops the press again.
+///
+/// Blocking, all of it — `git status` per checkout — so it goes to a worker of
+/// its own, the way the Diff's own reading does.
+pub(crate) async fn to_lose(
+    giving_way: &[Box<store::Conversation>],
+    discarding: &[i64],
+) -> Vec<Uncommitted> {
+    let asking = giving_way
+        .iter()
+        .map(|holder| {
+            (
+                holder.id,
+                holder.branch.clone(),
+                crate::diffs::writable(holder),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    // Whatever the reading turns out to be, this is the list to fall back to: a
+    // worker that went down read nothing, and nothing read is nothing anybody may
+    // say is clean.
+    let every = || {
+        giving_way
+            .iter()
+            .map(|holder| Uncommitted {
+                conversation: holder.id,
+                branch: holder.branch.clone(),
+            })
+            .collect::<Vec<_>>()
+    };
+
+    let holding = tokio::task::spawn_blocking(move || {
+        asking
+            .into_iter()
+            .filter(|(_, _, readings)| readings.iter().any(|reading| holds(&reading.worktree)))
+            .map(|(conversation, branch, _)| Uncommitted {
+                conversation,
+                branch,
+            })
+            .collect::<Vec<_>>()
+    })
+    .await;
+
+    let holding = match holding {
+        Ok(holding) => holding,
+        Err(error) => {
+            tracing::error!(
+                error = ?error,
+                "reading what a close would discard failed, so every Conversation about to be \
+                 closed is named as holding something",
+            );
+
+            every()
+        }
+    };
+
+    // Every one of them where any of them is unconfirmed, rather than the
+    // unconfirmed ones alone: what the press sends back is the list it was shown,
+    // so a list that named only what was new would never be the list the next
+    // press confirms.
+    if holding
+        .iter()
+        .all(|held| discarding.contains(&held.conversation))
+    {
+        return Vec::new();
+    }
+
+    holding
+}
+
+/// Whether closing a Conversation would throw away what is in this checkout.
+///
+/// Three answers from git, and two of them are yes. Something changed is
+/// obviously something to lose; nothing changed is nothing to lose; and *git
+/// would not say* is something to lose, because the close removes the directory
+/// by force and a directory nobody could read is not a directory anybody has
+/// established is empty. The one no in that last case is the directory being gone
+/// — the Worktree a human deleted by hand, which really does hold nothing.
+///
+/// [`crate::done`] takes the same reading of the same worktrees before it accepts
+/// a signal, and refuses over the one it cannot read for the same reason.
+///
+/// Blocking, so it is called from the worker [`to_lose`] spawns.
+fn holds(worktree: &std::path::Path) -> bool {
+    match crate::diffs::changed(worktree) {
+        Some(changes) => !changes.is_empty(),
+        // `exists` rather than a second question of git: what is being told apart
+        // here is a directory that has gone from one git will not answer about,
+        // and git answers neither.
+        None => worktree.exists(),
+    }
+}
+
+/// Close a Conversation that has finished with a pull request, to make way for a
+/// take-up of it — or for a Steer back onto it.
+///
+/// **By the ordinary Close**, which is [`close`] and nothing written beside it:
+/// the sessions and the terminals ended, the Worktree and the companions' given
+/// back, the record moved, the Sets it left open shut. A second way of closing a
+/// Conversation would be a second thing to keep in step with the first.
+///
+/// **And the Worktree is why the close cannot wait.** A Done Conversation keeps
+/// its checkout — a Follow-up steer picks the work up there — and git holds one
+/// checkout per branch, so a press over a branch somebody is still standing on
+/// is refused all over again as [`TakenUp::CheckedOutElsewhere`], or as the steer's
+/// own *git would not make the worktree*. Lifting the first refusal without the
+/// close would have moved the refusal rather than removed it.
+///
+/// Hands back the branch it went under, for the Timeline of the Conversation that
+/// took over: a Conversation is called by its branch once anybody has named one,
+/// and that is the name it will be found under in the sidebar. `None` where the
+/// record lost it between the read and the close, which is a holder that has made
+/// way by not being there.
+pub(crate) async fn close_to_make_way(
+    state: &AppState,
+    holder: Box<store::Conversation>,
+) -> Result<Option<String>> {
+    match close(state, holder.id).await? {
+        ConversationClosed::Closed | ConversationClosed::AlreadyClosed => {}
+        ConversationClosed::NoSuchConversation => return Ok(None),
+    }
+
+    tracing::info!(
+        conversation_id = holder.id,
+        branch = holder.branch,
+        "a Conversation that had finished with a pull request was closed to make way for \
+         somebody else on it",
+    );
+
+    Ok(Some(holder.branch))
+}
+
+/// Who is standing on the neighbours of a chain, and what it would take for them
+/// to make way.
+///
+/// [`making_way`]'s answer for a whole stack rather than for one pull request.
+/// Nothing is closed here either: what this hands back is every Conversation a
+/// take-up would close, and the first reason it cannot, where there is one.
+struct Standing {
+    /// The Conversations to close, in the order the chain was walked in — from
+    /// the bottom.
+    ///
+    /// Boxed apiece, because that is how [`MadeWay::ToClose`] hands each of them
+    /// over and a record is a large thing to copy out of its box and back in: the
+    /// caller's own list is the same shape, and [`to_lose`] reads both as one
+    /// slice.
+    #[allow(clippy::vec_box)]
+    giving_way: Vec<Box<store::Conversation>>,
+
+    /// The first link somebody will not give up, where there is one. Which stops
+    /// the whole start: see [`WillNotMakeWay`].
+    refused: Option<WillNotMakeWay>,
+}
+
+/// Why a link of the chain cannot be made way on.
+///
+/// **All or nothing**, which is why this stops a start rather than narrowing it.
+/// A conflict low in a stack is fixed by one `gh stack sync`, which rebases and
+/// force-pushes every branch of the chain: a sync that cannot move one of them
+/// moves none of them, so closing the Conversations standing on the others would
+/// be four Conversations given up for a run that was never going to work.
+enum WillNotMakeWay {
+    /// A Conversation still at work on one of the links, which is the refusal the
+    /// named pull request's own holder gets: the way on is that Conversation
+    /// rather than a second one over the same branch.
+    StillAtWork {
+        /// The Conversation, for the way there.
+        conversation: i64,
+    },
+
+    /// A link's branch is checked out somewhere that is no Conversation's — the
+    /// human's own clone, or a worktree made by hand. Nothing here may close it
+    /// and git will not move the branch under it, so this is the refusal a take-up
+    /// already gives over its own head branch, said about the neighbour.
+    CheckedOutElsewhere {
+        /// Where it is checked out, as git named it.
+        at: String,
+    },
+}
+
+/// Read who is standing on each of `links`, and say whether they can make way.
+///
+/// **Two questions per link, because git and the record answer different
+/// things.** The record says which Conversation the pull request is on, which is
+/// the lookup [`making_way`] reads a state off. Git says where the link's branch
+/// is checked out, which is what a sync will actually be refused over: a Done
+/// Conversation keeps its Worktree, and a checkout that belongs to nobody here is
+/// one Verkstead cannot give back.
+///
+/// `already` is the Conversations the caller has gathered already — the holder of
+/// the pull request this start names — so that one standing on two links of the
+/// chain is closed once rather than twice.
+///
+/// Nothing is closed and nothing is refused for. The first link that will not
+/// make way stops the walk, because the start is refused whole either way.
+async fn standing_on(
+    state: &AppState,
+    taking_up: i64,
+    repo: &store::Repo,
+    links: &[&crate::github::Numbered],
+    already: &[Box<store::Conversation>],
+) -> Result<Standing> {
+    let pool = &state.pool;
+
+    let mut gathered: Vec<i64> = already.iter().map(|holder| holder.id).collect();
+    let mut giving_way = Vec::new();
+
+    for link in links {
+        // Whose the pull request is, which is the record's answer.
+        if let Some(other) = store::conversation_on_pull_request(pool, repo.id, link.number).await?
+            && other != taking_up
+            && !gathered.contains(&other)
+        {
+            match making_way(state, other).await? {
+                MadeWay::ToClose(holder) => {
+                    gathered.push(other);
+                    giving_way.push(holder);
+                }
+                MadeWay::NothingToGiveUp => gathered.push(other),
+                MadeWay::StillAtWork => {
+                    return Ok(Standing {
+                        giving_way,
+                        refused: Some(WillNotMakeWay::StillAtWork {
+                            conversation: other,
+                        }),
+                    });
+                }
+            }
+        }
+
+        // And who is standing on its branch, which is git's — and the one a sync
+        // is refused over. Off the runtime's threads, `git worktree list` being a
+        // process like any other.
+        let at = tokio::task::spawn_blocking({
+            let repo = repo.path.clone();
+            let head = link.head.clone();
+
+            move || worktrees::checked_out_at(&repo, &head)
+        })
+        .await?;
+
+        let Some(at) = at else {
+            continue;
+        };
+
+        match store::conversation_at_worktree(pool, &at).await? {
+            Some(other) if other == taking_up || gathered.contains(&other) => {}
+            Some(other) => match making_way(state, other).await? {
+                MadeWay::ToClose(holder) => {
+                    gathered.push(other);
+                    giving_way.push(holder);
+                }
+                MadeWay::NothingToGiveUp => gathered.push(other),
+                MadeWay::StillAtWork => {
+                    return Ok(Standing {
+                        giving_way,
+                        refused: Some(WillNotMakeWay::StillAtWork {
+                            conversation: other,
+                        }),
+                    });
+                }
+            },
+            None => {
+                return Ok(Standing {
+                    giving_way,
+                    refused: Some(WillNotMakeWay::CheckedOutElsewhere {
+                        at: at.display().to_string(),
+                    }),
+                });
+            }
+        }
+    }
+
+    Ok(Standing {
+        giving_way,
+        refused: None,
+    })
+}
+
+/// Make a chain's neighbours give way where there is nobody to ask about it, and
+/// say in words why they could not where they could not.
+///
+/// **The second door**, which is a take-up over a bare branch: nothing was
+/// recorded at the press, the `submitting` session it sent has just opened a pull
+/// request, and only now is there a chain to walk — see [`crate::wrapping::record`].
+/// The human pressed Start minutes ago and is not standing here, so nothing can be
+/// asked of them: a neighbour holding uncommitted changes stops the run exactly as
+/// one still at work does, rather than being closed over their head.
+///
+/// `Ok` is every Conversation that was closed, by id, for the note that says what
+/// the stack is. `Err` is the sentence the run is stopped with — which is a stop
+/// rather than a silence because what would follow it is a session told to run
+/// `gh stack sync`, and a sync cannot move a branch somebody is standing on.
+pub(crate) async fn neighbours_give_way(
+    state: &AppState,
+    id: i64,
+    repo: &store::Repo,
+    links: &[&crate::github::Numbered],
+) -> std::result::Result<Vec<i64>, String> {
+    let standing = match standing_on(state, id, repo, links, &[]).await {
+        Ok(standing) => standing,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading who is standing on this stack failed");
+
+            return Err(
+                "Verkstead could not read which Conversations are standing on the rest of this \
+                 stack, so it has not closed any of them: a sync rebases every branch of the \
+                 chain, and git will not move one that is checked out elsewhere."
+                    .to_owned(),
+            );
+        }
+    };
+
+    match standing.refused {
+        Some(WillNotMakeWay::StillAtWork { conversation }) => {
+            return Err(format!(
+                "{whose} is still at work on one of the pull requests of this stack, so nothing \
+                 here may take it over: there is one open Conversation per pull request. Nothing \
+                 was closed and no sync was dispatched — a sync rebases every branch of the \
+                 chain, and git will not move one that is checked out elsewhere.",
+                whose = by_branch(state, conversation).await,
+            ));
+        }
+        Some(WillNotMakeWay::CheckedOutElsewhere { at }) => {
+            return Err(format!(
+                "A branch of this stack is checked out at {at}, which is no Conversation's, so \
+                 Verkstead cannot give it back. Nothing was closed and no sync was dispatched — a \
+                 sync rebases every branch of the chain, and git will not move one that is checked \
+                 out elsewhere.",
+            ));
+        }
+        None => {}
+    }
+
+    // And the one thing a close cannot give back. At the press the human is asked
+    // about this; here there is nobody to ask, so it stops the run the same way a
+    // Conversation still at work does.
+    let holding = to_lose(&standing.giving_way, &[]).await;
+
+    if !holding.is_empty() {
+        let named: Vec<String> = holding
+            .iter()
+            .map(|held| format!("`{}`", held.branch))
+            .collect();
+
+        return Err(format!(
+            "The Conversation on {named} is standing on a pull request of this stack and has \
+             uncommitted changes, so closing it would throw them away and nobody is here to be \
+             asked. Nothing was closed and no sync was dispatched.",
+            named = named.join(", the Conversation on "),
+        ));
+    }
+
+    let mut closed = Vec::new();
+
+    for holder in standing.giving_way {
+        let holder_id = holder.id;
+
+        match close_to_make_way(state, holder).await {
+            Ok(Some(_)) => closed.push(holder_id),
+            Ok(None) => {}
+            Err(error) => {
+                tracing::error!(error = ?error, conversation_id = id, closing = holder_id, "closing a Conversation standing on this stack failed");
+
+                return Err(format!(
+                    "{whose} had finished with a pull request of this stack and could not be \
+                     closed to make way, so no sync was dispatched.",
+                    whose = by_branch(state, holder_id).await,
+                ));
+            }
+        }
+    }
+
+    Ok(closed)
+}
+
+/// A Conversation as a Notice names it: *the Conversation on `branch`*, which is
+/// what it is called once anybody has named one.
+///
+/// By its id where the record will not say — a Notice that named a number would
+/// still be a Notice the human could act on, and one that said nothing at all
+/// would not.
+async fn by_branch(state: &AppState, conversation: i64) -> String {
+    match store::load_conversation(&state.pool, conversation).await {
+        Ok(Some(held)) => format!("The Conversation on `{}`", held.branch),
+        _ => format!("Conversation {conversation}"),
+    }
+}
+
+/// Say on the log that a take-up was refused after it had already closed the
+/// Conversations that were standing on its pull request and on the rest of its
+/// chain, and hand the refusal back.
+///
+/// Nothing is undone. A close is sessions ended and directories given back, so
+/// there is nothing to put back, and the way back into a Closed Conversation
+/// exists already: a Steer brings one into whichever state the work is in — see
+/// ADR-0020. What is owed is the *saying*, because the human pressed Start on one
+/// Conversation and several others moved.
+///
+/// Only where something was closed. Every other refusal is what it has always
+/// been, and a log line about a close that never happened would be a log line
+/// about nothing.
+///
+/// `made_way` is every branch given up, by the name its Conversation goes under:
+/// a stack's neighbours are closed here alongside the holder of the pull request
+/// that was named, and a line naming one of four would be a line that hid three.
+fn refused_having_made_way(refusal: TakenUp, id: i64, made_way: &[String]) -> TakenUp {
+    if !made_way.is_empty() {
+        tracing::warn!(
+            conversation_id = id,
+            closed = made_way.join(", "),
+            refusal = ?refusal,
+            "a take-up was refused after the Conversations standing on its pull request had been \
+             closed to make way for it, so they stay Closed — a Steer is the way back into one",
+        );
+    }
+
+    refusal
 }
 
 /// What a **Review**'s Target turned out to name.
@@ -3311,8 +4561,9 @@ fn standing(head: &str, upstream: String) -> Holds {
 /// ordinary wrap-up is what a taken-up Conversation has always run.
 ///
 /// **And the stack, where the take-up walked one.** `stack` is
-/// [`crate::stacks::walked`]'s own account of the chain — what it is, from the
-/// bottom, and which of it belongs to another Conversation — and it goes in
+/// [`crate::stacks::record`]'s own account of the chain — what it is, from the
+/// bottom, which of it belongs to another Conversation, and which of those were
+/// closed to make way for this one — and it goes in
 /// ahead of the narrowing for the reason it is said at all: the pull requests
 /// above and below arrived on this record without anybody pressing anything, and
 /// a wrap-up that quietly waits on two more than the human named is a wrap-up
@@ -3320,7 +4571,26 @@ fn standing(head: &str, upstream: String) -> Holds {
 /// for the same reason turned around — a wrap-up over one pull request of a
 /// stack nobody knows the size of is as unreadable as the other way. `None` is a
 /// lone pull request, which is every take-up there was before there were stacks.
-fn taken(taking: &Target, named: &str, narrowed: bool, stack: Option<String>) -> String {
+///
+/// **And what this take-up closed to get here, where it closed something.**
+/// `made_way` is the branch of the Conversation that had this pull request and had
+/// finished with it, paired with the number of the pull request it had — see
+/// [`making_way`] — and it is named by its branch for the
+/// reason the stack note names a neighbour's holder by one: that is what a
+/// Conversation is called once anybody has named one. The pull request that was
+/// *named* and nothing else: the Conversations that were standing on the rest of
+/// the chain are the stack note's to list, which is where the links they were
+/// standing on are already written out. Worth saying because the
+/// human pressed Start on this Conversation and a different one moved, and this
+/// Timeline is the one they are looking at when it did. `None` is every take-up
+/// over a pull request nobody had, which is most of them.
+fn taken(
+    taking: &Target,
+    named: &str,
+    made_way: Option<(&str, i64)>,
+    narrowed: bool,
+    stack: Option<String>,
+) -> String {
     let taken = match taking {
         Target::PullRequest(held) => format!(
             "Pull request #{} — *{}* — was taken up for wrapping. The work carries on `{}`, and \
@@ -3333,6 +4603,28 @@ fn taken(taking: &Target, named: &str, narrowed: bool, stack: Option<String>) ->
              being opened against `{named}` before the wrap-up reads it. What this Timeline records \
              starts at that branch's head — the commits already on it are the work's own.",
         ),
+    };
+
+    // Named by its number where the Target was a branch, rather than as *this
+    // pull request*. A branch take-up records none of its own, so the sentence
+    // above has just said so — and it is still asked which one GitHub has open on
+    // the branch, that being how a holder is found there at all, so the pull
+    // request the holder gave up is one this note has not named yet. See
+    // [`opened_on`].
+    let taken = match made_way {
+        Some((branch, number)) => {
+            let which = match taking {
+                Target::PullRequest(_) => "this pull request".to_owned(),
+                Target::Branch(_) => format!("pull request #{number} on that branch"),
+            };
+
+            format!(
+                "{taken} The Conversation on `{branch}` had finished with {which}, so it was \
+                 closed to make way: there is one open Conversation per pull request, and a Steer \
+                 is the way back into it.",
+            )
+        }
+        None => taken,
     };
 
     let taken = match stack {
@@ -3657,18 +4949,36 @@ fn unready(
     [Some(grilling), Some(implementation), review]
         .into_iter()
         .flatten()
-        .any(|pairing| pairing.profile.broken.is_some())
-        .then_some(Unready::ProfileBroken)
+        .find_map(|pairing| trouble(&pairing.profile))
+        .map(Unready::ProfileBroken)
+}
+
+/// What is wrong with one chosen Profile, in the three facts the row's own
+/// sentence about it is composed out of — or nothing, where it is a row to run
+/// under.
+///
+/// **The same sentence, said at the press.** Every one of the readings is drawn
+/// on the Profile's row before anybody presses anything, and a refusal that
+/// said only *a chosen profile is broken* would be a second, vaguer account of
+/// it — so what goes back is what the row carries, and the viewer composes the
+/// one sentence for both. Which is what makes a Start refused over a Profile
+/// whose home has stopped answering name that machine.
+fn trouble(profile: &ProfileEntry) -> Option<ProfileTrouble> {
+    Some(ProfileTrouble {
+        broken: profile.broken?,
+        agent_type: profile.account.agent_type(),
+        device: profile.device.as_ref().map(|device| device.name.clone()),
+    })
 }
 
 /// What is wrong with a Conversation's pair of Profiles, before it is put in
 /// the words of whichever press asked.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum Unready {
     NoGrillingProfile,
     NoImplementationProfile,
     NoReviewProfile,
-    ProfileBroken,
+    ProfileBroken(ProfileTrouble),
 }
 
 impl Unready {
@@ -3678,7 +4988,7 @@ impl Unready {
             Unready::NoGrillingProfile => GrillingStarted::NoGrillingProfile,
             Unready::NoImplementationProfile => GrillingStarted::NoImplementationProfile,
             Unready::NoReviewProfile => GrillingStarted::NoReviewProfile,
-            Unready::ProfileBroken => GrillingStarted::ProfileBroken,
+            Unready::ProfileBroken(trouble) => GrillingStarted::ProfileBroken(trouble),
         }
     }
 
@@ -3688,7 +4998,7 @@ impl Unready {
             Unready::NoGrillingProfile => Adopted::NoGrillingProfile,
             Unready::NoImplementationProfile => Adopted::NoImplementationProfile,
             Unready::NoReviewProfile => Adopted::NoReviewProfile,
-            Unready::ProfileBroken => Adopted::ProfileBroken,
+            Unready::ProfileBroken(trouble) => Adopted::ProfileBroken(trouble),
         }
     }
 
@@ -3702,7 +5012,7 @@ impl Unready {
                 TakenUp::NoImplementationProfile
             }
             Unready::NoReviewProfile => TakenUp::NoReviewProfile,
-            Unready::ProfileBroken => TakenUp::ProfileBroken,
+            Unready::ProfileBroken(trouble) => TakenUp::ProfileBroken(trouble),
         }
     }
 }
@@ -3729,8 +5039,8 @@ fn unready_to_wrap(implementation: Option<&PairingView>, review: &PickedView) ->
     [Some(implementation), review]
         .into_iter()
         .flatten()
-        .any(|pairing| pairing.profile.broken.is_some())
-        .then_some(Unready::ProfileBroken)
+        .find_map(|pairing| trouble(&pairing.profile))
+        .map(Unready::ProfileBroken)
 }
 
 /// And what is wrong with the one Profile an investigation runs under, or
@@ -3751,11 +5061,7 @@ fn unready_to_investigate(implementation: Option<&PairingView>) -> Option<Unread
         return Some(Unready::NoImplementationProfile);
     };
 
-    implementation
-        .profile
-        .broken
-        .is_some()
-        .then_some(Unready::ProfileBroken)
+    trouble(&implementation.profile).map(Unready::ProfileBroken)
 }
 
 /// The Brief the round a Conversation is in started from.

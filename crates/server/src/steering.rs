@@ -104,6 +104,25 @@
 //! narrows one, and the payload cannot spell either: what a session was once
 //! given is never taken back mid-Conversation.
 //!
+//! **And a steer back into work may find somebody else on the pull request.**
+//! There is one *open* Conversation per pull request — see ADR-0020 — so a
+//! Conversation closed to make way for a Review or a Fix Merge Issues, or closed
+//! by hand long before, is steered back onto a pull request that has been taken
+//! over since. Into a state something runs in, that is asked about before any
+//! checkout is planned: a holder that has finished with it is closed by the
+//! ordinary Close and the steer carries on, one already Closed or Archived has
+//! nothing to give up, and one still at work refuses the steer and leads there.
+//! The branch is the whole reason for it — git holds one checkout per branch, so
+//! a steer onto a branch somebody is standing on answered *git would not make the
+//! worktree*, which is the refusal with nothing in it for the human to correct,
+//! and here there was something. A close discards what was uncommitted,
+//! so that is asked about first and nothing else is, exactly as at the take-up.
+//! Into Done nothing runs and nothing is asked. See [`giving_way`].
+//!
+//! **Stacks are not walked here.** A steer is about the Conversation's own pull
+//! request; the neighbours above and below it are a Fix Merge Issues start's to
+//! clear.
+//!
 //! **The record is two Events, a Pairing and whatever was made.** The Steer is
 //! the human's — *I moved this* — the machine's plain Moved line stands under
 //! it, which is the order the moment happened in, and beside them go the Pairing
@@ -368,8 +387,18 @@ pub(crate) async fn cancel(
 /// somebody's session would be a press that half happened. See [`refusal`],
 /// which is every one asked of the record alone, [`additions`] and [`upgrades`],
 /// which are what the record is asked about the companion section's two halves,
-/// and [`plan`], which asks git everything a directory turns on and makes none
-/// of it. What is after them either happens or is a failure.
+/// [`giving_way`], which is who else is on this Conversation's pull request, and
+/// [`plan`], which asks git everything a directory turns on and makes none of it.
+/// What is after them either happens or is a failure.
+///
+/// **With one act between the questions and the making**, and it is the one thing
+/// here that moves another Conversation: a holder that has finished with this
+/// pull request is closed to make way, because git holds one checkout per branch
+/// and the checkout this steer is about to make is on that branch. It goes after
+/// [`plan`] and before [`make`] — every refusal that costs nobody their
+/// Conversation is asked in front of it, and what a close would discard has been
+/// asked about in front of all of them. A refusal reached past it is said on the
+/// log rather than undone; see [`refused_having_made_way`].
 ///
 /// The stop goes before the move rather than after, because what it is in front
 /// of is the launch: a run does not advance past a stop — see
@@ -423,10 +452,53 @@ pub(crate) async fn submit(
         Upgrades::Ready(opened) => opened,
     };
 
+    // And who else is on this Conversation's pull request, which is the last
+    // question asked of the record and the last one asked before git is asked
+    // anything: there is one *open* Conversation per pull request, and a
+    // Conversation steered back into work may find the pull request it is on has
+    // been taken over since — see [`giving_way`], which is the whole of that
+    // reading.
+    let giving_way = match giving_way(state, &conversation, submission.target).await? {
+        GivingWay::Refused(refusal) => return Ok(refusal),
+        GivingWay::Ready(holder) => holder,
+    };
+
+    // And the one thing a close cannot give back: a Worktree goes by force, so
+    // whatever was left uncommitted in it goes with it. That is what the human is
+    // asked about and it is the only thing they are asked about — see ADR-0020 —
+    // so a holder whose checkouts are clean is closed without a word, and one
+    // that is holding something stops the submit until a submit that names it
+    // says to go ahead. The pending steer stands either way, a stopped submit
+    // being a press that did not happen.
+    let holding = crate::conversations::to_lose(&giving_way, &submission.discarding).await;
+
+    if !holding.is_empty() {
+        return Ok(ConversationSteered::WouldDiscard {
+            uncommitted: holding,
+        });
+    }
+
     let planned = match plan(state, &conversation, submission.target, &added, &opened).await? {
         Planning::Refused(refusal) => return Ok(refusal),
         Planning::Ready(planned) => planned,
     };
+
+    // The way made, now that everything that could refuse this steer without
+    // moving anything has been asked: the holder closed by the ordinary Close,
+    // and its branch kept for this Conversation's own Timeline.
+    //
+    // After [`plan`] and before [`make`], which is where the close is *needed*:
+    // git holds one checkout per branch, so a steer onto a branch somebody is
+    // still standing on would be refused all over again as
+    // [`ConversationSteered::WorktreeRefused`] — the refusal the way back was
+    // written for. Planning asks git nothing this changes the answer to, and
+    // leaving the close behind it is one more refusal that costs nobody their
+    // Conversation.
+    let mut made_way = None;
+
+    for holder in giving_way {
+        made_way = crate::conversations::close_to_make_way(state, holder).await?;
+    }
 
     if submission.interrupt {
         // Ended rather than force-stopped, because the stop is already written:
@@ -454,8 +526,13 @@ pub(crate) async fn submit(
     // [`crate::AppState::checkouts`].
     let making = state.checkouts.lock().await;
 
+    // And from here on a refusal is one reached over a close that has already
+    // happened, which is a thing to say rather than a thing to undo — see
+    // [`refused_having_made_way`].
+    let refused = |refusal| refused_having_made_way(refusal, conversation_id, made_way.as_deref());
+
     let made = match make(planned).await? {
-        Making::Refused(refusal) => return Ok(refusal),
+        Making::Refused(refusal) => return Ok(refused(refusal)),
         Making::Ready(made) => made,
     };
 
@@ -501,7 +578,7 @@ pub(crate) async fn submit(
         store::reinvent_branch(&state.pool, conversation_id, &branch).await?;
     }
 
-    let said = announced(&added, &opened, &branch);
+    let said = announced(&added, &opened, &branch, made_way.as_deref());
 
     let settling = settling(&conversation, submission);
 
@@ -564,8 +641,10 @@ pub(crate) async fn submit(
     };
 
     match store::steer_conversation(&state.pool, conversation_id, steer).await? {
-        store::Steering::NoSuchConversation => return Ok(ConversationSteered::NoSuchConversation),
-        store::Steering::NoSuchProfile => return Ok(ConversationSteered::NoSuchProfile),
+        store::Steering::NoSuchConversation => {
+            return Ok(refused(ConversationSteered::NoSuchConversation));
+        }
+        store::Steering::NoSuchProfile => return Ok(refused(ConversationSteered::NoSuchProfile)),
         store::Steering::Steered => {}
     }
 
@@ -726,6 +805,121 @@ pub(crate) async fn submit(
     );
 
     Ok(ConversationSteered::Steered)
+}
+
+/// Who has to make way for this steer, or the refusal that says nobody will.
+///
+/// **The rule read the other way round.** A take-up is pointed at a pull request
+/// that is already somebody's; a steer takes a Conversation back to the pull
+/// request that is *its own* and may find somebody else there — closed to make way
+/// for a Review or a Fix Merge Issues, or closed by hand long before, and steered
+/// back into work while the Conversation that took it over is still on it. One
+/// open Conversation per pull request either way: see ADR-0020, and
+/// [`crate::conversations::making_way`], which is the one reading of a holder's
+/// state that both doors ask.
+///
+/// **A steer into Done asks none of it.** Nothing runs there and nothing is
+/// checked out, so there is no branch to want and nobody to want it from — see
+/// [`SteerTarget::runs`], which is the same question the rest of this form's shape
+/// follows.
+///
+/// **Nor does a Conversation on no pull request**, which is most of them: there
+/// is nothing for a second Conversation to be on.
+///
+/// **And stacks are not walked here.** A steer is about the Conversation's own
+/// pull request; the neighbours above and below are a Fix Merge Issues start's to
+/// clear, which is what walks the chain and why.
+///
+/// Nothing is closed. What comes back is the holder to close, and the close itself
+/// waits until what it would discard has been asked about — see
+/// [`crate::conversations::to_lose`].
+async fn giving_way(
+    state: &AppState,
+    conversation: &Conversation,
+    target: SteerTarget,
+) -> anyhow::Result<GivingWay> {
+    if !target.runs() {
+        return Ok(GivingWay::Ready(Vec::new()));
+    }
+
+    let Some(held) =
+        store::pull_request(&state.pool, conversation.id, conversation.repo.id).await?
+    else {
+        return Ok(GivingWay::Ready(Vec::new()));
+    };
+
+    let Some(other) = store::other_conversation_on_pull_request(
+        &state.pool,
+        conversation.repo.id,
+        held.number,
+        conversation.id,
+    )
+    .await?
+    else {
+        return Ok(GivingWay::Ready(Vec::new()));
+    };
+
+    Ok(
+        match crate::conversations::making_way(state, other).await? {
+            crate::conversations::MadeWay::ToClose(holder) => GivingWay::Ready(vec![holder]),
+            crate::conversations::MadeWay::NothingToGiveUp => GivingWay::Ready(Vec::new()),
+            crate::conversations::MadeWay::StillAtWork => {
+                GivingWay::Refused(ConversationSteered::AlreadyHeld {
+                    conversation: other,
+                })
+            }
+        },
+    )
+}
+
+/// What [`giving_way`] answered: the Conversations to close, or the refusal that
+/// stops the steer where it stands.
+///
+/// A list of what to close rather than one of them, because that is the shape
+/// [`crate::conversations::to_lose`] and
+/// [`crate::conversations::close_to_make_way`] are written against — a take-up of
+/// a stack closes one per link. A steer never finds more than one, this being one
+/// pull request.
+enum GivingWay {
+    /// Boxed apiece, because that is how [`crate::conversations::MadeWay::ToClose`]
+    /// hands one over and a record is a large thing to copy out of its box and
+    /// back in.
+    #[allow(clippy::vec_box)]
+    Ready(Vec<Box<store::Conversation>>),
+
+    Refused(ConversationSteered),
+}
+
+/// Say on the log that a steer was refused after it had already closed the
+/// Conversation that had taken its pull request over, and hand the refusal back.
+///
+/// Nothing is undone, exactly as at the take-up — see
+/// [`crate::conversations::refused_having_made_way`], which says the same about
+/// the same close. A close is sessions ended and directories given back, so there
+/// is nothing to put back, and a Steer is the way into a Closed Conversation. What
+/// is owed is the *saying*, because the human submitted a form about one
+/// Conversation and a different one moved.
+///
+/// Only where something was closed. Every other refusal is what it has always
+/// been, and a log line about a close that never happened would be a line about
+/// nothing.
+fn refused_having_made_way(
+    refusal: ConversationSteered,
+    conversation_id: i64,
+    made_way: Option<&str>,
+) -> ConversationSteered {
+    if let Some(branch) = made_way {
+        tracing::warn!(
+            conversation_id,
+            closed = branch,
+            refusal = ?refusal,
+            "a steer was refused after the Conversation that had taken its pull request over had \
+             been closed to make way for it, so that Conversation stays Closed — a Steer is the \
+             way back into it",
+        );
+    }
+
+    refusal
 }
 
 /// Why this steer cannot be made at all, or `None` where it can.
@@ -1333,8 +1527,9 @@ fn carried(pairing: Option<&store::Pairing>) -> store::Picked {
 }
 
 /// The line that goes under the Steer, naming every companion the steer put in
-/// and the mode it went in at, and every one it opened up and the branch it was
-/// given — or `None` where it did neither.
+/// and the mode it went in at, every one it opened up and the branch it was
+/// given, and the Conversation it closed to get here — or `None` where it did
+/// none of it.
 ///
 /// What a Conversation was configured with is read on the Brief's details pane
 /// ever after, and that pane says only what the set *is*. This is what says when
@@ -1351,10 +1546,22 @@ fn carried(pairing: Option<&store::Pairing>) -> store::Picked {
 /// Two sentences where a steer did both, because they are two different things
 /// to have done: one widened the set and the other opened a row that was
 /// already in it.
+///
+/// **And a sentence of its own for what was closed to make way**, which is a
+/// third different thing to have done and the one that moved a Conversation
+/// somebody else is looking at. `made_way` is the branch of the Conversation that
+/// had taken this pull request over and had finished with it — see
+/// [`crate::conversations::making_way`] — named by its branch for the reason the
+/// take-up's own note names one by it: that is what a Conversation is called once
+/// anybody has named one. Worth saying because the human submitted a form about
+/// this Conversation and a different one moved, and this Timeline is the one they
+/// are looking at when it did. `None` is every steer over a pull request nobody
+/// else was on, which is nearly all of them.
 fn announced(
     added: &[store::Companion],
     opened: &[store::Companion],
     branch: &str,
+    made_way: Option<&str>,
 ) -> Option<String> {
     let mut said = Vec::new();
 
@@ -1388,6 +1595,14 @@ fn announced(
             .collect();
 
         said.push(format!("Opened up for writing: {}.", named.join(", ")));
+    }
+
+    if let Some(closed) = made_way {
+        said.push(format!(
+            "The Conversation on `{closed}` had taken this pull request over and finished with \
+             it, so it was closed to make way: there is one open Conversation per pull request, \
+             and a Steer is the way back into it.",
+        ));
     }
 
     (!said.is_empty()).then(|| said.join(" "))
@@ -2336,18 +2551,28 @@ pub(crate) fn steered(state: Lifecycle) -> Option<SteerTarget> {
 }
 
 /// Take the stop the press wrote away, along with any request to stop that has
-/// not landed yet.
+/// not landed yet — and the conversation an arrival left to be carried on.
 ///
-/// Both, for the reason a Resume clears both: the request is what the *next*
-/// launch turns into a stop, so one left behind would stop the Conversation all
-/// over again on the far side of the steer. See [`crate::resume`], which does
-/// the same two things for the same reason.
+/// The first two, for the reason a Resume clears both: the request is what the
+/// *next* launch turns into a stop, so one left behind would stop the
+/// Conversation all over again on the far side of the steer. See
+/// [`crate::resume`], which does the same two things for the same reason.
 ///
-/// Nothing to clear is an ordinary outcome. A steer from a state nothing drives
-/// found nothing to stop at the click, and there is nothing here to take away.
+/// **And the third because a steer is the human replacing what a session is
+/// doing.** A Conversation that arrived stopped by a decision waits for a press,
+/// and the press may be a steer rather than a Resume — which is somebody saying
+/// what is to happen instead. What the steer launches is primed with their words;
+/// a conversation left standing to be carried on would have primed it with a note
+/// about a move and nothing else. See [`store::take_up_the_conversation`], which
+/// is read and spent in one step here as it is at a launch.
+///
+/// Nothing to clear is an ordinary outcome for all three. A steer from a state
+/// nothing drives found nothing to stop at the click, and nearly every
+/// Conversation has never been moved anywhere.
 async fn clear(state: &AppState, conversation_id: i64) -> anyhow::Result<()> {
     store::clear_stop(&state.pool, conversation_id).await?;
     store::forget_stop(&state.pool, conversation_id).await?;
+    store::take_up_the_conversation(&state.pool, conversation_id).await?;
 
     Ok(())
 }

@@ -44,6 +44,7 @@ mod browsing;
 pub mod boundaries;
 pub mod build_cache;
 mod capture;
+mod carrying;
 mod checklist;
 mod checks;
 mod cleanup;
@@ -53,9 +54,27 @@ mod commits;
 mod continuing;
 
 mod conversations;
+/// What a roadmap's stage line declares: the stages it stands on, and the
+/// platform it wants.
+mod declarations;
 mod deferrals;
+/// What this Verkstead is: the device id and the self-signed certificate made
+/// at its first start and read back at every one after (ADR-0020).
+///
+/// Public for the reason [`key`] is — what a device *is* is the product's own
+/// boundary rather than an implementation detail of an endpoint, and what
+/// proves an identity survives a restart is a suite standing where a start
+/// does.
+pub mod device;
 /// The uncommitted changes the server reads for a Question Set's Diff.
 mod diffs;
+/// How a device is found by one nobody has typed an address into: what this one
+/// says about itself on the LAN, over mDNS (ADR-0020, *Discovery*).
+///
+/// Public for the reason [`device`] above is: what a machine says about itself
+/// to whoever is on the wire is the product's own boundary, and a suite that
+/// browses for it is standing where another Verkstead stands.
+pub mod discovery;
 /// Whether this process has a display to draw on — a window station somebody is
 /// looking at, or a Linux session that names one.
 ///
@@ -103,6 +122,7 @@ mod grillings;
 /// sessions means saying where they live.
 pub mod handoffs;
 mod investigations;
+mod joins;
 /// The Workbench Key: the secret the human's browser holds and a session cannot
 /// read, and the gate that answers 401 to everything which has not shown it.
 ///
@@ -120,6 +140,14 @@ pub mod key;
 /// suite that proves it stands outside this crate.
 pub mod languages;
 mod limits;
+/// Which of a member's Repos is this repository: origin URL first, then name
+/// where neither has one (ADR-0020, *Repos across devices*).
+///
+/// Public for the reason [`device`] is — which repository a path belongs to is
+/// the product's own boundary rather than an implementation detail of an
+/// endpoint, and what settles it is a reading a suite makes standing where the
+/// device that is about to sync or transfer stands.
+pub mod matching;
 /// Trying a declared MCP server as it is saved, which is the one place one is
 /// ever spoken to from here — see ADR-0021, where an unreachable server never
 /// holds a launch.
@@ -127,7 +155,26 @@ mod mcp;
 /// Watching a pull request go on merging after the work on it is Done — see
 /// [`checks`] for the watcher that covers a wrap-up, which this takes over from.
 mod merges;
-mod nudge;
+/// One sidebar for the cluster: every member's Conversations held in memory and
+/// merged with this device's own by Rank (ADR-0020, *The opened device relays*).
+mod merging;
+/// One list of accounts for the cluster: a mirror row per member Agent Profile,
+/// fetched over the link and kept beside this device's own (ADR-0020, *Shared
+/// Profiles*).
+///
+/// Public for the reason [`matching`] is: what a session away from home is given
+/// of an account is the product's own boundary rather than an implementation
+/// detail of a launch, and what proves it is a suite standing where the device
+/// about to launch stands — see [`mirroring::account::fetched`].
+pub mod mirroring;
+/// Telling the open viewer pages that the pending world moved (ADR-0009).
+///
+/// Public for the one thing a Nudge is announced about from outside the
+/// workbench's own routes: a join arriving on the peer listener, which is a
+/// different listener in the same process — so the handle the pages listen
+/// through is made once and given to both, and a suite standing the two up is
+/// what has to be able to make one.
+pub mod nudge;
 /// Telling a session idling on a stored ask that its Answers are there to fetch.
 mod nudging;
 /// Whether this Verkstead can do anything yet: the objective a fresh one is
@@ -144,6 +191,15 @@ mod pairing_defaults;
 /// Every Sandbox Configuration bind as the settings page reads them: which of
 /// the two places said each one, and whether the server can see it.
 mod paths;
+/// The listener devices talk to each other over: TLS on a port of its own,
+/// presenting this device's certificate and asking every caller for one
+/// without insisting on it (ADR-0020).
+///
+/// Public for the reason [`device`] is — what a device is reached *on* is the
+/// product's own surface rather than an implementation detail of an endpoint,
+/// and a suite that proves a handshake completes has to be able to stand one
+/// up and dial it.
+pub mod peer;
 /// The named pipe the server listens on beside its socket, which is what a
 /// sandboxed Windows session asks Verkstead through — the one way in when that
 /// platform's boundary was an AppContainer, and a transport that has stayed
@@ -157,6 +213,9 @@ mod paths;
 /// there is no pipe here and no Unix-socket twin beside it either.
 #[cfg(windows)]
 pub mod pipe;
+/// The look that starts a roadmap stage which waited for a place the whole
+/// server has, made as one comes free.
+mod places;
 /// Where a directory of Verkstead's own goes when nobody has said: the
 /// platform's own place for the Data Directory, and the environment values it
 /// is resolved out of.
@@ -165,13 +224,22 @@ pub mod pipe;
 /// the product's business rather than an endpoint's, and the default is one rule
 /// for every binary that parses a [`Config`] rather than the server's alone.
 pub mod platform;
+pub mod preflight;
 mod profiles;
 /// Putting a share where a link reaches it, which is Verkstead's own write to
 /// GitHub.
 mod publishing;
-mod push;
+/// Telling the phones what happened while nobody was watching — and, in a
+/// cluster, telling the members so that one phone hears from all of them.
+pub mod push;
+/// Where the human just dropped one row of the merged sidebar: the **Rank**
+/// minted here and written to the device that owns the row.
+mod ranking;
 /// The store an OpenCode session keeps of itself, followed while it runs.
 mod records;
+/// A call for one of this device's members, put to that member over the Peer
+/// Listener and answered back to the browser untouched.
+mod relaying;
 /// Whether this machine can be reached from a phone: what its Tailscale is
 /// doing, and whether the tailnet name is in front of the workbench.
 pub mod remote;
@@ -258,6 +326,9 @@ pub mod terminal;
 /// orchestrator does, asking the machine the same question it asks.
 pub mod terminals;
 mod transcript;
+/// Moving a Conversation onto another device of the cluster: the press, the
+/// wait for the turn to end, and the move itself.
+mod transfers;
 /// What Verkstead says to a running session: the keystrokes the rescue and the
 /// nudge both go in as.
 mod typing;
@@ -291,6 +362,14 @@ pub use github::Gh;
 /// How fast the backlog is worked, which is part of the same choice — see
 /// [`Agents::at_pace`].
 pub use runner::Pace;
+
+/// Why something a device put to one of its members was never answered, naming
+/// the machine that did not take it — see [`relaying::Refusal`].
+///
+/// Re-exported because [`matching`] answers with one: a reading across a link
+/// has to be able to say *that machine did not take it* rather than *nothing
+/// over there matched*, and telling the two apart is what the caller acts on.
+pub use relaying::Refusal;
 
 /// Persistence lives in its own crate so the viewer's endpoints can reach it
 /// without depending on the binary that links them. It is re-exported here
@@ -366,6 +445,12 @@ pub(crate) struct AppState {
     /// keeps starting them — see [`drivers`].
     drivers: drivers::Drivers,
 
+    /// And which of them are stages held before their finish, waiting for the
+    /// chain below them to settle — see [`joins`]. Beside the drivers rather
+    /// than inside them, because a held stage is being driven: the run holding
+    /// it is the driver, and this is what it is holding it for.
+    joins: joins::Joins,
+
     /// And what each running session is to be ended on the Done signal for,
     /// where something is waiting on one — see [`done`].
     signals: done::Signals,
@@ -388,6 +473,41 @@ pub(crate) struct AppState {
     /// the Remote access pane asks, so a `tailscale up` run in a terminal shows
     /// on the next load rather than on the next restart — see [`remote`].
     remote: remote::Tailscale,
+
+    /// What this Verkstead is, as the Devices section of that same pane reads
+    /// it — see [`device::Devices`]. A handle for the reason the one above it
+    /// is: the id and the certificate are off the disk and do not move, and
+    /// the machine around them is read at the moment the pane asks.
+    ///
+    /// `None` is a router stood up without a Data Directory to have invented
+    /// an identity in, which is every router but the served one — the section
+    /// is refused there rather than answered about a device that does not
+    /// exist, the way **Reset key** is refused where there is no key.
+    devices: Option<device::Devices>,
+
+    /// And the list each of those members last answered, which is what the
+    /// sidebar is merged out of — see [`merging`].
+    ///
+    /// Held rather than fetched per load, and in memory rather than in the
+    /// store: every row in it is a Conversation of somebody else's, and what
+    /// keeps it fresh is that member's own Nudges. Empty on every router with no
+    /// identity, there being no member to hold a list of.
+    merged: merging::MemberLists,
+
+    /// And what holds two drops onto that list apart, which is the transaction
+    /// a mint off a held merge no longer has — see [`ranking`].
+    minting: ranking::Minting,
+
+    /// What this device is called by every record written through this state:
+    /// the Device Id, which is the suffix on every Rank a start mints — see
+    /// [`store::rank_the_conversations`] and [`device::Devices::id`].
+    ///
+    /// The id off the handle above where there is one, and [`STATED_DEVICE`]
+    /// where there is not: a router stood up without a Data Directory invented
+    /// no identity, and a rank still has to say whose it is. Which is a test's
+    /// router rather than a served one — a serve has both, and the rank a
+    /// Conversation is started with there is this machine's.
+    device: String,
 
     /// The Workbench Key the gate in front of this router stands on, where it
     /// stands on one — see [`key`].
@@ -448,7 +568,32 @@ pub(crate) struct AppState {
     /// A rebuild does not take it. What that remakes is a directory the record
     /// already names, so the keep-set holds it whenever the sweep looks.
     checkouts: Arc<tokio::sync::Mutex<()>>,
+
+    /// And held across one unattended reading of a roadmap, from what it has
+    /// ready to the last stage of it started.
+    ///
+    /// Two things bring that reading about — a wrap-up settling and a look for a
+    /// free place — and they arrive on their own clocks, so the same roadmap can
+    /// be read twice at once. Each reading is a reading of the record, and a
+    /// stage is not in the record until it has started: two that overlapped
+    /// would find the same stage ready and start it twice, on one branch, in two
+    /// Conversations. So they take this and hold it to the end, and the second
+    /// reads what the first wrote.
+    ///
+    /// **The readings alone.** A press takes nothing — it is over the limit by
+    /// design and refused by the branch where it would collide — and neither
+    /// does anything else here: what this serialises is Verkstead starting work
+    /// nobody asked for. See [`continuing::reading`].
+    starting: Arc<tokio::sync::Mutex<()>>,
 }
+
+/// What a router stood up without a Data Directory calls itself where a record
+/// it writes has to name a device.
+///
+/// Every router but the served one — see [`AppState::device`]. Shaped like the
+/// ids [`device`] invents, because what reads one is a comparison and a string
+/// of some other shape would be a device no rank could be told apart from.
+const STATED_DEVICE: &str = "00000000000000000000000000000000";
 
 /// The port Verkstead is served on when nobody has said otherwise, and so the
 /// port `tailscale serve` is put in front of — see the Remote access pane in
@@ -517,6 +662,26 @@ pub struct Config {
     )]
     pub listen: SocketAddr,
 
+    /// Address and port the peer listener binds — the second listener, which is
+    /// the one other devices dial (ADR-0020).
+    ///
+    /// Every interface by default, where the workbench's is the loopback: the
+    /// device calling this one may be on the LAN or on the tailnet, and neither
+    /// of those is the loopback. What stands in front of it is not a secret on
+    /// the address but the handshake — a caller reaches nothing here without
+    /// presenting a certificate this device's cluster holds, the one identity
+    /// endpoint aside.
+    ///
+    /// Two Verksteads on one machine want a port each, the way they want a
+    /// `--listen` each: an address somebody else is already on refuses the
+    /// start rather than coming up with half a server.
+    #[arg(
+        long,
+        env = "VERKSTEAD_PEER_LISTEN",
+        default_value_t = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), peer::PEER_PORT),
+    )]
+    pub peer_listen: SocketAddr,
+
     /// An extra read-write bind every sandbox gets. Repeat the flag, or separate
     /// several in the environment variable the way the platform writes `PATH`.
     ///
@@ -577,6 +742,31 @@ pub struct Config {
         value_parser = clap::builder::FalseyValueParser::new(),
     )]
     pub no_update_check: bool,
+
+    /// Don't say what this device is on the LAN, and so be found only by a
+    /// machine somebody has typed this one's address into (ADR-0020).
+    ///
+    /// What advertising puts on the wire is this machine's hostname, the word
+    /// for its operating system and its device id, and the LAN it goes out on
+    /// may not be the human's alone — so it is a switch for the reason the
+    /// update check above is one. On by default all the same, for the reason
+    /// `openFirewall` is on by default in the NixOS module: a discovery nothing
+    /// can hear is a feature that silently does not work, with nothing on
+    /// either machine saying why.
+    ///
+    /// It is the advertising half: what this turns off is what other devices
+    /// hear of this one.
+    #[arg(
+        long,
+        env = "VERKSTEAD_NO_ADVERTISING",
+        action = clap::ArgAction::SetTrue,
+        // Anything that is not a falsey word counts as set, for the reason the
+        // update check's own parser is this one: `=1` is how a switch is thrown
+        // in a service unit, and clap's own parser for a flag would refuse it
+        // for not being the word `true`.
+        value_parser = clap::builder::FalseyValueParser::new(),
+    )]
+    pub no_advertising: bool,
 }
 
 impl Config {
@@ -585,6 +775,14 @@ impl Config {
     /// that what it decided can be asked about rather than inferred.
     pub fn releases(&self) -> Option<&'static str> {
         (!self.no_update_check).then_some(updates::LATEST_RELEASE)
+    }
+
+    /// Whether this device says what it is on the LAN — the one thing
+    /// [`Config::no_advertising`] decides, named so that what it decided can be
+    /// asked about rather than inferred, which is what [`Config::releases`]
+    /// above is for.
+    pub fn advertises(&self) -> bool {
+        !self.no_advertising
     }
 
     /// The Data Directory this configuration comes to, made where it is not
@@ -656,6 +854,7 @@ pub fn router(pool: SqlitePool) -> Router {
         key::Gate::open(),
         onboarding::Machine::here(),
         None,
+        no_device(),
     )
 }
 
@@ -676,6 +875,7 @@ pub fn router_keeping(pool: SqlitePool, data_dir: PathBuf) -> Router {
         key::Gate::open(),
         onboarding::Machine::here(),
         None,
+        no_device(),
     )
 }
 
@@ -703,6 +903,7 @@ pub fn router_installed(
         key::Gate::open(),
         onboarding::Machine::here(),
         None,
+        no_device(),
     )
 }
 
@@ -735,6 +936,7 @@ pub fn router_running_sessions(
         key::Gate::open(),
         onboarding::Machine::here(),
         None,
+        no_device(),
     )
 }
 
@@ -757,6 +959,7 @@ pub fn router_asking_github(pool: SqlitePool, data_dir: PathBuf, gh: Gh) -> Rout
         key::Gate::open(),
         onboarding::Machine::here(),
         None,
+        no_device(),
     )
 }
 
@@ -833,6 +1036,7 @@ pub fn router_onboarding_elevating(
         key::Gate::open(),
         machine,
         escalation,
+        no_device(),
     )
 }
 
@@ -856,6 +1060,7 @@ pub fn router_reading_tailscale(pool: SqlitePool, remote: remote::Tailscale) -> 
         key::Gate::open(),
         onboarding::Machine::here(),
         None,
+        no_device(),
     )
 }
 
@@ -885,7 +1090,152 @@ pub fn router_reading_tailscale_keyed(
         key::Gate::keyed(key),
         onboarding::Machine::here(),
         None,
+        no_device(),
     )
+}
+
+/// A router answering for `devices`: what this Verkstead is, and the machine it
+/// is on.
+///
+/// What the Devices section of that same pane is stood up over — a third
+/// reading beside the serve and the key, and a parameter for the reason the
+/// Tailscale above is one. The id and the certificate are made in a directory
+/// the test owns, and the hostname, the OS and the addresses are the box the
+/// suite happens to be running on unless they are stated — see
+/// [`device::reading::Reading::stated`], which is what puts a WSL in front of
+/// this on a machine that is not one.
+pub fn router_answering_devices(pool: SqlitePool, devices: device::Devices) -> Router {
+    router_answering_devices_telling(pool, devices, nudge::Nudges::new())
+}
+
+/// The same, over a Nudge stream the caller made.
+///
+/// For the suite that stands a whole Verkstead up: a join arrives on the peer
+/// listener and the modal it raises is drawn on a page this router serves, so
+/// what has to be asked is whether a page listening here hears a join landing
+/// there — which it can only do over one handle. See [`routed_telling`], and
+/// [`peer::router`], which takes the other half of it.
+pub fn router_answering_devices_telling(
+    pool: SqlitePool,
+    devices: device::Devices,
+    nudges: nudge::Nudges,
+) -> Router {
+    routed_telling(
+        pool,
+        updates::Updates::nothing_learned(),
+        nothing_bound(),
+        nowhere(),
+        sessions::Sessions::none(),
+        Gh::on_path(),
+        tailnet(),
+        key::Gate::open(),
+        onboarding::Machine::here(),
+        None,
+        Some(devices),
+        nudges,
+    )
+}
+
+/// And **both** of that device's routers over **one** state, which is what a
+/// running server serves: the workbench its own browser asks, and the slice of
+/// it a member reaches over the link (see [`Routers`]).
+///
+/// A constructor of its own because one endpoint in that namespace now answers
+/// the two listeners differently and the difference is about the *state*: the
+/// sidebar is this device's own Conversations merged with the lists it holds of
+/// its members, and what a member gets is this device's own rows alone — see
+/// [`merging`], and [`ui::conversations`]. Two routers built separately would be
+/// two devices asked the one question, each holding its own memory of the
+/// cluster.
+///
+/// The peer half is handed to [`peer::router`] the way [`router_over_the_link`]'s
+/// is, which is what puts the Member Gate in front of it.
+///
+/// **And `machine` is what the mirrors are judged on**, which is the one thing
+/// a clustered router probes that a lone one never does: a **mirror** of a
+/// member's Profile whose harness is not on this box reads broken in the
+/// onboarding probe's own word, so a suite about mirrors has to say what this
+/// box has rather than take whatever the runner happens to hold — see
+/// [`profiles::broken`]. A served Verkstead passes [`onboarding::Machine::here`],
+/// as every other constructor does.
+pub fn routers_answering_devices_telling(
+    pool: SqlitePool,
+    devices: device::Devices,
+    nudges: nudge::Nudges,
+    machine: onboarding::Machine,
+) -> Routers {
+    let gate = key::Gate::open();
+
+    let state = standing(
+        pool,
+        updates::Updates::nothing_learned(),
+        nothing_bound(),
+        nowhere(),
+        sessions::Sessions::none(),
+        Gh::on_path(),
+        tailnet(),
+        &gate,
+        machine,
+        None,
+        Some(devices),
+        nudges,
+    );
+
+    Routers {
+        workbench: serving(state.clone(), &gate),
+        over_the_link: peer::workbench::served(state),
+    }
+}
+
+/// And both of them over a device that **runs sessions**, keeping what it makes
+/// in `data_dir` and reaching GitHub through `gh`.
+///
+/// What a served Verkstead in a cluster is, and what a suite asking whether a
+/// session away from home comes up logged in has to stand up: the mirrors are
+/// refreshed off the membership behind the state (see [`mirroring`]), the account
+/// of a member's Profile is fetched over the cluster handle as each session
+/// starts (see [`mirroring::account`]), and the agent that runs is `agents`'.
+/// Every other clustered constructor here runs no session at all, which is every
+/// question about a cluster but that one.
+///
+/// And `machine` is what its mirrors are judged on, for the reason
+/// [`routers_answering_devices_telling`] takes one: a session away from home is
+/// refused where the harness it would run is not on this box, and what a suite
+/// stubs the agent with is not what the probe walks a `PATH` for.
+pub fn routers_running_sessions_answering_devices(
+    pool: SqlitePool,
+    data_dir: PathBuf,
+    agents: Agents,
+    gh: Gh,
+    devices: device::Devices,
+    nudges: nudge::Nudges,
+    machine: onboarding::Machine,
+) -> Routers {
+    // Taken off the agents rather than asked for again, for
+    // [`router_running_sessions`]'s reason: the binds a session gets and the
+    // binds the settings page draws as the installation's are the one set.
+    let binds = agents.binds().clone();
+    let gate = key::Gate::open();
+
+    let state = standing(
+        pool,
+        updates::Updates::nothing_learned(),
+        binds,
+        data_dir,
+        sessions::Sessions::under(agents),
+        gh,
+        tailnet(),
+        &gate,
+        machine,
+        None,
+        Some(devices),
+        nudges,
+    );
+
+    Routers {
+        workbench: serving(state.clone(), &gate),
+        over_the_link: peer::workbench::served(state),
+    }
 }
 
 /// The Tailscale of a router that was not stood up to be reached from a phone:
@@ -932,6 +1282,20 @@ fn nowhere() -> PathBuf {
     PathBuf::new()
 }
 
+/// And the identity of a router that was never given one.
+///
+/// A device is invented in a Data Directory and read back out of it at every
+/// start, so a router handed [`nowhere`] to keep anything in has none to draw —
+/// and the Devices section of the Remote access pane is refused there rather
+/// than answered about a device that was never made, the way **Reset key** is
+/// refused on a router standing behind no gate.
+///
+/// What a suite asking about that section stands up is
+/// [`router_answering_devices`].
+fn no_device() -> Option<device::Devices> {
+    None
+}
+
 /// The same, with the update check running against `releases` — where to ask
 /// about the latest release, which is GitHub in the running server and a server
 /// the test stood up itself under test. `None` is the check turned off: nothing
@@ -952,12 +1316,19 @@ pub fn router_checking_updates(pool: SqlitePool, releases: Option<&str>) -> Rout
         key::Gate::open(),
         onboarding::Machine::here(),
         None,
+        no_device(),
     )
 }
 
-/// Ten, because the state a router holds is what a router is built out of: each
-/// of these is one thing the served router was given and every other one stands
-/// in for. A struct of them would be this list with a name on it.
+/// Eleven, because the state a router holds is what a router is built out of:
+/// each of these is one thing the served router was given and every other one
+/// stands in for. A struct of them would be this list with a name on it.
+///
+/// The stream the open pages listen on is this router's own, which is right for
+/// every router but the served one: nothing else in a suite is announcing to it
+/// from another listener. Where the peer listener beside this one has to reach
+/// the same pages — a join arriving raises a modal — the handle is made outside
+/// and both are given it, which is [`routed_telling`].
 #[allow(clippy::too_many_arguments)]
 fn routed(
     pool: SqlitePool,
@@ -970,7 +1341,84 @@ fn routed(
     gate: key::Gate,
     machine: onboarding::Machine,
     escalation: Option<Arc<dyn remote::Elevate>>,
+    devices: Option<device::Devices>,
 ) -> Router {
+    routed_telling(
+        pool,
+        updates,
+        binds,
+        data_dir,
+        sessions,
+        github,
+        remote,
+        gate,
+        machine,
+        escalation,
+        devices,
+        nudge::Nudges::new(),
+    )
+}
+
+/// The same, over a Nudge stream somebody else made.
+///
+/// **One handle rather than one per listener**, which is the whole of why this
+/// parameter exists: a join lands on the peer listener and the modal it raises
+/// is drawn on a page this router served, so the two have to be announcing on
+/// the same channel. See [`nudge`], and [`peer::router`], which takes the other
+/// half of it.
+#[allow(clippy::too_many_arguments)]
+fn routed_telling(
+    pool: SqlitePool,
+    updates: updates::Updates,
+    binds: sandbox::SandboxConfig,
+    data_dir: PathBuf,
+    sessions: sessions::Sessions,
+    github: Gh,
+    remote: remote::Tailscale,
+    gate: key::Gate,
+    machine: onboarding::Machine,
+    escalation: Option<Arc<dyn remote::Elevate>>,
+    devices: Option<device::Devices>,
+    nudges: nudge::Nudges,
+) -> Router {
+    serving(
+        standing(
+            pool, updates, binds, data_dir, sessions, github, remote, &gate, machine, escalation,
+            devices, nudges,
+        ),
+        &gate,
+    )
+}
+
+/// The state every router here is built over, and the sweeps a start makes
+/// before it answers anything.
+///
+/// **Made once and shared, which is what a second listener costs.** A relayed
+/// call has to land on the state this device's own browser lands on — the same
+/// held waits, the same terminals, the same watchers — so the workbench's
+/// router and the slice of it the Peer Listener answers are two routers over
+/// one of these rather than two of these. See [`serving`] and
+/// [`peer::workbench::served`], which are the two of them, and [`Routers`],
+/// which is a start taking both.
+///
+/// `gate` is read rather than held: what the state wants of it is the key
+/// behind it, for the one press that re-issues one — see [`key::Gate::held`] —
+/// and what stands it in front of a namespace is [`serving`].
+#[allow(clippy::too_many_arguments)]
+fn standing(
+    pool: SqlitePool,
+    updates: updates::Updates,
+    binds: sandbox::SandboxConfig,
+    data_dir: PathBuf,
+    sessions: sessions::Sessions,
+    github: Gh,
+    remote: remote::Tailscale,
+    gate: &key::Gate,
+    machine: onboarding::Machine,
+    escalation: Option<Arc<dyn remote::Elevate>>,
+    devices: Option<device::Devices>,
+    nudges: nudge::Nudges,
+) -> AppState {
     let state = AppState {
         pool,
 
@@ -978,7 +1426,7 @@ fn routed(
         // at the moment they are wanted, so what the settings page saves reaches
         // the next session without a restart — see [`settings`].
         settings: settings::Settings::in_data_dir(&data_dir),
-        nudges: nudge::Nudges::new(),
+        nudges,
         settlements: Settlements::new(SETTLEMENT_BACKLOG),
         waits: Waits::new(),
         sessions,
@@ -986,6 +1434,7 @@ fn routed(
         watchers: watchers::Watchers::new(),
         followers: followers::Followers::new(),
         drivers: drivers::Drivers::new(),
+        joins: joins::Joins::new(),
         signals: done::Signals::new(),
         updates,
 
@@ -999,6 +1448,30 @@ fn routed(
         // And the host's `tailscale`, which is the whole of what the Remote access
         // pane reads — see [`remote`].
         remote,
+
+        // And what this Verkstead is called by everything it writes down, which
+        // is the id off that same handle — see [`AppState::device`]. Taken off
+        // it rather than passed in beside it, there being one identity and no
+        // choice to make about which of the two a record names.
+        device: devices.as_ref().map_or_else(
+            || STATED_DEVICE.to_owned(),
+            |devices| devices.id().to_owned(),
+        ),
+
+        // And what this Verkstead is, which the Devices section of that same
+        // pane draws — see [`device::Devices`]. `None` on every router that was
+        // not stood up over a Data Directory: an identity is invented in one,
+        // and a router with nowhere to have invented it has no device to draw.
+        devices,
+
+        // And nothing held of any member yet, which is what a start is: the
+        // lists arrive as the Nudge streams to them are taken up, and the loop
+        // below is what listens for that — see [`merging`].
+        merged: merging::MemberLists::none(),
+
+        // And nothing being minted against it, which is what a start is there
+        // too: this is a lock rather than a record — see [`ranking::Minting`].
+        minting: ranking::Minting::new(),
 
         // And the key the gate below stands on, so that the one press that
         // re-issues it goes through the very handle every request is checked
@@ -1019,6 +1492,7 @@ fn routed(
 
         data_dir,
         checkouts: Arc::new(tokio::sync::Mutex::new(())),
+        starting: Arc::new(tokio::sync::Mutex::new(())),
     };
 
     // First of all, the worktrees directory swept of everything no Conversation
@@ -1046,13 +1520,23 @@ fn routed(
     // rather than about anything a request will start: every Conversation the
     // last server was driving is one nothing is driving now, and nobody but this
     // is going to look at any of them — see [`resume::at_startup`].
-    let resumed = vec![resume::at_startup(&state)];
+    //
+    // Turned into a signal rather than a handle, because two things below wait
+    // for it and a task can be awaited by one — see [`resume::taken_up`].
+    let resumed = resume::taken_up(resume::at_startup(&state));
 
     // And then, once that is done, the check for the Conversations it could not
     // take up: a restart holds no driver registrations at all, so what is still
     // undriven after everything that resumes has resumed is what genuinely has
     // nobody — see [`stalls`].
-    stalls::sweeping(&state, resumed);
+    stalls::sweeping(&state, resumed.clone());
+
+    // And the look for a stage that is waiting on a place the whole server has,
+    // which waits for the same signal and for the mirror image of the reason:
+    // the places are counted off those same registrations, so a look in front of
+    // the resume would find every one of them free. After that it is woken by a
+    // place coming free rather than by a clock — see [`places`].
+    places::looking(&state, resumed);
 
     // And the pull requests of everything that has already finished, which is a
     // sweep of its own at a pace of its own: a base goes on moving under a
@@ -1073,12 +1557,40 @@ fn routed(
     // waiting for a line nobody is going to type.
     nudging::listening(&state);
 
+    // And the lists this device holds of its members, which is what the sidebar
+    // is merged out of: read once now, and again whenever a member says
+    // something its own sidebar would be re-read on (ADR-0020, *The opened
+    // device relays*) — see [`merging`]. Here rather than beside the streams
+    // themselves, which are held by a task spawned before this state exists:
+    // what the two share is the one Nudge channel, and this end of it is the
+    // one that needs the state.
+    merging::refreshing(&state);
+
+    // And the mirror rows of every member's Agent Profiles, beside it and on the
+    // same channel: read once now, and again whenever a member says its Profiles
+    // moved or the membership itself does (ADR-0020, *Shared Profiles*) — see
+    // [`mirroring`]. A sweep of its own rather than a second thing the one above
+    // does, because what it keeps is rows in this store rather than a list in
+    // this device's memory, and the two are refreshed by different news.
+    mirroring::refreshing(&state);
+
     // And the verdict about the machine itself, which is the one sweep here
     // that decides something rather than tidying something: whether this
     // Verkstead has what it takes to run a session at all, reached once, now,
     // and held for the length of the run — see [`onboarding::at_startup`].
     onboarding::at_startup(&state);
 
+    state
+}
+
+/// The workbench listener's own router over that state: the agents' contract,
+/// the health check, and the viewer's namespace behind `gate`.
+///
+/// **This is the listener a session and a browser share**, which is why the
+/// gate is in the middle of it rather than over the lot: the two routes a
+/// session dials are open, and everything the human's browser asks is behind
+/// the key. See [`key`].
+fn serving(state: AppState, gate: &key::Gate) -> Router {
     Router::new()
         // The one route that is nobody's Conversation: whether the server is up
         // is not a question about a piece of work.
@@ -1098,6 +1610,12 @@ fn routed(
             &format!("{ASKING_FROM}/{{conversation}}/api/v1/done"),
             post(done::signal),
         )
+        // And asking for the work to be moved onto another device, which the
+        // mover acts on once the session has ended (ADR-0020, *The agent's call*).
+        .route(
+            &format!("{ASKING_FROM}/{{conversation}}/api/v1/transfer"),
+            post(transfers::call),
+        )
         // And saying it is waiting on work of its own, which keeps it at work.
         .route(
             &format!("{ASKING_FROM}/{{conversation}}/api/v1/waiting"),
@@ -1113,8 +1631,19 @@ fn routed(
         // session reaching the loopback must not be able to ask any of it. The
         // first of the gate's two attachments — the other is over the fallback
         // that answers every page of the workbench, which is put on in
-        // [`router_with_ui`]. See [`key`].
+        // [`routers_with_ui`]. See [`key`].
         .merge(gate.guarding(ui::routes()))
+        // And the same namespace again for each of this device's members,
+        // under a prefix of its own: a call the browser makes here and this
+        // device puts to the member over the Peer Listener (ADR-0020, *The
+        // opened device relays*). Behind the same gate, because it is the
+        // human's browser asking — what admits it over *there* is this
+        // device's certificate, and a member's own key is no part of it.
+        //
+        // Here rather than in [`ui::routes`], which is the router that is
+        // mounted twice: a member reaching this would be a relay of a relay.
+        // See [`relaying`].
+        .merge(gate.guarding(relaying::routes()))
         .with_state(state)
 }
 
@@ -1122,12 +1651,40 @@ async fn health() -> &'static str {
     "ok"
 }
 
+/// The two routers the one binary serves, over the one state — see
+/// [`standing`], which makes it.
+///
+/// **Two listeners rather than two servers.** The workbench's own is the human's
+/// browser and its sessions; the other is what a member reaches over the Peer
+/// Listener, which is the viewer's namespace and nothing else (ADR-0020, *The
+/// opened device relays*). They are built together because they answer out of
+/// one state: a Set answered through a relay has to end a wait this device is
+/// genuinely holding, and two states over one database would be two servers
+/// disagreeing about their own work.
+pub struct Routers {
+    /// Everything this device serves its own browser: the agents' contract, the
+    /// viewer's namespace behind the Workbench Key, and the workbench's pages
+    /// on the fallback.
+    pub workbench: Router,
+
+    /// And what a member reaches over the link it already holds: the same
+    /// namespace, minus the prefixes this device keeps to itself, with the
+    /// Member Gate in front of it instead of the key — handed to
+    /// [`peer::router`], which is what puts that gate there. See
+    /// [`peer::workbench`].
+    pub over_the_link: Router,
+}
+
 /// Everything the one binary serves: the API above, plus the viewer built into
-/// it on every other path.
+/// it on every other path — and the same API again for the Peer Listener, as
+/// [`Routers`] says.
 ///
 /// The viewer takes the fallback, so `/api/v1/` and `/api/ui/` keep their exact
 /// paths and everything else — the document, the bundles, the app shell's own
-/// files — is [`viewer`]'s to answer.
+/// files — is [`viewer`]'s to answer. None of that is on the other router:
+/// `/api/v1/` is a session's and answers the loopback and the named pipe, the
+/// health check is nobody's Conversation, and a page is something a browser
+/// asks its own device for.
 ///
 /// This is also the only router that checks for updates, because it is the only
 /// one with a viewer to draw the Notice in — see [`router_checking_updates`] for
@@ -1149,8 +1706,19 @@ async fn health() -> &'static str {
 /// wizard's install run raises — see [`remote::Elevate`], which both of them go
 /// through. `None` is a server started from a shell or a unit file, with nobody
 /// at that machine to put a dialog in front of.
+///
+/// And `devices` is what this Verkstead is — the id and the certificate this
+/// Data Directory holds, the machine they are on, and who it is linked to. It
+/// is required here where it is optional inside, because this is the router
+/// with the Remote access pane on it and the Devices section is a third of
+/// that pane: a served workbench that could not say what device it was would
+/// be the one Verkstead where that section is refused.
+///
+/// And `nudges` is the stream the pages it serves listen on, made outside
+/// because the peer listener beside this router announces on it too: a join
+/// arriving there raises a modal on a page served from here — see [`nudge`].
 #[allow(clippy::too_many_arguments)]
-pub fn router_with_ui(
+pub fn routers_with_ui(
     pool: SqlitePool,
     releases: Option<&str>,
     data_dir: PathBuf,
@@ -1159,13 +1727,15 @@ pub fn router_with_ui(
     remote: remote::Tailscale,
     key: key::WorkbenchKey,
     escalation: Option<Arc<dyn remote::Elevate>>,
-) -> Router {
+    devices: device::Devices,
+    nudges: nudge::Nudges,
+) -> Routers {
     // Off the agents, for the reason [`router_running_sessions`] takes it off
     // them: one configured set, said once.
     let binds = agents.binds().clone();
     let gate = key::Gate::keyed(key);
 
-    routed(
+    let state = standing(
         pool,
         updates::watching(releases),
         binds,
@@ -1173,11 +1743,22 @@ pub fn router_with_ui(
         sessions::Sessions::under(agents),
         gh,
         remote,
-        gate.clone(),
+        &gate,
         onboarding::Machine::here(),
         escalation,
-    )
-    .fallback_service(guarded_viewer::<viewer::Built>(&gate))
+        Some(devices),
+        nudges,
+    );
+
+    Routers {
+        workbench: serving(state.clone(), &gate)
+            .fallback_service(guarded_viewer::<viewer::Built>(&gate)),
+
+        // The same state, and no gate of this kind at all: what admits a caller
+        // over there is the handshake, and a member's own Workbench Key is no
+        // more use on this device than a stranger's would be.
+        over_the_link: peer::workbench::served(state),
+    }
 }
 
 /// The same, over a site named by the caller, which is how the tests ask what the
@@ -1203,7 +1784,103 @@ pub fn router_keyed(pool: SqlitePool, key: key::WorkbenchKey) -> Router {
         key::Gate::keyed(key),
         onboarding::Machine::here(),
         None,
+        no_device(),
     )
+}
+
+/// [`router`] as a member reaches it over the Peer Listener: the viewer's own
+/// namespace, minus the prefixes this device keeps to itself, and nothing else
+/// — see [`peer::workbench`].
+///
+/// A constructor of its own for the reason [`router_keyed`] is one: what the
+/// suite about that listener stands up is the far end of a relay hop, and every
+/// other constructor here answers the whole of `/api/`. It is handed to
+/// [`peer::router`], which is what puts the Member Gate in front of it — a
+/// router asked in process is a namespace with no gate at all, which is why the
+/// suite dials a real socket instead.
+///
+/// `data_dir` is what it keeps in, which the relay suite needs a real one of:
+/// an attachment put on a Conversation through the hop is a file on the far
+/// end's disk, and what that suite asserts is that it landed there.
+pub fn router_over_the_link(pool: SqlitePool, data_dir: PathBuf) -> Router {
+    peer::workbench::served(standing(
+        pool,
+        updates::Updates::nothing_learned(),
+        nothing_bound(),
+        data_dir,
+        sessions::Sessions::none(),
+        Gh::on_path(),
+        tailnet(),
+        &key::Gate::open(),
+        onboarding::Machine::here(),
+        None,
+        no_device(),
+        nudge::Nudges::new(),
+    ))
+}
+
+/// The same namespace over a Nudge stream the caller made, which is what the
+/// suite about a member's *news* stands up at the far end.
+///
+/// A constructor of its own beside [`router_over_the_link`] for the reason
+/// [`router_answering_devices_telling`] is one beside its own plain version:
+/// what this device holds to a member is that member's `/api/ui/nudges`, so a
+/// suite asking whether news crosses the link needs the handle the far end
+/// announces on — and in a running server that handle is the state's, shared by
+/// the two routers standing over it (see [`Routers`]).
+pub fn router_over_the_link_telling(
+    pool: SqlitePool,
+    data_dir: PathBuf,
+    nudges: nudge::Nudges,
+) -> Router {
+    peer::workbench::served(standing(
+        pool,
+        updates::Updates::nothing_learned(),
+        nothing_bound(),
+        data_dir,
+        sessions::Sessions::none(),
+        Gh::on_path(),
+        tailnet(),
+        &key::Gate::open(),
+        onboarding::Machine::here(),
+        None,
+        no_device(),
+        nudges,
+    ))
+}
+
+/// And the same namespace with Sandboxes behind it, which is what the suite about
+/// a relayed *socket* stands up at the far end.
+///
+/// A constructor of its own beside [`router_over_the_link`] for one reason: a
+/// Conversation terminal is a human's shell inside the far Sandbox, so a device
+/// whose sessions are nobody's cannot open one, and a socket relayed onto a
+/// refusal would be a hop proved against nothing. Everything else is that
+/// function's — the Member Gate is [`peer::router`]'s to put on, and `data_dir`
+/// is what this end keeps in.
+pub fn router_over_the_link_running_sessions(
+    pool: SqlitePool,
+    data_dir: PathBuf,
+    agents: Agents,
+) -> Router {
+    // Taken off the agents rather than asked for again, for the reason
+    // [`router_running_sessions`] takes them off there.
+    let binds = agents.binds().clone();
+
+    peer::workbench::served(standing(
+        pool,
+        updates::Updates::nothing_learned(),
+        binds,
+        data_dir,
+        sessions::Sessions::under(agents),
+        Gh::on_path(),
+        tailnet(),
+        &key::Gate::open(),
+        onboarding::Machine::here(),
+        None,
+        no_device(),
+        nudge::Nudges::new(),
+    ))
 }
 
 /// And the same with a site behind it, which is what the workbench's own pages
@@ -1375,6 +2052,91 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
     // human finds out which one that turned out to be.
     let data_dir = config.data_directory()?;
 
+    // The database, opened before anything that reads a row out of it — which
+    // on this path is the membership below, and through it the identity. Every
+    // other reader of it is a route, and no route is answered until the serve
+    // at the foot of this function.
+    let pool = open_database(&database(&data_dir)).await?;
+
+    // And who this device is linked to, which is the rows that database keeps —
+    // see [`peer::Members`]. The peer listener's gate asks it whether a caller
+    // is one, the Devices section of the Remote access pane asks it for a row
+    // apiece, and the identity below asks it the third question.
+    //
+    // Which is why it is read here rather than beside the listeners it is
+    // handed to: a certificate near its expiry is made again at a start, and
+    // whether the new one can be presented straight away is whether any member
+    // is owed an announcement of it. That is also what puts the database open
+    // above it rather than beside the router: a membership that reads rows
+    // cannot be built before there is anything to read.
+    let members = peer::Members::recorded(pool.clone());
+
+    // And the joins in flight, which are what puts a row in that membership: a
+    // link asked for and not yet settled, kept on both sides of the asking —
+    // see [`peer::joining::Joins`]. Rows rather than memory, so that a restart
+    // inside the ten minutes a request is held for is a question still being
+    // held rather than one silently dropped.
+    let joins = peer::joining::Joins::recorded(pool.clone());
+
+    // And the stream this device's open workbenches hear what moved on. Made
+    // here rather than inside the router, because this is the one start with two
+    // listeners on it and a join arriving on the peer one has to reach a page
+    // served by the other: the modal that asks this human about a device is
+    // raised wherever they happen to be looking — see [`nudge`].
+    let nudges = nudge::Nudges::new();
+
+    // And what this Verkstead is, which is read out of that directory or
+    // invented into it: the device id every record and URL in a cluster names it
+    // by, and the self-signed certificate a link is made of (ADR-0020) — see
+    // [`device`]. Both are on the startup line below, the fingerprint because it
+    // is what two machines are checked against each other by.
+    //
+    // This is also where the expiry is seen to. A certificate with less than
+    // thirty of its ninety days left is made again here, and with no member
+    // owed an announcement of the new one the changeover is over before the
+    // line below is printed — see [`device::Changeover`], which is what says
+    // which of those happened.
+    let device = device::Device::issued(&data_dir, &members)
+        .await
+        .with_context(|| {
+            format!(
+                "keeping this device's id and certificate in {}",
+                data_dir.display()
+            )
+        })?;
+
+    // And the Conversations of a database written before the sidebar was ordered
+    // by a Rank, ranked in the order that sidebar has been drawing them in — see
+    // [`store::rank_the_conversations`]. Here rather than inside the open, which
+    // is the one rewrite that cannot be: a rank carries the device that issued
+    // it, and the identity above is read out of the very pool the open is
+    // running on. So it goes at the first moment both are in hand, and before
+    // the routes are stood up at the foot of this function: a sidebar answered
+    // ahead of it would be one with rows nothing could drag.
+    store::rank_the_conversations(&pool, device.id())
+        .await
+        .context("ranking the Conversations of a database written before there were ranks")?;
+
+    // And the key each of them was born under, stamped on every Conversation
+    // that has none: this device's id and the row's own, which is what a
+    // Conversation that has never moved has (ADR-0020, *Transfer*) — see
+    // [`store::stamp_the_births`]. Here for the reason the ranking above is
+    // here, and before the routes for the same one: a sidebar answered ahead of
+    // it would be a merged list with rows nothing could tell from a copy of
+    // somebody else's work.
+    store::stamp_the_births(&pool, device.id())
+        .await
+        .context("stamping the Conversations of a database written before there were birth keys")?;
+
+    // And the listener that presents it, taken now: the peer port is the second
+    // address this start claims, and one somebody else is already on is a
+    // misconfiguration to refuse here rather than a Verkstead that comes up
+    // answering the workbench and nothing else (ADR-0020) — see [`peer`]. Right
+    // behind the device, because the certificate it stands behind is the one
+    // that was just read: a start that got an identity it cannot present is one
+    // to stop at the file a human could delete.
+    let peer = peer::Listener::bound(config.peer_listen, &device)?;
+
     // And where a session's HOME comes from, which wants the Data Directory
     // above on the platform that makes a real one under it — see
     // [`sandbox::Homes`]. Refused for the reason the binds are: a HOME the unit
@@ -1462,8 +2224,6 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
     // held.
     sandbox::hold_session_path(&settings);
 
-    let pool = open_database(&database(&data_dir)).await?;
-
     listener
         .set_nonblocking(true)
         .context("putting the listening socket into the mode the runtime reads it in")?;
@@ -1531,11 +2291,26 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
     // that hands the link over itself says the address alone here, because its
     // log is a file on a desk that a menu item opens — see
     // [`key::HandsOverTheLink`].
+    //
+    // And what this Verkstead is, on the same line: `device=` is the id every
+    // record and URL in a cluster names it by, and `fingerprint=` is what
+    // another machine's operator checks this one against by eye — the two
+    // together are what makes an identity something an operator can see rather
+    // than something two servers agree about privately (ADR-0020).
+    //
+    // And `peer_listen=` beside the workbench's own address, because they are
+    // two listeners rather than one: it is what another device dials to link to
+    // this one, said as the socket really landed rather than as it was asked
+    // for.
     tracing::info!(
         listen = %config.listen,
+        peer_listen = %peer.address(),
         workbench = %hands_over.startup_line(config.listen, &key),
         data_dir = %data_dir.display(),
+        device = %device.id(),
+        fingerprint = %device.fingerprint(),
         update_check = config.releases().is_some(),
+        advertising = config.advertises(),
         home = %homes.servers().display(),
         sandbox_binds = binds.count(),
         build_cache = ?cache.dir(),
@@ -1544,6 +2319,34 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
         verkstead = ?verkstead.as_ref().map(sandbox::Executable::path),
         "verkstead is listening",
     );
+
+    // And what this start did about the certificate's expiry, on a line of its
+    // own rather than as a field on the one above — for the reason the pipe
+    // below is: a changeover is a handful of days in a certificate's life, and
+    // a field saying *not due* at every other startup would be a line about
+    // nothing (ADR-0020) — see [`device::Changeover`].
+    //
+    // Both fingerprints where there are two of them, because over a changeover
+    // that is the only way anybody tells which of the two a peer met: the one
+    // going out is still what the handshake presents, and the one coming in is
+    // what every member has to be told before it can.
+    match device.changeover() {
+        device::Changeover::NotDue => {}
+
+        device::Changeover::NobodyToTell => tracing::info!(
+            fingerprint = %device.fingerprint(),
+            "this device's certificate was near its expiry and has been made again, \
+             and there was no member to announce the new fingerprint to",
+        ),
+
+        device::Changeover::YetToTell(owed) => tracing::info!(
+            fingerprint = %device.fingerprint(),
+            incoming = %device.incoming_fingerprint().unwrap_or_default(),
+            owed,
+            "this device's certificate has been made again and is waiting on members to \
+             acknowledge the new fingerprint, so the old one is still what it presents",
+        ),
+    }
 
     // The pipe on a line of its own rather than as a field on the one above:
     // the other platforms have no pipe, and a field saying so at every startup
@@ -1563,8 +2366,144 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
     #[cfg(windows)]
     let reachable = reachable.piped(pipe.asked_through());
 
-    let app = router_with_ui(
-        pool,
+    // Whatever `tailscale` this machine has, which two of the readings below run
+    // and one of them presses: where this device is on the tailnet, which nodes
+    // of that tailnet are up, and the pane's own four things. The port it is
+    // built with is the one the workbench bound — a serve is this workbench's when
+    // it proxies there — which is nothing the two readings ask about.
+    //
+    // One handle rather than three, because it is one daemon on one machine asked
+    // three questions; the pane's own is built again below, that one holding the
+    // Workbench Key and a way to escalate and being the only one of them that
+    // does anything to the machine.
+    let tailscale = remote::Tailscale::on_path(config.listen.port());
+
+    // And the machine this device is on, read at each answer rather than held
+    // from here: the hostname it is shown under, the word for its OS, and every
+    // address a peer could reach it on — see [`device::reading`]. Through the
+    // handle above, because the tailnet half of those addresses is the same
+    // `status --json` the Remote access pane stands on.
+    //
+    // One handle rather than one per listener, because the two listeners
+    // describe one machine: what a peer reads off the identity endpoint and
+    // what the Devices section of the Remote access pane draws are the same
+    // answer told to two different askers.
+    let reading = device::reading::Reading::of_this_machine(tailscale.clone());
+
+    // And what this device says about itself on the LAN, so that a Verkstead on
+    // the next desk can draw a row for it with nobody typing an address
+    // (ADR-0020) — see [`discovery`]. Four things: the device id, the name and
+    // the OS word out of the reading above, and the port the peer listener
+    // *landed* on rather than the one the configuration asked for — a `:0` is a
+    // port the operating system chose, and an advertisement naming any other
+    // number is one nothing can be dialled at.
+    //
+    // Registered here rather than beside the bind, because this is where the
+    // reading is: the machine a discovered row draws and the machine the
+    // identity endpoint answers for are one answer told to two askers.
+    let advertisement = discovery::Advertisement::of_this_device(
+        config.advertises(),
+        &discovery::Announcement::of(&device, &reading, peer.address().port()),
+    );
+
+    // And the signal an ordered stop arrives as, listened for from here rather
+    // than from the moment it is awaited: one that arrives before the handler is
+    // in place is one that kills the process, and what would be lost with it is
+    // the goodbye that takes the row above off every other machine's list at
+    // once — see [`discovery::ToldToStop`].
+    let mut stopping = discovery::ToldToStop::listening();
+
+    // And this device's cluster as something to *do* things to rather than to
+    // read: the Devices section's presses go through it, and so does the one thing
+    // in a cluster that nobody presses at all — the announcement of a certificate
+    // this start made again, below.
+    let devices = device::Devices::of(
+        device.clone(),
+        reading.clone(),
+        members.clone(),
+        joins.clone(),
+    )
+    // And the other half of the discovery above: a browse of the same service,
+    // which is what the Discovered list under those rows is drawn from. Started
+    // by the first read of that list rather than here — a server nobody is
+    // looking at browses nothing — and dropped again once nothing has read it
+    // for a spell, which is what the reading being read is the only signal for
+    // (ADR-0020) — see [`discovery::Browse`]. An open pane re-reads on an interval
+    // of its own to keep it, a browse that hears nothing new having nothing to
+    // announce and so nothing to prompt the next read with.
+    //
+    // The nudges, because a browse is the one reading here that answers before
+    // it knows: a cold one has heard nothing, so the rows arrive over the seconds
+    // after the pane was drawn and each of them is a word to the open pages.
+    //
+    // Not behind the advertising switch. What that turns off is what this machine
+    // *says* about itself on a LAN that may not be the human's; hearing the
+    // devices whose operator chose to say something is the other half, and a
+    // machine that has been told to keep quiet has not been told to go deaf.
+    .browsing(discovery::Browse::of_this_device(nudges.clone()))
+    // And the tailnet half of the same list, which is asked rather than heard:
+    // there is no multicast on a tailnet for an advertisement to go out over, so
+    // what finds a device there is the peers `tailscale status` names, each asked
+    // on the peer port what it is as the list is read (ADR-0020) — see
+    // [`discovery::Probe`]. Bounded, because how many nodes a tailnet has is
+    // somebody else's decision.
+    //
+    // Not behind the advertising switch either, and for the same reason the browse
+    // is not: what that turns off is what this machine *says* about itself, and a
+    // machine told to keep quiet has not been told to stop looking.
+    .probing(discovery::Probe::of_this_tailnet(tailscale));
+
+    // Which is where the changeover above is picked up. A start that re-issued the
+    // certificate owes every member the new fingerprint, and until they hold it
+    // the old one is what goes out — so without this the day this device began
+    // presenting the new one would be the day every link it holds stopped working
+    // (ADR-0020) — see [`device::Devices::announce_renewal`], which does nothing
+    // at all at every other start.
+    //
+    // **In a task rather than waited on**, and before the serve rather than after
+    // it: a member that is switched off costs a dial's patience apiece down its
+    // addresses, and a start that would not finish coming up until somebody's
+    // laptop had answered would be a changeover costing exactly the call it exists
+    // not to cost. The serve below never returns, so anything after it would never
+    // run.
+    tokio::spawn({
+        let devices = devices.clone();
+
+        async move { devices.announce_renewal().await }
+    });
+
+    // And the news coming the other way: one Nudge stream held to each member,
+    // with everything down it announced locally under the device it came from, so
+    // that a page drawing a member's Conversation hears about a Set answered over
+    // there without a poll and without a reload (ADR-0020, *The opened device
+    // relays*) — see [`relaying::freshness`].
+    //
+    // **In a task rather than waited on**, and before the serve, for the reasons
+    // the changeover above is both: what it does first is dial every member, some
+    // of which are laptops that are shut, and the serve below never returns. It
+    // never returns either — a stream let go of is one taken up again, which is
+    // what makes a member that was off a member that comes back.
+    tokio::spawn({
+        let devices = devices.clone();
+        let nudges = nudges.clone();
+
+        async move { devices.stay_fresh(nudges).await }
+    });
+
+    // And the cluster left where a notification can reach it, which is the one
+    // thing in a cluster that is set off from the far end of the tree: a stop, a
+    // rescue or a roadmap moving on sends a push, and in a cluster it owes the
+    // same sentence to every member so that a phone installed from any one device
+    // hears from all of them (ADR-0020, *The opened device relays*) — see
+    // [`push::hold_the_cluster`], which says why it is held rather than threaded
+    // through a session's relay loop.
+    push::hold_the_cluster(&pool, &devices);
+
+    let Routers {
+        workbench: app,
+        over_the_link,
+    } = routers_with_ui(
+        pool.clone(),
         config.releases(),
         data_dir,
         Agents::new(
@@ -1596,28 +2535,74 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
         // — see [`onboarding::install`]. One handle rather than two, because it
         // is one dialog on one machine.
         escalation,
+        // And what this Verkstead is, which the Devices section of the Remote
+        // access pane draws: the same device, machine and membership the peer
+        // listener below answers a stranger out of — see [`device::Devices`].
+        // The browser cannot read the identity endpoint itself, that listener
+        // presenting a certificate nothing but another Verkstead has a reason
+        // to trust, so the answer is assembled over here as well.
+        devices,
+        nudges.clone(),
     );
 
-    // Two listeners over one router here, so that everything a request can ask
-    // for over the socket it can ask for over the pipe. Either one ending is
-    // the server ending: there is no graceful shutdown — the process stopping
-    // is the whole of stopping — so a half that has stopped answering is a
-    // Verkstead that has stopped serving.
+    // And what the peer listener answers, which is a router of its own rather
+    // than the one above: this port is other devices' and the workbench's is
+    // the human's browser and its sessions — see [`peer`]. The member list it is
+    // gated on is the rows above: a caller presenting a recorded certificate
+    // reaches what a membership admits, and everything else is refused for not
+    // being a member's. Inside the gate is one membership said three ways — a
+    // device put on this one's list, one taken off it, and the certificate one of
+    // them stands under changed — and, beside them, the viewer's own namespace
+    // over the state the workbench answers out of, which is what makes this
+    // device's whole workbench reachable through a member (ADR-0020, *The opened
+    // device relays*). Outside the gate are the identity endpoint and the two
+    // routes a join is made of, which stand there because a join comes from a
+    // non-member.
+    let peers = peer::router(device, reading, members, joins, nudges, over_the_link);
+
+    // The workbench and the peer listener together, and on Windows the named
+    // pipe beside them: everything a request can ask for over the socket it can
+    // ask for over the pipe, and a peer asks over neither. Whichever ends first
+    // is the server ending — there is no graceful shutdown, the process
+    // stopping being the whole of stopping — so a listener that has stopped
+    // answering is a Verkstead that has stopped serving.
     #[cfg(windows)]
     {
         tokio::select! {
             served = axum::serve(listener, app.clone()) => served.context("serving Verkstead"),
             served = axum::serve(pipe, app) => served.context("serving Verkstead over its named pipe"),
+            served = peer.serving(peers) => served,
+            signal = stopping.told() => stopped(signal, &advertisement).await,
         }
     }
 
-    // And the socket on its own everywhere else, there being no pipe to serve.
+    // And the socket beside the peer listener everywhere else, there being no
+    // pipe to serve.
     #[cfg(not(windows))]
     {
-        axum::serve(listener, app)
-            .await
-            .context("serving Verkstead")
+        tokio::select! {
+            served = axum::serve(listener, app) => served.context("serving Verkstead"),
+            served = peer.serving(peers) => served,
+            signal = stopping.told() => stopped(signal, &advertisement).await,
+        }
     }
+}
+
+/// The ordered stop: the advertisement withdrawn, and then this server ending
+/// the way it always did.
+///
+/// **The one thing this process does on its way out, and the only reason it has
+/// a way out at all.** A row on another machine's **Discovered** list runs out
+/// on its own TTL, which is what covers a killed server and a lid that shut —
+/// this is what makes a restart tidy rather than what makes a stale row
+/// impossible. Nothing else is drained, stopped or closed in order: no request
+/// waits, no session is asked to finish, and the listeners go with the process.
+async fn stopped(signal: &str, advertisement: &discovery::Advertisement) -> Result<()> {
+    tracing::info!(signal, "verkstead has been asked to stop");
+
+    advertisement.withdrawn().await;
+
+    Ok(())
 }
 
 #[cfg(test)]

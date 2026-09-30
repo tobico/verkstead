@@ -61,3 +61,46 @@ pub enum Subscribed {
 pub struct Unsubscribe {
     pub endpoint: String,
 }
+
+/// What a device tells each of its members when it has something worth a phone
+/// (ADR-0020, *The opened device relays*).
+///
+/// **Not a viewer type.** This one crosses the peer listener rather than the
+/// workbench, like [`crate::RenewedCertificate`] beside it: it is one Verkstead
+/// telling another what has just happened to a piece of its work, so that a
+/// phone installed from one device hears from the whole cluster and a lock
+/// screen says which machine the work was on. No browser ever reads it.
+///
+/// **What travels is what the far end needs to title it and route a tap**, and
+/// nothing more. The sentence the sender would have shown, the repository that
+/// stands under it, and which Conversation it is about — the *device* is not on
+/// it, because the certificate the caller presented at the handshake is what
+/// says which device this is, and a member passing on what a third one told it
+/// would be saying that news was its own.
+///
+/// **Prose rather than a variant to match on.** The kind of news is decided
+/// where it happens and written into `said` there — see `News::title` in
+/// `crates/server/src/push.rs`, where every title in the cluster is written. So
+/// a news kind a newer member has and this one has not still reads: what arrives
+/// is a sentence, and the receiver has only to put a device in front of it.
+///
+/// **And the path is not on it either.** The receiver composes one onto its own
+/// device segment from `conversation`, because a path taken verbatim would open
+/// the receiver's Conversation of the same number — ids being each device's own,
+/// which is the collision a cluster's URLs are addressed by device for.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RelayedNews {
+    /// Which Conversation of the sender's it is about, by that device's own id
+    /// for it — the number the receiver writes into
+    /// `/devices/{device}/conversations/{id}` and nothing it looks up.
+    pub conversation: i64,
+
+    /// The sentence the sender would have shown on its own lock screen, with no
+    /// device in front of it: the receiver is what puts one there.
+    pub said: String,
+
+    /// And the repository the work is in, where the sender knows it — which is
+    /// the one thing that tells two notifications apart at a glance, and stands
+    /// under the title here exactly as it does under a local one.
+    pub project: Option<String>,
+}

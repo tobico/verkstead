@@ -72,6 +72,7 @@ import {
   profileOpened,
 } from "../src/settings/openings";
 import head from "../src/workbench/PaneHead.module.css";
+import { rowKey } from "../src/reaching";
 import notices from "../src/notices.module.css";
 import { SET_UP, drawn } from "./bench";
 import { json, serving, whenever } from "./serving";
@@ -115,6 +116,11 @@ const CLEANUP = {
   trim: { enabled: true, days: "5" },
   delete: { enabled: true, days: "90" },
 };
+
+/// And how much Verkstead runs at once as a save puts it back: both numbers as
+/// the strings a form holds, carried by every section for that reason again —
+/// see [`heldAtOnce`].
+const AT_ONCE = { roadmap_stages: "1", conversations: "2" };
 const PROFILES = profiles as ProfileEntry[];
 const REPOS = repos as RepoEntry[];
 const FIRST_REPO = REPOS[0]!;
@@ -502,6 +508,7 @@ describe("saving", () => {
         // author.
         ...LANGUAGES,
         cleanup: CLEANUP,
+        at_once: AT_ONCE,
         conflict_resolution: TOLD.conflict_resolution,
         share_on_done: TOLD.share_on_done,
         ...PATHS,
@@ -741,6 +748,7 @@ describe("replacing and clearing the token", () => {
         // with — see the sections below it for what does change these.
         languages: TOLD.languages,
         cleanup: TOLD.cleanup,
+        at_once: TOLD.at_once,
         conflict_resolution: TOLD.conflict_resolution,
         share_on_done: TOLD.share_on_done,
         paths: TOLD.paths,
@@ -769,6 +777,7 @@ describe("replacing and clearing the token", () => {
         mcp_servers: "Keep",
         ...LANGUAGES,
         cleanup: CLEANUP,
+        at_once: AT_ONCE,
         conflict_resolution: TOLD.conflict_resolution,
         share_on_done: TOLD.share_on_done,
         ...PATHS,
@@ -1172,6 +1181,7 @@ describe("sharing on Done", () => {
         // included.
         ...LANGUAGES,
         cleanup: CLEANUP,
+        at_once: AT_ONCE,
         conflict_resolution: TOLD.conflict_resolution,
         ...PATHS,
         // And the text every session is given, likewise: what is sent is what the
@@ -1291,6 +1301,7 @@ describe("how a conflict is resolved", () => {
         share_on_done: TOLD.share_on_done,
         ...LANGUAGES,
         cleanup: CLEANUP,
+        at_once: AT_ONCE,
         ...PATHS,
         // And the text every session is given, likewise: what is sent is what the
         // file holds afterwards, so a save that left it out would clear it.
@@ -1468,9 +1479,12 @@ describe("the settings page", () => {
   it("opens a conversation from the pane beside it", async () => {
     const { container, history } = thePage();
 
+    // A row is a Conversation and a device, the sidebar being merged from the
+    // whole cluster — and this fixture is a lone device's (see `reaching.ts`).
+    const at = `[data-row="${rowKey(null, SIDEBAR[0]!.id)}"]`;
     const row = await drawn<HTMLElement>(
       container,
-      `[data-id="${SIDEBAR[0]!.id}"] [role="button"], [data-id="${SIDEBAR[0]!.id}"] button`,
+      `${at} [role="button"], ${at} button`,
     );
     fireEvent.click(row);
 

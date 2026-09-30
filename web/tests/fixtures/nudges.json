@@ -34,6 +34,18 @@
     "kind": "repos"
   },
   {
+    "kind": "joins"
+  },
+  {
+    "kind": "devices"
+  },
+  {
+    "kind": "discovered"
+  },
+  {
     "kind": "profiles"
+  },
+  {
+    "kind": "everything"
   }
 ]

@@ -106,7 +106,7 @@ use verkstead_render::{
 };
 
 use crate::github::Gh;
-use crate::platform::{Environment, Platform};
+use crate::platform::{Environment, Platform, hostname};
 use crate::remote::Elevate;
 use crate::settings::Settings;
 use crate::unseen::Unseen;
@@ -209,32 +209,11 @@ const NO_XCODE_SELECT: &str = "the git a session would run is the stub Apple shi
      xcode-select on this machine's PATH to ask whether the command line tools behind it are \
      installed";
 
-/// What a machine calls itself when it will not say, and what a stated one is
-/// called until a test says otherwise — see [`Machine::called`].
-///
-/// The sentence it goes in is *waiting for the password dialog on …*, so what
-/// stands in for a name is the thing that sentence is pointing at.
-const NAMELESS: &str = "this machine";
-
-/// And what a stated machine is called, which is a name nobody's box has: what
+/// What a stated machine is called, which is a name nobody's box has: what
 /// a test asserts about is what the server made of what it was told, and a
 /// hostname read off the box the suite is on would be a golden fixture nobody
 /// could commit.
 const STATED: &str = "a-machine";
-
-/// What this box calls itself, or [`NAMELESS`] where it will not say.
-///
-/// Read at the edge with everything else about the machine — see
-/// [`Machine::here`] — and never again: a hostname is a fact about the box
-/// rather than about a request, and the one sentence that needs it is written
-/// while somebody is waiting for a dialog.
-fn hostname() -> String {
-    hostname::get()
-        .ok()
-        .map(|name| name.to_string_lossy().into_owned())
-        .filter(|name| !name.trim().is_empty())
-        .unwrap_or_else(|| NAMELESS.to_owned())
-}
 
 /// What this machine says about [`ARM64`], where it is a machine with an
 /// opinion — which is a Mac and nothing else.
@@ -658,6 +637,37 @@ impl Machine {
         stood(self.reaches(program))
     }
 
+    /// And whether one harness is on this machine, which is the same probe
+    /// asked as a yes or a no.
+    ///
+    /// **The wizard's own finding, borrowed.** A **mirror** of a member's
+    /// Profile names a harness this device may simply not have, and a row that
+    /// said so in words of its own would be a second vocabulary for a fact the
+    /// dependencies step already has one for. So it is this probe, under the
+    /// name a session of that type is launched as, and the row reads in that
+    /// step's word — see `crate::profiles::broken`.
+    ///
+    /// Blocks: one `PATH` walk, which is why every caller is already off the
+    /// runtime.
+    pub(crate) fn harness(&self, agent_type: store::AgentType) -> bool {
+        present(&self.installed(sessions::binary(agent_type)))
+    }
+
+    /// And every one of them, which is what a device answers a member asking
+    /// what could be launched here at all — see [`crate::peer::harnesses`].
+    ///
+    /// **The dependency step's own list**, walked in the order those rows are
+    /// drawn: a second spelling of *the four harnesses* is a list that would go
+    /// out of step with the one the wizard installs from.
+    ///
+    /// Blocks: one `PATH` walk apiece.
+    pub(crate) fn harnesses(&self) -> Vec<(store::AgentType, bool)> {
+        HARNESSES
+            .iter()
+            .map(|(_, agent_type)| (*agent_type, self.harness(*agent_type)))
+            .collect()
+    }
+
     /// The `PATH` a session searches, which on the machine this server is
     /// running on is composed now rather than read off a field — see
     /// [`Machine::path`] for why that one has none held, and
@@ -1052,6 +1062,18 @@ impl Onboarding {
         }
     }
 
+    /// The machine this server probes, for the one reader of it that is not
+    /// the wizard.
+    ///
+    /// Whether a harness is on this machine is the dependencies step's own
+    /// question, and a **mirror** of a member's Profile has to ask it too — see
+    /// [`Machine::harness`], and `crate::profiles::broken`, which is where a
+    /// row of a type this device has not got is read as broken in that step's
+    /// word.
+    pub(crate) fn machine(&self) -> &Machine {
+        &self.machine
+    }
+
     /// The whole of what the wizard is drawn from, read now.
     ///
     /// The probes and the store together, because the steps are the one thing
@@ -1310,7 +1332,25 @@ async fn steps(
 
     Ok(StepsView {
         dependencies: dependencies_met(dependencies),
+
+        // **A mirror counts, however it was made.** What this step asks is
+        // whether there is an account for a session to run under, and a
+        // member's Profile is one: the login and the configuration a Built Root
+        // is made from are fetched from the device it is at home on before
+        // every launch, which is the whole of what ADR-0020's *Shared Profiles*
+        // is for. A device with nothing but mirrors runs sessions, so a rule
+        // that wanted one of this device's own would hold the wizard open over
+        // a machine that works — and the objective is what Onboarding Mode is
+        // decided off, so it would hold the machine at `/setup` after the next
+        // start rather than merely leave a tick off.
+        //
+        // Every row rather than every runnable row, for the reason the harness
+        // probes are not asked here either: whether a mirror's home is
+        // answering is a fact about this moment, and a verdict that moved with
+        // the network would take a Verkstead in and out of the wizard as a
+        // laptop's lid opened.
         accounts: !profiles.is_empty(),
+
         git: author.name().is_some() && author.email().is_some(),
     })
 }

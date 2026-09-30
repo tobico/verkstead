@@ -406,7 +406,38 @@ flowchart LR
   there are **no
   per-commit review states**; commits are viewable events, and the wrap-up
   phase is where problems get raised. The next stage starts only after
-  wrap-up completes.
+  wrap-up completes. *Refined 2026-09-29, building
+  parallel-stages/04-the-scheduler*: what a settling wrap-up starts is **every
+  stage of its roadmap whose dependencies have settled**, rather than the one
+  after it — the order is no longer the schedule. A roadmap declares what each
+  stage stands on, on the stage's own line in `ROADMAP.md`, read afresh off the
+  top of its chain at every start; **a roadmap that declares nothing runs
+  strictly in order** exactly as it always did, each stage standing on the one
+  before it, so there is one scheduler rather than two. How many run together is
+  a setting — three stages of one roadmap unless somebody says otherwise — and a
+  stage waiting on the human or waiting to join takes a place. A stage that
+  halts **before it has joined** holds up only the stages that stand on it,
+  where one halted after it has joined holds up every later join. So a wrap-up
+  still starts nothing until it completes, and it is no longer the only thing a
+  stage is waiting for. *Refined 2026-09-29, building
+  parallel-stages/05-the-server-wide-limit*: *how many run together* is **two
+  settings rather than one** — three stages of one roadmap, and **four
+  Conversations across the whole server**, whatever roadmap or Process those
+  belong to, so that one roadmap cannot take the whole server by default. Both
+  are in force and a stage that starts spends one of each: a place on the server
+  is taken by every Conversation with a session running or a driver registered,
+  of any kind, so a grilling and a Review being worked beside a roadmap stand in
+  front of its next stage as its own siblings do. **Only what Verkstead starts
+  by itself is held back** — a press goes ahead over the limit and what it made
+  is counted from then on — and **waiting for a place is a third way a stage is
+  neither started nor halted**, beside waiting on a dependency and waiting to
+  join. A place comes free when a Conversation of any kind finishes or stops,
+  which is not a settle, so the server looks over the roadmaps it is driving as
+  one comes free — with a slow look behind that for the ways one can come free
+  unannounced — and starts what waited, oldest roadmap first. The halted
+  stage is where the two limits part: it keeps its place under its own roadmap's
+  until it is Resumed or closed, and holds none on the server, nothing being
+  left running or driving it. See [ADR-0021](../adr/0021-parallel-stages.md).
 - **Stages always stack.** The next stage's branch stacks on the unmerged
   predecessor (`gh stack`), per the repo's stacked review process — *refined
   2026-08-21, building stage 04*: per the mechanism that repo **records**, in
@@ -425,7 +456,28 @@ flowchart LR
   no block is recorded the pull request carries the stage before it until that
   one merges, and the timeline says so — still no convention invented on the
   repo's behalf, because the one thing Verkstead decides here is the one thing
-  it always decided.
+  it always decided. *Refined 2026-09-29, building
+  parallel-stages/03-joining-the-chain*: the predecessor stops being what a
+  stage stands on. A roadmap is **one chain of branches in the order its stages
+  finish** — its bottom the roadmap's own branch while that is unmerged — and a
+  stage is **cut from the highest settled stage in that chain**, so it is built
+  on everything the roadmap has finished rather than on the one stage in front
+  of it. **The join is at the finish**: a stage whose tasks are all done waits
+  until every stage already in the chain has settled, rebases onto the top of
+  it, and only then pushes and opens its pull request. So no pull request
+  anybody has started reading is ever rewritten — a stage is rebased once,
+  before it has one — and what it costs is that the joins are the one thing a
+  roadmap does in single file. Where the branch starts and what it ends up
+  stacked on are two facts now, settled a stage apart; the block still decides
+  what the session does about the pull request, and the rebase happens block or
+  no block. In a roadmap run in order the top of the chain is what the stage was
+  cut from, the rebase moves nothing, and nobody sees a difference. *Refined
+  2026-09-29, building parallel-stages/04-the-scheduler*: **running in order is
+  now one of the two ways a roadmap runs** rather than the way every roadmap
+  runs. It is what a roadmap that declares nothing gets, and what a declared one
+  gets wherever its declarations happen to form one line; a declared roadmap
+  running its stages side by side is the case the chain and the join were built
+  for, and it is now reachable.
 - **The brief freezes at grill start.** A later round adds a new brief
   event rather than editing the old one. Until then it is edited where it
   stands, with no mode to enter and no Save to press (*settled 2026-08-24,
@@ -945,14 +997,46 @@ Timeline events:
   rows existed are not backfilled: they keep their pinned cards alone.
 - **A checklist card shows five entries, not all of them** (*settled
   2026-08-28, building design-fixes*): the task list and the stage list window
-  to five real entries centred on the first one that is not done, held inside
-  the list's ends — none of ten done shows 1–5, five of ten shows 4–8, nine of
-  ten shows 6–10, and a list with every box ticked shows its last five. A plain
-  ellipsis row marks whichever end has entries out of sight, and does not count
-  against the five. A card that grew with the backlog would push the record it
-  is pinned above off the screen; the progress line on it still counts the whole
-  list, and the details pane it opens still holds every entry, which is where
-  the whole list is read.
+  to five real entries around the places the work is at, held inside the list's
+  ends — none of ten done shows 1–5, five of ten shows 4–8, nine of ten shows
+  6–10, and a list with every box ticked shows its last five. A plain ellipsis
+  row marks whichever end has entries out of sight, and does not count against
+  the five. A card that grew with the backlog would push the record it is pinned
+  above off the screen; the progress line on it still counts the whole list, and
+  the details pane it opens still holds every entry, which is where the whole
+  list is read. **Where the work is at is one place on a backlog and as many as
+  a roadmap has stages in flight** (*refined 2026-09-30, building
+  parallel-stages/06-every-stage-in-flight*): the first entry that is not done
+  while nothing is in flight, which is every backlog and a roadmap nobody is
+  running, and otherwise every stage the record has a Conversation on — in
+  progress, waiting to join or halted — none of which is dropped to hold the
+  card at five, three stages running being three rows whatever gives way for
+  them. What is left of the five goes on closing the gaps between them and then
+  on their neighbours, and stages too far apart to join up are drawn as
+  stretches with an ellipsis row saying what is out of sight between them as
+  well as at the ends. Neither of the two waits nothing has started is in
+  flight, and for the one reason: what each of them waits for is somewhere else.
+  A stage waiting on another waits on the work the card is already showing; a
+  stage waiting for a place waits on the machine, and a wide roadmap on a busy
+  server has as many of those as it has roots, so a card keeping a row for each
+  would grow with the queue — which is the one thing the window is there to
+  stop. Both are drawn where the window reaches them, as the neighbours they
+  are, and both say their own word when it does. **And a stage's row leads
+  to the Conversation working it** (*settled 2026-09-30, building
+  parallel-stages/06-every-stage-in-flight*), which is the one place a card in
+  this app has a second target on it: everywhere else the whole surface is the
+  one press, and a pull request's way out to GitHub was taken off its card for
+  exactly that. What earns it here is that the card is a list of work rather
+  than one thing — a reader following a roadmap wants the Conversation a stage
+  is being worked in, not a brief they have read — and the target is the row,
+  which is the thing they were already reading. Which Conversation a stage is,
+  is the record's, off the same row its state came from, so a row cannot lead to
+  one Conversation while saying where another had got to; every standing the
+  record holds keeps its link, a settled stage's being where its pull request
+  and its review are. A stage the record holds no row for — one nothing has
+  started, one worked by hand or by the old tools — is not a press, and the card
+  under it opens the roadmap as it does from its head and from everywhere else
+  on it.
 - **A session's liveness is a mark rather than a word**, and the same mark
   everywhere it is said — the sidebar card, the agent-output row and the
   details pane above the record. A slowly turning ring while the session is
