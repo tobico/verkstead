@@ -54,6 +54,7 @@ import {
 } from "../directions";
 import { ErrorLine, Note } from "../notices";
 import { keyOf, useDevice } from "../reaching";
+import { rowPress } from "../rows";
 import styles from "./Answering.module.css";
 import { AskText } from "./AskText";
 import { Postscript } from "./Postscript";
@@ -461,7 +462,7 @@ function Choosing(props: {
                   class={page.direction}
                   classList={{ [page.recommended!]: recommended() }}
                 >
-                  <label>
+                  <label onClick={rowPress(() => props.pick(offered))}>
                     <input
                       type="radio"
                       id={`direction-${offered}`}
@@ -470,8 +471,10 @@ function Choosing(props: {
                       checked={props.picked() === offered}
                       // Both gestures, for the reason an Option answers
                       // both: an arrow key fires a change and never a click,
-                      // and a click on what is already picked fires a click
-                      // and never a change.
+                      // and a click on the radio itself when it is already
+                      // picked fires a click and never a change. A press
+                      // anywhere else in the row is the row's own — see
+                      // [`rowPress`].
                       onChange={() => props.move(offered)}
                       onClick={() => props.pick(offered)}
                     />
@@ -512,6 +515,10 @@ function Choosing(props: {
 /// between: it is on or it is off, and a second click takes it off again — the
 /// clearing an Option needs a rule of its own for.
 ///
+/// The row is pressed the way every other row on the sheet is — see
+/// [`rowPress`] — so the tick is the row's own doing wherever the press landed,
+/// and the box's `change` answers only a press on the box.
+///
 /// And it says what ticking does, for the reason the direction chooser does:
 /// what a control means has to be on the control, rather than left to whatever
 /// the agent happened to write above it.
@@ -522,7 +529,7 @@ function NothingElse(props: {
 }): JSX.Element {
   return (
     <section class={page.ending}>
-      <label>
+      <label onClick={rowPress(() => props.tick(!props.ticked()))}>
         <input
           type="checkbox"
           id="nothing-else"
@@ -690,6 +697,8 @@ function Asking(props: {
 /// load, so an unread Recommendation cannot be submitted by accident. Clicking
 /// the selected Option clears it, which puts the question back to unanswered and
 /// so back into the warning before submit.
+///
+/// The row carries the press itself — see [`rowPress`], which is why.
 function Offered(props: {
   option: OptionView;
   group: string;
@@ -707,7 +716,7 @@ function Offered(props: {
   // it is everywhere else.
   return (
     <li class={marks(props.option)}>
-      <label>
+      <label onClick={rowPress(() => props.fields.pick(n()))}>
         <input
           type="radio"
           id={`${props.group}-${n()}`}
@@ -716,14 +725,19 @@ function Offered(props: {
           checked={props.fields.selected() === n()}
           // Both, because they answer different gestures. An arrow key moves the
           // selection and fires a change without ever firing a click; a click on
-          // the Option already selected is the other way round — the browser
-          // fires no change, because as far as it is concerned nothing changed.
+          // the radio itself — by pointer or by the space bar — is the other way
+          // round when it lands on the Option already selected, the browser
+          // firing no change because as far as it is concerned nothing changed.
           // Space is a click here too, which is what gives the keyboard the
           // clearing.
           //
           // The click runs before the change, so it still sees what the question
           // held before this gesture — which is the whole of how a second click
           // on the same Option is told from a first.
+          //
+          // A press that landed anywhere else in the row never reaches this one:
+          // the row's own handler has it, and cancels what the label would have
+          // forwarded here.
           onChange={() => props.fields.move(n())}
           onClick={() => props.fields.pick(n())}
         />
@@ -779,10 +793,12 @@ function Tabulated(props: {
 ///
 /// A row cannot be wrapped in a label the way a list entry is, so the click sits
 /// on the row and the radio is named by the cell holding its text — which is the
-/// accessible name a wrapping label would have given it. A click on the radio
-/// bubbles to the row like any other, so both reach the same handler exactly
-/// once, and the gestures are the list's: a click selects or clears, an arrow
-/// key only moves.
+/// accessible name a wrapping label would have given it. The gestures are the
+/// list's down to the handler they go through: a press anywhere in the row
+/// selects or clears, a press on the radio is the radio's own, and an arrow key
+/// only moves. See [`rowPress`], which is what makes the two shapes one
+/// arrangement — here there is no label and so no forwarding to cancel, and
+/// what it is here for is the focus and the link it stands out of.
 function Row(props: {
   option: OptionView;
   group: string;
@@ -795,7 +811,7 @@ function Row(props: {
   return (
     <tr
       class={marks(props.option)}
-      onClick={() => props.fields.pick(n())}
+      onClick={rowPress(() => props.fields.pick(n()))}
     >
       <td class={page.pick}>
         <input
@@ -805,9 +821,12 @@ function Row(props: {
           value={n()}
           checked={props.fields.selected() === n()}
           aria-labelledby={naming()}
-          // The click is the row's, so only the arrow key's change is answered
-          // here — see `Offered` for what the two gestures are between them.
+          // Both, exactly as the list's radio answers both — see `Offered`,
+          // which is the same two lines for the same two gestures. A press that
+          // landed anywhere else in the row is the row's own and never reaches
+          // here.
           onChange={() => props.fields.move(n())}
+          onClick={() => props.fields.pick(n())}
         />
         <span class={page.n}>{n()}</span>
       </td>

@@ -1,5 +1,6 @@
 {
   "adopting": {
+    "beside": [],
     "roadmap": "mvp",
     "stage": {
       "branch": "roadmaps/mvp/04-wrap-up",
@@ -59,6 +60,7 @@
   "trimmed": false,
   "waiting": false,
   "waiting_on_checks": false,
+  "waiting_to_join": false,
   "working": false,
   "worktree": null
 }

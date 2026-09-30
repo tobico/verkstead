@@ -14,8 +14,8 @@ use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Event, Landed, open_database, record_backlog, record_roadmap, register_repo, save_brief,
-    stage_roadmap, start_conversation, start_grilling, timeline,
+    Event, Landed, StageOf, open_database, record_backlog, record_roadmap, register_repo,
+    save_brief, stage_roadmap, start_conversation, start_grilling, timeline,
 };
 
 /// The device every Conversation started here is ranked by, named the way a
@@ -172,6 +172,11 @@ async fn there_is_nothing_to_stamp_on_a_conversation_that_is_not_there() {
 /// Writing a roadmap is choosing it — there is no other moment at which this
 /// Conversation's roadmap is settled — so the name arrives with the row saying
 /// the roadmap landed.
+///
+/// **And no stage label beside it**, which is the row saying what this
+/// Conversation is: one that wrote a roadmap rather than a stage of one. Told
+/// from no row at all, which is what a Conversation that has nothing to do with
+/// any roadmap has.
 #[tokio::test]
 async fn the_roadmap_a_branch_wrote_is_recorded_with_the_landing() {
     let (_dir, pool) = fresh_pool().await;
@@ -189,8 +194,13 @@ async fn the_roadmap_a_branch_wrote_is_recorded_with_the_landing() {
     );
 
     assert_eq!(
-        stage_roadmap(&pool, id).await.unwrap().as_deref(),
-        Some("mvp")
+        stage_roadmap(&pool, id).await.unwrap(),
+        Some(StageOf {
+            roadmap: "mvp".to_owned(),
+            stage: None,
+        }),
+        "the roadmap it wrote, and no stage of it: writing one is not being a \
+         stage of it",
     );
 }
 
@@ -230,8 +240,8 @@ async fn a_second_landing_leaves_the_recorded_roadmap_alone() {
     );
 
     assert_eq!(
-        stage_roadmap(&pool, id).await.unwrap().as_deref(),
-        Some("mvp"),
+        stage_roadmap(&pool, id).await.unwrap().map(|of| of.roadmap),
+        Some("mvp".to_owned()),
         "the first sighting is the one that settled it",
     );
 }

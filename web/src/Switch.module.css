@@ -13,6 +13,13 @@
   font-size: 0.85rem;
   color: var(--ink-soft);
   cursor: pointer;
+
+  /* And the whole row being a press, it takes no selection: a press that slid a
+     pixel over the words used to leave a character of them highlighted instead
+     of flipping anything — see `rowPress` in `src/rows.ts`, which is the other
+     half of this. The words are a setting's name and the page keeps them; there
+     is nothing here anybody copies. */
+  user-select: none;
 }
 
 .switch input {

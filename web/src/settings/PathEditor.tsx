@@ -46,7 +46,7 @@ import type {
 } from "../api/types";
 import { useReading } from "../freshness";
 import { Empty } from "../notices";
-import { heldCleanup, heldInstructions, heldPaths } from "./held";
+import { heldAtOnce, heldCleanup, heldInstructions, heldPaths } from "./held";
 import styles from "./PathEditor.module.css";
 
 /// The settings as they stand, read once for every pane that draws them — the
@@ -130,6 +130,8 @@ export function useWritingPaths() {
         },
         // And what becomes of an archived Conversation — see [`heldCleanup`].
         cleanup: heldCleanup(standing),
+        // And how much Verkstead runs at once, likewise — see [`heldAtOnce`].
+        at_once: heldAtOnce(standing),
         conflict_resolution: standing?.conflict_resolution ?? "Merge",
         share_on_done: standing?.share_on_done ?? false,
         // And the text every session is given, likewise — see
