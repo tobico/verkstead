@@ -419,13 +419,18 @@ pub(crate) fn staging(skills: &Skills, brief: &str) -> String {
 /// It arrives as the Conversation's Brief, so it is primed exactly as every
 /// other session is primed with one — see [`on_the_documents`].
 ///
-/// `stacked_on` is the predecessor's branch where this stage's branch was made
-/// on top of it, and `None` where it came off the default branch. Said because
-/// it is the one thing about the stage the session cannot read out of the
-/// repository: a branch says what it is descended from, not what somebody meant
-/// by it, and what the session does about it — registering the stack the way the
-/// repository records — turns on which of the two this is.
-pub(crate) fn next_stage(skills: &Skills, brief: &str, stacked_on: Option<&str>) -> String {
+/// `cut_from` is the branch this stage's was cut from, and `None` where it came
+/// off the default branch. Said because it is the one thing about the stage the
+/// session cannot read out of the repository: a branch says what it is
+/// descended from, not what somebody meant by it.
+///
+/// **The base rather than what it will be stacked on.** Those stopped being one
+/// fact when the join moved to the finish: a stage is cut from the highest
+/// settled branch of its roadmap's chain and joins that chain later, on top of
+/// whatever is there by then — see [`crate::joins`]. A planning session told
+/// *stacks on* would be told something its own finish contradicts, and would go
+/// and register a stack the join is about to rebuild.
+pub(crate) fn next_stage(skills: &Skills, brief: &str, cut_from: Option<&str>) -> String {
     let skill = skills.named(NEXT_STAGE);
 
     let prompt = on_the_documents(
@@ -434,13 +439,14 @@ pub(crate) fn next_stage(skills: &Skills, brief: &str, stacked_on: Option<&str>)
         None,
     );
 
-    let branch = match stacked_on {
-        Some(predecessor) => format!(
-            "This stage's branch stacks on `{predecessor}`, the branch the stage before it \
-             was worked on, which is not merged yet.",
+    let branch = match cut_from {
+        Some(base) => format!(
+            "This stage's branch was cut from `{base}`, the highest settled branch of its \
+             roadmap's chain, which is not merged yet. Where it goes in that chain is settled \
+             at this stage's finish rather than now, so there is nothing to stack here.",
         ),
-        None => "This stage's branch came off the repository's default branch, so it is not \
-                 stacked on anything."
+        None => "This stage's branch came off the repository's default branch, there being \
+                 nothing unmerged left to stand on."
             .to_owned(),
     };
 
@@ -919,6 +925,111 @@ pub(crate) fn alongside(prompt: &str, branch: &str, companions: &[store::Compani
     )
 }
 
+/// One branch of the **chain** a stage joins at its finish: the branch itself,
+/// and which stage of the roadmap it belongs to.
+///
+/// `stage` is the label the roadmap's own line gives it — `02`, with the
+/// roadmap's zero-padding kept. `None` is the **foot** of the chain, which is
+/// the branch the stage was cut from rather than a stage of the roadmap: the
+/// Conversation that wrote the roadmap, while its pull request is unmerged. See
+/// [`joining`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Link {
+    /// Which stage of the roadmap this branch is, or `None` for the branch at
+    /// the foot.
+    pub(crate) stage: Option<String>,
+
+    /// The branch, as Verkstead's own record names it.
+    pub(crate) branch: String,
+}
+
+/// The same prompt again, with the chain this stage joins listed under it —
+/// bottom to top — and the one instruction the chain is told for: the rebase
+/// comes before the push.
+///
+/// **Only the finish of a stage carries this.** A roadmap is one chain of
+/// branches in the order its stages finish, and a stage joins it at its finish:
+/// the branch is rebased onto the top of the chain, and only then pushed, opened
+/// and wrapped up. So the session that runs the finish is the one session that
+/// has to know what the chain is, and the session that runs a task is told
+/// nothing — the two are one skill and two steps, and the runner is what tells
+/// them apart.
+///
+/// **The chain is Verkstead's to say and the rebase is the session's to do.**
+/// The server recorded which stages joined and in what order, and no agent could
+/// work that out from a branch; `gh stack` is a session's to run and never the
+/// server's, and how a branch joins a stack is the target repository's
+/// `docs/agents/git-workflow.md`. So this says what the chain is and that the
+/// rebase comes first, and hands the how to the block.
+///
+/// **And where the repository records no stacking mechanism the rebase still
+/// happens.** It is Verkstead's rather than the block's: the work is built on
+/// the branch below it and a pull request opened anywhere else would be read
+/// against the wrong base. What the unrecorded case opens is an ordinary pull
+/// request carrying the stage below it until that one merges, which is the
+/// sentence already written where a stage's base is decided — see
+/// [`crate::continuing::Stands`].
+///
+/// **A stage cut from what is still the top rebases nothing**, which is every
+/// stage of every roadmap run in order: the top of the chain is what the branch
+/// was cut from, and the rebase finds it there and moves no commit. The section
+/// is written the same way either way — a session told the chain only when it
+/// had moved would have to be told that too.
+///
+/// A stage with nothing under it is the prompt unchanged: an empty heading would
+/// tell a session there was a chain to join.
+///
+/// **And the chain is the Conversation's own repository's.** A companion
+/// repository a stage commits in has a chain of its own shape and nothing joins
+/// it: its branch is left where [`crate::continuing::beside`] cut it, which is
+/// the companion of whatever this stage's own branch was cut from. That is the
+/// same branch as the top of the chain while a roadmap runs its stages one at a
+/// time, so nothing was out of place while every roadmap ran that way — and a
+/// declaring roadmap does not, so a stage that rebases onto a top above its base
+/// leaves its companion's branch behind. **Known and not yet done**, and it
+/// costs nothing until a roadmap both declares and has a companion its stages
+/// commit in. See CONTEXT's **Chain**, where the deferral is written down.
+pub(crate) fn joining(prompt: &str, chain: &[Link]) -> String {
+    let Some((top, under)) = chain.split_last() else {
+        return prompt.to_owned();
+    };
+
+    let listed: Vec<String> = chain
+        .iter()
+        .map(|link| match &link.stage {
+            Some(stage) => format!("- `{}` — stage {stage}.", link.branch),
+            None => format!(
+                "- `{}` — the branch this stage was cut from, which the chain starts at.",
+                link.branch
+            ),
+        })
+        .collect();
+
+    let top = &top.branch;
+
+    let bottom = match under.is_empty() {
+        true => "one branch".to_owned(),
+        false => format!("{} branches, bottom to top", chain.len()),
+    };
+
+    format!(
+        "{}\n\n# The chain this stage joins\n\nThis stage's roadmap is one chain of branches, in \
+         the order its stages finished, and this branch joins it at this finish. The chain is \
+         {bottom}:\n\n{listed}\n\nSo **rebase this branch onto `{top}` before anything is \
+         pushed**, and open the pull request against `{top}`. Do the rebase the way this \
+         repository's own `docs/agents/git-workflow.md` says a stage joins a chain, where it says \
+         anything; where it records no stacking mechanism, rebase onto `{top}` all the same and \
+         open an ordinary pull request against it, which carries the stage below this one until \
+         that one merges.\n\nA branch already sitting on top of `{top}` is a rebase that moves \
+         nothing, which is the ordinary case rather than a sign anything is wrong. Rebase **once**, \
+         before the pull request exists: nothing in the chain below moves because this stage \
+         joined above it — no branch of it is rebased, and no pull request of it changes base — \
+         and this branch is never force-pushed once its own pull request is open.\n",
+        prompt.trim_end(),
+        listed = listed.join("\n"),
+    )
+}
+
 /// The same prompt again, with the files the human attached to the Conversation
 /// listed under it.
 ///
@@ -1234,6 +1345,23 @@ mod tests {
     /// each copy happened to break.
     fn flowed(name: &str) -> String {
         skill(name).split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
+    /// Every example stage line a skill writes, as a line the roadmap's own
+    /// reader would be handed.
+    ///
+    /// An example is what an agent copies, so an example that declares nothing
+    /// is a roadmap line that declares nothing. The placeholder label `NN`
+    /// becomes a number on the way past: `checklist::entry` reads digits, a
+    /// roadmap's labels being numbers, and a line standing in for a line is
+    /// still the line being held to this.
+    fn stage_lines(skill: &str) -> Vec<String> {
+        skill
+            .lines()
+            .map(str::trim)
+            .filter(|line| line.starts_with("- [") && line.contains("[brief]("))
+            .map(|line| line.replace("] NN:", "] 07:"))
+            .collect()
     }
 
     /// Every path a session is sent to, which is every skill this binary ships.
@@ -1943,6 +2071,68 @@ mod tests {
         }
     }
 
+    /// And the line says what the stage stands on. Verkstead reads that off the
+    /// line rather than out of the brief — see [`crate::declarations`] — so the
+    /// fork has to ask for one on every stage line, in the wording the reading
+    /// expects, and the prose notes above the list stay as the *why* behind
+    /// them rather than a substitute for them.
+    #[test]
+    fn the_staging_skill_asks_for_a_declaration_on_every_stage_line() {
+        let staging = flowed(STAGING);
+
+        for wording in [
+            "after 01",
+            "no dependencies",
+            "on linux",
+            "on macos",
+            "on windows",
+        ] {
+            assert!(
+                staging.contains(wording),
+                "`{wording}` is wording the reading expects: {staging}"
+            );
+        }
+
+        assert!(
+            staging.contains("Every line carries a declaration or none of them does"),
+            "all or nothing, because a bare line there cannot be told from a forgotten \
+             one: {staging}"
+        );
+        assert!(
+            staging.contains("Dependency notes"),
+            "and the prose notes stay, as the why behind the declarations: {staging}"
+        );
+    }
+
+    /// Three skills write the end of a stage line — `staging` writes the line,
+    /// `next-stage` annotates it in progress, `next-task` ticks it off — and
+    /// every example line in all three carries a declaration, an example being
+    /// what an agent copies. A roadmap that has lost one line's declaration
+    /// declares on some lines and not others, which is the shape
+    /// [`crate::declarations::judge`] refuses.
+    #[test]
+    fn every_example_stage_line_the_skills_write_declares() {
+        for named in [STAGING, NEXT_STAGE, NEXT_TASK] {
+            let text = skill(named);
+            let lines = stage_lines(&text);
+
+            assert!(
+                !lines.is_empty(),
+                "{named} writes that end of a stage line, so it shows one"
+            );
+
+            for line in lines {
+                let entry = crate::checklist::entry(&line)
+                    .unwrap_or_else(|| panic!("{named} writes a stage line: {line}"));
+
+                assert!(
+                    crate::declarations::read(entry.after).stands_on.is_some(),
+                    "{named}'s example declares what its stage stands on: {line}"
+                );
+            }
+        }
+    }
+
     /// The fork drops what a workstation-driven flow assumes and Verkstead
     /// supplies instead, and gains what only Verkstead's shape needs: the branch
     /// is already made, nobody approves the commit, and the stages are
@@ -2116,12 +2306,17 @@ mod tests {
         );
     }
 
-    /// The roadmap keeps its own score, and the plan commit is what moves it:
-    /// the stage before this one ticked, and this one annotated with the branch
-    /// it is being worked on — which is also what stops Verkstead starting this
-    /// stage twice.
+    /// The roadmap keeps its own score, and the plan commit moves one line of
+    /// it: this stage's, annotated with the branch it is being worked on — which
+    /// is also what stops Verkstead starting this stage twice.
+    ///
+    /// **And no other line**, box included. Every stage ticks its own box in its
+    /// own finish commit, and with stages worked side by side a stage annotated
+    /// in progress beside this one may be a sibling still going; what says a
+    /// stage is done here is [`crate::stages::done`], which reads the record
+    /// first and the boxes behind it.
     #[test]
-    fn the_next_stage_fork_moves_the_roadmaps_own_score() {
+    fn the_next_stage_fork_annotates_its_own_line_and_no_other() {
         let next_stage = skill("next-stage/SKILL.md");
 
         assert!(
@@ -2134,26 +2329,92 @@ mod tests {
              rather than the prose: {next_stage}"
         );
         assert!(
-            next_stage.contains("`- [x]`"),
-            "the stage before it is ticked, its work having settled: {next_stage}"
+            !next_stage.contains("[x]"),
+            "and nothing here ticks a box, this stage's or a stage above it: \
+             {next_stage}"
+        );
+
+        let said = flowed(NEXT_STAGE);
+
+        assert!(
+            said.contains("Leave the line's declaration where it is"),
+            "what the line already declared shares that tail, and the annotation goes \
+             beside it rather than over it: {said}"
+        );
+        assert!(
+            said.contains("leave every other stage's line alone"),
+            "the stage before this one is not this session's to tick off: {said}"
+        );
+
+        let lines = stage_lines(&next_stage);
+        let [annotated] = lines.as_slice() else {
+            panic!("the step shows the one line it writes: {lines:?}")
+        };
+        let annotated = crate::checklist::entry(annotated).expect("the example is a stage line");
+
+        assert!(
+            !annotated.checked,
+            "the one line it writes is this stage's, under way rather than done: {}",
+            annotated.after
+        );
+        assert!(
+            annotated.after.contains("in progress:")
+                && crate::declarations::read(annotated.after)
+                    .stands_on
+                    .is_some(),
+            "and the example carries both, a declaration written away here being the \
+             mixed roadmap `verkstead done` refuses: {}",
+            annotated.after
         );
     }
 
-    /// Stacking is the repository's mechanism rather than Verkstead's, so the
-    /// fork is told where to read it and told not to invent one.
+    /// *No other plan in flight to check for* has to stay true now that a
+    /// roadmap starts every stage whose dependencies have settled: a sibling of
+    /// this roadmap may well be being planned beside this session, and the
+    /// sentence is true for a reason it did not have before — the sibling is in
+    /// a worktree of its own and none of it is this session's to wait on.
     #[test]
-    fn the_next_stage_fork_stacks_the_repositorys_own_way() {
+    fn the_next_stage_fork_says_a_sibling_stage_is_not_its_to_wait_on() {
+        let said = flowed(NEXT_STAGE);
+
+        assert!(
+            said.contains("no other plan in flight to check for"),
+            "there is still nothing here to go looking for: {said}"
+        );
+        assert!(
+            said.contains(
+                "Sibling stages of this roadmap may well be being planned or built \
+                 beside you"
+            ),
+            "and what makes that true is said, rather than left to a reader who \
+             knows a roadmap now runs its stages side by side: {said}"
+        );
+        assert!(
+            said.contains("yours to wait for"),
+            "a session that waited on a sibling would idle until somebody noticed: \
+             {said}"
+        );
+    }
+
+    /// A stage joins its roadmap's chain at its **finish**, so the planning
+    /// session registers no stack: the branch it would name is one the join is
+    /// about to move this branch off.
+    #[test]
+    fn the_next_stage_fork_leaves_the_stack_to_the_finish() {
         let next_stage = skill("next-stage/SKILL.md");
 
         assert!(
-            next_stage.contains("docs/agents/git-workflow.md")
-                && next_stage.contains("### Stacking roadmap stages"),
-            "the mechanism is the repository's, read out of the file that records it: \
-             {next_stage}"
+            next_stage.contains("cut from") && next_stage.contains("not registered now"),
+            "the branch has a base rather than a place in the chain: {next_stage}"
         );
         assert!(
-            next_stage.contains("Do not invent one"),
-            "and where there is none there is none: {next_stage}"
+            next_stage.contains("docs/agents/git-workflow.md"),
+            "and where the join is done by is the repository's own file: {next_stage}"
+        );
+        assert!(
+            next_stage.contains("Do not rebase anything"),
+            "nothing here moves a branch, the join being the one rebase a stage \
+             gets: {next_stage}"
         );
         assert!(
             !next_stage.contains("/next-stage") && !next_stage.contains("/to-tasks"),
@@ -2193,13 +2454,21 @@ mod tests {
 
     /// Where the branch came from is the one thing about a stage the session
     /// cannot read out of the repository, so it is the one thing it is told.
+    ///
+    /// The **base** rather than what the stage will be stacked on: the join is
+    /// at the finish, so a planning session promised a place in the chain would
+    /// be promised something its own finish decides.
     #[test]
-    fn a_stage_session_is_told_whether_its_branch_is_stacked() {
-        let stacked = next_stage(&mounted(), "# 05. Roadmap direction\n", Some("wrap-up"));
+    fn a_stage_session_is_told_what_its_branch_was_cut_from() {
+        let cut = next_stage(&mounted(), "# 05. Roadmap direction\n", Some("wrap-up"));
 
         assert!(
-            stacked.contains("`wrap-up`"),
-            "the predecessor is named, because registering the stack needs it: {stacked:?}"
+            cut.contains("cut from `wrap-up`"),
+            "the branch it came off is named: {cut:?}"
+        );
+        assert!(
+            !cut.contains("stacks on"),
+            "and not as a place in the chain, which the finish settles: {cut:?}"
         );
 
         let alone = next_stage(&mounted(), "# 05. Roadmap direction\n", None);
@@ -2264,9 +2533,11 @@ mod tests {
     /// And where the backlog was a stage's, the finish is what ticks the stage
     /// off. The roadmap keeps the score of the whole effort and this is the
     /// moment the stage finished, so the box moves here rather than a step
-    /// later — [`crate::stages::startable`] refuses to adopt a roadmap whose
-    /// lowest unchecked stage is annotated with a branch that still exists, and
-    /// [`crate::continuing`] has to tell a finished stage from one in flight.
+    /// later — the box is what says a stage is done wherever Verkstead's own
+    /// record says nothing about it, which is every stage worked by hand or by the
+    /// old tools; see [`crate::stages::done`], which is that rule, and
+    /// [`crate::continuing`], which has to tell a finished stage from one in
+    /// flight.
     #[test]
     fn the_next_task_fork_ticks_the_roadmap_stage_it_finished() {
         let next_task = skill("next-task/SKILL.md");
@@ -2289,6 +2560,55 @@ mod tests {
             next_task.contains("in progress:"),
             "and the annotation goes with it — the stage is done rather than in flight: \
              {next_task}"
+        );
+    }
+
+    /// And the tick takes the annotation and nothing else. What the stage stands
+    /// on is declared after that same link, so the fork's before-and-after pair
+    /// is what says a declaration survives being ticked off: a roadmap that has
+    /// lost one line's is refused for declaring on some lines and not others.
+    #[test]
+    fn the_next_task_forks_tick_leaves_the_lines_declaration_alone() {
+        let next_task = skill(NEXT_TASK);
+        let said = flowed(NEXT_TASK);
+
+        assert!(
+            said.contains("The annotation is all that goes"),
+            "the declaration after the link is not the annotation's to take with it: \
+             {said}"
+        );
+
+        let lines = stage_lines(&next_task);
+        let [in_flight, ticked] = lines.as_slice() else {
+            panic!("the step shows the line before the tick and after it: {lines:?}")
+        };
+
+        let in_flight = crate::checklist::entry(in_flight).expect("the example is a stage line");
+        let ticked = crate::checklist::entry(ticked).expect("and so is what it becomes");
+
+        assert!(
+            !in_flight.checked && ticked.checked,
+            "the box is what the tick moves: {in_flight:?} then {ticked:?}"
+        );
+        assert!(
+            in_flight.after.contains("in progress:") && !ticked.after.contains("in progress:"),
+            "and the annotation is what it takes off: {} then {}",
+            in_flight.after,
+            ticked.after
+        );
+
+        let declared = crate::declarations::read(in_flight.after);
+
+        assert!(
+            declared.stands_on.is_some(),
+            "the line it starts from declares, or the pair says nothing about a \
+             declaration: {}",
+            in_flight.after
+        );
+        assert_eq!(
+            declared,
+            crate::declarations::read(ticked.after),
+            "and it declares the same thing after the tick as before it"
         );
     }
 
@@ -2322,6 +2642,170 @@ mod tests {
             next_task.contains("Nothing waits on approval here either"),
             "and there is no gate in front of that either, as there is in front of none: \
              {next_task}"
+        );
+    }
+
+    /// And which of the two shapes a stage is, is settled by the chain it was
+    /// handed rather than by what `gh stack view` says in this worktree.
+    ///
+    /// `gh stack` keeps its registry per worktree and every stage is worked in a
+    /// worktree of its own, so `view` errors there whatever GitHub holds — a
+    /// skill that read the error as proof would send every stage there has ever
+    /// been down the unstacked sequence, and the join would never happen. The
+    /// repository's own block says the same thing, and this is the sentence that
+    /// decides which sequence runs.
+    #[test]
+    fn a_stage_handed_a_chain_is_a_stacked_branch_whatever_this_worktree_says() {
+        let next_task = flowed("next-task/SKILL.md");
+
+        assert!(
+            next_task.contains(
+                "**A prompt carrying a *The chain this stage joins* section is what settles it**"
+            ),
+            "the chain in the prompt is what says the branch is stacked: {next_task}"
+        );
+        assert!(
+            next_task.contains("erroring here is an empty registry rather than proof of anything"),
+            "and an empty registry is not an unstacked branch: {next_task}"
+        );
+        assert!(
+            next_task.contains("Where no chain was carried, `gh stack view` naming this branch"),
+            "the old reading still answering for everything that joins nothing: {next_task}"
+        );
+    }
+
+    /// And what it does when the rebase that carries a stage into its roadmap's
+    /// chain stops in a conflict: it resolves it. A conflict at the join is the
+    /// joining session's rather than something to stop on — always stopping to
+    /// ask was weighed and turned down (ADR-0021, *The chain*) — so the skill has
+    /// to say that resolving is the job, and say it in the words a session sent
+    /// at a stack is already told it in.
+    ///
+    /// The failure mode is the one nothing downstream would catch: a conflict
+    /// "resolved" by taking one side wholesale rebases cleanly, passes the
+    /// checks, and has thrown away work somebody did without saying so.
+    #[test]
+    fn a_conflict_on_the_way_into_the_chain_is_the_joining_sessions_to_resolve() {
+        let next_task = flowed("next-task/SKILL.md");
+
+        let said = "**A conflict is two changes to reconcile**, and resolving it means keeping \
+                    both. Taking one side's hunk wholesale — `--ours`, `--theirs`, or the same \
+                    thing done by hand — is not a resolution: it throws away work somebody did";
+
+        assert!(
+            next_task.contains(said),
+            "resolving is the job, in the words the resolution skill says it in: {next_task}"
+        );
+        assert!(
+            flowed("addressing/SKILL.md").contains(said),
+            "which is the sentence a session sent at a stack is already told, word for word",
+        );
+        assert!(
+            next_task.contains("an aborted rebase leaves this branch exactly as unjoined as it"),
+            "and undoing it to escape it leaves the join still to do: {next_task}"
+        );
+    }
+
+    /// The tree a conflicted rebase produced is one neither branch ever had, so
+    /// the work is not built until the repository's own checks have been over it
+    /// — and only then is anything pushed.
+    #[test]
+    fn a_resolved_join_runs_the_checks_again_before_anything_is_pushed() {
+        let next_task = flowed("next-task/SKILL.md");
+
+        let again = "**Then run the repository's checks again, before anything is pushed.**";
+        let built = "a rebase that compiles is not a rebase that reconciled anything";
+
+        assert!(
+            next_task.contains(again),
+            "the checks run over the result, and in front of the push: {next_task}"
+        );
+        assert!(
+            next_task.contains(built),
+            "and a tree that builds is not a tree anybody reconciled: {next_task}"
+        );
+    }
+
+    /// And the one thing a joining session must not do that a session sent at a
+    /// stack is asked for: move a branch below this one.
+    ///
+    /// A stage is rebased once, before it has a pull request anybody is reading,
+    /// and that promise is about the branches *under* it as much as about this
+    /// one — so a session resolving a conflict on the way in touches this branch
+    /// and nothing else. The sync that moves a whole stack is the other skill's,
+    /// and it runs after the pull requests are open rather than before this one
+    /// is.
+    #[test]
+    fn nothing_below_a_joining_branch_is_touched_while_its_conflict_is_resolved() {
+        let next_task = flowed("next-task/SKILL.md");
+
+        let neither = "no branch below it is rebased, none of them is pushed, and no pull \
+                       request of one changes base";
+
+        assert!(
+            next_task.contains("**Nothing below this branch is touched.**"),
+            "the chain below is left where it stands: {next_task}"
+        );
+        assert!(
+            next_task.contains(neither),
+            "in all three of the ways a branch below could be moved: {next_task}"
+        );
+    }
+
+    /// Where the two changes are two intentions, that is a decision rather than
+    /// a reconciliation: one Question Set through the ordinary ask, rather than a
+    /// guess committed on the human's behalf or a session that stopped with
+    /// nothing said.
+    #[test]
+    fn a_conflict_it_cannot_judge_goes_to_the_human_as_one_set() {
+        let next_task = flowed("next-task/SKILL.md");
+
+        let one_set = "one Question Set through the ordinary ask — see *When you need the human* \
+                       below — saying what conflicted, what each side was doing, and the options \
+                       you can see";
+
+        assert!(
+            next_task.contains("**Ask only where you cannot tell which side is meant.**"),
+            "the ask is for the conflict it cannot judge and no other: {next_task}"
+        );
+        assert!(
+            next_task.contains(one_set),
+            "one Set, saying what conflicted and what each side was doing: {next_task}"
+        );
+        assert!(
+            next_task
+                .contains("rather than a guess committed and rather than a session that stopped"),
+            "and neither of the two things it is instead of: {next_task}"
+        );
+    }
+
+    /// And the Timeline says the join met a conflict whichever of the two
+    /// happened, because a join that took a session an hour and a rebase that
+    /// moved nothing should not read alike.
+    ///
+    /// Said by the session on its way out rather than by Verkstead: a Notice is
+    /// the server's own account of a decision it took, and whether a rebase had
+    /// two changes to reconcile is a fact only the session that ran it holds. So
+    /// the last thing it prints is where it goes, which is what the skills that
+    /// end with nothing to commit already do with the one line they owe.
+    #[test]
+    fn the_join_says_it_met_a_conflict_whichever_way_it_went() {
+        let next_task = flowed("next-task/SKILL.md");
+
+        let either = "**And say the join met a conflict, whichever way it went.** As the last \
+                      thing you print";
+
+        assert!(
+            next_task.contains(either),
+            "said either way, and where the human reads what a session said: {next_task}"
+        );
+        assert!(
+            next_task.contains("what conflicted, and whether you reconciled it or asked"),
+            "with which of the two happened in it: {next_task}"
+        );
+        assert!(
+            next_task.contains("what the human reads on the Timeline"),
+            "which is what the Timeline carries of this session: {next_task}"
         );
     }
 
@@ -4710,5 +5194,117 @@ mod tests {
             "a withdrawn skill is still installed: {}",
             stale.display()
         );
+    }
+
+    /// One branch of a chain, as the runner reads it off the record.
+    fn link(stage: Option<&str>, branch: &str) -> Link {
+        Link {
+            stage: stage.map(str::to_owned),
+            branch: branch.to_owned(),
+        }
+    }
+
+    /// The finish of a stage is told what the chain is, bottom to top, and the
+    /// one thing the chain is told for: the rebase comes before the push.
+    ///
+    /// The chain is the server's to say — it recorded which stages joined and in
+    /// what order, and no agent could read that off a branch — and the rebase is
+    /// the session's to do, `gh stack` being a session's to run and never the
+    /// server's.
+    #[test]
+    fn the_finish_of_a_stage_is_told_the_chain_it_joins_bottom_to_top() {
+        let prompt = joining(
+            &next_task(&mounted(), "# Rate limiting\n\nThe API has none.\n", None),
+            &[
+                link(None, "rate-limiting"),
+                link(Some("01"), "roadmaps/rate-limiting/01-the-counter"),
+                link(Some("02"), "roadmaps/rate-limiting/02-the-window"),
+            ],
+        );
+
+        assert!(
+            prompt.contains("# The Brief this started from"),
+            "the work is still what the session is being told about: {prompt:?}"
+        );
+
+        let chain = prompt
+            .split_once("# The chain this stage joins")
+            .expect("the chain is a section of its own")
+            .1;
+
+        let counter = chain
+            .find("`roadmaps/rate-limiting/01-the-counter`")
+            .expect("the stage below is named");
+        let window = chain
+            .find("`roadmaps/rate-limiting/02-the-window`")
+            .expect("and so is the one above it");
+
+        assert!(
+            chain.find("`rate-limiting`").expect("and the foot") < counter && counter < window,
+            "bottom to top, which is the order it is rebased through: {chain:?}"
+        );
+        assert!(
+            chain.contains("stage 01") && chain.contains("stage 02"),
+            "each named as the stage of the roadmap it is: {chain:?}"
+        );
+        assert!(
+            chain.contains("cut from"),
+            "and the foot as the branch this one came off: {chain:?}"
+        );
+    }
+
+    /// The rebase comes before the push, it is onto the top of the chain, and
+    /// the pull request opens against the same branch.
+    ///
+    /// Which is the whole instruction. How it is done is the target
+    /// repository's own block, and where that records no stacking mechanism the
+    /// rebase happens all the same — it is Verkstead's rather than the block's.
+    #[test]
+    fn the_finish_is_told_the_rebase_comes_before_the_push() {
+        let prompt = joining(
+            &next_task(&mounted(), "# Rate limiting\n", None),
+            &[link(Some("01"), "roadmaps/rate-limiting/01-the-counter")],
+        );
+
+        assert!(
+            prompt.contains(
+                "**rebase this branch onto `roadmaps/rate-limiting/01-the-counter` before \
+                 anything is pushed**"
+            ),
+            "the rebase is before the push, and onto the top: {prompt:?}"
+        );
+        assert!(
+            prompt
+                .contains("open the pull request against `roadmaps/rate-limiting/01-the-counter`"),
+            "and the stage below it in the chain is what it opens against: {prompt:?}"
+        );
+        assert!(
+            prompt.contains("docs/agents/git-workflow.md"),
+            "how it is done is the target repository's own: {prompt:?}"
+        );
+        assert!(
+            prompt.contains("records no stacking mechanism"),
+            "and one that records nothing gets the rebase anyway: {prompt:?}"
+        );
+        assert!(
+            prompt.contains("never force-pushed once its own pull request is open"),
+            "rebased once, before anybody is reading one: {prompt:?}"
+        );
+        assert!(
+            prompt.contains("is a rebase that moves nothing"),
+            "and a branch already on the top is the ordinary case: {prompt:?}"
+        );
+    }
+
+    /// A task session carries none of it, and neither does the finish of
+    /// anything that joins no chain.
+    ///
+    /// The one thing the finish of a stage is told that a task session is not.
+    /// A heading over an empty chain would tell a session there was one to join.
+    #[test]
+    fn a_session_with_no_chain_to_join_is_started_on_the_prompt_as_it_stands() {
+        let prompt = next_task(&mounted(), "# Rate limiting\n\nThe API has none.\n", None);
+
+        assert_eq!(joining(&prompt, &[]), prompt);
     }
 }

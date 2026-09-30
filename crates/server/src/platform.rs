@@ -66,11 +66,13 @@ const LOWERCASE: &str = "verkstead";
 /// people read in a file dialog.
 const CAPITALISED: &str = "Verkstead";
 
-/// Whose conventions a directory is resolved by.
+/// An operating system, which is the crate's one name for one: whose conventions
+/// a directory is resolved by here, and what a roadmap's stage line names when it
+/// says `on windows` — see [`crate::declarations`].
 ///
 /// A value rather than a `cfg`, so that the arm a machine will never run is
 /// still an arm a test can call. [`Platform::HERE`] is the one this binary was
-/// built for, and it is the only one anything outside a test passes.
+/// built for, and it is the only one anything resolving a directory passes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Platform {
     /// XDG: the directory is `$XDG_DATA_HOME` where that is set to an absolute

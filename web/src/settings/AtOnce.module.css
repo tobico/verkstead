@@ -1,0 +1,125 @@
+/* How much Verkstead runs at once — see `AtOnce.tsx`.
+
+   Two halves in two panes, like the sections around it: the card carries both
+   the numbers, and the fields that change them stand in the details pane beside
+   it — the roadmap's limit, the server's, and under the server's what it is
+   measured against.
+
+   What a card *is* is `CardButton.module.css`'s: the surface, the fill it takes
+   while its pane is open, and what it does under the pointer. What is here is
+   only what stands on it. */
+
+.atOnceCard {
+  margin-bottom: 1.5rem;
+}
+
+.atOnceCard h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.1rem;
+}
+
+/* How much, a line each: the same quiet the sections around it say how they
+   stand in. */
+.standing {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+.standing + .standing {
+  margin-top: 0.3rem;
+}
+
+/* The number itself in the face a number is read in here, the way the Cleanup's
+   durations are drawn on their own card. */
+.standing .places {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  color: var(--ink);
+}
+
+/* And the details pane: the line about what holds a place, then a field and a
+   press each. */
+.atOnce {
+  margin-top: 0.85rem;
+}
+
+.atOnce label {
+  display: block;
+  margin: 1.25rem 0 0.35rem;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+/* The box and its press on one line: the value is a count, so a field the width
+   of the pane would say it was expecting prose. The same row the Cleanup's
+   durations stand in. */
+.field {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.field input {
+  width: 5rem;
+  font: inherit;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  color: inherit;
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  padding: 0.5rem 0.6rem;
+}
+
+.field button {
+  padding: 0.5rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--paper);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.field button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.field input:disabled {
+  cursor: not-allowed;
+}
+
+/* And what the server's limit is measured against, under its field: the same
+   quiet as the card's lines, close enough to the box to read as being about it
+   rather than as a section of its own. */
+.taken {
+  margin: 0.4rem 0 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+.taken .places {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  color: var(--ink);
+}
+
+.failure {
+  margin: 0.5rem 0 0;
+  font-size: 0.9rem;
+}
+
+.field input:focus-visible {
+  border-color: var(--accent);
+}
+
+@media (hover: hover) {
+  .field input:not(:disabled):hover {
+    border-color: var(--ink-soft);
+  }
+
+  .field button:not(:disabled):hover {
+    background: var(--accent-deep);
+    border-color: var(--accent-deep);
+  }
+}

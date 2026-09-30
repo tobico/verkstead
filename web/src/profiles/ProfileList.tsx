@@ -125,6 +125,7 @@ import type {
   ProfileSaved,
 } from "../api/types";
 import { useReading } from "../freshness";
+import { rowPress } from "../rows";
 import { KNOWN_MODELS, known, prettify } from "../models";
 import { Empty, ErrorLine } from "../notices";
 import { Listbox } from "../picking";
@@ -833,7 +834,13 @@ export function ProfileForm(props: {
           <For each={offered()}>
             {(model) => (
               <li>
-                <label>
+                {/* Pressed as a row — see `rowPress`, and the press a label
+                    stops forwarding once a hand has slid. */}
+                <label
+                  onClick={rowPress(() =>
+                    pick(model, !form().models.includes(model)),
+                  )}
+                >
                   <input
                     type="checkbox"
                     checked={form().models.includes(model)}

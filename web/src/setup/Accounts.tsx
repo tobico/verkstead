@@ -53,6 +53,7 @@ import type {
 } from "../api/types";
 import { KNOWN_MODELS } from "../models";
 import { ErrorLine, Note } from "../notices";
+import { rowPress } from "../rows";
 import { BLANK_PROFILE, PROFILE_REFUSAL, ProfileForm } from "../profiles/ProfileList";
 import { Mark } from "./Mark";
 import styles from "./Accounts.module.css";
@@ -306,7 +307,15 @@ function Row(props: {
       data-account={agent()}
       data-harness={props.found.harness ? "yes" : "no"}
     >
-      <label class={styles.head}>
+      {/* The whole row is what is ticked, so the row answers the press rather
+          than the box a label forwards one to — and stops forwarding the moment
+          a hand slides. An account with no binary on the machine is refused
+          there, its box being disabled, which is what the greyed row says. See
+          `rowPress`. */}
+      <label
+        class={styles.head}
+        onClick={rowPress(() => props.tick(!props.ticked))}
+      >
         <input
           type="checkbox"
           checked={props.ticked}

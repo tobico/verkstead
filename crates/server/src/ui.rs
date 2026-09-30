@@ -31,31 +31,33 @@ use axum::routing::{delete, get, post};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use verkstead_render::{
-    Adopted, AnswerAttached, AnswerAttachmentRemoved, AskingDevice, Attached, AttachmentRemoved,
-    Author, BaseBranchChoice, BranchRename, BriefEdit, BuildCacheView, CheckRollup,
-    CleanupStepView, CleanupView, CommentedOn, CompanionAdded, CompanionBaseRecorded,
+    Adopted, AnswerAttached, AnswerAttachmentRemoved, AskingDevice, AtOnceView, Attached,
+    AttachmentRemoved, Author, BaseBranchChoice, BranchRename, BriefEdit, BuildCacheView,
+    CheckRollup, CleanupStepView, CleanupView, CommentedOn, CompanionAdded, CompanionBaseRecorded,
     CompanionBranchRenamed, CompanionModeChoice, CompanionModeChosen, CompanionRemoved,
-    CompanionView, CompileCaching, ConflictResolution, ConversationArchived, ConversationClosed,
-    ConversationEntry, ConversationSteered, ConversationStopped, ConversationUnarchived,
-    ConversationView, Creation, Cursor, DevicesView, FileDeleted, FileDeleting, FileListsView,
-    FileMade, FileMaking, FileReading, FileRenamed, FileRenaming, FileRootsView, FileStatusView,
-    FileWrite, FileWritten, FolderListing, GrillingStarted, HeaderEdit, IgnoreRule,
-    IgnoredCommentsEdit, InstallPress, Lifecycle, Locked, McpHeader, McpServer, McpServerEdit,
-    McpServersEdit, Merging, MissedOut, NewAdoption, NewCompanion, NewConversation, NewJoin,
-    NewOrder, PairingView, Parked, PendingSteerView, Process, ProcessChoice, ProcessPicked,
-    ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration, RemoteBanner, RemoteView,
-    RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice, RuleField, RuleRefused,
-    ServeEdit, ServePress, ServerAttached, ServerField, ServerRefused, ServerRemoved, SetReading,
-    SetView, SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished,
-    SharedCommit, SharedConversation, ShowArchived, ShowingArchived, Standing, SteerCancelled,
-    SteerForm, SteerOpened, SteerPairingView, SteerSaved, SteerSubmission, Submitted, Subscribed,
-    Subscription, TakenUp, TargetNamed, TargetRecorded, TerminalOpened, TimelineEvent, TokenEdit,
-    TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
+    CompanionView, CompileCaching, Confirming, ConflictResolution, ConversationArchived,
+    ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
+    ConversationUnarchived, ConversationView, Creation, Cursor, DevicesView, FileDeleted,
+    FileDeleting, FileListsView, FileMade, FileMaking, FileReading, FileRenamed, FileRenaming,
+    FileRootsView, FileStatusView, FileWrite, FileWritten, FolderListing, GrillingStarted,
+    HeaderEdit, IgnoreRule, IgnoredCommentsEdit, InstallPress, Lifecycle, Locked, McpHeader,
+    McpServer, McpServerEdit, McpServersEdit, Merging, MissedOut, NewAdoption, NewCompanion,
+    NewConversation, NewJoin, NewOrder, PairingView, Parked, PendingSteerView, Process,
+    ProcessChoice, ProcessPicked, ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration,
+    RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice,
+    RuleField, RuleRefused, ServeEdit, ServePress, ServerAttached, ServerField, ServerRefused,
+    ServerRemoved, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView, ShareCommented,
+    SharePublished, SharedCommit, SharedConversation, ShowArchived, ShowingArchived, Standing,
+    SteerCancelled, SteerForm, SteerOpened, SteerPairingView, SteerSaved, SteerSubmission,
+    Submitted, Subscribed, Subscription, TakenUp, TargetNamed, TargetRecorded, TerminalOpened,
+    TimelineEvent, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
 use crate::onboarding::Refusal;
-use crate::settings::{Cleanup, CleanupStep, Config, GitAuthor, RuleTrouble, RustBuildCache};
+use crate::settings::{
+    AtOnce, Cleanup, CleanupStep, Config, GitAuthor, RuleTrouble, RustBuildCache,
+};
 use crate::{AppState, store};
 
 /// The viewer's routes, over the state the agent API is already holding: a
@@ -1023,6 +1025,9 @@ async fn create_repo(
         &creation.parent,
         &creation.name,
         creation.github,
+        // What the Repo pane this comes back with says is waiting in it, which is
+        // bounded by the same setting the notice is — see [`crate::stages::waiting`].
+        author.at_once().roadmap_stages(),
     )
     .await
     {
@@ -1076,7 +1081,12 @@ async fn abandoned_roadmaps(State(state): State<AppState>) -> HttpResponse {
         }
     };
 
-    Json(crate::stages::abandoned(repos).await).into_response()
+    // And how many stages of one roadmap run at once, which is what bounds the
+    // stages each row names: the press starts every ready stage there is a place
+    // for, so the row offers every ready stage there is a place for.
+    let at_once = state.settings.config().at_once().roadmap_stages();
+
+    Json(crate::stages::abandoned(&state.pool, repos, at_once).await).into_response()
 }
 
 /// `GET /api/ui/conversations` — the sidebar, newest first.
@@ -1118,6 +1128,11 @@ async fn conversations(State(state): State<AppState>) -> HttpResponse {
     // [`crate::sessions::Sessions::all_parked`].
     let sitting = state.sessions.all_parked();
 
+    // And which of them are stages held before their finish, read once for the
+    // whole list for the reason the three above are — one lock rather than one
+    // per row, over an answer that cannot meaningfully change between them.
+    let held = state.joins.all_waiting();
+
     let rows: Vec<ConversationEntry> = conversations
         .into_iter()
         .map(|conversation| {
@@ -1142,6 +1157,11 @@ async fn conversations(State(state): State<AppState>) -> HttpResponse {
                 // say. A fix session working a red check draws as plain
                 // Wrapping — waiting is what a wrap-up with nobody in it does.
                 waiting_on_checks: conversation.narrowed_to_checks && !working,
+                // And the condition one state earlier, which is the run's own
+                // register rather than the record: a stage whose tasks are all
+                // done and whose finish is held until the chain below it settles
+                // — see [`crate::joins`].
+                waiting_to_join: held.contains(&conversation.id),
                 // And the rescue's own reading of the session, paired with
                 // `working` for the reason `idle` above is: the two reads are a
                 // moment apart, and a row saying a session that has gone is
@@ -1384,9 +1404,45 @@ pub(crate) async fn conversation_view(
     // roadmaps is this one's is asked of git against the base commit: a
     // repository keeps its finished roadmaps, and a Conversation is about the
     // one its branch has written to. See [`crate::stages`].
+    //
+    // Where each of its stages *is* is the one thing that does not come off the
+    // files: the boxes are one branch's and Verkstead's record of the stage
+    // Conversations is the Repo's, so the record is read here — where the pool is
+    // — and handed to the reading. A record that would not read leaves the card
+    // to its boxes, which is a roadmap drawn the way one nothing knows about is:
+    // a page with a card an hour behind is better than a Conversation that will
+    // not open.
+    let record = match store::stage_standings(&state.pool, conversation.repo.id).await {
+        Ok(record) => record,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading what a Repo's roadmap stages have got to failed");
+            store::StageStandings::default()
+        }
+    };
+
+    // And the register beside it, which is the other half of where a stage is:
+    // which Conversations are stages this server is holding before their finish —
+    // see [`crate::joins`]. Read here for the reason the sidebar's own *Waiting to
+    // join* label is read where the rows are drawn: the hold is a task of this
+    // process rather than anything stored, so the card's word and the label are the
+    // one register read at the one moment and cannot disagree about a stage.
+    let held = state.joins.all_waiting();
+
+    // And the places, which is the third thing a stage's state comes off and the
+    // one that is neither the record nor a register: both limits off Settings as
+    // they stand and how many places the server has given away this moment — see
+    // [`crate::stages::Places`]. Read here rather than in the reading for the
+    // reason the two above are, and read afresh for the reason the look that
+    // spends freed places reads them afresh: a limit raised on the settings page
+    // is in force at the next draw.
+    let places = crate::stages::Places::now(state);
+
     let roadmaps = crate::stages::showing(
         conversation.worktree.clone(),
         conversation.base_commit.clone(),
+        record,
+        held,
+        places,
     )
     .await;
 
@@ -1605,9 +1661,11 @@ pub(crate) async fn conversation_view(
     let adopting = match conversation.adopting.clone() {
         Some(roadmap) if worktree.is_none() => Some(
             crate::stages::adopting(
+                &state.pool,
                 conversation.repo.clone(),
                 conversation.base_commit.clone(),
                 roadmap,
+                state.settings.config().at_once().roadmap_stages(),
             )
             .await,
         ),
@@ -1919,6 +1977,11 @@ pub(crate) async fn conversation_view(
         // with it, so the label is drawn only where nothing is running — the
         // same reading `working` below is.
         waiting_on_checks: narrowed_to_checks && writing.is_none() && writing_now.is_none(),
+        // And the condition one state earlier, off the register the run holding
+        // the stage put it on — see [`crate::joins`]. No pairing with what is
+        // running is wanted here, unlike the label above: the hold stands in
+        // front of the launch, so a held stage is one with no session at all.
+        waiting_to_join: state.joins.waiting(id),
         // And the other condition, which is the one a running session can be in:
         // idle past the grace with the rescue watching it, said in the same
         // numbers the sidebar row carries — and not while anything is waiting on
@@ -3573,8 +3636,12 @@ async fn roadmap(
         return no_such_roadmap();
     };
 
-    let (worktree, base) = match store::load_conversation(&state.pool, id).await {
-        Ok(Some(conversation)) => (conversation.worktree, conversation.base_commit),
+    let (worktree, base, repo_id) = match store::load_conversation(&state.pool, id).await {
+        Ok(Some(conversation)) => (
+            conversation.worktree,
+            conversation.base_commit,
+            conversation.repo.id,
+        ),
         Ok(None) => return no_such_roadmap(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "loading a Conversation failed");
@@ -3582,7 +3649,34 @@ async fn roadmap(
         }
     };
 
-    match crate::stages::documents(worktree, base, name).await {
+    // The same record the card was drawn against, read here for the reason it is
+    // read there: where a stage is comes off Verkstead's own rows rather than off
+    // the boxes in this branch's `ROADMAP.md`. One that would not read leaves the
+    // pane to its boxes, as the card's does. The joins register goes with it, and
+    // is read at this moment for the same reason it is read at that one — a pane
+    // saying a stage was in progress while the card that opened it said the stage
+    // was waiting to join would be two readings of one hold. And the places go
+    // with the two of them, read at the same moment for the same reason again.
+    let record = match store::stage_standings(&state.pool, repo_id).await {
+        Ok(record) => record,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading what a Repo's roadmap stages have got to failed");
+            store::StageStandings::default()
+        }
+    };
+
+    let places = crate::stages::Places::now(&state);
+
+    match crate::stages::documents(
+        worktree,
+        base,
+        name,
+        record,
+        state.joins.all_waiting(),
+        places,
+    )
+    .await
+    {
         Some(pane) => Json(pane).into_response(),
         None => no_such_roadmap(),
     }
@@ -4121,12 +4215,23 @@ async fn adopt(State(state): State<AppState>, Path(id): Path<String>) -> HttpRes
 /// checked the same way: what the page named was read off GitHub a moment ago,
 /// and a branch somebody has pushed to, taken or checked out since is answered
 /// here rather than there.
-async fn take_up(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+///
+/// **And the one press of the three that takes a body**: a take-up may close the
+/// Conversation that had the pull request, and a close takes its Worktree with
+/// whatever was left uncommitted in it. So a press that was stopped over that
+/// comes back naming what the human is agreeing to lose — see
+/// [`verkstead_render::Confirming`], which is empty on every press that was not
+/// stopped.
+async fn take_up(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(confirming): Json<Confirming>,
+) -> HttpResponse {
     let Ok(id) = id.parse::<i64>() else {
         return Json(TakenUp::NoSuchConversation).into_response();
     };
 
-    match crate::conversations::take_up(&state, id).await {
+    match crate::conversations::take_up(&state, id, &confirming.discarding).await {
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "taking a pull request up failed");
@@ -4967,8 +5072,21 @@ async fn settings(State(state): State<AppState>) -> HttpResponse {
         &state.settings,
         state.sessions.caches_compiles(),
         &state.binds,
+        taken(&state),
     ))
     .into_response()
+}
+
+/// How many of the server's places are taken this moment — see
+/// [`crate::drivers::Drivers::taking`], which is the one place they are counted.
+///
+/// Read here rather than inside [`as_told`] because it is the one thing on that
+/// page which is not out of the files: two in-process registers, and the settings
+/// page draws them beside the limit they are measured against so that a server
+/// holding every place looks like a server holding every place rather than a
+/// stall.
+fn taken(state: &AppState) -> usize {
+    state.drivers.taking(&state.sessions.working()).len()
 }
 
 /// `POST /api/ui/settings` — write the author and the paths down, and set or
@@ -5016,6 +5134,11 @@ async fn save_settings(
     // the save: the page draws both sources, and this is not anything a save
     // can touch.
     let installed = state.binds.clone();
+
+    // And how many of the server's places are taken, for the same read — counted
+    // out here because it is two in-process registers rather than a file, and
+    // nothing a save touches either.
+    let taking = taken(&state);
 
     let saved = tokio::task::spawn_blocking(move || {
         // What the rules are to be afterwards, and what is wrong with them —
@@ -5077,7 +5200,7 @@ async fn save_settings(
                     // How things stand, which is how they stood: nothing was
                     // written, and the page draws the errors over what the human
                     // still has in front of them.
-                    settings: as_told(&settings, caches_compiles, &installed),
+                    settings: as_told(&settings, caches_compiles, &installed, taking),
                     verified: None,
                     refused,
                     refused_servers,
@@ -5107,6 +5230,17 @@ async fn save_settings(
                 Cleanup::of(
                     CleanupStep::of(edit.cleanup.trim.enabled, Some(edit.cleanup.trim.days)),
                     CleanupStep::of(edit.cleanup.delete.enabled, Some(edit.cleanup.delete.days)),
+                ),
+                // And how much Verkstead runs at once, as the two numbers were
+                // typed: an empty field is the default asked for back, and so is
+                // anything that is not a whole number of places. The page refuses
+                // a limit below one in either field rather than sending it — a
+                // roadmap with no places starts nothing and a server with none
+                // starts nothing at all — and a save carrying one anyway
+                // configures nothing, which is that default again.
+                AtOnce::of(
+                    Some(edit.at_once.roadmap_stages),
+                    Some(edit.at_once.conversations),
                 ),
                 // And how a conflict is resolved, in every Repo there is, which
                 // is one of two words and never absent: there is no third state
@@ -5225,7 +5359,7 @@ async fn save_settings(
 
         Ok::<_, std::io::Error>((
             SettingsSaved {
-                settings: as_told(&settings, caches_compiles, &installed),
+                settings: as_told(&settings, caches_compiles, &installed, taking),
                 verified,
                 // Nothing turned down: a save that got this far was one there was
                 // nothing wrong with — of either list.
@@ -5321,7 +5455,9 @@ fn stored(resolution: ConflictResolution) -> store::ConflictResolution {
     }
 }
 
-/// How the settings stand, read off the files.
+/// How the settings stand, read off the files — and, beside them, `taking`: how
+/// many of the server's places are held this moment, which is the one thing here
+/// no file says.
 ///
 /// The token comes back as its last four characters and the moment the file was
 /// written, and never as itself — see [`verkstead_render::SettingsView`]. A
@@ -5332,12 +5468,14 @@ fn as_told(
     settings: &crate::settings::Settings,
     caches_compiles: bool,
     binds: &crate::sandbox::SandboxConfig,
+    taking: usize,
 ) -> SettingsView {
     let secrets = settings.secrets();
     let config = settings.config();
     let author = config.git_author();
     let cache = config.rust_build_cache();
     let cleanup = config.cleanup();
+    let at_once = config.at_once();
 
     SettingsView {
         git_author: Author {
@@ -5372,6 +5510,20 @@ fn as_told(
                 days_configured: cleanup.delete_after_configured().is_some(),
             },
         },
+        // And how much Verkstead runs at once, both numbers read the way the
+        // Cleanup's durations are: the number either way, and the flag beside it
+        // saying whether it is one somebody chose.
+        at_once: AtOnceView {
+            roadmap_stages: at_once.roadmap_stages(),
+            roadmap_stages_configured: at_once.roadmap_stages_configured().is_some(),
+            conversations: at_once.conversations(),
+            conversations_configured: at_once.conversations_configured().is_some(),
+            // And the one thing on this page that is out of neither file: how many
+            // of those places are taken this moment, counted off the two registers
+            // a place is counted off — see [`taken`].
+            places_taken: taking,
+        },
+
         // Where the setting sits rather than whether anybody has been here:
         // nothing configured is a merge, and there is no third state to draw.
         conflict_resolution: resolution(config.conflict_resolution()),

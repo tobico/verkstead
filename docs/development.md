@@ -236,6 +236,18 @@ still the app quitting. The sidecar's stdout and the app's own lines both go to
 `verkstead.log` under the **Log Directory**, which the app names on the terminal
 as it opens it and which both **View Logs** open.
 
+**And a held middle button scrolls the pane under it**, on Linux as on Windows.
+Chromium has middle-click autoscroll already and enables it on Windows alone, so
+the app asks Blink for it by name — `--enable-blink-features=MiddleClickAutoscroll`,
+appended before there is a renderer to read it. Asked for on every platform
+rather than on the one that needed it: a gesture is the same gesture wherever
+there is a middle button to hold, so it is one switch and no platform branch —
+Windows is told what is already true there, and a Mac with a three-button mouse
+plugged into it gets the same gesture as everywhere else. It takes nothing away
+from the other thing a middle button does on Linux, a middle click in a text
+field still pasting the X primary selection, and a middle press on a link still
+scrolling nothing. `autoscroll.ts` is the switch and the whole of it.
+
 **And the window has no title bar of its own.** What stands at its top-right
 corner on Linux and Windows is the platform's own controls overlay, drawn on the
 paper the page's heads are drawn on with its symbols in their ink and as tall as
@@ -494,6 +506,31 @@ because SQLite frees the pages a delete emptied inside the file and leaves the
 file the size it was; a pass that found nothing does not. And it touches nothing
 outside Verkstead's own record: the git branch stays, and a published share
 stays published.
+
+`"at_once"` is how much Verkstead runs at once, which is two numbers and two
+limits, both in force. `"roadmap_stages"` is how many stages of one roadmap may
+be under way together, three where nobody has said, and a place there is held by
+every stage that is under way whatever it is doing, a stage waiting on an answer
+included. `"conversations"` is how many Conversations take a place across the
+**whole server**, whatever roadmap or Process they belong to, four where nobody
+has said — so one roadmap cannot take the whole server by default — and a place
+there is held by every Conversation with a session running or a driver
+registered: a grilling, a Review, a Tinker, another roadmap's stage alike. For
+either, an absent key, an absent file and one nothing can parse all mean the
+default. Both are read afresh at every start and at every look for a stage
+waiting on a place — which is a look made as a place comes free, with a slow one
+behind it for the ways one can come free unannounced — so a change is in force at
+the next start without a restart and stops nothing already running;
+`"roadmap_stages_configured"` and `"conversations_configured"` beside them are
+what say whether a number is one somebody typed, and the settings
+page draws a default as a placeholder. They are the one pair of fields on that
+page with a floor under them: a limit below one is a roadmap — or a server — that
+would never start anything, so the page refuses one rather than sending it, and a
+save carrying one anyway configures nothing. `"places_taken"` rides back beside
+them and is nothing a save sets: how many of the server's places are held as of
+the read, off the same two registers, so that a server holding every place reads
+as held rather than as stalled. It can stand above the limit, a press going ahead
+over it and being counted from then on. Its own card, under the instructions.
 
 `"conflict_resolution"` is what a session sent at a pull request that will not
 merge is told to do about it: `"Merge"`, which merges the base branch into the

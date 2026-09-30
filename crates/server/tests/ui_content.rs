@@ -3183,6 +3183,14 @@ async fn the_viewers_own_tests_are_fed_from_here() {
                 "trim": { "enabled": true, "days": "5" },
                 "delete": { "enabled": true, "days": "90" },
             },
+            // And both limits somebody typed, for the reason the size above is
+            // typed: this is the fixture of a Verkstead that has been told
+            // everything, and `settings-unset.json` is the one holding the
+            // defaults the page draws as placeholders. One roadmap stage rather
+            // than two, because one is the number with something to say — a
+            // declared roadmap run in order — and two Conversations across the
+            // server, so that the two numbers on the card are told apart.
+            "at_once": { "roadmap_stages": "1", "conversations": "2" },
             // And a rebase configured, for the reason the size above is typed:
             // the fixture of a Verkstead that has been told everything carries
             // the answer somebody chose, and `settings-unset.json` is the one
