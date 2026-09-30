@@ -2736,6 +2736,7 @@ impl Sessions {
             conversation,
             pairing,
             &agents.homes.for_conversation(conversation_id),
+            &agents.attachments,
             held,
         )
         .await;
@@ -3475,9 +3476,10 @@ async fn continuing(
     conversation: &store::Conversation,
     pairing: &store::Pairing,
     home: &crate::sandbox::Home,
+    attachments: &crate::attachments::Attachments,
     held: Held<'_>,
 ) -> Option<Continuing> {
-    match carried_on(pool, conversation, pairing, home).await {
+    match carried_on(pool, conversation, pairing, home, attachments).await {
         // Said on the Timeline by the launch rather than here — see
         // [`Sessions::start`], which writes it once there is a process. This is a
         // whole launch in front of that, and a sandbox that cannot be built, a
@@ -3551,6 +3553,7 @@ async fn carried_on(
     conversation: &store::Conversation,
     pairing: &store::Pairing,
     home: &crate::sandbox::Home,
+    attachments: &crate::attachments::Attachments,
 ) -> Carrying {
     // Spent whichever way this comes out, and that is the point of reading it
     // here: the session launched in the moment after an arrival is the one with a
@@ -3619,10 +3622,45 @@ async fn carried_on(
         note: skills::moved(
             &crate::platform::hostname(),
             worktree,
+            attached(pool, conversation.id, attachments)
+                .await
+                .as_deref(),
             &idling_on(pool, conversation.id).await,
         ),
         carried,
     })
+}
+
+/// Where this device's sessions read the files the human attached, said only
+/// where there are files to read (ADR-0020, *Transfer*).
+///
+/// **The other directory a landing moves.** A Conversation's attachments are at a
+/// path made of the Data Directory and the Conversation's id, and a record that
+/// lands takes an id of this device's inside a Data Directory of this device's —
+/// so on the platforms that give a session that directory where it really is, the
+/// path a resumed agent is carrying is the sending machine's. An ordinary session
+/// is told the right one by [`skills::attached`], which is the listing a resumed
+/// one is the single session never to get.
+///
+/// `None` for a Conversation with nothing attached, which is most of them and
+/// which the note says nothing to at all — and for a read that failed, that being
+/// a note without one line rather than a resume that did not happen. Said in the
+/// log.
+async fn attached(
+    pool: &SqlitePool,
+    conversation_id: i64,
+    attachments: &crate::attachments::Attachments,
+) -> Option<PathBuf> {
+    match store::attachments(pool, conversation_id).await {
+        Ok(files) if files.is_empty() => None,
+
+        Ok(_) => Some(attachments.inside(Platform::HERE, conversation_id)),
+
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading whether a carried conversation has files attached failed, so the note it is primed with says nothing about where they are now");
+            None
+        }
+    }
 }
 
 /// And each of the Question Sets the resumed session was idling on, said the way

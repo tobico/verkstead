@@ -468,9 +468,14 @@ Conversation** brings that very reader back on this machine, so the Sets are hel
 open for it rather than locked, and the Note names each of them by the id it landed
 under. Which of the two it is turns on the log having come across, and that is not
 settled until the launch has run the **Memory sync** — so the relaunch holds off
-and the launch locks them after all where the resume cannot be made. A **Deferred
-Ask** had nobody behind it to begin with and lands open either way, answerable
-where the work now is.
+and the launch locks them after all where the resume cannot be made. **Which of
+the two it is, is asked the moment the Timeline has been read**, so that a
+relaunch with nothing to hold locks as early as it ever did: everything after that
+is a way a relaunch can give up without starting anything, and a Set locked any
+later than that is one somebody could answer into a session that is never going to
+exist. A relaunch that held and then started nothing locks them on its way out.
+A **Deferred Ask** had nobody behind it to begin with and lands open either way,
+answerable where the work now is.
 **And a Conversation that has been on a device before comes home rather than
 arriving.** The second time work moves it is usually coming back — drafted on the
 laptop, worked on the desktop, home again — and the **Birth Key** is what says
@@ -590,9 +595,13 @@ from the record, and from the outside both are a session appearing. So the
 arrival that *did* carry a conversation on says so in a **Notice** of its own —
 which harness was told to resume which session — and the one that did not says
 that instead, with the reason. None of the reasons is a failure and none of them
-is anything to answer: whatever the arrival takes the work up with is already on
-its way by the time the Notice is written, and Verkstead's Resume is a complete way
-to take up work that has landed.
+is anything to answer: whatever the arrival takes the work up with is already
+settled by the time the Notice is written, and Verkstead's Resume is a complete way
+to take up work that has landed. **The first of them is written once there is a
+process** rather than where the decision is made: a whole launch stands between
+the two, and a sandbox that cannot be built, a terminal that will not open and a
+spawn that fails each refuse a session there — so a Notice in front of them would
+say a conversation had been picked up where nothing ever ran.
 **The Profile's memory switch off** is the first: nothing of the harness's store
 travelled, because a session under a Profile that shares no memory gets a store of
 its own and empty, away from home exactly as at home. **No session on the record**
@@ -627,9 +636,13 @@ carried on having been spent by the launch that failed.
 **The Note is the whole of what a carried conversation is primed with.** The
 session has its own context and is mid-turn in its own thinking, so being told the
 Brief again is worse than being told nothing: what it is sent is what it cannot
-know — the device the work now runs on, the **Worktree**'s new path, and the
-**Question Sets** it was idling on. Not the ordinary re-prime with the note over
-it.
+know — the device the work now runs on, the **Worktree**'s new path, where the
+files attached to it are read now, and the **Question Sets** it was idling on. Not
+the ordinary re-prime with the note over it. The attachments are named only where
+there are any, and for the Worktree's reason: their directory is made of the Data
+Directory and the Conversation's id, and a landing gives it an id of this device's
+inside a Data Directory of this device's — so a session that is never going to get
+the ordinary listing again is carrying the sending machine's path for them.
 **Those Sets are the one place the note bends from statement to instruction**,
 because a wait that has gone is something to do again rather than something to
 know. A blocking ask is a wait held open by a command running in the session's

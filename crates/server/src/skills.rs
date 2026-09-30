@@ -1178,6 +1178,18 @@ pub(crate) fn naming(prompt: &str, naming: bool) -> String {
 /// has been editing all along, at a path that is this device's rather than the
 /// other one's. Everything else about the work is what it was.
 ///
+/// **And `attachments` where there are any**, which is the same fact about the
+/// other directory a session is given. The files the human attached are read at a
+/// path made of the Data Directory and the Conversation's id, and a landing gives
+/// the Conversation an id of this device's inside a Data Directory of this
+/// device's — so on the platforms that bind them where they really are, the path
+/// in the agent's context is the sending machine's. `None` is a Conversation with
+/// nothing attached, which is told nothing about attachments at all, exactly as an
+/// ordinary session's prompt tells it nothing — see [`attached`]. On Linux the
+/// mount makes one path of it everywhere and this says what it already knew,
+/// which is worth more than a rule about platforms that the note would have to
+/// carry.
+///
 /// **And the third thing, where there is one: the Question Sets it was idling
 /// on.** A blocking ask is a wait held open by a shell command, and that command
 /// died with the process on the other machine — so the session comes back to a
@@ -1192,7 +1204,12 @@ pub(crate) fn naming(prompt: &str, naming: bool) -> String {
 /// undoing the whole point of resuming it. The Sets are the one place that bends,
 /// because a wait that has gone is something to do again rather than something to
 /// know.
-pub(crate) fn moved(machine: &str, worktree: &Path, sets: &[CarriedSet]) -> String {
+pub(crate) fn moved(
+    machine: &str,
+    worktree: &Path,
+    attachments: Option<&Path>,
+    sets: &[CarriedSet],
+) -> String {
     let mut note = format!(
         "This Conversation has been moved onto another machine and you are running on it \
          now: **{machine}**. Nothing about the work has changed — this is the \
@@ -1201,6 +1218,16 @@ pub(crate) fn moved(machine: &str, worktree: &Path, sets: &[CarriedSet]) -> Stri
          at a path of this machine's. Carry on from where you were.\n",
         worktree.display(),
     );
+
+    if let Some(attachments) = attachments {
+        note.push_str(&format!(
+            "\nThe files attached to this Conversation moved with it and are at `{}` now, \
+             for the same reason: that path is made of this machine's own directories and \
+             this machine's own id for the Conversation, so it is not the one you have been \
+             reading them at.\n",
+            attachments.display(),
+        ));
+    }
 
     if sets.is_empty() {
         return note;
@@ -4800,6 +4827,57 @@ mod tests {
             !stale.exists(),
             "a withdrawn skill is still installed: {}",
             stale.display()
+        );
+    }
+
+    /// The note a carried conversation is primed with names the two directories a
+    /// landing moves and nothing else: the Worktree, and the attached files.
+    ///
+    /// A resumed session is the one session that never gets the ordinary
+    /// listing — see [`attached`] — so the path it is carrying for those files is
+    /// the sending machine's, made of that machine's Data Directory and that
+    /// machine's id for the Conversation.
+    #[test]
+    fn the_move_note_names_where_the_attached_files_are_now() {
+        let note = moved(
+            "askance",
+            Path::new("/var/lib/verkstead/worktrees/verkstead-rate-limiting"),
+            Some(Path::new("/state/attachments/41")),
+            &[],
+        );
+
+        assert!(
+            note.contains("askance"),
+            "the machine the work runs on now: {note:?}",
+        );
+        assert!(
+            note.contains("/var/lib/verkstead/worktrees/verkstead-rate-limiting"),
+            "and the Worktree at a path of its own: {note:?}",
+        );
+        assert!(
+            note.contains("/state/attachments/41"),
+            "and the attached files at one: {note:?}",
+        );
+    }
+
+    /// And a Conversation with nothing attached is told nothing about
+    /// attachments, which is what its ordinary prompt would have said too.
+    ///
+    /// The note is what a session cannot know rather than everything that is
+    /// true, and a heading over no files is a session told something had been
+    /// configured.
+    #[test]
+    fn the_move_note_says_nothing_about_files_a_conversation_has_none_of() {
+        let note = moved(
+            "askance",
+            Path::new("/var/lib/verkstead/worktrees/verkstead-rate-limiting"),
+            None,
+            &[],
+        );
+
+        assert!(
+            !note.to_lowercase().contains("attach"),
+            "nothing is said about attachments: {note:?}",
         );
     }
 }
