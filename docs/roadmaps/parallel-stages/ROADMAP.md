@@ -41,4 +41,4 @@ some lines and not others is one 01 refuses and 04 starts nothing from.
 - [x] 03: Joining the chain — [brief](03-joining-the-chain.md) — after 02
 - [x] 04: The scheduler — [brief](04-the-scheduler.md) — after 01, 03
 - [x] 05: The server-wide limit — [brief](05-the-server-wide-limit.md) — after 04
-- [ ] 06: Every stage in flight — [brief](06-every-stage-in-flight.md) — after 04
+- [ ] 06: Every stage in flight — [brief](06-every-stage-in-flight.md) — after 04 *(in progress: `roadmaps/parallel-stages/06-every-stage-in-flight`)*
