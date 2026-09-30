@@ -1197,6 +1197,25 @@ fn reachable(platform: Platform, path: &OsStr, home: Option<&Path>) -> bool {
             .any(|directory| within(path, OsStr::new(directory)))
 }
 
+/// Whether a session on `platform` reaches `path` through the platform's own
+/// floor alone — [`reachable`] asked with no home, which is what a program
+/// installed on the machine rather than granted by Verkstead is reached by.
+///
+/// **Public for the proofs' sake.** `tests/package_stores.rs` runs real package
+/// managers by their host path *inside* a Sandbox, and a tool on the `PATH`
+/// that resolves outside [`SYSTEM`] is one the shell in there reports as
+/// absent — so the proof fails on `not found` where it meant to skip. The CI
+/// job that installs those tools asks the same question of each of them with
+/// `readlink -f`; this is so the suite can ask it wherever it runs, rather than
+/// against a second copy of the floor written out beside it.
+///
+/// No home, and that is the answer rather than a simplification: the homes a
+/// session is granted are the one the server runs as and the Profile's account,
+/// and neither of them is where anybody installs a package manager.
+pub fn reaches(platform: Platform, path: &Path) -> bool {
+    reachable(platform, path.as_os_str(), None)
+}
+
 /// The system directories a session on `platform` holds read-only — [`SYSTEM`]
 /// asked of a platform rather than of the build, the way every other arm here
 /// is a value rather than a `cfg`.

@@ -54,10 +54,14 @@
 //!   [`nuget_registry`] — and deny it two ways at once: the Worktree's own
 //!   `NuGet.config` clears every source, and the port stops answering.
 //!
-//! **A tool that is not installed is skipped in a line naming it**, so a
-//! checkout run on a machine that only builds Rust stays green. Set
-//! [`REQUIRED`] and a skip is a failure instead, which is what CI's own job
-//! does: a tool cannot quietly leave the list.
+//! **A tool this machine cannot run inside a Sandbox is skipped in a line
+//! naming it**, so a checkout run on a machine that only builds Rust stays
+//! green. Two ways to be that, and one answer to both — see [`found`]: nothing
+//! of that name on the `PATH` at all, and a name on the `PATH` resolving
+//! somewhere no Sandbox binds, which is what a runner image's link into its own
+//! tool cache is. Set [`REQUIRED`] and either is a failure instead, which is
+//! what CI's own job does: a tool cannot quietly leave the list, or quietly
+//! move out of reach of the thing that has to run it.
 //!
 //! Linux only. A store is shared through a bind, and a bind is the Linux
 //! sandbox's; what the other two platforms hand a session is asserted where
@@ -421,22 +425,67 @@ fn installing(sandbox: &Sandbox, script: &str) -> Ran {
     finished(starting(sandbox, script))
 }
 
-/// Where `program` is on the host, absolute, or `None` where this machine has
-/// none.
+/// What this machine has of one program, which is three answers rather than
+/// two — see [`found`].
+enum Reach {
+    /// It is here, at the path a session reaches it by.
+    Here(PathBuf),
+
+    /// Nothing of that name anywhere on this machine's `PATH`.
+    Nowhere,
+
+    /// On the `PATH`, and resolving to somewhere no Sandbox binds — so it is
+    /// installed and a session cannot run it. Carries the path it really is at,
+    /// because that is the whole of what a skip line has to say about it.
+    Outside(PathBuf),
+}
+
+/// Where `program` is on the host, absolute and followed, and whether a session
+/// could run it there.
 ///
 /// Absolute because a sandbox's `PATH` is the machine's system profile rather
 /// than the shell the tests were started from, and a tool the suite found on
 /// its own `PATH` is one it has to name in full to reach inside.
-fn found(program: &str) -> Option<PathBuf> {
-    std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+///
+/// **And followed, because the link is where the trouble is.** A program under
+/// a directory every Sandbox binds may still be a symlink into one that none of
+/// them does — a runner image keeps its own toolchains under
+/// `/opt/hostedtoolcache` and links them onto `/usr/bin`, which is a `go` a
+/// session opens and finds absent. Handed that path, a proof dies on
+/// `/bin/sh: /usr/bin/go: not found` rather than skipping, which is the one
+/// thing a machine that has not got a tool is supposed not to do.
+///
+/// So the question is asked of what the name resolves to and it is asked of the
+/// server — [`verkstead_server::sandbox::reaches`], which is the same floor a
+/// session is really given rather than a second copy of it written out here.
+/// The CI job that installs these tools asks it of each of them with
+/// `readlink -f`; this is the suite asking it wherever it runs.
+fn found(program: &str) -> Reach {
+    let Some(on_the_path) = std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
         .map(|dir| dir.join(program))
         .find(|path| path.is_file())
+    else {
+        return Reach::Nowhere;
+    };
+
+    // Whatever it really is, which is what a session opens when it runs the
+    // name above. A path that will not canonicalise at all is one nothing could
+    // open either, so it is the same answer as a link leading nowhere.
+    let Ok(real) = std::fs::canonicalize(&on_the_path) else {
+        return Reach::Nowhere;
+    };
+
+    match verkstead_server::sandbox::reaches(Platform::HERE, &real) {
+        true => Reach::Here(on_the_path),
+        false => Reach::Outside(real),
+    }
 }
 
 /// Every tool a proof needs, or `None` and a line naming the first one this
-/// machine has not got.
+/// machine has not got — or has somewhere a session cannot reach, which is the
+/// same answer for the same reason.
 ///
-/// Where [`REQUIRED`] is set, a missing tool is a failure instead: that is the
+/// Where [`REQUIRED`] is set, either of those is a failure instead: that is the
 /// job whose whole business is having them installed, and a proof quietly
 /// skipped there would be a tool that had left the list without anybody
 /// hearing about it.
@@ -444,23 +493,30 @@ fn tools(proof: &str, wanted: &[&str]) -> Option<Vec<PathBuf>> {
     let mut found_them = Vec::new();
 
     for program in wanted {
-        let Some(path) = found(program) else {
-            println!(
-                "skipping the {proof} package-store proof: this machine has no `{program}` on \
-                 its PATH"
-            );
-
-            assert!(
-                std::env::var_os(REQUIRED).is_none(),
-                "the {proof} package-store proof was skipped for want of `{program}`, and \
-                 {REQUIRED} is set — which is the run where every tool on the list has to be \
-                 installed. Install it in that job, or take {proof} off the list.",
-            );
-
-            return None;
+        let missing = match found(program) {
+            Reach::Here(path) => {
+                found_them.push(path);
+                continue;
+            }
+            Reach::Nowhere => format!("this machine has no `{program}` on its PATH"),
+            Reach::Outside(real) => format!(
+                "this machine's `{program}` is {}, which no session's sandbox binds — see \
+                 LINUX_SYSTEM in crates/server/src/sandbox.rs",
+                real.display(),
+            ),
         };
 
-        found_them.push(path);
+        println!("skipping the {proof} package-store proof: {missing}");
+
+        assert!(
+            std::env::var_os(REQUIRED).is_none(),
+            "the {proof} package-store proof was skipped for want of a `{program}` a session \
+             can run — {missing} — and {REQUIRED} is set, which is the run where every tool on \
+             the list has to be installed somewhere a Sandbox reaches. Install it there in that \
+             job, or take {proof} off the list.",
+        );
+
+        return None;
     }
 
     Some(found_them)
