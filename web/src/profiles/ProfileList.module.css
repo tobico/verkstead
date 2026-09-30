@@ -216,6 +216,11 @@
   align-items: baseline;
   gap: 0.4rem;
   margin: 0;
+
+  /* And a row to press: the whole of it, taking no selection — see `rowPress` in
+     `src/rows.ts` for what a press that slid used to do instead. */
+  cursor: pointer;
+  user-select: none;
   font-size: inherit;
   color: inherit;
 }

@@ -47,7 +47,7 @@ import type { SettingsSaved, SettingsView } from "../api/types";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine, Note } from "../notices";
 import { PaneHead } from "../workbench/PaneHead";
-import { heldCleanup, heldPaths } from "./held";
+import { heldAtOnce, heldCleanup, heldPaths } from "./held";
 import styles from "./Instructions.module.css";
 
 /// What the section is called, in the one place both panes read it from.
@@ -164,6 +164,8 @@ export function InstructionsPane(props: {
         },
         // And what becomes of an archived Conversation — see [`heldCleanup`].
         cleanup: heldCleanup(told()),
+        // And how much Verkstead runs at once, likewise — see [`heldAtOnce`].
+        at_once: heldAtOnce(told()),
         conflict_resolution: told()?.conflict_resolution ?? "Merge",
         share_on_done: told()?.share_on_done ?? false,
         // And the paths as they stand — see [`heldPaths`].
