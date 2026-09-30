@@ -2386,11 +2386,17 @@ contents reaches it by, beside what the Stage's line declares it stands on.
 **And every Stage in flight is a row on that card.** It draws five entries of a
 longer roadmap, and which five was the ones around the first Stage not ticked
 while that was *where the work has got to*; with Stages worked side by side it is
-every Stage the record has in flight — *in progress*, *waiting to join*,
-*waiting for a place* or *halted* — and none of them gives way to hold the card
-at five, three Stages running being what a reader came to it for. A Stage
-*waiting on* another is not in flight, what it waits for being the work the card
-already shows. What is left of the five goes on closing the gaps between them and
+every Stage the record has a Conversation on — *in progress*, *waiting to join*
+or *halted* — and none of them gives way to hold the card at five, three Stages
+running being what a reader came to it for. Neither of the two waits nothing has
+started is in flight, and for the one reason: what each of them waits for is
+somewhere else. A Stage *waiting on* another waits on the work the card is
+already showing; a Stage *waiting for a place* waits on the machine, and a wide
+roadmap on a busy server has as many of those as it has roots — a card keeping a
+row for each would grow with the queue and push the record it is pinned above off
+the screen, which is the one thing the window is there to stop. Both are drawn
+where the window reaches them, as the neighbours they are, and both say their own
+word when it does. What is left of the five goes on closing the gaps between them and
 then on their neighbours, so a roadmap running in one place reads as it always
 did, and Stages too far apart to join up are drawn as stretches of the roadmap
 with an ellipsis row saying what is out of sight between them as well as at the

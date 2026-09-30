@@ -990,14 +990,20 @@ Timeline events:
   a roadmap has stages in flight** (*refined 2026-09-30, building
   parallel-stages/06-every-stage-in-flight*): the first entry that is not done
   while nothing is in flight, which is every backlog and a roadmap nobody is
-  running, and otherwise every stage the record has in progress, waiting to
-  join, waiting for a place or halted — none of which is dropped to hold the
+  running, and otherwise every stage the record has a Conversation on — in
+  progress, waiting to join or halted — none of which is dropped to hold the
   card at five, three stages running being three rows whatever gives way for
   them. What is left of the five goes on closing the gaps between them and then
   on their neighbours, and stages too far apart to join up are drawn as
   stretches with an ellipsis row saying what is out of sight between them as
-  well as at the ends. A stage waiting on another is not in flight: what it
-  waits for is the work the card is already showing. **And a stage's row leads
+  well as at the ends. Neither of the two waits nothing has started is in
+  flight, and for the one reason: what each of them waits for is somewhere else.
+  A stage waiting on another waits on the work the card is already showing; a
+  stage waiting for a place waits on the machine, and a wide roadmap on a busy
+  server has as many of those as it has roots, so a card keeping a row for each
+  would grow with the queue — which is the one thing the window is there to
+  stop. Both are drawn where the window reaches them, as the neighbours they
+  are, and both say their own word when it does. **And a stage's row leads
   to the Conversation working it** (*settled 2026-09-30, building
   parallel-stages/06-every-stage-in-flight*), which is the one place a card in
   this app has a second target on it: everywhere else the whole surface is the

@@ -16265,6 +16265,50 @@ describe("a roadmap with more than one stage in flight", () => {
       "1 more",
     ]);
   });
+
+  /// And a stage waiting for a place is a neighbour too, which is what keeps the
+  /// card a card: a wide roadmap on a busy server has one of those per root past
+  /// the places there are, and a row kept for each of them would grow the card
+  /// with the queue rather than with the work.
+  it("draws a stage waiting for a place where the window reaches it, and no further", async () => {
+    theStaged({
+      pinned: [
+        {
+          StageList: stagesOf([
+            { state: "WaitingForAPlace" },
+            { state: "WaitingForAPlace" },
+            { state: "InProgress" },
+            { state: "WaitingForAPlace" },
+            { state: "WaitingForAPlace" },
+            { state: "WaitingForAPlace" },
+            { state: "WaitingForAPlace" },
+            { state: "WaitingForAPlace" },
+            { state: "WaitingForAPlace" },
+            { state: "WaitingForAPlace" },
+          ]),
+        },
+      ],
+    });
+    const { container } = mount(`/conversations/${STAGED.id}`);
+
+    const card = await drawn(
+      container,
+      `.${timeline.pinned} .${timeline.stageList}`,
+    );
+
+    // Nine of the ten are ready with nowhere to run, and the card is still five
+    // rows: the one stage anybody is on is the place the work is, and the rest
+    // are the neighbours around it.
+    expect(down(card)).toEqual(["01", "02", "03", "04", "05", "5 more"]);
+
+    // And each of the ones it did reach says what it is waiting for, which is
+    // the whole of what the word was added for.
+    expect(
+      [...card.querySelectorAll(`.${timeline.stages} li:not(.${timeline.more})`)]
+        .map((row) => row.querySelector(`.${timeline.state}`)!.textContent)
+        .filter((state) => state === "waiting for a place"),
+    ).toHaveLength(4);
+  });
 });
 
 /// The roadmap opened, as the details pane fetches it: one brief per stage, done

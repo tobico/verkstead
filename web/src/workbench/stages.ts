@@ -57,26 +57,35 @@ export function settled(state: StageState): boolean {
   return state.state === "Done";
 }
 
-/// Whether a stage is in flight: somebody is on it, or Verkstead is holding it
-/// somewhere on its way through, or it has stopped part-way and is waiting for
-/// a human. Which is the other thing the page asks of a state, and it asks for
-/// the card: every stage in flight is a row on it, however many there are —
-/// see `windowing.ts`.
+/// Whether a stage is in flight: a Conversation of Verkstead's is on it, or is
+/// holding it somewhere on its way through, or has stopped part-way and is
+/// waiting for a human. Which is the other thing the page asks of a state, and
+/// it asks for the card: every stage in flight is a row on it, however many
+/// there are — see `windowing.ts`.
 ///
-/// Halted counts, being the one of them nobody is working: a stage that has
-/// stopped is a stage somebody has to do something about, so it is the last row
-/// worth hiding rather than the first. A stage waiting on another does not: what
-/// it is waiting for is work elsewhere in the roadmap, and the row worth reading
-/// is that work's.
+/// **Which is a stage the record has a Conversation for, and only those**, so
+/// the rows the card can never drop are bounded by how many stages the machine
+/// runs at once. Halted counts, being the one of them nobody is working: a
+/// stage that has stopped is a stage somebody has to do something about, so it
+/// is the last row worth hiding rather than the first.
+///
+/// The two waits nothing has started do not, and for the one reason: what each
+/// of them waits for is somewhere else. A stage *waiting on* another waits on
+/// work the card is already showing; a stage *waiting for a place* waits on the
+/// machine, and there may be a great many of them at once — every root of a
+/// wide roadmap past the places there are — so a card that kept a row for each
+/// would grow with the queue and push the record it is pinned above off the
+/// screen. Both are drawn where the window reaches them, as the neighbours they
+/// are, and both say their own word when it does.
 export function inFlight(state: StageState): boolean {
   switch (state.state) {
     case "InProgress":
     case "WaitingToJoin":
-    case "WaitingForAPlace":
     case "Halted":
       return true;
     case "Done":
     case "WaitingOn":
+    case "WaitingForAPlace":
     case "ToDo":
       return false;
   }
