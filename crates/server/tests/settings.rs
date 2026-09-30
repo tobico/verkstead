@@ -861,6 +861,7 @@ async fn an_entry_that_would_not_load_says_so_on_the_page_and_stays_in_the_file(
             "share_on_done": false,
             "sandbox_binds": [],
             "ignored_comments": "Keep",
+            "mcp_servers": "Keep",
             "instructions": "",
         }),
     )
@@ -910,6 +911,7 @@ async fn a_save_carries_the_old_key_into_the_map_and_writes_it_away() {
             "share_on_done": false,
             "sandbox_binds": [],
             "ignored_comments": "Keep",
+            "mcp_servers": "Keep",
             "instructions": "",
         }),
     )
@@ -1406,6 +1408,7 @@ async fn a_save_leaves_an_installers_own_descriptor_exactly_as_the_file_had_it()
             "share_on_done": false,
             "sandbox_binds": [],
             "ignored_comments": "Keep",
+            "mcp_servers": "Keep",
             "instructions": "",
         }),
     )
@@ -2071,7 +2074,7 @@ async fn save_servers(app: &Router, servers: serde_json::Value) -> SettingsSaved
         &serde_json::json!({
             "git_author": { "name": "", "email": "" },
             "github_token": "Keep",
-            "rust_build_cache": { "enabled": true, "size": "" },
+            "languages": languages_unset(),
             "cleanup": cleanup_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
@@ -2324,7 +2327,7 @@ async fn a_save_refused_over_a_name_writes_nothing_at_all() {
         &serde_json::json!({
             "git_author": { "name": "Tobias Cohen", "email": "tobi@tobico.net" },
             "github_token": { "Set": { "token": "ghp_thetoken" } },
-            "rust_build_cache": { "enabled": true, "size": "" },
+            "languages": languages_unset(),
             "cleanup": cleanup_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
@@ -2534,7 +2537,7 @@ async fn a_header_value_appears_in_no_answer_this_endpoint_gives() {
         &serde_json::json!({
             "git_author": { "name": "", "email": "" },
             "github_token": "Keep",
-            "rust_build_cache": { "enabled": true, "size": "" },
+            "languages": languages_unset(),
             "cleanup": cleanup_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
@@ -3288,7 +3291,7 @@ mod trying {
             &serde_json::json!({
                 "git_author": { "name": "", "email": "" },
                 "github_token": "Keep",
-                "rust_build_cache": { "enabled": true, "size": "" },
+                "languages": super::languages_unset(),
                 "cleanup": super::cleanup_unset(),
                 "conflict_resolution": "Merge",
                 "share_on_done": false,

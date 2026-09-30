@@ -64,10 +64,13 @@ const REST = {
   // The rules ride along as an action rather than a value: nothing this pane
   // does says anything about them — see [`IgnoredCommentsEdit`].
   ignored_comments: "Keep",
-  rust_build_cache: {
-    enabled: TOLD.rust_build_cache.enabled,
-    size: TOLD.rust_build_cache.size,
-  },
+  // And the languages, for the reason the rules do: one request writes the whole
+  // of `config.yaml`, so a list left out would be a list emptied. See
+  // [`heldLanguages`].
+  languages: [
+    { name: "rust", enabled: true, size: "50G" },
+    { name: "gleam", enabled: true, size: "8G" },
+  ],
   cleanup: {
     trim: { enabled: true, days: "5" },
     delete: { enabled: true, days: "90" },
@@ -339,7 +342,7 @@ describe("the pane", () => {
         // The read this pane sent from is the one nobody has been to, so what
         // rides along is that file rather than the told one.
         git_author: UNSET.git_author,
-        rust_build_cache: { enabled: true, size: "" },
+        languages: [{ name: "rust", enabled: true, size: "" }],
         cleanup: {
           trim: { enabled: true, days: "" },
           delete: { enabled: false, days: "" },
