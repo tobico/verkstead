@@ -528,3 +528,29 @@ does when they share a root, and they share every bind besides).
 its risk.** It is safe and measured. The cost is about 1 s on every trivial
 build and about 3 s on every Kotlin rebuild, against 0.2 s and 0.4 s, and the
 `--daemon` hole stays as it is, accepted and documented.
+
+## The decision: leave the daemon off
+
+Put to the human on 2026-10-01 (Question Set 1003), with the recommendation
+above. **They chose to leave the daemon off**, as stage 04 left it, over both
+the per-session registry and a daemon of Verkstead's own. No reason was given
+beside the pick, so none is recorded here beyond the case as it was put to
+them:
+
+- **A daemon of Verkstead's own is not built** because it is unsound, as
+  measured above: mismatched or merely concurrent sessions start daemons of
+  their own in the shared registry, which brings back stage 04's hazard, and
+  every build that does reach it runs where every Worktree is writable and
+  none of its session's binds are.
+- **The per-session registry is not taken.** It works on both Gradles, but it
+  rests on `org.gradle.daemon.registry.base`, which Gradle does not document,
+  and that is the reason stage 04 turned it down.
+- **Leaving the daemon off is safe and was measured.** It costs about 1 s on
+  every build and about 3 s on a Kotlin rebuild, against 0.2 s and 0.4 s with
+  a daemon. The explicit `--daemon` hole stays as stage 04 left it: accepted
+  and documented, not closed.
+
+The design questions that would have followed the registry (where its
+directory lives off Linux, the idle timeout, the build's breakdown) were
+conditional on it and left unanswered. No build tasks are added to the
+backlog. The docs task records this outcome.
