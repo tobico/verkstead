@@ -128,8 +128,25 @@
 #              cannot be given a unit safely is left this way rather than
 #              guessed at.
 #
-# A store saying both, or a unit matching anything, is refused the way a
-# misplaced `dir` is.
+# Refused the way a misplaced `dir` is, the entry falling back to its built-in:
+# a store saying both; a unit naming none of `depth`, `named` or `holding`,
+# which would match anything; `depth: 0`, which is the whole store; an `under`
+# that leaves the store; a pattern that is a path; and a store under
+# `.verkstead-swept`, which is the directory the sweep moves units aside into.
+#
+# **The sweep runs as the server starts and hourly after, and only while no
+# session and no Conversation Terminal runs** — at the first moment nothing
+# does, where one comes due while something is running, so a machine that is
+# never idle is never swept. It takes a language's units oldest first, a unit
+# being as old as the newest time anywhere in it: access times where the
+# store's filesystem keeps them, modification times where it does not. Each
+# unit is renamed into `.verkstead-swept` at the top of `{cache}` or `{stores}`
+# before it is deleted, so no tool ever sees half of one; a store mounted on a
+# filesystem of its own is never swept, the rename being refused rather than
+# turned into a copy. **Clear**, on the settings page, empties every store of
+# one language the same way, whichever of the three it is, and is refused
+# while anything runs. What a reader's filesystem makes of *oldest* is in
+# `docs/adoption.md`.
 #
 # **Write `/` between the placeholder and what is under it, on every platform.**
 # A descriptor is one file read on three, so the grammar has one separator: what

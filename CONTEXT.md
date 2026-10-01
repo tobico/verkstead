@@ -1034,8 +1034,9 @@ settings page, and no release needed to put it there. **The file only**, there
 being no descriptor editor: `enabled` and `size` are keys of the same entry and
 the only two the settings page ever writes, which is what lets one save write
 the whole of `config.yaml` without taking an installer's own keys away. Absent
-`enabled` is on and absent `size` is 30G, so a language nobody has said
-anything about is one that works. `rust_build_cache`, where Rust's two used to
+`enabled` is on and absent `size` is 10G — 30G for Rust, whose sccache has
+always been started at that — so a language nobody has said anything about is
+one that works and one whose stores are held to something. `rust_build_cache`, where Rust's two used to
 be said, is still read as Rust's, and the map wins where both say something.
 **Placeholders are what only the server knows**, and there are four. `{cache}`
 is the **Build Cache**, where a store goes that nothing has to share a
@@ -1058,6 +1059,13 @@ a session, only where a loaded descriptor names it — and four of the shipped
 variables name the one beside the Worktrees, so a session with Node or Python
 switched on is opened onto it and an install with both off is opened onto
 none.
+**A descriptor names its stores as well as its variables**, under `stores:` —
+the directories its tools fill, each under `{cache}` or `{stores}` and nowhere
+else, because what is done to a store is delete what is in it — and says of
+each how it is kept under the size: by its tool (sccache, and only sccache), by
+**unit** for the **Sweep** to take out whole, or not at all. A store has to be
+named rather than read back out of `env` because a variable is not always a
+path: Maven's repository is a flag inside `MAVEN_OPTS`.
 **An entry that will not load falls back to the built-in of that name.** Two
 ways one fails — naming a variable the Sandbox sets itself, which is refused by
 name, and being something nothing can parse, a key the grammar does not have
@@ -1098,9 +1106,11 @@ directory on both Unixes — `~/.cache/verkstead` where nothing says otherwise �
 and `%LOCALAPPDATA%\Verkstead\Cache` on Windows, the local rather than the
 roaming application data because a compiled crate follows nobody between
 machines. The packaged unit says `/var/cache/verkstead`); which languages a
-Sandbox gets at all, and how big the compiled half may grow, is the human's, in
+Sandbox gets at all, and how big each one's stores may grow, is the human's, in
 the workbench settings — a box per descriptor under **Language support**, with
-the size hanging off the one whose store an sccache bounds. The one control
+a size, the disk use beside it and a Clear under every one that has a store of
+its own (C/C++'s objects being Rust's sccache's). It is kept under those sizes
+by sccache for the compiled half and by the **Sweep** for the rest. The one control
 there that only ever *closes* a hole — the **Sandbox
 Configuration** beside it opens them, and does so only for what somebody typed.
 Without an sccache it is still a cache — the crate downloads are shared — and
@@ -1160,6 +1170,38 @@ else** — not `CC` and `CXX`, which reach builds that are not C++ projects at
 all and can wrap one compile twice beside a launcher (ADR-0021). What that
 covers, and what it does not, is the installer's documentation's.
 _Avoid_: daemon, sccache daemon, build server, compiler service
+
+**Sweep**:
+What keeps a language's stores under its size where the tool filling them does
+not do it for itself — every store but sccache's. It takes out **units**,
+whole and oldest first, until the language's swept stores together are under
+its size. **A unit is one package, never a file of one**, because a Go module or
+a Maven artifact with a file missing is a broken store rather than a smaller
+one. The **Descriptor** names it, as data: every entry at a depth, or the first
+entry down named like a pattern, or the first directory down holding one. It
+is a single file only where the file is the whole package, or where the store
+is content-addressed and its tool checks every blob it reads, so that a blob
+gone is a blob fetched again. A store naming no unit is never swept, and the
+settings page says so. Rust's cargo half is swept, held to Rust's size apart
+from sccache's own eviction, so a Rust machine holds up to twice it.
+**As the server starts and hourly after, and only while nothing runs** — no
+session and no Conversation Terminal, both of which reach the stores — at the
+first moment nothing does, where one comes due while something is running.
+**A machine that is never idle is never swept**, which was decided rather than
+overlooked; the settings page says when each language was last swept.
+**Never half a unit**: each is renamed aside into `.verkstead-swept`, at the top
+of the Build Cache or of the directory beside the Worktrees, so the rename
+stays on one filesystem, and only then deleted. A launch waits for the one
+rename in hand, and the sweep stops between units once anything has started.
+*Oldest* is the newest time anywhere in the unit: access times where the
+store's filesystem keeps them — measured with a probe, not read off the mount
+options — and modification times where it does not, which on a Mac and on most
+Windows machines makes *least recently used* into *least recently written*.
+**Clear** is the same machinery pressed by a human: every store of one
+language emptied, sccache's included with the Compile Server stopped first,
+and **refused while anything runs** rather than waited for, because whoever
+pressed it is there to be told why nothing happened.
+_Avoid_: prune, garbage collection, cleanup (the Cleanup is what trims archived Conversations), eviction policy
 
 **Log Directory**:
 The other directory of Verkstead's own outside the Data Directory: where the

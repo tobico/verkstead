@@ -947,6 +947,21 @@ languages:
           RUSTC_WRAPPER: "{sccache}"
           SCCACHE_DIR: "{cache}/sccache"
           SCCACHE_CACHE_SIZE: "{size}"
+    stores:
+      cargo:
+        dir: "{cache}/cargo"
+        units:
+          - under: registry/src
+            depth: 2
+          - under: registry/cache
+            depth: 2
+          - under: git/db
+            depth: 1
+          - under: git/checkouts
+            depth: 2
+      sccache:
+        dir: "{cache}/sccache"
+        evicted: by-its-tool
 ```
 
 `label` is what the settings page calls it. `detect` is what says a Repo builds
@@ -959,12 +974,16 @@ the **Compile Server**, and a capability's variables are set only on a machine
 that can offer it — no sccache anywhere and a session gets the downloads above
 and none of the three below. There is no key for a command to run, and there
 will not be one: a settings file that started programs is a settings file whose
-sandbox somebody then has to describe in YAML too.
+sandbox somebody then has to describe in YAML too. `stores` names the
+directories the language's tools fill — what the settings page measures, and
+what is held to the language's size — and says of each how it is kept under
+that size, which is [its own section](#how-big-a-store-grows).
 
 Two more keys belong to the same entry and are not in the file above, because
 what they say is your machine's rather than the release's: `enabled`, whether
 sessions get this language at all, and `size`, how big its store may grow —
-which is what `{size}` stands for. Absent, they are **on** and **30G**. They
+which is what `{size}` stands for. Absent, they are **on** and **10G** —
+**30G** for Rust, whose sccache has always been started at that. They
 are also the only two keys the settings page ever writes, so a save from the
 **Language support** pane leaves everything else in an entry exactly as you
 typed it.
@@ -1390,6 +1409,204 @@ too, but it finds itself through `~/.kotlin/daemon` under the account's real
 home, which no Sandbox binds, so each Sandbox's is its own. **Kotlin/Native's
 `~/.konan`**, where it downloads its compilers and platform libraries, is not
 in the Build Cache, so it is not shared between Conversations.
+
+### How big a store grows
+
+**Every language with a store has a size, and its stores are kept under it**,
+so a machine that has run Verkstead for a year has not had its disk filled with
+packages for projects nobody has opened since. The **Language support** pane
+draws a size field under each such language, its default as the placeholder:
+**10G**, and **30G for Rust**. C/C++ draws none, because it compiles into
+Rust's sccache rather than a store of its own. A size is written in sccache's
+own grammar — a whole number with `K`, `M`, `G` or `T` after it, in binary
+multiples — because Verkstead reads it as well as sccache, and one word should
+mean the same to both. The page refuses a size it cannot read, and says why. A
+size written by hand in `config.yaml` that cannot be read is taken as the
+default, and the pane says that too.
+
+Beside the size the pane shows **what the language's stores hold on disk**. It
+is measured in the background, every quarter of an hour and straight after a
+sweep or a Clear, so it may be a few minutes old, and just after the server
+starts it reads *not measured yet*. The walk follows no symlink and counts a
+hardlinked file once. Under that, a line per store says **how it is bounded**,
+and a last line says when the language was last swept.
+
+#### What is evicted
+
+A store is kept under its language's size in one of three ways, and its
+descriptor says which:
+
+- **By its tool** (`evicted: by-its-tool`). The tool is handed the size in a
+  variable carrying `{size}` and evicts for itself, and Verkstead leaves the
+  store alone. **sccache is the only one**: `SCCACHE_CACHE_SIZE`, least
+  recently used first. Cargo, Go's build cache and Gradle clean up by *age*
+  rather than to a size, and no other tool here evicts at all, so none of them
+  counts.
+- **By unit** (`units:`). The sweep takes **whole units** out, oldest first,
+  until the language's swept stores together are under its size. A unit is one
+  package, never one file of one: a Go module or a Maven artifact with one file
+  missing is a broken store rather than a smaller one.
+- **Not at all**: a store naming neither is never swept, and the pane says so.
+  What could not be given a unit safely is left this way rather than guessed
+  at.
+
+The built-ins:
+
+| Language | Store | Bounded | A unit is |
+| --- | --- | --- | --- |
+| Rust | `cargo` | by unit | a downloaded `.crate`, the source unpacked from one, a git dependency's database, or a checkout of one revision of it. The registry index is never swept: it is small, and a crate missing from it is fetched again |
+| Rust | `sccache` | by its tool | — |
+| Go | `modules` | by unit | a directory named `path@version`, wherever the module's path puts it, and its download's `@v` directory. Go makes them read-only, and the sweep gets past that |
+| Go | `build` | by unit | one entry in the build cache's `00`–`ff` shards |
+| Node | npm | by unit | one blob in `_cacache/content-v2` |
+| Node | pnpm's store | by unit | one blob in `v11/files` — never a shard, which holds a slice of every package |
+| Node | pnpm's metadata | by unit | one package's `.jsonl` |
+| Node | Yarn Classic | by unit | one `npm-…` entry in `v6` |
+| Node | Yarn Berry | by unit | one `.zip` in `cache` |
+| Node | deno | by unit | one npm package, the directory holding its `registry.json`, and one remote module |
+| Node | bun | by unit | one `name@version@@@…` directory, and whatever an install that lost a race to another left in `.tmp` |
+| Python | pip, pipenv | by unit | one cached response in `http-v2`, and one built wheel in `wheels` |
+| Python | uv | by unit | one unpacked archive in `archive-v0` |
+| Python | poetry | by unit | one downloaded artifact, and one cached response about a repository |
+| .NET | `packages` | by unit | one package version, `<id>/<version>` |
+| .NET | `http` | by unit | one cached response, a `.dat` file |
+| .NET | `scratch` | not at all | — it holds NuGet's locks and temporary files rather than packages |
+| JVM | Maven's repository | by unit | one artifact version: the directory holding its `.pom` or `_remote.repositories` |
+| JVM | Gradle's home | by unit | one module version under `caches/modules-2/files-2.1` |
+
+**Rust is held to its size twice.** sccache trims the compiled objects to it,
+and the sweep holds the cargo half to it separately, so a Rust machine holds up
+to twice Rust's size between the two.
+
+**A unit is a file in two cases only.** One is where the file *is* the whole
+package, as a `.crate`, a `.zip` or a `.jsonl` is. The other is where the store
+is **content-addressed and its tool checks every blob it reads** — Go's build
+cache, npm's `_cacache`, pnpm's store — so that a blob gone is a blob fetched
+again rather than a package quietly broken.
+
+**What is not in any unit still counts towards the size.** A store's indexes
+and metadata, and the parts of Gradle's home that are not module downloads —
+the distributions `gradlew` fetched, toolchain JDKs, the build cache — are
+measured with the rest and never swept. A language whose unswept part is
+bigger than its size is swept down to no units at all and stays over. That is
+the size to raise.
+
+#### Naming a unit for your own descriptor
+
+A unit is data, like the rest of a descriptor. Each store's `units` is a list
+of rules, and each rule walks down from `under` — a path inside the store, `/`
+between its segments; the store itself where it is not said — and stops at the
+first entry that is a unit:
+
+- `depth: N` — every entry `N` levels down, `1` being what is directly in
+  `under`. NuGet's packages are `depth: 2`, `<id>/<version>`.
+- `named: [patterns]` — an entry whose name is one of these, at whatever depth.
+  Go's modules are `named: ["*@*"]`, because the `@` before a version is in no
+  other segment of a module path.
+- `holding: [patterns]` — a directory holding an entry with one of these names.
+  Maven's artifacts are `holding: ["*.pom", "_remote.repositories"]`, because a
+  group id puts an artifact anywhere from three to six levels down, and what
+  marks one is the file inside it.
+
+A rule saying more than one of them wants an entry that is all of them. Yarn
+Classic's is `under: v6`, `depth: 1` and `named: ["npm-*"]`. A pattern is one
+name, `*` standing for any run of characters and `?` for one. Rust's `cargo`
+store, [above](#languages), is four rules for four kinds of unit.
+
+An override replaces a store's `units` whole rather than merging into it, and
+`units: []` says a store is never to be swept:
+
+```yaml
+# config.yaml — this machine's Maven repository is a mirror kept by hand, and
+# nothing of it is to go.
+languages:
+  jvm:
+    stores:
+      maven:
+        units: []
+```
+
+The walk follows no symlink, and never takes one as a unit. **A rule the sweep
+could not follow is refused**, and the entry falls back to its built-in the way
+any refused entry does: a rule with none of `depth`, `named` or `holding`,
+which would match anything; `depth: 0`, which is the whole store; an `under`
+leaving the store; a pattern holding a `/`; a store that says both `units` and
+`evicted`; and a store under `.verkstead-swept`, which is the sweep's own
+directory.
+
+#### When
+
+**As the server starts and hourly after, and only while nothing runs** — no
+session and no Conversation Terminal, both of which reach the stores. A sweep that comes due while
+something runs happens at the first moment after that when nothing does,
+rather than an hour later, so a machine that is idle for ten minutes a day is
+swept every day. **A machine that is never idle is never swept.** That was
+decided rather than overlooked, and the pane's *Last swept …* line is where it
+shows: it is the last pass that went through that language's stores to the
+end, whether or not it found anything to take. The server keeps it in memory,
+so after a restart, until the first such pass, the line says the language has
+not been swept since the server started, and that a sweep waits until no
+session or terminal is running.
+
+**Nothing ever sees half a unit.** Each unit is renamed aside into
+`.verkstead-swept`, at the top of the Build Cache or of the directory beside
+the Worktrees, and only then deleted. A session or terminal starting meanwhile
+waits for the one rename in hand, a moment, and the sweep stops between units
+as soon as anything has started. What a sweep that died left aside is deleted
+at the start of the next. The rename stays on one filesystem, so **a store you
+mounted on a filesystem of its own is never swept**: the system refuses the
+rename, the unit is passed over and said in the log, and nothing is ever
+copied instead. Read-only units are made writable first.
+
+**Clear** empties every store of one language — sccache's too, for Rust, with
+the Compile Server stopped first so its index does not go on describing
+objects that are gone; the next session starts it again. The store
+directories stay, empty, and the next install fetches what it needs again.
+**Clear is refused while anything runs**, rather than waiting: the button is
+off and says how many sessions and terminals it is waiting on, and the server
+refuses one that arrives anyway. Clear goes through the sweep's machinery, so
+it too renames aside before deleting, and a launch pressed meanwhile waits for
+it.
+
+#### What *oldest* means on your filesystem
+
+A unit is as old as **the newest time anywhere in it**: in any file inside it,
+and in the directory itself. That is because a file's own time can mislead. A
+Maven jar's modification time is the `Last-Modified` the repository sent, so a
+jar downloaded this morning can carry a date from 2014. A directory is dated by
+when it was last written. A file is dated by when it was last **read** as well
+— its access time — **only where the store's filesystem keeps access times**.
+Where it does not, *least recently used* quietly becomes **least recently
+written**, and a package every build reads but nothing has rewritten since it
+was downloaded is the first to go.
+
+Verkstead measures this rather than reading it off the mount options. On each
+pass it dates a file two days back, reads it, and looks again. What you are
+likely to have:
+
+- **Linux**: kept. The kernel's default is `relatime`, which updates a file's
+  access time when it is older than its modification time or more than a day
+  old. That is plenty for an hourly sweep that counts in days. A filesystem
+  mounted `noatime` keeps none, and some setups choose it for flash storage.
+  `findmnt -T <Build Cache>` shows what yours is mounted with.
+- **macOS**: **not, in effect.** By Apple's description of APFS, a volume
+  mounted without `strictatime` — and no default volume is — updates a file's
+  access time on a read only while it is still older than its modification
+  time. So a file read once after its download is never seen read again, and a
+  Mac sweeps by when things were written. `mount` lists `strictatime` against
+  a volume that has it.
+- **Windows**: **usually not.** Since Windows 10's April 2018 update, NTFS's
+  last-access updates are *system managed*: on at boot where the system volume
+  is 128 GB or smaller, and off where it is larger, which is most machines now.
+  `fsutil behavior query disablelastaccess` says which: `2` (system managed,
+  enabled) and `0` are kept, `3` (system managed, disabled) and `1` are not.
+  With them on, NTFS answers a query with the true time even where it has not
+  yet written it to disk.
+
+Least recently written is still a fair order: a package is downloaded when
+some project first wanted it, and a store kept that way loses the packages
+fetched longest ago first. What it can get wrong is a package fetched long ago
+that every build still uses. The next install fetches it again.
 
 ## A day's work
 

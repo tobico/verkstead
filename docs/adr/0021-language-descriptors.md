@@ -187,7 +187,8 @@ daemon holds memory for hours. That stage may end with the daemon staying off.
 
 Every store has a size — `10G` where nobody has said, Rust's sccache staying at
 `30G`. Tools that evict for themselves are handed the size and left alone. For
-the rest, the descriptor names the **unit** — a directory depth — and Verkstead
+the rest, the descriptor names the **unit** — a directory depth *(amended by stage 05:
+or a marker, and a blob in a content-addressed store — see below)* — and Verkstead
 removes whole units, oldest first, until the store is under its size.
 
 Never by file: a Go module or a Maven artifact with one file missing is a
@@ -201,6 +202,50 @@ unit aside before deleting it. *Oldest* is access time where the filesystem
 keeps one and modification time where it does not, and the documentation says
 which a reader is likely to have. The settings page shows each language's disk
 use beside its size, with a Clear.
+
+**Amended by stage 05, with what its grilling decided (Set 996)** and what was
+measured while building it:
+
+- **A unit is named by a depth or by a marker.** A depth alone could not name
+  Go's modules or Maven's artifacts, which sit at whatever depth their path or
+  group id puts them. So a unit is every entry at a `depth`, the first entry
+  down `named` like a pattern, or the first directory down `holding` one,
+  walking from an `under` inside the store and stopping at the unit. The
+  patterns are names with `*` and `?`, so the descriptor stays data.
+- **A unit may be one blob where the store is content-addressed and its tool
+  verifies every blob it reads** — Go's build cache, npm's `_cacache` and
+  pnpm's store — because there a blob gone is a blob fetched again. It is never
+  a shard, which holds a slice of every package. Never by file otherwise, as
+  above.
+- **Rust's cargo half is swept**, by crate, by unpacked source, by git database
+  and by checkout, and held to Rust's size separately from sccache, which holds
+  the objects to the same size again. A Rust machine holds up to twice its
+  size. sccache is the only tool that evicts for itself: Cargo, Go's build
+  cache and Gradle clean up by age rather than to a size, and nothing else
+  evicts at all.
+- **Nothing runs** means no session **and no Conversation Terminal**, both of
+  which reach the stores. A sweep that comes due while something runs happens
+  at the first moment nothing does. **A machine that is never idle is never
+  swept**, which was accepted rather than overlooked, and the page says when
+  each language was last swept.
+- **A unit is renamed aside onto the same filesystem**, into a directory at the
+  top of `{cache}` or `{stores}`, and a launch waits for the rename in hand. A
+  rename refused for crossing filesystems passes the unit over rather than
+  copying it. Read-only units, Go's modules and cargo's git packs, are made
+  writable first.
+- ***Oldest* is the newest time anywhere in the unit**, because a Maven jar's
+  own modification time is the repository's `Last-Modified`. Whether a
+  filesystem keeps access times is measured with a probe file rather than read
+  off the mount options. Linux's default `relatime` keeps them. By their own
+  vendors' descriptions, APFS without `strictatime` and NTFS's
+  system-managed default on a system volume over 128 GB do not. So on a Mac,
+  and on most Windows machines, *least recently used* is *least recently
+  written*, and the installer's documentation says so.
+- **Clear is refused while anything runs**, rather than waiting or going
+  ahead: a human who pressed it is there to be told why nothing happened, and
+  the button says how many sessions and terminals it is waiting on. It empties
+  every store of the language through the sweep's machinery, sccache's
+  included, with the Compile Server stopped first.
 
 ## What is accepted
 
