@@ -284,7 +284,10 @@ export function bytesSaid(bytes: number): string {
   return `${said}${units[unit]}`;
 }
 
-/// What a language's store holds on disk, as a sentence under its size.
+/// What a language's store holds on disk, as a sentence under its size — and,
+/// where the sweep keeps any of it, how much of that is the packages it holds
+/// to the size. The rest is an index, metadata or what no unit names, which the
+/// sweep cannot take and so does not count against the size.
 function held(disk: DiskUse): string {
   if (disk === "NoStore") {
     return "Its descriptor names no store directory, so what it holds on disk is not measured.";
@@ -294,7 +297,13 @@ function held(disk: DiskUse): string {
     return "Not measured yet.";
   }
 
-  return `Holds ${bytesSaid(disk.Measured.bytes)} on disk.`;
+  const { bytes, in_units } = disk.Measured;
+
+  if (in_units === null) {
+    return `Holds ${bytesSaid(bytes)} on disk.`;
+  }
+
+  return `Holds ${bytesSaid(bytes)} on disk, ${bytesSaid(in_units)} of it in the packages the sweep holds to this size.`;
 }
 
 /// How one directory of a store is kept under the size, as the end of a

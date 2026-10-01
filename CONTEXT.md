@@ -1174,8 +1174,10 @@ _Avoid_: daemon, sccache daemon, build server, compiler service
 **Sweep**:
 What keeps a language's stores under its size where the tool filling them does
 not do it for itself — every store but sccache's. It takes out **units**,
-whole and oldest first, until the language's swept stores together are under
-its size. **A unit is one package, never a file of one**, because a Go module or
+whole and oldest first, until the units of the language's swept stores together are under
+its size — **the units, not the stores**: an index or what no unit names is
+nothing the sweep can take, so it is not counted against the size, and the
+settings page shows it beside the size instead. **A unit is one package, never a file of one**, because a Go module or
 a Maven artifact with a file missing is a broken store rather than a smaller
 one. The **Descriptor** names it, as data: every entry at a depth, or the first
 entry down named like a pattern, or the first directory down holding one. It

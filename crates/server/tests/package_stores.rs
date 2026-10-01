@@ -778,28 +778,12 @@ fn filled_and_swept(
          given with the {held} an install left. It came to {swept:?}",
     );
 
-    // Under the size, or with no unit left to take: a store's indexes and
-    // metadata are no package of anybody's, so they are never swept, and on a
-    // store holding one small package they can be half of it.
-    let machine = cache
-        .machine()
-        .expect("the fixture's cache has a directory");
-    let left: Vec<PathBuf> = descriptor
-        .stores(&machine)
-        .into_iter()
-        .filter_map(|(name, dir)| match descriptor.bounded(&name) {
-            verkstead_server::languages::Bounded::ByUnit(units) => {
-                Some(verkstead_server::units::listed(&dir, units))
-            }
-            _ => None,
-        })
-        .flatten()
-        .collect();
-
+    // And under the size: what is held to it is the units alone — a store's
+    // indexes and metadata are no package of anybody's, so they are neither
+    // taken nor counted — so taking units always gets there.
     assert!(
-        swept.left <= size || left.is_empty(),
-        "and stops once {language}'s stores are under {size} bytes, or there is nothing left \
-         to take. It came to {swept:?}, leaving the units {left:?}",
+        swept.left <= size,
+        "and stops once {language}'s units are under {size} bytes. It came to {swept:?}",
     );
 
     for unit in &swept.removed {

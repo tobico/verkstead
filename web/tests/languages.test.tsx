@@ -655,26 +655,35 @@ describe("the languages as the pane draws them", () => {
   });
 
   /// What each store holds, beside its size: the last figure the server
-  /// measured, that it has not measured one yet, or — for a descriptor naming
-  /// no store directory — that there is nothing to measure.
+  /// measured, with the part of it the sweep holds to the size, that it has
+  /// not measured one yet, or — for a descriptor naming no store directory —
+  /// that there is nothing to measure.
   it("draws each store's disk use beside its size", async () => {
     theSettings({
       ...TOLD,
       languages: TOLD.languages.map((language) =>
         language.name === GO
-          ? { ...language, disk_use: { Measured: { bytes: 9.6 * 2 ** 30 } } }
+          ? {
+              ...language,
+              disk_use: {
+                Measured: { bytes: 9.6 * 2 ** 30, in_units: 4 * 2 ** 30 },
+              },
+            }
           : language,
       ),
     });
     mountPane();
 
-    await waitFor(() => screen.getByText("Holds 9.6G on disk."));
+    const said =
+      "Holds 9.6G on disk, 4.0G of it in the packages the sweep holds to this size.";
+
+    await waitFor(() => screen.getByText(said));
 
     const under = (name: string) =>
       theSize(name).closest("form")?.querySelector(`.${styles.held}`)
         ?.textContent;
 
-    expect(under(GO)).toBe("Holds 9.6G on disk.");
+    expect(under(GO)).toBe(said);
     expect(under(NODE)).toBe("Not measured yet.");
     expect(under(GLEAM)).toMatch(/names no store directory/);
   });
@@ -765,7 +774,7 @@ function holding(standing: SettingsView, bytes: number): SettingsView {
     ...standing,
     languages: standing.languages.map((language) =>
       language.name === GO
-        ? { ...language, disk_use: { Measured: { bytes } } }
+        ? { ...language, disk_use: { Measured: { bytes, in_units: null } } }
         : language,
     ),
   };

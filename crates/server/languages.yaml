@@ -101,7 +101,9 @@
 #              rather than to a size, and no other tool here evicts at all.
 #
 #   units:     what the sweep takes out of it whole, oldest first, until the
-#              language is under its size: **a package, never a file of one**,
+#              language's units are under its size — the units alone, an index
+#              or anything else no unit names being nothing it can take, and so
+#              nothing held to the size: **a package, never a file of one**,
 #              because a Go module or a Maven artifact with one file missing is
 #              a broken store rather than a smaller one. A list, each item a way
 #              of finding one, walking down from `under` (a path inside the

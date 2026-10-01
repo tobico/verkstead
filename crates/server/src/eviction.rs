@@ -8,6 +8,13 @@
 //! the sweep takes units out of, together: Rust's cargo half is held to Rust's
 //! size, and its sccache is held to the same size again by sccache.
 //!
+//! **What is held to the size is the units, and only the units.** What a store
+//! holds beside them — an index, metadata, the parts of Gradle's home no unit
+//! names — is nothing the sweep can take, so counting it against the size would
+//! have a language whose unswept part alone was over it lose every unit on
+//! every pass and still be over. The page shows it beside the size instead —
+//! see [`held_in_units`].
+//!
 //! **Hourly, and only while nothing runs.** The pace is
 //! [`crate::Pace::evicting`], and *nothing runs* is no session and no
 //! Conversation Terminal: both are launched through
@@ -65,7 +72,7 @@ use time::OffsetDateTime;
 
 use crate::AppState;
 use crate::build_cache::BuildCache;
-use crate::disk_use::{Walking, measure, walk};
+use crate::disk_use::{Walking, walk};
 use crate::languages::{self, Bounded, Descriptor, Languages};
 
 /// How often the stores are swept, as [`crate::Pace`] has it by default.
@@ -79,12 +86,15 @@ pub(crate) const SWEPT_EVERY: Duration = Duration::from_secs(60 * 60);
 /// What sweeping one language did.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Swept {
-    /// What its swept stores held before, in bytes.
+    /// What the units of its swept stores held before, in bytes — each file
+    /// once per unit, so a little over what a fresh measurement would say where
+    /// a file was linked twice inside one. **Only the units**: what is beside
+    /// them in a store, its indexes and its metadata and whatever its
+    /// descriptor names no unit for, is nothing the sweep can take, so it is
+    /// nothing the sweep holds to the size — see [`swept`].
     pub held: u64,
 
-    /// And what they hold after, as the units taken out add up: each file once
-    /// per unit, so a little over what a fresh measurement would say where a
-    /// file was linked twice inside one.
+    /// And what they hold after, as the units taken out add up.
     pub left: u64,
 
     /// The units taken out, oldest first, where they were.
@@ -94,12 +104,20 @@ pub struct Swept {
     pub stopped: bool,
 }
 
-/// Bring the stores `descriptor` sweeps by unit under `size` bytes together,
-/// taking whole units out of them oldest first — or nothing at all where they
+/// Bring the units of the stores `descriptor` sweeps by unit under `size` bytes
+/// together, taking whole ones out oldest first — or nothing at all where they
 /// are under it already, or where anything is running.
 ///
-/// **Blocks**, on a walk of every store and then of every unit in them; the
-/// loop hands it to a blocking thread.
+/// **The units are what is held to the size, and nothing else in the store.**
+/// A store holds what no unit names as well — an index, metadata, and in
+/// Gradle's home the distributions, the JDKs and the transforms — and none of
+/// that is the sweep's to take. Counted against the size, a language whose
+/// unswept part alone was over it would lose every unit on every pass and
+/// still be over, which is a store cleared whole each hour by another route.
+/// So it is measured on the page beside the size rather than held to it.
+///
+/// **Blocks**, on a walk of every unit in every store; the loop hands it to a
+/// blocking thread.
 ///
 /// Public for the proofs' sake: `tests/package_stores.rs` sweeps a store a real
 /// tool filled, and then has the tool install out of what is left.
@@ -108,25 +126,25 @@ pub fn swept(cache: &BuildCache, descriptor: &Descriptor, size: u64) -> Swept {
         return Swept::default();
     };
 
-    let stores: Vec<(PathBuf, &[languages::Unit])> = descriptor
-        .stores(&machine)
-        .into_iter()
-        .filter_map(|(name, dir)| match descriptor.bounded(&name) {
-            Bounded::ByUnit(units) => Some((dir, units)),
-            Bounded::ByItsTool | Bounded::NotAtAll => None,
-        })
-        .collect();
+    let mut found: Vec<Found> = Vec::new();
 
-    if stores.is_empty() {
-        return Swept::default();
+    for (dir, units) in by_unit(descriptor, &machine) {
+        let Some(aside) = machine.aside(&dir) else {
+            continue;
+        };
+
+        for unit in crate::units::listed(&dir, units) {
+            if let Some(survey) = surveyed(&unit) {
+                found.push(Found {
+                    path: unit,
+                    aside: aside.clone(),
+                    survey,
+                });
+            }
+        }
     }
 
-    let held = measure(
-        &stores
-            .iter()
-            .map(|(dir, _)| dir.clone())
-            .collect::<Vec<_>>(),
-    );
+    let held = found.iter().map(|unit| unit.survey.bytes).sum();
 
     let mut swept = Swept {
         held,
@@ -139,7 +157,7 @@ pub fn swept(cache: &BuildCache, descriptor: &Descriptor, size: u64) -> Swept {
     }
 
     // Where something is already running there is nothing to take, so the
-    // walks below are not worth making.
+    // probes below are not worth making.
     if cache.holding() > 0 {
         swept.stopped = true;
 
@@ -147,39 +165,25 @@ pub fn swept(cache: &BuildCache, descriptor: &Descriptor, size: u64) -> Swept {
     }
 
     // Asked once per filesystem a unit is moved aside on, which is once per
-    // placeholder's directory.
+    // placeholder's directory — and only now, with something to take.
     let mut keeping: HashMap<PathBuf, bool> = HashMap::new();
 
-    let mut found: Vec<Found> = Vec::new();
+    let mut dated: Vec<(SystemTime, Found)> = found
+        .into_iter()
+        .map(|unit| {
+            let atime = *keeping
+                .entry(unit.aside.clone())
+                .or_insert_with(|| keeps_access_times(&unit.aside));
 
-    for (dir, units) in &stores {
-        let Some(aside) = machine.aside(dir) else {
-            continue;
-        };
+            (unit.survey.newest(atime), unit)
+        })
+        .collect();
 
-        let atime = *keeping
-            .entry(aside.clone())
-            .or_insert_with(|| keeps_access_times(&aside));
-
-        for unit in crate::units::listed(dir, units) {
-            if let Some((newest, bytes)) = surveyed(&unit, atime) {
-                found.push(Found {
-                    path: unit,
-                    aside: aside.clone(),
-                    newest,
-                    bytes,
-                });
-            }
-        }
-    }
-
-    found.sort_by(|one, other| {
-        one.newest
-            .cmp(&other.newest)
-            .then(one.path.cmp(&other.path))
+    dated.sort_by(|(one, one_unit), (other, other_unit)| {
+        one.cmp(other).then(one_unit.path.cmp(&other_unit.path))
     });
 
-    for unit in found {
+    for (_, unit) in dated {
         if swept.left <= size {
             break;
         }
@@ -211,11 +215,51 @@ pub fn swept(cache: &BuildCache, descriptor: &Descriptor, size: u64) -> Swept {
             );
         }
 
-        swept.left = swept.left.saturating_sub(unit.bytes);
+        swept.left = swept.left.saturating_sub(unit.survey.bytes);
         swept.removed.push(unit.path);
     }
 
     swept
+}
+
+/// How many bytes the units of the stores `descriptor` sweeps by unit hold on
+/// `machine` — what [`swept`] holds to the language's size — or `None` for a
+/// language with no such store, which nothing holds to it.
+///
+/// What the settings page draws beside the store's whole disk use, so the part
+/// the size bounds and the part it does not are both seen. **Blocks**, on the
+/// same walk of every unit the sweep makes.
+pub(crate) fn held_in_units(descriptor: &Descriptor, machine: &languages::Machine) -> Option<u64> {
+    let stores = by_unit(descriptor, machine);
+
+    if stores.is_empty() {
+        return None;
+    }
+
+    Some(
+        stores
+            .iter()
+            .flat_map(|(dir, units)| crate::units::listed(dir, units))
+            .filter_map(|unit| surveyed(&unit))
+            .map(|survey| survey.bytes)
+            .sum(),
+    )
+}
+
+/// The stores `descriptor` sweeps by unit on `machine`, each with the rules its
+/// units are found by — not the one its tool evicts, nor one naming no unit.
+fn by_unit<'a>(
+    descriptor: &'a Descriptor,
+    machine: &languages::Machine,
+) -> Vec<(PathBuf, &'a [languages::Unit])> {
+    descriptor
+        .stores(machine)
+        .into_iter()
+        .filter_map(|(name, dir)| match descriptor.bounded(&name) {
+            Bounded::ByUnit(units) => Some((dir, units)),
+            Bounded::ByItsTool | Bounded::NotAtAll => None,
+        })
+        .collect()
 }
 
 /// **Clear**: empty every store `descriptor` names — swept by unit, evicted by
@@ -303,44 +347,64 @@ struct Found {
     /// Where it is moved aside to, on the store's own filesystem.
     aside: PathBuf,
 
-    newest: SystemTime,
+    survey: Survey,
+}
+
+/// What a walk of one unit found: the newest time anything in it was written,
+/// and read, and the bytes of its files.
+struct Survey {
+    written: SystemTime,
+
+    /// Files only — see this module's header for why a directory's access
+    /// time says nothing.
+    read: SystemTime,
+
     bytes: u64,
 }
 
-/// The newest time anywhere in the unit at `unit`, and the bytes of the files
-/// in it — `None` for one gone before it was read.
-///
-/// A file by its access time as well where `atime` says the filesystem keeps
-/// one, and a directory by its modification time alone — see this module's
-/// header for why. A link inside is neither followed nor read.
-fn surveyed(unit: &Path, atime: bool) -> Option<(SystemTime, u64)> {
+impl Survey {
+    /// How new the unit is: its newest access time as well where `atime` says
+    /// its filesystem keeps them, and its newest modification time alone where
+    /// it does not.
+    fn newest(&self, atime: bool) -> SystemTime {
+        match atime {
+            true => self.written.max(self.read),
+            false => self.written,
+        }
+    }
+}
+
+/// The times and the bytes of the unit at `unit` — `None` for one gone before
+/// it was read. A link inside is neither followed nor read.
+fn surveyed(unit: &Path) -> Option<Survey> {
     let metadata = std::fs::symlink_metadata(unit).ok()?;
 
-    let time = |metadata: &std::fs::Metadata| -> Option<SystemTime> {
-        let modified = metadata.modified().ok();
+    let mut survey = Survey {
+        written: SystemTime::UNIX_EPOCH,
+        read: SystemTime::UNIX_EPOCH,
+        bytes: 0,
+    };
 
-        match metadata.is_file() && atime {
-            true => modified.max(metadata.accessed().ok()),
-            false => modified,
+    let mut add = |metadata: &std::fs::Metadata| {
+        if let Ok(modified) = metadata.modified() {
+            survey.written = survey.written.max(modified);
+        }
+
+        if metadata.is_file() {
+            if let Ok(accessed) = metadata.accessed() {
+                survey.read = survey.read.max(accessed);
+            }
+
+            survey.bytes += metadata.len();
         }
     };
 
-    let mut newest = time(&metadata).unwrap_or(SystemTime::UNIX_EPOCH);
-    let mut bytes = match metadata.is_file() {
-        true => metadata.len(),
-        false => 0,
-    };
+    add(&metadata);
 
     if metadata.is_dir() {
         let walked = walk(unit, &mut |entry| {
             if !entry.metadata.is_symlink() {
-                if let Some(time) = time(entry.metadata) {
-                    newest = newest.max(time);
-                }
-
-                if entry.metadata.is_file() {
-                    bytes += entry.metadata.len();
-                }
+                add(entry.metadata);
             }
 
             Walking::Into
@@ -353,7 +417,7 @@ fn surveyed(unit: &Path, atime: bool) -> Option<(SystemTime, u64)> {
         }
     }
 
-    Some((newest, bytes))
+    Some(survey)
 }
 
 /// Whether the filesystem `aside` is on keeps access times: a file of
@@ -925,8 +989,9 @@ languages:
             .unwrap();
         dated(&unit, 300);
 
-        let (kept, _) = surveyed(&unit, true).unwrap();
-        let (unkept, _) = surveyed(&unit, false).unwrap();
+        let survey = surveyed(&unit).unwrap();
+        let kept = survey.newest(true);
+        let unkept = survey.newest(false);
 
         assert!(kept >= lately - Duration::from_secs(1));
         assert!(unkept < lately - Duration::from_secs(24 * 60 * 60));

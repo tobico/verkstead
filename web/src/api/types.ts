@@ -2466,7 +2466,7 @@ found: Array<FoundOn>, };
  * last found — or that it has found nothing yet, which a server that has just
  * started says until its first walk is done.
  */
-export type DiskUse = "NoStore" | "NotMeasured" | { "Measured": { bytes: number, } };
+export type DiskUse = "NoStore" | "NotMeasured" | { "Measured": { bytes: number, in_units: number | null, } };
 
 /**
  * And which of the wizard's nine tabs this machine is.

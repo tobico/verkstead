@@ -13,7 +13,10 @@
 //!
 //! **A store is the directories its descriptor names** — see
 //! [`crate::languages::Descriptor::stores`] — and a language's figure is all of
-//! them together, which is what its one size bounds.
+//! them together, with the part of it in the units the sweep holds to the
+//! language's size beside it: the rest, an index or what no unit names, is on
+//! the disk all the same, and nothing holds it to the size — see
+//! [`crate::eviction`].
 //!
 //! **The walk never follows a symlink.** pnpm's `projects/` holds links to the
 //! Worktrees that installed out of it, bun keeps links into its own cache, and
@@ -194,6 +197,29 @@ impl Linked {
     }
 }
 
+/// What one language's stores held when they were last measured.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct Held {
+    /// Every directory of them together — see [`measure`].
+    pub bytes: u64,
+
+    /// And how much of that is in the units the sweep holds to the language's
+    /// size — see [`crate::eviction::held_in_units`] — or `None` for a
+    /// language with no store the sweep takes units out of.
+    pub in_units: Option<u64>,
+}
+
+impl Held {
+    /// Stores holding `bytes`, none of it the sweep's to hold to a size.
+    #[cfg(test)]
+    pub(crate) fn whole(bytes: u64) -> Held {
+        Held {
+            bytes,
+            in_units: None,
+        }
+    }
+}
+
 /// The figures, held: each language's bytes on disk as last measured, and a
 /// way to ask for them to be measured again.
 ///
@@ -201,7 +227,7 @@ impl Linked {
 /// one set of figures.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct DiskUse {
-    figures: Arc<Mutex<HashMap<String, u64>>>,
+    figures: Arc<Mutex<HashMap<String, Held>>>,
     again: Arc<tokio::sync::Notify>,
 }
 
@@ -213,7 +239,7 @@ impl DiskUse {
     /// for the moment it writes a figure it already has — see
     /// [`DiskUse::measuring_with`] — so a read in the middle of a walk is
     /// answered at once, with the figure from before it.
-    pub(crate) fn of(&self, language: &str) -> Option<u64> {
+    pub(crate) fn of(&self, language: &str) -> Option<Held> {
         self.held().get(language).copied()
     }
 
@@ -227,8 +253,8 @@ impl DiskUse {
     /// Say what `language`'s stores hold now, measured by whoever changed them —
     /// a Clear, whose answer draws the figure, and whose walk of stores just
     /// emptied is no wait.
-    pub(crate) fn measured(&self, language: &str, bytes: u64) {
-        self.held().insert(language.to_owned(), bytes);
+    pub(crate) fn measured(&self, language: &str, held: Held) {
+        self.held().insert(language.to_owned(), held);
     }
 
     /// One pass: each of `stores`' languages measured by `measuring` in turn,
@@ -236,25 +262,40 @@ impl DiskUse {
     /// is on the page while the last is still being walked. A language that is
     /// no longer in `stores` has its figure taken away.
     ///
-    /// `measuring` is [`measure`] everywhere but the suite, which holds one up
-    /// to prove a read does not wait on it.
-    pub(crate) fn measuring_with(
-        &self,
-        stores: &[(String, Vec<PathBuf>)],
-        measuring: impl Fn(&[PathBuf]) -> u64,
-    ) {
+    /// `measuring` is [`measured_now`] everywhere but the suite, which holds
+    /// one up to prove a read does not wait on it.
+    pub(crate) fn measuring_with<S>(&self, stores: &[(String, S)], measuring: impl Fn(&S) -> Held) {
         self.held()
             .retain(|language, _| stores.iter().any(|(name, _)| name == language));
 
-        for (language, dirs) in stores {
-            let bytes = measuring(dirs);
+        for (language, store) in stores {
+            let held = measuring(store);
 
-            self.held().insert(language.clone(), bytes);
+            self.held().insert(language.clone(), held);
         }
     }
 
-    fn held(&self) -> std::sync::MutexGuard<'_, HashMap<String, u64>> {
+    fn held(&self) -> std::sync::MutexGuard<'_, HashMap<String, Held>> {
         self.figures.lock().unwrap_or_else(|held| held.into_inner())
+    }
+}
+
+/// What `descriptor`'s stores hold on `machine` now: all of them, and the part
+/// of that in the units the sweep holds to its size. **Blocks**, on a walk of
+/// every store and then of every unit in them.
+pub(crate) fn measured_now(
+    descriptor: &crate::languages::Descriptor,
+    machine: &crate::languages::Machine,
+) -> Held {
+    let dirs: Vec<PathBuf> = descriptor
+        .stores(machine)
+        .into_iter()
+        .map(|(_, dir)| dir)
+        .collect();
+
+    Held {
+        bytes: measure(&dirs),
+        in_units: crate::eviction::held_in_units(descriptor, machine),
     }
 }
 
@@ -282,25 +323,19 @@ pub(crate) fn measuring(state: &AppState) {
         loop {
             let languages = crate::languages::configured(&state.settings.config());
 
-            let stores: Vec<(String, Vec<PathBuf>)> = languages
+            let stores: Vec<(String, crate::languages::Descriptor)> = languages
                 .iter()
                 .filter(|(_, descriptor)| descriptor.names_a_store())
-                .map(|(name, descriptor)| {
-                    (
-                        name.to_owned(),
-                        descriptor
-                            .stores(&machine)
-                            .into_iter()
-                            .map(|(_, dir)| dir)
-                            .collect(),
-                    )
-                })
+                .map(|(name, descriptor)| (name.to_owned(), descriptor.clone()))
                 .collect();
 
             let disk_use = state.disk_use.clone();
+            let machine = machine.clone();
 
-            if let Err(error) =
-                tokio::task::spawn_blocking(move || disk_use.measuring_with(&stores, measure)).await
+            if let Err(error) = tokio::task::spawn_blocking(move || {
+                disk_use.measuring_with(&stores, |descriptor| measured_now(descriptor, &machine))
+            })
+            .await
             {
                 tracing::error!(error = ?error, "measuring the languages' stores failed");
             }
@@ -447,7 +482,7 @@ mod tests {
             let measuring = scope.spawn(|| {
                 disk_use.measuring_with(&stores, |_| {
                     started.send(()).unwrap();
-                    released.lock().unwrap().recv().unwrap()
+                    Held::whole(released.lock().unwrap().recv().unwrap())
                 });
             });
 
@@ -462,12 +497,12 @@ mod tests {
             release.send(4096).unwrap();
             measuring.join().unwrap();
 
-            assert_eq!(disk_use.of("go"), Some(4096));
+            assert_eq!(disk_use.of("go"), Some(Held::whole(4096)));
 
             let measuring = scope.spawn(|| {
                 disk_use.measuring_with(&stores, |_| {
                     started.send(()).unwrap();
-                    released.lock().unwrap().recv().unwrap()
+                    Held::whole(released.lock().unwrap().recv().unwrap())
                 });
             });
 
@@ -475,7 +510,7 @@ mod tests {
 
             assert_eq!(
                 disk_use.of("go"),
-                Some(4096),
+                Some(Held::whole(4096)),
                 "and one in flight after it is the last figure",
             );
 
@@ -483,7 +518,7 @@ mod tests {
             measuring.join().unwrap();
         });
 
-        assert_eq!(disk_use.of("go"), Some(8192));
+        assert_eq!(disk_use.of("go"), Some(Held::whole(8192)));
     }
 
     /// A language no longer loaded has no figure left over.
@@ -491,10 +526,10 @@ mod tests {
     fn a_language_gone_from_the_descriptors_takes_its_figure_with_it() {
         let disk_use = DiskUse::default();
 
-        disk_use.measuring_with(&[(String::from("go"), Vec::new())], |_| 1);
-        disk_use.measuring_with(&[(String::from("node"), Vec::new())], |_| 2);
+        disk_use.measuring_with(&[(String::from("go"), ())], |_| Held::whole(1));
+        disk_use.measuring_with(&[(String::from("node"), ())], |_| Held::whole(2));
 
         assert_eq!(disk_use.of("go"), None);
-        assert_eq!(disk_use.of("node"), Some(2));
+        assert_eq!(disk_use.of("node"), Some(Held::whole(2)));
     }
 }

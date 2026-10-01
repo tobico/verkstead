@@ -1424,8 +1424,8 @@ mean the same to both. The page refuses a size it cannot read, and says why. A
 size written by hand in `config.yaml` that cannot be read is taken as the
 default, and the pane says that too.
 
-Beside the size the pane shows **what the language's stores hold on disk**. It
-is measured in the background, every quarter of an hour and straight after a
+Beside the size the pane shows **what the language's stores hold on disk**, and
+how much of that is in the packages the sweep holds to the size. It is measured in the background, every quarter of an hour and straight after a
 sweep or a Clear, so it may be a few minutes old, and just after the server
 starts it reads *not measured yet*. The walk follows no symlink and counts a
 hardlinked file once. Under that, a line per store says **how it is bounded**,
@@ -1443,7 +1443,7 @@ descriptor says which:
   rather than to a size, and no other tool here evicts at all, so none of them
   counts.
 - **By unit** (`units:`). The sweep takes **whole units** out, oldest first,
-  until the language's swept stores together are under its size. A unit is one
+  until the units of the language's swept stores together are under its size. A unit is one
   package, never one file of one: a Go module or a Maven artifact with one file
   missing is a broken store rather than a smaller one.
 - **Not at all**: a store naming neither is never swept, and the pane says so.
@@ -1484,12 +1484,15 @@ is **content-addressed and its tool checks every blob it reads** — Go's build
 cache, npm's `_cacache`, pnpm's store — so that a blob gone is a blob fetched
 again rather than a package quietly broken.
 
-**What is not in any unit still counts towards the size.** A store's indexes
-and metadata, and the parts of Gradle's home that are not module downloads —
-the distributions `gradlew` fetched, toolchain JDKs, the build cache — are
-measured with the rest and never swept. A language whose unswept part is
-bigger than its size is swept down to no units at all and stays over. That is
-the size to raise.
+**What the size bounds is the units, and nothing else in the store.** A
+store's indexes and metadata, and the parts of Gradle's home that are not
+module downloads — the distributions `gradlew` fetched, toolchain JDKs, the
+build cache — are nothing the sweep can take, so they are not counted against
+the size: counted, a language whose unswept part alone was over its size would
+lose every package on every pass and still be over, which is a store cleared
+whole each hour. They are on the disk all the same, and the pane shows both:
+what the language's stores hold, and how much of that is the packages the
+sweep holds to the size.
 
 #### Naming a unit for your own descriptor
 

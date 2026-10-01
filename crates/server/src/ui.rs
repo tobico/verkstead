@@ -5752,27 +5752,24 @@ async fn clear_language(State(state): State<AppState>, Path(name): Path<String>)
     let cleared = tokio::task::spawn_blocking(move || {
         let emptied = crate::eviction::emptied(&cache, &descriptor, &others)?;
 
-        let dirs: Vec<std::path::PathBuf> = descriptor
-            .stores(&machine)
-            .into_iter()
-            .map(|(_, dir)| dir)
-            .collect();
-
-        Some((emptied, crate::disk_use::measure(&dirs)))
+        Some((
+            emptied,
+            crate::disk_use::measured_now(&descriptor, &machine),
+        ))
     })
     .await;
 
     match cleared {
         Ok(None) => Json(LanguageCleared::Running(running(&state))).into_response(),
-        Ok(Some((emptied, bytes))) => {
+        Ok(Some((emptied, held))) => {
             tracing::info!(
                 language = name,
                 emptied,
-                bytes,
+                bytes = held.bytes,
                 "a language's stores were cleared"
             );
 
-            state.disk_use.measured(&name, bytes);
+            state.disk_use.measured(&name, held);
 
             Json(LanguageCleared::Cleared {
                 settings: Box::new(as_told(
@@ -6257,7 +6254,10 @@ fn languages(
             disk_use: match (descriptor.names_a_store(), disk_use.of(name)) {
                 (false, _) => DiskUse::NoStore,
                 (true, None) => DiskUse::NotMeasured,
-                (true, Some(bytes)) => DiskUse::Measured { bytes },
+                (true, Some(held)) => DiskUse::Measured {
+                    bytes: held.bytes,
+                    in_units: held.in_units,
+                },
             },
             // And how each of its directories is held to that size, which is
             // the descriptor's to say: by its tool, by the sweep, or not at
@@ -7512,7 +7512,7 @@ mod tests {
         let stores: Vec<_> = loaded
             .iter()
             .filter(|(_, descriptor)| descriptor.names_a_store())
-            .map(|(name, _)| (name.to_owned(), Vec::new()))
+            .map(|(name, _)| (name.to_owned(), ()))
             .collect();
 
         let (started, starting) = mpsc::channel();
@@ -7524,7 +7524,7 @@ mod tests {
                 disk_use.measuring_with(&stores, |_| {
                     started.send(()).unwrap();
                     released.lock().unwrap().recv().unwrap();
-                    2048
+                    crate::disk_use::Held::whole(2048)
                 });
             });
 
@@ -7547,7 +7547,13 @@ mod tests {
                     .disk_use
             };
 
-            assert_eq!(of("rust"), DiskUse::Measured { bytes: 2048 });
+            assert_eq!(
+                of("rust"),
+                DiskUse::Measured {
+                    bytes: 2048,
+                    in_units: None
+                }
+            );
             assert_eq!(of("go"), DiskUse::NotMeasured);
             assert_eq!(of("jvm"), DiskUse::NotMeasured);
             assert_eq!(

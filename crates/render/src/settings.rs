@@ -451,7 +451,13 @@ pub enum DiskUse {
 
     /// Every directory of its store together, in bytes: each file once, however
     /// many links it has, and nothing a symlink points at.
-    Measured { bytes: u64 },
+    ///
+    /// **And `in_units`, the part of that the sweep holds to the size**: what
+    /// is in the units of the stores it takes whole packages out of. Null for a
+    /// language with no such store. The rest — an index, metadata, a store its
+    /// tool evicts, what no unit names — is on the disk too, and is not what
+    /// the sweep holds to the size, because it is nothing the sweep can take.
+    Measured { bytes: u64, in_units: Option<u64> },
 }
 
 /// One directory of a language's store, by the name its descriptor keys it

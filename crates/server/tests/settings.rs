@@ -895,7 +895,13 @@ async fn a_clear_empties_one_languages_stores_and_its_disk_use_drops() {
         .find(|language| language.name == "go")
         .unwrap();
 
-    assert_eq!(go.disk_use, DiskUse::Measured { bytes: 0 });
+    assert_eq!(
+        go.disk_use,
+        DiskUse::Measured {
+            bytes: 0,
+            in_units: Some(0)
+        }
+    );
 }
 
 /// A Clear is refused while anything runs, saying how many of each, and takes

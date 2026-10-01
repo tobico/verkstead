@@ -217,6 +217,13 @@ measured while building it:
   pnpm's store — because there a blob gone is a blob fetched again. It is never
   a shard, which holds a slice of every package. Never by file otherwise, as
   above.
+- **The size bounds the units, not the whole store.** What a store holds beside
+  its units — indexes, metadata, and most of Gradle's home — is nothing the
+  sweep can take. Counted against the size, a language whose unswept part alone
+  was over it would lose every unit on every pass and still be over, which is
+  the clearing whole rejected above by another route. So only the units are
+  held to the size, and the settings page shows the rest beside it. (Decided
+  in the branch's review, Set 998.)
 - **Rust's cargo half is swept**, by crate, by unpacked source, by git database
   and by checkout, and held to Rust's size separately from sccache, which holds
   the objects to the same size again. A Rust machine holds up to twice its
