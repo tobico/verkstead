@@ -149,3 +149,39 @@
 .bounds li + li {
   margin-top: 0.15rem;
 }
+
+/* A Clear and what it does, or what it waits on, under the size: indented as the
+   size is, and its press quieter than Save's — it is not the thing the pane is
+   for. */
+.clearing {
+  display: flex;
+  gap: 0.6rem;
+  align-items: baseline;
+  margin: 0.6rem 0 0;
+  padding: 0 0 0 1.6rem;
+}
+
+.clearing .held {
+  margin: 0;
+}
+
+.clearing button {
+  padding: 0.35rem 0.8rem;
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.clearing button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+@media (hover: hover) {
+  .clearing button:not(:disabled):hover {
+    border-color: var(--ink-soft);
+  }
+}

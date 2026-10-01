@@ -46,12 +46,20 @@ use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
 use tower::ServiceExt;
 use verkstead_render::{
-    CompileCaching, ConflictResolution, DiskUse, Eviction, IgnoreRule, LanguageView, McpHeader,
-    McpServer, PathResolution, PathSource, RuleField, RunningOn, ServerField, SettingsSaved,
-    SettingsView, Verified,
+    CompileCaching, ConflictResolution, DiskUse, Eviction, IgnoreRule, LanguageCleared,
+    LanguageView, McpHeader, McpServer, PathResolution, PathSource, RuleField, RunningOn,
+    ServerField, SettingsSaved, SettingsView, Verified,
 };
-use verkstead_server::sandbox::SandboxConfig;
-use verkstead_server::{Gh, open_database, router_asking_github, router_installed};
+use verkstead_server::attachments::Attachments;
+use verkstead_server::build_cache::BuildCache;
+use verkstead_server::handoffs::Handoffs;
+use verkstead_server::platform::Platform;
+use verkstead_server::sandbox::{Homes, Reachable, SandboxConfig};
+use verkstead_server::settings::{Config, Settings};
+use verkstead_server::skills::Skills;
+use verkstead_server::{
+    Agents, Gh, open_database, router_asking_github, router_installed, router_running_sessions,
+};
 
 /// A `gh` that answers `gh api user` with the token it was run with, as the
 /// account's login.
@@ -795,6 +803,147 @@ async fn a_store_not_yet_measured_says_so_and_cpp_has_none() {
 
         assert_eq!(language.disk_use, expected, "{}", language.name);
     }
+}
+
+/// A server that runs sessions, over a Build Cache the test holds a handle on
+/// too — which is how it stands something running up without running it: a
+/// launch's hold on the cache is what a Clear is refused over.
+async fn app_with_a_cache() -> (tempfile::TempDir, Router, BuildCache) {
+    let dir = tempfile::tempdir().unwrap();
+    let data_dir = dir.path().join("data");
+    std::fs::create_dir_all(&data_dir).unwrap();
+
+    let pool = open_database(&data_dir.join("verkstead.db")).await.unwrap();
+    let cache = BuildCache::at(dir.path().join("cache"), None, data_dir.clone());
+
+    let agents = Agents::running(
+        vec!["/bin/false".to_owned()],
+        Homes::on(Platform::HERE, dir.path().join("home"), &data_dir),
+        Reachable::at("127.0.0.1:8422".parse().unwrap()),
+        SandboxConfig::default(),
+        cache.clone(),
+        Skills::installed(Platform::HERE, &data_dir).expect("this binary carries skills"),
+        None,
+        Handoffs::under(&data_dir),
+        Attachments::under(&data_dir),
+        Settings::in_data_dir(&data_dir),
+    );
+
+    let gh = Gh::running(vec![
+        "/bin/sh".to_owned(),
+        "-c".to_owned(),
+        SAYS_ITS_TOKEN.to_owned(),
+        "gh".to_owned(),
+    ]);
+
+    let app = router_running_sessions(pool, data_dir, agents, gh);
+
+    (dir, app, cache)
+}
+
+async fn clear_language(app: &Router, language: &str) -> LanguageCleared {
+    let (status, body) = fetch(
+        app,
+        Request::builder()
+            .method("POST")
+            .uri(format!("/api/ui/languages/{language}/clear"))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK, "the Clear failed: {body}");
+    read(&body)
+}
+
+/// A Clear empties every store of one language and no other's, and the page it
+/// answers with draws that language's disk use as what is left.
+#[tokio::test]
+async fn a_clear_empties_one_languages_stores_and_its_disk_use_drops() {
+    let (dir, app, _cache) = app_with_a_cache().await;
+    let cache = dir.path().join("cache");
+
+    let module = cache.join("go/mod/example.test/greet@v1.0.0");
+    std::fs::create_dir_all(&module).unwrap();
+    std::fs::write(module.join("greet.go"), "package greet\n").unwrap();
+    std::fs::create_dir_all(cache.join("go/build/ab")).unwrap();
+    std::fs::write(cache.join("go/build/ab/abcd-d"), vec![0; 1000]).unwrap();
+
+    let npm = cache.join("npm/_cacache/index");
+    std::fs::create_dir_all(npm.parent().unwrap()).unwrap();
+    std::fs::write(&npm, "kept").unwrap();
+
+    let LanguageCleared::Cleared { settings } = clear_language(&app, "go").await else {
+        panic!("nothing is running, so the Clear goes ahead");
+    };
+
+    for store in ["go/mod", "go/build"] {
+        assert!(
+            std::fs::read_dir(cache.join(store))
+                .unwrap()
+                .next()
+                .is_none(),
+            "{store} is empty",
+        );
+    }
+
+    assert!(npm.exists(), "and another language's store is untouched");
+
+    let go = settings
+        .languages
+        .iter()
+        .find(|language| language.name == "go")
+        .unwrap();
+
+    assert_eq!(go.disk_use, DiskUse::Measured { bytes: 0 });
+}
+
+/// A Clear is refused while anything runs, saying how many of each, and takes
+/// nothing; the page is told what is running so it can draw the button off.
+#[tokio::test]
+async fn a_clear_is_refused_while_a_session_or_terminal_runs() {
+    let (dir, app, cache) = app_with_a_cache().await;
+
+    let module = dir.path().join("cache/go/mod/example.test/greet@v1.0.0");
+    std::fs::create_dir_all(&module).unwrap();
+    std::fs::write(module.join("greet.go"), "package greet\n").unwrap();
+
+    let running = cache.compiling(&Config::default(), None);
+
+    assert!(
+        matches!(
+            clear_language(&app, "go").await,
+            LanguageCleared::Running(_)
+        ),
+        "a Clear while a launch holds the cache is refused",
+    );
+    assert!(module.join("greet.go").exists());
+
+    let told = settings(&app).await;
+    assert_eq!((told.running.sessions, told.running.terminals), (0, 0));
+
+    drop(running);
+
+    assert!(matches!(
+        clear_language(&app, "go").await,
+        LanguageCleared::Cleared { .. }
+    ));
+    assert!(!module.exists());
+}
+
+/// A language naming no store, and one nobody loaded, have nothing to clear.
+#[tokio::test]
+async fn a_language_with_no_store_has_nothing_to_clear() {
+    let (_dir, app, _cache) = app_with_a_cache().await;
+
+    assert_eq!(
+        clear_language(&app, "cpp").await,
+        LanguageCleared::NoSuchLanguage
+    );
+    assert_eq!(
+        clear_language(&app, "cobol").await,
+        LanguageCleared::NoSuchLanguage
+    );
 }
 
 /// The page is told how each directory of a store is held to its size: Rust's

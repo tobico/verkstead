@@ -758,6 +758,7 @@ describe("replacing and clearing the token", () => {
         share_on_done: TOLD.share_on_done,
         paths: TOLD.paths,
         ignored_comments: TOLD.ignored_comments,
+        running: TOLD.running,
         mcp_servers: TOLD.mcp_servers,
         instructions: TOLD.instructions,
       },

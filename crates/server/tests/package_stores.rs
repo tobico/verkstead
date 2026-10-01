@@ -822,6 +822,35 @@ fn filled_and_swept(
     );
 }
 
+/// **Clear** every store of `language` on `cache`, as the settings page's
+/// button does, and assert it is empty: each store directory still there and
+/// holding nothing.
+fn cleared(cache: &BuildCache, language: &str) {
+    let descriptor = verkstead_server::languages::built_in()
+        .get(language)
+        .expect("a built-in language");
+
+    let emptied = verkstead_server::eviction::emptied(cache, descriptor, &[])
+        .expect("nothing is running, so a Clear goes ahead");
+
+    assert!(
+        emptied > 0,
+        "a Clear of a store an install filled takes something out of it"
+    );
+
+    let machine = cache
+        .machine()
+        .expect("the fixture's cache has a directory");
+
+    for (name, dir) in descriptor.stores(&machine) {
+        assert!(
+            std::fs::read_dir(&dir).map_or(true, |mut entries| entries.next().is_none()),
+            "{language}'s {name} store is empty after a Clear, and holds:\n  {}",
+            tree(&dir).join("\n  "),
+        );
+    }
+}
+
 /// What every Go command in this suite is told, beside the two variables the
 /// descriptor sets — which are the two this is here to prove.
 ///
@@ -1017,6 +1046,67 @@ async fn two_go_builds_at_once_fill_one_store_and_a_third_builds_out_of_it() {
         "and it fails for want of the registry rather than for some other \
          reason. It said:\n{}",
         control.said,
+    );
+}
+
+/// **A cleared Go store is fetched into again.** A build fills the store, a
+/// Clear empties it — so a build denied its registry now fails, which is what
+/// says the Clear really took the module — and the next build with its registry
+/// fetches the module again, after which one denied it builds out of the store
+/// once more.
+#[tokio::test]
+async fn a_cleared_go_store_is_empty_and_the_next_build_fetches_into_it_again() {
+    let Some(tools) = tools("Go", &["go", "zip"]) else {
+        return;
+    };
+    let (go, zip) = (&tools[0], &tools[1]);
+
+    let machine = machine(2).await;
+    let cache = machine.cache();
+
+    let proxy = machine.registries.join("go");
+    go_proxy(&proxy, zip);
+
+    for nth in 0..2 {
+        go_consumer(machine.worktree(nth));
+    }
+
+    let reaching = || vec![Bind::readable(proxy.clone())];
+
+    let building = format!(
+        "set -e\n{GO_SETTINGS}\nexport GOPROXY=file://{proxy}\n{go} build -o ./built ./...\n",
+        proxy = proxy.display(),
+        go = go.display(),
+    );
+    let offline = format!(
+        "set -e\n{GO_SETTINGS}\nexport GOPROXY=off\n{go} build -o ./built ./...\n./built\n",
+        go = go.display(),
+    );
+
+    installing(&machine.sandbox(0, &cache, reaching()), &building)
+        .worked("a build fills the store");
+
+    cleared(&cache, verkstead_server::languages::GO);
+
+    let emptied = installing(&machine.sandbox(1, &cache, vec![]), &offline);
+
+    assert!(
+        !emptied.worked && emptied.said.contains("GOPROXY=off"),
+        "with the store cleared and no registry, a build has nothing to build out of. It \
+         said:\n{}",
+        emptied.said,
+    );
+
+    installing(&machine.sandbox(0, &cache, reaching()), &building)
+        .worked("the next build with its registry fetches the module into the cleared store");
+
+    let refilled = installing(&machine.sandbox(1, &cache, vec![]), &offline);
+
+    refilled.worked("and a build denied its registry builds out of the store it refilled");
+    assert!(
+        refilled.said.contains("out of the store"),
+        "and what it built runs. It said:\n{}",
+        refilled.said,
     );
 }
 
@@ -4351,6 +4441,11 @@ fn listed(ran: &Ran, name: &str) -> String {
 /// Compile Server listens on and the one a session's client dials.
 const SCCACHE_PORT: u16 = 4226;
 
+/// Held by each proof starting a Compile Server for as long as it runs: there
+/// is one port for it to listen on, so two at once would be one proof's client
+/// reaching the other's server.
+static ON_THE_PORT: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 /// A small CMake project that is nonetheless a real one: a C source and a C++
 /// source, and a header under `include/` so that a `-I` is on every compile
 /// line. The minimum is the first release that reads the two launchers out of
@@ -4475,6 +4570,8 @@ fn answering() {
 #[tokio::test]
 async fn cmake_compiles_through_the_compile_server_and_a_rebuild_or_a_second_conversation_is_all_hits()
  {
+    let _turn = ON_THE_PORT.lock().await;
+
     let Some(found) = tools("CMake", &["sccache", "cmake", "ninja", "cc", "c++"]) else {
         return;
     };
@@ -4693,6 +4790,140 @@ async fn cmake_compiles_through_the_compile_server_and_a_rebuild_or_a_second_con
         requests,
         "every one of its compiles was served out of what the first Conversation \
          compiled: {across}",
+    );
+}
+
+/// **Rust compiles again through a cleared sccache.** A crate compiled through
+/// the Compile Server fills its store; a Clear of Rust stops the server and
+/// empties the store; and the next launch starts the server again, through
+/// which the same crate compiles — a miss, the cache being empty — and the
+/// store holds what it compiled once more.
+///
+/// A library compiled with `rustc` alone rather than a `cargo build`, so the
+/// Sandbox needs no linker: what is asked is the Compile Server's, and a `.rlib`
+/// is as much a compile through it as anything.
+///
+/// **Skipped where the port is taken**, for the CMake proof's reason above.
+#[tokio::test]
+async fn rust_compiles_again_through_a_cleared_sccache() {
+    let _turn = ON_THE_PORT.lock().await;
+
+    let Some(found) = tools("Rust Compile Server", &["sccache", "rustc"]) else {
+        return;
+    };
+
+    let [sccache, rustc] = &found[..] else {
+        unreachable!("two tools were asked for");
+    };
+
+    if std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, SCCACHE_PORT)).is_err() {
+        let missing = format!(
+            "port {SCCACHE_PORT} is already taken on this machine, which is another sccache \
+             server that a session's client would reach instead of the Compile Server"
+        );
+
+        println!("skipping the cleared-sccache proof: {missing}");
+
+        assert!(
+            std::env::var_os(REQUIRED).is_none(),
+            "the cleared-sccache proof was skipped — {missing} — and {REQUIRED} is set",
+        );
+
+        return;
+    }
+
+    let machine = machine(1).await;
+    let cache = machine.compiling_cache(sccache);
+    let store = cache.dir().unwrap().join("sccache");
+
+    let worktree = machine.worktree(0);
+    std::fs::write(
+        worktree.join("probe.rs"),
+        "pub fn probe() -> u32 { 41 + 1 }\n",
+    )
+    .unwrap();
+
+    let compiling = |stats: &str| {
+        format!(
+            r#"set -e
+            mkdir -p out
+            "$RUSTC_WRAPPER" '{rustc}' --crate-name probe --crate-type lib --emit=link \
+                --out-dir out probe.rs
+            "$RUSTC_WRAPPER" --show-stats --stats-format=json > {stats}
+            "#,
+            rustc = rustc.display(),
+        )
+    };
+
+    let running = cache.compiling(&machine.settings.config(), None);
+    answering();
+
+    installing(
+        &machine.sandbox(0, &cache, vec![]),
+        &compiling("first.json"),
+    )
+    .worked("a crate compiles through the Compile Server");
+
+    let first = stats(worktree, "first.json");
+
+    assert!(
+        first["stats"]["cache_misses"]["counts"]["Rust"]
+            .as_u64()
+            .unwrap_or(0)
+            >= 1,
+        "into an empty cache, so a miss: {first}",
+    );
+    assert!(
+        !tree(&store).is_empty(),
+        "and its store holds what it compiled"
+    );
+
+    // The session over, so nothing runs and the Clear goes ahead.
+    drop(running);
+
+    cleared(&cache, verkstead_server::languages::RUST);
+
+    // Gone a moment after its sandbox is: the sccache inside dies with the
+    // bwrap it was started under, which the Clear waited for.
+    let began = std::time::Instant::now();
+
+    while std::net::TcpStream::connect((Ipv4Addr::LOCALHOST, SCCACHE_PORT)).is_ok() {
+        assert!(
+            began.elapsed() < std::time::Duration::from_secs(10),
+            "a Clear of Rust stops the Compile Server, so its index does not go on naming \
+             files that are gone",
+        );
+
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+
+    let _running = cache.compiling(&machine.settings.config(), None);
+    answering();
+
+    std::fs::remove_dir_all(worktree.join("out")).unwrap();
+
+    installing(
+        &machine.sandbox(0, &cache, vec![]),
+        &compiling("again.json"),
+    )
+    .worked("the same crate compiles through the Compile Server started again");
+
+    let again = stats(worktree, "again.json");
+
+    assert!(
+        again["stats"]["cache_misses"]["counts"]["Rust"]
+            .as_u64()
+            .unwrap_or(0)
+            >= 1
+            && again["stats"]["cache_hits"]["counts"]["Rust"]
+                .as_u64()
+                .unwrap_or(0)
+                == 0,
+        "out of a cache the Clear emptied, so a miss and not a hit: {again}",
+    );
+    assert!(
+        !tree(&store).is_empty(),
+        "and the cleared store holds what it compiled again",
     );
 }
 

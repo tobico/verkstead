@@ -224,6 +224,13 @@ impl DiskUse {
         self.again.notify_one();
     }
 
+    /// Say what `language`'s stores hold now, measured by whoever changed them —
+    /// a Clear, whose answer draws the figure, and whose walk of stores just
+    /// emptied is no wait.
+    pub(crate) fn measured(&self, language: &str, bytes: u64) {
+        self.held().insert(language.to_owned(), bytes);
+    }
+
     /// One pass: each of `stores`' languages measured by `measuring` in turn,
     /// and its figure written the moment it is had — so the first language's
     /// is on the page while the last is still being walked. A language that is

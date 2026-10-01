@@ -796,6 +796,33 @@ impl BuildCache {
         (self.using.load(Ordering::Acquire) == 0).then(aside)
     }
 
+    /// Run `aside` — a Clear moving everything out of a language's stores —
+    /// where nothing is running, and `None` without running it where something
+    /// is: [`BuildCache::moving`] for a whole Clear at once, so a launch waits
+    /// for every store of it to be empty rather than finding one half emptied.
+    ///
+    /// **And the Compile Server stopped first where `compiler` says** — a
+    /// language whose stores hold sccache's — so its index does not go on
+    /// describing files that are gone. Nothing is compiling through it, nothing
+    /// running, and the next launch that wants it starts it again. Locked in
+    /// the order [`BuildCache::compiling`] locks, the server and then the
+    /// sweep's lock, so the two never wait on each other.
+    pub fn clearing<T>(&self, compiler: bool, aside: impl FnOnce() -> T) -> Option<T> {
+        let mut running = self.held();
+        let _moving = self.moving.lock().unwrap_or_else(|held| held.into_inner());
+
+        if self.using.load(Ordering::Acquire) != 0 {
+            return None;
+        }
+
+        if compiler {
+            // Dropped, which ends it and waits for it to go — see [`Compiling`].
+            *running = None;
+        }
+
+        Some(aside())
+    }
+
     /// Wait until nothing is running: at once where nothing is, and otherwise
     /// at the moment the last session or terminal lets go of its hold.
     ///

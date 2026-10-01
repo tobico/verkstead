@@ -26,17 +26,18 @@ use crate::{
     Creation, DeviceIdentity, DevicesView, DirectoryListing, DiscoveredDevice, DroppedRow,
     FileDeleted, FileDeleting, FileListsView, FileMade, FileMaking, FileReading, FileRenamed,
     FileRenaming, FileRootsView, FileStatusView, FileWrite, FileWritten, FolderListing,
-    GrillingStarted, InstallPress, LinkedDevice, Locked, NewAdoption, NewCompanion,
-    NewConversation, NewJoin, NewRank, OnboardingView, PendingJoin, Permitting, PrefillView,
-    Preflight, ProcessChoice, ProcessPicked, ProfileChoice, ProfileChosen, ProfileDeleted,
-    ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails, PushKey, Registered, Registration,
-    RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoPairingsView, RepoRemoved, RepoSwitched,
-    RepoView, Resolved, Resumed, RoadmapPane, RoleChoice, Screen, ServeEdit, ServePress,
-    ServerAttached, ServerRemoved, SetReading, SettingsEdit, SettingsSaved, SettingsView,
-    ShareCommented, SharePublished, SharedConversation, ShowArchived, ShowingArchived, Shown,
-    Started, SteerCancelled, SteerForm, SteerOpened, SteerSaved, SteerSubmission, Submitted,
-    Subscribed, Subscription, TakenUp, TargetNamed, TargetRecorded, TerminalClosed, TerminalOpened,
-    TerminalsView, TranscriptView, Transferring, Unsubscribe, UpdateNotice, Watching,
+    GrillingStarted, InstallPress, LanguageCleared, LinkedDevice, Locked, NewAdoption,
+    NewCompanion, NewConversation, NewJoin, NewRank, OnboardingView, PendingJoin, Permitting,
+    PrefillView, Preflight, ProcessChoice, ProcessPicked, ProfileChoice, ProfileChosen,
+    ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails, PushKey,
+    Registered, Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoPairingsView,
+    RepoRemoved, RepoSwitched, RepoView, Resolved, Resumed, RoadmapPane, RoleChoice, Screen,
+    ServeEdit, ServePress, ServerAttached, ServerRemoved, SetReading, SettingsEdit, SettingsSaved,
+    SettingsView, ShareCommented, SharePublished, SharedConversation, ShowArchived,
+    ShowingArchived, Shown, Started, SteerCancelled, SteerForm, SteerOpened, SteerSaved,
+    SteerSubmission, Submitted, Subscribed, Subscription, TakenUp, TargetNamed, TargetRecorded,
+    TerminalClosed, TerminalOpened, TerminalsView, TranscriptView, Transferring, Unsubscribe,
+    UpdateNotice, Watching,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -401,6 +402,10 @@ fn the_viewers_types_are_written_from_these() {
     SettingsView::export_all(&config).unwrap();
     SettingsEdit::export_all(&config).unwrap();
     SettingsSaved::export_all(&config).unwrap();
+
+    // And what a language's Clear answers: the settings again, or how many
+    // sessions and terminals it was refused over.
+    LanguageCleared::export_all(&config).unwrap();
 
     // And what a path field browses with: one directory of the filesystem,
     // asked for by path and nothing else. The listing writes the entries and

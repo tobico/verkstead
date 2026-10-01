@@ -289,6 +289,10 @@
         }
       ]
     },
+    "running": {
+      "sessions": 0,
+      "terminals": 0
+    },
     "share_on_done": true
   },
   "tried": [

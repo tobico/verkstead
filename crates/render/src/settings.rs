@@ -205,6 +205,39 @@ pub struct SettingsView {
     /// handed is these words, so what comes back here has to be the ones that
     /// were typed rather than a tidied copy of them.
     pub instructions: String,
+
+    /// And what is running as this was drawn, which is what a language's
+    /// Clear is refused over — see [`LanguageCleared`].
+    pub running: Running,
+}
+
+/// How many sessions and Conversation Terminals are running this moment.
+///
+/// Both, because both are sandboxed with the stores: a Clear while either runs
+/// would take a package from under a build. Counted apart, so the page can say
+/// which it is waiting on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct Running {
+    pub sessions: usize,
+    pub terminals: usize,
+}
+
+/// What became of a Clear: every store of one language emptied — sccache's
+/// included for Rust — or why not.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum LanguageCleared {
+    /// Emptied, and the settings as they stand afterwards — the cleared
+    /// language's disk use measured again, so the page draws what is left.
+    Cleared { settings: Box<SettingsView> },
+
+    /// Refused, because something is running: a Clear never waits, the way the
+    /// sweep does, because a human pressed it and is there to be told.
+    Running(Running),
+
+    /// No language of that name is loaded, or it names no store to clear.
+    NoSuchLanguage,
 }
 
 /// How a merge conflict between a pull request and its base branch is resolved.

@@ -263,6 +263,13 @@ impl Terminals {
         live
     }
 
+    /// How many are live across every Conversation, which is what a Clear of a
+    /// language's stores is refused over — a terminal's shell is sandboxed with
+    /// them, as a session is.
+    pub(crate) fn running(&self) -> usize {
+        self.held().values().map(|held| held.live.len()).sum()
+    }
+
     /// The Screen of one of them, or `None` where it is not live.
     ///
     /// What [`crate::screen::follow`] asks for every message it carries, which

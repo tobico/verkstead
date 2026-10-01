@@ -32,7 +32,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
 import type { JSX } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { SettingsSaved, SettingsView } from "../src/api/types";
+import type {
+  LanguageCleared,
+  SettingsSaved,
+  SettingsView,
+} from "../src/api/types";
 import card from "../src/CardButton.module.css";
 import check from "../src/Check.module.css";
 import {
@@ -41,7 +45,7 @@ import {
   bytesSaid,
 } from "../src/settings/Languages";
 import styles from "../src/settings/Languages.module.css";
-import { json, serving, whenever } from "./serving";
+import { type Answer, json, serving, whenever } from "./serving";
 import told from "./fixtures/settings.json" with { type: "json" };
 import unset from "./fixtures/settings-unset.json" with { type: "json" };
 
@@ -163,7 +167,7 @@ function mountPane() {
 
 function theSettings(
   standing: SettingsView,
-  ...answers: Array<() => Promise<Response>>
+  ...answers: Array<Answer>
 ) {
   return serving(whenever("/api/ui/settings", json(standing)), ...answers);
 }
@@ -744,6 +748,112 @@ describe("saying how much a store holds", () => {
     expect(bytesSaid(20 * 2 ** 20)).toBe("20M");
     expect(bytesSaid(30 * 2 ** 30)).toBe("30G");
     expect(bytesSaid(2 * 2 ** 40)).toBe("2.0T");
+  });
+});
+
+/// The Clear under a language's size, which stands outside the group the size
+/// hangs in — a language switched off still holds what it fetched.
+function theClear(container: ParentNode, name = RUST): HTMLButtonElement {
+  const clearing = theGroup(container, name).nextElementSibling;
+  expect(clearing?.className).toBe(styles.clearing);
+  return clearing!.querySelector("button")!;
+}
+
+/// The same settings with Go's store holding `bytes`.
+function holding(standing: SettingsView, bytes: number): SettingsView {
+  return {
+    ...standing,
+    languages: standing.languages.map((language) =>
+      language.name === GO
+        ? { ...language, disk_use: { Measured: { bytes } } }
+        : language,
+    ),
+  };
+}
+
+describe("clearing a store", () => {
+  /// A press empties that language's stores, and what the answer measured is
+  /// what is drawn.
+  it("clears one language and draws what its store holds after", async () => {
+    const cleared: LanguageCleared = {
+      Cleared: { settings: holding(TOLD, 0) },
+    };
+    const fetching = theSettings(
+      holding(TOLD, 5 * 2 ** 30),
+      whenever("/api/ui/languages/go/clear", json(cleared), "POST"),
+    );
+    const { container } = mountPane();
+
+    await waitFor(() =>
+      expect(theGroup(container, GO).textContent).toContain(
+        "Holds 5.0G on disk.",
+      ),
+    );
+    expect(theClear(container, GO).disabled).toBe(false);
+
+    fireEvent.click(theClear(container, GO));
+
+    await waitFor(() =>
+      expect(theGroup(container, GO).textContent).toContain(
+        "Holds 0 bytes on disk.",
+      ),
+    );
+    expect(
+      fetching.mock.calls.some(
+        ([asked, init]) =>
+          String(asked) === "/api/ui/languages/go/clear" &&
+          init?.method === "POST",
+      ),
+    ).toBe(true);
+  });
+
+  /// Off while anything runs, saying what it waits on.
+  it("is off while a session or terminal runs, and says how many", async () => {
+    theSettings({ ...TOLD, running: { sessions: 2, terminals: 1 } });
+    const { container } = mountPane();
+
+    await waitFor(() => expect(theClear(container, GO).disabled).toBe(true));
+    expect(theClear(container, GO).parentElement!.textContent).toContain(
+      "Clear waits until no session or terminal is running: 2 sessions and " +
+        "1 terminal are running.",
+    );
+  });
+
+  /// And a Clear the server refused, something having started since the read,
+  /// goes off the same way.
+  it("draws a refusal as what it waits on", async () => {
+    const refused: LanguageCleared = {
+      Running: { sessions: 1, terminals: 0 },
+    };
+    theSettings(
+      TOLD,
+      whenever("/api/ui/languages/go/clear", json(refused), "POST"),
+    );
+    const { container } = mountPane();
+
+    await waitFor(() => expect(theClear(container, GO).disabled).toBe(false));
+    fireEvent.click(theClear(container, GO));
+
+    await waitFor(() =>
+      expect(theClear(container, GO).parentElement!.textContent).toContain(
+        "1 session is running.",
+      ),
+    );
+    expect(theClear(container, GO).disabled).toBe(true);
+  });
+
+  /// C/C++ has no store of its own, so nothing to clear.
+  it("draws no Clear for a language with no store", async () => {
+    theSettings(TOLD);
+    mountPane();
+
+    await waitFor(() => theSize(RUST));
+
+    expect(screen.getAllByRole("button", { name: "Clear" }).length).toBe(
+      TOLD.languages.filter(
+        (language) => language.disk_use !== "NoStore" && language.store,
+      ).length,
+    );
   });
 });
 

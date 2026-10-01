@@ -48,6 +48,11 @@
 //! when Verkstead last walked it. Whether a filesystem keeps access times is
 //! measured rather than read off its mount options — see
 //! [`keeps_access_times`].
+//!
+//! **And Clear, which is the same machinery pressed by a human** — see
+//! [`emptied`]: every store of one language emptied, sccache's included, and
+//! **refused while anything runs** rather than waiting for it, because a human
+//! pressing a button is there to be told why it did nothing.
 
 use std::collections::HashMap;
 use std::io::{self, Read, Write};
@@ -211,6 +216,84 @@ pub fn swept(cache: &BuildCache, descriptor: &Descriptor, size: u64) -> Swept {
     }
 
     swept
+}
+
+/// **Clear**: empty every store `descriptor` names — swept by unit, evicted by
+/// its tool or not bounded at all — and say how many things were taken out of
+/// them, or `None` where anything is running, which a Clear is refused over.
+///
+/// The sweep's machinery, all of it at once: everything in a store is renamed
+/// aside under [`BuildCache::clearing`], so a launch waits for the whole Clear
+/// rather than finding a store half emptied, and is deleted after — read-only
+/// directories given their write bits, and no link followed. The store
+/// directories themselves stay, empty, so what a session is handed is still
+/// there. A language naming the Compile Server has it stopped first, its store
+/// being sccache's.
+///
+/// `others` is every other language's store: one inside this language's is
+/// left where it is, and only what is beside it goes.
+///
+/// **Blocks**, on the deletes.
+pub fn emptied(cache: &BuildCache, descriptor: &Descriptor, others: &[PathBuf]) -> Option<usize> {
+    let Some(machine) = cache.machine() else {
+        return Some(0);
+    };
+
+    let stores = descriptor.stores(&machine);
+
+    // And where units are moved aside to, which is in nobody's store.
+    let kept: Vec<PathBuf> = others.iter().cloned().chain(machine.asides()).collect();
+
+    let moved = cache.clearing(descriptor.names(languages::SCCACHE), || {
+        let mut moved = Vec::new();
+
+        for (_, dir) in &stores {
+            if let Some(aside) = machine.aside(dir) {
+                emptying(dir, &aside, &kept, &mut moved);
+            }
+        }
+
+        moved
+    })?;
+
+    for at in &moved {
+        if let Err(error) = deleted(at) {
+            tracing::warn!(
+                error = ?error,
+                aside = %at.display(),
+                "what a Clear took out of a store could not be deleted, so the next sweep deletes it",
+            );
+        }
+    }
+
+    Some(moved.len())
+}
+
+/// Move everything in `dir` into `aside`, onto `moved` — except what `kept`
+/// names, and what holds something it names, which is gone into instead.
+fn emptying(dir: &Path, aside: &Path, kept: &[PathBuf], moved: &mut Vec<PathBuf>) {
+    // A store nothing has written yet is empty already.
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+
+        if kept.contains(&path) {
+            continue;
+        }
+
+        let holds_kept = kept.iter().any(|kept| kept.starts_with(&path));
+
+        if holds_kept && entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+            emptying(&path, aside, kept, moved);
+
+            continue;
+        }
+
+        moved.extend(moved_aside(&path, aside));
+    }
 }
 
 /// One unit the sweep may take, with what it is judged and counted by.
@@ -1041,5 +1124,87 @@ languages:
 
         assert!(pass.stopped);
         assert!(pass.swept.is_empty());
+    }
+
+    /// A Clear empties every store of the language, however each is bounded,
+    /// and leaves another language's alone — one inside it included.
+    #[test]
+    fn a_clear_empties_every_store_of_one_language_and_no_other() {
+        let fixture = Fixture::new();
+
+        fixture.write("demo/packages/one/a", 100, 0);
+        fixture.write("demo/packages/two/b", 100, 0);
+        fixture.write("demo/tool/blob", 100, 0);
+        fixture.write("demo/loose/thing/a", 100, 0);
+        let others = fixture.write("demo/loose/theirs/kept", 100, 0);
+        let beside = fixture.write("other/packages/one/a", 100, 0);
+
+        let kept = [
+            fixture.root.join("demo/loose/theirs"),
+            fixture.root.join("other/packages"),
+        ];
+
+        assert_eq!(
+            emptied(&fixture.cache, fixture.descriptor(), &kept),
+            Some(4)
+        );
+
+        for store in ["packages", "tool"] {
+            let dir = fixture.root.join("demo").join(store);
+
+            assert!(
+                std::fs::read_dir(&dir).unwrap().next().is_none(),
+                "{} is empty, and still there",
+                dir.display(),
+            );
+        }
+
+        assert!(!fixture.root.join("demo/loose/thing").exists());
+        assert!(others.exists(), "another language's store inside it stays");
+        assert!(beside.exists(), "and so does another language's beside it");
+        assert!(
+            std::fs::read_dir(fixture.root.join(ASIDE_NAME))
+                .unwrap()
+                .next()
+                .is_none(),
+            "and nothing of it is left aside",
+        );
+    }
+
+    /// A Clear is refused while anything runs, and takes nothing.
+    #[test]
+    fn a_clear_is_refused_while_a_session_or_terminal_runs() {
+        let fixture = Fixture::new();
+
+        let unit = fixture.write("demo/packages/one/a", 100, 0);
+
+        let running = fixture.cache.compiling(&Config::default(), None);
+
+        assert_eq!(emptied(&fixture.cache, fixture.descriptor(), &[]), None);
+        assert!(unit.exists());
+
+        drop(running);
+
+        assert_eq!(emptied(&fixture.cache, fixture.descriptor(), &[]), Some(1));
+        assert!(!unit.exists());
+    }
+
+    /// Go's read-only modules are cleared like anything else.
+    #[cfg(unix)]
+    #[test]
+    fn a_clear_takes_read_only_go_modules() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let fixture = Fixture::new();
+
+        let module = fixture.root.join("demo/tool/greet@v1.0.0");
+        fixture.write("demo/tool/greet@v1.0.0/greet.go", 100, 0);
+
+        for (path, mode) in [(module.join("greet.go"), 0o444), (module.clone(), 0o555)] {
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode)).unwrap();
+        }
+
+        assert_eq!(emptied(&fixture.cache, fixture.descriptor(), &[]), Some(1));
+        assert!(!module.exists());
     }
 }

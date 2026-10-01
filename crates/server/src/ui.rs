@@ -44,18 +44,18 @@ use verkstead_render::{
     DiskUse, DroppedRow, Eviction, FileDeleted, FileDeleting, FileListsView, FileMade, FileMaking,
     FileReading, FileRenamed, FileRenaming, FileRootsView, FileStatusView, FileWrite, FileWritten,
     FolderListing, GrillingStarted, HeaderEdit, IgnoreRule, IgnoredCommentsEdit, InstallPress,
-    LanguageEdit, LanguageView, Lifecycle, Locked, McpHeader, McpServer, McpServerEdit,
-    McpServersEdit, Merging, MissedOut, NewAdoption, NewCompanion, NewConversation, NewJoin,
-    NewRank, PairingView, Parked, PendingSteerView, Permitting, Process, ProcessChoice,
+    LanguageCleared, LanguageEdit, LanguageView, Lifecycle, Locked, McpHeader, McpServer,
+    McpServerEdit, McpServersEdit, Merging, MissedOut, NewAdoption, NewCompanion, NewConversation,
+    NewJoin, NewRank, PairingView, Parked, PendingSteerView, Permitting, Process, ProcessChoice,
     ProcessPicked, ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration, RemoteBanner,
     RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice, RuleField,
-    RuleRefused, RunningOn, ServeEdit, ServePress, ServerAttached, ServerField, ServerRefused,
-    ServerRemoved, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView, ShareCommented,
-    SharePublished, SharedCommit, SharedConversation, ShowArchived, ShowingArchived, SizeRefused,
-    Standing, SteerCancelled, SteerForm, SteerOpened, SteerPairingView, SteerSaved,
-    SteerSubmission, StoreView, Submitted, Subscribed, Subscription, TakenUp, TargetNamed,
-    TargetRecorded, TerminalOpened, TimelineEvent, TokenEdit, TokenSaved, TransferredTo,
-    Transferring, UnreadEntry, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
+    RuleRefused, Running, RunningOn, ServeEdit, ServePress, ServerAttached, ServerField,
+    ServerRefused, ServerRemoved, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView,
+    ShareCommented, SharePublished, SharedCommit, SharedConversation, ShowArchived,
+    ShowingArchived, SizeRefused, Standing, SteerCancelled, SteerForm, SteerOpened,
+    SteerPairingView, SteerSaved, SteerSubmission, StoreView, Submitted, Subscribed, Subscription,
+    TakenUp, TargetNamed, TargetRecorded, TerminalOpened, TimelineEvent, TokenEdit, TokenSaved,
+    TransferredTo, Transferring, UnreadEntry, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -605,6 +605,9 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // read and the save being the same page's two halves — and one save for
         // the author and the token together, because the page has one button.
         .route("/api/ui/settings", get(settings).post(save_settings))
+        // Emptying one language's stores, which is an act rather than a value
+        // the settings hold, so a route of its own rather than a key of a save.
+        .route("/api/ui/languages/{name}/clear", post(clear_language))
         // One directory of the filesystem, for a path field's browse dropdown.
         // Not a route under anything it belongs to: it serves every field that
         // takes a path — the settings' own, the Repos' form, an Agent Profile's
@@ -5698,8 +5701,97 @@ async fn settings(State(state): State<AppState>) -> HttpResponse {
         &state.sweeps,
         &state.binds,
         taken(&state),
+        running(&state),
     ))
     .into_response()
+}
+
+/// `POST /api/ui/languages/{name}/clear` — empty every store of one language,
+/// sccache's included for Rust, and answer with the settings as they stand
+/// after.
+///
+/// **Refused while a session or a Conversation Terminal runs**, saying how many
+/// of each: both are sandboxed with the stores, and a Clear under one would take
+/// a package from under its build. Refused rather than waited for, the way the
+/// sweep waits, because a human pressed this and is there to be told — and the
+/// refusal is [`crate::build_cache::BuildCache::clearing`]'s, under the lock a
+/// launch is counted under, so the page having drawn the button live is no
+/// promise this goes ahead.
+///
+/// The language's disk use is measured again before the answer, which is a walk
+/// of stores just emptied, so the page draws what is left rather than what was.
+async fn clear_language(State(state): State<AppState>, Path(name): Path<String>) -> HttpResponse {
+    let languages = crate::languages::configured(&state.settings.config());
+
+    let (Some(descriptor), Some(cache)) = (
+        languages
+            .get(&name)
+            .filter(|descriptor| descriptor.names_a_store()),
+        state.sessions.build_cache(),
+    ) else {
+        return Json(LanguageCleared::NoSuchLanguage).into_response();
+    };
+
+    // A server with no cache directory has no stores to clear.
+    let Some(machine) = cache.machine() else {
+        return Json(LanguageCleared::NoSuchLanguage).into_response();
+    };
+
+    let descriptor = descriptor.clone();
+    let cache = cache.clone();
+
+    // Every other language's stores, which a Clear of this one never reaches
+    // into — see [`crate::eviction::emptied`].
+    let others: Vec<std::path::PathBuf> = languages
+        .iter()
+        .filter(|(other, _)| *other != name)
+        .flat_map(|(_, other)| other.stores(&machine))
+        .map(|(_, dir)| dir)
+        .collect();
+
+    let cleared = tokio::task::spawn_blocking(move || {
+        let emptied = crate::eviction::emptied(&cache, &descriptor, &others)?;
+
+        let dirs: Vec<std::path::PathBuf> = descriptor
+            .stores(&machine)
+            .into_iter()
+            .map(|(_, dir)| dir)
+            .collect();
+
+        Some((emptied, crate::disk_use::measure(&dirs)))
+    })
+    .await;
+
+    match cleared {
+        Ok(None) => Json(LanguageCleared::Running(running(&state))).into_response(),
+        Ok(Some((emptied, bytes))) => {
+            tracing::info!(
+                language = name,
+                emptied,
+                bytes,
+                "a language's stores were cleared"
+            );
+
+            state.disk_use.measured(&name, bytes);
+
+            Json(LanguageCleared::Cleared {
+                settings: Box::new(as_told(
+                    &state.settings,
+                    state.sessions.caches_compiles(),
+                    &state.disk_use,
+                    &state.sweeps,
+                    &state.binds,
+                    taken(&state),
+                    running(&state),
+                )),
+            })
+            .into_response()
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, language = name, "clearing a language's stores failed");
+            unavailable("the language's stores could not be cleared")
+        }
+    }
 }
 
 /// How many of the server's places are taken this moment — see
@@ -5712,6 +5804,16 @@ async fn settings(State(state): State<AppState>) -> HttpResponse {
 /// stall.
 fn taken(state: &AppState) -> usize {
     state.drivers.taking(&state.sessions.working()).len()
+}
+
+/// How many sessions and Conversation Terminals are running this moment, which
+/// the Language support pane draws beside each Clear and a Clear is refused
+/// over.
+fn running(state: &AppState) -> Running {
+    Running {
+        sessions: state.sessions.working().len(),
+        terminals: state.terminals.running(),
+    }
 }
 
 /// `POST /api/ui/settings` — write the author and the paths down, and set or
@@ -5771,6 +5873,9 @@ async fn save_settings(
     // out here because it is two in-process registers rather than a file, and
     // nothing a save touches either.
     let taking = taken(&state);
+
+    // And what is running, which a Clear is refused over — the same.
+    let running = running(&state);
 
     let saved = tokio::task::spawn_blocking(move || {
         // What the rules are to be afterwards, and what is wrong with them —
@@ -5844,6 +5949,7 @@ async fn save_settings(
                         &sweeps,
                         &installed,
                         taking,
+                        running,
                     ),
                     verified: None,
                     refused,
@@ -6017,6 +6123,7 @@ async fn save_settings(
                     &sweeps,
                     &installed,
                     taking,
+                    running,
                 ),
                 verified,
                 // Nothing turned down: a save that got this far was one there was
@@ -6231,6 +6338,7 @@ fn as_told(
     sweeps: &crate::eviction::Sweeps,
     binds: &crate::sandbox::SandboxConfig,
     taking: usize,
+    running: Running,
 ) -> SettingsView {
     let secrets = settings.secrets();
     let config = settings.config();
@@ -6320,6 +6428,8 @@ fn as_told(
         // one: the box on the page holds a string either way, and there is no
         // third state between an unwritten key and a text of nothing.
         instructions: config.instructions().to_owned(),
+        // And what is running, which is no file's either.
+        running,
         github_token: secrets.github_token().map(|token| TokenSaved {
             last_four: last_four(token),
             at: settings

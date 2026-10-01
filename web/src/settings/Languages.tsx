@@ -98,7 +98,14 @@
 //! says that instead: its variables are given, but nothing says where they
 //! write, so there is nothing to measure.
 //!
-//! Everything goes through the one settings endpoint, which writes both files:
+//! **And a Clear**, under it, which empties every store of that language —
+//! sccache's too, for Rust — and draws the disk use the answer measured again.
+//! Outside the group the size hangs in, because a language switched off still
+//! holds what it downloaded. **Off while a session or a terminal runs**, saying
+//! how many of each: both are sandboxed with the stores, and the server refuses
+//! a Clear that arrives anyway, which is drawn the same way.
+//!
+//! The sizes go through the one settings endpoint, which writes both files:
 //! the author rides along as it stands and the token is left alone, so saving a
 //! store size cannot lose either.
 
@@ -115,12 +122,14 @@ import {
 import { CardButton } from "../CardButton";
 import { Check, Nested } from "../Check";
 import { PaneSticky } from "../Panes";
-import { loadSettings, saveSettings } from "../api/client";
+import { clearLanguage, loadSettings, saveSettings } from "../api/client";
 import type {
   DiskUse,
   Eviction,
   LanguageEdit,
+  LanguageCleared,
   LanguageView,
+  Running,
   SettingsSaved,
   SettingsView,
   UnreadEntry,
@@ -316,6 +325,29 @@ function sweptSaid(language: LanguageView): string | undefined {
   }
 
   return `Last swept ${utcStamp(language.swept)}.`;
+}
+
+/// How many of `count` there are, in words: `1 session`, `2 terminals`.
+function counted(count: number, one: string): string {
+  return `${count} ${one}${count === 1 ? "" : "s"}`;
+}
+
+/// Why a Clear is off, where something is running: what it waits on, counted —
+/// or nothing, where nothing runs and the button is live.
+export function clearWaits(running: Running): string | undefined {
+  const what = [
+    running.sessions > 0 ? counted(running.sessions, "session") : undefined,
+    running.terminals > 0 ? counted(running.terminals, "terminal") : undefined,
+  ].filter((said): said is string => said !== undefined);
+
+  if (what.length === 0) {
+    return undefined;
+  }
+
+  const verb =
+    running.sessions + running.terminals === 1 ? "is running" : "are running";
+
+  return `Clear waits until no session or terminal is running: ${what.join(" and ")} ${verb}.`;
 }
 
 /// Whether a language's store is held to its size twice over: once by a tool
@@ -552,6 +584,29 @@ export function LanguagesPane(props: {
     },
   }));
 
+  /// A Clear pressed, which empties every store of that language and answers
+  /// with the settings as they stand after — or, refused, with what is running,
+  /// which is written over the read's own count so the button goes off and says
+  /// what it waits on.
+  const clearing = useMutation(() => ({
+    mutationFn: (language: LanguageView) => clearLanguage(language.name),
+    onSuccess: (cleared: LanguageCleared) => {
+      if (cleared === "NoSuchLanguage") {
+        return;
+      }
+
+      if ("Running" in cleared) {
+        const running = cleared.Running;
+        queries.setQueryData<SettingsView>(["settings"], (held) =>
+          held === undefined ? held : { ...held, running },
+        );
+        return;
+      }
+
+      queries.setQueryData(["settings"], cleared.Cleared.settings);
+    },
+  }));
+
   /// Every language as a save puts it back, with one entry's key replaced —
   /// which is what either press sends. The sizes are the *server's*, so a press
   /// that is not about a size commits none of them: see [`heldLanguages`], and
@@ -706,6 +761,27 @@ export function LanguagesPane(props: {
                           </Show>
                         </form>
                       </Nested>
+
+                      {/* And a Clear, outside the group the size hangs in: a
+                          language switched off still holds what it fetched. */}
+                      <Show when={language.disk_use !== "NoStore"}>
+                        <div class={styles.clearing}>
+                          <button
+                            type="button"
+                            disabled={
+                              clearing.isPending ||
+                              clearWaits(set().running) !== undefined
+                            }
+                            onClick={() => clearing.mutate(language)}
+                          >
+                            Clear
+                          </button>
+                          <span class={styles.held}>
+                            {clearWaits(set().running) ??
+                              "Empties its store; the next install fetches again."}
+                          </span>
+                        </div>
+                      </Show>
                     </Show>
 
                     {/* And why nothing above it can be changed, where the
@@ -718,6 +794,12 @@ export function LanguagesPane(props: {
               </For>
 
               <Show when={warned(set())}>{uncompiled()}</Show>
+
+              <Show when={clearing.isError}>
+                <ErrorLine class={styles.failure}>
+                  The store could not be cleared: {clearing.error?.message}
+                </ErrorLine>
+              </Show>
 
               <Show when={save.isError}>
                 <ErrorLine class={styles.failure}>

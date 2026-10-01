@@ -3104,6 +3104,12 @@ companion: boolean, } } | { "Harness": { role: PairingRole,
 profile: string | null, agent_type: AgentType, } };
 
 /**
+ * What became of a Clear: every store of one language emptied — sccache's
+ * included for Rust — or why not.
+ */
+export type LanguageCleared = { "Cleared": { settings: SettingsView, } } | { "Running": Running } | "NoSuchLanguage";
+
+/**
  * One language as the human has just left it: the two keys of its entry the
  * settings page writes, and nothing else.
  *
@@ -4986,6 +4992,15 @@ total: number,
 cancelling: boolean, };
 
 /**
+ * How many sessions and Conversation Terminals are running this moment.
+ *
+ * Both, because both are sandboxed with the stores: a Clear while either runs
+ * would take a package from under a build. Counted apart, so the page can say
+ * which it is waiting on.
+ */
+export type Running = { sessions: number, terminals: number, };
+
+/**
  * Which of the two happened to a language whose entry would not load.
  */
 export type RunningOn = "BuiltIn" | "Nothing";
@@ -5549,7 +5564,12 @@ mcp_servers: Array<McpServer>,
  * handed is these words, so what comes back here has to be the ones that
  * were typed rather than a tidied copy of them.
  */
-instructions: string, };
+instructions: string, 
+/**
+ * And what is running as this was drawn, which is what a language's
+ * Clear is refused over — see [`LanguageCleared`].
+ */
+running: Running, };
 
 /**
  * What became of sharing a Conversation to the pull requests its work is on.
