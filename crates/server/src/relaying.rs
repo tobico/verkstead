@@ -70,7 +70,7 @@
 //! take the press is named in a [`Refusal`] the page draws under the control that
 //! was pressed.
 
-mod bridging;
+pub(crate) mod bridging;
 pub(crate) mod freshness;
 
 use std::pin::Pin;

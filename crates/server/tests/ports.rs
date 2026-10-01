@@ -29,6 +29,7 @@ use futures_util::{SinkExt, StreamExt};
 use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
 use sqlx::SqlitePool;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::time::Instant;
 use tokio_tungstenite::tungstenite::Message;
 use tower::ServiceExt;
@@ -769,4 +770,234 @@ async fn a_listener_inside_a_nested_bwrap_is_read_from_outside_it() {
 
     let _ = sandbox.kill();
     let _ = sandbox.wait();
+}
+
+/// Where one of a terminal's ports is connected to.
+fn port_path(number: i64, port: u16) -> String {
+    format!("/api/ui/conversations/{THERE}/terminals/{number}/ports/{port}")
+}
+
+/// What a server started in a terminal is typed as when it is to be talked to:
+/// node on `host`, echoing what it is sent behind `echo:` and ending the
+/// connection itself — with `ended` — on anything starting `end`.
+fn echoing(host: &str, port: u16) -> String {
+    format!(
+        "node -e \"require('net').createServer(s => s.on('data', d => \
+         String(d).startsWith('end') ? s.end('ended') : s.write('echo:' + d)))\
+         .listen({port}, '{host}', () => console.log('listening-' + {port}))\"\n"
+    )
+}
+
+/// Upgrade a connection to `at` for `path`, the way a forwarding device does:
+/// the socket where it switched protocols, or the status and what was said
+/// where it did not.
+async fn upgraded(at: SocketAddr, path: &str) -> Result<tokio::net::TcpStream, (u16, String)> {
+    let mut stream = tokio::net::TcpStream::connect(at).await.unwrap();
+
+    stream
+        .write_all(
+            format!(
+                "GET {path} HTTP/1.1\r\nHost: {at}\r\nConnection: Upgrade\r\n\
+                 Upgrade: verkstead-forward\r\n\r\n"
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+
+    // Read a byte at a time up to the end of the head, so that nothing past it —
+    // the first bytes of what crosses — is taken off the socket here.
+    let mut head = Vec::new();
+
+    while !head.ends_with(b"\r\n\r\n") {
+        let mut byte = [0u8; 1];
+        let read = tokio::time::timeout(PATIENCE, stream.read(&mut byte))
+            .await
+            .expect("the upgrade should have been answered")
+            .unwrap();
+
+        assert_eq!(read, 1, "the connection ended mid-answer: {head:?}");
+        head.push(byte[0]);
+    }
+
+    let head = String::from_utf8(head).unwrap();
+    let status: u16 = head
+        .split_whitespace()
+        .nth(1)
+        .and_then(|status| status.parse().ok())
+        .unwrap_or_else(|| panic!("an answer starts with its status, and it said {head}"));
+
+    if status == 101 {
+        return Ok(stream);
+    }
+
+    let length: usize = head
+        .lines()
+        .find_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            name.eq_ignore_ascii_case("content-length")
+                .then(|| value.trim().parse().ok())?
+        })
+        .unwrap_or(0);
+
+    let mut said = vec![0u8; length];
+    stream.read_exact(&mut said).await.unwrap();
+
+    Err((status, String::from_utf8_lossy(&said).into_owned()))
+}
+
+/// Send `sending` and read until `wanted` has come back — or the connection
+/// ended, which fails.
+async fn exchanged(stream: &mut tokio::net::TcpStream, sending: &str, wanted: &str) {
+    stream.write_all(sending.as_bytes()).await.unwrap();
+
+    let mut heard = Vec::new();
+
+    while !String::from_utf8_lossy(&heard).contains(wanted) {
+        let mut chunk = [0u8; 256];
+        let read = tokio::time::timeout(PATIENCE, stream.read(&mut chunk))
+            .await
+            .unwrap_or_else(|_| panic!("{wanted:?} never came back, only {heard:?}"))
+            .unwrap();
+
+        assert!(read > 0, "the connection ended before {wanted:?} came back");
+        heard.extend_from_slice(&chunk[..read]);
+    }
+}
+
+/// Whether the connection reaches its end — a read of nothing — within the
+/// patience, whatever was still to read before it.
+async fn ends(stream: &mut tokio::net::TcpStream) -> bool {
+    let mut rest = Vec::new();
+
+    matches!(
+        tokio::time::timeout(PROMPTLY, stream.read_to_end(&mut rest)).await,
+        Ok(Ok(_)) | Ok(Err(_)),
+    )
+}
+
+/// A connection to a terminal's port, upgraded over the link from the device
+/// attached to it, reaches the server listening in the terminal and brings its
+/// answers back; the server ending the connection ends it at the caller, and
+/// the caller ending it ends it at the server.
+#[tokio::test]
+async fn a_connection_upgraded_over_the_link_reaches_the_server_in_the_terminal() {
+    let (a, _b) = linked().await;
+    let (app, at) = a.served().await;
+
+    let number = opened(
+        &app,
+        &through(B, &format!("/api/ui/conversations/{THERE}/terminals")),
+    )
+    .await;
+
+    let mut terminal = Terminal::attached(format!(
+        "ws://{at}{}",
+        through(
+            B,
+            &format!("/api/ui/conversations/{THERE}/terminals/{number}/attach")
+        )
+    ))
+    .await;
+
+    let port = free_port();
+    terminal.typed(&echoing("127.0.0.1", port)).await;
+    terminal.until(&format!("listening-{port}")).await;
+
+    until(&app, &through(B, &ports_path()), |read| holds(read, port)).await;
+
+    // The server ending it.
+    let mut stream = upgraded(at, &through(B, &port_path(number, port)))
+        .await
+        .unwrap_or_else(|refused| panic!("the port should have been joined: {refused:?}"));
+
+    exchanged(&mut stream, "hello", "echo:hello").await;
+    exchanged(&mut stream, "end", "ended").await;
+
+    assert!(
+        ends(&mut stream).await,
+        "the server ending its connection should have ended the caller's",
+    );
+
+    // And the caller ending it: the server, which ends its side when the other
+    // does, is what ends what is left.
+    let mut stream = upgraded(at, &through(B, &port_path(number, port)))
+        .await
+        .unwrap_or_else(|refused| panic!("the port should have been joined again: {refused:?}"));
+
+    exchanged(&mut stream, "again", "echo:again").await;
+    stream.shutdown().await.unwrap();
+
+    assert!(
+        ends(&mut stream).await,
+        "the caller ending its connection should have reached the server",
+    );
+
+    terminal.closed().await;
+}
+
+/// Nothing is joined that the caller may not have: a port not in the reading, a
+/// terminal it holds no attach on, and the device's own browser are each refused
+/// by name — and a port in the reading that the loopback does not answer is
+/// refused rather than answered with a socket carrying nothing.
+#[tokio::test]
+async fn a_connection_is_refused_unless_the_reading_offers_it_to_the_caller() {
+    let (a, b) = linked().await;
+    let (app, at) = a.served().await;
+    let (_, own) = b.served().await;
+
+    let terminals = through(B, &format!("/api/ui/conversations/{THERE}/terminals"));
+    let number = opened(&app, &terminals).await;
+    let unattached = opened(&app, &terminals).await;
+
+    let mut terminal = Terminal::attached(format!(
+        "ws://{at}{}",
+        through(
+            B,
+            &format!("/api/ui/conversations/{THERE}/terminals/{number}/attach")
+        )
+    ))
+    .await;
+
+    // On 127.0.0.2, which is in the reading — a listener on any address is — and
+    // which neither loopback the member dials answers on: the same answer a
+    // server gone between the read and the dial gets, without racing the read.
+    let elsewhere = free_port();
+    terminal.typed(&echoing("127.0.0.2", elsewhere)).await;
+    terminal.until(&format!("listening-{elsewhere}")).await;
+
+    until(&app, &through(B, &ports_path()), |read| {
+        holds(read, elsewhere)
+    })
+    .await;
+
+    let (status, said) = upgraded(at, &through(B, &port_path(number, elsewhere)))
+        .await
+        .expect_err("a port nothing answers on should have been refused");
+    assert_eq!(status, 502, "{said}");
+    assert!(said.contains("nothing answered"), "{said}");
+
+    // A port the terminal never opened.
+    let never = free_port();
+    let (status, said) = upgraded(at, &through(B, &port_path(number, never)))
+        .await
+        .expect_err("a port not in the reading should have been refused");
+    assert_eq!(status, 404, "{said}");
+    assert!(said.contains("not listening"), "{said}");
+
+    // A terminal A holds no attach on, for a port that is listening in another.
+    let (status, said) = upgraded(at, &through(B, &port_path(unattached, elsewhere)))
+        .await
+        .expect_err("a terminal the caller is not attached to should have been refused");
+    assert_eq!(status, 403, "{said}");
+    assert!(said.contains("holding an attach"), "{said}");
+
+    // And B's own browser, for the very port A may have.
+    let (status, said) = upgraded(own, &port_path(number, elsewhere))
+        .await
+        .expect_err("the device's own browser should have been refused");
+    assert_eq!(status, 403, "{said}");
+    assert!(said.contains("over the link"), "{said}");
+
+    terminal.closed().await;
 }

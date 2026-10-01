@@ -21,7 +21,7 @@ is stopped by hand. **Forward** is the term, kept apart from the Relay.
 ## Tasks
 
 - [x] 01: A terminal's ports, read on Linux — [details](01-a-terminals-ports-read-on-linux.md)
-- [ ] 02: The member connects a reported port — [details](02-the-member-connects-a-reported-port.md)
+- [x] 02: The member connects a reported port — [details](02-the-member-connects-a-reported-port.md)
 - [ ] 03: The hub forwards — [details](03-the-hub-forwards.md)
 - [ ] 04: The sidebar item and its popup — [details](04-the-sidebar-item-and-its-popup.md)
 - [ ] 05: The macOS and Windows readers — [details](05-the-macos-and-windows-readers.md)

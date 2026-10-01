@@ -63,7 +63,7 @@ use crate::ui::refused;
 /// among its tokens, and an `Upgrade` header to say what to. Which protocol is
 /// not this hop's business — the member is the one that has to agree to it — so
 /// the value itself is only carried.
-pub(super) fn upgrading(headers: &HeaderMap) -> bool {
+pub(crate) fn upgrading(headers: &HeaderMap) -> bool {
     headers.contains_key(UPGRADE) && names_upgrade(headers)
 }
 
@@ -213,7 +213,13 @@ pub(super) fn bridged(taking: OnUpgrade, answered: reqwest::Response) -> Respons
 /// direction that ended is the direction that delivered it, so a member that
 /// closed its socket politely has already had its frame copied by the time this
 /// tears the pair down.
-async fn crossing(
+///
+/// **And a forwarded port's connection is joined the same way** — the member's
+/// own loopback dial on one side and the upgrade it answered on the other, see
+/// [`crate::terminals::connect`] — because it is the same promise about a
+/// different pair of sockets: nothing in the bytes is this device's business,
+/// and whichever end goes takes the other.
+pub(crate) async fn crossing(
     near: impl AsyncRead + AsyncWrite + Send + 'static,
     far: impl AsyncRead + AsyncWrite + Send + 'static,
 ) {

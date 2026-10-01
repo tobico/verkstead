@@ -99,6 +99,10 @@
 //!
 //! What a member reads back is its own and no other's — the terminals *it*
 //! holds an attach on, over the link and nowhere else. See [`ports_of`].
+//!
+//! **And a port in that reading is one the member may connect to**, one
+//! upgrade per connection, joined to this device's loopback byte for byte — and
+//! no other port, terminal or caller is. See [`connect`].
 
 /// Which shell a terminal comes up in: the server user's own where the machine
 /// has given it a usable one, and PowerShell where the machine keeps no such
@@ -517,6 +521,38 @@ impl Terminals {
 
         theirs.sort_unstable_by_key(|terminal| terminal.number);
         theirs
+    }
+
+    /// Whether `member` may be connected to `port` on one of them: an attach of
+    /// its own open on the terminal, and the port in the terminal's reading as it
+    /// stands.
+    ///
+    /// **The reading is the gate**, rather than whether something happens to
+    /// answer on the loopback: a port the terminal never opened is not one it
+    /// offered anybody, whatever else on this machine is listening on it, and a
+    /// port that closed a moment ago is out of the reading on the next turn.
+    fn forwardable(
+        &self,
+        conversation_id: i64,
+        number: i64,
+        member: &str,
+        port: u16,
+    ) -> Result<(), Unforwardable> {
+        let open = self.held();
+
+        let watched = open
+            .get(&conversation_id)
+            .and_then(|held| held.live.get(&number))
+            .ok_or(Unforwardable::NoSuchTerminal)?;
+
+        if !watched.members.contains_key(member) {
+            return Err(Unforwardable::NotAttached);
+        }
+
+        match watched.ports.contains(&port) {
+            true => Ok(()),
+            false => Err(Unforwardable::NotListening),
+        }
     }
 
     /// The register, locked.
@@ -1168,6 +1204,177 @@ pub(crate) async fn ports_of(
     };
 
     Json(PortsView { terminals }).into_response()
+}
+
+/// What a forwarded connection's upgrade names, and what its `101` answers with.
+///
+/// Not a WebSocket: what crosses is a TCP connection's bytes as they are, with
+/// no frames around them, and a name of its own is what says so to anything
+/// reading the handshake.
+pub(crate) const FORWARD: &str = "verkstead-forward";
+
+/// How long the dial to a port on this device's loopback is given. A loopback
+/// either answers or refuses at once, so this is only ever reached by a server
+/// too wedged to accept — which is a refusal too.
+const DIALLING: Duration = Duration::from_secs(5);
+
+/// Why a member cannot be connected to a port — see [`Terminals::forwardable`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Unforwardable {
+    NoSuchTerminal,
+    NotAttached,
+    NotListening,
+}
+
+/// `GET /api/ui/conversations/{id}/terminals/{number}/ports/{port}`, as an
+/// upgrade — one connection to a port a terminal here is listening on, for a
+/// member forwarding it to its own `localhost`.
+///
+/// **One upgrade per connection.** The member dials this device's loopback at
+/// `port` and, once that has answered, switches protocols and joins the two —
+/// see [`crate::relaying::bridging::crossing`], which is the Relay's own bridge:
+/// bytes crossed both ways, and whichever end goes ending both with a shutdown.
+///
+/// **Refused by name before anything is dialled** unless the caller may have
+/// it: over the link alone, from a member holding an attach on that terminal,
+/// for a port in the terminal's current reading — see
+/// [`Terminals::forwardable`]. And a port that is in the reading but whose
+/// server went between the read and the dial is refused too, rather than
+/// answered with a socket that would carry nothing.
+pub(crate) async fn connect(
+    State(state): State<AppState>,
+    Path((id, number, port)): Path<(String, String, String)>,
+    over_the_link: Option<Extension<OverTheLink>>,
+    caller: Option<Extension<ConnectInfo<Caller>>>,
+    mut request: axum::extract::Request,
+) -> HttpResponse {
+    if over_the_link.is_none() {
+        return crate::ui::refused(
+            StatusCode::FORBIDDEN,
+            ApiError::new(
+                "a terminal's port is connected to for a device of the cluster attached to \
+                 it, over the link, and not for a browser on the machine it is on",
+            ),
+        );
+    }
+
+    let (Ok(id), Ok(number)) = (id.parse::<i64>(), number.parse::<i64>()) else {
+        return crate::ui::no_such_terminal();
+    };
+
+    let Ok(port) = port.parse::<u16>() else {
+        return not_listening(&port);
+    };
+
+    if !crate::relaying::bridging::upgrading(request.headers()) {
+        return crate::ui::refused(
+            StatusCode::BAD_REQUEST,
+            ApiError::new(format!(
+                "a connection to a terminal's port is an upgrade to {FORWARD}, and this \
+                 request asked for none",
+            )),
+        );
+    }
+
+    let Some(member) = calling(&state, caller).await else {
+        return not_attached();
+    };
+
+    match state.terminals.forwardable(id, number, &member, port) {
+        Ok(()) => {}
+        Err(Unforwardable::NoSuchTerminal) => return crate::ui::no_such_terminal(),
+        Err(Unforwardable::NotAttached) => return not_attached(),
+        Err(Unforwardable::NotListening) => return not_listening(&port.to_string()),
+    }
+
+    let Some(taking) = request
+        .extensions_mut()
+        .remove::<hyper::upgrade::OnUpgrade>()
+    else {
+        return crate::ui::refused(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ApiError::new("this connection cannot be upgraded, so no port can be joined to it"),
+        );
+    };
+
+    let Some(dialled) = dialled(port).await else {
+        return crate::ui::refused(
+            StatusCode::BAD_GATEWAY,
+            ApiError::new(format!(
+                "nothing answered on port {port} here: the server in the terminal has \
+                 stopped since it was read",
+            )),
+        );
+    };
+
+    // A task rather than an await, for the reason the Relay's own bridge gives:
+    // the caller's half is only handed over once the `101` below has been
+    // written, which this return is what does.
+    tokio::spawn(async move {
+        match taking.await {
+            Ok(upgraded) => {
+                crate::relaying::bridging::crossing(
+                    hyper_util::rt::TokioIo::new(upgraded),
+                    dialled,
+                )
+                .await;
+            }
+            Err(why) => {
+                tracing::debug!(
+                    %why,
+                    "a member's half of a forwarded connection could not be taken, so \
+                     the port's is let go of",
+                );
+            }
+        }
+    });
+
+    (
+        StatusCode::SWITCHING_PROTOCOLS,
+        [
+            (axum::http::header::CONNECTION, "upgrade"),
+            (axum::http::header::UPGRADE, FORWARD),
+        ],
+    )
+        .into_response()
+}
+
+/// A connection to `port` on this device's loopback, IPv4 first and IPv6 after —
+/// a server in a terminal may have bound either, and the reading does not say
+/// which. `None` where neither answered.
+async fn dialled(port: u16) -> Option<tokio::net::TcpStream> {
+    for loopback in [
+        std::net::IpAddr::from(std::net::Ipv4Addr::LOCALHOST),
+        std::net::IpAddr::from(std::net::Ipv6Addr::LOCALHOST),
+    ] {
+        if let Ok(Ok(stream)) =
+            tokio::time::timeout(DIALLING, tokio::net::TcpStream::connect((loopback, port))).await
+        {
+            return Some(stream);
+        }
+    }
+
+    None
+}
+
+/// The refusal for a caller that holds no attach on the terminal it named.
+fn not_attached() -> HttpResponse {
+    crate::ui::refused(
+        StatusCode::FORBIDDEN,
+        ApiError::new(
+            "a terminal's ports are connected to only for a device holding an attach on it",
+        ),
+    )
+}
+
+/// And for a port the terminal is not listening on, as the reading stands.
+fn not_listening(port: &str) -> HttpResponse {
+    crate::ui::refused(
+        StatusCode::NOT_FOUND,
+        ApiError::new(format!(
+            "the terminal is not listening on port {port}, so it is not one to connect to",
+        )),
+    )
 }
 
 /// Which member of the cluster is on the far end of a request over the link, by
