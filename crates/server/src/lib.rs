@@ -106,6 +106,9 @@ mod files;
 /// What a follow-up session is started on, and read back from where it stands.
 mod follow_ups;
 mod followers;
+/// The ports of members' terminals held on this device's own `localhost`, for
+/// as long as the terminal's tab is open here.
+mod forwarding;
 /// Verkstead's own reach into GitHub: the host's `gh`, run against a Repo.
 ///
 /// Public for the reason [`sandbox`] is — what Verkstead reaches out to is the
@@ -419,6 +422,12 @@ pub(crate) struct AppState {
     /// a Conversation has one session and may have any number of terminals, and
     /// what runs on one is the human rather than an agent.
     terminals: terminals::Terminals,
+
+    /// And the ports of members' terminals this device holds on its own
+    /// `localhost`, which is the other end of a terminal's ports: read off the
+    /// member as it moves and held here while the tab is open — see
+    /// [`forwarding`].
+    forwards: forwarding::Forwards,
 
     /// And which Conversations have a Code pane attached, with the watcher the
     /// first attachment on each started — see [`watchers`]. A register beside
@@ -1423,6 +1432,11 @@ fn standing(
         waits: Waits::new(),
         sessions,
         terminals: terminals::Terminals::new(),
+
+        // And nothing forwarded yet, which is every start: a Forward stands on a
+        // tab open in a browser that asks this server — see [`forwarding`].
+        forwards: forwarding::Forwards::new(),
+
         watchers: watchers::Watchers::new(),
         followers: followers::Followers::new(),
         drivers: drivers::Drivers::new(),
@@ -1565,6 +1579,11 @@ fn standing(
     // does, because what it keeps is rows in this store rather than a list in
     // this device's memory, and the two are refreshed by different news.
     mirroring::refreshing(&state);
+
+    // And what this device forwards, on the same channel again: a member's
+    // `ports` Nudge is that Conversation's ports read over the link and held on
+    // this device's `localhost` — see [`forwarding`].
+    forwarding::holding(&state);
 
     // And the verdict about the machine itself, which is the one sweep here
     // that decides something rather than tidying something: whether this

@@ -524,6 +524,12 @@ const ABOUT: Record<string, readonly string[]> = {
   // the conversation itself. What it does move is the Code pane's tree, asked
   // about where that is drawn in the test after this sweep.
   files: [],
+  // What a member's terminals are listening on, which is read by the device that
+  // attached to them over the link rather than by any page.
+  ports: [],
+  // And what this device forwards, which the sidebar's foot reads — nothing the
+  // conversation page this sweep opens is drawn over.
+  forwards: [],
   set: [OPENED, SIDEBAR],
   liveness: [OPENED],
   conversation: [OPENED, SIDEBAR],

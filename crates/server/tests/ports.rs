@@ -33,8 +33,11 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::time::Instant;
 use tokio_tungstenite::tungstenite::Message;
 use tower::ServiceExt;
-use verkstead_render::{PortsView, Shown, TerminalOpened, TerminalPorts, Watching};
-use verkstead_schema::Nudge;
+use verkstead_render::{
+    ForwardSkip, ForwardStanding, ForwardView, ForwardsView, PortsView, Shown, TerminalOpened,
+    TerminalPorts, Watching,
+};
+use verkstead_schema::{Nudge, Nudged};
 use verkstead_server::attachments::Attachments;
 use verkstead_server::build_cache::BuildCache;
 use verkstead_server::device::reading::Reading;
@@ -259,6 +262,14 @@ async fn linked() -> (Verkstead, Verkstead) {
     let a = Verkstead::answering(A, false).await;
     let b = Verkstead::answering(B, true).await;
 
+    there(&a, &b).await;
+
+    (a, b)
+}
+
+/// B's one Conversation, in a Worktree of its own with a Profile to run a
+/// terminal under, and A and B linked both ways.
+async fn there(a: &Verkstead, b: &Verkstead) {
     let repo = repository(b.dir.path().join("verkstead"));
     let registered = store::register_repo(&b.pool, &repo, "verkstead", "main")
         .await
@@ -271,7 +282,7 @@ async fn linked() -> (Verkstead, Verkstead) {
         .expect("the Repo was just registered");
     assert_eq!(conversation, THERE);
 
-    paired(&b, b.dir.path(), conversation).await;
+    paired(b, b.dir.path(), conversation).await;
 
     // Beside the Data Directory's own `worktrees/` rather than in it: B is
     // already up, and its startup sweep reclaims a directory there that no
@@ -298,8 +309,6 @@ async fn linked() -> (Verkstead, Verkstead) {
 
     b.linked_to(&a.device, vec![a.at()]).await;
     a.linked_to(&b.device, vec![b.at()]).await;
-
-    (a, b)
 }
 
 fn repository(path: PathBuf) -> PathBuf {
@@ -998,6 +1007,424 @@ async fn a_connection_is_refused_unless_the_reading_offers_it_to_the_caller() {
         .expect_err("the device's own browser should have been refused");
     assert_eq!(status, 403, "{said}");
     assert!(said.contains("over the link"), "{said}");
+
+    terminal.closed().await;
+}
+
+/// Where A forwards in the tests that follow: an IPv4 loopback address B's own
+/// server is not on, and IPv6's one.
+///
+/// **Not `127.0.0.1`**, because A and B are one machine here and a Sandbox
+/// shares its network: the server in B's terminal is on `127.0.0.1`, so that
+/// port is busy at A's `127.0.0.1` by construction — which is a Forward
+/// skipped, rather than the one these tests are about. Every other address in
+/// `127.0.0.0/8` is the loopback too.
+fn forwarding_on() -> Vec<std::net::IpAddr> {
+    vec![
+        std::net::IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2)),
+        std::net::IpAddr::V6(std::net::Ipv6Addr::LOCALHOST),
+    ]
+}
+
+/// The address A's IPv4 Forward is reached at.
+fn forwarded_v4(port: u16) -> SocketAddr {
+    SocketAddr::new(forwarding_on()[0], port)
+}
+
+/// And its IPv6 one.
+fn forwarded_v6(port: u16) -> SocketAddr {
+    SocketAddr::new(forwarding_on()[1], port)
+}
+
+/// What a forwarding A holds its members' Nudge streams with, handed back to
+/// be started once the members are written down.
+struct Staying {
+    cluster: Devices,
+    nudges: Nudges,
+}
+
+/// The tasks a forwarding A holds, aborted as the test lets go of it.
+struct Holding(Vec<tokio::task::JoinHandle<()>>);
+
+impl Drop for Holding {
+    fn drop(&mut self) {
+        for held in &self.0 {
+            held.abort();
+        }
+    }
+}
+
+impl Verkstead {
+    /// A Verkstead that **forwards**: its own workbench and the namespace it
+    /// serves over the link over one state, the way a served one has them, with
+    /// its Forwards held on `on` — and holding a Nudge stream to each of its
+    /// members, which is what a running server spawns at the start and what sets
+    /// a Forward going.
+    async fn forwarding(id: &str, on: Vec<std::net::IpAddr>) -> (Verkstead, Holding, Staying) {
+        let dir = tempfile::tempdir().unwrap();
+        let pool = open_database(&dir.path().join("verkstead.db"))
+            .await
+            .unwrap();
+
+        let device = Device::stated(dir.path(), id).unwrap();
+        let members = Members::recorded(pool.clone());
+
+        let listener = peer::Listener::bound("127.0.0.1:0".parse().unwrap(), &device)
+            .expect("the loopback on a port the machine picked is free");
+        let address = listener.address();
+
+        let reading = Reading::advertising(
+            no_tailscale(),
+            Platform::Linux,
+            None,
+            vec![format!("127.0.0.1:{}", address.port())],
+        );
+
+        let cluster = Devices::of(
+            device.clone(),
+            reading.clone(),
+            members.clone(),
+            Joins::none(),
+        )
+        .forwarding_on(on);
+
+        let nudges = Nudges::new();
+
+        let routers = verkstead_server::routers_answering_devices_telling(
+            pool.clone(),
+            cluster.clone(),
+            nudges.clone(),
+            Machine::here(),
+        );
+
+        let peer = peer::router(
+            device.clone(),
+            reading.clone(),
+            members.clone(),
+            Joins::none(),
+            Nudges::new(),
+            routers.over_the_link,
+        );
+
+        let serving = tokio::spawn(async move {
+            let _ = listener.serving(peer).await;
+        });
+
+        (
+            Verkstead {
+                device,
+                pool,
+                members,
+                reading,
+                address,
+                own: Some(routers.workbench),
+                dir,
+                _sandboxing: Vec::new(),
+            },
+            Holding(vec![serving]),
+            Staying { cluster, nudges },
+        )
+    }
+}
+
+/// A and B linked both ways as [`linked`] makes them, with A forwarding on
+/// [`forwarding_on`].
+async fn linked_forwarding() -> (Verkstead, Verkstead, Holding) {
+    let (a, mut holding, staying) = Verkstead::forwarding(A, forwarding_on()).await;
+    let b = Verkstead::answering(B, true).await;
+
+    there(&a, &b).await;
+
+    // After the linking rather than before it: the streams are taken up against
+    // the membership as it is first read, and it is read again only every ten
+    // seconds.
+    let Staying { cluster, nudges } = staying;
+    holding.0.push(tokio::spawn(
+        async move { cluster.stay_fresh(nudges).await },
+    ));
+
+    (a, b, holding)
+}
+
+/// What A is forwarding, read until it satisfies `enough` — or given up on,
+/// saying what it last read.
+async fn forwarded_until(app: &Router, enough: impl Fn(&[ForwardView]) -> bool) -> Duration {
+    let started = Instant::now();
+
+    loop {
+        let read: ForwardsView = call(app, "GET", "/api/ui/forwards").await;
+
+        if enough(&read.forwards) {
+            return started.elapsed();
+        }
+
+        assert!(
+            started.elapsed() < PATIENCE,
+            "what is forwarded never came round, and it last said: {:?}",
+            read.forwards,
+        );
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+/// How `port` stands in what A is forwarding, where it is there at all.
+fn standing(read: &[ForwardView], port: u16) -> Option<ForwardStanding> {
+    read.iter()
+        .find(|forward| forward.port == port)
+        .map(|forward| forward.standing)
+}
+
+/// Whether a connection to `at` reaches the echoing server in B's terminal and
+/// brings its answer back.
+async fn echoes(at: SocketAddr, saying: &str) {
+    let mut stream = tokio::time::timeout(PATIENCE, tokio::net::TcpStream::connect(at))
+        .await
+        .unwrap_or_else(|_| panic!("{at} never answered"))
+        .unwrap_or_else(|why| panic!("{at} should have been forwarded: {why}"));
+
+    exchanged(&mut stream, saying, &format!("echo:{saying}")).await;
+}
+
+/// The Nudges a page on this device hears, with whose they are: a member's news
+/// comes down the same stream under that member's Device Id.
+async fn heard_nudged(page: &mut Listening, over: Duration) -> Vec<Nudged> {
+    let mut heard = Vec::new();
+    let until = Instant::now() + over;
+
+    loop {
+        let left = until.saturating_duration_since(Instant::now());
+
+        let Ok(frame) = tokio::time::timeout(left, page.frame()).await else {
+            return heard;
+        };
+
+        if let Some(data) = frame.lines().find_map(|line| line.strip_prefix("data: ")) {
+            heard.push(serde_json::from_str(data).unwrap());
+        }
+    }
+}
+
+/// A server started in a terminal on B, attached from A's browser, is reachable
+/// at A's own loopback on the same port — IPv4 and IPv6 both — within a few
+/// seconds; a pane swap keeps it, and closing the tab ends it once the grace is
+/// over.
+#[tokio::test]
+async fn a_server_in_a_remote_terminal_is_forwarded_to_the_attaching_devices_localhost() {
+    let (a, _b, _holding) = linked_forwarding().await;
+    let (app, at) = a.served().await;
+
+    let mut page = Listening::open(&app, "/api/ui/nudges").await;
+
+    let number = opened(
+        &app,
+        &through(B, &format!("/api/ui/conversations/{THERE}/terminals")),
+    )
+    .await;
+
+    let attach = format!(
+        "ws://{at}{}",
+        through(
+            B,
+            &format!("/api/ui/conversations/{THERE}/terminals/{number}/attach")
+        )
+    );
+
+    let mut terminal = Terminal::attached(attach.clone()).await;
+
+    let port = free_port();
+    terminal.typed(&echoing("127.0.0.1", port)).await;
+    terminal.until(&format!("listening-{port}")).await;
+
+    let took = forwarded_until(&app, |read| {
+        standing(read, port) == Some(ForwardStanding::Forwarding)
+    })
+    .await;
+    assert!(took < PROMPTLY, "port {port} took {took:?} to be forwarded");
+
+    echoes(forwarded_v4(port), "over-ipv4").await;
+    echoes(forwarded_v6(port), "over-ipv6").await;
+
+    // The reading says what it is: the port, the device and its OS, the
+    // Conversation and the terminal.
+    let read: ForwardsView = call(&app, "GET", "/api/ui/forwards").await;
+    assert_eq!(
+        read.forwards,
+        vec![ForwardView {
+            port,
+            device: B.to_owned(),
+            name: "somewhere-else".to_owned(),
+            os: "Linux".to_owned(),
+            conversation: THERE,
+            title: read.forwards[0].title.clone(),
+            terminal: number,
+            standing: ForwardStanding::Forwarding,
+        }],
+    );
+
+    assert!(
+        heard_nudged(&mut page, Duration::from_millis(500))
+            .await
+            .contains(&Nudged::here(Nudge::Forwards)),
+        "a Forward taken up should have been a forwards Nudge on A's own stream",
+    );
+
+    // A pane swap: the attach let go of and taken again at once. The Forward
+    // stands across it and past the grace.
+    terminal.closed().await;
+    let terminal = Terminal::attached(attach).await;
+
+    tokio::time::sleep(SETTLING).await;
+
+    let read: ForwardsView = call(&app, "GET", "/api/ui/forwards").await;
+    assert_eq!(
+        standing(&read.forwards, port),
+        Some(ForwardStanding::Forwarding),
+        "a pane swap should have kept the Forward",
+    );
+    echoes(forwarded_v4(port), "after-the-swap").await;
+
+    // And the tab closed: the Forward outlives it by the grace and no longer.
+    let closed = Instant::now();
+    terminal.closed().await;
+
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let read: ForwardsView = call(&app, "GET", "/api/ui/forwards").await;
+    assert_eq!(
+        standing(&read.forwards, port),
+        Some(ForwardStanding::Forwarding),
+        "a Forward should have outlived its tab for the grace",
+    );
+
+    forwarded_until(&app, <[ForwardView]>::is_empty).await;
+    let took = closed.elapsed();
+    assert!(
+        took >= Duration::from_secs(2) && took < PROMPTLY + Duration::from_secs(2),
+        "the Forward ended {took:?} after its tab closed",
+    );
+
+    assert!(
+        tokio::net::TcpStream::connect(forwarded_v4(port))
+            .await
+            .is_err(),
+        "nothing should be listening on port {port} here once the Forward has ended",
+    );
+}
+
+/// A port A already holds is skipped, *port busy here*, while the others are
+/// forwarded as before — and is taken once it frees.
+#[tokio::test]
+async fn a_port_already_held_here_is_skipped_and_taken_once_it_frees() {
+    let (a, _b, _holding) = linked_forwarding().await;
+    let (app, at) = a.served().await;
+
+    let number = opened(
+        &app,
+        &through(B, &format!("/api/ui/conversations/{THERE}/terminals")),
+    )
+    .await;
+
+    let mut terminal = Terminal::attached(format!(
+        "ws://{at}{}",
+        through(
+            B,
+            &format!("/api/ui/conversations/{THERE}/terminals/{number}/attach")
+        )
+    ))
+    .await;
+
+    // This device's own server, on the very number the terminal is about to
+    // listen on.
+    let busy = free_port();
+    let own = TcpListener::bind(forwarded_v4(busy)).expect("the port to be free here");
+
+    let free = free_port();
+    // In the background, so that the shell takes the second one too.
+    terminal
+        .typed(&echoing("127.0.0.1", busy).replace('\n', " &\n"))
+        .await;
+    terminal.until(&format!("listening-{busy}")).await;
+    terminal.typed(&echoing("127.0.0.1", free)).await;
+    terminal.until(&format!("listening-{free}")).await;
+
+    forwarded_until(&app, |read| {
+        standing(read, busy)
+            == Some(ForwardStanding::Skipped {
+                reason: ForwardSkip::PortBusy,
+            })
+            && standing(read, free) == Some(ForwardStanding::Forwarding)
+    })
+    .await;
+
+    echoes(forwarded_v4(free), "beside-the-busy-one").await;
+
+    // And this device's own server stopping frees it.
+    drop(own);
+
+    let took = forwarded_until(&app, |read| {
+        standing(read, busy) == Some(ForwardStanding::Forwarding)
+    })
+    .await;
+    assert!(took < PROMPTLY, "the freed port took {took:?} to be taken");
+
+    echoes(forwarded_v4(busy), "once-it-freed").await;
+
+    terminal.closed().await;
+}
+
+/// What A forwards is A's own: its reading is refused to a member over the
+/// link, and its `forwards` Nudge goes down A's own stream and not the one a
+/// member holds.
+#[tokio::test]
+async fn what_a_device_forwards_is_not_served_over_the_link() {
+    let (a, b, _holding) = linked_forwarding().await;
+    let (app, at) = a.served().await;
+    let (relaying, _) = b.served().await;
+
+    let mut own = Listening::open(&app, "/api/ui/nudges").await;
+    let mut linked = Listening::open(&relaying, &through(A, "/api/ui/nudges")).await;
+
+    let number = opened(
+        &app,
+        &through(B, &format!("/api/ui/conversations/{THERE}/terminals")),
+    )
+    .await;
+
+    let mut terminal = Terminal::attached(format!(
+        "ws://{at}{}",
+        through(
+            B,
+            &format!("/api/ui/conversations/{THERE}/terminals/{number}/attach")
+        )
+    ))
+    .await;
+
+    let port = free_port();
+    terminal.typed(&echoing("127.0.0.1", port)).await;
+    terminal.until(&format!("listening-{port}")).await;
+
+    forwarded_until(&app, |read| {
+        standing(read, port) == Some(ForwardStanding::Forwarding)
+    })
+    .await;
+
+    assert!(
+        heard_nudged(&mut own, Duration::from_millis(500))
+            .await
+            .contains(&Nudged::here(Nudge::Forwards)),
+        "A's own pages should have been told",
+    );
+    assert!(
+        !heard_nudged(&mut linked, Duration::from_millis(500))
+            .await
+            .iter()
+            .any(|nudged| nudged.moved == Nudge::Forwards),
+        "a member should never be told what A forwards",
+    );
+
+    let (status, said) = asked(&relaying, "GET", &through(A, "/api/ui/forwards")).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{said}");
+    assert!(said.contains("keeps to itself"), "{said}");
 
     terminal.closed().await;
 }

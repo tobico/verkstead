@@ -26,7 +26,7 @@ use crate::{
     Creation, DeviceIdentity, DevicesView, DirectoryListing, DiscoveredDevice, DroppedRow,
     FileDeleted, FileDeleting, FileListsView, FileMade, FileMaking, FileReading, FileRenamed,
     FileRenaming, FileRootsView, FileStatusView, FileWrite, FileWritten, FolderListing,
-    GrillingStarted, InstallPress, LinkedDevice, Locked, NewAdoption, NewCompanion,
+    ForwardsView, GrillingStarted, InstallPress, LinkedDevice, Locked, NewAdoption, NewCompanion,
     NewConversation, NewJoin, NewRank, OnboardingView, PendingJoin, Permitting, PortsView,
     PrefillView, Preflight, ProcessChoice, ProcessPicked, ProfileChoice, ProfileChosen,
     ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails, PushKey,
@@ -445,6 +445,11 @@ fn the_viewers_types_are_written_from_these() {
     // what dims a row and reads *unreachable* on it.
     DevicesView::export_all(&config).unwrap();
     LinkedDevice::export_all(&config).unwrap();
+
+    // And the ports of members' terminals this device is holding on its own
+    // `localhost`, which the sidebar's foot counts and its popup lists — this
+    // device's own reading, held back from the link.
+    ForwardsView::export_all(&config).unwrap();
 
     // And the devices nobody has typed an address for, which is the Discovered
     // list under those rows: a reading of its own rather than a field of the one

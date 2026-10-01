@@ -698,6 +698,10 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // happens to live, and everything a cluster relays later stands under
         // this same segment.
         .route("/api/ui/devices", get(devices))
+        // And the ports of members' terminals this device is holding on its own
+        // `localhost`, which the sidebar's foot counts: this device's own
+        // reading, held back from the link — see [`crate::forwarding`].
+        .route("/api/ui/forwards", get(crate::forwarding::forwards))
         // And the devices nobody has typed an address for, which is the
         // Discovered list under those rows. A read of its own beside the one
         // above rather than a field of it, and that is the point of it: a browse

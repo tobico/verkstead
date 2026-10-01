@@ -64,6 +64,15 @@ pub enum Nudge {
     /// server).
     Ports { conversation: i64 },
 
+    /// What this device is forwarding moved: a Forward was taken up, skipped,
+    /// taken up after a skip, or ended.
+    ///
+    /// **This device's own and nobody else's**, as the reading it names is: a
+    /// Forward is a listener on this machine's `localhost`, so the Nudge is told
+    /// to the pages in front of it and never down the stream a member holds
+    /// (see `forwarding` on the server).
+    Forwards,
+
     /// A Question Set in a Conversation arrived, was answered, or was closed
     /// unanswered.
     Set { conversation: i64 },

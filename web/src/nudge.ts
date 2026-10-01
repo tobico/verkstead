@@ -477,6 +477,12 @@ function standsFor(device: Device, moved: Nudge): readonly QueryKey[] | null {
     case "ports":
       return [];
 
+    // And what *this* device is forwarding moved, which is that reading's other
+    // end: a port of a member's terminal taken up on this machine's `localhost`,
+    // skipped, or let go. Unkeyed, being this device's own and never a member's.
+    case "forwards":
+      return [["forwards"]];
+
     // And everything of one device's, which is what the stream to a member says
     // the moment it is taken up again: it knows nothing about what it missed, so
     // what is read back is whatever of that device is on screen.
