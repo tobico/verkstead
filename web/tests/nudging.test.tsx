@@ -527,8 +527,8 @@ const ABOUT: Record<string, readonly string[]> = {
   // What a member's terminals are listening on, which is read by the device that
   // attached to them over the link rather than by any page.
   ports: [],
-  // And what this device forwards, which the sidebar's foot reads — nothing the
-  // conversation page this sweep opens is drawn over.
+  // And what this device forwards, which the sidebar's foot reads — a read
+  // that is none of the five, asked about where it is drawn after this sweep.
   forwards: [],
   set: [OPENED, SIDEBAR],
   liveness: [OPENED],
@@ -610,6 +610,53 @@ describe("what a Nudge is about", () => {
       });
     },
   );
+
+  /// What this device forwards, asked about where it is drawn: the sidebar's
+  /// foot, whose item and popup are both drawn off the one reading. Its own
+  /// test rather than a row of the sweep, which counts five reads and this is
+  /// none of them — and the popup is open, because a Nudge that moved the item
+  /// and left an open list behind would be two answers on one screen.
+  it("reads the forwards back where the sidebar's foot draws them", async () => {
+    const FORWARDS = "/api/ui/forwards";
+    const held = (ports: number[]) => ({
+      forwards: ports.map((port) => ({
+        port,
+        device: MEMBER,
+        name: "build-box",
+        os: "Linux",
+        conversation: 7,
+        title: "Port the parser",
+        terminal: 1,
+        standing: { kind: "forwarding" as const },
+      })),
+    });
+    let ports = [3000];
+
+    window.history.pushState({}, "", `/conversations/${CONVERSATION.id}`);
+    const fetching = serving(
+      ...BESIDE,
+      whenever(OPENED, json(CONVERSATION)),
+      whenever(FORWARDS, () => json(held(ports))()),
+    );
+    render(() => <App />);
+    const item = await waitFor(() => screen.getByText("Forwarding 1 port"));
+    fireEvent.click(item);
+    await waitFor(() =>
+      expect(document.querySelector(`a[href="http://localhost:3000/"]`)).not.toBeNull(),
+    );
+    stream().opens();
+    const before = askedFor(fetching, FORWARDS);
+
+    ports = [3000, 4000];
+    stream().nudges({ kind: "forwards" });
+    await vi.advanceTimersByTimeAsync(0);
+
+    await waitFor(() => expect(askedFor(fetching, FORWARDS)).toBe(before + 1));
+    await waitFor(() => screen.getByText("Forwarding 2 ports"));
+    await waitFor(() =>
+      expect(document.querySelector(`a[href="http://localhost:4000/"]`)).not.toBeNull(),
+    );
+  });
 
   /// The Repos and the roadmaps nothing is driving, asked about where they are
   /// drawn: the compose page, which is over both — the registered Repos in its
