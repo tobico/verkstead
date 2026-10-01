@@ -5805,10 +5805,11 @@ fn taken(state: &AppState) -> usize {
 
 /// How many sessions and Conversation Terminals are running this moment, which
 /// the Language support pane draws beside each Clear and a Clear is refused
-/// over.
+/// over — those still starting included, because they hold the stores before
+/// they are on either register, and a refusal over one has to name it.
 fn running(state: &AppState) -> Running {
     Running {
-        sessions: state.sessions.working().len(),
+        sessions: state.sessions.running_or_launching(),
         terminals: state.terminals.running(),
     }
 }

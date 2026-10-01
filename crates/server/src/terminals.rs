@@ -95,6 +95,7 @@ pub mod shell;
 pub mod busy;
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -149,6 +150,20 @@ const LINGERING: Duration = Duration::from_secs(2);
 #[derive(Clone, Default)]
 pub(crate) struct Terminals {
     open: Arc<Mutex<HashMap<i64, Held>>>,
+
+    /// And how many are being opened and are not on the register yet — see
+    /// [`Terminals::opening`].
+    opening: Arc<AtomicUsize>,
+}
+
+/// One terminal being opened, counted for as long as it is held — see
+/// [`Terminals::opening`].
+pub(crate) struct Opening(Arc<AtomicUsize>);
+
+impl Drop for Opening {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
 }
 
 /// One Conversation's terminals, and the count that names them.
@@ -263,11 +278,29 @@ impl Terminals {
         live
     }
 
-    /// How many are live across every Conversation, which is what a Clear of a
-    /// language's stores is refused over — a terminal's shell is sandboxed with
-    /// them, as a session is.
+    /// How many are live across every Conversation, or on their way to it,
+    /// which is what a Clear of a language's stores is refused over — a
+    /// terminal's shell is sandboxed with them, as a session is.
+    ///
+    /// **The ones being opened as well.** A terminal holds the stores from the
+    /// moment its sandbox is described, well before it is on the register, and
+    /// a Clear pressed in between is refused for it — so a count that left it
+    /// out would refuse a Clear while saying nothing was running.
     pub(crate) fn running(&self) -> usize {
-        self.held().values().map(|held| held.live.len()).sum()
+        self.held()
+            .values()
+            .map(|held| held.live.len())
+            .sum::<usize>()
+            + self.opening.load(Ordering::Acquire)
+    }
+
+    /// Count one terminal as being opened until what comes back is dropped,
+    /// which [`open`] does once it is on the register or has failed to get
+    /// there.
+    pub(crate) fn opening(&self) -> Opening {
+        self.opening.fetch_add(1, Ordering::AcqRel);
+
+        Opening(self.opening.clone())
     }
 
     /// The Screen of one of them, or `None` where it is not live.
@@ -498,6 +531,10 @@ pub(crate) async fn open(state: &AppState, conversation_id: i64) -> anyhow::Resu
             return Ok(TerminalOpened::Refused);
         }
     };
+
+    // Counted as running from here, ahead of the sandbox that holds the stores,
+    // until it is on the register or has failed — see [`Terminals::running`].
+    let _opening = state.terminals.opening();
 
     let built = tokio::task::spawn_blocking({
         let agents = agents.clone();
@@ -933,4 +970,26 @@ pub(crate) async fn close(
             .await,
     )
     .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A terminal being opened is counted as running until it is on the
+    /// register or has failed, so a Clear refused over it names it.
+    #[test]
+    fn a_terminal_being_opened_is_counted_as_running() {
+        let terminals = Terminals::new();
+
+        assert_eq!(terminals.running(), 0);
+
+        let opening = terminals.opening();
+
+        assert_eq!(terminals.running(), 1);
+
+        drop(opening);
+
+        assert_eq!(terminals.running(), 0);
+    }
 }

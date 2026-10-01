@@ -2254,6 +2254,28 @@ impl Sessions {
             .collect()
     }
 
+    /// How many sessions are running or being launched, across every
+    /// Conversation — what a Clear of a language's stores is refused over.
+    ///
+    /// **The launching ones as well**, because a launch holds the stores from
+    /// the moment its sandbox is described, and is on the register above only
+    /// once its relay is up — on the platform whose boundary is written,
+    /// minutes later. A count of the register alone would have a Clear refused
+    /// for a launch while saying nothing was running.
+    pub(crate) fn running_or_launching(&self) -> usize {
+        let mut sessions = self.working();
+
+        sessions.extend(
+            self.launching
+                .lock()
+                .expect("the launching registry is not poisoned")
+                .keys()
+                .copied(),
+        );
+
+        sessions.len()
+    }
+
     /// And which of those have stopped — [`Sessions::idling`] for the whole
     /// sidebar at once, and one lock rather than one per row for the same reason
     /// [`Sessions::working`] is.
@@ -5448,6 +5470,27 @@ exit 1
             !sessions.starting(CONVERSATION),
             "and no launch is in flight once it is over, whatever it left",
         );
+    }
+
+    /// A launch is counted among the running sessions from before it is on the
+    /// register — what a Clear is refused over, and what its refusal names.
+    #[test]
+    fn a_launch_in_flight_is_counted_as_running() {
+        let sessions = Sessions::none();
+
+        assert_eq!(sessions.running_or_launching(), 0);
+
+        {
+            let _launching = sessions.launching(CONVERSATION, store::AgentType::Claude);
+
+            assert_eq!(
+                sessions.running_or_launching(),
+                1,
+                "a launch holds the stores before the register has it",
+            );
+        }
+
+        assert_eq!(sessions.running_or_launching(), 0);
     }
 
     /// A launch names the Event it is writing into from the moment the Capture
