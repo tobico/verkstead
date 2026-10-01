@@ -470,6 +470,13 @@ function standsFor(device: Device, moved: Nudge): readonly QueryKey[] | null {
     case "profiles":
       return [keyOf(device, "profiles")];
 
+    // What a member's terminals are listening on moved. That is read by the
+    // device that attached to them, over the link, rather than by any page: a
+    // browser on the machine the ports are on has nothing to forward, so there
+    // is nothing here to read again.
+    case "ports":
+      return [];
+
     // And everything of one device's, which is what the stream to a member says
     // the moment it is taken up again: it knows nothing about what it missed, so
     // what is read back is whatever of that device is on screen.

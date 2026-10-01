@@ -3424,7 +3424,7 @@ html: string, };
  * the behaviour every kind used to get — so a new kind is safe to add and an
  * old page stays correct against a newer server.
  */
-export type Nudge = { "kind": "transcript", conversation: number, } | { "kind": "screen", conversation: number, } | { "kind": "commit", conversation: number, } | { "kind": "files", conversation: number, } | { "kind": "set", conversation: number, } | { "kind": "liveness", conversation: number, } | { "kind": "conversation", conversation: number, } | { "kind": "conversations" } | { "kind": "repos" } | { "kind": "joins" } | { "kind": "devices" } | { "kind": "discovered" } | { "kind": "profiles" } | { "kind": "everything" };
+export type Nudge = { "kind": "transcript", conversation: number, } | { "kind": "screen", conversation: number, } | { "kind": "commit", conversation: number, } | { "kind": "files", conversation: number, } | { "kind": "ports", conversation: number, } | { "kind": "set", conversation: number, } | { "kind": "liveness", conversation: number, } | { "kind": "conversation", conversation: number, } | { "kind": "conversations" } | { "kind": "repos" } | { "kind": "joins" } | { "kind": "devices" } | { "kind": "discovered" } | { "kind": "profiles" } | { "kind": "everything" };
 
 /**
  * One Nudge as it goes down a stream: what moved, and **whose news it is**.
@@ -3449,7 +3449,7 @@ export type Nudged = {
  * Device Id — absent for this device's own, which is every Nudge a
  * workbench has ever sent about its own work.
  */
-device?: string | null, } & ({ "kind": "transcript", conversation: number, } | { "kind": "screen", conversation: number, } | { "kind": "commit", conversation: number, } | { "kind": "files", conversation: number, } | { "kind": "set", conversation: number, } | { "kind": "liveness", conversation: number, } | { "kind": "conversation", conversation: number, } | { "kind": "conversations" } | { "kind": "repos" } | { "kind": "joins" } | { "kind": "devices" } | { "kind": "discovered" } | { "kind": "profiles" } | { "kind": "everything" });
+device?: string | null, } & ({ "kind": "transcript", conversation: number, } | { "kind": "screen", conversation: number, } | { "kind": "commit", conversation: number, } | { "kind": "files", conversation: number, } | { "kind": "ports", conversation: number, } | { "kind": "set", conversation: number, } | { "kind": "liveness", conversation: number, } | { "kind": "conversation", conversation: number, } | { "kind": "conversations" } | { "kind": "repos" } | { "kind": "joins" } | { "kind": "devices" } | { "kind": "discovered" } | { "kind": "profiles" } | { "kind": "everything" });
 
 /**
  * Whether a fresh Verkstead can do anything yet, and what it would take.
@@ -3805,6 +3805,19 @@ export type PinnedEvent = { "AgentOutput": AgentOutputEvent } | { "TaskList": Ta
  * being Apple's own on either.
  */
 export type Platform = "Linux" | "MacOs" | "Windows";
+
+/**
+ * What one device's attached terminals on a Conversation are listening on —
+ * the reading a device takes over the link, of the member running them.
+ *
+ * **Only the caller's own.** A terminal is listed where the device asking holds
+ * an attach on it and not otherwise, so a device that holds none reads an empty
+ * list and a device never reads the ports of a terminal another one attached:
+ * what a device is offered to forward is what it is looking at.
+ *
+ * Oldest terminal first, and each one's ports lowest first.
+ */
+export type PortsView = { terminals: Array<TerminalPorts>, };
 
 /**
  * What this machine can offer the git step, for each field Verkstead has not
@@ -6504,6 +6517,16 @@ export type TerminalClosed = "Closed" | "Busy";
  * than one that quietly never appears.
  */
 export type TerminalOpened = { "Opened": { number: number, } } | "NoSuchConversation" | "NoWorktree" | "NoProfile" | "Refused";
+
+/**
+ * One of them: which terminal, and the TCP ports something inside it is
+ * listening on — any address, either family.
+ */
+export type TerminalPorts = { 
+/**
+ * The number this server issued it — see [`TerminalView::number`].
+ */
+number: number, ports: Array<number>, };
 
 /**
  * One of them: which of the Conversation's it is, and whether somebody is

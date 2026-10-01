@@ -230,6 +230,14 @@ pub(crate) fn routes() -> axum::Router<AppState> {
             "/api/ui/conversations/{id}/terminals/{number}/attach",
             get(crate::terminals::attach),
         )
+        // And what the terminals a member is attached to are listening on, which
+        // is that member's reading and nobody else's: answered over the link
+        // alone, a browser here being on the machine the ports are on already —
+        // see [`crate::terminals::ports_of`].
+        .route(
+            "/api/ui/conversations/{id}/ports",
+            get(crate::terminals::ports_of),
+        )
         // And the other half of Code: the files of the Worktrees it is drawn
         // over. Beside the terminals' routes, which is what puts them behind the
         // Workbench Key — a session's network is the host's own, so the key is
