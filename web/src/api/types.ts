@@ -2532,6 +2532,16 @@ export type Ending = "FollowUp" | "Investigation";
 export type EntryKind = "Directory" | "File" | "Repository";
 
 /**
+ * How one store is kept under its language's size — one of three answers, each
+ * the descriptor's own.
+ *
+ * **Every store held to the size by the sweep is held to it together**, and a
+ * store its tool evicts is held to it on its own: so a language with one of
+ * each, which is Rust, may hold up to twice its size between them.
+ */
+export type Eviction = "ByItsTool" | "ByUnit" | "NotSwept";
+
+/**
  * What became of taking it away.
  *
  * [`FileRenamed`]'s answers said about something that is about to stop being
@@ -3195,6 +3205,12 @@ store: boolean,
  * this page never waits on a walk of a store.
  */
 disk_use: DiskUse, 
+/**
+ * And each directory of that store, with how it is kept under the size
+ * above — in the order the descriptor names them, and empty for a
+ * language naming none.
+ */
+stores: Array<StoreView>, 
 /**
  * Whether this language compiles through the Compile Server, and where it
  * does, whether that compiling is really being cached — null for a
@@ -6420,6 +6436,12 @@ accounts: boolean,
  * The GitHub token is not in this — see ADR-0016.
  */
 git: boolean, };
+
+/**
+ * One directory of a language's store, by the name its descriptor keys it
+ * under, and how it is kept under the language's size.
+ */
+export type StoreView = { name: string, eviction: Eviction, };
 
 /**
  * What became of the human's Response.

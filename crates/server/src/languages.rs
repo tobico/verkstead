@@ -683,9 +683,19 @@ impl Descriptor {
     /// named anywhere else is a sweep reaching into somebody's home. So the
     /// path is checked as it is written, before any machine fills it in — see
     /// [`placed`].
+    ///
+    /// **And a store says how it is bounded in one way that can be followed**,
+    /// for the same reason: a unit that would match anything is a sweep taking
+    /// the store apart a file at a time — see [`Store::unbounded`].
     fn misplaced(&self) -> Option<String> {
         self.stores.iter().find_map(|(name, store)| {
-            let dir = store.as_ref()?.dir.as_deref()?;
+            let store = store.as_ref()?;
+
+            if let Some(why) = store.unbounded() {
+                return Some(format!("names its store {name} {why}"));
+            }
+
+            let dir = store.dir.as_deref()?;
 
             placed(dir)
                 .err()
@@ -806,6 +816,12 @@ impl Descriptor {
             .filter_map(|(name, store)| Some((name, store.as_ref()?.dir.as_deref()?)))
     }
 
+    /// The names this language's store directories are keyed under, in the
+    /// order they were written — what the settings page lists them by.
+    pub fn store_names(&self) -> impl Iterator<Item = &str> {
+        self.store_dirs().map(|(name, _)| name)
+    }
+
     /// And those directories on `machine`, keyed the same way, in the order
     /// they were written. A directory [`Descriptor::misplaced`] would refuse is
     /// left out, though a descriptor holding one never loads.
@@ -813,6 +829,26 @@ impl Descriptor {
         self.store_dirs()
             .filter_map(|(name, dir)| Some((name.to_owned(), machine.store(dir)?)))
             .collect()
+    }
+
+    /// How the store this descriptor names `store` is kept under its size —
+    /// [`Bounded::NotAtAll`] for one it does not name, which nothing sweeps
+    /// either.
+    pub fn bounded(&self, store: &str) -> Bounded<'_> {
+        let Some(Some(named)) = self
+            .stores
+            .iter()
+            .find(|(name, _)| *name == store)
+            .map(|(_, store)| store)
+        else {
+            return Bounded::NotAtAll;
+        };
+
+        match (named.evicted, named.units.as_deref()) {
+            (Some(Evicted::ByItsTool), _) => Bounded::ByItsTool,
+            (None, Some(units)) if !units.is_empty() => Bounded::ByUnit(units),
+            _ => Bounded::NotAtAll,
+        }
     }
 
     /// Whether this descriptor names `capability`, whatever this machine can
@@ -930,8 +966,8 @@ impl Capability {
 /// One directory of a language's store, as the file says it.
 ///
 /// A mapping rather than the bare path, because a store says more about itself
-/// than where it is — how it is bounded is the next thing — and a grammar that
-/// grew a mapping out of a string later would be two grammars for one key.
+/// than where it is: how it is kept under its language's size, which is one of
+/// three answers — see [`Bounded`].
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Store {
@@ -939,6 +975,18 @@ pub struct Store {
     /// [`placed`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     dir: Option<String>,
+
+    /// `by-its-tool` where the tool filling it evicts for itself, handed the
+    /// size in a variable of its own — see [`Evicted`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    evicted: Option<Evicted>,
+
+    /// Or what the sweep takes out of it whole — see [`Unit`]. Replaced whole
+    /// by an override rather than merged into, the way `detect` is: half a set
+    /// of units is a store with packages nobody bounds, and an empty list is
+    /// how an installer says a built-in's store is never to be swept.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    units: Option<Vec<Unit>>,
 }
 
 impl Store {
@@ -946,8 +994,186 @@ impl Store {
     fn merged(&self, over: &Store) -> Store {
         Store {
             dir: over.dir.clone().or_else(|| self.dir.clone()),
+            evicted: over.evicted.or(self.evicted),
+            units: over.units.clone().or_else(|| self.units.clone()),
         }
     }
+
+    /// Why this store's way of being bounded is not one, where it is not — a
+    /// clause that follows the store's name, in [`Descriptor::misplaced`]'s
+    /// words.
+    fn unbounded(&self) -> Option<String> {
+        if self.evicted.is_some() && self.units.as_ref().is_some_and(|units| !units.is_empty()) {
+            return Some(String::from(
+                "both as evicted by its tool and as swept by unit, and a store is one or the \
+                 other",
+            ));
+        }
+
+        self.units.iter().flatten().find_map(Unit::unread)
+    }
+}
+
+/// How a store is kept under its language's size: the one answer of the three
+/// a descriptor can give that is not about the sweep.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Evicted {
+    /// The tool filling it is handed the size and evicts for itself, so the
+    /// sweep leaves it alone. sccache is the one: `SCCACHE_CACHE_SIZE`, least
+    /// recently used first. A variable carrying `{size}` is how the tool is
+    /// told, which is the descriptor's own business.
+    ByItsTool,
+}
+
+/// What the sweep takes out of a store whole — **a package, never a file of
+/// one**, because a Go module or a Maven artifact with one file missing is a
+/// broken store rather than a smaller one.
+///
+/// Found by walking down from `under` and stopping at the first entry that is
+/// one: every entry at `depth`, or the first one down whose name is one of
+/// `named`, or the first directory down holding an entry whose name is one of
+/// `holding` — and where more than one is said, an entry has to be all of them.
+/// The walk follows no symlink and never takes one as a unit.
+///
+/// **A unit may be a file** where the file is the whole package — a `.crate`,
+/// a `.zip` — or where the store is content-addressed and its tool checks every
+/// blob it reads, so that a blob gone is a blob fetched again rather than a
+/// package half there.
+///
+/// Patterns are a name's and nothing more: `*` for any run of characters and
+/// `?` for one, and no `/`. A descriptor is data, so it says what a unit looks
+/// like and never a command that would find one.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Unit {
+    /// Where under the store to look, `/` between its segments on every
+    /// platform; the store itself where it is not said.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    under: Option<String>,
+
+    /// How deep under that: one for what is directly in it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    depth: Option<usize>,
+
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    named: Vec<String>,
+
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    holding: Vec<String>,
+}
+
+impl Unit {
+    /// Why this is not a unit the sweep can find, where it is not.
+    fn unread(&self) -> Option<String> {
+        if self.depth.is_none() && self.named.is_empty() && self.holding.is_empty() {
+            return Some(String::from(
+                "with a unit named by none of depth, named or holding, which would be anything",
+            ));
+        }
+
+        if self.depth == Some(0) {
+            return Some(String::from(
+                "with a unit at depth 0, which is the whole store rather than anything in it",
+            ));
+        }
+
+        if let Some(under) = &self.under
+            && !under
+                .split('/')
+                .all(|segment| !matches!(segment, "" | "." | "..") && !segment.contains('{'))
+        {
+            return Some(format!(
+                "with a unit under {under}, and a unit is under a path inside the store, \
+                 written with `/` between its segments"
+            ));
+        }
+
+        self.named
+            .iter()
+            .chain(&self.holding)
+            .find(|pattern| pattern.is_empty() || pattern.contains(['/', '\\']))
+            .map(|pattern| {
+                format!("with a unit named by `{pattern}`, and a pattern is one name, never a path")
+            })
+    }
+
+    /// The directory under `store` this unit is looked for in.
+    pub fn root(&self, store: &Path) -> PathBuf {
+        self.under
+            .iter()
+            .flat_map(|under| under.split('/'))
+            .fold(store.to_owned(), |path, segment| path.join(segment))
+    }
+
+    /// Whether an entry the walk reached at `depth` under [`Unit::root`] is one
+    /// of these, `holding` asked of `children` — what is in it, read only when
+    /// this asks.
+    pub fn is(&self, name: &str, depth: usize, children: impl FnOnce() -> Vec<String>) -> bool {
+        self.depth.is_none_or(|wanted| wanted == depth)
+            && (self.named.is_empty() || self.named.iter().any(|pattern| matches(pattern, name)))
+            && (self.holding.is_empty()
+                || children()
+                    .iter()
+                    .any(|child| self.holding.iter().any(|pattern| matches(pattern, child))))
+    }
+
+    /// Whether the walk has gone as deep as a unit can be, so that nothing
+    /// under an entry at `depth` is worth reading.
+    pub fn deepest(&self, depth: usize) -> bool {
+        self.depth.is_some_and(|wanted| depth >= wanted)
+    }
+}
+
+/// Whether `name` is what `pattern` says: `*` any run of characters, `?` any
+/// one, and everything else itself.
+fn matches(pattern: &str, name: &str) -> bool {
+    let pattern: Vec<char> = pattern.chars().collect();
+    let name: Vec<char> = name.chars().collect();
+
+    // The last `*` seen and where in the name it was tried from, which is the
+    // one place to go back to on a mismatch: a greedy match with one step of
+    // backtracking, which is enough for patterns with no character classes.
+    let (mut p, mut n) = (0, 0);
+    let mut star: Option<(usize, usize)> = None;
+
+    while n < name.len() {
+        match pattern.get(p) {
+            Some('*') => {
+                star = Some((p, n));
+                p += 1;
+            }
+            Some(&c) if c == '?' || c == name[n] => {
+                p += 1;
+                n += 1;
+            }
+            _ => match star {
+                Some((at, from)) => {
+                    p = at + 1;
+                    n = from + 1;
+                    star = Some((at, from + 1));
+                }
+                None => return false,
+            },
+        }
+    }
+
+    pattern[p..].iter().all(|&c| c == '*')
+}
+
+/// How one store is kept under its language's size, as the sweep reads it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Bounded<'a> {
+    /// By the tool that fills it, which is handed the size — see
+    /// [`Evicted::ByItsTool`].
+    ByItsTool,
+
+    /// By the sweep, which takes these out whole, oldest first.
+    ByUnit(&'a [Unit]),
+
+    /// Not at all: the descriptor names no unit, so the sweep never touches
+    /// it, and the page says so.
+    NotAtAll,
 }
 
 /// Which placeholder a store's directory is under, and the path below it — or
@@ -2857,6 +3083,173 @@ mod tests {
                 stores_of(built_in(), GO),
                 "and the language runs on the built-in's stores",
             );
+        }
+    }
+
+    /// How each built-in store is bounded, by its name: `tool`, `unit` or
+    /// `none`.
+    fn bounded_of(languages: &Languages, name: &str) -> Vec<(String, &'static str)> {
+        let descriptor = languages.get(name).unwrap();
+
+        descriptor
+            .stores(&machine(true))
+            .into_iter()
+            .map(|(store, _)| {
+                let said = match descriptor.bounded(&store) {
+                    Bounded::ByItsTool => "tool",
+                    Bounded::ByUnit(_) => "unit",
+                    Bounded::NotAtAll => "none",
+                };
+
+                (store, said)
+            })
+            .collect()
+    }
+
+    /// Every built-in store says how it is bounded: sccache by its tool, the
+    /// cargo half beside it by unit, NuGet's scratch directory of locks not at
+    /// all, and every other store by unit.
+    #[test]
+    fn every_built_in_store_is_bounded_one_of_three_ways() {
+        let said = |pairs: &[(&str, &'static str)]| -> Vec<(String, &'static str)> {
+            pairs
+                .iter()
+                .map(|(name, how)| ((*name).to_owned(), *how))
+                .collect()
+        };
+
+        assert_eq!(
+            bounded_of(built_in(), RUST),
+            said(&[("cargo", "unit"), ("sccache", "tool")]),
+        );
+        assert_eq!(
+            bounded_of(built_in(), DOTNET),
+            said(&[("packages", "unit"), ("http", "unit"), ("scratch", "none")]),
+        );
+
+        for language in [GO, NODE, PYTHON, JVM] {
+            assert!(
+                bounded_of(built_in(), language)
+                    .iter()
+                    .all(|(_, how)| *how == "unit"),
+                "every one of {language}'s stores is swept by unit",
+            );
+        }
+    }
+
+    /// The size reaches the one tool that evicts for itself as a variable of
+    /// its own, which is what makes `by-its-tool` true of sccache's store.
+    #[test]
+    fn the_store_its_tool_evicts_is_handed_the_size() {
+        let given = built_in().given(&machine(true));
+
+        assert!(
+            given
+                .env()
+                .iter()
+                .any(|(name, value)| name == "SCCACHE_CACHE_SIZE" && value == "30G"),
+        );
+    }
+
+    /// An installer's store naming no unit is never swept, and an override's
+    /// `units: []` takes a built-in's away; one naming units replaces the
+    /// built-in's whole.
+    #[test]
+    fn a_store_naming_no_unit_is_not_bounded_at_all() {
+        let loaded = built_in().merged(&written(
+            "languages:\n  go:\n    stores:\n      build:\n        units: []\n      \
+             modules:\n        units:\n          - depth: 1\n  gleam:\n    stores:\n      \
+             cache:\n        dir: \"{cache}/gleam\"\n",
+        ));
+
+        assert_eq!(
+            bounded_of(&loaded, GO),
+            [
+                (String::from("modules"), "unit"),
+                (String::from("build"), "none"),
+            ],
+        );
+        assert_eq!(
+            loaded.get(GO).unwrap().bounded("modules"),
+            Bounded::ByUnit(&[Unit {
+                depth: Some(1),
+                ..Unit::default()
+            }]),
+        );
+        assert_eq!(
+            bounded_of(&loaded, "gleam"),
+            [(String::from("cache"), "none")]
+        );
+        assert_eq!(
+            loaded.get(GO).unwrap().bounded("nothing-of-that-name"),
+            Bounded::NotAtAll
+        );
+    }
+
+    /// A unit that would match anything, one at the store itself, one under a
+    /// path that leaves the store, a pattern that is a path, and a store both
+    /// evicted by its tool and swept — each refused, the entry falling back.
+    #[test]
+    fn a_unit_the_sweep_could_not_follow_is_refused() {
+        for (store, why) in [
+            (
+                "units:\n          - under: src",
+                "none of depth, named or holding",
+            ),
+            ("units:\n          - depth: 0", "depth 0"),
+            (
+                "units:\n          - under: ../x\n            depth: 1",
+                "under ../x",
+            ),
+            (
+                "units:\n          - under: \"{cache}\"\n            depth: 1",
+                "under {cache}",
+            ),
+            ("units:\n          - named: [\"a/*\"]", "`a/*`"),
+            ("units:\n          - holding: [\"\"]", "``"),
+            (
+                "evicted: by-its-tool\n        units:\n          - depth: 1",
+                "one or the other",
+            ),
+        ] {
+            let loaded = built_in().merged(&written(&format!(
+                "languages:\n  go:\n    stores:\n      modules:\n        {store}\n",
+            )));
+
+            let read = loaded
+                .get(GO)
+                .unwrap()
+                .unread()
+                .unwrap_or_else(|| panic!("{store} was taken"));
+
+            assert!(
+                read.starts_with("names its store modules") && read.contains(why),
+                "{store}: {read}",
+            );
+            assert_eq!(bounded_of(&loaded, GO), bounded_of(built_in(), GO));
+        }
+    }
+
+    /// A pattern's `*` is any run of characters and `?` any one.
+    #[test]
+    fn a_pattern_is_a_name_with_stars_and_question_marks() {
+        for (pattern, name, is) in [
+            ("*@*", "greet@v1.0.0", true),
+            ("*@*", "@v", true),
+            ("*@*", "greet", false),
+            ("*@*@@@*", "greet@1.0.0@@@1", true),
+            ("*@*@@@*", "1.0.0@@@1", false),
+            ("*.pom", "greet-1.0.0.pom", true),
+            ("*.pom", "greet-1.0.0.pom.sha1", false),
+            ("npm-*", "npm-greet-1.0.0-integrity", true),
+            ("?.dat", "a.dat", true),
+            ("?.dat", "ab.dat", false),
+            ("registry.json", "registry.json", true),
+            ("*", "", true),
+            ("a*b*c", "aXbYbZc", true),
+            ("a*b*c", "aXbYbZ", false),
+        ] {
+            assert_eq!(matches(pattern, name), is, "{pattern} against {name}");
         }
     }
 

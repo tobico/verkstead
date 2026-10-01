@@ -118,6 +118,7 @@ import { PaneSticky } from "../Panes";
 import { loadSettings, saveSettings } from "../api/client";
 import type {
   DiskUse,
+  Eviction,
   LanguageEdit,
   LanguageView,
   SettingsSaved,
@@ -284,6 +285,28 @@ function held(disk: DiskUse): string {
   }
 
   return `Holds ${bytesSaid(disk.Measured.bytes)} on disk.`;
+}
+
+/// How one directory of a store is kept under the size, as the end of a
+/// sentence that starts with its name.
+function bounding(eviction: Eviction): string {
+  switch (eviction) {
+    case "ByItsTool":
+      return "is handed this size and evicts for itself.";
+    case "ByUnit":
+      return "is swept to this size by whole packages, oldest first.";
+    case "NotSwept":
+      return "is never swept: its descriptor names no unit, so it grows as its tool fills it.";
+  }
+}
+
+/// Whether a language's store is held to its size twice over: once by a tool
+/// that evicts for itself, and once more by the sweep for the rest — Rust's
+/// sccache beside its cargo half.
+function twice(language: LanguageView): boolean {
+  const evictions = language.stores.map((store) => store.eviction);
+
+  return evictions.includes("ByItsTool") && evictions.includes("ByUnit");
 }
 
 /// The language whose size the one Compile Server is started at: the first
@@ -619,6 +642,27 @@ export function LanguagesPane(props: {
                           {/* And what the store holds now, beside the size it
                               is held to. */}
                           <p class={styles.held}>{held(language.disk_use)}</p>
+
+                          {/* And how each directory of it is held to that
+                              size, which is the descriptor's to say. */}
+                          <Show when={language.stores.length > 0}>
+                            <ul class={styles.bounds}>
+                              <For each={language.stores}>
+                                {(store) => (
+                                  <li>
+                                    <code>{store.name}</code>{" "}
+                                    {bounding(store.eviction)}
+                                  </li>
+                                )}
+                              </For>
+                            </ul>
+                          </Show>
+                          <Show when={twice(language)}>
+                            <p class={styles.held}>
+                              Each is held to it separately, so together they
+                              may hold up to twice it.
+                            </p>
+                          </Show>
 
                           <Show when={refused()[language.name]}>
                             {(why) => (

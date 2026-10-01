@@ -50,10 +50,6 @@ pub(crate) const MEASURED_EVERY: Duration = Duration::from_secs(15 * 60);
 /// One entry the walk reached: where it is, how deep under the directory the
 /// walk started at, and its own metadata — a symlink's, never what it points
 /// at.
-#[allow(
-    dead_code,
-    reason = "the path and the depth are the sweep's, which is not written yet"
-)]
 pub(crate) struct Entry<'a> {
     pub path: &'a Path,
 
@@ -67,10 +63,6 @@ pub(crate) struct Entry<'a> {
 /// whole — which is how the sweep stops at a unit. Said of anything else, it
 /// means nothing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(
-    dead_code,
-    reason = "leaving a directory whole is the sweep's, which is not written yet"
-)]
 pub(crate) enum Walking {
     Into,
     Past,

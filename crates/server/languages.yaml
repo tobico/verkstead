@@ -90,6 +90,47 @@
 # back the way any other refused entry does: what is done to a store is delete
 # what is in it, and nothing outside Verkstead's own directories is that.
 #
+# **And a store says how it is kept under the language's size**, which is one
+# of three answers, each a key of the store's own:
+#
+#   evicted: by-its-tool
+#              the tool filling it evicts for itself, handed the size in a
+#              variable carrying `{size}`. The sweep leaves it alone. sccache is
+#              the one built-in that does: `SCCACHE_CACHE_SIZE`, least recently
+#              used first. Cargo, Go's build cache and Gradle clean up by *age*
+#              rather than to a size, and no other tool here evicts at all.
+#
+#   units:     what the sweep takes out of it whole, oldest first, until the
+#              language is under its size: **a package, never a file of one**,
+#              because a Go module or a Maven artifact with one file missing is
+#              a broken store rather than a smaller one. A list, each item a way
+#              of finding one, walking down from `under` (a path inside the
+#              store; the store itself where it is not said) and stopping at
+#              the first entry that is one:
+#
+#                depth     every entry that many levels down — one for what
+#                          is directly in `under`.
+#                named     an entry whose name is one of these patterns.
+#                holding   a directory holding an entry whose name is one of
+#                          these patterns.
+#
+#              Where more than one is said, an entry has to be all of them. A
+#              pattern is one name, `*` for any run of characters and `?` for
+#              one — data, like the rest, and never a command that would find a
+#              unit. The walk follows no symlink and never takes one as a unit.
+#              **A unit may be a file** where the file is the whole package, or
+#              where the store is content-addressed and its tool checks every
+#              blob it reads, so that a blob gone is a blob fetched again.
+#              Replaced whole by an override rather than merged into, and `[]`
+#              is how an installer says a store is never to be swept.
+#
+#   neither    the store is never swept, and the settings page says so. What
+#              cannot be given a unit safely is left this way rather than
+#              guessed at.
+#
+# A store saying both, or a unit matching anything, is refused the way a
+# misplaced `dir` is.
+#
 # **Write `/` between the placeholder and what is under it, on every platform.**
 # A descriptor is one file read on three, so the grammar has one separator: what
 # a Windows session is handed is the path its own tools compose, `\` and all.
@@ -127,11 +168,29 @@ languages:
           SCCACHE_CACHE_SIZE: "{size}"
     # The two halves above, as the directories they are: the downloads and
     # the Compile Server's objects.
+    #
+    # **Each is held to Rust's size on its own**, so a Rust machine holds up to
+    # twice it: sccache trims its objects for itself, and the sweep takes whole
+    # crates out of the downloads. A crate is two units — the `.crate` as
+    # downloaded and the source unpacked out of it — and a git dependency two
+    # more, the database fetched and a checkout of one revision of it. The
+    # index is left alone: it is small, and a crate missing from it is fetched
+    # again rather than broken.
     stores:
       cargo:
         dir: "{cache}/cargo"
+        units:
+          - under: registry/src
+            depth: 2
+          - under: registry/cache
+            depth: 2
+          - under: git/db
+            depth: 1
+          - under: git/checkouts
+            depth: 2
       sccache:
         dir: "{cache}/sccache"
+        evicted: by-its-tool
 
   go:
     # The second language Verkstead ships knowing about, and the first of the
@@ -170,11 +229,22 @@ languages:
     env:
       GOMODCACHE: "{cache}/go/mod"
       GOCACHE: "{cache}/go/build"
+    #
+    # A module is a directory named `path@version`, at whatever depth its path
+    # puts it, and its download is `cache/download/<path>/@v/` — both named
+    # with an `@`, which no other segment of a module path holds. **Go makes
+    # them read-only**, which is the sweep's to get past rather than this
+    # file's. The build cache is content-addressed and checked as it is read,
+    # so there an entry in one of its `00`–`ff` shards is the unit.
     stores:
       modules:
         dir: "{cache}/go/mod"
+        units:
+          - named: ["*@*"]
       build:
         dir: "{cache}/go/build"
+        units:
+          - depth: 2
 
   node:
     # The JavaScript ecosystem, and the second of the package stores. One entry
@@ -363,21 +433,70 @@ languages:
       DENO_DIR: "{stores}/deno"
       BUN_INSTALL_CACHE_DIR: "{stores}/bun"
     # And the seven directories those name, one store apiece.
+    #
+    # **npm's and pnpm's stores are content-addressed**, so a blob is the unit:
+    # neither keeps a package in one place, a pnpm shard holding a slice of
+    # every package there is. Each checks a blob as it reads it, and an index
+    # entry whose blob has gone is a miss fetched again rather than a broken
+    # install. pnpm's metadata is a file per package.
+    #
+    # **The rest keep a package in one place, and a partial one is worse than
+    # none**: Yarn Classic, deno and bun all install a half-removed package
+    # without a word. So their unit is the package whole — Classic's entry
+    # directory, Berry's zip, deno's directory of a package's versions beside
+    # its `registry.json`, and bun's `<name>@<version>` directory, a scoped one
+    # a level further down. bun's link beside each of those is passed over,
+    # being a link, which leaves it pointing at nothing once its version has
+    # gone. deno's remote modules are a file apiece.
+    #
+    # What is not named here is never swept: npm's index and logs, pnpm's
+    # index and its links into the Worktrees, and deno's origin storage, which
+    # is a program's own state rather than a download.
     stores:
       npm:
         dir: "{cache}/npm"
+        units:
+          - under: _cacache/content-v2
+            depth: 4
       pnpm:
         dir: "{stores}/pnpm"
+        units:
+          - under: v11/files
+            depth: 2
       pnpm-metadata:
         dir: "{cache}/pnpm/metadata"
+        units:
+          - under: v11/metadata
+            named: ["*.jsonl"]
       yarn:
         dir: "{cache}/yarn/cache"
+        units:
+          - under: v6
+            depth: 1
+            named: ["npm-*"]
       yarn-berry:
         dir: "{cache}/yarn/global"
+        units:
+          - under: cache
+            depth: 1
+            named: ["*.zip"]
       deno:
         dir: "{stores}/deno"
+        units:
+          - under: npm
+            holding: ["registry.json"]
+          - under: remote
+            depth: 3
       bun:
         dir: "{stores}/bun"
+        units:
+          - named: ["*@*@@@*"]
+          # And what an install that lost a race to another left behind: bun
+          # extracts into `.tmp` and renames into place, and the loser's copy
+          # stays where it was. Nothing reads it again, and the sweep runs
+          # only while no session is, so it goes whole like a package.
+          - under: .tmp
+            depth: 1
 
   python:
     # Python, and the third of the package stores. One entry for the whole
@@ -535,15 +654,47 @@ languages:
       PIPENV_VENV_IN_PROJECT: "1"
     # The four caches, and not the two `_IN_PROJECT` switches, which name no
     # directory of ours: a project's environment is in its own Worktree.
+    #
+    # pip's units are its cache's own leaves: a response it downloaded is a
+    # directory of its own under `http-v2`, and a wheel it built is one under
+    # `wheels`, each at a fixed depth of hashed segments. pipenv's store is
+    # pip's, at its root. uv's is an unpacked wheel under `archive-v0`, which
+    # its `wheels-v6` links into rather than copying — a partial archive fails
+    # the install. Poetry's are a distribution under `artifacts`, and under
+    # `cache/repositories/<source>` the two caches it keeps of an index: a
+    # response, which is a directory under `_http_` holding its `.body` beside
+    # what was said about it, and a release's information, a file ten levels
+    # down. Every one of them is keyed by a hash, so a unit gone is a miss
+    # fetched again.
     stores:
       pip:
         dir: "{cache}/pip"
+        units:
+          - under: http-v2
+            depth: 5
+          - under: wheels
+            depth: 5
       uv:
         dir: "{stores}/uv"
+        units:
+          - under: archive-v0
+            depth: 1
       poetry:
         dir: "{cache}/poetry"
+        units:
+          - under: artifacts
+            depth: 4
+          - under: cache/repositories
+            holding: ["*.body"]
+          - under: cache/repositories
+            depth: 10
       pipenv:
         dir: "{cache}/pipenv"
+        units:
+          - under: http-v2
+            depth: 5
+          - under: wheels
+            depth: 5
 
   dotnet:
     # .NET, and the last of the package stores. One entry for the ecosystem the
@@ -636,11 +787,22 @@ languages:
       NUGET_PACKAGES: "{cache}/nuget/packages"
       NUGET_HTTP_CACHE_PATH: "{cache}/nuget/http"
       NUGET_SCRATCH: "{cache}/nuget/scratch"
+    #
+    # A package's unit is one version of it, `<id>/<version>/` — a restore
+    # that finds part of one fails the build — and the http cache's is one
+    # response, a `.dat` file under a directory per source. The scratch
+    # directory names none and is never swept: it holds the locks the two
+    # above are guarded by, and what else is there is NuGet's own to clear.
     stores:
       packages:
         dir: "{cache}/nuget/packages"
+        units:
+          - depth: 2
       http:
         dir: "{cache}/nuget/http"
+        units:
+          - depth: 2
+            named: ["*.dat"]
       scratch:
         dir: "{cache}/nuget/scratch"
 
@@ -844,8 +1006,25 @@ languages:
 
     # Maven's repository, which is the store `MAVEN_OPTS` names inside its
     # line of flags, and Gradle's home. Not `GRADLE_OPTS`, which names none.
+    #
+    # Maven's unit is one version of an artifact: the directory holding its
+    # `.pom`, or the `_remote.repositories` Maven writes beside whatever it
+    # downloaded — at whatever depth the group puts it. **Its files' times are
+    # the server's `Last-Modified`** rather than when they were downloaded,
+    # which the sweep has to know.
+    #
+    # Gradle's is one version of a module under `files-2.1`. The rest of the
+    # home is Gradle's own databases, the distributions `gradlew` fetched and
+    # the build cache, none of which is given a unit here: Gradle keeps what it
+    # used in a journal of its own rather than in a file's times, and what
+    # cannot be given a unit safely is left alone.
     stores:
       maven:
         dir: "{cache}/maven/repository"
+        units:
+          - holding: ["*.pom", "_remote.repositories"]
       gradle:
         dir: "{cache}/gradle"
+        units:
+          - under: caches/modules-2/files-2.1
+            depth: 3

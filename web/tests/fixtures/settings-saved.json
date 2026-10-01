@@ -50,6 +50,16 @@
         "size_configured": true,
         "size_unread": null,
         "store": true,
+        "stores": [
+          {
+            "eviction": "ByUnit",
+            "name": "cargo"
+          },
+          {
+            "eviction": "ByItsTool",
+            "name": "sccache"
+          }
+        ],
         "unread": null
       },
       {
@@ -63,6 +73,16 @@
         "size_configured": false,
         "size_unread": null,
         "store": true,
+        "stores": [
+          {
+            "eviction": "ByUnit",
+            "name": "modules"
+          },
+          {
+            "eviction": "ByUnit",
+            "name": "build"
+          }
+        ],
         "unread": null
       },
       {
@@ -76,6 +96,36 @@
         "size_configured": false,
         "size_unread": null,
         "store": true,
+        "stores": [
+          {
+            "eviction": "ByUnit",
+            "name": "npm"
+          },
+          {
+            "eviction": "ByUnit",
+            "name": "pnpm"
+          },
+          {
+            "eviction": "ByUnit",
+            "name": "pnpm-metadata"
+          },
+          {
+            "eviction": "ByUnit",
+            "name": "yarn"
+          },
+          {
+            "eviction": "ByUnit",
+            "name": "yarn-berry"
+          },
+          {
+            "eviction": "ByUnit",
+            "name": "deno"
+          },
+          {
+            "eviction": "ByUnit",
+            "name": "bun"
+          }
+        ],
         "unread": null
       },
       {
@@ -89,6 +139,24 @@
         "size_configured": false,
         "size_unread": null,
         "store": true,
+        "stores": [
+          {
+            "eviction": "ByUnit",
+            "name": "pip"
+          },
+          {
+            "eviction": "ByUnit",
+            "name": "uv"
+          },
+          {
+            "eviction": "ByUnit",
+            "name": "poetry"
+          },
+          {
+            "eviction": "ByUnit",
+            "name": "pipenv"
+          }
+        ],
         "unread": null
       },
       {
@@ -102,6 +170,20 @@
         "size_configured": false,
         "size_unread": null,
         "store": true,
+        "stores": [
+          {
+            "eviction": "ByUnit",
+            "name": "packages"
+          },
+          {
+            "eviction": "ByUnit",
+            "name": "http"
+          },
+          {
+            "eviction": "NotSwept",
+            "name": "scratch"
+          }
+        ],
         "unread": null
       },
       {
@@ -115,6 +197,7 @@
         "size_configured": false,
         "size_unread": null,
         "store": false,
+        "stores": [],
         "unread": null
       },
       {
@@ -128,6 +211,16 @@
         "size_configured": false,
         "size_unread": null,
         "store": true,
+        "stores": [
+          {
+            "eviction": "ByUnit",
+            "name": "maven"
+          },
+          {
+            "eviction": "ByUnit",
+            "name": "gradle"
+          }
+        ],
         "unread": null
       },
       {
@@ -141,6 +234,7 @@
         "size_configured": true,
         "size_unread": null,
         "store": true,
+        "stores": [],
         "unread": null
       }
     ],

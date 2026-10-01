@@ -136,3 +136,16 @@
   font-size: 0.85rem;
   color: var(--ink-soft);
 }
+
+/* How each directory of the store is held to the size: as quiet as the reading
+   above it, one line apiece. */
+.bounds {
+  margin: 0.35rem 0 0;
+  padding-left: 1.1rem;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+.bounds li + li {
+  margin-top: 0.15rem;
+}

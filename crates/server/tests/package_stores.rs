@@ -555,6 +555,188 @@ fn tools(proof: &str, wanted: &[&str]) -> Option<Vec<PathBuf>> {
     Some(found_them)
 }
 
+/// What a store's units are expected to be, which is one of two shapes.
+#[derive(Clone, Copy)]
+enum Units {
+    /// Packages by name: each unit names exactly one of these — in its own
+    /// path or in a file inside it — and every file under where the units are
+    /// looked for that names one is inside a unit. Which is *every file a
+    /// package installed is inside exactly one unit, and no unit spans two*.
+    Naming(&'static [&'static str]),
+
+    /// Keyed by a hash rather than a name: a content-addressed store, whose
+    /// tool checks every blob it reads, or an HTTP cache keyed by URL. Each
+    /// unit is one file, or one directory of files with nothing under it, so a
+    /// unit is never a shard of many.
+    Hashed,
+}
+
+/// Every file and link under `dir`, relative to it, for a failure to be read
+/// against — what the tool really left, rather than what was expected of it.
+fn tree(dir: &Path) -> Vec<String> {
+    fn under(dir: &Path, at: &Path, into: &mut Vec<String>) {
+        let Ok(entries) = std::fs::read_dir(at) else {
+            return;
+        };
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(metadata) = std::fs::symlink_metadata(&path) else {
+                continue;
+            };
+
+            match metadata.is_dir() {
+                true => under(dir, &path, into),
+                false => into.push(path.strip_prefix(dir).unwrap().display().to_string()),
+            }
+        }
+    }
+
+    let mut found = Vec::new();
+    under(dir, dir, &mut found);
+    found.sort();
+
+    found
+}
+
+/// The units the built-in `language` names in its store `store`, found in that
+/// store on `cache` once a real tool has filled it — and the assertion that
+/// each is one whole package, the way `expected` says a package looks in it.
+///
+/// **This is the descriptor's units against the tool's real layout**, which is
+/// the one thing a unit test over a hand-made tree cannot say: a release that
+/// moved its packages one level down would leave a unit spanning every package
+/// there is, and only an install shows that.
+fn whole_packages(cache: &BuildCache, language: &str, store: &str, expected: Units) {
+    use verkstead_server::languages::Bounded;
+
+    let descriptor = verkstead_server::languages::built_in()
+        .get(language)
+        .expect("a built-in language");
+    let machine = cache
+        .machine()
+        .expect("the fixture's cache has a directory");
+
+    let dir = descriptor
+        .stores(&machine)
+        .into_iter()
+        .find_map(|(name, dir)| (name == store).then_some(dir))
+        .unwrap_or_else(|| panic!("{language} names a store {store}"));
+
+    let Bounded::ByUnit(units) = descriptor.bounded(store) else {
+        panic!("{language}'s store {store} is swept by unit");
+    };
+
+    let found = verkstead_server::units::listed(&dir, units);
+    let held = tree(&dir).join("\n");
+
+    let relative = |path: &Path| {
+        path.strip_prefix(&dir)
+            .unwrap()
+            .to_string_lossy()
+            .replace('\\', "/")
+    };
+
+    assert!(
+        !found.is_empty(),
+        "{language}'s store {store} holds a unit once a tool has filled it. It holds:\n{held}",
+    );
+
+    println!(
+        "{language}'s store {store} holds the units:\n  {}",
+        found
+            .iter()
+            .map(|unit| relative(unit))
+            .collect::<Vec<_>>()
+            .join("\n  "),
+    );
+
+    for unit in &found {
+        let metadata = std::fs::symlink_metadata(unit).unwrap();
+
+        assert!(
+            !metadata.is_symlink(),
+            "a link is never a unit: {} in {language}'s store {store}",
+            relative(unit),
+        );
+    }
+
+    match expected {
+        Units::Hashed => {
+            for unit in &found {
+                let leaf = std::fs::symlink_metadata(unit).unwrap().is_file()
+                    || std::fs::read_dir(unit)
+                        .unwrap()
+                        .flatten()
+                        .all(|entry| entry.file_type().is_ok_and(|kind| kind.is_file()));
+
+                assert!(
+                    leaf,
+                    "a unit of {language}'s hashed store {store} is one entry rather than a \
+                     shard of many, and {} is not. The store holds:\n{held}",
+                    relative(unit),
+                );
+            }
+        }
+
+        Units::Naming(packages) => {
+            let naming = |path: &str| -> Vec<&str> {
+                let path = path.to_lowercase();
+
+                packages
+                    .iter()
+                    .copied()
+                    .filter(|package| path.contains(&package.to_lowercase()))
+                    .collect()
+            };
+
+            for unit in &found {
+                let inside = relative(unit);
+
+                let mut named: Vec<&str> = naming(&inside);
+                named.extend(tree(unit).iter().flat_map(|file| naming(file)));
+                named.sort_unstable();
+                named.dedup();
+
+                assert!(
+                    named.len() == 1,
+                    "a unit of {language}'s store {store} is one package, and {inside} names \
+                     {named:?}. The store holds:\n{held}",
+                );
+            }
+
+            // And the other half: nothing of a package's is left outside every
+            // unit, where the units are looked for.
+            let roots: Vec<PathBuf> = units.iter().map(|unit| unit.root(&dir)).collect();
+
+            for file in tree(&dir) {
+                let path = dir.join(&file);
+
+                // A link is no package's file: bun keeps one per version beside
+                // the directory that is the version, and it is the directory
+                // that is the unit.
+                if !roots.iter().any(|root| path.starts_with(root))
+                    || naming(&file).is_empty()
+                    || std::fs::symlink_metadata(&path).is_ok_and(|metadata| metadata.is_symlink())
+                {
+                    continue;
+                }
+
+                assert!(
+                    found.iter().any(|unit| path.starts_with(unit)),
+                    "every file of a package is inside a unit, and {file} in {language}'s store \
+                     {store} is in none. The units are:\n{}\nand the store holds:\n{held}",
+                    found
+                        .iter()
+                        .map(|unit| relative(unit))
+                        .collect::<Vec<_>>()
+                        .join("\n"),
+                );
+            }
+        }
+    }
+}
+
 /// What every Go command in this suite is told, beside the two variables the
 /// descriptor sets — which are the two this is here to prove.
 ///
@@ -702,6 +884,21 @@ async fn two_go_builds_at_once_fill_one_store_and_a_third_builds_out_of_it() {
         "and what it built really runs, so the store held the source rather than \
          something shaped like it. It said:\n{}",
         third.said,
+    );
+
+    // And what the two left is units the sweep can take out whole: the module
+    // and its download, and the build cache's blobs one at a time.
+    whole_packages(
+        &cache,
+        verkstead_server::languages::GO,
+        "modules",
+        Units::Naming(&["greet"]),
+    );
+    whole_packages(
+        &cache,
+        verkstead_server::languages::GO,
+        "build",
+        Units::Hashed,
     );
 
     // The control. Everything the same but the Build Cache, which nothing has
@@ -1058,6 +1255,10 @@ struct Installs {
 
     /// What two of them at once are allowed to come to — see [`Racing`].
     racing: Racing,
+
+    /// The stores of Node's this tool fills, and what each one's units are
+    /// expected to be once it has — see [`whole_packages`].
+    units: &'static [(&'static str, Units)],
 }
 
 /// One tool's proof: two installs at once against one store, a third out of
@@ -1209,6 +1410,11 @@ async fn one_javascript_tools_store(proof: Installs) {
         third.said,
     );
 
+    // And what the installs left is units the sweep can take out whole.
+    for (store, expected) in proof.units {
+        whole_packages(&cache, verkstead_server::languages::NODE, store, *expected);
+    }
+
     // The control. Everything the same but the Build Cache and the directory
     // beside its Worktrees, neither of which anything has filled — so a pass
     // here would mean the install above needed no store at all, and the proof
@@ -1252,6 +1458,7 @@ async fn npm_fills_one_cache_and_a_third_install_reads_it() {
         running: "{node} -e \"process.stdout.write(require('greet-from-the-store'))\"",
         denied: "ENOTCACHED",
         racing: Racing::BothFinish,
+        units: &[("npm", Units::Hashed)],
     })
     .await;
 }
@@ -1275,6 +1482,10 @@ async fn pnpm_fills_one_store_and_a_third_install_reads_it() {
         running: "{node} -e \"process.stdout.write(require('greet-from-the-store'))\"",
         denied: "ERR_PNPM_NO_OFFLINE_META",
         racing: Racing::BothFinish,
+        units: &[
+            ("pnpm", Units::Hashed),
+            ("pnpm-metadata", Units::Naming(&[NPM_PACKAGE])),
+        ],
     })
     .await;
 }
@@ -1304,6 +1515,7 @@ async fn yarn_classic_fills_one_cache_and_a_third_install_reads_it() {
         running: "{node} -e \"process.stdout.write(require('greet-from-the-store'))\"",
         denied: "Can't make a request in offline mode",
         racing: Racing::OneMayLose,
+        units: &[("yarn", Units::Naming(&[NPM_PACKAGE]))],
     })
     .await;
 }
@@ -1342,6 +1554,7 @@ async fn yarn_berry_fills_one_cache_and_a_third_install_reads_it() {
                   \"process.stdout.write(require('greet-from-the-store'))\"",
         denied: "YN0080",
         racing: Racing::BothFinish,
+        units: &[("yarn-berry", Units::Naming(&[NPM_PACKAGE]))],
     })
     .await;
 }
@@ -1377,6 +1590,7 @@ async fn deno_fills_one_cache_and_a_third_install_reads_it() {
                   \"import greeting from 'greet-from-the-store'; console.log(greeting)\"",
         denied: "--cached-only is specified",
         racing: Racing::BothFinish,
+        units: &[("deno", Units::Naming(&[NPM_PACKAGE]))],
     })
     .await;
 }
@@ -1407,6 +1621,7 @@ async fn bun_fills_one_cache_and_a_third_install_reads_it() {
         running: "{bun} -e \"process.stdout.write(require('greet-from-the-store'))\"",
         denied: "ConnectionRefused",
         racing: Racing::BothFinish,
+        units: &[("bun", Units::Naming(&[NPM_PACKAGE]))],
     })
     .await;
 }
@@ -2329,6 +2544,10 @@ struct Python {
     /// And what the control's failure has to say, so that what it failed over
     /// was the denial rather than anything else.
     denied: &'static str,
+
+    /// The store of Python's this tool fills, and what its units are expected
+    /// to be once it has — see [`whole_packages`].
+    units: (&'static str, Units),
 }
 
 /// One Python tool's proof: two installs at once against one store, a third out
@@ -2454,6 +2673,10 @@ async fn one_python_tools_store(proof: Python) {
         third.said,
     );
 
+    // And what the installs left is units the sweep can take out whole.
+    let (store, expected) = proof.units;
+    whole_packages(&cache, verkstead_server::languages::PYTHON, store, expected);
+
     // The control. Everything the same but the Build Cache and the directory
     // beside its Worktrees, neither of which anything has filled — so a pass
     // here would mean the install above needed no store at all.
@@ -2536,6 +2759,7 @@ async fn pip_fills_one_cache_and_a_third_install_reads_it() {
         running: "PYTHONPATH=./installed {python3} -c \
                   \"import greet_from_the_store as it; print(it.GREETING)\"",
         denied: "Connection refused",
+        units: ("pip", Units::Hashed),
     })
     .await;
 }
@@ -2575,6 +2799,7 @@ async fn uv_fills_one_store_and_a_third_install_reads_it() {
         running: "./.venv/bin/python -c \
                   \"import greet_from_the_store as it; print(it.GREETING)\"",
         denied: "was not found in the cache",
+        units: ("uv", Units::Naming(&[PYPI_MODULE])),
     })
     .await;
 }
@@ -2773,6 +2998,7 @@ async fn poetry_fills_one_cache_and_a_third_install_reads_it() {
         running: "./.venv/bin/python -c \
                   \"import greet_from_the_store as it; print(it.GREETING)\"",
         denied: "All attempts to connect to",
+        units: ("poetry", Units::Hashed),
     })
     .await;
 }
@@ -2842,6 +3068,7 @@ async fn pipenv_fills_one_cache_and_a_third_install_reads_it() {
         running: "./.venv/bin/python -c \
                   \"import greet_from_the_store as it; print(it.GREETING)\"",
         denied: "Connection refused",
+        units: ("pipenv", Units::Hashed),
     })
     .await;
 }
@@ -3579,6 +3806,21 @@ async fn two_dotnet_restores_at_once_fill_one_store_and_a_third_restores_out_of_
         "and what it built really runs, so the store held the package rather \
          than something shaped like it. It said:\n{}",
         third.said,
+    );
+
+    // And what the restores left is units the sweep can take out whole: a
+    // version of the package, and a response of the http cache's at a time.
+    whole_packages(
+        &cache,
+        verkstead_server::languages::DOTNET,
+        "packages",
+        Units::Naming(&[NUGET_ID]),
+    );
+    whole_packages(
+        &cache,
+        verkstead_server::languages::DOTNET,
+        "http",
+        Units::Hashed,
     );
 
     // The control. Everything the same but the Build Cache, which nothing has
@@ -4812,6 +5054,15 @@ async fn two_maven_builds_at_once_fill_one_repository_and_a_third_builds_out_of_
         third.said,
     );
 
+    // And what the builds left is units the sweep can take out whole: one
+    // version of an artifact at a time, the plugin's apart from its library's.
+    whole_packages(
+        &cache,
+        verkstead_server::languages::JVM,
+        "maven",
+        Units::Naming(&[MAVEN_GREET, MAVEN_PLUGIN]),
+    );
+
     // The control. Everything the same but the Build Cache, which nothing has
     // filled.
     let control = installing(
@@ -5329,6 +5580,15 @@ async fn two_gradle_builds_at_once_each_in_its_own_sandbox_fill_one_home_and_a_t
         third.said,
     );
 
+    // And what the builds left is units the sweep can take out whole: one
+    // version of a module at a time.
+    whole_packages(
+        &cache,
+        verkstead_server::languages::JVM,
+        "gradle",
+        Units::Naming(&[MAVEN_GREET]),
+    );
+
     let control = installing(
         &machine.sandbox(3, &machine.empty_cache(), reaching_nothing()),
         &offline,
@@ -5829,5 +6089,260 @@ async fn a_task_one_conversation_caches_comes_from_the_cache_in_another_only_whe
         holds_anything(&machine.worktree(3).join("own-build-cache")),
         "and stores its output in the directory the Repo named. It said:\n{}",
         own.said,
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Rust: the cargo half, which is a store the sweep bounds.
+// ---------------------------------------------------------------------------
+
+/// The crate the Rust proof fetches out of a registry, and the version of it.
+const CRATE: &str = "greet";
+const CRATE_VERSION: &str = "1.0.0";
+
+/// And the one it fetches out of a git repository, which is the other half of
+/// what `CARGO_HOME` holds.
+const GIT_CRATE: &str = "wave";
+
+/// Lay a **sparse registry** out under `at`, holding [`CRATE`], and serve it —
+/// the protocol `cargo` speaks to crates.io itself: a `config.json` naming where
+/// a crate is downloaded from, and an index file per crate at the path its name
+/// spells, one line of JSON per version.
+///
+/// The `.crate` is a gzipped tar with everything under `<name>-<version>/`,
+/// which is what `cargo package` writes, and its `cksum` in the index is the
+/// sha256 of the file as served — which cargo checks before it unpacks a byte.
+fn cargo_registry(at: &Path, tar: &Path) -> Registry {
+    let named = format!("{CRATE}-{CRATE_VERSION}");
+    let inside = at.join(&named);
+    std::fs::create_dir_all(inside.join("src")).unwrap();
+
+    std::fs::write(
+        inside.join("Cargo.toml"),
+        format!(
+            "[package]\nname = \"{CRATE}\"\nversion = \"{CRATE_VERSION}\"\nedition = \"2021\"\n"
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        inside.join("src/lib.rs"),
+        format!("pub const GREETING: &str = \"{OUT_OF_THE_STORE}\";\n"),
+    )
+    .unwrap();
+
+    let archive = at.join(format!("{named}.crate"));
+    let made = Command::new(tar)
+        .arg("-czf")
+        .arg(&archive)
+        .arg("-C")
+        .arg(at)
+        .arg(&named)
+        .stdin(Stdio::null())
+        .status()
+        .expect("the suite's own `tar`");
+
+    assert!(made.success(), "the .crate was not built");
+
+    let crate_file = std::fs::read(&archive).unwrap();
+    let cksum = format!("{:x}", Sha256::digest(&crate_file));
+
+    let listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .expect("a loopback port for the registry");
+    let url = format!("http://{}", listener.local_addr().expect("the port it got"));
+
+    listener
+        .set_nonblocking(true)
+        .expect("what tokio takes a standard listener over");
+
+    let config = format!("{{\"dl\":\"{url}/crates\",\"api\":null}}");
+    let index = format!(
+        "{{\"name\":\"{CRATE}\",\"vers\":\"{CRATE_VERSION}\",\"deps\":[],\"cksum\":\"{cksum}\",\
+          \"features\":{{}},\"yanked\":false}}\n"
+    );
+
+    // A name of five letters or more is under its first two and its next two.
+    let app = Router::new()
+        .route(
+            "/config.json",
+            get(move || async move { ([(header::CONTENT_TYPE, "application/json")], config) }),
+        )
+        .route(
+            &format!("/{}/{}/{CRATE}", &CRATE[..2], &CRATE[2..4]),
+            get(move || async move { index }),
+        )
+        .route(
+            &format!("/crates/{CRATE}/{CRATE_VERSION}/download"),
+            get(move || async move {
+                (
+                    [(header::CONTENT_TYPE, "application/octet-stream")],
+                    crate_file,
+                )
+            }),
+        );
+
+    let (stop, stopping) = tokio::sync::oneshot::channel();
+
+    let serving = std::thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("a runtime for the registry's own thread");
+
+        runtime.block_on(async move {
+            let listener = tokio::net::TcpListener::from_std(listener)
+                .expect("the listener this thread was handed");
+
+            tokio::select! {
+                served = axum::serve(listener, app) => { let _ = served; }
+                _ = stopping => {}
+            }
+        });
+    });
+
+    Registry {
+        url,
+        stop: Some(stop),
+        serving: Some(serving),
+    }
+}
+
+/// A git repository holding [`GIT_CRATE`], which a manifest names by a
+/// `file://` URL — read-only, and bound only where a proof hands it over.
+fn cargo_git_crate(at: &Path) -> PathBuf {
+    let repo = repository(at.to_owned());
+
+    std::fs::create_dir_all(repo.join("src")).unwrap();
+    std::fs::write(
+        repo.join("Cargo.toml"),
+        format!("[package]\nname = \"{GIT_CRATE}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n"),
+    )
+    .unwrap();
+    std::fs::write(repo.join("src/lib.rs"), "pub fn wave() {}\n").unwrap();
+    git(&repo, &["add", "Cargo.toml", "src/lib.rs"]);
+    git(&repo, &["commit", "-m", "a crate"]);
+
+    repo
+}
+
+/// And what a Conversation's Worktree holds: a package depending on both, with
+/// the registry named in its own `.cargo/config.toml` the way a Repo names an
+/// alternative registry.
+fn cargo_consumer(worktree: &Path, registry: &str, git_crate: &Path) {
+    std::fs::create_dir_all(worktree.join("src")).unwrap();
+    std::fs::create_dir_all(worktree.join(".cargo")).unwrap();
+
+    std::fs::write(
+        worktree.join("Cargo.toml"),
+        format!(
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n\
+             [dependencies]\n\
+             {CRATE} = {{ version = \"{CRATE_VERSION}\", registry = \"proof\" }}\n\
+             {GIT_CRATE} = {{ git = \"file://{}\" }}\n",
+            git_crate.display(),
+        ),
+    )
+    .unwrap();
+    std::fs::write(worktree.join("src/main.rs"), "fn main() {}\n").unwrap();
+    std::fs::write(
+        worktree.join(".cargo/config.toml"),
+        format!("[registries.proof]\nindex = \"sparse+{registry}/\"\n"),
+    )
+    .unwrap();
+}
+
+/// Rust's cargo half: `CARGO_HOME`, two Sandboxes fetching at once, a third
+/// fetching with `--offline` and the registry gone, and the control.
+///
+/// **Here for the sweep rather than for the variable**, which every Rust
+/// session has had since before the package stores: the cargo half is swept
+/// under Rust's size like any other store, so its units have to be whole crates
+/// against the layout cargo really writes — a registry's `.crate` and the
+/// source unpacked out of it, and a git dependency's database and checkout.
+///
+/// `cargo fetch` rather than a build, because a fetch is the whole of what
+/// fills this store and a build would want a linker in the Sandbox besides.
+/// What says the third was served out of the store is that `--offline`
+/// succeeded and the source it unpacked is there to read.
+#[tokio::test]
+async fn two_cargo_fetches_at_once_fill_one_cargo_home_and_a_third_fetches_out_of_it() {
+    let Some(found_them) = tools("Rust", &["cargo", "tar"]) else {
+        return;
+    };
+    let (cargo, tar) = (&found_them[0], &found_them[1]);
+
+    let machine = machine(4).await;
+    let cache = machine.cache();
+
+    let registry = cargo_registry(&machine.registries.join("cargo"), tar);
+    let git_crate = cargo_git_crate(&machine.registries.join(GIT_CRATE));
+
+    for nth in 0..4 {
+        cargo_consumer(machine.worktree(nth), &registry.url, &git_crate);
+    }
+
+    let reaching = || vec![Bind::readable(git_crate.clone())];
+
+    let fetching = format!("set -e\n{cargo} fetch\n", cargo = cargo.display());
+
+    let first = starting(&machine.sandbox(0, &cache, reaching()), &fetching);
+    let second = starting(&machine.sandbox(1, &cache, reaching()), &fetching);
+
+    finished(first).worked("the first session's fetch fills CARGO_HOME");
+    finished(second).worked("and the second one racing it finishes just as well");
+
+    // The lockfile a Repo would have committed, which pins the git dependency
+    // to the revision the store holds.
+    let lock = std::fs::read(machine.worktree(0).join("Cargo.lock"))
+        .expect("the first fetch writes a Cargo.lock");
+
+    for nth in 2..4 {
+        std::fs::write(machine.worktree(nth).join("Cargo.lock"), &lock).unwrap();
+    }
+
+    registry.shut();
+
+    let offline = format!(
+        "set -e\n{cargo} fetch --offline\ncat \"$CARGO_HOME\"/registry/src/*/{CRATE}-{CRATE_VERSION}/src/lib.rs\n",
+        cargo = cargo.display(),
+    );
+
+    let third = installing(&machine.sandbox(2, &cache, vec![]), &offline);
+
+    third.worked(
+        "a third session fetches with its registry and the git repository denied, which it \
+         can only do out of the shared CARGO_HOME",
+    );
+    assert!(
+        third.said.contains(OUT_OF_THE_STORE),
+        "and the source it reads is the crate's own. It said:\n{}",
+        third.said,
+    );
+
+    // And what the fetches left is units the sweep can take out whole: a
+    // crate's download apart from its source, and the git dependency's
+    // database apart from its checkout.
+    whole_packages(
+        &cache,
+        verkstead_server::languages::RUST,
+        "cargo",
+        Units::Naming(&[CRATE, GIT_CRATE]),
+    );
+
+    let control = installing(
+        &machine.sandbox(3, &machine.empty_cache(), vec![]),
+        &offline,
+    );
+
+    assert!(
+        !control.worked,
+        "an empty CARGO_HOME and no registry has to fail, or the fetch above proved \
+         nothing. It said:\n{}",
+        control.said,
+    );
+    assert!(
+        control.said.contains("offline"),
+        "and it fails for want of the registry rather than for some other reason. It \
+         said:\n{}",
+        control.said,
     );
 }

@@ -335,6 +335,12 @@ mod transfers;
 /// nudge both go in as.
 mod typing;
 mod ui;
+/// The units a store is swept by, found the way its descriptor says.
+///
+/// Public for the reason [`languages`] is: that a unit is a whole package is
+/// the product's promise about a store, and the proofs that fill one with each
+/// tool for real stand outside this crate.
+pub mod units;
 /// Running a program without putting a window on the human's screen, which is
 /// Windows' question and nobody else's.
 ///

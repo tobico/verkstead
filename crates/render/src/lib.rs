@@ -93,11 +93,11 @@ pub use repos::{
 };
 pub use settings::{
     AtOnceEdit, AtOnceView, Author, BindEntry, CleanupEdit, CleanupStepEdit, CleanupStepView,
-    CleanupView, CompileCaching, ConflictResolution, DiskUse, HeaderEdit, IgnoreRule,
+    CleanupView, CompileCaching, ConflictResolution, DiskUse, Eviction, HeaderEdit, IgnoreRule,
     IgnoredCommentsEdit, LanguageEdit, LanguageView, McpHeader, McpHeaderEdit, McpServer,
     McpServerEdit, McpServersEdit, PathResolution, PathSource, PathsView, RuleField, RuleRefused,
     RunningOn, ServerField, ServerRefused, ServerTried, SettingsEdit, SettingsSaved, SettingsView,
-    SizeRefused, TokenEdit, TokenSaved, Tried, UnreadEntry, Verified,
+    SizeRefused, StoreView, TokenEdit, TokenSaved, Tried, UnreadEntry, Verified,
 };
 pub use sharing::{
     CommentedOn, MissedOut, SHARE_MARKER, ShareCommented, SharePublished, SharedCommit,

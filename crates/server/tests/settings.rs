@@ -46,9 +46,9 @@ use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
 use tower::ServiceExt;
 use verkstead_render::{
-    CompileCaching, ConflictResolution, DiskUse, IgnoreRule, LanguageView, McpHeader, McpServer,
-    PathResolution, PathSource, RuleField, RunningOn, ServerField, SettingsSaved, SettingsView,
-    Verified,
+    CompileCaching, ConflictResolution, DiskUse, Eviction, IgnoreRule, LanguageView, McpHeader,
+    McpServer, PathResolution, PathSource, RuleField, RunningOn, ServerField, SettingsSaved,
+    SettingsView, Verified,
 };
 use verkstead_server::sandbox::SandboxConfig;
 use verkstead_server::{Gh, open_database, router_asking_github, router_installed};
@@ -795,6 +795,36 @@ async fn a_store_not_yet_measured_says_so_and_cpp_has_none() {
 
         assert_eq!(language.disk_use, expected, "{}", language.name);
     }
+}
+
+/// The page is told how each directory of a store is held to its size: Rust's
+/// cargo half by the sweep and its sccache by its own tool, NuGet's scratch
+/// directory not at all, and C/C++ naming no directory to say it of.
+#[tokio::test]
+async fn each_store_says_how_it_is_held_to_its_size() {
+    let (_dir, app) = app().await;
+    let languages = settings(&app).await.languages;
+
+    let stores = |name: &str| -> Vec<(String, Eviction)> {
+        languages
+            .iter()
+            .find(|language| language.name == name)
+            .unwrap()
+            .stores
+            .iter()
+            .map(|store| (store.name.clone(), store.eviction))
+            .collect()
+    };
+
+    assert_eq!(
+        stores("rust"),
+        [
+            (String::from("cargo"), Eviction::ByUnit),
+            (String::from("sccache"), Eviction::ByItsTool),
+        ],
+    );
+    assert!(stores("dotnet").contains(&(String::from("scratch"), Eviction::NotSwept)));
+    assert!(stores("cpp").is_empty());
 }
 
 /// A size Verkstead cannot read is refused at the save, with the reason the

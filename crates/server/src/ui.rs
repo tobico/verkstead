@@ -41,7 +41,7 @@ use verkstead_render::{
     CompanionView, CompileCaching, Confirming, ConflictResolution, ConversationArchived,
     ConversationClosed, ConversationEntry, ConversationMove, ConversationSteered,
     ConversationStopped, ConversationUnarchived, ConversationView, Creation, Cursor, DevicesView,
-    DiskUse, DroppedRow, FileDeleted, FileDeleting, FileListsView, FileMade, FileMaking,
+    DiskUse, DroppedRow, Eviction, FileDeleted, FileDeleting, FileListsView, FileMade, FileMaking,
     FileReading, FileRenamed, FileRenaming, FileRootsView, FileStatusView, FileWrite, FileWritten,
     FolderListing, GrillingStarted, HeaderEdit, IgnoreRule, IgnoredCommentsEdit, InstallPress,
     LanguageEdit, LanguageView, Lifecycle, Locked, McpHeader, McpServer, McpServerEdit,
@@ -53,9 +53,9 @@ use verkstead_render::{
     ServerRemoved, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView, ShareCommented,
     SharePublished, SharedCommit, SharedConversation, ShowArchived, ShowingArchived, SizeRefused,
     Standing, SteerCancelled, SteerForm, SteerOpened, SteerPairingView, SteerSaved,
-    SteerSubmission, Submitted, Subscribed, Subscription, TakenUp, TargetNamed, TargetRecorded,
-    TerminalOpened, TimelineEvent, TokenEdit, TokenSaved, TransferredTo, Transferring, UnreadEntry,
-    UnreadableSet, Unsubscribe, UpdateNotice, Verified,
+    SteerSubmission, StoreView, Submitted, Subscribed, Subscription, TakenUp, TargetNamed,
+    TargetRecorded, TerminalOpened, TimelineEvent, TokenEdit, TokenSaved, TransferredTo,
+    Transferring, UnreadEntry, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -6133,6 +6133,21 @@ fn languages(
                 (true, None) => DiskUse::NotMeasured,
                 (true, Some(bytes)) => DiskUse::Measured { bytes },
             },
+            // And how each of its directories is held to that size, which is
+            // the descriptor's to say: by its tool, by the sweep, or not at
+            // all — said on the page so a store nothing bounds is never a
+            // surprise.
+            stores: descriptor
+                .store_names()
+                .map(|store| StoreView {
+                    name: store.to_owned(),
+                    eviction: match descriptor.bounded(store) {
+                        crate::languages::Bounded::ByItsTool => Eviction::ByItsTool,
+                        crate::languages::Bounded::ByUnit(_) => Eviction::ByUnit,
+                        crate::languages::Bounded::NotAtAll => Eviction::NotSwept,
+                    },
+                })
+                .collect(),
             // And whether anything reads that size. Not out of the files at
             // all where something does: this is the server's own environment
             // and its own platform, and the one thing on this page the human

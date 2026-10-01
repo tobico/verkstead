@@ -676,6 +676,41 @@ describe("the languages as the pane draws them", () => {
   });
 });
 
+describe("saying how a store is held to its size", () => {
+  /// Each directory of a store by name, with how it is kept under the size —
+  /// by its tool, by the sweep, or not at all — and Rust's two halves said to
+  /// be held to it separately.
+  it("draws how each directory of a store is bounded", async () => {
+    theSettings(TOLD);
+    const { container } = mountPane();
+
+    await waitFor(() => theSize(RUST));
+
+    const lines = (name: string) =>
+      Array.from(
+        theGroup(container, name).querySelectorAll(`.${styles.bounds} li`),
+      ).map((line) => line.textContent);
+
+    expect(lines(RUST)).toEqual([
+      "cargo is swept to this size by whole packages, oldest first.",
+      "sccache is handed this size and evicts for itself.",
+    ]);
+    expect(theGroup(container, RUST).textContent).toContain(
+      "Each is held to it separately, so together they may hold up to twice it.",
+    );
+
+    expect(lines(DOTNET)).toContain(
+      "scratch is never swept: its descriptor names no unit, so it grows as " +
+        "its tool fills it.",
+    );
+    expect(theGroup(container, DOTNET).textContent).not.toContain(
+      "twice it",
+    );
+
+    expect(lines(GLEAM)).toEqual([]);
+  });
+});
+
 describe("saying how much a store holds", () => {
   /// In the size grammar's own units, so a figure reads against the size
   /// beside it without a conversion.

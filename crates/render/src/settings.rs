@@ -358,6 +358,11 @@ pub struct LanguageView {
     /// this page never waits on a walk of a store.
     pub disk_use: DiskUse,
 
+    /// And each directory of that store, with how it is kept under the size
+    /// above — in the order the descriptor names them, and empty for a
+    /// language naming none.
+    pub stores: Vec<StoreView>,
+
     /// Whether this language compiles through the Compile Server, and where it
     /// does, whether that compiling is really being cached — null for a
     /// language whose descriptor names no such capability.
@@ -405,6 +410,37 @@ pub enum DiskUse {
     /// Every directory of its store together, in bytes: each file once, however
     /// many links it has, and nothing a symlink points at.
     Measured { bytes: u64 },
+}
+
+/// One directory of a language's store, by the name its descriptor keys it
+/// under, and how it is kept under the language's size.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct StoreView {
+    pub name: String,
+    pub eviction: Eviction,
+}
+
+/// How one store is kept under its language's size — one of three answers, each
+/// the descriptor's own.
+///
+/// **Every store held to the size by the sweep is held to it together**, and a
+/// store its tool evicts is held to it on its own: so a language with one of
+/// each, which is Rust, may hold up to twice its size between them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum Eviction {
+    /// The tool filling it is handed the size and evicts for itself, and the
+    /// sweep leaves it alone — sccache.
+    ByItsTool,
+
+    /// The sweep takes whole packages out of it, oldest first, while no
+    /// session is running.
+    ByUnit,
+
+    /// Nothing: its descriptor names no unit, so it is never swept and grows
+    /// as its tool fills it.
+    NotSwept,
 }
 
 /// What became of a language whose entry in `config.yaml` could not be read.
