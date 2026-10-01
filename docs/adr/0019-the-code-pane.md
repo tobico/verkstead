@@ -277,13 +277,16 @@ nothing.
 **Its life is the attach's, with the watcher's grace.** A Forward ends two
 seconds after it leaves the reading, and leaving the reading is every ending
 there is — the attach let go of, the port closing, the terminal ending — and at
-once where the member reads as unreachable, there being nothing to connect to.
-Ending closes the listener and every connection crossing it. Two seconds is the
-watcher's, for the watcher's reason: the pane is taken down on every pane swap
-and comes straight back. About thirty seconds, so that a reload kept the
-connections open across it, was rejected — a tab closed on purpose would leave
-a port on this machine answering for half a minute after; and none at all was
-rejected, a pane swap then being a dropped connection.
+once where the member reads as unreachable, there being nothing to connect to
+— and is taken up again once it answers, its tab still open: the hub counts the
+terminal attaches it relays, and reads their ports again whenever a `ports`
+Nudge may have gone unheard. Ending closes the listener and every connection
+crossing it. Two seconds is the watcher's, for the watcher's reason: the pane
+is taken down on every pane swap and comes straight back. About thirty seconds,
+so that a reload kept the connections open across it, was rejected — a tab
+closed on purpose would leave a port on this machine answering for half a
+minute after; and none at all was rejected, a pane swap then being a dropped
+connection.
 
 **Said at the sidebar's foot, and never stopped by hand.** *Forwarding 3 ports*
 stands beside *Show archived* while this device holds any Forward, forwarding

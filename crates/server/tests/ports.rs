@@ -1435,6 +1435,62 @@ async fn a_server_in_a_remote_terminal_is_forwarded_to_the_attaching_devices_loc
     );
 }
 
+/// A member a turn found not answering has its Forwards ended at once — and,
+/// its tab never having closed, taken up again once it answers, with nothing
+/// about its ports having moved to say so.
+#[tokio::test]
+async fn a_forward_ended_by_its_member_not_answering_comes_back_when_it_does() {
+    let (a, b, _holding) = linked_forwarding().await;
+    let (app, at) = a.served().await;
+
+    let number = opened(
+        &app,
+        &through(B, &format!("/api/ui/conversations/{THERE}/terminals")),
+    )
+    .await;
+
+    let mut terminal = Terminal::attached(format!(
+        "ws://{at}{}",
+        through(
+            B,
+            &format!("/api/ui/conversations/{THERE}/terminals/{number}/attach")
+        )
+    ))
+    .await;
+
+    let port = free_port();
+    terminal.typed(&echoing("127.0.0.1", port)).await;
+    terminal.until(&format!("listening-{port}")).await;
+
+    forwarded_until(&app, |read| {
+        standing(read, port) == Some(ForwardStanding::Forwarding)
+    })
+    .await;
+
+    // What a dial that reached none of B's addresses writes down.
+    verkstead_store::member_unreachable(&a.pool, B)
+        .await
+        .unwrap();
+
+    forwarded_until(&app, <[ForwardView]>::is_empty).await;
+
+    // And what the next dial that gets through writes back.
+    a.linked_to(&b.device, vec![b.at()]).await;
+
+    let took = forwarded_until(&app, |read| {
+        standing(read, port) == Some(ForwardStanding::Forwarding)
+    })
+    .await;
+    assert!(
+        took < PROMPTLY,
+        "port {port} took {took:?} to be forwarded again once B answered"
+    );
+
+    echoes(forwarded_v4(port), "after-the-blip").await;
+
+    drop(terminal);
+}
+
 /// A port A already holds is skipped, *port busy here*, while the others are
 /// forwarded as before — and is taken once it frees.
 #[tokio::test]

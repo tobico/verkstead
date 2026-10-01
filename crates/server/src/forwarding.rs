@@ -18,6 +18,15 @@
 //! and IPv6 both, and each connection accepted on one is one upgrade over the
 //! link to the member, joined byte for byte — see [`carried`].
 //!
+//! **And read again wherever that Nudge may have been missed.** A `ports` Nudge
+//! is said once, so one said while the stream to its member was down — a link
+//! that blipped, this server starting while a tab was open — is one nobody
+//! heard. So this device counts the terminal attaches it relays to each member
+//! (see [`Forwards::attached`]), and every Conversation of a member with one of
+//! those or a Forward is read again when its stream is taken up, when this
+//! device falls behind on its news, and when a member a turn found not
+//! answering answers again.
+//!
 //! **A port this device cannot take is skipped and said.** Already bound here —
 //! its own dev server, or another member's port of the same number already
 //! forwarded — and the Forward is recorded as *skipped* with that reason and
@@ -29,7 +38,8 @@
 //! a reload — an attach let go of and taken again — keeps it. Leaving the
 //! reading is every ending there is: the attach it stands on ending, the port
 //! closing, the terminal ending. And it ends at once where the member reads as
-//! unreachable or is no member at all, there being nothing to connect to.
+//! unreachable or is no member at all, there being nothing to connect to — and
+//! is taken up again once it answers, while the tab is still open.
 //! Ending closes the listener, and the connections crossing it go with it.
 //!
 //! **This device's own business.** The reading is [`forwards`], for this
@@ -74,11 +84,11 @@ pub(crate) const LOOPBACKS: [IpAddr; 2] = [
 const GRACE: Duration = crate::watchers::GRACE;
 
 /// How often the Forwards are looked over: a grace that has run out, a skip to
-/// try again, a member that has stopped answering.
+/// try again, a member that has stopped answering or has come back.
 ///
 /// A second, which is a look at a handful of entries in memory and, while there
-/// are any, a read of the membership — and it is what a grace ending is late by
-/// at most.
+/// are any Forwards or relayed attaches, a read of the membership — and it is
+/// what a grace ending is late by at most.
 const TURN: Duration = Duration::from_secs(1);
 
 /// The most one member's reading of a Conversation's ports may be: **64 KiB**.
@@ -92,7 +102,38 @@ const BACKLOG: u32 = 1024;
 
 /// The Forwards this device holds, by what each one is.
 #[derive(Clone, Default)]
-pub(crate) struct Forwards(Arc<Mutex<BTreeMap<Key, Forward>>>);
+pub(crate) struct Forwards {
+    held: Arc<Mutex<BTreeMap<Key, Forward>>>,
+
+    /// And the terminal attaches this device is relaying to its members, by
+    /// member and Conversation, each with how many sockets are open — see
+    /// [`Attaching`]. What is read again when a member's news may have been
+    /// missed: a Forward that ended, or was never taken up, while its tab stayed
+    /// open is one nothing else would ever read again.
+    attaching: Arc<Mutex<BTreeMap<(String, i64), usize>>>,
+}
+
+/// One terminal attach this device is relaying to a member, counted for as long
+/// as this is held — which is as long as the two halves of the socket are
+/// joined. See [`Forwards::attaching`].
+pub(crate) struct Attaching {
+    forwards: Forwards,
+    on: (String, i64),
+}
+
+impl Drop for Attaching {
+    fn drop(&mut self) {
+        let mut attaching = self.forwards.attaching();
+
+        if let Some(count) = attaching.get_mut(&self.on) {
+            *count -= 1;
+
+            if *count == 0 {
+                attaching.remove(&self.on);
+            }
+        }
+    }
+}
 
 /// What one Forward is: a port of one terminal of one Conversation on one
 /// member. Ordered by port first, which is the order the reading lists them in.
@@ -144,7 +185,40 @@ impl Forwards {
 
     /// The register, locked. Never held across an await.
     fn held(&self) -> MutexGuard<'_, BTreeMap<Key, Forward>> {
-        self.0.lock().expect("nothing panics holding this")
+        self.held.lock().expect("nothing panics holding this")
+    }
+
+    /// The relayed attaches, locked. Never held across an await, nor while the
+    /// register above is.
+    fn attaching(&self) -> MutexGuard<'_, BTreeMap<(String, i64), usize>> {
+        self.attaching.lock().expect("nothing panics holding this")
+    }
+
+    /// Count a terminal attach on `device`'s `conversation` as relayed for as
+    /// long as what comes back is held — see [`crate::relaying`], which holds
+    /// it for as long as it joins the socket.
+    pub(crate) fn attached(&self, device: &str, conversation: i64) -> Attaching {
+        let on = (device.to_owned(), conversation);
+
+        *self.attaching().entry(on.clone()).or_default() += 1;
+
+        Attaching {
+            forwards: self.clone(),
+            on,
+        }
+    }
+}
+
+/// The Conversation a relayed path attaches a terminal of —
+/// `/api/ui/conversations/{id}/terminals/{number}/attach`, its query aside —
+/// or `None` where it is anything else.
+pub(crate) fn attach_of(onwards: &str) -> Option<i64> {
+    let path = onwards.split_once('?').map_or(onwards, |(path, _)| path);
+    let rest = path.strip_prefix("/api/ui/conversations/")?;
+
+    match rest.split('/').collect::<Vec<_>>()[..] {
+        [id, "terminals", number, "attach"] if !number.is_empty() => id.parse().ok(),
+        _ => None,
     }
 }
 
@@ -168,6 +242,10 @@ async fn held(state: AppState) {
     let mut moved = state.nudges.subscribe();
     let mut turning = tokio::time::interval(TURN);
 
+    // The members [`turned`] last found not answering, so that it can tell one
+    // that has come back.
+    let mut away = BTreeSet::new();
+
     turning.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
     loop {
@@ -185,10 +263,12 @@ async fn held(state: AppState) {
 
                         // A stream taken up again, which says nothing about what
                         // it missed: every Conversation of that member this
-                        // device forwards for is read again.
+                        // device forwards for, or relays a terminal of, is read
+                        // again — the second for the `ports` Nudge an attach
+                        // made while the stream was down, which nobody heard.
                         Nudge::Everything => {
-                            for conversation in forwarded_on(&state, Some(&device)) {
-                                reconciled(&state, &conversation.0, conversation.1).await;
+                            for (device, conversation) in looked_at(&state, Some(&device)) {
+                                reconciled(&state, &device, conversation).await;
                             }
                         }
 
@@ -197,9 +277,10 @@ async fn held(state: AppState) {
                 }
 
                 // Fallen behind, so every Conversation this device forwards for
-                // is read again: what was missed is unknowable.
+                // or relays a terminal of is read again: what was missed is
+                // unknowable.
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                    for (device, conversation) in forwarded_on(&state, None) {
+                    for (device, conversation) in looked_at(&state, None) {
                         reconciled(&state, &device, conversation).await;
                     }
                 }
@@ -207,21 +288,41 @@ async fn held(state: AppState) {
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
             },
 
-            _ = turning.tick() => turned(&state).await,
+            _ = turning.tick() => {
+                // A member answering again after a turn that found it not, which
+                // ended its Forwards: their tabs may never have closed, and the
+                // member has nothing new to say about ports that did not move.
+                for device in turned(&state, &mut away).await {
+                    for (device, conversation) in looked_at(&state, Some(&device)) {
+                        reconciled(&state, &device, conversation).await;
+                    }
+                }
+            }
         }
     }
 }
 
-/// Every member and Conversation this device holds a Forward for, of `device`
-/// alone where it is said.
-fn forwarded_on(state: &AppState, device: Option<&str>) -> BTreeSet<(String, i64)> {
-    state
+/// Every member and Conversation this device holds a Forward for or relays a
+/// terminal attach to, of `device` alone where it is said.
+fn looked_at(state: &AppState, device: Option<&str>) -> BTreeSet<(String, i64)> {
+    let mut looked_at: BTreeSet<(String, i64)> = state
         .forwards
         .held()
         .keys()
         .filter(|key| device.is_none_or(|device| key.device == device))
         .map(|key| (key.device.clone(), key.conversation))
-        .collect()
+        .collect();
+
+    looked_at.extend(
+        state
+            .forwards
+            .attaching()
+            .keys()
+            .filter(|(on, _)| device.is_none_or(|device| on == device))
+            .cloned(),
+    );
+
+    looked_at
 }
 
 /// Read `conversation`'s ports off `device` over the link, and make the
@@ -318,13 +419,23 @@ async fn reconciled(state: &AppState, device: &str, conversation: i64) {
 
 /// Look the Forwards over: end the ones whose grace has run out and the ones on
 /// a member that is not answering, and try again the ones that were skipped.
-async fn turned(state: &AppState) {
-    if state.forwards.held().is_empty() {
-        return;
+///
+/// **And say which members have come back** — answering now, where they were
+/// in `away` on the last turn — so that what this device relays to them is read
+/// again. `away` is left holding the members this turn found not answering.
+async fn turned(state: &AppState, away: &mut BTreeSet<String>) -> BTreeSet<String> {
+    let looking: BTreeSet<String> = looked_at(state, None)
+        .into_iter()
+        .map(|(device, _)| device)
+        .collect();
+
+    if looking.is_empty() {
+        away.clear();
+        return BTreeSet::new();
     }
 
     let Some(devices) = state.devices.as_ref() else {
-        return;
+        return BTreeSet::new();
     };
 
     // The members answering, read before the register is taken: a membership
@@ -399,6 +510,23 @@ async fn turned(state: &AppState) {
     if changed {
         state.nudges.announce_here(Nudge::Forwards);
     }
+
+    let Some(answering) = answering else {
+        return BTreeSet::new();
+    };
+
+    let back = away
+        .iter()
+        .filter(|device| answering.contains(*device))
+        .cloned()
+        .collect();
+
+    *away = looking
+        .into_iter()
+        .filter(|device| !answering.contains(device))
+        .collect();
+
+    back
 }
 
 /// Take `key`'s port on every loopback this device forwards on, and start
@@ -657,4 +785,51 @@ pub(crate) async fn forwards(State(state): State<AppState>) -> Json<ForwardsView
         .collect();
 
     Json(ForwardsView { forwards })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A terminal's attach is read for its Conversation, a query and all, and
+    /// nothing else under the Conversation is.
+    #[test]
+    fn only_a_terminal_attach_is_counted_as_one() {
+        assert_eq!(
+            attach_of("/api/ui/conversations/7/terminals/2/attach"),
+            Some(7)
+        );
+        assert_eq!(
+            attach_of("/api/ui/conversations/7/terminals/2/attach?cols=80"),
+            Some(7)
+        );
+
+        for other in [
+            "/api/ui/conversations/7/attach",
+            "/api/ui/conversations/7/terminals",
+            "/api/ui/conversations/7/terminals/2/ports/3000",
+            "/api/ui/conversations/7/terminals//attach",
+            "/api/ui/conversations/seven/terminals/2/attach",
+            "/api/ui/nudges",
+        ] {
+            assert_eq!(attach_of(other), None, "{other}");
+        }
+    }
+
+    /// Each relayed attach is counted while it is held, and the last one let go
+    /// of takes the Conversation off the count.
+    #[test]
+    fn an_attach_is_counted_for_as_long_as_it_is_held() {
+        let forwards = Forwards::new();
+
+        let first = forwards.attached("b", 7);
+        let second = forwards.attached("b", 7);
+        assert_eq!(forwards.attaching().get(&("b".to_owned(), 7)), Some(&2));
+
+        drop(first);
+        assert_eq!(forwards.attaching().get(&("b".to_owned(), 7)), Some(&1));
+
+        drop(second);
+        assert!(forwards.attaching().is_empty());
+    }
 }

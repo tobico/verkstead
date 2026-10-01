@@ -157,7 +157,14 @@ pub(super) fn asking(headers: &HeaderMap) -> HeaderMap {
 /// asked for, so it gets the member's own — see this module's documentation. The
 /// browser's upgrade is dropped unused, which leaves the connection exactly what
 /// it was: one that answered a request and may answer another.
-pub(super) fn bridged(taking: OnUpgrade, answered: reqwest::Response) -> Response {
+///
+/// `attaching` is a terminal attach counted as relayed, and is held for exactly
+/// as long as the two halves are joined — see [`crate::forwarding::Attaching`].
+pub(super) fn bridged(
+    taking: OnUpgrade,
+    answered: reqwest::Response,
+    attaching: Option<crate::forwarding::Attaching>,
+) -> Response {
     if answered.status() != StatusCode::SWITCHING_PROTOCOLS {
         return super::handed_back(answered);
     }
@@ -197,6 +204,9 @@ pub(super) fn bridged(taking: OnUpgrade, answered: reqwest::Response) -> Respons
         };
 
         crossing(near, far).await;
+
+        // Let go of only once the two halves are, which is the socket closed.
+        drop(attaching);
     });
 
     switching

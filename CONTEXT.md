@@ -2006,9 +2006,10 @@ frees. The member connects only a port it is reporting, and only for a device
 attached to that terminal.
 **It ends on its own**: two seconds after it leaves the reading — the tab
 closed, the port closed, the terminal ended — the watcher's grace, so a pane
-swap keeps it; and at once where the member is unreachable. Ending closes the
-listener and every connection crossing it. Nothing stops one by hand: closing
-the tab is the stop.
+swap keeps it; and at once where the member is unreachable, taken up again
+once it answers while the tab is still open. Ending closes the listener and
+every connection crossing it. Nothing stops one by hand: closing the tab is the
+stop.
 **Said at the sidebar's foot**, *Forwarding 3 ports* beside *Show archived*,
 whose popup lists each as a link with its device and Conversation. That reading
 and its `forwards` Nudge are this device's own and never served over the link.
