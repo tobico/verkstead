@@ -43,6 +43,14 @@
 //! untouched, and the browser's dial fails rather than opening onto a socket
 //! that says nothing. Nothing is upgraded on this side until the member has
 //! upgraded on that one.
+//!
+//! **And the join is not the attach sockets' alone.** A Forward's connections
+//! cross the link the same way, one upgrade each, and [`crossing`] is what joins
+//! them at both ends — the hub's accepted connection to the upgrade it carried
+//! it over, and the member's upgrade to its own loopback dial (ADR-0019,
+//! *Forwards*). Those are the hub's own dials rather than a browser's, so they
+//! never come through [`upgrading`] here: see [`crate::forwarding`] and
+//! [`crate::terminals::connect`].
 
 use axum::http::header::{CONNECTION, UPGRADE};
 use axum::http::{HeaderMap, StatusCode};
@@ -55,8 +63,9 @@ use verkstead_schema::ApiError;
 use crate::ui::refused;
 
 /// Whether the browser is asking for the protocol to change rather than making
-/// a call — which is every one of the three attach endpoints, and nothing else
-/// in the namespace.
+/// a call — which is every one of the three attach endpoints a browser dials.
+/// The one other upgrade in the namespace, a terminal's port, is a member's to
+/// dial rather than a browser's — see [`crate::terminals::connect`].
 ///
 /// Read the way [`axum::extract::ws::WebSocketUpgrade`] reads it, because it is
 /// the extractor at the far end of this hop: `Connection` naming `upgrade`
@@ -214,9 +223,11 @@ pub(super) fn bridged(taking: OnUpgrade, answered: reqwest::Response) -> Respons
 /// closed its socket politely has already had its frame copied by the time this
 /// tears the pair down.
 ///
-/// **And a forwarded port's connection is joined the same way** — the member's
-/// own loopback dial on one side and the upgrade it answered on the other, see
-/// [`crate::terminals::connect`] — because it is the same promise about a
+/// **And a forwarded port's connection is joined the same way**, at both ends:
+/// on the member its own loopback dial and the upgrade it answered, see
+/// [`crate::terminals::connect`], and on the hub the connection a Forward's
+/// listener accepted and the upgrade it was carried over, see
+/// [`crate::forwarding`] — because it is the same promise about a
 /// different pair of sockets: nothing in the bytes is this device's business,
 /// and whichever end goes takes the other.
 pub(crate) async fn crossing(

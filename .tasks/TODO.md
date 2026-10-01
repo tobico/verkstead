@@ -26,4 +26,4 @@ is stopped by hand. **Forward** is the term, kept apart from the Relay.
 - [x] 04: The sidebar item and its popup — [details](04-the-sidebar-item-and-its-popup.md)
 - [x] 05: The macOS and Windows readers — [details](05-the-macos-and-windows-readers.md)
 - [x] 06: A printed URL hurries the read — [details](06-a-printed-url-hurries-the-read.md)
-- [ ] 07: The docs — [details](07-the-docs.md)
+- [x] 07: The docs — [details](07-the-docs.md)

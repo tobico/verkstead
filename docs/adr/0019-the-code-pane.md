@@ -188,6 +188,114 @@ fetched when Code first opens and never before.
 An image opens as a preview in its tab; any other binary, and any file over a
 few megabytes, opens as a line saying why rather than in the editor.
 
+## Forwards
+
+Trying the agent's work is very often starting a dev server in a terminal tab
+and opening it in a browser — and where the Conversation is a member's
+([ADR-0020](0020-cluster-mode.md)), the server is listening on the other
+machine's `localhost` and the browser is on this one. So a **Forward**: a
+server started in a terminal on another device of the cluster is reachable on
+this device's own `localhost`, at the same port, for as long as the terminal's
+tab is open here. Decided in the grilling of 2026-10-01; the vocabulary is
+`CONTEXT.md`'s **Forward**, a word kept apart from the **Relay** it rides on.
+
+**A terminal's, never the agent's session.** The session runs in the same
+Sandbox and could be read the same way, but what it opens is a build cache's
+port, MCP servers and language servers — none of which anybody means to open in
+a browser, and every one of which would sit in the list beside the port they
+did. Reading the session as well, now or behind a later switch, was rejected:
+a dev server somebody wants to look at is one they start in a terminal, and a
+session's that they want is one they can start there too.
+
+**The attaching device forwards, and no other.** The device whose browser has
+the terminal's tab open is the hub bridging that attach, and it alone listens.
+Every device forwarding every member's ports was the other way — it is how the
+merged list works — and was rejected: two members' 3000s would collide on every
+device at once, and a laptop would hold listeners for a desktop's terminals
+nobody on it had opened. A device with any workbench open forwarding was
+rejected for the same collisions, merely coming and going with a tab. A
+terminal this device's own browser attached is no Forward at all: the port is
+on this machine already.
+
+**On loopback alone, at the same number.** IPv4 and IPv6 loopback both, and no
+other interface: a phone on the tailnet reaching the hub's `localhost:3000` is
+a much larger thing than trying a change, with a boundary of its own to argue —
+the workbench itself is reached from a phone through `tailscale serve` in front
+of a loopback listener, not through an open interface.
+The number is the one the server printed, because that is the URL the human
+reads off the terminal. **A number already bound here is skipped and said** —
+this device's own dev server, or another member's 3000 already forwarded — and
+taken when it frees. Remapping to a free number was rejected, a URL the server
+printed being then a URL that does not work; and the later Forward taking the
+port from the earlier was rejected, a `localhost:3000` that meant one machine a
+minute ago and another now being worse than one that plainly is not this.
+
+**Read on the member, polled, while an attach over the link is held.** The
+member is the only machine the terminal's processes are on, so it is the one
+that reads them: a listening TCP socket, on any address and either family,
+held by any process in the terminal's tree, about every two seconds — the pid
+namespace bwrap made for it on Linux, the wrapper's descendants and its group
+through `ps` and `lsof` on macOS, the Job Object's processes against the TCP
+table on Windows. UDP is left out, there being nothing to connect. Reading
+only loopback binds, or only all-interfaces ones, was rejected: a dev server
+binds whichever its author liked, and either is reachable on the member's
+loopback, which is all a Forward dials. The read runs while a member holds an
+attach on that terminal over the link and not otherwise, the way the watcher
+runs while a pane is attached; and **which member** is the certificate the
+attach came in under, so the member knows whose terminals are whose without
+the hub having to inspect what it bridges — the hub noting its own bridged
+attaches was the other way, and was rejected for being exactly that
+inspection. Where a reader cannot tell, it reads nothing and says so once in
+the log — the opposite of the busy check's rule, because there the cost of a
+wrong *no* is a shell ended under somebody's hands, and here it is a port not
+forwarded.
+
+**Sniffing the terminal's output alone was rejected**: VS Code reads printed
+`http://localhost:3000` lines, which catches a server the moment it prints and
+misses one that prints nothing. **But a printed URL hurries the read** — a
+`localhost`, `127.0.0.1`, `0.0.0.0` or `[::1]` URL with a port, in the bytes
+on their way to the terminal's screen, wakes the read rather than leaving it to
+the next turn, so a server that says it is up is forwarded about when it says
+so. **And it forwards nothing by itself.** A printed port whose listener is
+outside the terminal's tree — a container's, a daemon's — forwarding where
+anything on the member listens there was the other way and was rejected: the
+reading is what a member will connect, below, and a line of output is not
+something anybody should be able to widen that with.
+
+**The member connects only what it reports, to a device attached to that
+terminal.** Each connection accepted on the hub's listener is one upgrade over
+the link, naming the terminal and the port; the member dials its own loopback
+and joins the two byte for byte, and refuses by name a port not in the
+terminal's reading, a terminal the caller holds no attach on, and this
+device's own browser — before anything is dialled. Connecting any loopback port
+a member asks for, the link being trusted, was rejected: it would make every
+member a way into every other's loopback — its build cache, its workbench —
+with a terminal tab as the pretext. A port that answered the reading and
+refuses the dial is a refusal of the upgrade, not a socket that carries
+nothing.
+
+**Its life is the attach's, with the watcher's grace.** A Forward ends two
+seconds after it leaves the reading, and leaving the reading is every ending
+there is — the attach let go of, the port closing, the terminal ending — and at
+once where the member reads as unreachable, there being nothing to connect to.
+Ending closes the listener and every connection crossing it. Two seconds is the
+watcher's, for the watcher's reason: the pane is taken down on every pane swap
+and comes straight back. About thirty seconds, so that a reload kept the
+connections open across it, was rejected — a tab closed on purpose would leave
+a port on this machine answering for half a minute after; and none at all was
+rejected, a pane swap then being a dropped connection.
+
+**Said at the sidebar's foot, and never stopped by hand.** *Forwarding 3 ports*
+stands beside *Show archived* while this device holds any Forward, forwarding
+or skipped, and is not drawn at none — an item that opens onto nothing is one
+nobody needs to press. A press lists each as a link to `localhost` on its port,
+with the device, its OS mark and the Conversation's title; a skipped one is
+dimmed and says why. That reading and its `forwards` Nudge are this device's
+own and are not served over the link. No row has a control: closing the tab is
+the stop. A × per row, and a × beside a switch turning forwarding off for a
+device, were both rejected for this build — the Brief asked for it automatic,
+and a port somebody never wants on this machine is a case nobody has met yet.
+
 ## What Code is not
 
 Everything ADR-0013 said a terminal is not. **Not a record**: no Capture, no
