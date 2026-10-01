@@ -394,21 +394,31 @@ describe("the languages as the pane draws them", () => {
     await waitFor(() => expect(theCheck().checked).toBe(true));
   });
 
-  /// The size is sccache's own word, so a server without one has nothing to
-  /// read it — and the field is greyed rather than taken away, because the
-  /// setting has not gone anywhere.
-  it("greys the size where there is no sccache to read it", async () => {
+  /// With no sccache the size is still read, by the sweep holding Rust's
+  /// cargo half to it, so the field stays live while Rust is on — beside the
+  /// warning that its compiling is not cached.
+  it("keeps the size live where there is no sccache, for the cargo half", async () => {
     theSettings(UNSET);
     const { container } = mountPane();
 
     await waitFor(() => screen.getByText(/No sccache is installed/));
 
     expect(theCheck().checked).toBe(true);
+    expect(theGroup(container).disabled).toBe(false);
+    expect(theSize().matches(":disabled")).toBe(false);
+    expect(theSave().matches(":disabled")).toBe(false);
+  });
+
+  /// And greyed where Rust is off with no sccache: C/C++ on compiles through
+  /// nothing that reads it, and Rust's own store is the box's that is off.
+  it("greys the size where there is no sccache and Rust is off", async () => {
+    theSettings(off(UNSET));
+    const { container } = mountPane();
+
+    await waitFor(() => expect(theCheck().checked).toBe(false));
+
     expect(theGroup(container).disabled).toBe(true);
     expect(theSize().matches(":disabled")).toBe(true);
-    expect(
-      theSave().matches(":disabled"),
-    ).toBe(true);
   });
 
   /// And greyed again while the box is unticked, which is the other half of the

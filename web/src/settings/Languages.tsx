@@ -63,9 +63,10 @@
 //! A size hangs off the checkbox it belongs to, which is the page's one pattern
 //! for configuration that only means something while something else is on:
 //! indented under that box, and disabled while it is off — see [`Nested`]. On
-//! the language sizing the Compile Server it is disabled for a second reason as
-//! well, and the reason is the warning above it: that size is sccache's own, so
-//! a server with no sccache has nothing to read it.
+//! the language sizing the Compile Server it is live while either language
+//! naming that server is on and there is an sccache to read it, and while the
+//! language itself is on whether or not there is: its cargo half is a store the
+//! sweep holds to the same size, so a server with no sccache still reads it.
 //!
 //! **Its placeholder is that language's own default** — `30G` for Rust, whose
 //! sccache has always been started at it, and `10G` for everything else. And a
@@ -224,7 +225,9 @@ function warned(told: SettingsView | undefined): boolean {
 /// on — this one's box or another's, because the one size is this one's while
 /// either compiles through it — and an sccache being there to read it, as well
 /// as the entry being readable: the size is sccache's own word, so a server
-/// without one has nowhere to put it.
+/// without one has nowhere to put it. **Or that language being on with a store
+/// the sweep holds to the size** — Rust's cargo half — which reads it whether
+/// or not there is an sccache, so a server without one still has a size to set.
 ///
 /// Every one of those is the group's *off*, and the group is drawn greyed
 /// rather than taken away — a field that vanished would say the setting had,
@@ -239,6 +242,13 @@ function sizeable(
 
   if (language.compiling === null) {
     return language.enabled;
+  }
+
+  if (
+    language.enabled &&
+    language.stores.some((store) => store.eviction === "ByUnit")
+  ) {
+    return true;
   }
 
   return (
