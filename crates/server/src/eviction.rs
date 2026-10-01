@@ -866,10 +866,25 @@ languages:
     fn dated(path: &Path, days: u64) {
         let when = SystemTime::now() - Duration::from_secs(days * 24 * 60 * 60);
 
-        std::fs::File::options()
-            .write(!path.is_dir())
-            .read(true)
-            .open(path)
+        let mut open = std::fs::OpenOptions::new();
+
+        open.write(!path.is_dir()).read(true);
+
+        // Both of which Windows wants asked for by name, as the transcript's
+        // suite says: a directory cannot be opened at all without backup
+        // semantics, and a read handle carries no right to write its times.
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+
+            const FILE_WRITE_ATTRIBUTES: u32 = 0x0100;
+            const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+
+            open.access_mode(FILE_WRITE_ATTRIBUTES)
+                .custom_flags(FILE_FLAG_BACKUP_SEMANTICS);
+        }
+
+        open.open(path)
             .unwrap()
             .set_times(
                 std::fs::FileTimes::new()
