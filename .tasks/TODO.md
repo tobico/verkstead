@@ -17,4 +17,4 @@ Roadmap stage: [06: A Gradle daemon of Verkstead's own](docs/roadmaps/language-c
 
 - [x] 01: The spike — [details](01-the-spike.md)
 - [x] 02: The grilling — [details](02-the-grilling.md)
-- [ ] 03: The docs — [details](03-the-docs.md)
+- [x] 03: The docs — [details](03-the-docs.md)

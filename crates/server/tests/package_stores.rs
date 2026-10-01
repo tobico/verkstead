@@ -6142,8 +6142,9 @@ async fn one_session_beside_anothers_daemon(
 ///   descriptor says without its second variable.
 /// - And an explicit `--daemon` in both sessions, with `GRADLE_OPTS` in place.
 ///   The command line beats the variable, and **that is accepted rather than
-///   defeated**: the failure is loud, and the way to close it for good is the
-///   daemon of Verkstead's own. This line is here so that it stays a known hole
+///   defeated**: the failure is loud, and stage 06 found that a daemon of
+///   Verkstead's own would not close it and turned down the per-session
+///   registry that would. This line is here so that it stays a known hole
 ///   rather than a surprise.
 ///
 /// The first session builds, leaves its daemon up and waits. The second builds

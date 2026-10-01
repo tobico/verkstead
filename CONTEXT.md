@@ -1018,7 +1018,8 @@ had to describe in YAML too. Behaviour is a **capability** built
 into the server and switched on by name — `sccache`, which is the **Compile
 Server**, and Rust's and C/C++'s descriptors both name it. The JVM's names
 none: turning Gradle's daemon off and Maven's cross-process locking on both
-turned out to be variables. A capability's variables are set only
+turned out to be variables, and a Gradle daemon of Verkstead's own, which would
+have been one, was measured and found unsound. A capability's variables are set only
 where this server can offer it, so a language keeps its own on a machine that
 cannot and loses only the capability's; and a name this server has never heard
 of is a capability it cannot offer rather than a file it refuses, so a
@@ -1091,7 +1092,9 @@ for a store nothing has to share a filesystem with: Rust's descriptor puts
 everything of theirs that nothing hardlinks out of there too, the JVM puts
 Maven's repository and Gradle's home there — with Gradle's daemon off in a
 session, a daemon registered in one shared home being one another Sandbox's
-build could run inside — and a language
+build could run inside, and no daemon of Verkstead's own in its place, since
+any session that missed it would register one of its own there anyway — and a
+language
 added after them reaches the same directory by writing the same placeholder.
 **Writable is the point and the cost of it**: a store two Conversations share
 is one either of them can plant a package in for the other to install, which is

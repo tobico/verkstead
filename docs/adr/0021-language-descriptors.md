@@ -35,7 +35,8 @@ into the server, which a descriptor switches on by name. *(Amended by stage 04:
 Gradle turned out to need none. Its daemon is switched off, and Maven's
 cross-process locking on, with variables alone — see [Gradle's daemon is off in
 a session](#gradles-daemon-is-off-in-a-session) — so `sccache` is still the one
-capability there is.)* Rejected: descriptors
+capability there is. Stage 06 kept it so: the daemon of Verkstead's own it
+measured would have been a capability, and was not built.)* Rejected: descriptors
 that name commands, which would make `config.yaml` a place programs are
 started from, in a Sandbox somebody would then have to describe in YAML too.
 Rejected as well: descriptors compiled into the server, and a Rust trait with a
@@ -168,7 +169,8 @@ daemon holds memory for hours. That stage may end with the daemon staying off.
   `--daemon` can attach to it. A build with the daemon off never looks there,
   so it cannot — measured, and proven beside the hole in the suite. That
   hole is **accepted and documented** rather than closed: the failure it causes
-  is loud, and a daemon of Verkstead's own is what would close it for good.
+  is loud. *(Stage 06 found that a daemon of Verkstead's own would not close
+  it — see below.)*
   `-Dorg.gradle.daemon.registry.base` pointed at a directory per Sandbox was
   tried and does close it, and was **turned down**: it is undocumented, so it
   may go in any release, and the obvious value — a literal `/tmp` — is only per
@@ -182,6 +184,42 @@ daemon holds memory for hours. That stage may end with the daemon staying off.
   script one session writes runs in the others' builds — the case under *What
   is accepted* below, extended to build logic.
 - **Kotlin needs nothing of its own.** Kotlin/Native's `~/.konan` is left out.
+
+**Amended by stage 06: the daemon stays off.** The stage's spike measured a
+daemon of Verkstead's own, and the per-session registry beside it, against
+Gradle 8.14.4 and 9.4.1 on OpenJDK 21 (with 17 and 25 for the mismatches), in
+Sandboxes rendered with Verkstead's own flags and a daemon Sandbox shaped like
+the Compile Server's. The findings, the rig and every probe are in
+[the spike's findings](../roadmaps/language-caches/06-spike-findings.md).
+
+- **A daemon of Verkstead's own is unsound, and was not built.** A matching
+  client does attach to it, and a warm build takes 0.2–0.3 s against 1 s. But
+  a client that differs in Gradle version, JDK, `org.gradle.jvmargs`, locale
+  or Gradle 9's Daemon JVM criteria — or that merely finds it busy with
+  another session's build — forks a daemon of its own inside its session's
+  Sandbox and registers it in the shared home, and nothing a session can be
+  given stops that: a read-only registry fails every build, and Gradle has no
+  attach-only client. Another session's build then lands there and fails with
+  *could not setcwd()*, which is stage 04's hazard back without anyone saying
+  `--daemon`. Gradle also retired Verkstead's daemon by itself once a
+  compatible one was idle beside it. And a build that does reach it runs in
+  its Sandbox: every Worktree writable, its Kotlin compile daemon shared, and
+  none of the session's binds, `HOME`, `/tmp` or Repo `.git`. That is a wider
+  crossing than the Compile Server's, because Gradle runs a Repo's code where
+  sccache runs a compiler on paths it is handed. Each daemon is about a
+  gigabyte once it has built anything, idle for three hours, holding jars the
+  Sweep would take.
+- **The per-session registry works, and was not taken either.**
+  `-Dorg.gradle.daemon.registry.base` pointed at the session's own `/tmp`
+  kept each session's daemon to itself on both Gradles, beat a Repo's
+  `gradle.properties`, closed the `--daemon` hole, and gave a Kotlin rebuild
+  in 0.4 s against 3 s. The human chose against it: it rests on a property
+  Gradle does not document, which is why stage 04 turned it down.
+- **So the daemon stays off**, as stage 04 left it, which is safe and costs
+  about 1 s on every build and about 3 s on a Kotlin rebuild. The `jvm`
+  descriptor still names no capability, and **the explicit `--daemon` hole is
+  still accepted** rather than closed: the per-session registry is the one
+  measured way to close it, and it is the one turned down.
 
 ## Eviction is by whole units
 
@@ -261,7 +299,9 @@ is that by construction, it is already true of Rust's, and the machine is one
 person's. The documentation says so. A shared Gradle home extends it to init
 scripts and properties, which run in every session's Gradle builds; and an
 explicit `gradle --daemon` can still put one session's build in another's
-Sandbox, which fails loudly rather than quietly.
+Sandbox, which fails loudly rather than quietly. Stage 06 left that hole open:
+a daemon of Verkstead's own would not close it, and the per-session registry
+that would rests on an undocumented property.
 
 ## How it is proven
 

@@ -1000,10 +1000,18 @@ languages:
       # **An explicit `--daemon` on the command line still beats it**, and
       # registers in the shared home again, where another session's build
       # reaches it only by saying `--daemon` too: with the daemon off, Gradle
-      # never looks. That is accepted rather than worked
-      # around: the failure it causes is loud, and a daemon of Verkstead's own
-      # is what would close it for good. `-Dorg.gradle.daemon.registry.base`
-      # closes it too, and was turned down: it is undocumented.
+      # never looks. That is accepted rather than worked around: the failure
+      # it causes is loud.
+      #
+      # **Stage 06 left it so, on 8.14.4 and 9.4.1.** A daemon of Verkstead's
+      # own in a Sandbox of its own does not close the hole: a client that
+      # differs from it in Gradle version, JDK, jvmargs or locale, or finds it
+      # busy, forks its own daemon in its session and registers that in the
+      # shared home anyway, and a build that does reach it runs where every
+      # Worktree is and none of its session's binds are. The per-session
+      # registry, `-Dorg.gradle.daemon.registry.base` at the Sandbox's own
+      # `/tmp`, does close it and keeps most of a daemon's speed, and was
+      # turned down twice: Gradle does not document it. See ADR-0021.
       #
       # **Gradle's build cache is the Repo's to switch on.** Its local
       # directory is `caches/build-cache-1` inside the home above (measured

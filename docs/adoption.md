@@ -1367,11 +1367,17 @@ session is given `-Dorg.gradle.daemon=false`, which beats
 `org.gradle.daemon=true` in a Repo's own `gradle.properties` or in the shared
 home's. Gradle then runs each build in a single-use daemon inside the session's
 own Sandbox, gone when the build ends and registered nowhere. **Every Gradle
-invocation pays for a JVM starting up**, which is what this costs. [Stage 06 of
-the language caches
-roadmap](roadmaps/language-caches/06-a-gradle-daemon-of-verksteads-own.md) — a
-Gradle daemon Verkstead runs in a Sandbox of its own — is where that may change,
-and it may end with the daemon staying off.
+invocation pays for a JVM starting up**, which is what this costs: about a
+second on a trivial build and a few seconds on a Kotlin rebuild, measured
+against a fifth of that with a warm daemon. **And it stays that way.** A Gradle
+daemon Verkstead runs in a Sandbox of its own was measured and turned down: any
+build that differed from it in Gradle version, JDK, `org.gradle.jvmargs` or
+locale, or found it busy, started a daemon of its own in the shared home anyway,
+and a build that did reach it ran without its session's binds, `HOME` or `.git`
+and beside every other Conversation's Worktree. A daemon per session, kept to
+its own Sandbox, worked but rests on a property Gradle does not document, and
+was turned down too. [The measurements are in the
+roadmap](roadmaps/language-caches/06-spike-findings.md).
 
 **An explicit `gradle --daemon` still gets a daemon.** The command line beats
 the environment, so a build started that way registers in the shared home
@@ -1382,7 +1388,7 @@ single-use daemon of its own whatever is idle beside it, but another session's
 error above. That is accepted
 rather than worked around: the failure is loud rather than a build quietly
 running in the wrong place, and `gradle --stop` in any session, or the daemon's
-own idle timeout, puts it right. Leave
+own idle timeout, puts it right. Nothing Verkstead does closes it. Leave
 `--daemon` out of a session's commands and out of a Repo's scripts.
 
 **Gradle's build cache is shared only for Repos that switch it on.** Its local
