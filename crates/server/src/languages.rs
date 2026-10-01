@@ -559,6 +559,18 @@ pub struct Descriptor {
     #[serde(default, skip_serializing_if = "Ordered::is_empty")]
     capabilities: Ordered<Capability>,
 
+    /// The directories that are this language's **store**, by a name of the
+    /// descriptor's own — what is measured for the settings page's disk use,
+    /// and what is bounded by the language's size.
+    ///
+    /// Named here rather than read back out of the variables above, because a
+    /// variable is not always a path: Maven's repository is a flag inside the
+    /// line of JVM options in `MAVEN_OPTS`. A `None` is a `null` in the file,
+    /// which takes a store out the way a `null` takes out a variable — see
+    /// [`Descriptor::merged`].
+    #[serde(default, skip_serializing_if = "Ordered::is_empty")]
+    stores: Ordered<Option<Store>>,
+
     /// And why nothing above was taken from the file, where this entry would
     /// not load — with what the file said, so it can go back as written.
     ///
@@ -609,11 +621,12 @@ impl Descriptor {
     /// front of it — see [`crate::ui`], and the pane it reaches.
     fn read(written: Raw) -> Descriptor {
         let why = match Descriptor::parsed(&written) {
-            Ok(descriptor) => match descriptor.refuses() {
-                Some(name) => {
+            Ok(descriptor) => match (descriptor.refuses(), descriptor.misplaced()) {
+                (Some(name), _) => {
                     format!("sets {name}, which is a variable the Sandbox sets itself")
                 }
-                None => return descriptor,
+                (None, Some(why)) => why,
+                (None, None) => return descriptor,
             },
             Err(why) => why,
         };
@@ -660,6 +673,24 @@ impl Descriptor {
             )
             .map(|(name, _)| name)
             .find(|name| crate::sandbox::sets_itself(name))
+    }
+
+    /// Why a store this entry names is not one, where one is not — a clause, in
+    /// the words [`Descriptor::read`] gives the page.
+    ///
+    /// **A store is a directory under `{cache}` or `{stores}`, and nothing
+    /// else**, because what is done to a store is delete what is in it: a store
+    /// named anywhere else is a sweep reaching into somebody's home. So the
+    /// path is checked as it is written, before any machine fills it in — see
+    /// [`placed`].
+    fn misplaced(&self) -> Option<String> {
+        self.stores.iter().find_map(|(name, store)| {
+            let dir = store.as_ref()?.dir.as_deref()?;
+
+            placed(dir)
+                .err()
+                .map(|why| format!("names {dir} as its store {name}, {why}"))
+        })
     }
 
     /// Why this language's entry in `config.yaml` was not used, where it was
@@ -743,18 +774,45 @@ impl Descriptor {
     /// variables, and that server's store is sized by Rust's entry — see
     /// [`Languages::wanting`].
     pub fn has_store(&self) -> bool {
-        self.env
+        self.names_a_store()
+            || self
+                .env
+                .iter()
+                .chain(
+                    self.capabilities
+                        .iter()
+                        .flat_map(|(_, entry)| entry.env.iter()),
+                )
+                .any(|(_, value)| {
+                    value
+                        .as_deref()
+                        .is_some_and(|value| value.contains(CACHE) || value.contains(STORES))
+                })
+    }
+
+    /// Whether this descriptor names a store directory at all — which is what
+    /// says there is anything to measure on the settings page. An installer's
+    /// descriptor naming none is still a descriptor: its variables are given
+    /// all the same, and the page says nothing is measured.
+    pub fn names_a_store(&self) -> bool {
+        self.store_dirs().next().is_some()
+    }
+
+    /// Every directory this language names as its store, as written, by the
+    /// name it is keyed under — a `null`ed one and one with no `dir` left out.
+    fn store_dirs(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.stores
             .iter()
-            .chain(
-                self.capabilities
-                    .iter()
-                    .flat_map(|(_, entry)| entry.env.iter()),
-            )
-            .any(|(_, value)| {
-                value
-                    .as_deref()
-                    .is_some_and(|value| value.contains(CACHE) || value.contains(STORES))
-            })
+            .filter_map(|(name, store)| Some((name, store.as_ref()?.dir.as_deref()?)))
+    }
+
+    /// And those directories on `machine`, keyed the same way, in the order
+    /// they were written. A directory [`Descriptor::misplaced`] would refuse is
+    /// left out, though a descriptor holding one never loads.
+    pub fn stores(&self, machine: &Machine) -> Vec<(String, PathBuf)> {
+        self.store_dirs()
+            .filter_map(|(name, dir)| Some((name.to_owned(), machine.store(dir)?)))
+            .collect()
     }
 
     /// Whether this descriptor names `capability`, whatever this machine can
@@ -795,6 +853,16 @@ impl Descriptor {
                 &over.capabilities,
                 Capability::merged,
                 Capability::clone,
+            ),
+            // And a store in both merged in its turn, a `null` taking it out —
+            // the variables' rule, one level further down.
+            stores: self.stores.merged(
+                &over.stores,
+                |held, over| match (held, over) {
+                    (Some(held), Some(over)) => Some(held.merged(over)),
+                    (_, over) => over.clone(),
+                },
+                Clone::clone,
             ),
             // And why the override said nothing, where it said nothing because
             // it would not load. Carried rather than merged into: what it is
@@ -859,6 +927,63 @@ impl Capability {
     }
 }
 
+/// One directory of a language's store, as the file says it.
+///
+/// A mapping rather than the bare path, because a store says more about itself
+/// than where it is — how it is bounded is the next thing — and a grammar that
+/// grew a mapping out of a string later would be two grammars for one key.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Store {
+    /// Where it is: `{cache}/…` or `{stores}/…`, and nowhere else — see
+    /// [`placed`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    dir: Option<String>,
+}
+
+impl Store {
+    /// `over` written over this, key by key.
+    fn merged(&self, over: &Store) -> Store {
+        Store {
+            dir: over.dir.clone().or_else(|| self.dir.clone()),
+        }
+    }
+}
+
+/// Which placeholder a store's directory is under, and the path below it — or
+/// why it is not a directory a store can be, as a clause.
+///
+/// The placeholder first and alone, then at least one segment under it, and no
+/// segment that is empty, `.`, `..` or another placeholder: a store **is**
+/// somewhere under the Build Cache or the directory beside the Worktrees, and
+/// never one of those two whole — each holds every other language's store too.
+fn placed(dir: &str) -> Result<(&'static str, &str), String> {
+    let refused = || {
+        format!(
+            "and a store is a directory under {CACHE} or {STORES}, written as one of the \
+             two, a `/` and the path beneath it"
+        )
+    };
+
+    let (placeholder, rest) = [CACHE, STORES]
+        .into_iter()
+        .find_map(|placeholder| {
+            Some((
+                placeholder,
+                dir.strip_prefix(placeholder)?.strip_prefix('/')?,
+            ))
+        })
+        .ok_or_else(refused)?;
+
+    match rest
+        .split('/')
+        .all(|segment| !matches!(segment, "" | "." | "..") && !segment.contains('{'))
+    {
+        true => Ok((placeholder, rest)),
+        false => Err(refused()),
+    }
+}
+
 /// What this machine can put behind the placeholders, and which capabilities it
 /// can offer.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -884,6 +1009,23 @@ impl Machine {
             stores: stores(data_dir),
             sccache,
         }
+    }
+
+    /// The directory a store written as `dir` is on this machine, composed a
+    /// segment at a time the way this platform composes a path — or `None`
+    /// where `dir` is not a store's at all — see [`placed`].
+    pub fn store(&self, dir: &str) -> Option<PathBuf> {
+        let (placeholder, rest) = placed(dir).ok()?;
+
+        let base = match placeholder {
+            CACHE => &self.cache,
+            _ => &self.stores,
+        };
+
+        Some(
+            rest.split('/')
+                .fold(base.clone(), |path, segment| path.join(segment)),
+        )
     }
 
     /// Whether this server has the behaviour behind `capability`.
@@ -2546,6 +2688,191 @@ mod tests {
                 .map(|(name, _)| name.as_str())
                 .collect::<Vec<_>>(),
             ["ZZZ", "AAA", "MMM"],
+        );
+    }
+
+    /// Each built-in's stores by name, as directories of this machine.
+    fn stores_of(languages: &Languages, name: &str) -> Vec<(String, String)> {
+        languages
+            .get(name)
+            .unwrap()
+            .stores(&machine(true))
+            .into_iter()
+            .map(|(store, dir)| (store, dir.display().to_string()))
+            .collect()
+    }
+
+    /// Every built-in names the directories that are its store, and C/C++,
+    /// whose objects are the Compile Server's, names none.
+    #[test]
+    fn every_built_in_names_its_own_stores() {
+        let named = |pairs: &[(&str, String)]| -> Vec<(String, String)> {
+            pairs
+                .iter()
+                .map(|(name, dir)| ((*name).to_owned(), dir.clone()))
+                .collect()
+        };
+
+        assert_eq!(
+            stores_of(built_in(), RUST),
+            named(&[("cargo", cached("cargo")), ("sccache", cached("sccache"))]),
+        );
+        assert_eq!(
+            stores_of(built_in(), GO),
+            named(&[("modules", cached("go/mod")), ("build", cached("go/build"))]),
+        );
+        assert_eq!(
+            stores_of(built_in(), NODE),
+            named(&[
+                ("npm", cached("npm")),
+                ("pnpm", stored("pnpm")),
+                ("pnpm-metadata", cached("pnpm/metadata")),
+                ("yarn", cached("yarn/cache")),
+                ("yarn-berry", cached("yarn/global")),
+                ("deno", stored("deno")),
+                ("bun", stored("bun")),
+            ]),
+        );
+        assert_eq!(
+            stores_of(built_in(), PYTHON),
+            named(&[
+                ("pip", cached("pip")),
+                ("uv", stored("uv")),
+                ("poetry", cached("poetry")),
+                ("pipenv", cached("pipenv")),
+            ]),
+        );
+        assert_eq!(
+            stores_of(built_in(), DOTNET),
+            named(&[
+                ("packages", cached("nuget/packages")),
+                ("http", cached("nuget/http")),
+                ("scratch", cached("nuget/scratch")),
+            ]),
+        );
+        assert_eq!(
+            stores_of(built_in(), JVM),
+            named(&[
+                ("maven", cached("maven/repository")),
+                ("gradle", cached("gradle")),
+            ]),
+        );
+        assert!(
+            stores_of(built_in(), CPP).is_empty(),
+            "C/C++'s objects are the one Compile Server's, which is Rust's store",
+        );
+    }
+
+    /// And every store a built-in names is a directory one of its own variables
+    /// already points a tool at, so the list cannot drift from what is given.
+    #[test]
+    fn every_built_in_store_is_a_directory_its_variables_name() {
+        let given = built_in().given(&machine(true));
+
+        for (language, descriptor) in built_in().iter() {
+            for (store, dir) in descriptor.stores(&machine(true)) {
+                let dir = dir.display().to_string();
+
+                assert!(
+                    given.env().iter().any(|(_, value)| value.contains(&dir)),
+                    "{language}'s store {store}, {dir}, is named by no variable",
+                );
+            }
+        }
+    }
+
+    /// An installer adds a store by naming it and takes one out with a `null`,
+    /// key by key, and the rest of the built-in's stay as they were.
+    #[test]
+    fn an_installer_adds_a_store_or_takes_one_out_key_by_key() {
+        let loaded = built_in().merged(&written(
+            "languages:\n  go:\n    stores:\n      build: null\n      vendor:\n        \
+             dir: \"{cache}/go/vendor\"\n",
+        ));
+
+        assert_eq!(
+            stores_of(&loaded, GO),
+            [
+                (String::from("modules"), cached("go/mod")),
+                (String::from("vendor"), cached("go/vendor")),
+            ],
+        );
+        assert_eq!(
+            loaded.given(&machine(true)).env(),
+            built_in().given(&machine(true)).env(),
+            "and what a session is given is the variables' business, not the stores'",
+        );
+    }
+
+    /// A descriptor naming no store is a descriptor all the same: its variables
+    /// are given, and there is nothing of it to measure.
+    #[test]
+    fn a_descriptor_naming_no_store_is_still_one() {
+        let loaded =
+            written("languages:\n  gleam:\n    env:\n      GLEAM_CACHE: \"{cache}/gleam\"\n");
+        let gleam = loaded.get("gleam").unwrap();
+
+        assert_eq!(gleam.unread(), None);
+        assert!(!gleam.names_a_store());
+        assert!(
+            gleam.has_store(),
+            "it still has a size: its variable is in the Build Cache"
+        );
+        assert_eq!(
+            loaded.given(&machine(true)).env(),
+            [(String::from("GLEAM_CACHE"), cached("gleam"))],
+        );
+    }
+
+    /// A store anywhere but under `{cache}` or `{stores}` is refused, the entry
+    /// falling back to the built-in: what is done to a store is delete what is
+    /// in it.
+    #[test]
+    fn a_store_outside_verksteads_own_directories_is_refused() {
+        for dir in [
+            "/home/someone",
+            "{cache}",
+            "{cache}/",
+            "{stores}/../worktrees",
+            "{cache}/go//mod",
+            "{cache}/{stores}/x",
+            "~/go/{cache}",
+        ] {
+            let loaded = built_in().merged(&written(&format!(
+                "languages:\n  go:\n    stores:\n      modules:\n        dir: \"{dir}\"\n",
+            )));
+
+            let why = loaded
+                .get(GO)
+                .unwrap()
+                .unread()
+                .unwrap_or_else(|| panic!("{dir} was taken as a store"));
+
+            assert!(
+                why.starts_with(&format!("names {dir} as its store modules")),
+                "the reason names the directory: {why}",
+            );
+            assert_eq!(
+                stores_of(&loaded, GO),
+                stores_of(built_in(), GO),
+                "and the language runs on the built-in's stores",
+            );
+        }
+    }
+
+    /// And a key a store does not have is refused like any other.
+    #[test]
+    fn a_key_a_store_does_not_have_is_refused_too() {
+        let loaded = built_in().merged(&written(
+            "languages:\n  go:\n    stores:\n      modules:\n        path: \"{cache}/x\"\n",
+        ));
+
+        assert!(
+            loaded
+                .get(GO)
+                .unwrap()
+                .unread()
+                .is_some_and(|why| why.contains("path")),
         );
     }
 }

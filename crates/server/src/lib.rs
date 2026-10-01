@@ -75,6 +75,8 @@ mod diffs;
 /// to whoever is on the wire is the product's own boundary, and a suite that
 /// browses for it is standing where another Verkstead stands.
 pub mod discovery;
+/// How much each language's store holds on disk, measured in the background.
+mod disk_use;
 /// Whether this process has a display to draw on — a window station somebody is
 /// looking at, or a Linux session that names one.
 ///
@@ -533,6 +535,10 @@ pub(crate) struct AppState {
     /// the moment they are wanted, so the settings page and the next session to
     /// spawn see the same thing — see [`settings`].
     settings: settings::Settings,
+
+    /// What each language's store held when it was last measured — see
+    /// [`disk_use`].
+    disk_use: disk_use::DiskUse,
 
     /// Where Verkstead keeps what it makes — the worktrees, for now. Not one of
     /// the directories the human points Verkstead at: this is the one Verkstead
@@ -1426,6 +1432,7 @@ fn standing(
         // at the moment they are wanted, so what the settings page saves reaches
         // the next session without a restart — see [`settings`].
         settings: settings::Settings::in_data_dir(&data_dir),
+        disk_use: disk_use::DiskUse::default(),
         nudges,
         settlements: Settlements::new(SETTLEMENT_BACKLOG),
         waits: Waits::new(),
@@ -1548,6 +1555,11 @@ fn standing(
     // which is the one sweep that takes something away rather than writing
     // something down. See [`cleanup`].
     cleanup::sweeping(&state);
+
+    // And how much each language's store holds, measured in the background so
+    // that the settings page reading it never waits on a walk of a disk. See
+    // [`disk_use`].
+    disk_use::measuring(&state);
 
     // And a listener on the one channel a Set is settled through, so that a
     // session idling on a stored ask is told its Answers have landed whether the

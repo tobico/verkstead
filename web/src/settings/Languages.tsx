@@ -90,6 +90,14 @@
 //! is what the server last gave it, per language, for both keys — see
 //! [`heldLanguages`].
 //!
+//! **And beside the size, what the store holds now.** The server measures each
+//! language's store directories in the background and hands over the last
+//! figure, so what is drawn is how much was there when it last looked — or that
+//! it has not looked yet, which a server that has just started says until its
+//! first walk is done. A language whose descriptor names no store directory
+//! says that instead: its variables are given, but nothing says where they
+//! write, so there is nothing to measure.
+//!
 //! Everything goes through the one settings endpoint, which writes both files:
 //! the author rides along as it stands and the token is left alone, so saving a
 //! store size cannot lose either.
@@ -109,6 +117,7 @@ import { Check, Nested } from "../Check";
 import { PaneSticky } from "../Panes";
 import { loadSettings, saveSettings } from "../api/client";
 import type {
+  DiskUse,
   LanguageEdit,
   LanguageView,
   SettingsSaved,
@@ -238,6 +247,43 @@ function sized(
     language.store ||
     (language.compiling !== null && sizer(told)?.name === language.name)
   );
+}
+
+/// `bytes` in the size grammar's own units — `K`, `M`, `G`, `T`, binary
+/// multiples — so a figure reads against the size beside it without a
+/// conversion: `9.6G` of `10G`. One decimal under ten of a unit, where the
+/// decimal is most of what there is to read, and whole numbers above.
+export function bytesSaid(bytes: number): string {
+  const units = ["K", "M", "G", "T"];
+
+  if (bytes < 1024) {
+    return `${bytes} bytes`;
+  }
+
+  let value = bytes / 1024;
+  let unit = 0;
+
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+
+  const said = value < 10 ? value.toFixed(1) : Math.round(value).toString();
+
+  return `${said}${units[unit]}`;
+}
+
+/// What a language's store holds on disk, as a sentence under its size.
+function held(disk: DiskUse): string {
+  if (disk === "NoStore") {
+    return "Its descriptor names no store directory, so what it holds on disk is not measured.";
+  }
+
+  if (disk === "NotMeasured") {
+    return "Not measured yet.";
+  }
+
+  return `Holds ${bytesSaid(disk.Measured.bytes)} on disk.`;
 }
 
 /// The language whose size the one Compile Server is started at: the first
@@ -569,6 +615,10 @@ export function LanguagesPane(props: {
                               Save
                             </button>
                           </div>
+
+                          {/* And what the store holds now, beside the size it
+                              is held to. */}
+                          <p class={styles.held}>{held(language.disk_use)}</p>
 
                           <Show when={refused()[language.name]}>
                             {(why) => (

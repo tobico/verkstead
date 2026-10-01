@@ -46,7 +46,7 @@ use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
 use tower::ServiceExt;
 use verkstead_render::{
-    CompileCaching, ConflictResolution, IgnoreRule, LanguageView, McpHeader, McpServer,
+    CompileCaching, ConflictResolution, DiskUse, IgnoreRule, LanguageView, McpHeader, McpServer,
     PathResolution, PathSource, RuleField, RunningOn, ServerField, SettingsSaved, SettingsView,
     Verified,
 };
@@ -777,6 +777,23 @@ async fn every_language_with_a_store_is_sized_at_its_own_default() {
         assert!(!language.size_configured, "{}", language.name);
         assert_eq!(language.size_unread, None, "{}", language.name);
         assert_eq!(language.store, store, "{}", language.name);
+    }
+}
+
+/// Every language naming a store has a disk use on the page, and on a server
+/// that has not measured it the page is told so rather than kept waiting;
+/// C/C++, naming none, has nothing to measure.
+#[tokio::test]
+async fn a_store_not_yet_measured_says_so_and_cpp_has_none() {
+    let (_dir, app) = app().await;
+
+    for language in settings(&app).await.languages {
+        let expected = match language.name.as_str() {
+            "cpp" => DiskUse::NoStore,
+            _ => DiskUse::NotMeasured,
+        };
+
+        assert_eq!(language.disk_use, expected, "{}", language.name);
     }
 }
 

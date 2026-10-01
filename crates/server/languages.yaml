@@ -77,6 +77,19 @@
 # tool outright. A value that is one word is a path, read whole, space and all.
 # See the `jvm` entry, which is where this came from.
 #
+# **A language's store is named as well as given**, under `stores:` — the
+# directories its tools fill, each by a name of the entry's own, with a `dir`
+# that is `{cache}/…` or `{stores}/…` and nowhere else. They are what the
+# settings page measures the disk use of, and what is held to the language's
+# size. Said here rather than read back out of `env`, because a variable is not
+# always a path: Maven's repository is a flag inside the line `MAVEN_OPTS` is.
+# Merged key by key like the rest, so an installer adds a store by naming it
+# and takes one out with a `null`; a descriptor naming none is still a
+# descriptor, and the page says there is nothing of it to measure. A `dir`
+# anywhere but under one of those two placeholders is refused, the entry falling
+# back the way any other refused entry does: what is done to a store is delete
+# what is in it, and nothing outside Verkstead's own directories is that.
+#
 # **Write `/` between the placeholder and what is under it, on every platform.**
 # A descriptor is one file read on three, so the grammar has one separator: what
 # a Windows session is handed is the path its own tools compose, `\` and all.
@@ -112,6 +125,13 @@ languages:
           RUSTC_WRAPPER: "{sccache}"
           SCCACHE_DIR: "{cache}/sccache"
           SCCACHE_CACHE_SIZE: "{size}"
+    # The two halves above, as the directories they are: the downloads and
+    # the Compile Server's objects.
+    stores:
+      cargo:
+        dir: "{cache}/cargo"
+      sccache:
+        dir: "{cache}/sccache"
 
   go:
     # The second language Verkstead ships knowing about, and the first of the
@@ -150,6 +170,11 @@ languages:
     env:
       GOMODCACHE: "{cache}/go/mod"
       GOCACHE: "{cache}/go/build"
+    stores:
+      modules:
+        dir: "{cache}/go/mod"
+      build:
+        dir: "{cache}/go/build"
 
   node:
     # The JavaScript ecosystem, and the second of the package stores. One entry
@@ -337,6 +362,22 @@ languages:
       YARN_GLOBAL_FOLDER: "{cache}/yarn/global"
       DENO_DIR: "{stores}/deno"
       BUN_INSTALL_CACHE_DIR: "{stores}/bun"
+    # And the seven directories those name, one store apiece.
+    stores:
+      npm:
+        dir: "{cache}/npm"
+      pnpm:
+        dir: "{stores}/pnpm"
+      pnpm-metadata:
+        dir: "{cache}/pnpm/metadata"
+      yarn:
+        dir: "{cache}/yarn/cache"
+      yarn-berry:
+        dir: "{cache}/yarn/global"
+      deno:
+        dir: "{stores}/deno"
+      bun:
+        dir: "{stores}/bun"
 
   python:
     # Python, and the third of the package stores. One entry for the whole
@@ -492,6 +533,17 @@ languages:
       POETRY_VIRTUALENVS_IN_PROJECT: "true"
       PIPENV_CACHE_DIR: "{cache}/pipenv"
       PIPENV_VENV_IN_PROJECT: "1"
+    # The four caches, and not the two `_IN_PROJECT` switches, which name no
+    # directory of ours: a project's environment is in its own Worktree.
+    stores:
+      pip:
+        dir: "{cache}/pip"
+      uv:
+        dir: "{stores}/uv"
+      poetry:
+        dir: "{cache}/poetry"
+      pipenv:
+        dir: "{cache}/pipenv"
 
   dotnet:
     # .NET, and the last of the package stores. One entry for the ecosystem the
@@ -584,6 +636,13 @@ languages:
       NUGET_PACKAGES: "{cache}/nuget/packages"
       NUGET_HTTP_CACHE_PATH: "{cache}/nuget/http"
       NUGET_SCRATCH: "{cache}/nuget/scratch"
+    stores:
+      packages:
+        dir: "{cache}/nuget/packages"
+      http:
+        dir: "{cache}/nuget/http"
+      scratch:
+        dir: "{cache}/nuget/scratch"
 
   cpp:
     # C and C++, and the second descriptor naming the Compile Server (ADR-0021).
@@ -782,3 +841,11 @@ languages:
       # the account's home rather than `HOME` or the Gradle home, and no
       # Sandbox binds it, so each Sandbox's is its own.
       GRADLE_OPTS: "-Dorg.gradle.daemon=false"
+
+    # Maven's repository, which is the store `MAVEN_OPTS` names inside its
+    # line of flags, and Gradle's home. Not `GRADLE_OPTS`, which names none.
+    stores:
+      maven:
+        dir: "{cache}/maven/repository"
+      gradle:
+        dir: "{cache}/gradle"

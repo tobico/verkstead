@@ -35,7 +35,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SettingsSaved, SettingsView } from "../src/api/types";
 import card from "../src/CardButton.module.css";
 import check from "../src/Check.module.css";
-import { LanguagesCard, LanguagesPane } from "../src/settings/Languages";
+import {
+  LanguagesCard,
+  LanguagesPane,
+  bytesSaid,
+} from "../src/settings/Languages";
 import styles from "../src/settings/Languages.module.css";
 import { json, serving, whenever } from "./serving";
 import told from "./fixtures/settings.json" with { type: "json" };
@@ -644,6 +648,44 @@ describe("the languages as the pane draws them", () => {
     )) as HTMLInputElement;
 
     expect(field.value).toBe("50G");
+  });
+
+  /// What each store holds, beside its size: the last figure the server
+  /// measured, that it has not measured one yet, or — for a descriptor naming
+  /// no store directory — that there is nothing to measure.
+  it("draws each store's disk use beside its size", async () => {
+    theSettings({
+      ...TOLD,
+      languages: TOLD.languages.map((language) =>
+        language.name === GO
+          ? { ...language, disk_use: { Measured: { bytes: 9.6 * 2 ** 30 } } }
+          : language,
+      ),
+    });
+    mountPane();
+
+    await waitFor(() => screen.getByText("Holds 9.6G on disk."));
+
+    const under = (name: string) =>
+      theSize(name).closest("form")?.querySelector(`.${styles.held}`)
+        ?.textContent;
+
+    expect(under(GO)).toBe("Holds 9.6G on disk.");
+    expect(under(NODE)).toBe("Not measured yet.");
+    expect(under(GLEAM)).toMatch(/names no store directory/);
+  });
+});
+
+describe("saying how much a store holds", () => {
+  /// In the size grammar's own units, so a figure reads against the size
+  /// beside it without a conversion.
+  it("says bytes in K, M, G and T", () => {
+    expect(bytesSaid(0)).toBe("0 bytes");
+    expect(bytesSaid(1023)).toBe("1023 bytes");
+    expect(bytesSaid(1536)).toBe("1.5K");
+    expect(bytesSaid(20 * 2 ** 20)).toBe("20M");
+    expect(bytesSaid(30 * 2 ** 30)).toBe("30G");
+    expect(bytesSaid(2 * 2 ** 40)).toBe("2.0T");
   });
 });
 

@@ -41,8 +41,8 @@ use verkstead_render::{
     CompanionView, CompileCaching, Confirming, ConflictResolution, ConversationArchived,
     ConversationClosed, ConversationEntry, ConversationMove, ConversationSteered,
     ConversationStopped, ConversationUnarchived, ConversationView, Creation, Cursor, DevicesView,
-    DroppedRow, FileDeleted, FileDeleting, FileListsView, FileMade, FileMaking, FileReading,
-    FileRenamed, FileRenaming, FileRootsView, FileStatusView, FileWrite, FileWritten,
+    DiskUse, DroppedRow, FileDeleted, FileDeleting, FileListsView, FileMade, FileMaking,
+    FileReading, FileRenamed, FileRenaming, FileRootsView, FileStatusView, FileWrite, FileWritten,
     FolderListing, GrillingStarted, HeaderEdit, IgnoreRule, IgnoredCommentsEdit, InstallPress,
     LanguageEdit, LanguageView, Lifecycle, Locked, McpHeader, McpServer, McpServerEdit,
     McpServersEdit, Merging, MissedOut, NewAdoption, NewCompanion, NewConversation, NewJoin,
@@ -5694,6 +5694,7 @@ async fn settings(State(state): State<AppState>) -> HttpResponse {
     Json(as_told(
         &state.settings,
         state.sessions.caches_compiles(),
+        &state.disk_use,
         &state.binds,
         taken(&state),
     ))
@@ -5752,6 +5753,10 @@ async fn save_settings(
     // was set, a `gh` run. Everything here is the filesystem or a process, and
     // none of it belongs on the runtime's threads.
     let caches_compiles = state.sessions.caches_compiles();
+
+    // And the stores' disk use as last measured, which is a register rather
+    // than a file and costs a lock to read — see [`crate::disk_use`].
+    let disk_use = state.disk_use.clone();
 
     // And what the installation configured, for the read that rides back with
     // the save: the page draws both sources, and this is not anything a save
@@ -5828,7 +5833,7 @@ async fn save_settings(
                     // How things stand, which is how they stood: nothing was
                     // written, and the page draws the errors over what the human
                     // still has in front of them.
-                    settings: as_told(&settings, caches_compiles, &installed, taking),
+                    settings: as_told(&settings, caches_compiles, &disk_use, &installed, taking),
                     verified: None,
                     refused,
                     refused_servers,
@@ -5994,7 +5999,7 @@ async fn save_settings(
 
         Ok::<_, std::io::Error>((
             SettingsSaved {
-                settings: as_told(&settings, caches_compiles, &installed, taking),
+                settings: as_told(&settings, caches_compiles, &disk_use, &installed, taking),
                 verified,
                 // Nothing turned down: a save that got this far was one there was
                 // nothing wrong with — of either list.
@@ -6094,7 +6099,11 @@ fn compile_caching(cached: bool) -> CompileCaching {
 /// still there: it is running on the descriptor Verkstead ships, or off until
 /// the entry is fixed, and either is something for whoever wrote that file to
 /// see.
-fn languages(loaded: &crate::languages::Languages, caches_compiles: bool) -> Vec<LanguageView> {
+fn languages(
+    loaded: &crate::languages::Languages,
+    caches_compiles: bool,
+    disk_use: &crate::disk_use::DiskUse,
+) -> Vec<LanguageView> {
     loaded
         .iter()
         .map(|(name, descriptor)| LanguageView {
@@ -6116,6 +6125,14 @@ fn languages(loaded: &crate::languages::Languages, caches_compiles: bool) -> Vec
             // where it is not — only a hand-edit can make that so.
             size_unread: descriptor.size_unread(),
             store: descriptor.has_store(),
+            // And what that store holds, as last measured: never measured
+            // here, because a walk of a store is not something a read waits
+            // on — see [`crate::disk_use`].
+            disk_use: match (descriptor.names_a_store(), disk_use.of(name)) {
+                (false, _) => DiskUse::NoStore,
+                (true, None) => DiskUse::NotMeasured,
+                (true, Some(bytes)) => DiskUse::Measured { bytes },
+            },
             // And whether anything reads that size. Not out of the files at
             // all where something does: this is the server's own environment
             // and its own platform, and the one thing on this page the human
@@ -6173,6 +6190,7 @@ fn stored(resolution: ConflictResolution) -> store::ConflictResolution {
 fn as_told(
     settings: &crate::settings::Settings,
     caches_compiles: bool,
+    disk_use: &crate::disk_use::DiskUse,
     binds: &crate::sandbox::SandboxConfig,
     taking: usize,
 ) -> SettingsView {
@@ -6193,7 +6211,11 @@ fn as_told(
         // see [`crate::languages::configured`]. So a language an installer
         // wrote a descriptor for has a box on this page without anything here
         // knowing its name.
-        languages: languages(&crate::languages::configured(&config), caches_compiles),
+        languages: languages(
+            &crate::languages::configured(&config),
+            caches_compiles,
+            disk_use,
+        ),
         // And the Cleanup's two rows, each read the way the size above is: the
         // days configured where somebody typed them, and the fallback with the
         // flag beside it saying so, because a value nobody chose should be
@@ -7297,5 +7319,66 @@ mod tests {
             said,
             "attachment; filename=\"notes-2.md\"; filename*=UTF-8''notes-2.md",
         );
+    }
+
+    /// The settings page's languages are drawn from the disk use as last
+    /// measured, and drawing them while a measurement is held up part way
+    /// answers at once: Rust's figure, measured, and every language after it
+    /// not measured yet — never a read that waits for the walk.
+    #[test]
+    fn the_languages_are_drawn_without_waiting_on_a_measurement() {
+        use std::sync::mpsc;
+
+        let loaded = crate::languages::built_in();
+        let disk_use = crate::disk_use::DiskUse::default();
+
+        let stores: Vec<_> = loaded
+            .iter()
+            .filter(|(_, descriptor)| descriptor.names_a_store())
+            .map(|(name, _)| (name.to_owned(), Vec::new()))
+            .collect();
+
+        let (started, starting) = mpsc::channel();
+        let (release, released) = mpsc::channel::<()>();
+        let released = std::sync::Mutex::new(released);
+
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                disk_use.measuring_with(&stores, |_| {
+                    started.send(()).unwrap();
+                    released.lock().unwrap().recv().unwrap();
+                    2048
+                });
+            });
+
+            // Rust measured, and Go's walk held up where it is.
+            starting.recv().unwrap();
+            release.send(()).unwrap();
+            starting.recv().unwrap();
+
+            let drawn = languages(loaded, false, &disk_use);
+            let of = |name: &str| {
+                drawn
+                    .iter()
+                    .find(|language| language.name == name)
+                    .unwrap()
+                    .disk_use
+            };
+
+            assert_eq!(of("rust"), DiskUse::Measured { bytes: 2048 });
+            assert_eq!(of("go"), DiskUse::NotMeasured);
+            assert_eq!(of("jvm"), DiskUse::NotMeasured);
+            assert_eq!(
+                of("cpp"),
+                DiskUse::NoStore,
+                "C/C++ names no store, so there is nothing of it to measure",
+            );
+
+            // And let the rest of the pass go: Go's walk and every one after
+            // it, none of which waits on anything but this.
+            for _ in 1..stores.len() {
+                release.send(()).unwrap();
+            }
+        });
     }
 }

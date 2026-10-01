@@ -755,6 +755,18 @@ impl BuildCache {
             .unwrap_or_else(|held| held.into_inner())
     }
 
+    /// What the placeholders a language's store is named by stand for on this
+    /// server, or `None` where it has no cache — see
+    /// [`languages::Descriptor::stores`]. No sccache in it: a store is a
+    /// directory, and the binary is nothing a store is named by.
+    pub fn machine(&self) -> Option<languages::Machine> {
+        Some(languages::Machine::of(
+            self.dir.as_deref()?,
+            self.data_dir.as_deref()?,
+            None,
+        ))
+    }
+
     /// What one sandbox is given of every language that is switched on, or
     /// `None` where there is nothing to give: no cache on this server, or every
     /// language off.

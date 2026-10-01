@@ -2408,6 +2408,12 @@ impl Sessions {
         Some(named)
     }
 
+    /// Where every session's stores are — see [`BuildCache`] — and `None` on a
+    /// server that runs no sessions.
+    pub(crate) fn build_cache(&self) -> Option<&BuildCache> {
+        self.agents.as_ref().map(|agents| &agents.cache)
+    }
+
     /// Whether a session's Rust build would have its *compiling* cached and not
     /// only its downloads — which is whether this server found an sccache to
     /// hand out. See [`BuildCache::caches_compiles`].

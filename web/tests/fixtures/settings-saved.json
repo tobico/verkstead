@@ -42,6 +42,7 @@
       {
         "compiling": "NoSccache",
         "default_size": "30G",
+        "disk_use": "NotMeasured",
         "enabled": true,
         "label": "Rust",
         "name": "rust",
@@ -54,6 +55,7 @@
       {
         "compiling": null,
         "default_size": "10G",
+        "disk_use": "NotMeasured",
         "enabled": true,
         "label": "Go",
         "name": "go",
@@ -66,6 +68,7 @@
       {
         "compiling": null,
         "default_size": "10G",
+        "disk_use": "NotMeasured",
         "enabled": true,
         "label": "Node",
         "name": "node",
@@ -78,6 +81,7 @@
       {
         "compiling": null,
         "default_size": "10G",
+        "disk_use": "NotMeasured",
         "enabled": true,
         "label": "Python",
         "name": "python",
@@ -90,6 +94,7 @@
       {
         "compiling": null,
         "default_size": "10G",
+        "disk_use": "NotMeasured",
         "enabled": true,
         "label": ".NET",
         "name": "dotnet",
@@ -102,6 +107,7 @@
       {
         "compiling": "NoSccache",
         "default_size": "10G",
+        "disk_use": "NoStore",
         "enabled": true,
         "label": "C/C++",
         "name": "cpp",
@@ -114,6 +120,7 @@
       {
         "compiling": null,
         "default_size": "10G",
+        "disk_use": "NotMeasured",
         "enabled": true,
         "label": "JVM",
         "name": "jvm",
@@ -126,6 +133,7 @@
       {
         "compiling": null,
         "default_size": "10G",
+        "disk_use": "NoStore",
         "enabled": true,
         "label": "Gleam",
         "name": "gleam",

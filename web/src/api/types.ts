@@ -2458,6 +2458,17 @@ addresses: Array<string>,
 found: Array<FoundOn>, };
 
 /**
+ * How much a language's store holds on disk, as the server last measured it.
+ *
+ * **A figure the server holds rather than one it reads for this request.**
+ * Measuring is a walk of every file in a store, which for a year's packages is
+ * seconds of disk, so it runs on a pace of its own and this is whatever it
+ * last found — or that it has found nothing yet, which a server that has just
+ * started says until its first walk is done.
+ */
+export type DiskUse = "NoStore" | "NotMeasured" | { "Measured": { bytes: number, } };
+
+/**
  * And which of the wizard's nine tabs this machine is.
  *
  * The five Linux distributions whose commands are written down, everything
@@ -3178,6 +3189,12 @@ size_unread: string | null,
  * sized by the first language naming it, which says so under its own box.
  */
 store: boolean, 
+/**
+ * And how much its store holds on disk, beside the size above — measured
+ * in the background and handed over as it was last measured, so a read of
+ * this page never waits on a walk of a store.
+ */
+disk_use: DiskUse, 
 /**
  * Whether this language compiles through the Compile Server, and where it
  * does, whether that compiling is really being cached — null for a

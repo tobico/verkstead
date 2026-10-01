@@ -128,3 +128,11 @@
     border-color: var(--accent-deep);
   }
 }
+
+/* What the store holds on disk, under the field it is measured against: a
+   reading rather than a control, so in the quiet the label above it is in. */
+.held {
+  margin: 0.45rem 0 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}

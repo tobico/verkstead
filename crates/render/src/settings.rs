@@ -353,6 +353,11 @@ pub struct LanguageView {
     /// sized by the first language naming it, which says so under its own box.
     pub store: bool,
 
+    /// And how much its store holds on disk, beside the size above — measured
+    /// in the background and handed over as it was last measured, so a read of
+    /// this page never waits on a walk of a store.
+    pub disk_use: DiskUse,
+
     /// Whether this language compiles through the Compile Server, and where it
     /// does, whether that compiling is really being cached — null for a
     /// language whose descriptor names no such capability.
@@ -377,6 +382,29 @@ pub struct LanguageView {
     /// what makes it the one thing on this page that turns a language's
     /// controls off — see [`UnreadEntry`].
     pub unread: Option<UnreadEntry>,
+}
+
+/// How much a language's store holds on disk, as the server last measured it.
+///
+/// **A figure the server holds rather than one it reads for this request.**
+/// Measuring is a walk of every file in a store, which for a year's packages is
+/// seconds of disk, so it runs on a pace of its own and this is whatever it
+/// last found — or that it has found nothing yet, which a server that has just
+/// started says until its first walk is done.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum DiskUse {
+    /// The descriptor names no store directory, so there is nothing of it to
+    /// measure — an installer's own that gives variables and says nothing of
+    /// where they write, or C/C++, whose objects are Rust's store.
+    NoStore,
+
+    /// It names one and has not been measured since the server started.
+    NotMeasured,
+
+    /// Every directory of its store together, in bytes: each file once, however
+    /// many links it has, and nothing a symlink points at.
+    Measured { bytes: u64 },
 }
 
 /// What became of a language whose entry in `config.yaml` could not be read.
