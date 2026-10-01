@@ -217,7 +217,21 @@ pub struct BuildCache {
     /// is not a size or a death is a Worktree it was not told about, and that
     /// restart is held back while anything could be mid-compile — see
     /// [`deciding`].
+    ///
+    /// **And it is what says nothing is running**, which is the one thing the
+    /// sweep waits on — see [`crate::eviction`]. Every session and every
+    /// Conversation Terminal is a launch through here, so a count of nought is
+    /// a machine with nothing of either alive.
     using: Arc<AtomicUsize>,
+
+    /// Held by the sweep for the moment it moves one unit out of a store, and by
+    /// a launch for the moment it is counted in `using` — see
+    /// [`BuildCache::moving`]. So a launch waits for the unit being moved, and
+    /// the sweep, finding it counted, moves nothing more.
+    moving: Arc<Mutex<()>>,
+
+    /// Told when `using` comes down to nought — see [`BuildCache::idle`].
+    idle: Arc<tokio::sync::Notify>,
 }
 
 /// One session or terminal that could be compiling through the Compile Server,
@@ -226,15 +240,22 @@ pub struct BuildCache {
 /// Handed out by [`BuildCache::compiling`] and carried by the sandbox into what
 /// its rendering leaves to see to — see [`crate::sandbox::Closing`] — which is
 /// what is held until the process has been reaped. Letting go of it is the
-/// session being over as far as the Compile Server is concerned.
+/// session being over as far as the Compile Server is concerned — and, the last
+/// one going, the machine being idle as far as the sweep of the stores is — see
+/// [`BuildCache::idle`].
 #[derive(Debug)]
 pub struct Compiles {
     using: Arc<AtomicUsize>,
+    idle: Arc<tokio::sync::Notify>,
 }
 
 impl Drop for Compiles {
     fn drop(&mut self) {
-        self.using.fetch_sub(1, Ordering::AcqRel);
+        // The last one going is the machine falling idle, which a sweep that
+        // came due while it ran is waiting for.
+        if self.using.fetch_sub(1, Ordering::AcqRel) == 1 {
+            self.idle.notify_waiters();
+        }
     }
 }
 
@@ -483,6 +504,8 @@ impl BuildCache {
             data_dir: Some(data_dir.to_owned()),
             compiling: Arc::default(),
             using: Arc::default(),
+            moving: Arc::default(),
+            idle: Arc::default(),
         })
     }
 
@@ -502,6 +525,8 @@ impl BuildCache {
             data_dir: Some(data_dir),
             compiling: Arc::default(),
             using: Arc::default(),
+            moving: Arc::default(),
+            idle: Arc::default(),
         }
     }
 
@@ -639,11 +664,19 @@ impl BuildCache {
         let mut running = self.held();
 
         // Everybody already holding one, read before this caller is counted
-        // among them: what a restart would be under.
-        let others = self.using.fetch_add(1, Ordering::AcqRel);
+        // among them: what a restart would be under. Counted under the sweep's
+        // lock as well, so a launch arriving while a unit is moved out of a
+        // store waits for it to be gone, and the sweep moves nothing after it —
+        // see [`BuildCache::moving`].
+        let others = {
+            let _moving = self.moving.lock().unwrap_or_else(|held| held.into_inner());
+
+            self.using.fetch_add(1, Ordering::AcqRel)
+        };
 
         let compiles = Compiles {
             using: self.using.clone(),
+            idle: self.idle.clone(),
         };
 
         let (Some(dir), Some(sccache), Some(data_dir)) = (&self.dir, &self.sccache, &self.data_dir)
@@ -739,13 +772,50 @@ impl BuildCache {
     }
 
     /// How many sessions and terminals hold the Compile Server right now — see
-    /// [`Compiles`] — which is what a restart for a new Worktree waits on.
+    /// [`Compiles`] — which is what a restart for a new Worktree waits on, and
+    /// what the sweep waits to see come down to nought.
     ///
-    /// Read by nothing in the server but the decision itself, which counts
-    /// under the lock instead; out here so a test of whoever carries a hold can
-    /// see it is still held.
+    /// The decision counts under its lock instead, and the sweep under its own
+    /// — see [`BuildCache::moving`]; out here so a test of whoever carries a
+    /// hold can see it is still held.
     pub fn holding(&self) -> usize {
         self.using.load(Ordering::Acquire)
+    }
+
+    /// Run `aside` — the sweep moving one unit out of a store — where nothing
+    /// is running, and `None` without running it where something is.
+    ///
+    /// **Under the lock a launch is counted under**, so the two cannot cross: a
+    /// launch arriving while `aside` runs waits for it to finish, and is then
+    /// counted, and the next unit finds it and is left. Which is what makes a
+    /// unit never half-moved for anything that runs, and what stops a sweep
+    /// between units the moment anything starts. See [`crate::eviction`].
+    pub fn moving<T>(&self, aside: impl FnOnce() -> T) -> Option<T> {
+        let _moving = self.moving.lock().unwrap_or_else(|held| held.into_inner());
+
+        (self.using.load(Ordering::Acquire) == 0).then(aside)
+    }
+
+    /// Wait until nothing is running: at once where nothing is, and otherwise
+    /// at the moment the last session or terminal lets go of its hold.
+    ///
+    /// A moment rather than a promise. Something may start straight after,
+    /// which [`BuildCache::moving`] is what answers.
+    pub async fn idle(&self) {
+        loop {
+            let idle = self.idle.notified();
+            tokio::pin!(idle);
+
+            // Listening before looking, so a hold let go of between the two is
+            // still heard.
+            idle.as_mut().enable();
+
+            if self.holding() == 0 {
+                return;
+            }
+
+            idle.await;
+        }
     }
 
     /// The compile server, locked.

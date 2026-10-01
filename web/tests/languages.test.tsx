@@ -709,6 +709,29 @@ describe("saying how a store is held to its size", () => {
 
     expect(lines(GLEAM)).toEqual([]);
   });
+
+  /// When the sweep last brought a store under its size, or that it has not
+  /// since the server started and why — and nothing for a language whose
+  /// stores the sweep never touches.
+  it("says when each swept store was last swept", async () => {
+    theSettings({
+      ...TOLD,
+      languages: TOLD.languages.map((language) =>
+        language.name === GO
+          ? { ...language, swept: "2026-10-01T09:30:00Z" }
+          : language,
+      ),
+    });
+    const { container } = mountPane();
+
+    await waitFor(() => screen.getByText("Last swept 2026-10-01 09:30 UTC."));
+
+    expect(theGroup(container, NODE).textContent).toContain(
+      "Not swept since the server started: a sweep waits until no session " +
+        "or terminal is running.",
+    );
+    expect(theGroup(container, GLEAM).textContent).not.toMatch(/swept since/);
+  });
 });
 
 describe("saying how much a store holds", () => {

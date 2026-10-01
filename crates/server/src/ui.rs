@@ -5695,6 +5695,7 @@ async fn settings(State(state): State<AppState>) -> HttpResponse {
         &state.settings,
         state.sessions.caches_compiles(),
         &state.disk_use,
+        &state.sweeps,
         &state.binds,
         taken(&state),
     ))
@@ -5757,6 +5758,9 @@ async fn save_settings(
     // And the stores' disk use as last measured, which is a register rather
     // than a file and costs a lock to read — see [`crate::disk_use`].
     let disk_use = state.disk_use.clone();
+
+    // And when each store was last swept, which is the same.
+    let sweeps = state.sweeps.clone();
 
     // And what the installation configured, for the read that rides back with
     // the save: the page draws both sources, and this is not anything a save
@@ -5833,7 +5837,14 @@ async fn save_settings(
                     // How things stand, which is how they stood: nothing was
                     // written, and the page draws the errors over what the human
                     // still has in front of them.
-                    settings: as_told(&settings, caches_compiles, &disk_use, &installed, taking),
+                    settings: as_told(
+                        &settings,
+                        caches_compiles,
+                        &disk_use,
+                        &sweeps,
+                        &installed,
+                        taking,
+                    ),
                     verified: None,
                     refused,
                     refused_servers,
@@ -5999,7 +6010,14 @@ async fn save_settings(
 
         Ok::<_, std::io::Error>((
             SettingsSaved {
-                settings: as_told(&settings, caches_compiles, &disk_use, &installed, taking),
+                settings: as_told(
+                    &settings,
+                    caches_compiles,
+                    &disk_use,
+                    &sweeps,
+                    &installed,
+                    taking,
+                ),
                 verified,
                 // Nothing turned down: a save that got this far was one there was
                 // nothing wrong with — of either list.
@@ -6103,6 +6121,7 @@ fn languages(
     loaded: &crate::languages::Languages,
     caches_compiles: bool,
     disk_use: &crate::disk_use::DiskUse,
+    sweeps: &crate::eviction::Sweeps,
 ) -> Vec<LanguageView> {
     loaded
         .iter()
@@ -6148,6 +6167,9 @@ fn languages(
                     },
                 })
                 .collect(),
+            // And when the sweep last brought those of them it keeps under the
+            // size there — see [`crate::eviction`].
+            swept: sweeps.of(name).and_then(|at| at.format(&Rfc3339).ok()),
             // And whether anything reads that size. Not out of the files at
             // all where something does: this is the server's own environment
             // and its own platform, and the one thing on this page the human
@@ -6206,6 +6228,7 @@ fn as_told(
     settings: &crate::settings::Settings,
     caches_compiles: bool,
     disk_use: &crate::disk_use::DiskUse,
+    sweeps: &crate::eviction::Sweeps,
     binds: &crate::sandbox::SandboxConfig,
     taking: usize,
 ) -> SettingsView {
@@ -6230,6 +6253,7 @@ fn as_told(
             &crate::languages::configured(&config),
             caches_compiles,
             disk_use,
+            sweeps,
         ),
         // And the Cleanup's two rows, each read the way the size above is: the
         // days configured where somebody typed them, and the fallback with the
@@ -7336,6 +7360,34 @@ mod tests {
         );
     }
 
+    /// And each language says when its stores were last swept, as RFC 3339,
+    /// and nothing where they have not been since the server started.
+    #[test]
+    fn the_languages_say_when_they_were_last_swept() {
+        let sweeps = crate::eviction::Sweeps::default();
+        let at = time::OffsetDateTime::from_unix_timestamp(1_790_847_000).unwrap();
+
+        sweeps.swept(&[String::from("go")], at);
+
+        let drawn = languages(
+            crate::languages::built_in(),
+            false,
+            &crate::disk_use::DiskUse::default(),
+            &sweeps,
+        );
+        let of = |name: &str| {
+            drawn
+                .iter()
+                .find(|language| language.name == name)
+                .unwrap()
+                .swept
+                .clone()
+        };
+
+        assert_eq!(of("go").as_deref(), Some("2026-10-01T09:30:00Z"));
+        assert_eq!(of("node"), None);
+    }
+
     /// The settings page's languages are drawn from the disk use as last
     /// measured, and drawing them while a measurement is held up part way
     /// answers at once: Rust's figure, measured, and every language after it
@@ -7371,7 +7423,12 @@ mod tests {
             release.send(()).unwrap();
             starting.recv().unwrap();
 
-            let drawn = languages(loaded, false, &disk_use);
+            let drawn = languages(
+                loaded,
+                false,
+                &disk_use,
+                &crate::eviction::Sweeps::default(),
+            );
             let of = |name: &str| {
                 drawn
                     .iter()

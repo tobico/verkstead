@@ -304,6 +304,7 @@ static UNHURRIED: LazyLock<Pace> = LazyLock::new(|| Pace {
     places: Duration::from_secs(600),
     merges: Duration::from_secs(600),
     cleanup: Duration::from_secs(600),
+    evicting: Duration::from_secs(600),
 });
 
 /// Where every directory this suite makes goes: the machine's temporary

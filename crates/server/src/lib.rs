@@ -101,6 +101,11 @@ mod drivers;
 /// three arms are spawned commands with no toolkit behind them, so the asking
 /// lives with the server rather than with the app that has the screen.
 pub mod elevate;
+/// The sweep that keeps each language's store under its size.
+///
+/// Public for [`units`]'s reason: the proofs that fill a store with each tool
+/// for real sweep it too, and install again out of what is left.
+pub mod eviction;
 mod exchanges;
 /// The Worktrees Code reads: the roots its tree stands on, and one folder of
 /// one of them at a time.
@@ -545,6 +550,10 @@ pub(crate) struct AppState {
     /// What each language's store held when it was last measured — see
     /// [`disk_use`].
     disk_use: disk_use::DiskUse,
+
+    /// And when each language's stores were last swept under their size — see
+    /// [`eviction`].
+    sweeps: eviction::Sweeps,
 
     /// Where Verkstead keeps what it makes — the worktrees, for now. Not one of
     /// the directories the human points Verkstead at: this is the one Verkstead
@@ -1439,6 +1448,7 @@ fn standing(
         // the next session without a restart — see [`settings`].
         settings: settings::Settings::in_data_dir(&data_dir),
         disk_use: disk_use::DiskUse::default(),
+        sweeps: eviction::Sweeps::default(),
         nudges,
         settlements: Settlements::new(SETTLEMENT_BACKLOG),
         waits: Waits::new(),
@@ -1566,6 +1576,11 @@ fn standing(
     // that the settings page reading it never waits on a walk of a disk. See
     // [`disk_use`].
     disk_use::measuring(&state);
+
+    // And the sweep that keeps each of those stores under its size, whole
+    // packages out oldest first, and only while nothing runs. See
+    // [`eviction`].
+    eviction::sweeping(&state);
 
     // And a listener on the one channel a Set is settled through, so that a
     // session idling on a stored ask is told its Answers have landed whether the

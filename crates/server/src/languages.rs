@@ -147,6 +147,11 @@ const STORES: &str = "{stores}";
 /// How big this language's store may grow, which is the settings page's.
 const SIZE: &str = "{size}";
 
+/// The directory of Verkstead's own, at the top of each placeholder's, that a
+/// unit is moved aside into before it is deleted — see [`Machine::aside`].
+/// Never a store, nor inside one: [`placed`] refuses a directory under it.
+const ASIDE: &str = ".verkstead-swept";
+
 /// How big a language's store may grow where nobody has said, for every
 /// language but Rust — an installer's own included.
 ///
@@ -1183,6 +1188,8 @@ pub enum Bounded<'a> {
 /// segment that is empty, `.`, `..` or another placeholder: a store **is**
 /// somewhere under the Build Cache or the directory beside the Worktrees, and
 /// never one of those two whole — each holds every other language's store too.
+/// Nor under the directory the sweep moves units aside into, which it empties
+/// — see [`Machine::aside`].
 fn placed(dir: &str) -> Result<(&'static str, &str), String> {
     let refused = || {
         format!(
@@ -1204,6 +1211,7 @@ fn placed(dir: &str) -> Result<(&'static str, &str), String> {
     match rest
         .split('/')
         .all(|segment| !matches!(segment, "" | "." | "..") && !segment.contains('{'))
+        && rest.split('/').next() != Some(ASIDE)
     {
         true => Ok((placeholder, rest)),
         false => Err(refused()),
@@ -1252,6 +1260,27 @@ impl Machine {
             rest.split('/')
                 .fold(base.clone(), |path, segment| path.join(segment)),
         )
+    }
+
+    /// Where a unit swept out of the store at `store` is moved aside to before
+    /// it is deleted: a directory of Verkstead's own at the top of whichever of
+    /// the two placeholders' directories the store is under — see
+    /// [`crate::eviction`]. `None` for a directory under neither.
+    ///
+    /// **At the top of the placeholder's directory** rather than anywhere
+    /// else, because a rename is only a rename on one filesystem: the Build
+    /// Cache and the directory beside the Worktrees may each be a filesystem of
+    /// their own, and everything a descriptor names is under one of them.
+    pub fn aside(&self, store: &Path) -> Option<PathBuf> {
+        self.asides()
+            .into_iter()
+            .find(|aside| aside.parent().is_some_and(|base| store.starts_with(base)))
+    }
+
+    /// Both of those, whether or not anything is in them — which is where the
+    /// sweep looks for what a pass that died left aside.
+    pub fn asides(&self) -> [PathBuf; 2] {
+        [self.cache.join(ASIDE), self.stores.join(ASIDE)]
     }
 
     /// Whether this server has the behaviour behind `capability`.

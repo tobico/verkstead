@@ -3212,6 +3212,16 @@ disk_use: DiskUse,
  */
 stores: Array<StoreView>, 
 /**
+ * And when those of its stores the sweep keeps under the size were last
+ * swept, RFC 3339 — null where they have not been since the server
+ * started, which is also every language whose stores the sweep never
+ * touches.
+ *
+ * A sweep runs only while no session or terminal does, so a machine that
+ * is never idle is never swept, and this is where that is seen.
+ */
+swept: string | null, 
+/**
  * Whether this language compiles through the Compile Server, and where it
  * does, whether that compiling is really being cached — null for a
  * language whose descriptor names no such capability.

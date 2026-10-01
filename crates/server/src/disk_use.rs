@@ -220,10 +220,6 @@ impl DiskUse {
     /// Ask for every store to be measured again as soon as the one in hand is
     /// done — which is what anything that has just changed a store says, so the
     /// page does not go on drawing what it held before.
-    #[allow(
-        dead_code,
-        reason = "the sweep and Clear call it, neither of which is written yet"
-    )]
     pub(crate) fn refresh(&self) {
         self.again.notify_one();
     }

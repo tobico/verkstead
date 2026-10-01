@@ -126,6 +126,7 @@ import type {
   UnreadEntry,
 } from "../api/types";
 import { useReading } from "../freshness";
+import { utcStamp } from "../set/when";
 import { Empty, ErrorLine } from "../notices";
 import { PaneHead } from "../workbench/PaneHead";
 import {
@@ -298,6 +299,23 @@ function bounding(eviction: Eviction): string {
     case "NotSwept":
       return "is never swept: its descriptor names no unit, so it grows as its tool fills it.";
   }
+}
+
+/// When the sweep last brought a language's store under its size, as a
+/// sentence — or nothing for a language the sweep never touches.
+///
+/// A sweep runs only while no session or terminal does, so a store that has
+/// not been swept says why rather than looking forgotten.
+function sweptSaid(language: LanguageView): string | undefined {
+  if (!language.stores.some((store) => store.eviction === "ByUnit")) {
+    return undefined;
+  }
+
+  if (language.swept === null) {
+    return "Not swept since the server started: a sweep waits until no session or terminal is running.";
+  }
+
+  return `Last swept ${utcStamp(language.swept)}.`;
 }
 
 /// Whether a language's store is held to its size twice over: once by a tool
@@ -662,6 +680,9 @@ export function LanguagesPane(props: {
                               Each is held to it separately, so together they
                               may hold up to twice it.
                             </p>
+                          </Show>
+                          <Show when={sweptSaid(language)}>
+                            {(said) => <p class={styles.held}>{said()}</p>}
                           </Show>
 
                           <Show when={refused()[language.name]}>

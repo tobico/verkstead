@@ -11,7 +11,11 @@
 //!
 //! 1. Two Sandboxes, one per Conversation, against **one** Build Cache, each
 //!    installing the same thing **at the same time**. Both succeeding is what
-//!    says two sessions racing do not damage the store.
+//!    says two sessions racing do not damage the store. **And the store they
+//!    start from is one the sweep has just been through**: an install before
+//!    theirs fills it, and the sweep is given half of that, taking whole units
+//!    out until it is under — see [`filled_and_swept`]. So both succeeding says too
+//!    that what a sweep leaves is a store a tool can install into.
 //! 2. A third Sandbox, on that same Build Cache, installing it again with the
 //!    tool **denied its registry** — the offline flag the tool documents, and
 //!    no bind of the registry either. An install that succeeds with nothing to
@@ -737,6 +741,87 @@ fn whole_packages(cache: &BuildCache, language: &str, store: &str, expected: Uni
     }
 }
 
+/// One install in the `nth` Sandbox before a proof's own, filling `language`'s
+/// stores on `cache` — and then **the sweep, given half of what that left**,
+/// taking whole units out until they are under it or none is left. So the installs the proof is about run against a store the
+/// sweep has just taken whole units out of, which is the store a sweep ever
+/// leaves a tool: one with packages missing and none of them half there.
+///
+/// A unit gone is a package fetched again, so the two racing installs after
+/// this one still have their registry and fill the store back up; what would
+/// fail them is a unit taken in part, or one taken from under an index that
+/// the tool then trusts.
+fn filled_and_swept(
+    machine: &Machine,
+    nth: usize,
+    cache: &BuildCache,
+    extra: Vec<Bind>,
+    script: &str,
+    language: &str,
+) {
+    installing(&machine.sandbox(nth, cache, extra), script).worked(&format!(
+        "an install before the proof's own fills {language}'s stores for the sweep to take from"
+    ));
+
+    let descriptor = verkstead_server::languages::built_in()
+        .get(language)
+        .expect("a built-in language");
+
+    let held = verkstead_server::eviction::swept(cache, descriptor, u64::MAX).held;
+    let size = held / 2;
+
+    let swept = verkstead_server::eviction::swept(cache, descriptor, size);
+
+    assert!(
+        !swept.removed.is_empty() && swept.left < held && !swept.stopped,
+        "the sweep takes units out of {language}'s stores, over the {size} bytes it was \
+         given with the {held} an install left. It came to {swept:?}",
+    );
+
+    // Under the size, or with no unit left to take: a store's indexes and
+    // metadata are no package of anybody's, so they are never swept, and on a
+    // store holding one small package they can be half of it.
+    let machine = cache
+        .machine()
+        .expect("the fixture's cache has a directory");
+    let left: Vec<PathBuf> = descriptor
+        .stores(&machine)
+        .into_iter()
+        .filter_map(|(name, dir)| match descriptor.bounded(&name) {
+            verkstead_server::languages::Bounded::ByUnit(units) => {
+                Some(verkstead_server::units::listed(&dir, units))
+            }
+            _ => None,
+        })
+        .flatten()
+        .collect();
+
+    assert!(
+        swept.left <= size || left.is_empty(),
+        "and stops once {language}'s stores are under {size} bytes, or there is nothing left \
+         to take. It came to {swept:?}, leaving the units {left:?}",
+    );
+
+    for unit in &swept.removed {
+        assert!(
+            std::fs::symlink_metadata(unit).is_err(),
+            "and what it took is gone: {}",
+            unit.display(),
+        );
+    }
+
+    println!(
+        "{language}'s stores held {held} bytes, and the sweep took them to {} by removing:\n  {}",
+        swept.left,
+        swept
+            .removed
+            .iter()
+            .map(|unit| unit.display().to_string())
+            .collect::<Vec<_>>()
+            .join("\n  "),
+    );
+}
+
 /// What every Go command in this suite is told, beside the two variables the
 /// descriptor sets — which are the two this is here to prove.
 ///
@@ -836,14 +921,15 @@ async fn two_go_builds_at_once_fill_one_store_and_a_third_builds_out_of_it() {
     };
     let (go, zip) = (&tools[0], &tools[1]);
 
-    // Four: the two that race, the one denied its registry, and the control.
-    let machine = machine(4).await;
+    // Five: the two that race, the one denied its registry, the control, and
+    // the one that fills the store for the sweep before any of them.
+    let machine = machine(5).await;
     let cache = machine.cache();
 
     let proxy = machine.registries.join("go");
     go_proxy(&proxy, zip);
 
-    for nth in 0..4 {
+    for nth in 0..5 {
         go_consumer(machine.worktree(nth));
     }
 
@@ -856,6 +942,17 @@ async fn two_go_builds_at_once_fill_one_store_and_a_third_builds_out_of_it() {
         "set -e\n{GO_SETTINGS}\nexport GOPROXY=file://{proxy}\n{go} build -o ./built ./...\n",
         proxy = proxy.display(),
         go = go.display(),
+    );
+
+    // A store the sweep has just taken units out of, which is what the two
+    // below start from.
+    filled_and_swept(
+        &machine,
+        4,
+        &cache,
+        reaching(),
+        &building,
+        verkstead_server::languages::GO,
     );
 
     // Started together and waited on together, which is the only way the two
@@ -1285,8 +1382,9 @@ async fn one_javascript_tools_store(proof: Installs) {
         said
     };
 
-    // Four: the two that race, the one denied its registry, and the control.
-    let machine = machine(4).await;
+    // Five: the two that race, the one denied its registry, the control, and
+    // the one that fills the store for the sweep before any of them.
+    let machine = machine(5).await;
     let cache = machine.cache();
 
     let registry = npm_registry(
@@ -1303,7 +1401,7 @@ async fn one_javascript_tools_store(proof: Installs) {
             .expect("and sums it with `sha1sum`")],
     );
 
-    for nth in 0..4 {
+    for nth in 0..5 {
         npm_consumer(machine.worktree(nth));
     }
 
@@ -1324,6 +1422,17 @@ async fn one_javascript_tools_store(proof: Installs) {
     };
 
     let filling = script(proof.filling);
+
+    // A store the sweep has just taken units out of, which is what the two
+    // below start from.
+    filled_and_swept(
+        &machine,
+        4,
+        &cache,
+        vec![],
+        &filling,
+        verkstead_server::languages::NODE,
+    );
 
     // Started together and waited on together, which is the only way the two
     // are ever really writing the store at the same moment.
@@ -2583,8 +2692,9 @@ async fn one_python_tools_store(proof: Python) {
         said
     };
 
-    // Four: the two that race, the one denied its index, and the control.
-    let machine = machine(4).await;
+    // Five: the two that race, the one denied its index, the control, and the
+    // one that fills the store for the sweep before any of them.
+    let machine = machine(5).await;
     let cache = machine.cache();
 
     let registry = pypi_registry(
@@ -2600,11 +2710,11 @@ async fn one_python_tools_store(proof: Python) {
     // taking it off the air.
     let url = registry.url.clone();
 
-    // And the manifest every one of the four Worktrees holds, where this tool
+    // And the manifest every one of the five Worktrees holds, where this tool
     // installs out of one: a Repo's own file, naming the index this proof serves
     // and the distribution it is to install out of it.
     if let Some((called, written)) = proof.manifest {
-        for nth in 0..4 {
+        for nth in 0..5 {
             std::fs::write(machine.worktree(nth).join(called), named(written, &url)).unwrap();
         }
     }
@@ -2621,6 +2731,17 @@ async fn one_python_tools_store(proof: Python) {
     };
 
     let filling = script(proof.filling);
+
+    // A store the sweep has just taken units out of, which is what the two
+    // below start from.
+    filled_and_swept(
+        &machine,
+        4,
+        &cache,
+        vec![],
+        &filling,
+        verkstead_server::languages::PYTHON,
+    );
 
     // Started together and waited on together, which is the only way the two
     // are ever really writing the store at the same moment.
@@ -3752,8 +3873,9 @@ async fn two_dotnet_restores_at_once_fill_one_store_and_a_third_restores_out_of_
     };
     let (dotnet, zip) = (&found_them[0], &found_them[1]);
 
-    // Four: the two that race, the one denied its registry, and the control.
-    let machine = machine(4).await;
+    // Five: the two that race, the one denied its registry, the control, and
+    // the one that fills the store for the sweep before any of them.
+    let machine = machine(5).await;
     let cache = machine.cache();
     let dir = cache.dir().expect("the fixture's cache has a directory");
 
@@ -3763,7 +3885,7 @@ async fn two_dotnet_restores_at_once_fill_one_store_and_a_third_restores_out_of_
     // The two that fill the store name the feed; the two that follow have every
     // source taken away, which is *denied its registry* for a tool with no
     // offline flag of its own.
-    for nth in 0..2 {
+    for nth in [0, 1, 4] {
         nuget_consumer(machine.worktree(nth), &targeting, Some(&registry.url));
     }
 
@@ -3772,6 +3894,17 @@ async fn two_dotnet_restores_at_once_fill_one_store_and_a_third_restores_out_of_
     }
 
     let restoring = nuget_script(dotnet);
+
+    // A store the sweep has just taken units out of, which is what the two
+    // below start from.
+    filled_and_swept(
+        &machine,
+        4,
+        &cache,
+        reaching_nothing(),
+        &restoring,
+        verkstead_server::languages::DOTNET,
+    );
 
     // Started together and waited on together, which is the only way the two
     // are ever really writing the store at the same moment.
@@ -5000,14 +5133,15 @@ async fn two_maven_builds_at_once_fill_one_repository_and_a_third_builds_out_of_
         unreachable!("three tools were asked for");
     };
 
-    // Four: the two that race, the one denied its registry, and the control.
-    let machine = machine(4).await;
+    // Five: the two that race, the one denied its registry, the control, and
+    // the one that fills the store for the sweep before any of them.
+    let machine = machine(5).await;
     let cache = machine.cache();
     let dir = cache.dir().expect("the fixture's cache has a directory");
 
     let registry = maven_registry(&machine.registries.join("maven"), mvn, javac, zip);
 
-    for nth in 0..4 {
+    for nth in 0..5 {
         maven_consumer(machine.worktree(nth), Some(&registry.url));
     }
 
@@ -5018,6 +5152,17 @@ async fn two_maven_builds_at_once_fill_one_repository_and_a_third_builds_out_of_
     let offline = format!(
         "set -e\n'{mvn}' {MVN_FLAGS} --offline validate\n",
         mvn = mvn.display()
+    );
+
+    // A repository the sweep has just taken units out of, which is what the
+    // two below start from.
+    filled_and_swept(
+        &machine,
+        4,
+        &cache,
+        reaching_nothing(),
+        &building,
+        verkstead_server::languages::JVM,
     );
 
     // Started together and waited on together, which is the only way the two
@@ -5490,17 +5635,33 @@ async fn two_gradle_builds_at_once_each_in_its_own_sandbox_fill_one_home_and_a_t
         unreachable!("four tools were asked for");
     };
 
-    let machine = machine(4).await;
+    let machine = machine(5).await;
     let cache = machine.cache();
     let dir = cache.dir().expect("the fixture's cache has a directory");
 
     let registry = maven_registry(&machine.registries.join("gradle"), mvn, javac, zip);
 
-    for nth in 0..4 {
+    for nth in 0..5 {
         gradle_consumer(machine.worktree(nth), Some(&registry.url));
     }
 
     gradle_home_used_once(&machine, &cache, gradle);
+
+    // A home the sweep has just taken units out of, which is what the two
+    // below start from: one `say` on its own, with nobody to meet, resolves
+    // the jar into it first.
+    filled_and_swept(
+        &machine,
+        4,
+        &cache,
+        reaching_nothing(),
+        &format!(
+            "set -e\n{marking}'{gradle}' {GRADLE_FLAGS} say\n",
+            marking = marking("before"),
+            gradle = gradle.display(),
+        ),
+        verkstead_server::languages::JVM,
+    );
 
     let meet = dir.join("meeting");
     std::fs::create_dir_all(&meet).unwrap();
@@ -6270,19 +6431,30 @@ async fn two_cargo_fetches_at_once_fill_one_cargo_home_and_a_third_fetches_out_o
     };
     let (cargo, tar) = (&found_them[0], &found_them[1]);
 
-    let machine = machine(4).await;
+    let machine = machine(5).await;
     let cache = machine.cache();
 
     let registry = cargo_registry(&machine.registries.join("cargo"), tar);
     let git_crate = cargo_git_crate(&machine.registries.join(GIT_CRATE));
 
-    for nth in 0..4 {
+    for nth in 0..5 {
         cargo_consumer(machine.worktree(nth), &registry.url, &git_crate);
     }
 
     let reaching = || vec![Bind::readable(git_crate.clone())];
 
     let fetching = format!("set -e\n{cargo} fetch\n", cargo = cargo.display());
+
+    // A CARGO_HOME the sweep has just taken units out of, which is what the two
+    // below start from.
+    filled_and_swept(
+        &machine,
+        4,
+        &cache,
+        reaching(),
+        &fetching,
+        verkstead_server::languages::RUST,
+    );
 
     let first = starting(&machine.sandbox(0, &cache, reaching()), &fetching);
     let second = starting(&machine.sandbox(1, &cache, reaching()), &fetching);
