@@ -378,6 +378,32 @@ jobs:
 
           java -version
 
+      # **And Rust's own, which is the one toolchain this runner already has and
+      # cannot use.** The proofs of Rust's cargo half and of its Compile Server
+      # run `cargo` and `rustc` inside a session's Sandbox, and what the step at
+      # the top of this job installed is rustup's, under `~/.cargo` and
+      # `~/.rustup` — outside every bind a session gets, and a proxy besides. So
+      # the toolchain it installed is copied whole under `/usr/local`: the same
+      # 1.95.0 every other job pins, its binaries finding their libraries
+      # relative to where they really are, which stays inside the bind.
+      #
+      # Linked onto `/usr/local/bin`, which a session's `PATH` holds, so the
+      # `cargo` inside one finds this `rustc` beside it. And its directory put
+      # ahead of `~/.cargo/bin` on this job's own `PATH`, because the proofs ask
+      # the `PATH` they are run with which `cargo` there is — and it is the same
+      # release, so the build that runs them is no different for it.
+      - name: Install Rust 1.95.0 where a session can reach it
+        run: |
+          sudo cp -a "$(rustc --print sysroot)" /usr/local/rust
+
+          for tool in cargo rustc; do
+            sudo ln -sf "/usr/local/rust/bin/$tool" "/usr/local/bin/$tool"
+          done
+
+          echo /usr/local/rust/bin >> "$GITHUB_PATH"
+
+          /usr/local/rust/bin/cargo --version
+
       # And the same question asked of every tool on the list, in a line naming
       # the one that fails it rather than as a test failure about a shell that
       # could not find a program — the reason the sandbox-surface step in the
@@ -391,7 +417,7 @@ jobs:
         run: |
           status=0
 
-          for tool in go zip node npm pnpm yarn yarn-berry deno bun python3 uv poetry pipenv dotnet tar sha1sum sccache cmake ninja cc c++ java javac mvn gradle; do
+          for tool in go zip node npm pnpm yarn yarn-berry deno bun python3 uv poetry pipenv dotnet tar sha1sum sccache cmake ninja cc c++ java javac mvn gradle cargo rustc; do
             found=$(command -v "$tool" || true)
 
             if [ -z "$found" ]; then
