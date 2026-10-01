@@ -187,7 +187,8 @@ Three things in that table matter beyond the obvious.
 
 **Where the client's own daemon registers: in the shared home.** Every one of
 them appeared in `daemon/<version>/registry.bin` under `{cache}/gradle`, read
-from the daemon's Sandbox:
+from the daemon's Sandbox at the end of
+[`06-spike/busy.sh`](06-spike/busy.sh):
 
 ```
     44 IDLE     8.14.4          ← Verkstead's
@@ -210,8 +211,8 @@ stays open. Then session 0 holds Verkstead's busy again, and builds once more:
 That was 8.14.4. 9.4.1 printed the same lines. **This is the hazard stage 04
 closed, back again**, without anybody asking for `--daemon`.
 
-**And Gradle stopped Verkstead's daemon by itself.** After the busy runs, the
-registry said of it:
+**And Gradle stopped Verkstead's daemon by itself.** After the busy runs,
+the registry `busy.sh` reads at its end said of it:
 
 ```
     44 STOPPED  (other compatible daemons were started and after being idle for 0 minutes and not recently used)
