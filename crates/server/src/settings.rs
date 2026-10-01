@@ -3620,7 +3620,7 @@ mod tests {
             .expect("the old key is Rust's entry");
 
         assert!(!rust.enabled());
-        assert_eq!(rust.size(), "5G");
+        assert_eq!(rust.size(crate::languages::RUST), "5G");
     }
 
     /// And nothing written at all is every language on at its own size, which
@@ -3631,7 +3631,7 @@ mod tests {
         let rust = languages.get(crate::languages::RUST).unwrap();
 
         assert!(rust.enabled());
-        assert_eq!(rust.size(), crate::build_cache::SIZE);
+        assert_eq!(rust.size(crate::languages::RUST), crate::build_cache::SIZE);
     }
 
     /// Where both the old key and the new map say something about Rust, the map
@@ -3652,7 +3652,7 @@ mod tests {
             rust.enabled(),
             "the map turned back on what the key turned off"
         );
-        assert_eq!(rust.size(), "90G");
+        assert_eq!(rust.size(crate::languages::RUST), "90G");
     }
 
     /// And a save from the settings page leaves an installer's own descriptor

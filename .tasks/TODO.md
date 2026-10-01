@@ -18,7 +18,7 @@ Roadmap stage: [05: Sizes and eviction](docs/roadmaps/language-caches/05-sizes-a
 
 ## Tasks
 
-- [ ] 01: A size for every language — [details](01-a-size-for-every-language.md)
+- [x] 01: A size for every language — [details](01-a-size-for-every-language.md)
 - [ ] 02: The stores, and their disk use — [details](02-the-stores-and-their-disk-use.md)
 - [ ] 03: The unit, in the grammar and the built-ins — [details](03-the-unit.md)
 - [ ] 04: The sweep — [details](04-the-sweep.md)

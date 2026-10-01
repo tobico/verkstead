@@ -136,6 +136,7 @@ function holding(
     verified: null,
     refused: [],
     refused_servers: [],
+    refused_sizes: [],
     // What came of speaking to each of them, which every save that landed
     // carries — empty where the test is not about that.
     tried,
@@ -160,6 +161,7 @@ function turnedDown(...refused_servers: ServerRefused[]): SettingsSaved {
     verified: null,
     refused: [],
     refused_servers,
+    refused_sizes: [],
     tried: [],
   };
 }

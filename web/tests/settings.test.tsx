@@ -533,6 +533,7 @@ describe("saving", () => {
       verified: null,
       refused: [],
       refused_servers: [],
+      refused_sizes: [],
       tried: [],
     };
     theSettings(TOLD, json(rewritten));
@@ -617,6 +618,7 @@ describe("saving", () => {
       verified: { Account: { login: "ada", missing: ["gist"] } },
       refused: [],
       refused_servers: [],
+      refused_sizes: [],
       tried: [],
     };
     theSettings(UNSET, json(unscoped));
@@ -662,6 +664,7 @@ describe("saving", () => {
       verified: { Refused: { why: "gh: Bad credentials (HTTP 401)" } },
       refused: [],
       refused_servers: [],
+      refused_sizes: [],
       tried: [],
     };
     theSettings(UNSET, json(unverified));
@@ -761,6 +764,7 @@ describe("replacing and clearing the token", () => {
       verified: null,
       refused: [],
       refused_servers: [],
+      refused_sizes: [],
       tried: [],
     };
     const fetching = theSettings(TOLD, json(cleared));
@@ -838,6 +842,7 @@ describe("the ignore rules", () => {
       verified: null,
       refused,
       refused_servers: [],
+      refused_sizes: [],
       tried: [],
     };
   }
@@ -1109,6 +1114,7 @@ describe("the ignore rules", () => {
       verified: null,
       refused: [],
       refused_servers: [],
+      refused_sizes: [],
       tried: [],
     };
     theSettings(TOLD, json(written));
@@ -1131,6 +1137,7 @@ const answering = (standing: SettingsView): SettingsSaved => ({
   verified: null,
   refused: [],
   refused_servers: [],
+  refused_sizes: [],
   tried: [],
 });
 

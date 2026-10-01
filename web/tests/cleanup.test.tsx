@@ -157,6 +157,7 @@ function answering(standing: SettingsView): SettingsSaved {
     verified: null,
     refused: [],
     refused_servers: [],
+    refused_sizes: [],
     tried: [],
   };
 }

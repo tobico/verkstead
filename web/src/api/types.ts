@@ -3138,28 +3138,50 @@ label: string,
  */
 enabled: boolean, 
 /**
- * How big its store may grow, in sccache's own words — `30G`, `500M`.
- * Always a value: the default is what an untouched setting means, and a
- * field shows it rather than standing empty.
+ * How big its store may grow, in sccache's own words — `30G`, `500M`:
+ * what is written down where somebody wrote one, and the default where
+ * nobody did. Always a value, so the page always has a word to draw.
  *
- * **Every language's, not only the one with a field for it.** It is a key
+ * **As written, even where it is not a size** — which only a hand-edit of
+ * `config.yaml` can make it, and which `size_unread` below then says. It
+ * is what a save puts back, and a save about a checkbox has no business
+ * rewriting a word somebody typed into the file.
+ *
+ * **Every language's, not only the ones with a field for it.** It is a key
  * of that language's entry whoever wrote it, and the page sends both keys
- * of every entry back; what decides whether there is a field is
- * `compiling` below.
+ * of every entry back; what decides whether there is a field is `store`
+ * below.
  */
 size: string, 
 /**
  * Whether that size is one somebody typed, rather than the default being
- * shown. What lets a field draw the default as a placeholder — a value
- * nobody chose should not look like a choice — and what says which of the
- * two a save is putting back.
+ * shown. What says which of the two a save is putting back.
  */
 size_configured: boolean, 
 /**
- * Whether the size above is an sccache's to read, and where it is, whether
- * that compiling is really being cached — null for a language whose
- * descriptor names no such capability, which is what says nothing on this
- * page reads its size and there is no field to draw.
+ * And the default itself: what the store is held to where nobody has
+ * said, and where what they said is not a size. `30G` for Rust, `10G` for
+ * everything else. What a field draws as its placeholder — a value nobody
+ * chose should not look like a choice.
+ */
+default_size: string, 
+/**
+ * Why the size written down is not the one in force, where it is not: a
+ * clause following the word, the same one a save sending it would have
+ * been refused in. The store is held to `default_size` meanwhile.
+ */
+size_unread: string | null, 
+/**
+ * Whether the language has a store of its own, which is what says there is
+ * a size field to draw under its box. False for C/C++, whose whole
+ * descriptor is the Compile Server's launchers: that server's store is
+ * sized by the first language naming it, which says so under its own box.
+ */
+store: boolean, 
+/**
+ * Whether this language compiles through the Compile Server, and where it
+ * does, whether that compiling is really being cached — null for a
+ * language whose descriptor names no such capability.
  *
  * Hung off the language rather than standing beside the list, because it
  * is the language's: the server runs one Compile Server, sized by
@@ -5372,6 +5394,18 @@ refused: Array<RuleRefused>,
  */
 refused_servers: Array<ServerRefused>, 
 /**
+ * And the store sizes that would not be written down, or empty where the
+ * save landed. A refusal here is the whole request refused, like the two
+ * lists above: neither file is touched.
+ *
+ * Only a size that was *changed* is refused. One a hand-edit wrote into
+ * `config.yaml` that is not a size goes back as it was on a save about
+ * something else, so a tick is never turned down over a field the human
+ * did not touch — see `LanguageView::size_unread`, which is how the page
+ * says that one.
+ */
+refused_sizes: Array<SizeRefused>, 
+/**
  * And what came of speaking to each declaration that *was* written down,
  * in the order they were declared — empty on every save that said nothing
  * about them, and on one that was turned down, nothing having been written
@@ -5689,6 +5723,23 @@ export type Shown = { "Painted": Screen } | { "Printed": string };
  * the latest one is the size the Screen and the session's own terminal are.
  */
 export type Size = { columns: number, rows: number, };
+
+/**
+ * One store size a save was turned down over.
+ *
+ * By the language's name rather than by position: there is one size per
+ * language and one field per size, so the name is the field.
+ */
+export type SizeRefused = { 
+/**
+ * The language whose size it is, as `config.yaml` keys it.
+ */
+language: string, 
+/**
+ * Why, as a clause following the word that was sent — see
+ * `crate::languages::bytes` on the server.
+ */
+why: string, };
 
 /**
  * And where a prefill came from.

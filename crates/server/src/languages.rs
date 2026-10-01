@@ -147,6 +147,64 @@ const STORES: &str = "{stores}";
 /// How big this language's store may grow, which is the settings page's.
 const SIZE: &str = "{size}";
 
+/// How big a language's store may grow where nobody has said, for every
+/// language but Rust — an installer's own included.
+///
+/// A release's rather than a machine's, which is why it is a constant here and
+/// not a key of the embedded file: a key there would be one more an installer
+/// could write, meaning nothing a `size` does not already say. Rust's is
+/// [`crate::build_cache::SIZE`], which its sccache has always been started at
+/// — see [`default_size`].
+pub const DEFAULT_SIZE: &str = "10G";
+
+/// The size `name`'s store may grow to where nobody has said.
+///
+/// Rust keeps the `30G` its compiled half was always given, because a few Rust
+/// workspaces fill the `10G` every other store starts at. Every other language
+/// gets [`DEFAULT_SIZE`], an installer's own included.
+pub fn default_size(name: &str) -> &'static str {
+    match name {
+        RUST => crate::build_cache::SIZE,
+        _ => DEFAULT_SIZE,
+    }
+}
+
+/// How many bytes `size` is, read the way sccache reads `SCCACHE_CACHE_SIZE` —
+/// or, where it cannot be, why not, as a clause that follows the word.
+///
+/// **sccache's grammar, so that one word means the same to both.** A whole
+/// number, then one of `K`, `M`, `G` or `T` for binary multiples of a byte, or
+/// nothing for bytes themselves: `30G` is 30 × 2³⁰. Upper case only and no
+/// fractions, because sccache takes neither — a `1.5g` Verkstead read would be
+/// a size sccache quietly did not, and the Compile Server would be bounded by
+/// something nobody typed.
+///
+/// What it is for is the sweep, which compares a store's bytes against it.
+/// What a self-evicting tool is handed is still the human's own word — see
+/// [`Descriptor::size`] — and this is what decides that the word is a size at
+/// all.
+pub fn bytes(size: &str) -> Result<u64, String> {
+    let (number, multiplier) = match size.chars().last() {
+        Some('K') => (&size[..size.len() - 1], 1u64 << 10),
+        Some('M') => (&size[..size.len() - 1], 1 << 20),
+        Some('G') => (&size[..size.len() - 1], 1 << 30),
+        Some('T') => (&size[..size.len() - 1], 1 << 40),
+        _ => (size, 1),
+    };
+
+    number
+        .parse::<u64>()
+        .ok()
+        .filter(|_| number.bytes().all(|byte| byte.is_ascii_digit()))
+        .and_then(|number| number.checked_mul(multiplier))
+        .ok_or_else(|| {
+            format!(
+                "is not a size: a size is a whole number with K, M, G or T after it, such as \
+                 {DEFAULT_SIZE}"
+            )
+        })
+}
+
 /// And where a session reaches the sccache this server found, which is the
 /// [`SCCACHE`] capability's own.
 const SCCACHE_AT: &str = "{sccache}";
@@ -360,7 +418,7 @@ impl Languages {
                 continue;
             }
 
-            let size = descriptor.size();
+            let size = descriptor.size(name);
 
             given.taking(name, machine, size, descriptor.env.iter());
 
@@ -414,13 +472,14 @@ impl Languages {
     pub fn wanting(&self, capability: &str) -> Option<&str> {
         let naming = || {
             self.iter()
-                .map(|(_, descriptor)| descriptor)
-                .filter(|descriptor| descriptor.names(capability))
+                .filter(|(_, descriptor)| descriptor.names(capability))
         };
 
-        let sizer = naming().next()?;
+        let (name, sizer) = naming().next()?;
 
-        naming().any(Descriptor::enabled).then(|| sizer.size())
+        naming()
+            .any(|(_, descriptor)| descriptor.enabled())
+            .then(|| sizer.size(name))
     }
 
     /// Whether any descriptor loaded here names the directory beside the
@@ -643,14 +702,29 @@ impl Descriptor {
     }
 
     /// And how big this language's store may grow, which is the `{size}`
-    /// placeholder's value — [`crate::build_cache::SIZE`] where nobody has
-    /// said.
+    /// placeholder's value — [`default_size`] of `name`, which is what this
+    /// descriptor is keyed by, where nobody has said.
     ///
-    /// The human's own word rather than a number of bytes, and nothing here
-    /// parses it: what it reaches is the tool that reads it, and a parser here
-    /// would be a second opinion about the one thing the value is for.
-    pub fn size(&self) -> &str {
-        self.size.as_deref().unwrap_or(crate::build_cache::SIZE)
+    /// The human's own word rather than a number of bytes, because what it
+    /// reaches is a tool that reads it in the same grammar — see [`bytes`]. And
+    /// the default as well where the word written down is not a size at all,
+    /// which only a hand-edit of `config.yaml` can do, the settings page
+    /// refusing one: a word sccache could not read would start the Compile
+    /// Server at sccache's own default instead, and a store the sweep could not
+    /// measure against anything would be one nothing ever bounded. The pane
+    /// says why — see [`Descriptor::size_unread`].
+    pub fn size(&self, name: &str) -> &str {
+        match self.size.as_deref() {
+            Some(size) if bytes(size).is_ok() => size,
+            _ => default_size(name),
+        }
+    }
+
+    /// Why the size written down for this language is not the one it runs at,
+    /// where it is not — a clause that follows the word, in the words a save
+    /// that sent it would have been refused in.
+    pub fn size_unread(&self) -> Option<String> {
+        bytes(self.size.as_deref()?).err()
     }
 
     /// The size exactly as it is written down, and `None` where nobody has
@@ -660,9 +734,32 @@ impl Descriptor {
         self.size.as_deref()
     }
 
+    /// Whether this language has a store of its own: a variable naming the
+    /// Build Cache or the directory beside the Worktrees, the descriptor's own
+    /// or a capability's.
+    ///
+    /// What says the settings page has a size to draw under its box. C/C++ has
+    /// none — its whole descriptor is the Compile Server's two launcher
+    /// variables, and that server's store is sized by Rust's entry — see
+    /// [`Languages::wanting`].
+    pub fn has_store(&self) -> bool {
+        self.env
+            .iter()
+            .chain(
+                self.capabilities
+                    .iter()
+                    .flat_map(|(_, entry)| entry.env.iter()),
+            )
+            .any(|(_, value)| {
+                value
+                    .as_deref()
+                    .is_some_and(|value| value.contains(CACHE) || value.contains(STORES))
+            })
+    }
+
     /// Whether this descriptor names `capability`, whatever this machine can
-    /// offer — which is what says the settings page has a size to draw under
-    /// its box, and what [`Languages::wanting`] asks of a switched-on one.
+    /// offer — which is what [`Languages::wanting`] asks of a switched-on one,
+    /// and what says the settings page has a Compile Server to talk about.
     pub fn names(&self, capability: &str) -> bool {
         self.capabilities
             .iter()
@@ -1782,6 +1879,140 @@ mod tests {
         );
     }
 
+    /// A size is read in sccache's own grammar, so that one word means the same
+    /// to the Compile Server and to the sweep: a whole number, then one binary
+    /// multiple or none.
+    #[test]
+    fn a_size_is_read_the_way_sccache_reads_one() {
+        assert_eq!(bytes("30G"), Ok(30 << 30));
+        assert_eq!(bytes("10G"), Ok(10 << 30));
+        assert_eq!(bytes("500M"), Ok(500 << 20));
+        assert_eq!(bytes("64K"), Ok(64 << 10));
+        assert_eq!(bytes("2T"), Ok(2 << 40));
+        assert_eq!(bytes("4096"), Ok(4096), "nothing after it is bytes");
+        assert_eq!(bytes("0"), Ok(0));
+
+        for unread in [
+            "",
+            "G",
+            "lots",
+            "1.5G",
+            "10g",
+            "10GB",
+            "10 G",
+            " 10G",
+            "-1G",
+            "+1G",
+            "10Gi",
+            "99999999999T",
+        ] {
+            let why = bytes(unread).expect_err(unread);
+
+            assert!(
+                why.starts_with("is not a size"),
+                "{unread:?} is refused with a reason: {why}",
+            );
+        }
+    }
+
+    /// Rust keeps the size its sccache was always started at, and every other
+    /// language — an installer's own among them — starts at the smaller one.
+    #[test]
+    fn every_language_has_a_default_and_rusts_is_its_own() {
+        let installers = built_in().merged(&written(
+            "languages:\n  gleam:\n    env:\n      GLEAM_HOME: \"{cache}/gleam\"\n",
+        ));
+
+        for (name, descriptor) in installers.iter() {
+            let default = match name {
+                RUST => "30G",
+                _ => "10G",
+            };
+
+            assert_eq!(descriptor.size(name), default, "{name}");
+            assert_eq!(descriptor.size_configured(), None, "{name}");
+            assert_eq!(descriptor.size_unread(), None, "{name}");
+        }
+
+        assert_eq!(crate::build_cache::SIZE, "30G");
+    }
+
+    /// Every language with a store of its own has a size to draw; C/C++, whose
+    /// whole descriptor is the Compile Server's launchers, has none — the one
+    /// server is sized by Rust's entry.
+    #[test]
+    fn every_language_with_a_store_has_one_and_cpp_has_none() {
+        for (name, descriptor) in built_in().iter() {
+            assert_eq!(descriptor.has_store(), name != CPP, "{name}");
+        }
+
+        let installers = written(
+            "languages:\n  gleam:\n    env:\n      GLEAM_HOME: \"{stores}/gleam\"\n  \
+             zig:\n    env:\n      ZIG_COLOR: \"off\"\n",
+        );
+
+        assert!(installers.get("gleam").unwrap().has_store());
+        assert!(
+            !installers.get("zig").unwrap().has_store(),
+            "a language naming neither directory has nowhere to put a store",
+        );
+    }
+
+    /// A size written into `config.yaml` by hand that is not one is the
+    /// default, both to the tool that reads it and to the Compile Server, and
+    /// the descriptor says why — the page refuses one, so only a hand-edit gets
+    /// here.
+    #[test]
+    fn a_size_that_is_not_one_is_the_default_and_says_why() {
+        let sized = built_in().merged(&written(
+            "languages:\n  rust:\n    size: lots\n  go:\n    size: 1.5G\n",
+        ));
+        let rust = sized.get(RUST).unwrap();
+        let go = sized.get(GO).unwrap();
+
+        assert_eq!(rust.size(RUST), "30G");
+        assert_eq!(go.size(GO), "10G");
+        assert_eq!(
+            rust.size_configured(),
+            Some("lots"),
+            "what was written is kept, so a save puts it back as it was",
+        );
+        assert!(rust.size_unread().unwrap().starts_with("is not a size"));
+        assert!(go.size_unread().is_some());
+
+        assert!(
+            sized
+                .given(&machine(true))
+                .env()
+                .contains(&(String::from("SCCACHE_CACHE_SIZE"), String::from("30G"))),
+            "sccache is handed the default rather than a word it cannot read",
+        );
+        assert_eq!(sized.wanting(SCCACHE), Some("30G"));
+    }
+
+    /// A size reaches a descriptor's own variable as the human typed it, which
+    /// is what a self-evicting tool other than sccache would be handed.
+    #[test]
+    fn a_typed_size_reaches_any_descriptors_variable_unchanged() {
+        let sized = built_in().merged(&written(
+            "languages:\n  gleam:\n    size: 512M\n    env:\n      GLEAM_LIMIT: \"{size}\"\n  \
+             zig:\n    env:\n      ZIG_LIMIT: \"{size}\"\n",
+        ));
+        let given = sized.given(&machine(true));
+
+        assert!(
+            given
+                .env()
+                .contains(&(String::from("GLEAM_LIMIT"), String::from("512M")))
+        );
+        assert!(
+            given
+                .env()
+                .contains(&(String::from("ZIG_LIMIT"), String::from("10G"))),
+            "and an installer's own language with nothing said is handed the default",
+        );
+    }
+
     /// The second placeholder is granted only where a loaded descriptor names
     /// it, and among the built-ins four do: pnpm's store, deno's cache, bun's
     /// and uv's, because a hardlink out of a store does not cross a filesystem.
@@ -2005,10 +2236,7 @@ mod tests {
                     String::from("JAVA_TOOL_OPTIONS"),
                     String::from("-Dhttp.proxy=http://x/y")
                 ),
-                (
-                    String::from("JAVA_LIMIT"),
-                    String::from(crate::build_cache::SIZE)
-                ),
+                (String::from("JAVA_LIMIT"), String::from(DEFAULT_SIZE)),
             ],
             "a value with no directory in it is text, and nothing here reads it \
              as a path",

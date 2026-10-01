@@ -17,7 +17,13 @@
 #              a language nobody has said anything about is one that works.
 #
 #   size       how big its store may grow, which is what `{size}` below stands
-#              for. Absent is 30G.
+#              for. Absent is 10G, and 30G for Rust, whose sccache has always
+#              been started at that. Written in sccache's own grammar — a whole
+#              number with K, M, G or T after it, binary multiples — because
+#              Verkstead reads it too, and one word should mean the same to
+#              both. One that is not a size is refused by the settings page, and
+#              one written here by hand is read as the default, with the pane
+#              saying why.
 #
 # Those two are the only keys the settings page ever writes, so an entry an
 # installer wrote keeps everything else in it when somebody saves that page.
@@ -51,7 +57,8 @@
 #              are proved.
 #
 #   {size}     how big this language's store may grow: this entry's own `size`
-#              key, which the settings page writes, and 30G where nobody has.
+#              key as it was written, which the settings page writes, and the
+#              default above where nobody has.
 #
 #   {sccache}  the sccache this server found, at the path a session reaches it
 #              by. Only inside the `sccache` capability below, which is what

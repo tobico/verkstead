@@ -731,6 +731,118 @@ async fn a_language_nobody_has_configured_is_on_at_the_default_size() {
     );
 }
 
+/// Save the languages as given and leave everything else alone, which is what
+/// either of the language pane's presses sends.
+async fn save_languages(app: &Router, languages: serde_json::Value) -> SettingsSaved {
+    save(
+        app,
+        &serde_json::json!({
+            "git_author": { "name": "", "email": "" },
+            "github_token": "Keep",
+            "languages": languages,
+            "cleanup": cleanup_unset(),
+            "at_once": at_once_unset(),
+            "conflict_resolution": "Merge",
+            "share_on_done": false,
+            "sandbox_binds": [],
+            "ignored_comments": "Keep",
+            "mcp_servers": "Keep",
+            "instructions": "",
+        }),
+    )
+    .await
+}
+
+/// Every language with a store of its own has a size the page draws a field
+/// for, with its default as the placeholder: Rust's sccache keeps the 30G it
+/// always had, and every other store starts at 10G. C/C++ has no store — the
+/// one Compile Server is Rust's — and so no field.
+#[tokio::test]
+async fn every_language_with_a_store_is_sized_at_its_own_default() {
+    let (_dir, app) = app().await;
+
+    let told = settings(&app).await;
+
+    assert!(told.languages.len() > 2, "every built-in: {told:?}");
+
+    for language in &told.languages {
+        let (default, store) = match language.name.as_str() {
+            "rust" => ("30G", true),
+            "cpp" => ("10G", false),
+            _ => ("10G", true),
+        };
+
+        assert_eq!(language.default_size, default, "{}", language.name);
+        assert_eq!(language.size, default, "{}", language.name);
+        assert!(!language.size_configured, "{}", language.name);
+        assert_eq!(language.size_unread, None, "{}", language.name);
+        assert_eq!(language.store, store, "{}", language.name);
+    }
+}
+
+/// A size Verkstead cannot read is refused at the save, with the reason the
+/// page draws at the field, and neither file is touched.
+#[tokio::test]
+async fn a_size_that_is_not_one_is_refused_at_the_save() {
+    let (dir, app) = app().await;
+
+    save_languages(&app, rust(true, "40G")).await;
+
+    let saved = save_languages(&app, rust(true, "1.5G")).await;
+
+    assert_eq!(saved.refused_sizes.len(), 1, "{saved:?}");
+    assert_eq!(saved.refused_sizes[0].language, "rust");
+    assert!(
+        saved.refused_sizes[0].why.starts_with("is not a size"),
+        "{:?}",
+        saved.refused_sizes[0],
+    );
+    assert_eq!(
+        rust_told(&saved.settings).size,
+        "40G",
+        "and what is drawn is how things stood",
+    );
+
+    let written = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
+    assert!(
+        written.contains("40G") && !written.contains("1.5G"),
+        "nothing was written: {written}",
+    );
+}
+
+/// And one written into `config.yaml` by hand is the default until it is
+/// fixed, with the reason on the pane — and a save about something else puts
+/// it back as it was rather than being refused over a field nobody touched.
+#[tokio::test]
+async fn a_hand_written_size_that_is_not_one_is_the_default_and_survives_a_save() {
+    let (dir, app) = app().await;
+
+    hand_edit(
+        dir.path(),
+        "config.yaml",
+        "languages:\n  rust:\n    size: lots\n",
+    );
+
+    let told = settings(&app).await;
+    let rust = rust_told(&told);
+
+    assert_eq!((rust.size.as_str(), rust.size_configured), ("lots", true));
+    assert_eq!(rust.default_size, "30G");
+    assert!(
+        rust.size_unread
+            .as_deref()
+            .is_some_and(|why| why.starts_with("is not a size")),
+        "the pane says why: {rust:?}",
+    );
+
+    let saved = save_languages(&app, as_the_page_saves(&told)).await;
+
+    assert!(saved.refused_sizes.is_empty(), "{saved:?}");
+
+    let written = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
+    assert!(written.contains("lots"), "kept as written: {written}");
+}
+
 /// And what a save of it says: both halves come back off the file, and the
 /// switch is what the next session is built against.
 #[tokio::test]
@@ -1571,12 +1683,11 @@ async fn a_save_carrying_the_instructions_as_they_stand_leaves_them() {
 /// request writes the whole of `config.yaml`, so a save built out of what the
 /// page sent would take a language off the machine at the next session.
 ///
-/// The size is the one of the two that has to be *sent* to survive, and the
-/// only field on the page a language may have no box for: nothing here reads
-/// Gleam's, there being no sccache capability in its descriptor, so the pane
-/// draws none. A page that sent only the sizes it drew would be a save that
-/// emptied this one — which is why the save below is every language the read
-/// listed, exactly as the pane's own `asEdit` puts them back.
+/// The size is the one of the two that has to be *sent* to survive, and a
+/// language may have no field for it — C/C++ has none, having no store of its
+/// own. A page that sent only the sizes it drew would be a save that emptied
+/// that one's — which is why the save below is every language the read listed,
+/// exactly as the pane's own `asEdit` puts them back.
 #[tokio::test]
 async fn a_save_leaves_an_installers_own_descriptor_exactly_as_the_file_had_it() {
     let (dir, app) = app().await;
@@ -1597,11 +1708,15 @@ async fn a_save_leaves_an_installers_own_descriptor_exactly_as_the_file_had_it()
     assert_eq!(
         (gleam.size.as_str(), gleam.size_configured),
         ("8G", true),
-        "the size an installer wrote reaches the page even with no field for it",
+        "the size an installer wrote reaches the page",
     );
     assert!(
-        gleam.compiling.is_none(),
-        "which is what says there is no field: nothing reads this one's size"
+        gleam.store,
+        "and its store is under the Build Cache, so there is a field for it"
+    );
+    assert_eq!(
+        gleam.default_size, "10G",
+        "an installer's own starts at 10G"
     );
 
     save(

@@ -1,6 +1,6 @@
 //! Which languages a session gets build support for, on the settings page: one
-//! box per **descriptor** the server loaded, and — on the one whose store an
-//! sccache bounds — how big that store may grow.
+//! box per **descriptor** the server loaded, and — on every one with a store of
+//! its own — how big that store may grow.
 //!
 //! **The page is drawn from the descriptors rather than from a list it holds.**
 //! A language is data: the server loads the descriptors embedded in its binary,
@@ -62,26 +62,33 @@
 //!
 //! A size hangs off the checkbox it belongs to, which is the page's one pattern
 //! for configuration that only means something while something else is on:
-//! indented under that box, and disabled while it is off — see [`Nested`]. It is
-//! disabled for a second reason as well, and the reason is the warning above it:
-//! the size is sccache's own, so a server with no sccache has nothing to read it.
+//! indented under that box, and disabled while it is off — see [`Nested`]. On
+//! the language sizing the Compile Server it is disabled for a second reason as
+//! well, and the reason is the warning above it: that size is sccache's own, so
+//! a server with no sccache has nothing to read it.
+//!
+//! **Its placeholder is that language's own default** — `30G` for Rust, whose
+//! sccache has always been started at it, and `10G` for everything else. And a
+//! size is a word the server reads, in sccache's grammar: one it cannot read is
+//! refused at the save, with the reason drawn under the field and what was
+//! typed left in it; one a hand-edit put into `config.yaml` is drawn as typed
+//! with a sentence saying the store is held to the default meanwhile.
 //!
 //! **One Compile Server, one size, one field.** Two built-ins name the sccache
 //! capability — Rust and C/C++ — and the server runs one Compile Server between
 //! them, sized by the first language that names it whether or not that one is
-//! switched on. So the field is drawn on that one alone, and every other
-//! language naming the capability says instead which language's cache it
-//! compiles through — see [`sizer`]. Switch Rust off and the field stays under
-//! Rust, live while C/C++ is on: the store is still Rust's size, and a field
-//! that moved to C/C++ would be the store shrinking to C/C++'s default.
+//! switched on. C/C++ has no store of its own besides, so it draws no field and
+//! says instead which language's cache it compiles through — see [`sizer`].
+//! Switch Rust off and the field stays under Rust, live while C/C++ is on: the
+//! store is still Rust's size, and a field that moved to C/C++ would be the
+//! store shrinking to C/C++'s default.
 //!
 //! **And a language with no field for its size still sends one.** `size` is a
-//! key of every entry whoever wrote it, and only the language whose store an
-//! sccache bounds has anything here reading it — so a save built out of the
-//! fields drawn would write `config.yaml` with every other language's size gone,
-//! a key nobody was ever shown being emptied by a press about something else.
-//! What every save sends is what the server last gave it, per language, for both
-//! keys — see [`heldLanguages`].
+//! key of every entry whoever wrote it, so a save built out of the fields drawn
+//! would write `config.yaml` with C/C++'s size gone, a key nobody was ever
+//! shown being emptied by a press about something else. What every save sends
+//! is what the server last gave it, per language, for both keys — see
+//! [`heldLanguages`].
 //!
 //! Everything goes through the one settings endpoint, which writes both files:
 //! the author rides along as it stands and the token is left alone, so saving a
@@ -190,24 +197,46 @@ function warned(told: SettingsView | undefined): boolean {
 
 /// Whether the size hanging off a checkbox means anything.
 ///
-/// A language naming the Compile Server being on — this one's box or another's,
-/// because the one size is this one's while either compiles through it — an
-/// sccache being there to read it, and the entry this would be written into
-/// being one the server could read: the size is sccache's own word, so a server
-/// without one has nowhere to put it, and an entry that would not load is one
-/// nothing can be written into. All three are the group's *off*, and the group
-/// is drawn greyed rather than taken away — a field that vanished would say the
-/// setting had, and it has not.
+/// For most languages, that the language is on and its entry is one the server
+/// could read: an entry that would not load is one nothing can be written into.
+///
+/// For the one sizing the Compile Server, a language naming that server being
+/// on — this one's box or another's, because the one size is this one's while
+/// either compiles through it — and an sccache being there to read it, as well
+/// as the entry being readable: the size is sccache's own word, so a server
+/// without one has nowhere to put it.
+///
+/// Every one of those is the group's *off*, and the group is drawn greyed
+/// rather than taken away — a field that vanished would say the setting had,
+/// and it has not.
 function sizeable(
   told: SettingsView | undefined,
   language: LanguageView,
 ): boolean {
+  if (language.unread !== null) {
+    return false;
+  }
+
+  if (language.compiling === null) {
+    return language.enabled;
+  }
+
   return (
     (told?.languages ?? []).some(
       (other) => other.compiling !== null && other.enabled,
-    ) &&
-    language.compiling === "Cached" &&
-    language.unread === null
+    ) && language.compiling === "Cached"
+  );
+}
+
+/// Whether a language draws a size field at all: one with a store of its own,
+/// or the one the Compile Server is sized by.
+function sized(
+  told: SettingsView | undefined,
+  language: LanguageView,
+): boolean {
+  return (
+    language.store ||
+    (language.compiling !== null && sizer(told)?.name === language.name)
   );
 }
 
@@ -346,6 +375,11 @@ export function LanguagesPane(props: {
   // author fields do.
   const [typed, setTyped] = createSignal<Record<string, string>>({});
 
+  // And why the last size pressed Save on was turned down, by the language it
+  // belongs to — the server's own clause, drawn under the field still holding
+  // what was typed.
+  const [refused, setRefused] = createSignal<Record<string, string>>({});
+
   const told = (): SettingsView | undefined => settings.data;
 
   /// What a field holds: what was typed, else the size somebody configured,
@@ -406,10 +440,18 @@ export function LanguagesPane(props: {
       });
     },
     onSuccess: (saved: SettingsSaved, asked: Asked) => {
+      // A size turned down is the whole save turned down: nothing was written,
+      // so what was typed stays where it is and the reason goes under it.
+      setRefused(
+        Object.fromEntries(
+          saved.refused_sizes.map((refusal) => [refusal.language, refusal.why]),
+        ),
+      );
+
       // What was typed goes, because the answer is now what the field follows —
       // and only for the language this save committed. A tick commits none, so
       // what somebody is halfway through writing is still theirs.
-      if (asked.committed !== null) {
+      if (asked.committed !== null && saved.refused_sizes.length === 0) {
         const language = asked.committed;
         setTyped((held) => {
           const { [language]: _committed, ...rest } = held;
@@ -480,12 +522,10 @@ export function LanguagesPane(props: {
                       flip={(enabled) => flip(language, enabled)}
                     />
 
-                    {/* The size is sccache's, so the group is off where there
-                        is no sccache to read it as well as where the box is
-                        unticked. A language whose store nothing bounds has no
-                        group at all — there is no size to draw — and nor does
-                        one that compiles through a Compile Server another
-                        language sizes: it says which, instead. */}
+                    {/* A language with no store of its own has no group at all
+                        — there is no size to draw — and one that compiles
+                        through a Compile Server another language sizes says
+                        which, instead. */}
                     <Show
                       when={
                         language.compiling !== null &&
@@ -498,19 +538,14 @@ export function LanguagesPane(props: {
                       </p>
                     </Show>
 
-                    <Show
-                      when={
-                        language.compiling !== null &&
-                        sizer(set())?.name === language.name
-                      }
-                    >
+                    <Show when={sized(set(), language)}>
                       <Nested on={sizeable(set(), language)}>
                         <form
                           class={styles.sizing}
                           onSubmit={(ev) => commit(ev, language)}
                         >
                           <label for={`language-size-${language.name}`}>
-                            How large the compiled half may grow
+                            How large its store may grow
                           </label>
                           <div class={styles.field}>
                             <input
@@ -521,7 +556,7 @@ export function LanguagesPane(props: {
                               spellcheck={false}
                               // The default, so an empty box reads as the size
                               // nobody has chosen rather than as no size at all.
-                              placeholder={language.size}
+                              placeholder={language.default_size}
                               value={size(language)}
                               onInput={(ev) =>
                                 setTyped((held) => ({
@@ -534,6 +569,26 @@ export function LanguagesPane(props: {
                               Save
                             </button>
                           </div>
+
+                          <Show when={refused()[language.name]}>
+                            {(why) => (
+                              <ErrorLine class={styles.failure}>
+                                <code>{size(language)}</code> {why()}.
+                              </ErrorLine>
+                            )}
+                          </Show>
+
+                          {/* And a size a hand-edit wrote that is not one: kept
+                              as written, and the store held to the default. */}
+                          <Show when={language.size_unread}>
+                            {(why) => (
+                              <p class={styles.warning}>
+                                Its size in <code>config.yaml</code>,{" "}
+                                <code>{language.size}</code>, {why()}, so its
+                                store is held to {language.default_size}.
+                              </p>
+                            )}
+                          </Show>
                         </form>
                       </Nested>
                     </Show>

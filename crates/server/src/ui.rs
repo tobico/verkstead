@@ -44,18 +44,18 @@ use verkstead_render::{
     DroppedRow, FileDeleted, FileDeleting, FileListsView, FileMade, FileMaking, FileReading,
     FileRenamed, FileRenaming, FileRootsView, FileStatusView, FileWrite, FileWritten,
     FolderListing, GrillingStarted, HeaderEdit, IgnoreRule, IgnoredCommentsEdit, InstallPress,
-    LanguageView, Lifecycle, Locked, McpHeader, McpServer, McpServerEdit, McpServersEdit, Merging,
-    MissedOut, NewAdoption, NewCompanion, NewConversation, NewJoin, NewRank, PairingView, Parked,
-    PendingSteerView, Permitting, Process, ProcessChoice, ProcessPicked, ProfileChoice,
-    ProfileEdit, ProfileEntry, PushKey, Registration, RemoteBanner, RemoteView, RepoChoice,
-    RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice, RuleField, RuleRefused, RunningOn,
-    ServeEdit, ServePress, ServerAttached, ServerField, ServerRefused, ServerRemoved, SetReading,
-    SetView, SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished,
-    SharedCommit, SharedConversation, ShowArchived, ShowingArchived, Standing, SteerCancelled,
-    SteerForm, SteerOpened, SteerPairingView, SteerSaved, SteerSubmission, Submitted, Subscribed,
-    Subscription, TakenUp, TargetNamed, TargetRecorded, TerminalOpened, TimelineEvent, TokenEdit,
-    TokenSaved, TransferredTo, Transferring, UnreadEntry, UnreadableSet, Unsubscribe, UpdateNotice,
-    Verified,
+    LanguageEdit, LanguageView, Lifecycle, Locked, McpHeader, McpServer, McpServerEdit,
+    McpServersEdit, Merging, MissedOut, NewAdoption, NewCompanion, NewConversation, NewJoin,
+    NewRank, PairingView, Parked, PendingSteerView, Permitting, Process, ProcessChoice,
+    ProcessPicked, ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration, RemoteBanner,
+    RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice, RuleField,
+    RuleRefused, RunningOn, ServeEdit, ServePress, ServerAttached, ServerField, ServerRefused,
+    ServerRemoved, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView, ShareCommented,
+    SharePublished, SharedCommit, SharedConversation, ShowArchived, ShowingArchived, SizeRefused,
+    Standing, SteerCancelled, SteerForm, SteerOpened, SteerPairingView, SteerSaved,
+    SteerSubmission, Submitted, Subscribed, Subscription, TakenUp, TargetNamed, TargetRecorded,
+    TerminalOpened, TimelineEvent, TokenEdit, TokenSaved, TransferredTo, Transferring, UnreadEntry,
+    UnreadableSet, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -5817,7 +5817,12 @@ async fn save_settings(
             }
         };
 
-        if !refused.is_empty() || !refused_servers.is_empty() {
+        // And the sizes, which are values like everything else the page writes
+        // and refused like the two lists above: a word Verkstead cannot read as
+        // a size is a store nothing could hold to it.
+        let refused_sizes = size_refusals(&settings.config().languages(), &edit.languages);
+
+        if !refused.is_empty() || !refused_servers.is_empty() || !refused_sizes.is_empty() {
             return Ok((
                 SettingsSaved {
                     // How things stand, which is how they stood: nothing was
@@ -5827,6 +5832,7 @@ async fn save_settings(
                     verified: None,
                     refused,
                     refused_servers,
+                    refused_sizes,
                     // And nothing was spoken to. A refusal is the whole request
                     // refused, so there is no declaration written down to try.
                     tried: Vec::new(),
@@ -5994,6 +6000,7 @@ async fn save_settings(
                 // nothing wrong with — of either list.
                 refused: Vec::new(),
                 refused_servers: Vec::new(),
+                refused_sizes: Vec::new(),
                 // Filled in below, off the runtime rather than off this thread:
                 // trying a server is a request over the network, which is the one
                 // thing in this handler that is neither a file nor a process.
@@ -6075,10 +6082,11 @@ fn compile_caching(cached: bool) -> CompileCaching {
 /// a word to draw. **The size is every language's**, because it is a key of
 /// every entry and a save puts both of the page's keys back for all of them:
 /// a size only the file knows about would be a size the next save emptied.
-/// What `compiling` says is whether anything reads it — the language names the
-/// sccache capability — and, where something does, whether that compiling is
-/// really being cached, which is the server's own environment and the same
-/// answer for every language that asks.
+/// Whether there is a field for it is whether the language has a store of its
+/// own. What `compiling` says is whether the language names the sccache
+/// capability and, where it does, whether that compiling is really being
+/// cached, which is the server's own environment and the same answer for every
+/// language that asks.
 ///
 /// And a language whose entry in `config.yaml` would not load is on the list
 /// like any other, carrying the reason and what it is running on instead — see
@@ -6093,11 +6101,21 @@ fn languages(loaded: &crate::languages::Languages, caches_compiles: bool) -> Vec
             name: name.to_owned(),
             label: descriptor.label().unwrap_or(name).to_owned(),
             enabled: descriptor.enabled(),
-            // The default where nobody has typed one, with the flag beside it
-            // saying which of the two this is — a field showing a value nobody
-            // chose should say so, and it says so as a placeholder.
-            size: descriptor.size().to_owned(),
+            // What is written down, as written, where somebody wrote one — it is
+            // what a save puts back — and the default where nobody did, with the
+            // flag beside it saying which of the two this is. The default rides
+            // along on its own: a field showing a value nobody chose should say
+            // so, and it says so as a placeholder.
+            size: descriptor
+                .size_configured()
+                .unwrap_or(crate::languages::default_size(name))
+                .to_owned(),
             size_configured: descriptor.size_configured().is_some(),
+            default_size: crate::languages::default_size(name).to_owned(),
+            // And why what is written down is not what the store is held to,
+            // where it is not — only a hand-edit can make that so.
+            size_unread: descriptor.size_unread(),
+            store: descriptor.has_store(),
             // And whether anything reads that size. Not out of the files at
             // all where something does: this is the server's own environment
             // and its own platform, and the one thing on this page the human
@@ -6383,6 +6401,46 @@ fn server_refusals(servers: &[crate::settings::McpServer]) -> Vec<ServerRefused>
                 field,
                 why,
             }
+        })
+        .collect()
+}
+
+/// The sizes a save is asking for that are not sizes, one entry per language at
+/// fault, and empty where there is nothing wrong with any of them.
+///
+/// **Only a size that changed.** A word already in `config.yaml` that is not a
+/// size is a hand-edit's, and the page sends it back as it stands on every save
+/// about something else — so refusing it would turn down a tick over a field
+/// nobody touched. The pane says what is wrong with that one instead, and the
+/// store is held to its default meanwhile — see
+/// [`crate::languages::Descriptor::size`].
+///
+/// A blank is nothing configured rather than a size of nothing, so it is never
+/// refused: clearing the field is how the default is asked for back.
+fn size_refusals(written: &crate::languages::Languages, sent: &[LanguageEdit]) -> Vec<SizeRefused> {
+    sent.iter()
+        .filter_map(|language| {
+            let size = language.size.trim();
+
+            if size.is_empty() {
+                return None;
+            }
+
+            let unchanged = written
+                .get(&language.name)
+                .and_then(crate::languages::Descriptor::size_configured)
+                == Some(size);
+
+            if unchanged {
+                return None;
+            }
+
+            let why = crate::languages::bytes(size).err()?;
+
+            Some(SizeRefused {
+                language: language.name.clone(),
+                why,
+            })
         })
         .collect()
 }

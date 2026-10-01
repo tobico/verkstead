@@ -1,6 +1,6 @@
 //! Language support on the settings page: which languages the card names, what
-//! the checkboxes in its pane put on the wire, and the size that hangs off the
-//! one whose store an sccache bounds.
+//! the checkboxes in its pane put on the wire, and the size that hangs off
+//! every one with a store of its own.
 //!
 //! Two halves mounted apart, because that is what they are: a card in the middle
 //! pane naming the languages that have build support on, and the controls that
@@ -171,6 +171,7 @@ function answering(standing: SettingsView): SettingsSaved {
     verified: null,
     refused: [],
     refused_servers: [],
+    refused_sizes: [],
     tried: [],
   };
 }
@@ -206,14 +207,28 @@ function theCheck(label = "Rust"): HTMLInputElement {
   return screen.getByRole("checkbox", { name: label }) as HTMLInputElement;
 }
 
-/// And the group hanging off one, which holds the size. There is one on this
-/// fixture, which is Rust's: nothing bounds the installer's own store.
-function theGroup(container: ParentNode): HTMLFieldSetElement {
-  const group = container.querySelector<HTMLFieldSetElement>(
-    `.${check.nested}`,
-  );
-  expect(group, "expected the nested group to be drawn").not.toBeNull();
+/// And the group hanging off one, which holds the size — Rust's, the first
+/// drawn, unless another is named.
+function theGroup(container: ParentNode, name = RUST): HTMLFieldSetElement {
+  const group = container
+    .querySelector(`#language-size-${name}`)
+    ?.closest<HTMLFieldSetElement>(`.${check.nested}`);
+  expect(group, "expected the nested group to be drawn").toBeTruthy();
   return group!;
+}
+
+/// And the size field in it, by the language it belongs to.
+function theSize(name = RUST): HTMLInputElement {
+  return screen.getByLabelText(/How large/, {
+    selector: `#language-size-${name}`,
+  }) as HTMLInputElement;
+}
+
+/// And the Save beside that field.
+function theSave(name = RUST): HTMLButtonElement {
+  return theSize(name)
+    .closest("form")!
+    .querySelector<HTMLButtonElement>("button[type=submit]")!;
 }
 
 describe("the card", () => {
@@ -382,9 +397,9 @@ describe("the languages as the pane draws them", () => {
 
     expect(theCheck().checked).toBe(true);
     expect(theGroup(container).disabled).toBe(true);
-    expect(screen.getByLabelText(/How large/).matches(":disabled")).toBe(true);
+    expect(theSize().matches(":disabled")).toBe(true);
     expect(
-      screen.getByRole("button", { name: "Save" }).matches(":disabled"),
+      theSave().matches(":disabled"),
     ).toBe(true);
   });
 
@@ -399,7 +414,7 @@ describe("the languages as the pane draws them", () => {
     await waitFor(() => expect(theCheck().checked).toBe(false));
 
     expect(theGroup(container).disabled).toBe(true);
-    expect(screen.getByLabelText(/How large/).matches(":disabled")).toBe(true);
+    expect(theSize().matches(":disabled")).toBe(true);
   });
 
   /// A language whose entry would not load says so, with the reason the server
@@ -453,7 +468,7 @@ describe("the languages as the pane draws them", () => {
 
     await waitFor(() => expect(theCheck().checked).toBe(false));
 
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    fireEvent.click(theSave());
 
     expect(
       fetching.mock.calls.some(([, init]) => init?.method === "POST"),
@@ -469,22 +484,50 @@ describe("the languages as the pane draws them", () => {
     await waitFor(() => expect(theCheck().checked).toBe(true));
 
     expect(theGroup(container).disabled).toBe(false);
-    expect(screen.getByLabelText(/How large/).matches(":disabled")).toBe(false);
+    expect(theSize().matches(":disabled")).toBe(false);
   });
 
-  /// And a language whose store nothing bounds has no size at all — there is
-  /// one field on this pane, which is the one the sccache belongs to.
-  it("draws no size under a language whose store nothing bounds", async () => {
+  /// Every language with a store of its own has a size — an installer's own
+  /// among them — and C/C++, which has none, has no field.
+  it("draws a size under every language with a store, and none under C/C++", async () => {
     theSettings(compiling(TOLD));
     const { container } = mountPane();
 
     await waitFor(() => expect(theCheck("Gleam").checked).toBe(true));
 
-    expect(
-      container.querySelectorAll(`.${check.nested}`),
-      "one group, which is the one with an sccache behind it",
-    ).toHaveLength(1);
-    expect(screen.getAllByLabelText(/How large/)).toHaveLength(1);
+    const fields = screen
+      .getAllByLabelText(/How large/)
+      .map((field) => field.id);
+
+    expect(fields).toEqual(
+      [RUST, GO, NODE, PYTHON, DOTNET, JVM, GLEAM].map(
+        (name) => `language-size-${name}`,
+      ),
+    );
+    expect(container.querySelectorAll(`.${check.nested}`)).toHaveLength(7);
+  });
+
+  /// And a store nothing but Verkstead bounds takes its size whether or not
+  /// there is an sccache: only the Compile Server's size is sccache's word.
+  it("lets a package store's size be typed where there is no sccache", async () => {
+    theSettings(UNSET);
+    const { container } = mountPane();
+
+    await waitFor(() => screen.getByText(/No sccache is installed/));
+
+    expect(theGroup(container, GO).disabled).toBe(false);
+    expect(theSize(GO).matches(":disabled")).toBe(false);
+  });
+
+  /// And greys it while its own box is unticked, like Rust's.
+  it("greys a package store's size while its box is unticked", async () => {
+    theSettings(off(compiling(TOLD), GO));
+    const { container } = mountPane();
+
+    await waitFor(() => expect(theCheck("Go").checked).toBe(false));
+
+    expect(theGroup(container, GO).disabled).toBe(true);
+    expect(theGroup(container, NODE).disabled).toBe(false);
   });
 
   /// One Compile Server between the two languages naming it, so one size: the
@@ -495,8 +538,12 @@ describe("the languages as the pane draws them", () => {
 
     await waitFor(() => expect(theCheck("C/C++").checked).toBe(true));
 
-    expect(screen.getAllByLabelText(/How large/)).toHaveLength(1);
-    expect(screen.getByLabelText(/How large/).id).toBe(`language-size-${RUST}`);
+    expect(
+      screen.queryByLabelText(/How large/, {
+        selector: `#language-size-${CPP}`,
+      }),
+    ).toBeNull();
+    expect(theSize().id).toBe(`language-size-${RUST}`);
     expect(
       screen.getByText(/Shares the Compile Server with Rust/),
     ).toBeTruthy();
@@ -512,8 +559,7 @@ describe("the languages as the pane draws them", () => {
 
     await waitFor(() => expect(theCheck().checked).toBe(false));
 
-    expect(screen.getAllByLabelText(/How large/)).toHaveLength(1);
-    expect(screen.getByLabelText(/How large/).id).toBe(`language-size-${RUST}`);
+    expect(theSize().id).toBe(`language-size-${RUST}`);
     expect(theGroup(container).disabled).toBe(false);
     expect(
       screen.getByText(/Shares the Compile Server with Rust/),
@@ -537,11 +583,56 @@ describe("the languages as the pane draws them", () => {
     mountPane();
 
     const field = (await waitFor(() =>
-      screen.getByLabelText(/How large/),
+      theSize(),
     )) as HTMLInputElement;
 
     expect(field.value).toBe("");
     expect(field.placeholder).toBe("30G");
+    expect(
+      theSize(GO).placeholder,
+      "and every store but Rust's starts at 10G",
+    ).toBe("10G");
+  });
+
+  /// And the placeholder is the default even where a size is configured, so
+  /// that clearing the field shows what clearing it asks for.
+  it("draws the default as the placeholder under a configured size", async () => {
+    theSettings(compiling(TOLD));
+    mountPane();
+
+    await waitFor(() => expect(theSize().value).toBe("50G"));
+
+    expect(theSize().placeholder).toBe("30G");
+    expect(theSize(GLEAM).placeholder).toBe("10G");
+  });
+
+  /// A size a hand-edit wrote that is not one is drawn as written, with the
+  /// server's reason and the default the store is held to meanwhile.
+  it("says why a hand-written size is not the one in force", async () => {
+    const standing = compiling(TOLD);
+    theSettings({
+      ...standing,
+      languages: standing.languages.map((language) =>
+        language.name === GO
+          ? {
+              ...language,
+              size: "lots",
+              size_configured: true,
+              size_unread: "is not a size: write 10G",
+            }
+          : language,
+      ),
+    });
+    const { container } = mountPane();
+
+    await waitFor(() => expect(theSize(GO).value).toBe("lots"));
+
+    expect(
+      theGroup(container, GO).querySelector(`.${styles.warning}`)?.textContent,
+    ).toBe(
+      "Its size in config.yaml, lots, is not a size: write 10G, so its store " +
+        "is held to 10G.",
+    );
   });
 
   it("draws a size somebody configured as the value", async () => {
@@ -549,7 +640,7 @@ describe("the languages as the pane draws them", () => {
     mountPane();
 
     const field = (await waitFor(() =>
-      screen.getByLabelText(/How large/),
+      theSize(),
     )) as HTMLInputElement;
 
     expect(field.value).toBe("50G");
@@ -637,7 +728,7 @@ describe("changing the languages", () => {
     const fetching = theSettings(compiling(TOLD), json(answering(off(TOLD))));
     mountPane();
 
-    const field = await waitFor(() => screen.getByLabelText(/How large/));
+    const field = await waitFor(() => theSize());
     fireEvent.input(field, { target: { value: "5" } });
 
     fireEvent.click(theCheck());
@@ -647,7 +738,7 @@ describe("changing the languages", () => {
     // And what was typed is still there to finish typing: the tick did not
     // commit it, so the field did not let go of it either.
     await waitFor(() => expect(theCheck().checked).toBe(false));
-    expect((screen.getByLabelText(/How large/) as HTMLInputElement).value).toBe(
+    expect((theSize() as HTMLInputElement).value).toBe(
       "5",
     );
   });
@@ -659,7 +750,7 @@ describe("changing the languages", () => {
     const fetching = theSettings(compiling(TOLD), json(answering(bigger)));
     mountPane();
 
-    const field = await waitFor(() => screen.getByLabelText(/How large/));
+    const field = await waitFor(() => theSize());
     fireEvent.input(field, { target: { value: "80G" } });
 
     expect(
@@ -667,7 +758,7 @@ describe("changing the languages", () => {
       "typing is not saving",
     ).toBe(false);
 
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    fireEvent.click(theSave());
 
     await waitFor(() =>
       expect(sent(fetching)).toEqual({
@@ -710,9 +801,9 @@ describe("changing the languages", () => {
     );
     mountPane();
 
-    const field = await waitFor(() => screen.getByLabelText(/How large/));
+    const field = await waitFor(() => theSize());
     fireEvent.input(field, { target: { value: "" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    fireEvent.click(theSave());
 
     await waitFor(() => expect(languagesSent(fetching)[0]?.size).toBe(""));
   });
@@ -720,19 +811,21 @@ describe("changing the languages", () => {
   /// And a size the pane drew no field for is sent all the same.
   ///
   /// One request writes the whole of `config.yaml`, and `size` is a key of every
-  /// language's entry — not only of the one whose store an sccache bounds, which
-  /// is the only one with a box for it here. A tick that sent what it had drawn
-  /// would write the file with the installer's own size gone, which is a key
-  /// nobody was ever shown being emptied by a press about something else.
+  /// language's entry — C/C++'s too, which has no store and no box for it here.
+  /// A tick that sent what it had drawn would write the file with that size
+  /// gone, which is a key nobody was ever shown being emptied by a press about
+  /// something else.
   it("sends the size of a language it drew no field for", async () => {
     const fetching = theSettings(compiling(TOLD), json(answering(off(TOLD))));
     mountPane();
 
     await waitFor(() => expect(theCheck().checked).toBe(true));
     expect(
-      screen.queryAllByLabelText(/How large/),
-      "only the language whose store an sccache bounds has a field",
-    ).toHaveLength(1);
+      screen.queryByLabelText(/How large/, {
+        selector: `#language-size-${CPP}`,
+      }),
+      "C/C++ has no store, so no field",
+    ).toBeNull();
 
     fireEvent.click(theCheck());
 
@@ -748,6 +841,35 @@ describe("changing the languages", () => {
         { name: GLEAM, enabled: true, size: "8G" },
       ]),
     );
+  });
+
+  /// A size the server cannot read is turned down with the save, and the
+  /// reason drawn under the field still holding what was typed.
+  it("draws a refused size's reason and keeps what was typed", async () => {
+    const fetching = theSettings(
+      compiling(TOLD),
+      json({
+        ...answering(compiling(TOLD)),
+        refused_sizes: [{ language: GO, why: "is not a size: write 10G" }],
+      }),
+    );
+    mountPane();
+
+    const field = await waitFor(() => theSize(GO));
+    fireEvent.input(field, { target: { value: "1.5G" } });
+    fireEvent.click(theSave(GO));
+
+    await waitFor(() => screen.getByText(/is not a size: write 10G/));
+
+    expect(languagesSent(fetching)[1]).toEqual({
+      name: GO,
+      enabled: true,
+      size: "1.5G",
+    });
+    expect(screen.getByText(/is not a size/).textContent).toBe(
+      "1.5G is not a size: write 10G.",
+    );
+    expect(theSize(GO).value, "what was typed is still there").toBe("1.5G");
   });
 
   /// What the pane saved is what the card goes back to saying, because the

@@ -96,8 +96,8 @@ pub use settings::{
     CleanupView, CompileCaching, ConflictResolution, HeaderEdit, IgnoreRule, IgnoredCommentsEdit,
     LanguageEdit, LanguageView, McpHeader, McpHeaderEdit, McpServer, McpServerEdit, McpServersEdit,
     PathResolution, PathSource, PathsView, RuleField, RuleRefused, RunningOn, ServerField,
-    ServerRefused, ServerTried, SettingsEdit, SettingsSaved, SettingsView, TokenEdit, TokenSaved,
-    Tried, UnreadEntry, Verified,
+    ServerRefused, ServerTried, SettingsEdit, SettingsSaved, SettingsView, SizeRefused, TokenEdit,
+    TokenSaved, Tried, UnreadEntry, Verified,
 };
 pub use sharing::{
     CommentedOn, MissedOut, SHARE_MARKER, ShareCommented, SharePublished, SharedCommit,

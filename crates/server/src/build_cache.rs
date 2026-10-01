@@ -1583,7 +1583,7 @@ mod tests {
         );
         assert_eq!(
             variable(&shared, "GLEAM_LIMIT"),
-            Some(SIZE),
+            Some(languages::DEFAULT_SIZE),
             "and its store is its own default size until somebody says",
         );
         assert_eq!(

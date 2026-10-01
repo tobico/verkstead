@@ -3197,10 +3197,9 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             // Every language the page was given, which is how it saves: the
             // switch and the size of each, and the size of **every** one of them
             // whether the pane drew a field for it or not — see `held.ts`'s
-            // `asEdit`. So the fixture carries a size the human typed on the one
-            // whose store an sccache bounds, a size an installer wrote on one
-            // nothing here reads, and `settings-unset.json` above for the
-            // defaults.
+            // `asEdit`. So the fixture carries a size the human typed on Rust,
+            // whose store an sccache bounds, a size on an installer's own
+            // language, and `settings-unset.json` above for the defaults.
             "languages": [
                 { "name": "rust", "enabled": true, "size": "50G" },
                 { "name": "gleam", "enabled": true, "size": "8G" },
