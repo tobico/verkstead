@@ -24,10 +24,11 @@ use std::ffi::c_void;
 use std::io;
 use std::ptr;
 
-use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+use windows_sys::Win32::Foundation::{CloseHandle, ERROR_MORE_DATA, HANDLE};
 use windows_sys::Win32::System::JobObjects::{
     AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-    JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
+    JOBOBJECT_BASIC_PROCESS_ID_LIST, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+    JobObjectBasicProcessIdList, JobObjectExtendedLimitInformation, QueryInformationJobObject,
     SetInformationJobObject, TerminateJobObject,
 };
 
@@ -93,6 +94,59 @@ impl Job {
         }
 
         Ok(())
+    }
+
+    /// The ids of every process in it now, which is the whole tree — see
+    /// [`Job::take`]. A terminal's ports are read off these: see
+    /// [`crate::terminals::ports`].
+    pub(crate) fn processes(&self) -> io::Result<Vec<u32>> {
+        // Where the ids start, in words: after the two counts.
+        const FIRST: usize = std::mem::offset_of!(JOBOBJECT_BASIC_PROCESS_ID_LIST, ProcessIdList)
+            / size_of::<usize>();
+
+        // Room for this many to start with, doubled for as long as the Job says
+        // it holds more: the list is a header and then one word per process.
+        let mut room = 64usize;
+
+        loop {
+            let words = FIRST + room;
+            let mut list = vec![0usize; words];
+            let length = u32::try_from(words * size_of::<usize>()).unwrap_or(u32::MAX);
+
+            // Safety: the buffer is `length` bytes, word-aligned, and the class
+            // is the one documented to fill a list of process ids into it.
+            let asked = unsafe {
+                QueryInformationJobObject(
+                    self.handle(),
+                    JobObjectBasicProcessIdList,
+                    list.as_mut_ptr().cast::<c_void>(),
+                    length,
+                    ptr::null_mut(),
+                )
+            };
+
+            // Safety: the buffer starts with the header whether or not every id
+            // fitted, and is aligned for it.
+            let read = unsafe { &*list.as_ptr().cast::<JOBOBJECT_BASIC_PROCESS_ID_LIST>() };
+
+            if asked == 0 {
+                let error = io::Error::last_os_error();
+
+                if error.raw_os_error() == Some(ERROR_MORE_DATA as i32) {
+                    room = (read.NumberOfAssignedProcesses as usize).max(room * 2);
+                    continue;
+                }
+
+                return Err(error);
+            }
+
+            let listed = read.NumberOfProcessIdsInList as usize;
+
+            return Ok(list[FIRST..FIRST + listed.min(room)]
+                .iter()
+                .filter_map(|&pid| u32::try_from(pid).ok())
+                .collect());
+        }
     }
 
     /// And end everything in it now, saying it exited `code` — which is the

@@ -13,8 +13,9 @@
 //! reading has to see through: a Sandbox's pid namespace, and a server that
 //! `setsid` took out of the shell's tree.
 //!
-//! **Linux alone**, which is the one platform that reads anything yet: the other
-//! two read nothing and say so in `terminals::ports`.
+//! **Linux alone**: the two Verksteads stand on bwrap. The readers of the other
+//! two platforms are proven by `terminals::ports`'s own tests, on the macOS and
+//! Windows runners.
 #![cfg(target_os = "linux")]
 
 use std::net::{Ipv4Addr, SocketAddr, TcpListener};

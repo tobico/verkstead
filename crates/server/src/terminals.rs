@@ -244,7 +244,7 @@ struct Watched {
 
     /// The process the shell was started as, which is what its ports are read
     /// from — see [`ports`]. `None` where the platform handed back no id.
-    leader: Option<u32>,
+    leader: Option<ports::Tree>,
 
     /// The members of the cluster holding an attach on it, by Device Id, each
     /// with how many sockets it has open — see [`Attached`].
@@ -648,11 +648,11 @@ async fn reading(terminals: Terminals, conversation_id: i64, number: i64, nudges
                 return;
             }
 
-            watched.leader
+            watched.leader.clone()
         };
 
         let read = match leader {
-            Some(leader) => tokio::task::spawn_blocking(move || ports::listening(leader))
+            Some(leader) => tokio::task::spawn_blocking(move || leader.listening())
                 .await
                 .unwrap_or_default(),
             None => BTreeSet::new(),
@@ -890,7 +890,7 @@ pub(crate) async fn open(state: &AppState, conversation_id: i64) -> anyhow::Resu
             shell: named,
             closing,
             ended,
-            leader: child.id(),
+            leader: ports::Tree::of(&child),
             members: HashMap::new(),
             ports: BTreeSet::new(),
             reading: false,
