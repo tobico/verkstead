@@ -475,18 +475,23 @@ fn skipped(key: &Key, skip: ForwardSkip) -> Held {
 /// One listener on `at`.
 ///
 /// Built by hand rather than with [`TcpListener::bind`] for the one thing that
-/// differs by platform: the address is made reusable on Unix, which is what
+/// differs by platform: the address is made reusable on Linux, which is what
 /// lets a Forward ended a moment ago be taken again while its last connections
-/// sit out their `TIME_WAIT` — and not on Windows, where the same option lets a
-/// listener take a port somebody else is already listening on, which is the one
-/// thing a Forward must never do.
+/// sit out their `TIME_WAIT` — and nowhere else, because Linux alone keeps the
+/// option to that. On a Mac it also lets a bind to `127.0.0.1` stand beside
+/// somebody else's listener on every address at the same port, and on Windows
+/// it lets a listener take a port somebody else is already listening on: both
+/// would have a Forward take over this machine's own server, which is the one
+/// thing a Forward must never do. A Forward taken again there within its
+/// `TIME_WAIT` reads *port busy here* for a moment, and is taken on a later
+/// turn.
 fn bound(at: SocketAddr) -> std::io::Result<TcpListener> {
     let socket = match at {
         SocketAddr::V4(_) => TcpSocket::new_v4()?,
         SocketAddr::V6(_) => TcpSocket::new_v6()?,
     };
 
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
     socket.set_reuseaddr(true)?;
 
     socket.bind(at)?;
