@@ -97,6 +97,10 @@
 //! attached only from this device's own browser counts nobody and is not read:
 //! there is nothing to forward to a browser on the machine the port is on.
 //!
+//! A turn is hurried by the terminal printing an address on this machine with a
+//! port, which is a server saying it is up: the read happens then rather than
+//! on the turn, and what it finds is still what is forwarded — see [`printed`].
+//!
 //! What a member reads back is its own and no other's — the terminals *it*
 //! holds an attach on, over the link and nowhere else. See [`ports_of`].
 //!
@@ -116,6 +120,10 @@ pub mod busy;
 /// And what one is listening on, which is read while a member of the cluster
 /// holds an attach on it — see [`ports`], and [`Terminals::attach`].
 pub mod ports;
+
+/// And a server printing its address, which hurries that read along — see
+/// [`printed`].
+mod printed;
 
 use std::collections::{BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};
@@ -255,8 +263,9 @@ struct Watched {
     ports: BTreeSet<u16>,
 
     /// Whether the read is running, so that a second attach does not start a
-    /// second one — see [`reading`].
-    reading: bool,
+    /// second one — see [`reading`] — and the word that hurries it, which the
+    /// relay following the output holds too. See [`printed`].
+    hurry: Arc<printed::Hurry>,
 }
 
 impl Watched {
@@ -470,8 +479,7 @@ impl Terminals {
             let count = watched.members.entry(member.clone()).or_default();
             *count += 1;
 
-            let start = !watched.reading;
-            watched.reading = true;
+            let start = watched.hurry.start().then(|| watched.hurry.clone());
 
             (*count == 1, start)
         };
@@ -482,11 +490,12 @@ impl Terminals {
             });
         }
 
-        if start {
+        if let Some(hurry) = start {
             tokio::spawn(reading(
                 self.clone(),
                 conversation_id,
                 number,
+                hurry,
                 nudges.clone(),
             ));
         }
@@ -618,11 +627,20 @@ impl Drop for Attached {
 /// within one turn of closing. The walk is on a blocking thread, being a walk of
 /// `/proc`.
 ///
+/// **And sooner where the terminal says so**: an address printed while this is
+/// waiting for its turn is the turn — see [`printed`].
+///
 /// **Ends with the last member**, taking the ports with it — a terminal nobody
 /// is attached to from elsewhere has nothing to offer anybody — and **with the
 /// terminal**, which is a Nudge of its own: whoever was attached was reading
 /// ports of a terminal that has gone.
-async fn reading(terminals: Terminals, conversation_id: i64, number: i64, nudges: Nudges) {
+async fn reading(
+    terminals: Terminals,
+    conversation_id: i64,
+    number: i64,
+    hurry: Arc<printed::Hurry>,
+    nudges: Nudges,
+) {
     let moved = || {
         nudges.announce(Nudge::Ports {
             conversation: conversation_id,
@@ -643,7 +661,7 @@ async fn reading(terminals: Terminals, conversation_id: i64, number: i64, nudges
             };
 
             if watched.members.is_empty() {
-                watched.reading = false;
+                watched.hurry.stop();
                 watched.ports.clear();
                 return;
             }
@@ -677,7 +695,10 @@ async fn reading(terminals: Terminals, conversation_id: i64, number: i64, nudges
             moved();
         }
 
-        tokio::time::sleep(READING).await;
+        tokio::select! {
+            () = tokio::time::sleep(READING) => {}
+            () = hurry.hurried() => {}
+        }
     }
 }
 
@@ -877,6 +898,7 @@ pub(crate) async fn open(state: &AppState, conversation_id: i64) -> anyhow::Resu
     // terminal is to end, and one back, saying it has — see [`Watched`].
     let (closing, closed) = oneshot::channel();
     let (over, ended) = oneshot::channel();
+    let hurry = Arc::new(printed::Hurry::default());
 
     // On the register before the relay, so that a browser attaching with the
     // shell's first prompt has a Screen to attach to — and so that a shell that
@@ -893,7 +915,7 @@ pub(crate) async fn open(state: &AppState, conversation_id: i64) -> anyhow::Resu
             leader: ports::Tree::of(&child),
             members: HashMap::new(),
             ports: BTreeSet::new(),
-            reading: false,
+            hurry: hurry.clone(),
         },
     );
 
@@ -906,6 +928,7 @@ pub(crate) async fn open(state: &AppState, conversation_id: i64) -> anyhow::Resu
         afterwards,
         lending,
         screen,
+        hurry,
         closed,
         over,
     ));
@@ -947,8 +970,8 @@ pub(crate) async fn open(state: &AppState, conversation_id: i64) -> anyhow::Resu
     clippy::too_many_arguments,
     reason = "\
     one terminal's whole self: what it runs on, what runs on it, what it leaves \
-    to see to here and away, what it draws on, and a word each way about its \
-    ending"
+    to see to here and away, what it draws on, what hurries its reading, and a \
+    word each way about its ending"
 )]
 async fn follow(
     terminals: Terminals,
@@ -959,10 +982,12 @@ async fn follow(
     afterwards: Closing,
     lending: Option<crate::mirroring::account::Lending>,
     screen: Live,
+    hurry: Arc<printed::Hurry>,
     mut closing: oneshot::Receiver<()>,
     over: oneshot::Sender<()>,
 ) {
     let mut reading = Reading::default();
+    let mut sniffing = printed::Sniffing::default();
     let mut buffer = vec![0u8; CHUNK];
 
     // Whether the shell has been hung up, and the moment it has to be gone by —
@@ -978,7 +1003,13 @@ async fn follow(
             read = terminal.read(&mut buffer) => match read {
                 // The far end of the terminal is closed, which is the shell gone.
                 Ok(0) => break,
-                Ok(taken) => screen.printed(&reading.take(&buffer[..taken])),
+                Ok(taken) => {
+                    if hurry.reading() && sniffing.names_here(&buffer[..taken]) {
+                        hurry.hurry();
+                    }
+
+                    screen.printed(&reading.take(&buffer[..taken]));
+                }
                 Err(error) => {
                     tracing::error!(
                         error = ?error,

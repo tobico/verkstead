@@ -82,6 +82,10 @@ const PATIENCE: Duration = Duration::from_secs(30);
 /// own polling.
 const PROMPTLY: Duration = Duration::from_secs(4);
 
+/// How soon a server that printed its address has to be in the reading: well
+/// inside the two seconds a turn takes.
+const HURRIED: Duration = Duration::from_millis(1200);
+
 /// How long to listen on for a Nudge that should not come at all: past a whole
 /// turn of the reading, twice.
 const SETTLING: Duration = Duration::from_secs(5);
@@ -408,6 +412,18 @@ fn serving(port: u16) -> String {
     )
 }
 
+/// And the same server saying where it is, the way a dev server does: its
+/// address on this machine, with the port in it.
+///
+/// Put together as it is printed, so that the line typed — which the terminal
+/// echoes — holds no address of its own.
+fn announcing(port: u16) -> String {
+    format!(
+        "node -e \"require('net').createServer().listen({port}, '127.0.0.1', \
+         () => console.log('listening-' + {port} + ' at http://localhost:' + {port} + '/'))\"\n"
+    )
+}
+
 /// A call that carries no body, answered `200` with JSON.
 async fn call<T: DeserializeOwned>(app: &Router, method: &str, path: &str) -> T {
     let (status, said) = asked(app, method, path).await;
@@ -719,8 +735,9 @@ async fn a_terminal_attached_only_from_its_own_device_is_not_read() {
 
     let mut page = Listening::open(&own, "/api/ui/nudges").await;
 
+    // Saying where it is, which is no hurry to a read that is not running.
     let port = free_port();
-    terminal.typed(&serving(port)).await;
+    terminal.typed(&announcing(port)).await;
     terminal.until(&format!("listening-{port}")).await;
 
     assert!(
@@ -735,6 +752,112 @@ async fn a_terminal_attached_only_from_its_own_device_is_not_read() {
     // And B's own browser is not served the reading at all.
     let (status, _) = asked(&own, "GET", &ports_path()).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
+
+    terminal.closed().await;
+}
+
+/// Attach to B's terminal from A, and wait until A's reading has it — the read
+/// running, with nothing in it yet.
+async fn attached_from_a(app: &Router, at: SocketAddr) -> (i64, Terminal) {
+    let number = opened(
+        app,
+        &through(B, &format!("/api/ui/conversations/{THERE}/terminals")),
+    )
+    .await;
+
+    let terminal = Terminal::attached(format!(
+        "ws://{at}{}",
+        through(
+            B,
+            &format!("/api/ui/conversations/{THERE}/terminals/{number}/attach")
+        )
+    ))
+    .await;
+
+    until(app, &through(B, &ports_path()), |read| {
+        read == [TerminalPorts {
+            number,
+            ports: Vec::new(),
+        }]
+    })
+    .await;
+
+    (number, terminal)
+}
+
+/// A server that prints its address on starting is in the reading well before
+/// the turn after the one that last read the terminal.
+///
+/// Timed from a turn: one node holds a first port, which is in the reading the
+/// moment a turn has read it, and then — on a line typed to it — opens a second
+/// and prints that one's address. The next turn is the better part of
+/// two seconds away when that line is typed, so the second port in the reading
+/// well inside it is the print having hurried it.
+#[tokio::test]
+async fn a_server_printing_its_address_is_read_before_the_next_turn() {
+    let (a, _b) = linked().await;
+    let (app, at) = a.served().await;
+
+    let (_, mut terminal) = attached_from_a(&app, at).await;
+
+    let (first, second) = (free_port(), free_port());
+    terminal
+        .typed(&format!(
+            "node -e \"const net = require('net'); \
+             net.createServer().listen({first}, '127.0.0.1', () => console.log('holding-' + {first})); \
+             process.stdin.once('data', () => net.createServer().listen({second}, '127.0.0.1', \
+             () => console.log('up at http://localhost:' + {second} + '/')))\"\n"
+        ))
+        .await;
+    terminal.until(&format!("holding-{first}")).await;
+
+    // A turn has just read the first port.
+    until(&app, &through(B, &ports_path()), |read| holds(read, first)).await;
+
+    terminal.typed("go\n").await;
+
+    let took = until(&app, &through(B, &ports_path()), |read| holds(read, second)).await;
+    assert!(
+        took < HURRIED,
+        "port {second} took {took:?} to reach the reading after a turn, which is a turn \
+         of its own rather than the print hurrying it",
+    );
+
+    terminal.typed("\u{3}").await;
+    terminal.closed().await;
+}
+
+/// A port printed that nothing in the terminal is listening on is not in the
+/// reading, however it was printed: the read it hurried finds nothing, so
+/// nothing moves and nothing is said.
+#[tokio::test]
+async fn a_printed_port_nothing_listens_on_is_not_read() {
+    let (a, _b) = linked().await;
+    let (app, at) = a.served().await;
+
+    let mut page = Listening::open(&app, &through(B, "/api/ui/nudges")).await;
+    let (_, mut terminal) = attached_from_a(&app, at).await;
+
+    // A's attach, said and done with.
+    page.heard(Duration::from_millis(500)).await;
+
+    let port = free_port();
+    terminal
+        .typed(&format!("echo http://localhost:{port}/ printed-{port}\n"))
+        .await;
+    terminal.until(&format!("printed-{port}")).await;
+
+    assert!(
+        !page.heard(SETTLING).await.contains(&PORTS),
+        "a port nothing listens on should not have moved the reading",
+    );
+
+    let read: PortsView = call(&app, "GET", &through(B, &ports_path())).await;
+    assert!(
+        !holds(&read.terminals, port),
+        "port {port} was only printed, and it is in the reading: {:?}",
+        read.terminals,
+    );
 
     terminal.closed().await;
 }
