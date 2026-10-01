@@ -206,9 +206,9 @@ the Compile Server's. The findings, the rig and every probe are in
   its Sandbox: every Worktree writable, its Kotlin compile daemon shared, and
   none of the session's binds, `HOME`, `/tmp` or Repo `.git`. That is a wider
   crossing than the Compile Server's, because Gradle runs a Repo's code where
-  sccache runs a compiler on paths it is handed. Each daemon is about a
-  gigabyte once it has built anything, idle for three hours, holding jars the
-  Sweep would take.
+  sccache runs a compiler on paths it is handed. Each daemon is about 400 MiB
+  after a trivial build and around a gigabyte once it has compiled Kotlin,
+  idle for three hours, holding jars the Sweep would take.
 - **The per-session registry works, and was not taken either.**
   `-Dorg.gradle.daemon.registry.base` pointed at the session's own `/tmp`
   kept each session's daemon to itself on both Gradles, beat a Repo's
