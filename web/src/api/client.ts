@@ -63,6 +63,7 @@ import type {
   FileWrite,
   FileWritten,
   FolderListing,
+  ForwardsView,
   GrillingStarted,
   MergedRow,
   OnboardingView,
@@ -1857,6 +1858,16 @@ export function loadRemote(): Promise<RemoteView> {
 /// workbench is where the pane reads it.
 export function loadDevices(): Promise<DevicesView> {
   return get<DevicesView>("/api/ui/devices");
+}
+
+/// What this device is forwarding: every port of a member's terminal held on
+/// this machine's own `localhost`, and every one it could not hold.
+///
+/// **Always this device's own**, for the membership's reason above: a Forward
+/// is a listener on this machine's loopback, and the server keeps the reading
+/// back from the link — so there is no device on the call.
+export function loadForwards(): Promise<ForwardsView> {
+  return get<ForwardsView>("/api/ui/forwards");
 }
 
 /// And the devices nobody has typed an address for: the Discovered list under

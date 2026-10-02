@@ -121,6 +121,14 @@ export function Menu(props: {
   /// one, so a panel is a plain labelled group and the row paint in
   /// `Menu.module.css` stays off it.
   panel?: boolean;
+  /// Whether the card hangs **over** the trigger rather than under it, for a
+  /// trigger that stands at the bottom of what it is drawn in: the sidebar's
+  /// foot is stuck to the bottom edge of the pane, and a card dropped under it
+  /// would fall off the window.
+  ///
+  /// Said by the caller rather than measured, because where a trigger stands is
+  /// a fact about the page it was written into: a foot is always at the foot.
+  up?: boolean;
   /// Whether the trigger takes a press. A disabled trigger still says what it
   /// says — a badge with a locking in flight is the case this is for.
   disabled?: boolean;
@@ -222,7 +230,13 @@ export function Menu(props: {
           onClick={() => setOpen(false)}
         />
         <div
-          class={props.panel ? `${styles.drop} ${styles.panel}` : styles.drop}
+          class={[
+            styles.drop,
+            props.panel && styles.panel,
+            props.up && styles.up,
+          ]
+            .filter(Boolean)
+            .join(" ")}
           id={id}
           role={props.panel ? "group" : "menu"}
           aria-label={props.name}
