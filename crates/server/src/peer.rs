@@ -371,13 +371,13 @@ pub fn router(
                 }),
         )
         .fallback_service(members_only(
-            // And the three prefixes the workbench keeps to itself held back
+            // And the prefixes the workbench keeps to itself held back
             // over the lot of it, which is a layer rather than a route apiece so
             // that it is the namespace being refused rather than the endpoints
-            // that happen to be in it — see [`workbench::keeping_three_back`].
+            // that happen to be in it — see [`workbench::keeping_them_back`].
             // Inside the gate, so that a stranger is refused for not being a
             // member and learns nothing about which namespaces are relayed.
-            workbench::keeping_three_back(
+            workbench::keeping_them_back(
                 Router::new()
                     .route(announcing::MEMBERS, post(announcing::announced))
                     .with_state(announcing::Told {

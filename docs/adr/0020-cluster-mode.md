@@ -172,15 +172,33 @@ and an attachment upload, whose body is streamed through rather than held.
 being the Devices section's own namespace already: a Device Id is sixteen
 random hex bytes and could not collide with the words under it, but two
 namespaces one segment apart read as one thing.
-**And three prefixes are the device's own and are not served over that listener
-at all** — `/api/ui/remote/`, `/api/ui/devices/` and `/api/ui/push/`, refused
-there by name. Which is what makes *a member's workbench key never leaves it* a
+**And four prefixes are the device's own and are not served over that listener
+at all** — `/api/ui/remote/`, `/api/ui/devices/`, `/api/ui/push/` and
+`/api/ui/forwards`, refused there by name; the last came with the Forwards
+below. Which is what makes *a member's workbench key never leaves it* a
 fact about the mechanism rather than about the pages that happen to exist
 today: the Remote access reading carries the login link with that key on it, and
 a namespace served whole would hand it to whoever holds the hub's cookie.
 Remote Conversations live at `/devices/{device}/conversations/{id}` with every
 leaf under it; local ones keep their URLs, because this device is where most of
 the human's work is and a device segment on every URL would say nothing.
+
+**A Forward crosses the link the same way, one upgrade per connection**
+([ADR-0019](0019-the-code-pane.md), *Forwards*). The hub accepts a connection on
+its own loopback and puts an upgrade to the member naming the terminal and the
+port; the member answers `101` once it has dialled that port on its loopback,
+and the two sockets are joined by the relay's own bridge — bytes crossed both
+ways, either end going taking the other — so the bridge carries a Forward's
+connections beside the three attach sockets, and nothing about it knows the
+difference. It is the hub's own dial rather than a browser's, so it goes out
+through the relay's dial to the member and never through `/api/ui/members/`.
+And what the Forwards are is this device's own: the reading the sidebar draws
+them from and the `forwards` Nudge that moves it are kept back from the link —
+the reading among the prefixes above, the Nudge announced here and not down a
+member's stream — there being nothing another device could do with the ports
+this one holds on its own `localhost`. What the member *does* serve over the
+link is the terminal's ports, and only to the device attached to that
+terminal.
 
 The hub holds one nudge stream to each member, keeps that member's
 Conversation list in memory, refreshes it on a nudge, and re-announces every

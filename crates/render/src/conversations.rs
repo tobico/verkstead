@@ -2823,6 +2823,32 @@ pub struct TerminalView {
     pub busy: bool,
 }
 
+/// What one device's attached terminals on a Conversation are listening on —
+/// the reading a device takes over the link, of the member running them.
+///
+/// **Only the caller's own.** A terminal is listed where the device asking holds
+/// an attach on it and not otherwise, so a device that holds none reads an empty
+/// list and a device never reads the ports of a terminal another one attached:
+/// what a device is offered to forward is what it is looking at.
+///
+/// Oldest terminal first, and each one's ports lowest first.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct PortsView {
+    pub terminals: Vec<TerminalPorts>,
+}
+
+/// One of them: which terminal, and the TCP ports something inside it is
+/// listening on — any address, either family.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct TerminalPorts {
+    /// The number this server issued it — see [`TerminalView::number`].
+    pub number: i64,
+
+    pub ports: Vec<u16>,
+}
+
 /// And what became of asking for another one.
 ///
 /// Named refusals like every other press in the workbench, because each of them
