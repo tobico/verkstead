@@ -209,6 +209,14 @@ pub struct Pace {
     /// rest: what it is watching is a clock counted in days.
     pub cleanup: Duration,
 
+    /// And how often the languages' stores are swept under their sizes — see
+    /// [`crate::eviction`].
+    ///
+    /// Here for [`Pace::merges`]'s reason again. How often a pass comes due
+    /// rather than when it runs: one due while anything runs waits for the
+    /// first moment nothing does.
+    pub evicting: Duration,
+
     /// And how often a stage held before its finish looks at whether the chain
     /// below it has settled — see [`crate::joins`].
     ///
@@ -252,6 +260,7 @@ impl Default for Pace {
             joins: crate::joins::LOOKED_AT_EVERY,
             merges: crate::merges::SWEPT_EVERY,
             cleanup: crate::cleanup::SWEPT_EVERY,
+            evicting: crate::eviction::SWEPT_EVERY,
             reviewing: Duration::ZERO,
         }
     }

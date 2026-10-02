@@ -26,15 +26,206 @@
   "github_token": null,
   "ignored_comments": [],
   "instructions": "",
+  "languages": [
+    {
+      "compiling": "NoSccache",
+      "default_size": "30G",
+      "disk_use": "NotMeasured",
+      "enabled": true,
+      "label": "Rust",
+      "name": "rust",
+      "size": "30G",
+      "size_configured": false,
+      "size_unread": null,
+      "store": true,
+      "stores": [
+        {
+          "eviction": "ByUnit",
+          "name": "cargo"
+        },
+        {
+          "eviction": "ByItsTool",
+          "name": "sccache"
+        }
+      ],
+      "swept": null,
+      "unread": null
+    },
+    {
+      "compiling": null,
+      "default_size": "10G",
+      "disk_use": "NotMeasured",
+      "enabled": true,
+      "label": "Go",
+      "name": "go",
+      "size": "10G",
+      "size_configured": false,
+      "size_unread": null,
+      "store": true,
+      "stores": [
+        {
+          "eviction": "ByUnit",
+          "name": "modules"
+        },
+        {
+          "eviction": "ByUnit",
+          "name": "build"
+        }
+      ],
+      "swept": null,
+      "unread": null
+    },
+    {
+      "compiling": null,
+      "default_size": "10G",
+      "disk_use": "NotMeasured",
+      "enabled": true,
+      "label": "Node",
+      "name": "node",
+      "size": "10G",
+      "size_configured": false,
+      "size_unread": null,
+      "store": true,
+      "stores": [
+        {
+          "eviction": "ByUnit",
+          "name": "npm"
+        },
+        {
+          "eviction": "ByUnit",
+          "name": "pnpm"
+        },
+        {
+          "eviction": "ByUnit",
+          "name": "pnpm-metadata"
+        },
+        {
+          "eviction": "ByUnit",
+          "name": "yarn"
+        },
+        {
+          "eviction": "ByUnit",
+          "name": "yarn-berry"
+        },
+        {
+          "eviction": "ByUnit",
+          "name": "deno"
+        },
+        {
+          "eviction": "ByUnit",
+          "name": "bun"
+        }
+      ],
+      "swept": null,
+      "unread": null
+    },
+    {
+      "compiling": null,
+      "default_size": "10G",
+      "disk_use": "NotMeasured",
+      "enabled": true,
+      "label": "Python",
+      "name": "python",
+      "size": "10G",
+      "size_configured": false,
+      "size_unread": null,
+      "store": true,
+      "stores": [
+        {
+          "eviction": "ByUnit",
+          "name": "pip"
+        },
+        {
+          "eviction": "ByUnit",
+          "name": "uv"
+        },
+        {
+          "eviction": "ByUnit",
+          "name": "poetry"
+        },
+        {
+          "eviction": "ByUnit",
+          "name": "pipenv"
+        }
+      ],
+      "swept": null,
+      "unread": null
+    },
+    {
+      "compiling": null,
+      "default_size": "10G",
+      "disk_use": "NotMeasured",
+      "enabled": true,
+      "label": ".NET",
+      "name": "dotnet",
+      "size": "10G",
+      "size_configured": false,
+      "size_unread": null,
+      "store": true,
+      "stores": [
+        {
+          "eviction": "ByUnit",
+          "name": "packages"
+        },
+        {
+          "eviction": "ByUnit",
+          "name": "http"
+        },
+        {
+          "eviction": "NotSwept",
+          "name": "scratch"
+        }
+      ],
+      "swept": null,
+      "unread": null
+    },
+    {
+      "compiling": "NoSccache",
+      "default_size": "10G",
+      "disk_use": "NoStore",
+      "enabled": true,
+      "label": "C/C++",
+      "name": "cpp",
+      "size": "10G",
+      "size_configured": false,
+      "size_unread": null,
+      "store": false,
+      "stores": [],
+      "swept": null,
+      "unread": null
+    },
+    {
+      "compiling": null,
+      "default_size": "10G",
+      "disk_use": "NotMeasured",
+      "enabled": true,
+      "label": "JVM",
+      "name": "jvm",
+      "size": "10G",
+      "size_configured": false,
+      "size_unread": null,
+      "store": true,
+      "stores": [
+        {
+          "eviction": "ByUnit",
+          "name": "maven"
+        },
+        {
+          "eviction": "ByUnit",
+          "name": "gradle"
+        }
+      ],
+      "swept": null,
+      "unread": null
+    }
+  ],
   "mcp_servers": [],
   "paths": {
     "binds": []
   },
-  "rust_build_cache": {
-    "compiles": "NoSccache",
-    "enabled": true,
-    "size": "30G",
-    "size_configured": false
+  "running": {
+    "sessions": 0,
+    "terminals": 0
   },
   "share_on_done": false
 }

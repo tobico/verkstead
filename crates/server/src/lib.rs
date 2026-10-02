@@ -75,6 +75,8 @@ mod diffs;
 /// to whoever is on the wire is the product's own boundary, and a suite that
 /// browses for it is standing where another Verkstead stands.
 pub mod discovery;
+/// How much each language's store holds on disk, measured in the background.
+mod disk_use;
 /// Whether this process has a display to draw on — a window station somebody is
 /// looking at, or a Linux session that names one.
 ///
@@ -99,6 +101,11 @@ mod drivers;
 /// three arms are spawned commands with no toolkit behind them, so the asking
 /// lives with the server rather than with the app that has the screen.
 pub mod elevate;
+/// The sweep that keeps each language's store under its size.
+///
+/// Public for [`units`]'s reason: the proofs that fill a store with each tool
+/// for real sweep it too, and install again out of what is left.
+pub mod eviction;
 mod exchanges;
 /// The Worktrees Code reads: the roots its tree stands on, and one folder of
 /// one of them at a time.
@@ -134,6 +141,14 @@ mod joins;
 /// an endpoint, and standing the served router up means saying which key it is
 /// keyed with.
 pub mod key;
+/// What a session is given of the language it builds in, said as data: the
+/// descriptors Verkstead ships, embedded in the binary in the grammar an
+/// installer writes (ADR-0021).
+///
+/// Public for the reason [`build_cache`] is: what a session's environment holds
+/// is the product's own promise rather than an implementation detail, and the
+/// suite that proves it stands outside this crate.
+pub mod languages;
 mod limits;
 /// Which of a member's Repos is this repository: origin URL first, then name
 /// where neither has one (ADR-0020, *Repos across devices*).
@@ -328,6 +343,12 @@ mod transfers;
 /// nudge both go in as.
 mod typing;
 mod ui;
+/// The units a store is swept by, found the way its descriptor says.
+///
+/// Public for the reason [`languages`] is: that a unit is a whole package is
+/// the product's promise about a store, and the proofs that fill one with each
+/// tool for real stand outside this crate.
+pub mod units;
 /// Running a program without putting a window on the human's screen, which is
 /// Windows' question and nobody else's.
 ///
@@ -534,6 +555,14 @@ pub(crate) struct AppState {
     /// the moment they are wanted, so the settings page and the next session to
     /// spawn see the same thing — see [`settings`].
     settings: settings::Settings,
+
+    /// What each language's store held when it was last measured — see
+    /// [`disk_use`].
+    disk_use: disk_use::DiskUse,
+
+    /// And when each language's stores were last swept under their size — see
+    /// [`eviction`].
+    sweeps: eviction::Sweeps,
 
     /// Where Verkstead keeps what it makes — the worktrees, for now. Not one of
     /// the directories the human points Verkstead at: this is the one Verkstead
@@ -1427,6 +1456,8 @@ fn standing(
         // at the moment they are wanted, so what the settings page saves reaches
         // the next session without a restart — see [`settings`].
         settings: settings::Settings::in_data_dir(&data_dir),
+        disk_use: disk_use::DiskUse::default(),
+        sweeps: eviction::Sweeps::default(),
         nudges,
         settlements: Settlements::new(SETTLEMENT_BACKLOG),
         waits: Waits::new(),
@@ -1554,6 +1585,16 @@ fn standing(
     // which is the one sweep that takes something away rather than writing
     // something down. See [`cleanup`].
     cleanup::sweeping(&state);
+
+    // And how much each language's store holds, measured in the background so
+    // that the settings page reading it never waits on a walk of a disk. See
+    // [`disk_use`].
+    disk_use::measuring(&state);
+
+    // And the sweep that keeps each of those stores under its size, whole
+    // packages out oldest first, and only while nothing runs. See
+    // [`eviction`].
+    eviction::sweeping(&state);
 
     // And a listener on the one channel a Set is settled through, so that a
     // session idling on a stored ask is told its Answers have landed whether the
@@ -2168,6 +2209,17 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
     let skills = skills::Skills::installed(platform::Platform::HERE, &data_dir)
         .context("installing the skills every sandbox is given")?;
 
+    // And where the credentials are read from, which is the same directory
+    // again — both the ones a session runs with and the one the server's own
+    // `gh` authenticates as. Nothing is read here: the files are read as each
+    // session is spawned and as each `gh` is run, so what the human saves
+    // through the settings page applies without a restart — see [`settings`].
+    //
+    // Before the build cache below, which wants the descriptors this
+    // installation has: whether anything names a store beside the Worktrees is
+    // what says whether there is a directory to make.
+    let settings = settings::Settings::in_data_dir(&data_dir);
+
     // And the shared build cache, which is resolved for the reason the binds
     // above are and *made* here, which they never are — see
     // [`build_cache::BuildCache::resolve`] for why this one directory is
@@ -2176,7 +2228,11 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
     // given, and a bind of nothing will not start. An sccache that could not be
     // found is not a failure: what is left still shares the downloads, and the
     // log line says so.
-    let cache = build_cache::BuildCache::resolve(config.build_cache_dir.as_deref(), &data_dir)?;
+    let cache = build_cache::BuildCache::resolve(
+        config.build_cache_dir.as_deref(),
+        &data_dir,
+        &languages::configured(&settings.config()),
+    )?;
 
     // And the executable every sandbox asks with, which is this one: `verkstead
     // serve` and `verkstead ask` are two verbs of one binary, so a session's CLI
@@ -2210,13 +2266,6 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
     // as its first file lands in it, and read-only inside every session it has
     // after that — see [`attachments`].
     let attachments = attachments::Attachments::under(&data_dir);
-
-    // And where the credentials are read from, which is the same directory
-    // again — both the ones a session runs with and the one the server's own
-    // `gh` authenticates as. Nothing is read here: the files are read as each
-    // session is spawned and as each `gh` is run, so what the human saves
-    // through the settings page applies without a restart — see [`settings`].
-    let settings = settings::Settings::in_data_dir(&data_dir);
 
     // With one exception, read here and held for the run: the directories
     // Verkstead has installed into, which a session's `PATH` leads with. It is

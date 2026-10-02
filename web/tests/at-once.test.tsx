@@ -59,10 +59,17 @@ const REST = {
   // And the declared servers likewise, and for the same reason — see
   // [`McpServersEdit`].
   mcp_servers: "Keep",
-  rust_build_cache: {
-    enabled: TOLD.rust_build_cache.enabled,
-    size: TOLD.rust_build_cache.size,
-  },
+  // And the languages as the read left them — see [`heldLanguages`].
+  languages: [
+    { name: "rust", enabled: true, size: "50G" },
+    { name: "go", enabled: true, size: "" },
+    { name: "node", enabled: true, size: "" },
+    { name: "python", enabled: true, size: "" },
+    { name: "dotnet", enabled: true, size: "" },
+    { name: "cpp", enabled: true, size: "" },
+    { name: "jvm", enabled: true, size: "" },
+    { name: "gleam", enabled: true, size: "8G" },
+  ],
   // And the Cleanup as the read left it, each duration as the string a form
   // holds — see [`heldCleanup`].
   cleanup: {
@@ -141,6 +148,7 @@ function answering(standing: SettingsView): SettingsSaved {
     verified: null,
     refused: [],
     refused_servers: [],
+    refused_sizes: [],
     tried: [],
   };
 }

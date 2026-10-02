@@ -59,7 +59,7 @@ use verkstead_server::platform::{Environment, Platform, home_dir};
 use verkstead_server::sandbox::{
     Bind, Closing, Executable, Homes, Reachable, Rendering, Sandbox, SandboxConfig,
 };
-use verkstead_server::settings::{RustBuildCache, Settings};
+use verkstead_server::settings::Settings;
 use verkstead_server::skills::Skills;
 use verkstead_server::store;
 
@@ -244,6 +244,14 @@ impl Grilling {
         self.state.path().join("build-cache")
     }
 
+    /// And the directory beside the Worktrees, which is where a store goes
+    /// that has to be on one filesystem with the project — named by the server
+    /// rather than spelled here, for the reason every other path this fixture
+    /// hands over is read off the record.
+    fn stores_dir(&self) -> PathBuf {
+        verkstead_server::languages::stores(self.state.path())
+    }
+
     /// The Worktrees directory the compile server is shown of the Data
     /// Directory, which is where this fixture's own worktree already is.
     fn worktrees_dir(&self) -> PathBuf {
@@ -262,11 +270,18 @@ impl Grilling {
         let dir = self.cache_dir();
         std::fs::create_dir_all(&dir).unwrap();
 
-        BuildCache::at(
+        let cache = BuildCache::at(
             dir,
             compiling.then(|| self.sccache()),
             self.state.path().to_owned(),
-        )
+        );
+
+        // And the directory beside the Worktrees, which a built-in descriptor
+        // names now — see [`Grilling::stores_dir`]. Made by the server's own
+        // call rather than here, because that is what a session spawn does.
+        cache.opening(&self.settings.config());
+
+        cache
     }
 
     /// The stub sccache, written where the server would have found a real one.
@@ -3225,19 +3240,32 @@ async fn the_configured_binds_beside_a_read_only_companion_are_still_writable() 
     );
 }
 
-/// The shared Rust build cache, with nothing configured — which is the feature
-/// on, because a human who has never opened the settings page should not be the
-/// one paying for every dependency to be compiled twice.
+/// The shared build cache, with nothing configured — which is the feature on,
+/// because a human who has never opened the settings page should not be the one
+/// paying for every dependency to be compiled twice.
 ///
-/// The directory is writable at the same path inside, and `CARGO_HOME` points
-/// into it: that is the half of the cache that works with no sccache anywhere,
-/// and it is what stops two Conversations downloading one crate twice.
+/// The directory is writable at the same path inside, and the built-in
+/// languages' stores point into it: `CARGO_HOME`, which is the half of Rust's
+/// cache that works with no sccache anywhere, Go's two — the downloads and the
+/// compiled objects, which for Go is a directory and nothing more — four of
+/// Node's seven, three of Python's four — pip's, poetry's and pipenv's — and
+/// all three of .NET's: NuGet's global packages folder, the http cache behind
+/// it, and the directory it takes the lock on the first of those in.
+///
+/// That is what stops two Conversations downloading one crate, one module or
+/// one package twice.
+///
+/// **Node's other three and uv's are somewhere else**, and they are the reason a
+/// session now gets a second grant: pnpm's store, deno's cache, bun's and uv's
+/// are under the directory beside the Worktrees, which is asserted here too —
+/// this platform's policy is one description of what a session may reach, so
+/// both directories belong in the one probe.
 #[tokio::test]
 #[cfg_attr(
     not(target_os = "macos"),
     ignore = "the boundary this probes is a Mac's"
 )]
-async fn the_build_cache_is_writable_inside_and_cargos_home_is_in_it() {
+async fn the_build_cache_is_writable_inside_and_the_stores_are_in_it() {
     let fixture = grilling().await;
     let cache = fixture.cache(false);
 
@@ -3249,8 +3277,35 @@ async fn the_build_cache_is_writable_inside_and_cargos_home_is_in_it() {
             say cargo-home "${{CARGO_HOME-unset}}"
             say wrapper "${{RUSTC_WRAPPER-unset}}"
             say sccache-dir "${{SCCACHE_DIR-unset}}"
+            say c-launcher "${{CMAKE_C_COMPILER_LAUNCHER-unset}}"
+            say cxx-launcher "${{CMAKE_CXX_COMPILER_LAUNCHER-unset}}"
+            say cc "${{CC-unset}}"
+            say cxx "${{CXX-unset}}"
+            say gomodcache "${{GOMODCACHE-unset}}"
+            say gocache "${{GOCACHE-unset}}"
+            say npm-cache "${{NPM_CONFIG_CACHE-unset}}"
+            say pnpm-store "${{PNPM_CONFIG_STORE_DIR-unset}}"
+            say pnpm-metadata "${{PNPM_CONFIG_CACHE_DIR-unset}}"
+            say yarn-cache "${{YARN_CACHE_FOLDER-unset}}"
+            say yarn-global "${{YARN_GLOBAL_FOLDER-unset}}"
+            say deno-dir "${{DENO_DIR-unset}}"
+            say bun-cache "${{BUN_INSTALL_CACHE_DIR-unset}}"
+            say pip-cache "${{PIP_CACHE_DIR-unset}}"
+            say uv-cache "${{UV_CACHE_DIR-unset}}"
+            say poetry-cache "${{POETRY_CACHE_DIR-unset}}"
+            say pipenv-cache "${{PIPENV_CACHE_DIR-unset}}"
+            say poetry-in-project "${{POETRY_VIRTUALENVS_IN_PROJECT-unset}}"
+            say pipenv-in-project "${{PIPENV_VENV_IN_PROJECT-unset}}"
+            say nuget-packages "${{NUGET_PACKAGES-unset}}"
+            say nuget-http "${{NUGET_HTTP_CACHE_PATH-unset}}"
+            say nuget-scratch "${{NUGET_SCRATCH-unset}}"
+            say maven-opts "${{MAVEN_OPTS-unset}}"
+            say gradle-home "${{GRADLE_USER_HOME-unset}}"
+            say gradle-opts "${{GRADLE_OPTS-unset}}"
+            dir {beside} stores
             "#,
             dir = quoted(&fixture.cache_dir()),
+            beside = quoted(&fixture.stores_dir()),
         ),
     );
 
@@ -3269,6 +3324,109 @@ async fn the_build_cache_is_writable_inside_and_cargos_home_is_in_it() {
          RUSTC_WRAPPER naming a path that is not reachable would break every build"
     );
     assert_eq!(reported["sccache-dir"], "unset");
+    assert_eq!(
+        reported["c-launcher"], "unset",
+        "and no CMake launcher either: C/C++'s whole capability is left out \
+         where there is no sccache for it to name"
+    );
+    assert_eq!(reported["cxx-launcher"], "unset");
+    assert_eq!(reported["cc"], "unset", "and CC and CXX are set in no case");
+    assert_eq!(reported["cxx"], "unset");
+
+    assert_eq!(
+        reported["gomodcache"],
+        fixture.cache_dir().join("go/mod").display().to_string(),
+        "and the modules every session downloads are in the same bind",
+    );
+    assert_eq!(
+        reported["gocache"],
+        fixture.cache_dir().join("go/build").display().to_string(),
+        "beside the compiled output Go shares, which needs no compile server: \
+         it is a directory, and the one bind is what opens it",
+    );
+
+    // And Node's four under the cache, which are four tools rather than one:
+    // npm's packages, pnpm's registry metadata, and a directory per yarn, the
+    // two of them reading two different variables. And three of Python's four —
+    // pip's, poetry's and pipenv's, which are here because pip unpacks a wheel
+    // into `site-packages`, poetry unpacks one out of its artifacts, and pipenv
+    // is pip: none of the three has anything to link out of its store. And both
+    // of .NET's, for the same reason: a build reads a package's assemblies
+    // where they lie in NuGet's global packages folder and copies what it needs
+    // into `bin/`. The third of .NET's is the directory NuGet locks the first
+    // in, which two sessions at once have to be taking the same lock out of.
+    for (said, under) in [
+        ("npm-cache", "npm"),
+        ("pnpm-metadata", "pnpm/metadata"),
+        ("yarn-cache", "yarn/cache"),
+        ("yarn-global", "yarn/global"),
+        ("pip-cache", "pip"),
+        ("poetry-cache", "poetry"),
+        ("pipenv-cache", "pipenv"),
+        ("nuget-packages", "nuget/packages"),
+        ("nuget-http", "nuget/http"),
+        ("nuget-scratch", "nuget/scratch"),
+    ] {
+        assert_eq!(
+            reported[said],
+            fixture.cache_dir().join(under).display().to_string(),
+            "{said} is {under} inside the same policy: one directory, and a \
+             store of every tool this machine shares under it",
+        );
+    }
+
+    // And the other four, beside the Worktrees, which this platform has to
+    // grant as well — pnpm, deno, bun and uv each link a package out of their
+    // store into the project rather than copying it, and a link does not cross
+    // a filesystem.
+    assert_eq!(
+        reported["stores"], "write",
+        "a store a session cannot write to is no store"
+    );
+
+    for (said, under) in [
+        ("pnpm-store", "pnpm"),
+        ("deno-dir", "deno"),
+        ("bun-cache", "bun"),
+        ("uv-cache", "uv"),
+    ] {
+        assert_eq!(
+            reported[said],
+            fixture.stores_dir().join(under).display().to_string(),
+            "{said} is inside it rather than under the Build Cache, which is \
+             the whole of what the second placeholder says",
+        );
+    }
+
+    // And the two of Python's six that name no directory at all: poetry and
+    // pipenv are each told to keep a virtual environment in the project, a venv
+    // holding absolute paths and poetry's default place for one being the shared
+    // cache directory itself.
+    assert_eq!(reported["poetry-in-project"], "true");
+    assert_eq!(reported["pipenv-in-project"], "1");
+
+    // And the JVM's one, a line of flags with Maven's local repository inside
+    // it, since Maven has no variable of its own for that.
+    assert_eq!(
+        reported["maven-opts"],
+        format!(
+            "-Dmaven.repo.local={} -Daether.syncContext.named.factory=file-lock \
+             -Daether.syncContext.named.nameMapper=file-gav",
+            fixture.cache_dir().join("maven/repository").display(),
+        ),
+        "Maven's local repository is inside the same policy, and locked with \
+         files every session can see",
+    );
+
+    // And Gradle's two: one Gradle home for every session, and no daemon, since
+    // a daemon registered in a shared home is one another session's build can
+    // attach to over the loopback, and run inside the wrong boundary.
+    assert_eq!(
+        reported["gradle-home"],
+        fixture.cache_dir().join("gradle").display().to_string(),
+        "the Gradle home is inside the same policy",
+    );
+    assert_eq!(reported["gradle-opts"], "-Dorg.gradle.daemon=false");
 }
 
 /// And with an sccache the server resolved: a session finds it beside the
@@ -3301,6 +3459,10 @@ async fn the_sccache_the_server_resolved_is_what_rustc_is_wrapped_in() {
             say sccache-dir "${{SCCACHE_DIR-unset}}"
             say size "${{SCCACHE_CACHE_SIZE-unset}}"
             say which "$("${{RUSTC_WRAPPER}}")"
+            say c-launcher "${{CMAKE_C_COMPILER_LAUNCHER-unset}}"
+            say cxx-launcher "${{CMAKE_CXX_COMPILER_LAUNCHER-unset}}"
+            say cc "${{CC-unset}}"
+            say cxx "${{CXX-unset}}"
             dir {dir} cache
             "#,
             dir = quoted(&fixture.cache_dir()),
@@ -3319,6 +3481,18 @@ async fn the_sccache_the_server_resolved_is_what_rustc_is_wrapped_in() {
          own that leads the PATH — really there on this platform, because \
          nothing here can make a directory out of nothing"
     );
+    assert_eq!(
+        reported["c-launcher"], reported["wrapper"],
+        "and CMake launches C through the same sccache, at the same path — one \
+         Compile Server, whichever language asked"
+    );
+    assert_eq!(reported["cxx-launcher"], reported["wrapper"]);
+    assert_eq!(
+        reported["cc"], "unset",
+        "and CC and CXX are left alone: they reach every build that compiles C, \
+         not only a CMake project's"
+    );
+    assert_eq!(reported["cxx"], "unset");
     assert_eq!(
         reported["which"], "sccache 0.0.0-the-one-resolved",
         "and what a session compiles through is the binary the server resolved, \
@@ -3374,7 +3548,7 @@ async fn the_compile_server_holds_the_worktrees_and_none_of_the_data_directory()
     fixture.attach("wireframe.png", b"PNG");
 
     let cache = fixture.cache(true);
-    cache.compiling(&RustBuildCache::default(), None);
+    cache.compiling(&fixture.settings.config(), None);
 
     let reported = compile_server_report(&fixture);
 
@@ -3456,7 +3630,7 @@ async fn the_compile_server_is_kept_from_outliving_verkstead() {
     let fixture = grilling().await;
 
     let cache = fixture.cache(true);
-    cache.compiling(&RustBuildCache::default(), None);
+    cache.compiling(&fixture.settings.config(), None);
 
     let compiling = compile_server_report(&fixture)["pid"].clone();
 

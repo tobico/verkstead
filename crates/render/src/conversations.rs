@@ -591,15 +591,16 @@ pub struct ConversationView {
     /// what it says is true only as of the moment it was read.
     pub ready_to_grill: bool,
 
-    /// Whether to warn, where the work is started from, that this repository's
-    /// dependency compiles will not be cached.
+    /// Whether to warn, where the work is started from, that what this
+    /// repository compiles will not be cached.
     ///
-    /// True on three things at once: the Repo is a Cargo workspace — a
-    /// `Cargo.toml` at its root — the shared Rust build cache is switched on,
-    /// and the server found no sccache to compile through. Then a session's
-    /// crate downloads are shared and its dependencies are compiled from
-    /// scratch every time, which is a slow build rather than a broken one — so
-    /// it is a note above the button, not a refusal on it.
+    /// True on three things at once: a switched-on language that compiles
+    /// through sccache detects the Repo — Rust by a `Cargo.toml` at its root,
+    /// C/C++ by a `CMakeLists.txt` at its root or under `native/` or `cpp/` —
+    /// the platform compiles through one, and the server found no sccache.
+    /// Then every session compiles from scratch, which is a slow build rather
+    /// than a broken one — so it is a note above the button, not a refusal on
+    /// it.
     ///
     /// **Which is always something the human can go and do.** It was not
     /// always: a Windows session compiled through no sccache whatever the

@@ -50,6 +50,16 @@
   margin: 0.85rem 0 0;
 }
 
+/* What a language compiling through another's Compile Server says where the
+   size would be: indented as that size would be, and in the quiet the card
+   names what is on in — it is a fact about the machine, not something to do. */
+.shares {
+  margin: 0.85rem 0 0;
+  padding: 0 0 0 1.6rem;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
 /* The space above the size is the nested group's own — see `Check.module.css`,
    which is where the indent it is read by lives too. */
 
@@ -116,5 +126,62 @@
   .field button:not(:disabled):hover {
     background: var(--accent-deep);
     border-color: var(--accent-deep);
+  }
+}
+
+/* What the store holds on disk, under the field it is measured against: a
+   reading rather than a control, so in the quiet the label above it is in. */
+.held {
+  margin: 0.45rem 0 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+/* How each directory of the store is held to the size: as quiet as the reading
+   above it, one line apiece. */
+.bounds {
+  margin: 0.35rem 0 0;
+  padding-left: 1.1rem;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+.bounds li + li {
+  margin-top: 0.15rem;
+}
+
+/* A Clear and what it does, or what it waits on, under the size: indented as the
+   size is, and its press quieter than Save's — it is not the thing the pane is
+   for. */
+.clearing {
+  display: flex;
+  gap: 0.6rem;
+  align-items: baseline;
+  margin: 0.6rem 0 0;
+  padding: 0 0 0 1.6rem;
+}
+
+.clearing .held {
+  margin: 0;
+}
+
+.clearing button {
+  padding: 0.35rem 0.8rem;
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.clearing button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+@media (hover: hover) {
+  .clearing button:not(:disabled):hover {
+    border-color: var(--ink-soft);
   }
 }

@@ -64,6 +64,7 @@ use verkstead_render::{
 use verkstead_server::attachments::Attachments;
 use verkstead_server::build_cache::BuildCache;
 use verkstead_server::handoffs::Handoffs;
+use verkstead_server::languages;
 use verkstead_server::platform::{self, Platform};
 use verkstead_server::sandbox::account::Logon;
 use verkstead_server::sandbox::account::machine::Account;
@@ -260,7 +261,7 @@ static ROOM: LazyLock<Arc<tokio::sync::Semaphore>> = LazyLock::new(|| {
     Arc::new(tokio::sync::Semaphore::new((cores * 2).clamp(4, 16)))
 });
 
-/// And the two tests here that count sccache servers, one at a time.
+/// And the tests here that count sccache servers, or start one, one at a time.
 ///
 /// **Because what they count is the machine's**, not this suite's: an sccache
 /// server is a process outside every Verkstead, so the only way to say *this
@@ -268,6 +269,11 @@ static ROOM: LazyLock<Arc<tokio::sync::Semaphore>> = LazyLock::new(|| {
 /// tests doing that at once each see the other's server as their own, which is
 /// a failure that depends on which of them is scheduled first. So they take
 /// turns, and each holds this for as long as its own diff is open.
+///
+/// **And a fixture handed a cache is one of them**, whatever its Repo holds:
+/// the Compile Server comes up on the switch rather than on a manifest — see
+/// [`Builds`] — so a session given a cache is a server on this machine for as
+/// long as that fixture lives, and a diff running beside it would count it.
 static COUNTING: LazyLock<tokio::sync::Mutex<()>> = LazyLock::new(|| tokio::sync::Mutex::new(()));
 
 /// The pace these sessions are driven at.
@@ -298,6 +304,7 @@ static UNHURRIED: LazyLock<Pace> = LazyLock::new(|| Pace {
     places: Duration::from_secs(600),
     merges: Duration::from_secs(600),
     cleanup: Duration::from_secs(600),
+    evicting: Duration::from_secs(600),
 });
 
 /// Where every directory this suite makes goes: the machine's temporary
@@ -367,6 +374,14 @@ struct Grilling {
 }
 
 impl Grilling {
+    /// The directory beside this fixture's Worktrees, which is where a store
+    /// goes that has to be on one filesystem with the project — named by the
+    /// server rather than spelled here, for the reason every other path this
+    /// fixture hands over is read off the record.
+    fn stores_dir(&self) -> PathBuf {
+        verkstead_server::languages::stores(self.state.path())
+    }
+
     /// The Conversation as the workbench reads it.
     async fn view(&self) -> ConversationView {
         get(&self.app, &format!("/api/ui/conversations/{}", self.id)).await
@@ -658,9 +673,9 @@ fn joined(target: &Path, name: &Path) {
     );
 }
 
-/// And the same again in a Repo a session would build Rust in, which is what
-/// puts the Compile Server up: the session start asks the checkout for a
-/// manifest, and nothing else on this Timeline would ever want one.
+/// And the same again in a Repo a session would really build Rust in: a
+/// manifest to compile, and the machine's own rustup home joined into the
+/// fixture's so that the toolchain is there to compile it with.
 async fn grilling_building(script: &str, cache: Option<&Path>) -> Grilling {
     grilling_caching(script, cache, Builds::Rust).await
 }
@@ -668,17 +683,20 @@ async fn grilling_building(script: &str, cache: Option<&Path>) -> Grilling {
 /// What the Repo a fixture registers holds, which is the one thing about it a
 /// test here ever varies.
 ///
-/// **A `Cargo.toml` at the root is what starts the Compile Server**, and
-/// nothing else does — see `build_cache::builds_rust`, which the session start
-/// asks of the checkout. So a fixture is asked which it is rather than every
-/// one of them paying for an sccache server it has nothing to compile.
+/// **Not what starts the Compile Server.** That comes up wherever a language
+/// naming the sccache capability is switched on and there is an sccache to run,
+/// whatever the checkout holds — see `languages::Languages::wanting`, which the
+/// session start asks of the settings rather than of the Repo. So a cache
+/// handed to a fixture is a compile server either way, and what this decides is
+/// whether there is anything on disk for a session to compile.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Builds {
     /// A repository with a README and no manifest, which is every fixture here
     /// but the one about building.
     Nothing,
 
-    /// And one a session would build Rust in.
+    /// And one a session would build Rust in, with the machine's toolchain
+    /// reachable from inside.
     Rust,
 }
 
@@ -786,7 +804,8 @@ async fn grilling_caching(script: &str, cache: Option<&Path>, builds: Builds) ->
         .collect();
 
     let build_cache = match cache {
-        Some(dir) => BuildCache::resolve(Some(dir), state.path()).expect("a cache to resolve"),
+        Some(dir) => BuildCache::resolve(Some(dir), state.path(), languages::built_in())
+            .expect("a cache to resolve"),
         None => BuildCache::none(),
     };
 
@@ -2071,8 +2090,8 @@ async fn a_compile_server_comes_up_as_the_session_account() {
         )
     });
 
-    let build_cache =
-        BuildCache::resolve(Some(cache.path()), state.path()).expect("a cache to resolve");
+    let build_cache = BuildCache::resolve(Some(cache.path()), state.path(), languages::built_in())
+        .expect("a cache to resolve");
 
     assert!(
         build_cache.caches_compiles(),
@@ -2084,7 +2103,7 @@ async fn a_compile_server_comes_up_as_the_session_account() {
     let settings = Settings::in_data_dir(state.path()).config();
     let running_as = the_machines_account();
 
-    build_cache.compiling(settings.rust_build_cache(), Some(&running_as));
+    build_cache.compiling(&settings, Some(&running_as));
 
     // Long enough that one which was going to come up has: `compiling` starts
     // the process before it returns, so anything after that moment is slack
@@ -2169,15 +2188,72 @@ fn whose(pid: u32) -> String {
 /// The wrapper is the half that was missing for as long as a session ran inside
 /// an AppContainer — see
 /// [`verkstead_server::build_cache::compiles_through_an_sccache`].
+///
+/// **And the Repo holds no manifest**, which is the other half of what is being
+/// asked. A session is handed these variables whatever its checkout holds, and
+/// the Compile Server the wrapper reaches comes up for it all the same — so the
+/// servers are counted here as well: the one Verkstead started, and none the
+/// session started inside itself for want of it. That hazard is exactly the
+/// ordinary case, a manifest one directory down from the root.
+///
+/// **And Go's two directories beside them, Node's seven and Python's six**, which
+/// is this platform's half of what the package stores promise: the same one
+/// grant, with every language's store under it, written the way Windows writes a
+/// path.
+///
+/// Four of Node's seven are under that one directory, and three of Python's —
+/// pip's, poetry's and pipenv's — with them. The other four — pnpm's, deno's and
+/// bun's stores and uv's, each of which links a package out into the project
+/// rather than copying — are under the directory beside the Worktrees, and that
+/// is **a second grant this platform has to write**: a path a session cannot
+/// open is a store it installs past rather than out of, so it is written to as
+/// well as printed.
+///
+/// And Python's last two are settings rather than stores — poetry and pipenv
+/// each told to keep a virtual environment in the project — which this platform
+/// hands over exactly as the other two do: a descriptor's value is text where it
+/// names no directory, on all three.
 #[tokio::test]
 async fn a_session_gets_the_shared_cargo_home_and_the_compiler_wrapper() {
+    // Held for as long as this fixture is up. A session handed a cache is a
+    // Compile Server on this machine whatever its Repo holds, now that the
+    // server comes up on the switch — so this is one of the tests the two that
+    // count servers take turns with. See [`COUNTING`].
+    let _turn = COUNTING.lock().await;
+
     let cache = somewhere();
+    let already = servers();
 
     let fixture = grilling_caching(
         r#"
         Note 'wrapper' $env:RUSTC_WRAPPER
+        Note 'c-launcher' $env:CMAKE_C_COMPILER_LAUNCHER
+        Note 'cxx-launcher' $env:CMAKE_CXX_COMPILER_LAUNCHER
+        Note 'cc' ($(if (Test-Path Env:CC) { $env:CC } else { 'unset' }))
+        Note 'cxx' ($(if (Test-Path Env:CXX) { $env:CXX } else { 'unset' }))
         Note 'cargo-home' $env:CARGO_HOME
         Note 'sccache-dir' $env:SCCACHE_DIR
+        Note 'gomodcache' $env:GOMODCACHE
+        Note 'gocache' $env:GOCACHE
+        Note 'npm-cache' $env:NPM_CONFIG_CACHE
+        Note 'pnpm-store' $env:PNPM_CONFIG_STORE_DIR
+        Note 'pnpm-metadata' $env:PNPM_CONFIG_CACHE_DIR
+        Note 'yarn-cache' $env:YARN_CACHE_FOLDER
+        Note 'yarn-global' $env:YARN_GLOBAL_FOLDER
+        Note 'deno-dir' $env:DENO_DIR
+        Note 'bun-cache' $env:BUN_INSTALL_CACHE_DIR
+        Note 'pip-cache' $env:PIP_CACHE_DIR
+        Note 'uv-cache' $env:UV_CACHE_DIR
+        Note 'poetry-cache' $env:POETRY_CACHE_DIR
+        Note 'pipenv-cache' $env:PIPENV_CACHE_DIR
+        Note 'poetry-in-project' $env:POETRY_VIRTUALENVS_IN_PROJECT
+        Note 'pipenv-in-project' $env:PIPENV_VENV_IN_PROJECT
+        Note 'nuget-packages' $env:NUGET_PACKAGES
+        Note 'nuget-http' $env:NUGET_HTTP_CACHE_PATH
+        Note 'nuget-scratch' $env:NUGET_SCRATCH
+        Note 'maven-opts' $env:MAVEN_OPTS
+        Note 'gradle-home' $env:GRADLE_USER_HOME
+        Note 'gradle-opts' $env:GRADLE_OPTS
 
         # Run the thing it was pointed at, which is the only way to ask whether
         # the boundary really lets a session open it.
@@ -2186,6 +2262,24 @@ async fn a_session_gets_the_shared_cargo_home_and_the_compiler_wrapper() {
 
         [void][System.IO.Directory]::CreateDirectory($env:CARGO_HOME)
         [System.IO.File]::WriteAllText((Under $env:CARGO_HOME 'downloaded.crate'), 'here')
+
+        [void][System.IO.Directory]::CreateDirectory($env:GOMODCACHE)
+        [System.IO.File]::WriteAllText((Under $env:GOMODCACHE 'downloaded.zip'), 'here')
+
+        # And the stores that are not under the cache at all, which are the
+        # second grant rather than a name under the first. One file each, so
+        # that what is asserted is the grant rather than one name inside it.
+        $stores = @(
+          $env:PNPM_CONFIG_STORE_DIR,
+          $env:DENO_DIR,
+          $env:BUN_INSTALL_CACHE_DIR,
+          $env:UV_CACHE_DIR
+        )
+
+        foreach ($store in $stores) {
+          [void][System.IO.Directory]::CreateDirectory($store)
+          [System.IO.File]::WriteAllText((Under $store 'downloaded.tgz'), 'here')
+        }
         "#,
         Some(cache.path()),
         Builds::Nothing,
@@ -2200,6 +2294,22 @@ async fn a_session_gets_the_shared_cargo_home_and_the_compiler_wrapper() {
         "a session compiles through the sccache the server found, at the path it \
          really is: the server said {wrapper:?} and this machine says {sccache:?}",
     );
+
+    // And CMake's two launchers name that same file, which is C/C++'s half of
+    // the one Compile Server: the same capability, so the same path.
+    assert_eq!(
+        fixture.written("c-launcher").await,
+        wrapper,
+        "CMake launches C through the sccache RUSTC_WRAPPER names",
+    );
+    assert_eq!(fixture.written("cxx-launcher").await, wrapper);
+    assert_eq!(
+        fixture.written("cc").await,
+        "unset",
+        "and CC and CXX are set in no case: they reach every build that \
+         compiles C, not only a CMake project's",
+    );
+    assert_eq!(fixture.written("cxx").await, "unset");
 
     let ran = fixture.written("ran").await;
 
@@ -2227,6 +2337,107 @@ async fn a_session_gets_the_shared_cargo_home_and_the_compiler_wrapper() {
          directory",
     );
 
+    // And Go's two, composed the same way out of the same directory: the
+    // downloads and the compiled output, which for Go is a directory and no
+    // capability at all — so this platform's session is given both of them
+    // whether or not there is an sccache on the machine.
+    assert_eq!(
+        fixture.written("gomodcache").await,
+        cache.path().join("go").join("mod").display().to_string(),
+        "a session's module downloads go under the same shared cache",
+    );
+
+    assert_eq!(
+        fixture.written("gocache").await,
+        cache.path().join("go").join("build").display().to_string(),
+        "and what it compiles out of them goes beside them",
+    );
+
+    // And Node's four under the same directory, composed the same way: four
+    // tools rather than one, with a directory per yarn because the two of them
+    // read two different variables. And three of Python's four, which are under
+    // the cache because pip unpacks a wheel into `site-packages`, poetry unpacks
+    // one out of its artifacts, and pipenv is pip: none of the three has
+    // anything to link out of its store. And both of .NET's, for the same
+    // reason: a build reads a package's assemblies where they lie in NuGet's
+    // global packages folder and copies what it needs into `bin\`. And
+    // .NET's third is the directory NuGet locks the first in, which two
+    // sessions restoring at once have to be taking the same lock out of.
+    for (said, under) in [
+        ("npm-cache", vec!["npm"]),
+        ("pnpm-metadata", vec!["pnpm", "metadata"]),
+        ("yarn-cache", vec!["yarn", "cache"]),
+        ("yarn-global", vec!["yarn", "global"]),
+        ("pip-cache", vec!["pip"]),
+        ("poetry-cache", vec!["poetry"]),
+        ("pipenv-cache", vec!["pipenv"]),
+        ("nuget-packages", vec!["nuget", "packages"]),
+        ("nuget-http", vec!["nuget", "http"]),
+        ("nuget-scratch", vec!["nuget", "scratch"]),
+    ] {
+        let composed = under
+            .iter()
+            .fold(cache.path().to_owned(), |path, name| path.join(name));
+
+        assert_eq!(
+            fixture.written(said).await,
+            composed.display().to_string(),
+            "{said} is under the one shared cache, written the way this \
+             platform writes a path",
+        );
+    }
+
+    // And the other four, which are not under it: pnpm's, deno's and bun's
+    // stores and uv's are beside the Worktrees, so that is the second directory
+    // a session is granted.
+    for (said, under) in [
+        ("pnpm-store", "pnpm"),
+        ("deno-dir", "deno"),
+        ("bun-cache", "bun"),
+        ("uv-cache", "uv"),
+    ] {
+        assert_eq!(
+            fixture.written(said).await,
+            fixture.stores_dir().join(under).display().to_string(),
+            "{said} is beside the Worktrees rather than under the cache, which \
+             is what the second placeholder says on this platform as much as on \
+             the others",
+        );
+    }
+
+    // And the two that name no directory: poetry's and pipenv's virtual
+    // environments, which stay in the Worktree rather than going anywhere a
+    // second Conversation could reach them.
+    assert_eq!(fixture.written("poetry-in-project").await, "true");
+    assert_eq!(fixture.written("pipenv-in-project").await, "1");
+
+    // And the JVM's one, which is a line of flags with Maven's local
+    // repository inside it: the path is the one this platform composes, and
+    // nothing else in the line has a separator to turn.
+    assert_eq!(
+        fixture.written("maven-opts").await,
+        format!(
+            "-Dmaven.repo.local={} -Daether.syncContext.named.factory=file-lock \
+             -Daether.syncContext.named.nameMapper=file-gav",
+            cache.path().join("maven").join("repository").display(),
+        ),
+        "Maven's local repository is under the one shared cache, written the \
+         way this platform writes a path",
+    );
+
+    // And Gradle's two: one Gradle home under the shared cache, and no daemon,
+    // since a daemon registered in a shared home is one another session's
+    // build can attach to and run as the wrong session.
+    assert_eq!(
+        fixture.written("gradle-home").await,
+        cache.path().join("gradle").display().to_string(),
+        "the Gradle home is under the one shared cache",
+    );
+    assert_eq!(
+        fixture.written("gradle-opts").await,
+        "-Dorg.gradle.daemon=false"
+    );
+
     let downloaded = cache.path().join("cargo").join("downloaded.crate");
 
     until_there(&downloaded).await;
@@ -2235,6 +2446,45 @@ async fn a_session_gets_the_shared_cargo_home_and_the_compiler_wrapper() {
         std::fs::read_to_string(&downloaded).unwrap().trim(),
         "here",
         "and the session really wrote it, from inside its boundary",
+    );
+
+    let module = cache.path().join("go").join("mod").join("downloaded.zip");
+
+    until_there(&module).await;
+
+    assert_eq!(
+        std::fs::read_to_string(&module).unwrap().trim(),
+        "here",
+        "and the grant reaches the second language's store as well as the \
+         first's: one directory written for the session account, with every \
+         store this machine shares underneath it",
+    );
+
+    // And the second directory, which is a grant of its own rather than a name
+    // under the first: a store a session cannot write in is a store it
+    // installs past.
+    for under in ["pnpm", "deno", "bun", "uv"] {
+        let package = fixture.stores_dir().join(under).join("downloaded.tgz");
+
+        until_there(&package).await;
+
+        assert_eq!(
+            std::fs::read_to_string(&package).unwrap().trim(),
+            "here",
+            "so the directory beside the Worktrees is written for the session \
+             account too, wherever a descriptor points a store — {under} \
+             included",
+        );
+    }
+
+    let started: Vec<u32> = servers().difference(&already).copied().collect();
+
+    assert_eq!(
+        started.len(),
+        1,
+        "a Repo with no manifest at its root is a Compile Server all the same, \
+         and one is all of them: {already:?} were running before, {started:?} \
+         are new",
     );
 }
 

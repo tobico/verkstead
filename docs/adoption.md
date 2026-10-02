@@ -173,18 +173,21 @@ addresses another device could dial it on. It holds this device alone — nothin
 links anything yet — and the same two facts are on the startup line as `device=`
 and `fingerprint=` for anybody reading a journal rather than a screen.
 
-A Rust build cache is not one of them, and there is nothing to configure for
-one. The **Build Cache** is the server's own: the module makes
+A build cache is not one of them, and there is nothing to configure for one.
+The **Build Cache** is the server's own: the module makes
 `/var/cache/verkstead`, puts `sccache` on the service's path, and every Sandbox
 gets the directory writable with `CARGO_HOME` inside it and `sccache` as its
 `RUSTC_WRAPPER` — so a crate is downloaded once and compiled once for the
 machine rather than once per Conversation. The sccache server every Sandbox
 compiles through is Verkstead's own, in a Sandbox of its own holding the
-worktrees and the cache, and it comes and goes with the service. Whether
-Sandboxes get one, and how
-large its compiled half may grow, are in the workbench settings; it is on with
+worktrees and the cache, and it comes and goes with the service. Which
+languages a Sandbox gets at all, and how
+large the compiled half may grow, are in the workbench settings; each is on with
 nothing configured. `systemctl clean --what=cache verkstead` empties it, and
-nothing but build output is in it.
+nothing but build output is in it. Those variables are not Rust's by name
+anywhere in the server: Rust is a **descriptor** like any other, and writing
+one for a language Verkstead has never heard of is [Languages](#languages)
+below.
 
 The **Data Directory** is not one of the three either, and not a choice on this
 module: the unit keeps it in its own state directory, `/var/lib/verkstead`, and
@@ -900,7 +903,10 @@ Conversation. The other half, the compiled objects, wants an `sccache` on the
 `PATH` the server was started from: with one there, every session's `rustc`
 goes through the single Compile Server Verkstead runs, and a dependency is
 compiled once for the machine too. The workbench's Language support page says
-which of the two you have.
+which of the two you have. A C/C++ Repo goes through the same server only where
+CMake is told `-G Ninja`: the Visual Studio generator it picks by default
+ignores the launcher variables (see [C/C++ through the Compile
+Server](#cc-through-the-compile-server)).
 
 **The toolchain a session builds with is the one you installed.** `rustup`'s
 shims are on your `PATH` already, and the rustup home they resolve a toolchain
@@ -912,6 +918,704 @@ without rustup is a machine where a session finds whatever else is on the
 Out of a checkout instead — the same server, told `--data-dir .` so that
 `verkstead.db` and the rest land in the checkout rather than in the platform
 directory — is [development.md](development.md#quickstart).
+
+## Languages
+
+A language is a **descriptor**: data, in one grammar, saying what to call it,
+what says a checkout builds it, and what variables a session is given. Seven
+ship — Rust, C/C++, Go, Node, Python, .NET and the JVM — and there is nothing
+special about any of them: each is an entry in a YAML file embedded in the
+binary, written exactly the way you would write one. So the built-ins below are
+both what Verkstead does and the worked examples of the grammar. What C/C++
+covers is [its own section](#cc-through-the-compile-server), and what each of
+the other five shares, tool by tool, is [at the end of this
+section](#what-each-language-shares).
+
+This is the whole of Rust's, as it ships:
+
+```yaml
+languages:
+  rust:
+    label: Rust
+    detect:
+      - Cargo.toml
+    env:
+      CARGO_HOME: "{cache}/cargo"
+    capabilities:
+      sccache:
+        env:
+          RUSTC_WRAPPER: "{sccache}"
+          SCCACHE_DIR: "{cache}/sccache"
+          SCCACHE_CACHE_SIZE: "{size}"
+    stores:
+      cargo:
+        dir: "{cache}/cargo"
+        units:
+          - under: registry/src
+            depth: 2
+          - under: registry/cache
+            depth: 2
+          - under: git/db
+            depth: 1
+          - under: git/checkouts
+            depth: 2
+      sccache:
+        dir: "{cache}/sccache"
+        evicted: by-its-tool
+```
+
+`label` is what the settings page calls it. `detect` is what says a Repo builds
+it, looked for at the root of a checkout — **for the composer's warning and
+nothing else**: the variables are every session's whatever the Repo holds,
+because a manifest is often not at the root and a variable nothing reads costs
+nothing. `env` is those variables. `capabilities` names behaviour the server
+has built in, which a descriptor can *name* and cannot *describe*: `sccache` is
+the **Compile Server**, and a capability's variables are set only on a machine
+that can offer it — no sccache anywhere and a session gets the downloads above
+and none of the three below. There is no key for a command to run, and there
+will not be one: a settings file that started programs is a settings file whose
+sandbox somebody then has to describe in YAML too. `stores` names the
+directories the language's tools fill — what the settings page measures, and
+what is held to the language's size — and says of each how it is kept under
+that size, which is [its own section](#how-big-a-store-grows).
+
+Two more keys belong to the same entry and are not in the file above, because
+what they say is your machine's rather than the release's: `enabled`, whether
+sessions get this language at all, and `size`, how big its store may grow —
+which is what `{size}` stands for. Absent, they are **on** and **10G** —
+**30G** for Rust, whose sccache has always been started at that. They
+are also the only two keys the settings page ever writes, so a save from the
+**Language support** pane leaves everything else in an entry exactly as you
+typed it.
+
+**Your own entries merge over the built-ins, key by key.** What you write goes
+under `languages:` in `config.yaml` in the data directory, and each key lands
+in the built-in entry of that name. So changing one variable keeps every later
+fix to the rest:
+
+```yaml
+# config.yaml — this machine's Build Cache is a spinning disk and its Worktrees
+# are not, so the registry goes beside the Worktrees instead. Everything else
+# about Rust — its manifest, its Compile Server and that server's own store —
+# is still whatever this Verkstead ships.
+languages:
+  rust:
+    env:
+      CARGO_HOME: "{stores}/cargo"
+```
+
+and a variable set to `null` is taken **out**, which is how one of the
+built-ins above is dropped without writing the rest of them again:
+
+```yaml
+languages:
+  rust:
+    env:
+      CARGO_HOME: null
+```
+
+**A name Verkstead has never heard of is a language in its own right.** It is
+on from the next session, with its variables in every Sandbox and its own box
+on the settings page, and no release has to know about it:
+
+```yaml
+languages:
+  gleam:
+    label: Gleam
+    detect:
+      - gleam.toml
+    env:
+      HEX_HOME: "{cache}/hex"
+```
+
+**The placeholders are the things only the server knows**, and the two worth
+choosing between are `{cache}` and `{stores}`. `{cache}` is the **Build Cache**
+— `--build-cache-dir`, else `/var/cache/verkstead` on the packaged unit and the
+platform's own cache directory otherwise — and it is where a store goes that
+nothing has to share a filesystem with. Rust's two are both there: a registry
+and a pile of compiled objects are *read*, wherever they are. `{stores}` is a
+directory beside the **Worktrees**, under the data directory, and it is for a
+store that *does* care: pnpm, deno, bun and uv hardlink packages out of theirs
+into the project rather than copying them, and fall back to copying the lot
+where the store and the project are on different filesystems. The Build Cache
+is free to be a second disk — the flag may name one outright, and the packaged
+unit's `CacheDirectory` and `StateDirectory` are two mounts a sysadmin
+separates as a matter of course — so a store that has to be next to the
+checkout says so. Four of the built-in variables do, and an entry of your own
+says it the same way — conda hardlinks a package out of its cache into an
+environment and copies it where it cannot, so its cache belongs there too:
+
+```yaml
+languages:
+  conda:
+    label: conda
+    detect:
+      - environment.yml
+    env:
+      CONDA_PKGS_DIRS: "{stores}/conda"
+```
+
+**On Linux they all copy anyway today**, which is worth knowing before you
+count on the space a hardlink saves: a Worktree and this directory are two
+separate bind mounts inside a session's sandbox, and a hardlink does not cross
+two mounts however few disks are underneath them. The store still does its
+work — a copy out of it is a download that did not happen — and pnpm and uv say
+in as many words that they fell back, where deno and bun do it without a word.
+
+Write `/` after a placeholder whatever platform you are on. A descriptor is one
+file read on three, so the grammar has one separator, and a Windows session is
+handed the path its own tools would have composed.
+
+The other two are not a choice. `{size}` is that entry's own `size` key, and
+`{sccache}` is where a session reaches the sccache this server found — it only
+means anything inside the `sccache` capability, which is what says there is one
+at all. A placeholder's directory is made, and opened to a session, only where
+a loaded descriptor names it: four of the shipped variables name `{stores}` —
+pnpm's store, deno's cache, bun's and uv's — so every session with Node or
+Python switched on is opened onto that directory, and an install with both of
+them off is opened onto none of it.
+
+**What an entry that will not load costs you is the entry, and nothing else.**
+Two ways one fails. Naming a variable the Sandbox sets itself — `PATH`, `HOME`,
+`VERKSTEAD_SERVER`, `RUSTUP_HOME`, and the Windows names for a profile that the
+two Unixes have no equivalent of, refused on every platform so that a file
+which loaded on a Mac cannot break the same install on a Windows box — is
+refused by name, because a descriptor that could rewrite those is one that
+could take a session's `verkstead` away from it, or its agent's login. And an
+entry nothing can parse is refused the same way — **a key this grammar does not
+have included**, which is what stops `detct:` being a manifest list that
+silently did nothing. Either way that language falls
+back to the descriptor Verkstead ships, which is the cache you already had;
+every other language loads; the server comes up. A language with no built-in
+behind it — your Gleam, with a typo in it — goes **off** rather than on at
+nothing.
+
+The **Language support** pane is where you find out. That language's box is
+drawn with its controls off and a sentence saying why: the reason, naming the
+variable where a variable is what was refused, and which of the two became of
+it. Nothing of what you typed is thrown away — a save from that page writes the
+whole of `config.yaml` and puts your entry back exactly as it was — so the fix
+is in the file, and the next session reads it. Settings are read at every
+session spawn: nothing restarts.
+
+### C/C++ through the Compile Server
+
+C/C++ is the second descriptor naming the `sccache` capability, and it names
+the same one Rust's does: one **Compile Server** for the machine, one store and
+one size, so there is no second server and no size field of its own on the
+settings page. Its box turns C and C++ compiles through that server on and off.
+This is the whole of it:
+
+```yaml
+languages:
+  cpp:
+    label: C/C++
+    detect:
+      - CMakeLists.txt
+      - native/CMakeLists.txt
+      - cpp/CMakeLists.txt
+      - meson.build
+    capabilities:
+      sccache:
+        env:
+          CMAKE_C_COMPILER_LAUNCHER: "{sccache}"
+          CMAKE_CXX_COMPILER_LAUNCHER: "{sccache}"
+```
+
+C++ has no one manifest, so `detect` is the build files a checkout ordinarily
+has one of — and, as for every language, it drives the composer's warning and
+nothing else. With no sccache on the server the capability is left out whole,
+and a session gets neither launcher.
+
+**What is covered is CMake**, 3.17 and later, with the **Makefile or Ninja**
+generator. CMake reads the two launcher variables out of the environment when a
+build directory is **first configured**, and caches what it read — so a build
+directory configured before C/C++ was switched on keeps compiling without the
+server until it is configured afresh (delete it, or its `CMakeCache.txt`).
+**Meson** is covered without Verkstead doing anything: it finds an `sccache` on
+the `PATH` for itself, and a session's `PATH` has the server's.
+
+**What is not covered:**
+
+- **Plain Makefiles and Bazel.** Neither reads anything a descriptor could set
+  without reaching past C++ projects, so they compile uncached.
+- **CMake's Visual Studio and Xcode generators**, which ignore the launcher
+  variables. Visual Studio is CMake's default on Windows, so **a Windows Repo
+  is cached only where it configures with Ninja** (`-G Ninja`).
+- **MSVC debug information in `/Zi` form**, which sccache cannot cache; `/Z7`
+  it can. That is a project's compile flags, and Verkstead leaves them alone.
+
+**Why `CC` and `CXX` are left alone.** Setting them would have reached every
+Makefile too — and every build that compiles C and is not a C++ project at all:
+a Rust crate's C build script, a Python or Node native extension, Go with cgo.
+Beside a launcher, they can wrap one compile in sccache twice. The launcher
+variables are read by CMake and nothing else, so they change nothing that is not
+a CMake project. This was asked for and withdrawn once its reach was laid out
+([ADR 0021](adr/0021-language-descriptors.md)); a Repo that wants its own
+Makefile cached can still name `sccache` as its compiler itself.
+
+**A second Conversation hits the first one's objects** because the Compile
+Server is told every Worktree as a base directory. sccache hashes a C or C++
+compile with its absolute paths, and every Conversation's Worktree is a path of
+its own, so without that every Conversation would compile everything again.
+Three things are worth knowing about it:
+
+- It needs **sccache 0.14.0 or later**, the first to honour
+  `SCCACHE_BASEDIRS`. An older one ignores the variable: nothing fails, and a
+  C/C++ build in a second Conversation simply misses. Rust is unaffected
+  either way, its dependencies being compiled out of one `CARGO_HOME` at one
+  path from every Worktree.
+- The server reads the list **once, as it starts**, and is restarted to take in
+  a new Worktree only while no session is running — restarting it under a
+  build would fail that build. So on a machine that is never quiet a new
+  Conversation's builds miss until it is.
+- An object served from another Conversation's compile carries **that
+  Worktree's path in its debug information**. A debugger opened on it looks for
+  the source there.
+
+**If a compile fails rather than missing the cache**, it is one of two limits of
+the server's own Sandbox, which holds the Worktrees, the Build Cache and the
+system, and nothing else:
+
+- **A build directory outside the Worktree.** The server writes each object
+  where the compile names it, and a directory it cannot reach — the session's
+  own `/tmp`, say — is an error, not a miss. Configure the build directory
+  inside the Worktree (`cmake -B build`). The same holds for Rust's `target/`
+  and a `CARGO_TARGET_DIR` pointing elsewhere.
+- **A compiler reached only through the Conversation's own binds.** The server
+  runs the compiler, and it sees none of a Conversation's **Sandbox
+  Configuration**: a toolchain bound into one Conversation is one the server
+  cannot run. A compiler the machine itself has installed — what every Sandbox
+  reaches, a dev shell's under `/nix` included — or one inside the Worktree is
+  fine.
+
+### What each language shares
+
+Rust's descriptor is above, and C/C++'s is the section before this one. Four
+of the other five are the **package stores**, and the JVM, whose builds share
+more than downloads, is [at the end](#the-jvm). In all five, every
+tool that installs from one ecosystem's registry is in that ecosystem's entry
+rather than one of its own, so one box on the **Language support** pane turns
+the lot of them on or off, and a session gets every variable of a language that
+is on whatever its checkout holds.
+
+Each row below is one variable the built-in sets, where its directory goes, and
+what moves there. `{cache}` is the **Build Cache** and `{stores}` is the
+directory beside the **Worktrees** — a store is under the second one where its
+tool hardlinks a package out of it into the project.
+
+**Go**, detected by `go.mod`:
+
+| Variable | Where | What moves there |
+| --- | --- | --- |
+| `GOMODCACHE` | `{cache}` | the modules the `go` command downloaded |
+| `GOCACHE` | `{cache}` | **the compiled half**: what a build compiled, which for Go is a directory and nothing else |
+
+Go is the one ecosystem here whose compiled output is shared as well, and it is
+the easy kind: where Rust's second half wants an `sccache` running, Go's is a
+directory two sessions both write.
+
+**Node**, detected by `package.json` — npm, pnpm, both yarns, deno and bun,
+with no variable name shared between them:
+
+| Variable | Where | What moves there |
+| --- | --- | --- |
+| `NPM_CONFIG_CACHE` | `{cache}` | npm's `_cacache`: the packages it downloaded, and what `npm --offline` installs out of |
+| `PNPM_CONFIG_STORE_DIR` | `{stores}` | pnpm's content-addressable store, the one it hardlinks packages out of. Not `PNPM_HOME`, which is where pnpm puts global binaries and holds no packages at all |
+| `PNPM_CONFIG_CACHE_DIR` | `{cache}` | the registry metadata beside that store, which an offline install needs as much as the packages |
+| `YARN_CACHE_FOLDER` | `{cache}` | Yarn Classic's cache — yarn 1.x, still what `yarn` is on most machines |
+| `YARN_GLOBAL_FOLDER` | `{cache}` | Yarn Berry's, which is yarn 2 and up. Berry keeps its cache here rather than in the folder above, so the two yarns are two directories |
+| `DENO_DIR` | `{stores}` | deno's whole cache: remote modules, npm packages, what it emitted — and its origin storage, below |
+| `BUN_INSTALL_CACHE_DIR` | `{stores}` | bun's package cache. Not `BUN_INSTALL`, which is bun's install root and whose `bin` is on a session's `PATH` |
+
+No compiled store among the six: the one piece of built output any of them
+keeps is what deno emitted, which rides along inside `DENO_DIR` rather than
+being a second directory anybody chose to share. Everything else a build makes
+is in the project.
+
+**Python**, detected by `pyproject.toml` or `requirements.txt` — pip, uv,
+poetry and pipenv:
+
+| Variable | Where | What moves there |
+| --- | --- | --- |
+| `PIP_CACHE_DIR` | `{cache}` | pip's downloaded responses and the wheels it built out of an sdist |
+| `UV_CACHE_DIR` | `{stores}` | uv's: the index responses, the downloads, and the unpacked wheels it links into an environment |
+| `POETRY_CACHE_DIR` | `{cache}` | poetry's downloaded distributions and the release information it resolved against — an install offline needs both |
+| `PIPENV_CACHE_DIR` | `{cache}` | pipenv's, which **is** the pip cache a pipenv install uses: pipenv builds pip's environment itself and passes none of the session's other `PIP_` variables through, so the row above does nothing for it |
+
+And two that are not directories at all: `POETRY_VIRTUALENVS_IN_PROJECT` and
+`PIPENV_VENV_IN_PROJECT`, both on. **Only downloads are shared, never a virtual
+environment.** Poetry's would otherwise go under the cache directory above,
+which is to say into the shared store, and a virtual environment holds absolute
+paths — one built in another Worktree is broken in this one. So every `.venv`
+is in the Worktree that made it, where it also outlives the session. No
+compiled half here either.
+
+**.NET**, and the one tool every .NET machine installs through, NuGet:
+
+| Variable | Where | What moves there |
+| --- | --- | --- |
+| `NUGET_PACKAGES` | `{cache}` | the global packages folder: what restore downloaded and unpacked, and what a build then compiles against where it lies |
+| `NUGET_HTTP_CACHE_PATH` | `{cache}` | the responses behind it — the service index, the version lists and the `.nupkg` as it came off the wire |
+| `NUGET_SCRATCH` | `{cache}` | NuGet's temp directory, which holds no downloads. It is here because the lock restore takes before it extracts a package is a *file* in it, and two sessions that cannot see one lock extract over each other |
+
+This is the one entry with an empty `detect`, and on purpose: a .NET project is
+a `*.csproj`, a `*.fsproj` or a `*.sln`, and `detect` matches literal filenames
+rather than globs. What that costs is the composer's warning on a .NET Repo and
+nothing else — the variables are every session's either way. And there is no
+compiled half: what a build leaves is `obj/` and `bin/` in the project.
+
+**A shared store is a writable store, which means one session can plant a
+package another installs.** A Conversation that writes into pnpm's store or
+NuGet's packages folder is writing where the next one reads, and nothing here
+checks what it put there. That is accepted rather than mitigated: it has been
+true of Rust's registry since there was a Build Cache, the machine is one
+person's, and the alternative is every Conversation downloading the internet
+again. What is *not* shared is anything that is a session's own — a registry
+login lives beside these directories rather than in them, and none of the
+variables above moves the directory a login is in.
+
+**`DENO_DIR` is the one that holds more than downloads.** deno keeps its origin
+storage there: `localStorage` for a program run with a `--location`, and the
+database `Deno.openKv()` opens where it was given no path. So two Conversations
+running one Repo's program see one `localStorage` between them. That is a
+program's own state rather than a secret, and it is the same bargain as the
+store — but it is a bargain, so it is written down here.
+
+**A Repo's own configuration does not win over these.** Every one of these
+tools with a config key for its store puts the environment above that file, so
+a session's variable beats an `.npmrc`, a `pnpm-workspace.yaml`, a `.yarnrc` or
+a `bunfig.toml`, and a Repo that must have a store of its own passes
+`--cache`, `--store-dir` or `--cache-folder` on the command line where it
+installs. Nothing a descriptor can do changes that: the grammar sets variables,
+and there is no rung below the environment to set one on.
+
+**Two Conversations installing with Yarn Classic at the same moment may cost one
+of them its install.** Classic is the one tool of the eleven whose cache is not
+safe for two writers: it makes a cache entry at that entry's final name and
+fills it afterwards, so an install arriving in between finds the directory,
+takes it for complete, and fails on a file that is not written yet — a yarn
+error naming a `.yarn-tarball.tgz` under the cache. **Nothing is damaged**: the
+store is left usable, and the install is right the second time. The cache stays
+shared because that is the trade — one download for the machine against a
+collision you re-run — and it is written here so it is recognised rather than
+debugged. The other ten tools, Yarn Berry included, are safe for two at once.
+
+**The one Repo that loses something it cannot ask back for is a Yarn Berry Repo
+doing zero-installs.** A Repo that writes `enableGlobalCache: false` is asking
+Berry to keep its cache in the checkout — vendored, committed, installed from
+without a registry. What that switch actually does is send Berry from
+`globalFolder/cache` back to `cacheFolder`, and `cacheFolder` is
+`YARN_CACHE_FOLDER`, which is the variable the session set for Yarn Classic. So
+that Repo lands in a shared directory rather than its own, and **Berry has no
+command-line flag that moves the cache back** — the paragraph above does not
+apply to it, there being nothing to pass. What it keeps is an install that works
+out of a store; what it gives up is the project-local cache it would have had
+without Verkstead. `YARN_ENABLE_GLOBAL_CACHE` would settle it either way and is
+deliberately not set: moving a store is what a descriptor is for, and overriding
+a Repo's policy switch is not. A Repo that has to have the vendored cache turns
+**Node** off on the settings page.
+
+### The JVM
+
+**One `jvm` entry covers Maven and Gradle**, detected by `pom.xml`,
+`build.gradle`, `build.gradle.kts`, `settings.gradle` or `settings.gradle.kts`,
+with one box on the **Language support** pane — a Repo on the JVM picks one
+build tool or the other. Neither needed anything but variables: turning
+Gradle's daemon off and Maven's locking on are both said in the environment, so
+there is no capability of the server's own behind this entry.
+
+| Variable | Where | What moves there |
+| --- | --- | --- |
+| `MAVEN_OPTS` | `{cache}` | Maven's **local repository**, by `-Dmaven.repo.local`: everything a build downloaded, plugins included, and what `mvn -o` builds out of. And **file locks on it** — see below |
+| `GRADLE_USER_HOME` | `{cache}` | **Gradle's whole home**: the dependency caches under `caches/modules-2`, the distributions `gradlew` downloads under `wrapper/dists`, toolchain JDKs under `jdks/`, and the local build cache under `caches/build-cache-1` |
+| `GRADLE_OPTS` | — | `-Dorg.gradle.daemon=false`, and no directory at all: **no daemon in a session** — see below |
+
+**Maven's repository is locked with files every session sees.** Maven 3.9's
+resolver guards its local repository only inside one JVM unless it is told
+otherwise, so two sessions building at once would each take a lock the other
+cannot see. `MAVEN_OPTS` also carries
+`-Daether.syncContext.named.factory=file-lock` and
+`-Daether.syncContext.named.nameMapper=file-gav`, which put one lock file per
+artifact under `.locks` in the repository itself — the setting the resolver's
+own documentation names for a repository shared between processes. Maven 4
+locks with files already; **Maven 3.8 and older have no such locks and ignore
+the properties**, so two sessions on a 3.8 share the repository with nothing
+guarding it. These are system properties, so a Repo's own
+`.mvn/maven.config` naming a `-Dmaven.repo.local` of its own keeps it, and a
+`-s` settings file is still read. **A Build Cache whose path has a space in it
+gets no shared repository**: Maven 3 splits `MAVEN_OPTS` on whitespace, Maven 4
+`eval`s it, and no quoting survives both — so where the path has a space the
+whole line is left out, and each session builds with a repository of its own.
+`settings.xml`, where a server's password goes, stays in the session's own
+`~/.m2`: moving the repository does not move it. **Nor are `mvnw`'s
+distributions shared**: the wrapper unpacks a Maven release into the session's
+own `/tmp` and moves it into place, and across two mounts that is a copy a
+second session could find half-done, so `MAVEN_USER_HOME` is left alone and a
+wrapper downloads its Maven once per session.
+
+**Gradle's daemon is off in a session, and that is the price of sharing its
+home.** Gradle has no way to move only its caches out of its home, so the home
+is shared whole — and a Gradle daemon registers itself under that home and is
+reached over the loopback, which every Sandbox shares. With a daemon allowed, a
+second session's `gradle` would find the first session's idle daemon and run
+its build *there*, inside the first session's Sandbox, where the second one's
+Worktree is not bound: it fails with `Could not set process working directory
+… could not setcwd()`. That was observed before any of this was built, and it
+is the hazard the **Compile Server** exists to remove for sccache. So every
+session is given `-Dorg.gradle.daemon=false`, which beats
+`org.gradle.daemon=true` in a Repo's own `gradle.properties` or in the shared
+home's. Gradle then runs each build in a single-use daemon inside the session's
+own Sandbox, gone when the build ends and registered nowhere. **Every Gradle
+invocation pays for a JVM starting up**, which is what this costs: about a
+second on a trivial build and a few seconds on a Kotlin rebuild, measured
+against a fifth of that with a warm daemon. **And it stays that way.** A Gradle
+daemon Verkstead runs in a Sandbox of its own was measured and turned down: any
+build that differed from it in Gradle version, JDK, `org.gradle.jvmargs` or
+locale, or found it busy, started a daemon of its own in the shared home anyway,
+and a build that did reach it ran without its session's binds, `HOME` or `.git`
+and beside every other Conversation's Worktree. A daemon per session, kept to
+its own Sandbox, worked but rests on a property Gradle does not document, and
+was turned down too. [The measurements are in the
+roadmap](roadmaps/language-caches/06-spike-findings.md).
+
+**An explicit `gradle --daemon` still gets a daemon.** The command line beats
+the environment, so a build started that way registers in the shared home
+again. **Only a build that asks for a daemon itself can reach it**: a session
+given `-Dorg.gradle.daemon=false` never looks in the registry and starts a
+single-use daemon of its own whatever is idle beside it, but another session's
+`gradle --daemon` attaches to the one left up and fails with the `setcwd()`
+error above. That is accepted
+rather than worked around: the failure is loud rather than a build quietly
+running in the wrong place, and `gradle --stop` in any session, or the daemon's
+own idle timeout, puts it right. Nothing Verkstead does closes it. Leave
+`--daemon` out of a session's commands and out of a Repo's scripts.
+
+**Gradle's build cache is shared only for Repos that switch it on.** Its local
+directory is inside the shared home, so every Repo with
+`org.gradle.caching=true` shares one build cache for the machine, and a task
+one Conversation built comes `FROM-CACHE` in another. Verkstead does not switch
+caching on for a Repo that did not ask: that changes how a build behaves, not
+only where it writes, and a system property would beat a Repo that wrote
+`org.gradle.caching=false` on purpose. A Repo whose `settings.gradle` points
+`buildCache.local` somewhere of its own keeps that too.
+
+**A shared Gradle home shares its `gradle.properties` and `init.d/` as well.**
+An init script one session writes into `init.d/` runs in every other session's
+Gradle builds, and a property written there applies to all of them. This is
+the [writable store's bargain](#what-each-language-shares) — one session can
+plant a package another installs — extended from packages to build logic, and
+it is accepted on the same terms. A Gradle login in `gradle.properties` is
+shared with it, so a credential belongs in the Repo's own configuration or in
+the environment rather than in the Gradle home.
+
+**Kotlin needs nothing of its own.** It builds through Gradle or Maven and
+resolves out of the same stores. The Kotlin compile daemon outlives a build
+too, but it finds itself through `~/.kotlin/daemon` under the account's real
+home, which no Sandbox binds, so each Sandbox's is its own. **Kotlin/Native's
+`~/.konan`**, where it downloads its compilers and platform libraries, is not
+in the Build Cache, so it is not shared between Conversations.
+
+### How big a store grows
+
+**Every language with a store has a size, and its stores are kept under it**,
+so a machine that has run Verkstead for a year has not had its disk filled with
+packages for projects nobody has opened since. The **Language support** pane
+draws a size field under each such language, its default as the placeholder:
+**10G**, and **30G for Rust**. C/C++ draws none, because it compiles into
+Rust's sccache rather than a store of its own. A size is written in sccache's
+own grammar — a whole number with `K`, `M`, `G` or `T` after it, in binary
+multiples — because Verkstead reads it as well as sccache, and one word should
+mean the same to both. The page refuses a size it cannot read, and says why. A
+size written by hand in `config.yaml` that cannot be read is taken as the
+default, and the pane says that too.
+
+Beside the size the pane shows **what the language's stores hold on disk**, and
+how much of that is in the packages the sweep holds to the size. It is measured in the background, every quarter of an hour and straight after a
+sweep or a Clear, so it may be a few minutes old, and just after the server
+starts it reads *not measured yet*. The walk follows no symlink and counts a
+hardlinked file once. Under that, a line per store says **how it is bounded**,
+and a last line says when the language was last swept.
+
+#### What is evicted
+
+A store is kept under its language's size in one of three ways, and its
+descriptor says which:
+
+- **By its tool** (`evicted: by-its-tool`). The tool is handed the size in a
+  variable carrying `{size}` and evicts for itself, and Verkstead leaves the
+  store alone. **sccache is the only one**: `SCCACHE_CACHE_SIZE`, least
+  recently used first. Cargo, Go's build cache and Gradle clean up by *age*
+  rather than to a size, and no other tool here evicts at all, so none of them
+  counts.
+- **By unit** (`units:`). The sweep takes **whole units** out, oldest first,
+  until the units of the language's swept stores together are under its size. A unit is one
+  package, never one file of one: a Go module or a Maven artifact with one file
+  missing is a broken store rather than a smaller one.
+- **Not at all**: a store naming neither is never swept, and the pane says so.
+  What could not be given a unit safely is left this way rather than guessed
+  at.
+
+The built-ins:
+
+| Language | Store | Bounded | A unit is |
+| --- | --- | --- | --- |
+| Rust | `cargo` | by unit | a downloaded `.crate`, the source unpacked from one, a git dependency's database, or a checkout of one revision of it. The registry index is never swept: it is small, and a crate missing from it is fetched again |
+| Rust | `sccache` | by its tool | — |
+| Go | `modules` | by unit | a directory named `path@version`, wherever the module's path puts it, and its download's `@v` directory. Go makes them read-only, and the sweep gets past that |
+| Go | `build` | by unit | one entry in the build cache's `00`–`ff` shards |
+| Node | npm | by unit | one blob in `_cacache/content-v2` |
+| Node | pnpm's store | by unit | one blob in `v11/files` — never a shard, which holds a slice of every package |
+| Node | pnpm's metadata | by unit | one package's `.jsonl` |
+| Node | Yarn Classic | by unit | one `npm-…` entry in `v6` |
+| Node | Yarn Berry | by unit | one `.zip` in `cache` |
+| Node | deno | by unit | one npm package, the directory holding its `registry.json`, and one remote module |
+| Node | bun | by unit | one `name@version@@@…` directory, and whatever an install that lost a race to another left in `.tmp` |
+| Python | pip, pipenv | by unit | one cached response in `http-v2`, and one built wheel in `wheels` |
+| Python | uv | by unit | one unpacked archive in `archive-v0` |
+| Python | poetry | by unit | one downloaded artifact, and one cached response about a repository |
+| .NET | `packages` | by unit | one package version, `<id>/<version>` |
+| .NET | `http` | by unit | one cached response, a `.dat` file |
+| .NET | `scratch` | not at all | — it holds NuGet's locks and temporary files rather than packages |
+| JVM | Maven's repository | by unit | one artifact version: the directory holding its `.pom` or `_remote.repositories` |
+| JVM | Gradle's home | by unit | one module version under `caches/modules-2/files-2.1` |
+
+**Rust is held to its size twice.** sccache trims the compiled objects to it,
+and the sweep holds the cargo half to it separately, so a Rust machine holds up
+to twice Rust's size between the two.
+
+**A unit is a file in two cases only.** One is where the file *is* the whole
+package, as a `.crate`, a `.zip` or a `.jsonl` is. The other is where the store
+is **content-addressed and its tool checks every blob it reads** — Go's build
+cache, npm's `_cacache`, pnpm's store — so that a blob gone is a blob fetched
+again rather than a package quietly broken.
+
+**What the size bounds is the units, and nothing else in the store.** A
+store's indexes and metadata, and the parts of Gradle's home that are not
+module downloads — the distributions `gradlew` fetched, toolchain JDKs, the
+build cache — are nothing the sweep can take, so they are not counted against
+the size: counted, a language whose unswept part alone was over its size would
+lose every package on every pass and still be over, which is a store cleared
+whole each hour. They are on the disk all the same, and the pane shows both:
+what the language's stores hold, and how much of that is the packages the
+sweep holds to the size.
+
+#### Naming a unit for your own descriptor
+
+A unit is data, like the rest of a descriptor. Each store's `units` is a list
+of rules, and each rule walks down from `under` — a path inside the store, `/`
+between its segments; the store itself where it is not said — and stops at the
+first entry that is a unit:
+
+- `depth: N` — every entry `N` levels down, `1` being what is directly in
+  `under`. NuGet's packages are `depth: 2`, `<id>/<version>`.
+- `named: [patterns]` — an entry whose name is one of these, at whatever depth.
+  Go's modules are `named: ["*@*"]`, because the `@` before a version is in no
+  other segment of a module path.
+- `holding: [patterns]` — a directory holding an entry with one of these names.
+  Maven's artifacts are `holding: ["*.pom", "_remote.repositories"]`, because a
+  group id puts an artifact anywhere from three to six levels down, and what
+  marks one is the file inside it.
+
+A rule saying more than one of them wants an entry that is all of them. Yarn
+Classic's is `under: v6`, `depth: 1` and `named: ["npm-*"]`. A pattern is one
+name, `*` standing for any run of characters and `?` for one. Rust's `cargo`
+store, [above](#languages), is four rules for four kinds of unit.
+
+An override replaces a store's `units` whole rather than merging into it, and
+`units: []` says a store is never to be swept:
+
+```yaml
+# config.yaml — this machine's Maven repository is a mirror kept by hand, and
+# nothing of it is to go.
+languages:
+  jvm:
+    stores:
+      maven:
+        units: []
+```
+
+The walk follows no symlink, and never takes one as a unit. **A rule the sweep
+could not follow is refused**, and the entry falls back to its built-in the way
+any refused entry does: a rule with none of `depth`, `named` or `holding`,
+which would match anything; `depth: 0`, which is the whole store; an `under`
+leaving the store; a pattern holding a `/`; a store that says both `units` and
+`evicted`; and a store under `.verkstead-swept`, which is the sweep's own
+directory.
+
+#### When
+
+**As the server starts and hourly after, and only while nothing runs** — no
+session and no Conversation Terminal, both of which reach the stores. A sweep that comes due while
+something runs happens at the first moment after that when nothing does,
+rather than an hour later, so a machine that is idle for ten minutes a day is
+swept every day. **A machine that is never idle is never swept.** That was
+decided rather than overlooked, and the pane's *Last swept …* line is where it
+shows: it is the last pass that went through that language's stores to the
+end, whether or not it found anything to take. The server keeps it in memory,
+so after a restart, until the first such pass, the line says the language has
+not been swept since the server started, and that a sweep waits until no
+session or terminal is running.
+
+**Nothing ever sees half a unit.** Each unit is renamed aside into
+`.verkstead-swept`, at the top of the Build Cache or of the directory beside
+the Worktrees, and only then deleted. A session or terminal starting meanwhile
+waits for the one rename in hand, a moment, and the sweep stops between units
+as soon as anything has started. What a sweep that died left aside is deleted
+at the start of the next. The rename stays on one filesystem, so **a store you
+mounted on a filesystem of its own is never swept**: the system refuses the
+rename, the unit is passed over and said in the log, and nothing is ever
+copied instead. Read-only units are made writable first.
+
+**Clear** empties every store of one language — sccache's too, for Rust, with
+the Compile Server stopped first so its index does not go on describing
+objects that are gone; the next session starts it again. The store
+directories stay, empty, and the next install fetches what it needs again.
+**Clear is refused while anything runs**, rather than waiting: the button is
+off and says how many sessions and terminals it is waiting on, and the server
+refuses one that arrives anyway. Clear goes through the sweep's machinery, so
+it too renames aside before deleting, and a launch pressed meanwhile waits for
+it.
+
+#### What *oldest* means on your filesystem
+
+A unit is as old as **the newest time anywhere in it**: in any file inside it,
+and in the directory itself. That is because a file's own time can mislead. A
+Maven jar's modification time is the `Last-Modified` the repository sent, so a
+jar downloaded this morning can carry a date from 2014. A directory is dated by
+when it was last written. A file is dated by when it was last **read** as well
+— its access time — **only where the store's filesystem keeps access times**.
+Where it does not, *least recently used* quietly becomes **least recently
+written**, and a package every build reads but nothing has rewritten since it
+was downloaded is the first to go.
+
+Verkstead measures this rather than reading it off the mount options. On each
+pass it dates a file two days back, reads it, and looks again. What you are
+likely to have:
+
+- **Linux**: kept. The kernel's default is `relatime`, which updates a file's
+  access time when it is older than its modification time or more than a day
+  old. That is plenty for an hourly sweep that counts in days. A filesystem
+  mounted `noatime` keeps none, and some setups choose it for flash storage.
+  `findmnt -T <Build Cache>` shows what yours is mounted with.
+- **macOS**: **not, in effect.** By Apple's description of APFS, a volume
+  mounted without `strictatime` — and no default volume is — updates a file's
+  access time on a read only while it is still older than its modification
+  time. So a file read once after its download is never seen read again, and a
+  Mac sweeps by when things were written. `mount` lists `strictatime` against
+  a volume that has it.
+- **Windows**: **usually not.** Since Windows 10's April 2018 update, NTFS's
+  last-access updates are *system managed*: on at boot where the system volume
+  is 128 GB or smaller, and off where it is larger, which is most machines now.
+  `fsutil behavior query disablelastaccess` says which: `2` (system managed,
+  enabled) and `0` are kept, `3` (system managed, disabled) and `1` are not.
+  With them on, NTFS answers a query with the true time even where it has not
+  yet written it to disk.
+
+Least recently written is still a fair order: a package is downloaded when
+some project first wanted it, and a store kept that way loses the packages
+fetched longest ago first. What it can get wrong is a package fetched long ago
+that every build still uses. The next install fetches it again.
 
 ## A day's work
 

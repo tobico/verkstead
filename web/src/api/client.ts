@@ -65,6 +65,7 @@ import type {
   FolderListing,
   ForwardsView,
   GrillingStarted,
+  LanguageCleared,
   MergedRow,
   OnboardingView,
   Preflight,
@@ -2132,6 +2133,17 @@ export function loadSettings(): Promise<SettingsView> {
 /// way.
 export function saveSettings(edit: SettingsEdit): Promise<SettingsSaved> {
   return post<SettingsSaved>("/api/ui/settings", edit);
+}
+
+/// Empty every store of one language — sccache's too, for Rust.
+///
+/// Refused while a session or a Conversation Terminal runs, which is an answer
+/// rather than a failure: it says how many of each. Where it goes ahead, the
+/// answer carries the settings with that language's disk use measured again.
+export function clearLanguage(name: string): Promise<LanguageCleared> {
+  return post<LanguageCleared>(
+    `/api/ui/languages/${encodeURIComponent(name)}/clear`,
+  );
 }
 
 /// The public half of the server's VAPID keypair — what `PushManager.subscribe`

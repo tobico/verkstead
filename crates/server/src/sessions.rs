@@ -50,7 +50,7 @@ use tokio::task::JoinHandle;
 use verkstead_schema::Nudge;
 
 use crate::attachments::Attachments;
-use crate::build_cache::{self, BuildCache};
+use crate::build_cache::BuildCache;
 use crate::capture::{Reading, Told};
 use crate::handoffs::Handoffs;
 use crate::nudge::Nudges;
@@ -335,16 +335,30 @@ impl Agents {
             )
         });
 
+        // And the directories the languages this session is set up for are to
+        // be opened onto, made before the sandbox that binds them is described
+        // — see [`BuildCache::opening`]. Here rather than at startup alone for
+        // the reason the server below is: a descriptor is read at this moment,
+        // so one an installer hand-edited in an hour ago names a directory
+        // startup never heard of, and a bind of a path that is not there is a
+        // session that will not start.
+        self.cache.opening(&config);
+
         // And the one sccache server this machine compiles through, up before
         // whatever will reach for it — see [`BuildCache::compiling`]. Here
-        // rather than at startup and only for a Repo that builds Rust, because
-        // a machine that never builds Rust never needs one; and every time
-        // rather than once, because the switch, the size and whether the server
-        // is still alive are all read at this moment.
-        if build_cache::builds_rust(&conversation.repo.path) {
-            self.cache
-                .compiling(config.rust_build_cache(), session_account.as_ref());
-        }
+        // rather than at startup, and asked of every session rather than of the
+        // Repo: what decides is whether a language naming the sccache capability
+        // is switched on, because the session is handed the wrapper variable
+        // whatever its checkout holds and a client with no server of Verkstead's
+        // to reach starts one inside its own sandbox. Every time rather than
+        // once, because the switch, the size and whether the server is still
+        // alive are all read at this moment.
+        //
+        // And the hold that comes back is this launch's, carried by the sandbox
+        // into what its rendering leaves to see to, which is held until the
+        // process has been reaped: the Compile Server is not started again for
+        // a new Worktree while it is — see [`crate::build_cache::Compiles`].
+        let compiles = self.cache.compiling(&config, session_account.as_ref());
 
         let sandbox = Sandbox::for_conversation(
             conversation,
@@ -359,7 +373,8 @@ impl Agents {
             &config,
             &self.cache,
             self.config.binds(),
-        )?;
+        )?
+        .compiling_through(compiles);
 
         let worktree = conversation.worktree.clone()?;
 
@@ -2239,6 +2254,28 @@ impl Sessions {
             .collect()
     }
 
+    /// How many sessions are running or being launched, across every
+    /// Conversation — what a Clear of a language's stores is refused over.
+    ///
+    /// **The launching ones as well**, because a launch holds the stores from
+    /// the moment its sandbox is described, and is on the register above only
+    /// once its relay is up — on the platform whose boundary is written,
+    /// minutes later. A count of the register alone would have a Clear refused
+    /// for a launch while saying nothing was running.
+    pub(crate) fn running_or_launching(&self) -> usize {
+        let mut sessions = self.working();
+
+        sessions.extend(
+            self.launching
+                .lock()
+                .expect("the launching registry is not poisoned")
+                .keys()
+                .copied(),
+        );
+
+        sessions.len()
+    }
+
     /// And which of those have stopped — [`Sessions::idling`] for the whole
     /// sidebar at once, and one lock rather than one per row for the same reason
     /// [`Sessions::working`] is.
@@ -2391,6 +2428,12 @@ impl Sessions {
         }
 
         Some(named)
+    }
+
+    /// Where every session's stores are — see [`BuildCache`] — and `None` on a
+    /// server that runs no sessions.
+    pub(crate) fn build_cache(&self) -> Option<&BuildCache> {
+        self.agents.as_ref().map(|agents| &agents.cache)
     }
 
     /// Whether a session's Rust build would have its *compiling* cached and not
@@ -5427,6 +5470,27 @@ exit 1
             !sessions.starting(CONVERSATION),
             "and no launch is in flight once it is over, whatever it left",
         );
+    }
+
+    /// A launch is counted among the running sessions from before it is on the
+    /// register — what a Clear is refused over, and what its refusal names.
+    #[test]
+    fn a_launch_in_flight_is_counted_as_running() {
+        let sessions = Sessions::none();
+
+        assert_eq!(sessions.running_or_launching(), 0);
+
+        {
+            let _launching = sessions.launching(CONVERSATION, store::AgentType::Claude);
+
+            assert_eq!(
+                sessions.running_or_launching(),
+                1,
+                "a launch holds the stores before the register has it",
+            );
+        }
+
+        assert_eq!(sessions.running_or_launching(), 0);
     }
 
     /// A launch names the Event it is writing into from the moment the Capture

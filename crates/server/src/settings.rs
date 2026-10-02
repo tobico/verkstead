@@ -27,6 +27,16 @@
 //! rust_build_cache:
 //!   enabled: true
 //!   size: 30G
+//! languages:
+//!   rust:
+//!     enabled: true
+//!     size: 30G
+//!   dotnet:
+//!     enabled: false
+//!   conda:
+//!     label: conda
+//!     env:
+//!       CONDA_PKGS_DIRS: "{stores}/conda"
 //! cleanup:
 //!   trim:
 //!     enabled: true
@@ -71,12 +81,26 @@
 //! because a file the human wrote and Verkstead cannot read is the one of the
 //! three they would want telling about.
 //!
-//! Which is why `rust_build_cache` is written the way it is: an absent key, an
-//! absent file and an unparseable one all mean the shared build cache is on at
-//! its default size. The setting is here rather than on the command line
-//! because it is the one sandbox control the human may reasonably want to reach
-//! from a phone — see [`RustBuildCache`], and
-//! [`crate::build_cache`] for what it switches.
+//! Which is why `languages` is written the way it is: an absent entry, an
+//! absent file and an unparseable one all mean a language is on at its default
+//! size. One entry per language, merged key by key over the descriptors
+//! embedded in the binary — see [`crate::languages`], which is the grammar and
+//! the built-ins both. It is here rather than on the command line because it is
+//! the one sandbox control the human may reasonably want to reach from a phone,
+//! and because a descriptor is the sort of thing somebody hand-edits — see
+//! [`crate::build_cache`] for what Rust's entry switches.
+//!
+//! `enabled` and `size` are keys of the same entry and the only two the
+//! settings page ever writes, so an installer's own keys survive a save. And an
+//! entry nothing here could read survives one too, as the text it was written
+//! in: the language falls back to the descriptor Verkstead ships, the settings
+//! page says why, and the file is still the installer's to fix.
+//!
+//! `rust_build_cache` is where Rust's two used to be said, and it is **read
+//! and never written**: a `config.yaml` from before the map says exactly what
+//! it always did, the map wins where both say something, and the first save
+//! from the settings page carries what it said into the map and leaves the key
+//! out of the file — see [`RustBuildCache`].
 //!
 //! `cleanup` is written that way as well, and it is the one section here whose
 //! two halves fall back the two different ways: the trim is on at three days
@@ -122,6 +146,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
+use crate::languages::Languages;
 use crate::store::ConflictResolution;
 
 /// What the secrets file is called inside the Data Directory. Fixed rather than
@@ -639,8 +664,34 @@ pub struct Config {
     /// rather than a flag because it is the human's to change from a phone, and
     /// safe to be: what it opens is a directory of Verkstead's own making, and
     /// the switch is the one that *closes* it.
-    #[serde(default)]
+    ///
+    /// **Read, and never written again.** `languages` below is where the
+    /// settings page writes those two now, so a save carries Rust's entry into
+    /// the map and leaves this key out of the file it writes — which is the
+    /// migration, done by the one press that was always going to rewrite the
+    /// file. Until that press, an install that wrote one keeps exactly what it
+    /// said, and where both are written the map wins — see
+    /// [`Config::languages`].
+    #[serde(default, skip_serializing_if = "RustBuildCache::says_nothing")]
     rust_build_cache: RustBuildCache,
+
+    /// And what each language is: a map keyed by language name, merged key by
+    /// key over the descriptors Verkstead ships — see [`crate::languages`].
+    ///
+    /// Where `rust_build_cache` above went, and where every language after Rust
+    /// arrives without a build: a descriptor is data, so an installer who works
+    /// in a language Verkstead has never heard of writes its variables here and
+    /// sees them in the next session. The old key is still read as Rust's
+    /// `enabled` and `size`, and this map wins where both are written — see
+    /// [`Config::languages`], which is where the two are put together.
+    ///
+    /// **The page writes `enabled` and `size` and nothing else.** A save sends
+    /// the whole file, so what keeps an installer's own keys — and, once a
+    /// descriptor will not load, the entry nothing could read — is
+    /// [`Config::keeping_what_the_page_never_drew`], said at the endpoint over
+    /// what the file already holds.
+    #[serde(default, skip_serializing_if = "Languages::is_empty")]
+    languages: Languages,
 
     /// And what the Cleanup does to an archived Conversation, and how long
     /// after the archiving it does it: the trim that takes the bulk, and the
@@ -811,7 +862,7 @@ pub struct Config {
 impl Config {
     /// What `text` says, or what went wrong reading it. An empty file is not a
     /// failure, for the reason it is not one in [`Secrets::read`].
-    fn read(text: &str) -> Result<Config, serde_saphyr::Error> {
+    pub(crate) fn read(text: &str) -> Result<Config, serde_saphyr::Error> {
         if text.trim().is_empty() {
             return Ok(Config::default());
         }
@@ -827,6 +878,11 @@ impl Config {
                 enabled: config.rust_build_cache.enabled,
                 size: config.rust_build_cache.size.and_then(blank_is_nothing),
             },
+            // Nothing to tidy on the way in either: what is in an entry is the
+            // grammar's to say, and a value this side could not make sense of
+            // is the next task's to fall back over rather than this one's to
+            // quietly drop.
+            languages: config.languages,
             // Nothing to tidy on the way in: a switch is a switch, and a
             // duration that is not a whole number of days never became one —
             // see [`CleanupStep`].
@@ -856,7 +912,7 @@ impl Config {
     #[allow(clippy::too_many_arguments)]
     pub fn of(
         git_author: GitAuthor,
-        rust_build_cache: RustBuildCache,
+        languages: Languages,
         cleanup: Cleanup,
         at_once: AtOnce,
         conflict_resolution: ConflictResolution,
@@ -868,7 +924,18 @@ impl Config {
     ) -> Config {
         Config {
             git_author,
-            rust_build_cache,
+            // And nothing for the key the map replaced: the two keys the page
+            // draws of Rust are in `languages` below now, so writing this one
+            // as well would leave a second opinion about them in the file. A
+            // save is what migrates it, and the reading half is what keeps an
+            // install that wrote one working until somebody presses anything.
+            rust_build_cache: RustBuildCache::default(),
+            // The two keys the page writes, per language it was given, and only
+            // those two: the rest of an entry is an installer's. What keeps
+            // their descriptors — and an entry the page was never given at all
+            // — is [`Config::keeping_what_the_page_never_drew`], which puts the
+            // file underneath this.
+            languages,
             // As the page set it: both switches written down, and each duration
             // only where somebody typed one — see [`CleanupStep::of`], where an
             // empty box is the default asked for back rather than a duration of
@@ -918,10 +985,25 @@ impl Config {
         &self.git_author
     }
 
-    /// And how the build cache is set, which is on at the default size where
-    /// nobody has said otherwise.
-    pub fn rust_build_cache(&self) -> &RustBuildCache {
-        &self.rust_build_cache
+    /// And what this file says about the languages: the map an installer
+    /// writes, with `rust_build_cache` read underneath it as Rust's `enabled`
+    /// and `size`.
+    ///
+    /// The old key **under** the new map rather than beside it, which is the
+    /// whole of the compatibility rule: a `config.yaml` written by the released
+    /// version reads exactly as it did, and where both say something about Rust
+    /// the map wins — see [`Languages::of_rust`]. Nothing downstream has to ask
+    /// which of the two a value came from.
+    ///
+    /// What the built-ins are then merged under is
+    /// [`crate::languages::configured`], which is what a session is actually
+    /// built from.
+    pub fn languages(&self) -> Languages {
+        Languages::of_rust(
+            self.rust_build_cache.enabled(),
+            self.rust_build_cache.size(),
+        )
+        .merged(&self.languages)
     }
 
     /// And what the Cleanup is to do after an archiving, which is a trim at
@@ -972,14 +1054,31 @@ impl Config {
         &self.session_path
     }
 
-    /// The same config with `session_path` as it already stands.
+    /// The same config with the keys the settings page never drew as they
+    /// already stand.
     ///
-    /// What a save from the settings page goes through, that page having no
-    /// field for the key: a config built out of what was sent would write the
-    /// file with this key gone, and what it named is where a harness Verkstead
-    /// installed actually is.
-    pub fn keeping_session_path(mut self, kept: &Config) -> Config {
+    /// What a save from that page goes through, because one request writes the
+    /// whole of `config.yaml` and the page is not the only thing that writes
+    /// it. Two of them:
+    ///
+    /// - `session_path`, which the page has no field for at all — an install
+    ///   writes it and a hand-edit changes it, and a config built out of what
+    ///   was sent would write the file with the key gone and a harness
+    ///   Verkstead installed unreachable.
+    /// - the descriptor half of every `languages` entry. The page draws
+    ///   `enabled` and `size` and writes those two, so what the file already
+    ///   holds is kept underneath and what the page sent is written over it —
+    ///   which leaves an installer's label, manifests and variables exactly as
+    ///   they were written, and leaves an entry the page never drew at all
+    ///   untouched. Written over rather than merged, because the page's two
+    ///   keys are the page's word even when it sends neither: see
+    ///   [`Languages::under_the_page`]. An entry nothing could read is the
+    ///   furthest case of the same rule — it goes back as the text it was
+    ///   written in, that being the whole of what is left of it once it did not
+    ///   load, and it is still what the installer is about to go and fix.
+    pub fn keeping_what_the_page_never_drew(mut self, kept: &Config) -> Config {
         self.session_path = kept.session_path.clone();
+        self.languages = kept.languages.under_the_page(&self.languages);
 
         self
     }
@@ -1089,22 +1188,31 @@ impl Config {
     }
 }
 
-/// The shared Rust build cache as the human left it: whether sessions get one,
-/// and how much disk its compiled half may take.
+/// The shared Rust build cache as the released version wrote it: whether
+/// sessions get one, and how much disk its compiled half may take.
+///
+/// **Where Rust's two keys used to be said, and what is still read.** They are
+/// keys of Rust's entry under `languages` now — see [`crate::languages`] — and
+/// this is read underneath that map so a `config.yaml` written before it
+/// existed says exactly what it always did. Nothing writes it: a save from the
+/// settings page carries what is here into the map and leaves the key out, so
+/// the first press migrates the file and the second has nothing left to
+/// migrate.
 ///
 /// Both halves are optional and both are absent on a machine nobody has been to
 /// the settings page of — which is **on**, at the default size. That is the
 /// whole of the shape, and it is deliberate: a human should never have a worse
 /// experience for not having checked the settings, so an unwritten file says
-/// what a switch somebody turned on says.
+/// what a switch somebody turned on says. Neither half falls back here any
+/// more, the two defaults being the descriptor's — an absent key is an absent
+/// key, and what an absent key comes to is [`crate::languages::Descriptor`]'s
+/// to say for every language at once.
 ///
-/// The size is the human's own word rather than a number of bytes. It is
-/// `SCCACHE_CACHE_SIZE`, which sccache reads as `10G`, `500M` and so on, and
-/// nothing here parses it: what sccache makes of a word it cannot read is
-/// sccache's to say, and a parser here would be a second opinion about the one
-/// thing the value is for.
+/// Not public any more either, for the same reason: nothing outside this file
+/// asks about Rust's build cache, because there is no such thing to ask about —
+/// there are descriptors, and one of them happens to be Rust's.
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
-pub struct RustBuildCache {
+struct RustBuildCache {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     enabled: Option<bool>,
 
@@ -1113,31 +1221,23 @@ pub struct RustBuildCache {
 }
 
 impl RustBuildCache {
-    /// What a settings page has just been told: the switch, and the size where
-    /// one was typed.
-    pub fn of(enabled: bool, size: Option<String>) -> RustBuildCache {
-        RustBuildCache {
-            enabled: Some(enabled),
-            size: size.and_then(blank_is_nothing),
-        }
+    /// Whether the key says anything at all, which is what keeps an empty one
+    /// out of the file a save writes.
+    ///
+    /// Nothing in it is nothing to migrate: a `rust_build_cache:` holding two
+    /// absent keys would be the shape of a setting nobody ever made.
+    fn says_nothing(&self) -> bool {
+        self.enabled.is_none() && self.size.is_none()
     }
 
     /// Whether a session gets one. Nothing configured is **on**.
-    pub fn enabled(&self) -> bool {
-        self.enabled.unwrap_or(true)
+    fn enabled(&self) -> Option<bool> {
+        self.enabled
     }
 
-    /// And how big its compiled half may get, which is
-    /// [`crate::build_cache::SIZE`] where nobody has said.
-    pub fn size(&self) -> &str {
-        self.size.as_deref().unwrap_or(crate::build_cache::SIZE)
-    }
-
-    /// The size exactly as it is written down, and `None` where nobody has
-    /// written one: what a settings page draws as a placeholder rather than as
-    /// a value somebody chose.
-    pub fn size_configured(&self) -> Option<&str> {
-        self.size.as_deref()
+    /// And how big its compiled half may get, exactly as it is written down.
+    fn size(&self) -> Option<String> {
+        self.size.clone()
     }
 }
 
@@ -1970,7 +2070,7 @@ fn entries_written(entries: Vec<String>) -> Vec<String> {
 /// all is a session that fails obscurely rather than one that says plainly what
 /// it has not got — `GH_TOKEN=` is a login `gh` chokes on, and an empty
 /// `user.name` is a commit by nobody that git makes without a word.
-fn blank_is_nothing(value: String) -> Option<String> {
+pub(crate) fn blank_is_nothing(value: String) -> Option<String> {
     let trimmed = value.trim();
 
     (!trimmed.is_empty()).then(|| trimmed.to_owned())
@@ -1996,7 +2096,7 @@ mod tests {
 
     use super::{
         AtOnce, AttachedServer, Author, Cleanup, CleanupStep, Config, ConflictResolution,
-        GitAuthor, HeaderValue, IgnoreRule, McpServer, RuleTrouble, RustBuildCache, Secrets,
+        GitAuthor, HeaderValue, IgnoreRule, Languages, McpServer, RuleTrouble, Secrets,
         ServerTrouble, Settings, trouble_among,
     };
 
@@ -2387,7 +2487,7 @@ mod tests {
         settings
             .save_config(&Config::of(
                 GitAuthor::default(),
-                RustBuildCache::default(),
+                Languages::default(),
                 Cleanup::default(),
                 AtOnce::of(Some("1".to_owned()), Some("2".to_owned())),
                 ConflictResolution::Merge,
@@ -2420,7 +2520,7 @@ mod tests {
         settings
             .save_config(&Config::of(
                 GitAuthor::default(),
-                RustBuildCache::default(),
+                Languages::default(),
                 Cleanup::default(),
                 AtOnce::of(Some(String::new()), Some(String::new())),
                 ConflictResolution::Merge,
@@ -2599,7 +2699,7 @@ mod tests {
         settings
             .save_config(&Config::of(
                 GitAuthor::default(),
-                RustBuildCache::default(),
+                Languages::default(),
                 Cleanup::default(),
                 AtOnce::default(),
                 ConflictResolution::Rebase,
@@ -2619,7 +2719,7 @@ mod tests {
         settings
             .save_config(&Config::of(
                 GitAuthor::default(),
-                RustBuildCache::default(),
+                Languages::default(),
                 Cleanup::default(),
                 AtOnce::default(),
                 ConflictResolution::Merge,
@@ -2700,7 +2800,7 @@ mod tests {
         settings
             .save_config(&Config::of(
                 GitAuthor::default(),
-                RustBuildCache::default(),
+                Languages::default(),
                 Cleanup::default(),
                 AtOnce::default(),
                 ConflictResolution::Merge,
@@ -2717,7 +2817,7 @@ mod tests {
         settings
             .save_config(&Config::of(
                 GitAuthor::default(),
-                RustBuildCache::default(),
+                Languages::default(),
                 Cleanup::default(),
                 AtOnce::default(),
                 ConflictResolution::Merge,
@@ -2837,7 +2937,7 @@ mod tests {
         settings
             .save_config(&Config::of(
                 GitAuthor::default(),
-                RustBuildCache::default(),
+                Languages::default(),
                 Cleanup::of(
                     CleanupStep::of(false, Some("14".to_owned())),
                     CleanupStep::of(true, Some("2".to_owned())),
@@ -2876,7 +2976,7 @@ mod tests {
         settings
             .save_config(&Config::of(
                 GitAuthor::default(),
-                RustBuildCache::default(),
+                Languages::default(),
                 Cleanup::of(
                     CleanupStep::of(true, Some(String::new())),
                     CleanupStep::of(false, Some("  ".to_owned())),
@@ -3106,7 +3206,7 @@ mod tests {
                     Some("Tobias Cohen".to_owned()),
                     Some("tobi@tobico.net".to_owned()),
                 ),
-                RustBuildCache::default(),
+                Languages::default(),
                 Cleanup::default(),
                 AtOnce::default(),
                 ConflictResolution::Merge,
@@ -3141,7 +3241,7 @@ mod tests {
         settings
             .save_config(&Config::of(
                 GitAuthor::default(),
-                RustBuildCache::default(),
+                Languages::default(),
                 Cleanup::default(),
                 AtOnce::default(),
                 ConflictResolution::Merge,
@@ -3174,7 +3274,7 @@ mod tests {
                     Some("Cohen, Tobias: #1".to_owned()),
                     Some("tobi@tobico.net".to_owned()),
                 ),
-                RustBuildCache::default(),
+                Languages::default(),
                 Cleanup::default(),
                 AtOnce::default(),
                 ConflictResolution::Merge,
@@ -3200,7 +3300,7 @@ mod tests {
         settings
             .save_config(&Config::of(
                 GitAuthor::of(Some("Tobias Cohen".to_owned()), Some(String::new())),
-                RustBuildCache::default(),
+                Languages::default(),
                 Cleanup::default(),
                 AtOnce::default(),
                 ConflictResolution::Merge,
@@ -3271,7 +3371,7 @@ mod tests {
         settings
             .save_config(&Config::of(
                 GitAuthor::of(Some("Tobias Cohen".to_owned()), None),
-                RustBuildCache::default(),
+                Languages::default(),
                 Cleanup::default(),
                 AtOnce::default(),
                 ConflictResolution::Merge,
@@ -3305,7 +3405,7 @@ mod tests {
         settings
             .save_config(&Config::of(
                 GitAuthor::of(Some("Tobias Cohen".to_owned()), None),
-                RustBuildCache::default(),
+                Languages::default(),
                 Cleanup::default(),
                 AtOnce::default(),
                 ConflictResolution::Merge,
@@ -3371,7 +3471,7 @@ mod tests {
         settings
             .save_config(&Config::of(
                 GitAuthor::default(),
-                RustBuildCache::default(),
+                Languages::default(),
                 Cleanup::default(),
                 AtOnce::default(),
                 ConflictResolution::Merge,
@@ -3393,7 +3493,7 @@ mod tests {
         settings
             .save_config(&Config::of(
                 GitAuthor::default(),
-                RustBuildCache::default(),
+                Languages::default(),
                 Cleanup::default(),
                 AtOnce::default(),
                 ConflictResolution::Merge,
@@ -3478,7 +3578,7 @@ mod tests {
 
         let page = Config::of(
             GitAuthor::of(Some("Ada".to_owned()), Some("ada@example.com".to_owned())),
-            RustBuildCache::default(),
+            Languages::default(),
             Cleanup::default(),
             AtOnce::default(),
             ConflictResolution::Merge,
@@ -3490,7 +3590,7 @@ mod tests {
         );
 
         settings
-            .save_config(&page.keeping_session_path(&settings.config()))
+            .save_config(&page.keeping_what_the_page_never_drew(&settings.config()))
             .unwrap();
 
         assert_eq!(
@@ -3503,6 +3603,183 @@ mod tests {
             settings.config().git_author().name(),
             Some("Ada"),
             "and what the page did send is what the file holds",
+        );
+    }
+
+    /// A `config.yaml` the released version wrote reads as it always did:
+    /// `rust_build_cache` is Rust's entry, switch and size both.
+    ///
+    /// Which is the whole of what an install that has been to the settings page
+    /// once already has in its file, and it goes on meaning what it meant.
+    #[test]
+    fn the_released_versions_key_is_read_as_rusts_own_entry() {
+        let config = Config::read("rust_build_cache:\n  enabled: false\n  size: 5G\n").unwrap();
+        let languages = config.languages();
+        let rust = languages
+            .get(crate::languages::RUST)
+            .expect("the old key is Rust's entry");
+
+        assert!(!rust.enabled());
+        assert_eq!(rust.size(crate::languages::RUST), "5G");
+    }
+
+    /// And nothing written at all is every language on at its own size, which
+    /// is what a machine nobody has been to the settings page of gets.
+    #[test]
+    fn nothing_written_is_the_built_in_as_it_stands() {
+        let languages = Config::default().languages();
+        let rust = languages.get(crate::languages::RUST).unwrap();
+
+        assert!(rust.enabled());
+        assert_eq!(rust.size(crate::languages::RUST), crate::build_cache::SIZE);
+    }
+
+    /// Where both the old key and the new map say something about Rust, the map
+    /// is what stands: it is the one the settings page writes now, and the old
+    /// key is what was there before it.
+    #[test]
+    fn the_languages_map_wins_over_the_key_it_replaced() {
+        let config = Config::read(
+            "rust_build_cache:\n  enabled: false\n  size: 5G\nlanguages:\n  rust:\n    \
+             enabled: true\n    size: 90G\n",
+        )
+        .unwrap();
+
+        let languages = config.languages();
+        let rust = languages.get(crate::languages::RUST).unwrap();
+
+        assert!(
+            rust.enabled(),
+            "the map turned back on what the key turned off"
+        );
+        assert_eq!(rust.size(crate::languages::RUST), "90G");
+    }
+
+    /// And a save from the settings page leaves an installer's own descriptor
+    /// keys exactly as the file had them.
+    ///
+    /// The page draws `enabled` and `size` and writes those two. Everything
+    /// else in an entry — the label, the manifests, the variables — is the
+    /// file's, and one request writes the whole of `config.yaml`, so a save
+    /// built out of what the page sent would take a language off the machine.
+    #[test]
+    fn a_save_from_the_settings_page_keeps_the_descriptor_keys_it_never_drew() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+
+        std::fs::write(
+            settings.config_path(),
+            "languages:\n  gleam:\n    label: Gleam\n    detect:\n      - gleam.toml\n    \
+             env:\n      GLEAM_CACHE: \"{cache}/gleam\"\n",
+        )
+        .unwrap();
+
+        let page = Config::of(
+            GitAuthor::of(Some("Ada".to_owned()), Some("ada@example.com".to_owned())),
+            Languages::default(),
+            Cleanup::default(),
+            AtOnce::default(),
+            ConflictResolution::Merge,
+            false,
+            vec![],
+            vec![],
+            vec![],
+            String::new(),
+        );
+
+        settings
+            .save_config(&page.keeping_what_the_page_never_drew(&settings.config()))
+            .unwrap();
+
+        let languages = settings.config().languages();
+        let gleam = languages
+            .get("gleam")
+            .expect("the language the page never drew is still there");
+
+        assert_eq!(gleam.label(), Some("Gleam"));
+        assert!(
+            gleam.detected(&{
+                let repo = dir.path().join("repo");
+                std::fs::create_dir_all(&repo).unwrap();
+                std::fs::write(repo.join("gleam.toml"), "name = \"x\"\n").unwrap();
+                repo
+            }),
+            "its manifests as the file had them",
+        );
+        assert!(
+            std::fs::read_to_string(settings.config_path())
+                .unwrap()
+                .contains("GLEAM_CACHE"),
+            "and its variables, written back into the file",
+        );
+    }
+
+    /// And an entry nothing could read goes back into the file the way it was
+    /// written, which is the same rule one step further on.
+    ///
+    /// A save writes the whole of `config.yaml`, and an entry that will not
+    /// load is still text the installer typed and is about to fix. So it is
+    /// kept the way the descriptor keys the page never drew are — including
+    /// the very key that stopped it loading, because taking that out would be
+    /// Verkstead editing somebody's file to make its own complaint go away.
+    #[test]
+    fn a_save_leaves_an_entry_nothing_could_read_as_it_was_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+
+        std::fs::write(
+            settings.config_path(),
+            "languages:\n  rust:\n    env:\n      RUSTUP_HOME: \"{cache}/toolchains\"\n  \
+             gleam:\n    label: Gleam\n",
+        )
+        .unwrap();
+
+        let page = Config::of(
+            GitAuthor::default(),
+            crate::languages::Languages::of_page([
+                (crate::languages::RUST.to_owned(), false, String::new()),
+                ("gleam".to_owned(), true, String::new()),
+            ]),
+            Cleanup::default(),
+            AtOnce::default(),
+            ConflictResolution::Merge,
+            false,
+            vec![],
+            vec![],
+            vec![],
+            String::new(),
+        );
+
+        settings
+            .save_config(&page.keeping_what_the_page_never_drew(&settings.config()))
+            .unwrap();
+
+        let written = std::fs::read_to_string(settings.config_path()).unwrap();
+
+        assert!(
+            written.contains("RUSTUP_HOME"),
+            "the entry the page could not be drawn from is still the installer's \
+             own to fix: {written}",
+        );
+        assert!(
+            !written.contains("enabled: false"),
+            "and nothing the page sent was written into it, there being no entry \
+             there that could be read to write it into: {written}",
+        );
+
+        let languages = crate::languages::configured(&settings.config());
+
+        assert!(
+            languages
+                .get(crate::languages::RUST)
+                .unwrap()
+                .unread()
+                .is_some(),
+            "so it reads back exactly as it did before the save",
+        );
+        assert!(
+            languages.get("gleam").unwrap().enabled(),
+            "while the language beside it took what the page sent",
         );
     }
 
@@ -3605,7 +3882,7 @@ mod tests {
     fn config_saying(instructions: &str) -> Config {
         Config::of(
             GitAuthor::default(),
-            RustBuildCache::default(),
+            Languages::default(),
             Cleanup::default(),
             AtOnce::default(),
             ConflictResolution::Merge,
@@ -3682,7 +3959,7 @@ mod tests {
         settings
             .save_config(&Config::of(
                 GitAuthor::default(),
-                RustBuildCache::default(),
+                Languages::default(),
                 Cleanup::default(),
                 AtOnce::default(),
                 ConflictResolution::Merge,
@@ -3862,7 +4139,7 @@ mod tests {
         settings
             .save_config(&Config::of(
                 GitAuthor::default(),
-                RustBuildCache::default(),
+                Languages::default(),
                 Cleanup::default(),
                 AtOnce::default(),
                 ConflictResolution::Merge,

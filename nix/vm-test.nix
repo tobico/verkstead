@@ -816,7 +816,16 @@ testers.runNixOSTest {
         stood = json.loads(
             machine.succeed("curl -sf http://127.0.0.1:8422/api/ui/settings")
         )
-        cache = stood["rust_build_cache"]
+
+        def sized(language):
+            """A language's size as a save says it: what somebody typed, and the
+            empty string for the default being shown. Every language's, whether
+            the pane draws a field for it or not — a save that sent only the
+            sizes it drew would empty the rest."""
+            if language["size_configured"]:
+                return language["size"]
+
+            return ""
 
         saved = json.loads(
             post(
@@ -824,10 +833,14 @@ testers.runNixOSTest {
                 {
                     "git_author": {"name": name, "email": email},
                     "github_token": "Keep",
-                    "rust_build_cache": {
-                        "enabled": cache["enabled"],
-                        "size": cache["size"] if cache["size_configured"] else "",
-                    },
+                    "languages": [
+                        {
+                            "name": language["name"],
+                            "enabled": language["enabled"],
+                            "size": sized(language),
+                        }
+                        for language in stood["languages"]
+                    ],
                     "cleanup": {
                         which: {
                             "enabled": step["enabled"],

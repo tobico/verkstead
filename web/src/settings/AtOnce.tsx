@@ -67,7 +67,12 @@ import type {
 import { useReading } from "../freshness";
 import { Empty, ErrorLine, Note } from "../notices";
 import { PaneHead } from "../workbench/PaneHead";
-import { heldCleanup, heldInstructions, heldPaths } from "./held";
+import {
+  heldCleanup,
+  heldInstructions,
+  heldLanguages,
+  heldPaths,
+} from "./held";
 import styles from "./AtOnce.module.css";
 
 /// What the section is called, in the one place both panes read it from.
@@ -246,12 +251,8 @@ export function AtOncePane(props: {
         // blank token field read as *clear this* is exactly what `Keep` is
         // here to stop.
         github_token: "Keep",
-        rust_build_cache: {
-          enabled: told()?.rust_build_cache.enabled ?? true,
-          size: told()?.rust_build_cache.size_configured
-            ? (told()?.rust_build_cache.size ?? "")
-            : "",
-        },
+        // And the languages as they stand — see [`heldLanguages`].
+        ...heldLanguages(told()),
         // And what becomes of an archived Conversation — see [`heldCleanup`].
         cleanup: heldCleanup(told()),
         conflict_resolution: told()?.conflict_resolution ?? "Merge",

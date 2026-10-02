@@ -3164,8 +3164,26 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // The settings of a Verkstead nobody has told anything: no token at all, and
     // an author of two empty strings. What the page's warnings are drawn over,
     // and the state a fresh install opens in.
-    let (_dir, app) = told_app().await;
+    let (told_dir, app) = told_app().await;
     write("settings-unset.json", &get(&app, "/api/ui/settings").await);
+
+    // And a language an installer wrote a descriptor for, hand-edited into the
+    // file the way one really is — there being no editor for it here. What the
+    // page draws of it is its label and its box, which is what the fixture the
+    // viewer's tests read has to carry: Rust alone would prove only that the
+    // page can draw the language it was written around.
+    //
+    // **With a size on it**, which is the key the page draws no field for here:
+    // nothing reads this one's size, its descriptor naming no sccache
+    // capability, and a save still has to put it back. So the fixture carries a
+    // size somebody configured that the pane never shows — see `held.ts`, which
+    // is what sends it.
+    std::fs::write(
+        told_dir.path().join("config.yaml"),
+        "languages:\n  gleam:\n    label: Gleam\n    size: 8G\n    detect:\n      \
+         - gleam.toml\n    env:\n      GLEAM_CACHE: \"{cache}/gleam\"\n",
+    )
+    .unwrap();
 
     // And of one that has been told both. The token goes in through the endpoint
     // rather than into the file, because writing it is what stamps `secrets.yaml`
@@ -3176,10 +3194,16 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         &serde_json::json!({
             "git_author": { "name": "Ada Lovelace", "email": "ada@example.com" },
             "github_token": { "Set": { "token": "ghp_0123456789abcdef" } },
-            // A size the human typed, so the fixture carries the half of the
-            // build cache that has been configured rather than only its
-            // defaults — `settings-unset.json` above is the other half.
-            "rust_build_cache": { "enabled": true, "size": "50G" },
+            // Every language the page was given, which is how it saves: the
+            // switch and the size of each, and the size of **every** one of them
+            // whether the pane drew a field for it or not — see `held.ts`'s
+            // `asEdit`. So the fixture carries a size the human typed on Rust,
+            // whose store an sccache bounds, a size on an installer's own
+            // language, and `settings-unset.json` above for the defaults.
+            "languages": [
+                { "name": "rust", "enabled": true, "size": "50G" },
+                { "name": "gleam", "enabled": true, "size": "8G" },
+            ],
             // And a Cleanup somebody has been through: both durations typed and
             // the delete turned on, for the reason the size above is typed —
             // this is the fixture of a Verkstead that has been told everything,

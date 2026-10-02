@@ -41,6 +41,29 @@ import unset from "./fixtures/settings-unset.json" with { type: "json" };
 const TOLD = told as SettingsView;
 const UNSET = unset as SettingsView;
 
+/// The languages the fixture holds, as a save puts them back on the wire: the
+/// two keys the page writes, per language the read listed — the installer's own
+/// beside the ones Verkstead ships. Carried by every section for the reason the
+/// paths are: one request writes the whole of `config.yaml`, so a list left out
+/// would be a list emptied. See [`heldLanguages`].
+///
+/// Gleam's size is one the language pane itself draws no field for, nothing here
+/// reading it — and it is sent all the same, because it is a key of that entry
+/// whoever wrote it. Go's goes out empty, which is what a size nobody has
+/// configured comes to: the default is the server's to say, not this form's.
+const LANGUAGES = {
+  languages: [
+    { name: "rust", enabled: true, size: "50G" },
+    { name: "go", enabled: true, size: "" },
+    { name: "node", enabled: true, size: "" },
+    { name: "python", enabled: true, size: "" },
+    { name: "dotnet", enabled: true, size: "" },
+    { name: "cpp", enabled: true, size: "" },
+    { name: "jvm", enabled: true, size: "" },
+    { name: "gleam", enabled: true, size: "8G" },
+  ],
+};
+
 /// The rest of `config.yaml` as every save from this pane sends it: what the
 /// read said, left exactly where it was.
 const REST = {
@@ -50,10 +73,7 @@ const REST = {
   // does says anything about them — see [`IgnoredCommentsEdit`].
   ignored_comments: "Keep",
   mcp_servers: "Keep",
-  rust_build_cache: {
-    enabled: TOLD.rust_build_cache.enabled,
-    size: TOLD.rust_build_cache.size,
-  },
+  ...LANGUAGES,
   // And the Cleanup as the read left it, each duration as the string a form
   // holds — see [`heldCleanup`].
   cleanup: {
@@ -113,6 +133,7 @@ function saying(standing: SettingsView, instructions: string): SettingsSaved {
     verified: null,
     refused: [],
     refused_servers: [],
+    refused_sizes: [],
     tried: [],
   };
 }

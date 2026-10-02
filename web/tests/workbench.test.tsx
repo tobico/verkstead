@@ -4140,8 +4140,9 @@ describe("a conversation's setup", () => {
     expect(panel.getAttribute("role")).toBe("group");
   });
 
-  /// A Rust repository on a server with no sccache: the work will run, and
-  /// every dependency in it will be compiled again. Said at the foot of the
+  /// A repository that compiles — a Cargo workspace, a CMake project — on a
+  /// server with no sccache: the work will run, and everything in it will be
+  /// compiled again. Said at the foot of the
   /// card, which is the last thing read before the work is started — and said
   /// as a note, because nothing here is broken and nothing is gated on it.
   it("warns under the box where compiles will not be cached", async () => {
@@ -4152,6 +4153,10 @@ describe("a conversation's setup", () => {
     const warning = await drawn(pane, `.${setup.uncached}`);
 
     expect(warning.textContent).toMatch(/No sccache is installed/);
+    expect(
+      warning.textContent,
+      "a CMake project is warned too, and it has no crates to download",
+    ).not.toMatch(/crate|download|dependenc/i);
     expect(
       pane
         .querySelector(`.${composer.box}`)!

@@ -93,6 +93,24 @@ const PATHS = {
   sandbox_binds: ["/var/cache/verkstead-node", "/var/cache/verkstead-cargo"],
 };
 
+/// And the languages as a save puts them back: the two keys the page writes,
+/// per language the read listed — the installer's own beside the ones Verkstead
+/// ships, with a size the language pane draws no field for sent along like any
+/// other, and an empty one where nobody has configured a size at all. Carried by
+/// every section for the reason the paths are — see [`heldLanguages`].
+const LANGUAGES = {
+  languages: [
+    { name: "rust", enabled: true, size: "50G" },
+    { name: "go", enabled: true, size: "" },
+    { name: "node", enabled: true, size: "" },
+    { name: "python", enabled: true, size: "" },
+    { name: "dotnet", enabled: true, size: "" },
+    { name: "cpp", enabled: true, size: "" },
+    { name: "jvm", enabled: true, size: "" },
+    { name: "gleam", enabled: true, size: "8G" },
+  ],
+};
+
 /// And the Cleanup as a save puts it back: the switches where the read left
 /// them, and each duration as the string a form holds. Carried by every
 /// section for the reason the paths are — see [`heldCleanup`].
@@ -487,13 +505,10 @@ describe("saving", () => {
         // form does says anything about them — see [`IgnoredCommentsEdit`].
         ignored_comments: "Keep",
         mcp_servers: "Keep",
-        // The build cache rides along as it stands, because the endpoint
-        // writes the whole of `config.yaml` and this form only means to
-        // change the author.
-        rust_build_cache: {
-          enabled: TOLD.rust_build_cache.enabled,
-          size: TOLD.rust_build_cache.size,
-        },
+        // The languages ride along as they stand, because the endpoint writes
+        // the whole of `config.yaml` and this form only means to change the
+        // author.
+        ...LANGUAGES,
         cleanup: CLEANUP,
         at_once: AT_ONCE,
         conflict_resolution: TOLD.conflict_resolution,
@@ -518,6 +533,7 @@ describe("saving", () => {
       verified: null,
       refused: [],
       refused_servers: [],
+      refused_sizes: [],
       tried: [],
     };
     theSettings(TOLD, json(rewritten));
@@ -602,6 +618,7 @@ describe("saving", () => {
       verified: { Account: { login: "ada", missing: ["gist"] } },
       refused: [],
       refused_servers: [],
+      refused_sizes: [],
       tried: [],
     };
     theSettings(UNSET, json(unscoped));
@@ -647,6 +664,7 @@ describe("saving", () => {
       verified: { Refused: { why: "gh: Bad credentials (HTTP 401)" } },
       refused: [],
       refused_servers: [],
+      refused_sizes: [],
       tried: [],
     };
     theSettings(UNSET, json(unverified));
@@ -733,19 +751,21 @@ describe("replacing and clearing the token", () => {
         github_token: null,
         // Untouched by this form, and so untouched in what the save answers
         // with — see the sections below it for what does change these.
-        rust_build_cache: TOLD.rust_build_cache,
+        languages: TOLD.languages,
         cleanup: TOLD.cleanup,
         at_once: TOLD.at_once,
         conflict_resolution: TOLD.conflict_resolution,
         share_on_done: TOLD.share_on_done,
         paths: TOLD.paths,
         ignored_comments: TOLD.ignored_comments,
+        running: TOLD.running,
         mcp_servers: TOLD.mcp_servers,
         instructions: TOLD.instructions,
       },
       verified: null,
       refused: [],
       refused_servers: [],
+      refused_sizes: [],
       tried: [],
     };
     const fetching = theSettings(TOLD, json(cleared));
@@ -762,10 +782,7 @@ describe("replacing and clearing the token", () => {
         // form does says anything about them — see [`IgnoredCommentsEdit`].
         ignored_comments: "Keep",
         mcp_servers: "Keep",
-        rust_build_cache: {
-          enabled: TOLD.rust_build_cache.enabled,
-          size: TOLD.rust_build_cache.size,
-        },
+        ...LANGUAGES,
         cleanup: CLEANUP,
         at_once: AT_ONCE,
         conflict_resolution: TOLD.conflict_resolution,
@@ -826,6 +843,7 @@ describe("the ignore rules", () => {
       verified: null,
       refused,
       refused_servers: [],
+      refused_sizes: [],
       tried: [],
     };
   }
@@ -1097,6 +1115,7 @@ describe("the ignore rules", () => {
       verified: null,
       refused: [],
       refused_servers: [],
+      refused_sizes: [],
       tried: [],
     };
     theSettings(TOLD, json(written));
@@ -1119,6 +1138,7 @@ const answering = (standing: SettingsView): SettingsSaved => ({
   verified: null,
   refused: [],
   refused_servers: [],
+  refused_sizes: [],
   tried: [],
 });
 
@@ -1169,10 +1189,7 @@ describe("sharing on Done", () => {
         // And everything else in the file as it stands, because one request
         // writes the whole of it — the resolution the select beside it owns
         // included.
-        rust_build_cache: {
-          enabled: TOLD.rust_build_cache.enabled,
-          size: TOLD.rust_build_cache.size,
-        },
+        ...LANGUAGES,
         cleanup: CLEANUP,
         at_once: AT_ONCE,
         conflict_resolution: TOLD.conflict_resolution,
@@ -1292,10 +1309,7 @@ describe("how a conflict is resolved", () => {
         // And everything else in the file as it stands, the checkbox below it
         // included.
         share_on_done: TOLD.share_on_done,
-        rust_build_cache: {
-          enabled: TOLD.rust_build_cache.enabled,
-          size: TOLD.rust_build_cache.size,
-        },
+        ...LANGUAGES,
         cleanup: CLEANUP,
         at_once: AT_ONCE,
         ...PATHS,

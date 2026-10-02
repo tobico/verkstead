@@ -473,7 +473,7 @@
 
 /* What the setup says rather than asks, under the box: why an adopting
    conversation is asked for pairings it will not grill under, and the build
-   cache a Rust repository will not get. */
+   cache a repository that compiles will not get. */
 .aside {
   margin: 0.85rem 0 0;
 }

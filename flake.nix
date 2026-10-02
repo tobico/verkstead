@@ -165,6 +165,83 @@
               # network by reaching a listener the test itself is holding open,
               # which is the sharing proved without touching the internet.
               curl
+              # What `crates/server/tests/package_stores.rs` proves a shared
+              # package store with. That suite really installs a package inside
+              # a Sandbox, twice at once and then with the registry denied,
+              # because a descriptor naming `GOMODCACHE` cannot say whether Go
+              # still reads it — see ADR-0021. A checkout without one of these
+              # stays green, the proof skipping in a line that names the tool;
+              # the dev shell carries them so that the maintainer, who builds
+              # only Rust, is not the one who never runs them.
+              go
+              # And the JavaScript ecosystem's six, which are the `node`
+              # descriptor's. `nodejs` is what npm comes in and what the proofs
+              # run an installed package with.
+              nodejs
+              pnpm
+              # **Both yarns, and they are two different tools.** Classic reads
+              # `YARN_CACHE_FOLDER` and Berry reads `YARN_GLOBAL_FOLDER`, so a
+              # shell carrying one of them is a shell where half of that is
+              # never proved. Both packages install a program called `yarn`, so
+              # Berry's is linked in under a name of its own — which is the
+              # name `tests/package_stores.rs` looks for, and the same name the
+              # CI job installs it as.
+              yarn
+              (pkgs.runCommand "yarn-berry-under-its-own-name" { } ''
+                mkdir -p "$out/bin"
+                ln -s ${pkgs.lib.getExe' pkgs.yarn-berry "yarn"} "$out/bin/yarn-berry"
+              '')
+              # And deno and bun, which are two more tools that install out of
+              # the npm registry rather than two more ecosystems — which is why
+              # they are under Node's one entry. Each reads a store variable of
+              # its own, and each hardlinks a package out of its store into the
+              # project, so a shell without them is a shell where neither the
+              # variable nor the link count is ever measured.
+              deno
+              bun
+              # And Python's two, which are the `python` descriptor's. pip is a
+              # module of the interpreter that carries it rather than a package
+              # of its own, so what the proof runs is `python3 -m pip` and what
+              # this has to give it is a Python that has the module — which is
+              # what `withPackages` is for. uv is one binary and reads
+              # `UV_CACHE_DIR`; it is also the second built-in tool that
+              # *prints* it could not hardlink out of its store, so a shell
+              # without it is a shell where that sentence is never read.
+              (python3.withPackages (ps: [ ps.pip ]))
+              uv
+              # And Python's other two, which are the same descriptor's. Each
+              # reads a cache variable of its own and each has to be told to
+              # keep its virtual environment in the project — poetry's default
+              # place for one is the cache directory itself — so a shell
+              # without them is a shell where neither half of that is ever run
+              # against the tool that has to obey it.
+              poetry
+              pipenv
+              # And .NET, which is the `dotnet` descriptor's one tool: NuGet is
+              # what every .NET project installs through, and it comes in the
+              # SDK rather than as a package of its own. `dotnet-sdk` is 8.0.x
+              # here, which is the same major the runner image carries, so a
+              # proof that passes in the shell is a proof of the SDK CI runs it
+              # against.
+              dotnet-sdk
+              # And C/C++'s, which is a build rather than an install: the
+              # proof configures a CMake project with Ninja and builds it in a
+              # session's Sandbox, every compile going through the Compile
+              # Server. The compilers are the shell's own `cc-wrapper`, which is
+              # what a nix dev shell hands a session anyway.
+              cmake
+              ninja
+              # And the JVM's, which are the `jvm` descriptor's two build tools
+              # and the JDK they run on. Maven and Gradle each keep a store of
+              # their own and each is proved by a real build in a Sandbox, so a
+              # shell without them is a shell where neither store is ever read.
+              # Both are wrappers that set `JAVA_HOME` to nixpkgs' own JDK when
+              # nothing else has, which is what makes them runnable inside a
+              # Sandbox that is handed no `JAVA_HOME` of the host's; `jdk` is
+              # here as well so that `java` itself is a name the proofs can find.
+              jdk
+              maven
+              gradle
               # What a ticked `gh` row unpacks on an Intel Mac, which has no
               # Homebrew to install one with — see
               # `crates/server/src/onboarding/install.rs`'s `GH_RELEASE`. Both

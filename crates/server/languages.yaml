@@ -1,0 +1,1057 @@
+# The languages Verkstead ships knowing about, and the grammar every descriptor
+# is written in — an installer's own as much as these. What is here is embedded
+# in the binary; what an installer writes goes under `languages:` in
+# `config.yaml` and merges into the entry of the same name, key by key, so
+# changing one variable keeps every later fix to the rest.
+#
+# A descriptor is **data**: a label for the settings page, the manifests that
+# detect the language in a Repo, the variables a session is given, and the
+# capabilities it names. It cannot say a command to run. Anything that is
+# behaviour — the Compile Server an sccache needs — is built into the server and
+# switched on by name here.
+#
+# Two more keys belong to the same entry and are not written here, because what
+# they say is a machine's rather than a release's:
+#
+#   enabled    whether sessions get this language at all. Absent is **on**, so
+#              a language nobody has said anything about is one that works.
+#
+#   size       how big its store may grow, which is what `{size}` below stands
+#              for. Absent is 10G, and 30G for Rust, whose sccache has always
+#              been started at that. Written in sccache's own grammar — a whole
+#              number with K, M, G or T after it, binary multiples — because
+#              Verkstead reads it too, and one word should mean the same to
+#              both. One that is not a size is refused by the settings page, and
+#              one written here by hand is read as the default, with the pane
+#              saying why.
+#
+# Those two are the only keys the settings page ever writes, so an entry an
+# installer wrote keeps everything else in it when somebody saves that page.
+# `rust_build_cache` in `config.yaml` is still read as Rust's two, and this map
+# wins where both say something.
+#
+# A variable set to `null` is taken **out**: that is how an override drops one
+# of the variables below without having to write the rest of them out again.
+#
+# Placeholders stand for the things only the server knows:
+#
+#   {cache}    the Build Cache: `--build-cache-dir`, or this machine's own cache
+#              directory where nobody has said. Where a store goes that nothing
+#              has to share a filesystem with.
+#
+#   {stores}   a directory beside the Worktrees, for a store that does. pnpm,
+#              deno, bun and uv hardlink packages out of their store into the
+#              project rather than copying them, and fall back to copying the
+#              lot where the two are on different filesystems — and the Build
+#              Cache is free to be a disk of its own, which is what the packaged
+#              unit's separate `CacheDirectory` and `StateDirectory` are.
+#
+#              **And on Linux they copy anyway**, which is a fact about the
+#              sandbox rather than about this placeholder: a Worktree and this
+#              directory are two bind mounts, and `link(2)` answers `EXDEV`
+#              across two mounts however many filesystems are underneath them.
+#              So what a store here buys today is one download for the machine,
+#              the same as `{cache}` — the space a hardlink saves waits on one
+#              mount holding both, which is whoever changes what a session may
+#              reach. See `tests/package_stores.rs`, where both halves of that
+#              are proved.
+#
+#   {size}     how big this language's store may grow: this entry's own `size`
+#              key as it was written, which the settings page writes, and the
+#              default above where nobody has.
+#
+#   {sccache}  the sccache this server found, at the path a session reaches it
+#              by. Only inside the `sccache` capability below, which is what
+#              says there is one at all.
+#
+# A placeholder's directory is made, and granted writable to a session, only
+# where a loaded descriptor names it. Four of the stores below name `{stores}` —
+# three of Node's and uv's — so every session with either of those languages
+# switched on is opened onto it; an installation with every language that names
+# it switched off is opened onto none.
+#
+# **A value that is a line of words is left out where a directory in it has
+# whitespace.** A line of flags is what a tool with no variable for a path
+# reads one out of, and such a tool splits the line on whitespace — so a Build
+# Cache under a name with a space in it would hand over a line that breaks the
+# tool outright. A value that is one word is a path, read whole, space and all.
+# See the `jvm` entry, which is where this came from.
+#
+# **A language's store is named as well as given**, under `stores:` — the
+# directories its tools fill, each by a name of the entry's own, with a `dir`
+# that is `{cache}/…` or `{stores}/…` and nowhere else. They are what the
+# settings page measures the disk use of, and what is held to the language's
+# size. Said here rather than read back out of `env`, because a variable is not
+# always a path: Maven's repository is a flag inside the line `MAVEN_OPTS` is.
+# Merged key by key like the rest, so an installer adds a store by naming it
+# and takes one out with a `null`; a descriptor naming none is still a
+# descriptor, and the page says there is nothing of it to measure. A `dir`
+# anywhere but under one of those two placeholders is refused, the entry falling
+# back the way any other refused entry does: what is done to a store is delete
+# what is in it, and nothing outside Verkstead's own directories is that.
+#
+# **And a store says how it is kept under the language's size**, which is one
+# of three answers, each a key of the store's own:
+#
+#   evicted: by-its-tool
+#              the tool filling it evicts for itself, handed the size in a
+#              variable carrying `{size}`. The sweep leaves it alone. sccache is
+#              the one built-in that does: `SCCACHE_CACHE_SIZE`, least recently
+#              used first. Cargo, Go's build cache and Gradle clean up by *age*
+#              rather than to a size, and no other tool here evicts at all.
+#
+#   units:     what the sweep takes out of it whole, oldest first, until the
+#              language's units are under its size — the units alone, an index
+#              or anything else no unit names being nothing it can take, and so
+#              nothing held to the size: **a package, never a file of one**,
+#              because a Go module or a Maven artifact with one file missing is
+#              a broken store rather than a smaller one. A list, each item a way
+#              of finding one, walking down from `under` (a path inside the
+#              store; the store itself where it is not said) and stopping at
+#              the first entry that is one:
+#
+#                depth     every entry that many levels down — one for what
+#                          is directly in `under`.
+#                named     an entry whose name is one of these patterns.
+#                holding   a directory holding an entry whose name is one of
+#                          these patterns.
+#
+#              Where more than one is said, an entry has to be all of them. A
+#              pattern is one name, `*` for any run of characters and `?` for
+#              one — data, like the rest, and never a command that would find a
+#              unit. The walk follows no symlink and never takes one as a unit.
+#              **A unit may be a file** where the file is the whole package, or
+#              where the store is content-addressed and its tool checks every
+#              blob it reads, so that a blob gone is a blob fetched again.
+#              Replaced whole by an override rather than merged into, and `[]`
+#              is how an installer says a store is never to be swept.
+#
+#   neither    the store is never swept, and the settings page says so. What
+#              cannot be given a unit safely is left this way rather than
+#              guessed at.
+#
+# Refused the way a misplaced `dir` is, the entry falling back to its built-in:
+# a store saying both; a unit naming none of `depth`, `named` or `holding`,
+# which would match anything; `depth: 0`, which is the whole store; an `under`
+# that leaves the store; a pattern that is a path; and a store under
+# `.verkstead-swept`, which is the directory the sweep moves units aside into.
+#
+# **The sweep runs as the server starts and hourly after, and only while no
+# session and no Conversation Terminal runs** — at the first moment nothing
+# does, where one comes due while something is running, so a machine that is
+# never idle is never swept. It takes a language's units oldest first, a unit
+# being as old as the newest time anywhere in it: access times where the
+# store's filesystem keeps them, modification times where it does not. Each
+# unit is renamed into `.verkstead-swept` at the top of `{cache}` or `{stores}`
+# before it is deleted, so no tool ever sees half of one; a store mounted on a
+# filesystem of its own is never swept, the rename being refused rather than
+# turned into a copy. **Clear**, on the settings page, empties every store of
+# one language the same way, whichever of the three it is, and is refused
+# while anything runs. What a reader's filesystem makes of *oldest* is in
+# `docs/adoption.md`.
+#
+# **Write `/` between the placeholder and what is under it, on every platform.**
+# A descriptor is one file read on three, so the grammar has one separator: what
+# a Windows session is handed is the path its own tools compose, `\` and all.
+
+languages:
+  rust:
+    # What the settings page calls it.
+    label: Rust
+
+    # What says a Repo builds this language, looked for at the root of a
+    # checkout. **For the setup card's warning and nothing else**: the variables
+    # below are every session's whatever the Repo holds, because a manifest is
+    # often not at the root and a variable nothing reads costs nothing.
+    detect:
+      - Cargo.toml
+
+    # The registry index, the `.crate` files downloaded into it and the sources
+    # unpacked from them. This is the half of the cache that works with no
+    # sccache anywhere, and what stops two Conversations downloading one crate
+    # twice.
+    env:
+      CARGO_HOME: "{cache}/cargo"
+
+    # And the capabilities this descriptor switches on. `sccache` is the Compile
+    # Server: one sccache server for the machine, in a sandbox of its own,
+    # started wherever a language naming this is enabled and there is an sccache
+    # to run. A capability's variables are set only where the server can offer
+    # it, so a machine with no sccache installed gets the downloads above and
+    # none of these.
+    capabilities:
+      sccache:
+        env:
+          RUSTC_WRAPPER: "{sccache}"
+          SCCACHE_DIR: "{cache}/sccache"
+          SCCACHE_CACHE_SIZE: "{size}"
+    # The two halves above, as the directories they are: the downloads and
+    # the Compile Server's objects.
+    #
+    # **Each is held to Rust's size on its own**, so a Rust machine holds up to
+    # twice it: sccache trims its objects for itself, and the sweep takes whole
+    # crates out of the downloads. A crate is two units — the `.crate` as
+    # downloaded and the source unpacked out of it — and a git dependency two
+    # more, the database fetched and a checkout of one revision of it. The
+    # index is left alone: it is small, and a crate missing from it is fetched
+    # again rather than broken.
+    stores:
+      cargo:
+        dir: "{cache}/cargo"
+        units:
+          - under: registry/src
+            depth: 2
+          - under: registry/cache
+            depth: 2
+          - under: git/db
+            depth: 1
+          - under: git/checkouts
+            depth: 2
+      sccache:
+        dir: "{cache}/sccache"
+        evicted: by-its-tool
+
+  go:
+    # The second language Verkstead ships knowing about, and the first of the
+    # package stores (ADR-0021). Nothing in the server changed to add it: it is
+    # this entry, the proofs beside it, and `go` in the dev shell and in CI.
+    label: Go
+
+    # The module file, at the root of a checkout, for the setup card's warning
+    # and nothing else — the variables below are every session's, exactly as
+    # Rust's are.
+    detect:
+      - go.mod
+
+    # Go keeps the two halves this stage cares about in two directories, and
+    # names one variable for each — `go help environment`, checked against
+    # go1.26 as this entry was written:
+    #
+    #   GOMODCACHE  "the directory where the go command will store downloaded
+    #               modules". The downloads, which is what stops two
+    #               Conversations fetching one module twice.
+    #   GOCACHE     "the directory where the go command will store cached
+    #               information for reuse in future builds". Compiled output,
+    #               which for Go is nothing but a directory — there is no
+    #               Compile Server to run and no capability to name.
+    #
+    # Both under `{cache}` rather than `{stores}`: `go build` compiles out of
+    # the module cache where the module already is, so nothing is linked into
+    # the Worktree and the two are free to be different filesystems. Both are
+    # documented as safe for several `go` commands at once, which is the other
+    # half of what a shared store has to be — see
+    # <https://go.dev/ref/mod#module-cache>.
+    #
+    # And neither holds anything that is a session's own: a login is `~/.netrc`
+    # and `GOPATH/bin` is a third directory, so what is shared here is
+    # downloads and compiled objects and nothing else.
+    env:
+      GOMODCACHE: "{cache}/go/mod"
+      GOCACHE: "{cache}/go/build"
+    #
+    # A module is a directory named `path@version`, at whatever depth its path
+    # puts it, and its download is `cache/download/<path>/@v/` — both named
+    # with an `@`, which no other segment of a module path holds. **Go makes
+    # them read-only**, which is the sweep's to get past rather than this
+    # file's. The build cache is content-addressed and checked as it is read,
+    # so there an entry in one of its `00`–`ff` shards is the unit.
+    stores:
+      modules:
+        dir: "{cache}/go/mod"
+        units:
+          - named: ["*@*"]
+      build:
+        dir: "{cache}/go/build"
+        units:
+          - depth: 2
+
+  node:
+    # The JavaScript ecosystem, and the second of the package stores. One entry
+    # for every tool that installs from the npm registry rather than one each —
+    # npm, pnpm, both yarns, deno and bun: switching Node off switches the lot
+    # off, which is what one box on the settings page for an ecosystem means
+    # (ADR-0021). deno and bun are not runtimes with entries of their own for
+    # the same reason Berry is not: what they share is the npm registry's
+    # packages, and a box per tool would be five boxes saying one thing.
+    label: Node
+
+    # The manifest every one of them reads, at the root of a checkout — for the
+    # setup card's warning and nothing else, exactly as Rust's and Go's are.
+    detect:
+      - package.json
+
+    # Six tools and seven variables between them, and **not one name shared**.
+    # Each was read out of the tool that reads it as this entry was written —
+    # `<tool> config get`, `bun pm cache`, `deno info`, against the releases the
+    # dev shell and the CI job pin — rather than taken from a variable that
+    # looks like it ought to work:
+    #
+    #   NPM_CONFIG_CACHE          npm's `cache`, which holds the packages it has
+    #                             downloaded (`_cacache`) and what `--offline`
+    #                             installs out of. npm's own `npm_config_`
+    #                             prefix in its documented upper-case spelling,
+    #                             which is one of the two forms npm reads.
+    #
+    #   PNPM_CONFIG_STORE_DIR     pnpm's `store-dir`: the content-addressable
+    #                             store, **not** `PNPM_HOME`, which is where
+    #                             pnpm puts global binaries and holds no
+    #                             packages at all. `PNPM_CONFIG_` is pnpm's own
+    #                             prefix — pnpm 11 reads neither `store-dir`
+    #                             out of an `.npmrc` nor `npm_config_store_dir`
+    #                             out of the environment.
+    #
+    #   PNPM_CONFIG_CACHE_DIR     and pnpm's `cache-dir`, which is the registry
+    #                             metadata beside that store. Both halves, for
+    #                             the reason Go gets both of its: an offline
+    #                             install that has the packages and not the
+    #                             metadata fails, `ERR_PNPM_NO_OFFLINE_META`.
+    #
+    #   YARN_CACHE_FOLDER         Yarn Classic's `cache-folder`. Classic is
+    #                             yarn 1.x, still what `yarn` is on most
+    #                             machines, and this is the only one of its
+    #                             settings that moves the download.
+    #
+    #   YARN_GLOBAL_FOLDER        Yarn Berry's `globalFolder`, which is yarn 2
+    #                             and up, and where Berry's cache is *by
+    #                             default*. **Berry does not read
+    #                             `YARN_CACHE_FOLDER` there**:
+    #                             `enableGlobalCache` is on by default in Yarn
+    #                             4, and Berry then disregards `cacheFolder`
+    #                             and keeps the cache in `globalFolder/cache`.
+    #                             So the two yarns are two variables naming two
+    #                             directories, which is also what keeps
+    #                             Classic's `v6` layout out of Berry's zips.
+    #
+    #                             A Repo that writes `enableGlobalCache: false`
+    #                             sends Berry back to `cacheFolder`, which is
+    #                             the directory above — shared, and shared with
+    #                             Classic. That Repo does not get the
+    #                             project-local cache it would have had without
+    #                             Verkstead, which is the one thing a session
+    #                             takes away from it. `YARN_ENABLE_GLOBAL_CACHE`
+    #                             would settle it either way and is deliberately
+    #                             not set: moving a store is this descriptor's
+    #                             business and overriding a Repo's policy switch
+    #                             is not.
+    #
+    #   DENO_DIR                  deno's cache, which `deno --help` lists under
+    #                             exactly that description — "set the cache
+    #                             directory" — and `deno info` takes apart into
+    #                             the remote modules, the npm packages, the
+    #                             emitted ones and the language server's
+    #                             registries. **And the origin storage**, which
+    #                             is the one thing under any of these seven
+    #                             directories that is not a download; see below.
+    #                             deno has one variable for the lot rather than
+    #                             a store and a metadata directory the way pnpm
+    #                             does.
+    #
+    #   BUN_INSTALL_CACHE_DIR     bun's cache, which `bun pm cache` prints.
+    #                             **Not `BUN_INSTALL`**, which is bun's install
+    #                             root: its `bin` is where a global install puts
+    #                             a program, and its `install/cache` is only the
+    #                             default this variable moves — a session given
+    #                             the root instead would be sharing a `bin` on
+    #                             its `PATH` between Conversations. Nor
+    #                             `BUN_INSTALL_GLOBAL_DIR`, which is the global
+    #                             packages themselves and holds nothing a
+    #                             project installs out of.
+    #
+    # **Three of the seven are under `{stores}`** — pnpm's store, deno's cache
+    # and bun's — because each of those three tools hardlinks a package out of
+    # its store into the project rather than copying it, and a link does not
+    # cross a filesystem. pnpm was the first built-in to name that placeholder.
+    #
+    # **deno was expected to be one of the others and is not**, which is a
+    # measurement rather than a reading: after `deno install`, the `index.js`
+    # under `node_modules/.deno/` and the one under `DENO_DIR/npm/` are the same
+    # inode. So deno is where pnpm and bun are, for the reason they are.
+    #
+    # **And on Linux all three copy anyway**, which this stage found rather than
+    # assumed. A Worktree and this directory are two separate **bind mounts** in
+    # a session's sandbox, and `link(2)` answers `EXDEV` across two mounts even
+    # where both are the same filesystem — so the fall-back these tools document
+    # for two filesystems is what a session gets whatever disk these are on. The
+    # store still works: a copy out of it fetches nothing, which is the whole of
+    # what the install proofs assert. What is gone is the disk space a hardlink
+    # would have saved. Closing it means one mount holding both the Worktree and
+    # the store, which is the sandbox's business rather than a descriptor's — so
+    # it is written down here, proved in `tests/package_stores.rs`, and left to
+    # whoever changes what a session may reach. `{stores}` stays because it is
+    # still the right side of that line, and because it is where the fix would
+    # land.
+    #
+    # **And only pnpm says so.** pnpm prints that packages were copied from the
+    # store; deno and bun fall back without a word and exit zero, so the link
+    # count on a file in the project is the whole of the evidence for those two.
+    #
+    # The other three copy out of their store, or in Berry's case read the zip
+    # where it lies, so none of this costs them anything.
+    #
+    # Five of the six are safe for two installs at once — npm's `_cacache`,
+    # pnpm's store and deno's npm cache are content-addressed or keyed by
+    # version, and Berry writes each zip under a temporary name and renames it
+    # into place — which is the other half of what a shared store has to be, and
+    # what two Sandboxes installing at the same time is there to say.
+    #
+    # **Yarn Classic is the sixth, and it is not.** It was written here as
+    # renaming into place like Berry, and the two-at-once proof disproved it:
+    # Classic makes the cache entry at the entry's *final* path and fills it
+    # afterwards, so an install that arrives in between finds the directory,
+    # takes the entry for complete, and opens a `.yarn-tarball.tgz` that is not
+    # written yet. `ENOENT`, and that install stops — about one run in four under
+    # this suite.
+    #
+    # **The cache is shared anyway, and that is a decision rather than an
+    # oversight.** What a collision damages is the install that hit it and not
+    # the store: measured, in `tests/package_stores.rs`, a third install with
+    # the registry gone still installs out of what is there and still runs what
+    # it installed, whichever of the two lost. So what sharing costs Classic is
+    # an install that fails and is run again, and what it buys is the download
+    # every other Conversation then does not make. A human sees it as a yarn
+    # error naming a file in the cache; the adoption doc says so.
+    #
+    # And none of them holds a secret of a session's own. A registry login is
+    # `.npmrc`'s `_authToken` or Berry's `npmAuthToken`, both in a file nothing
+    # here moves, and deno's is `DENO_AUTH_TOKENS`, which is an environment
+    # variable rather than anything on disk. What npm keeps under its cache
+    # besides the packages is `_logs`, which is its own account of a failed
+    # install rather than a secret; Berry's `globalFolder` holds the cache, the
+    # metadata and an empty hardlink index and nothing else; and bun's cache
+    # holds tarballs and manifests, its global binaries being under `BUN_INSTALL`
+    # instead.
+    #
+    # **`DENO_DIR` is the one that holds more than downloads.** `deno info`
+    # names it *origin storage*: `localStorage` for a `--location`, and the
+    # database `Deno.openKv()` opens where it was given no path. That is a
+    # program's own state rather than a session's secret, and sharing it is the
+    # same bargain as sharing a store — two Conversations running one Repo's
+    # program see one `localStorage`. `DENO_KV_DEFAULT_PATH` would move half of
+    # it and is deliberately not set, for the reason `YARN_ENABLE_GLOBAL_CACHE`
+    # is not: a descriptor moves stores, and deciding where a Repo's program
+    # keeps its data is not that. The adoption doc is where a stranger reads it.
+    #
+    # **A Repo's own config does not win over these**, and it is worth knowing
+    # which way round that is: the four tools with a config key for it put the
+    # command line above the environment and the environment above their rc
+    # files, so a session's variable beats an `.npmrc`, a `pnpm-workspace.yaml`
+    # or a `.yarnrc`, and a Repo that must have its own store passes `--cache`,
+    # `--store-dir` or `--cache-folder` where it installs. Nothing a descriptor
+    # can do changes that: the grammar sets variables, and there is no rung
+    # below the environment to set one on. Both halves are asserted in
+    # `tests/package_stores.rs`, because a silent loss is the worse of the two.
+    # bun reads its cache out of `bunfig.toml`'s `install.cache.dir` and puts
+    # the environment above that too; deno documents no config key for
+    # `DENO_DIR` at all, so there is nothing for a Repo to lose.
+    env:
+      NPM_CONFIG_CACHE: "{cache}/npm"
+      PNPM_CONFIG_STORE_DIR: "{stores}/pnpm"
+      PNPM_CONFIG_CACHE_DIR: "{cache}/pnpm/metadata"
+      YARN_CACHE_FOLDER: "{cache}/yarn/cache"
+      YARN_GLOBAL_FOLDER: "{cache}/yarn/global"
+      DENO_DIR: "{stores}/deno"
+      BUN_INSTALL_CACHE_DIR: "{stores}/bun"
+    # And the seven directories those name, one store apiece.
+    #
+    # **npm's and pnpm's stores are content-addressed**, so a blob is the unit:
+    # neither keeps a package in one place, a pnpm shard holding a slice of
+    # every package there is. Each checks a blob as it reads it, and an index
+    # entry whose blob has gone is a miss fetched again rather than a broken
+    # install. pnpm's metadata is a file per package.
+    #
+    # **The rest keep a package in one place, and a partial one is worse than
+    # none**: Yarn Classic, deno and bun all install a half-removed package
+    # without a word. So their unit is the package whole — Classic's entry
+    # directory, Berry's zip, deno's directory of a package's versions beside
+    # its `registry.json`, and bun's `<name>@<version>` directory, a scoped one
+    # a level further down. bun's link beside each of those is passed over,
+    # being a link, which leaves it pointing at nothing once its version has
+    # gone. deno's remote modules are a file apiece.
+    #
+    # What is not named here is never swept: npm's index and logs, pnpm's
+    # index and its links into the Worktrees, and deno's origin storage, which
+    # is a program's own state rather than a download.
+    stores:
+      npm:
+        dir: "{cache}/npm"
+        units:
+          - under: _cacache/content-v2
+            depth: 4
+      pnpm:
+        dir: "{stores}/pnpm"
+        units:
+          - under: v11/files
+            depth: 2
+      pnpm-metadata:
+        dir: "{cache}/pnpm/metadata"
+        units:
+          - under: v11/metadata
+            named: ["*.jsonl"]
+      yarn:
+        dir: "{cache}/yarn/cache"
+        units:
+          - under: v6
+            depth: 1
+            named: ["npm-*"]
+      yarn-berry:
+        dir: "{cache}/yarn/global"
+        units:
+          - under: cache
+            depth: 1
+            named: ["*.zip"]
+      deno:
+        dir: "{stores}/deno"
+        units:
+          - under: npm
+            holding: ["registry.json"]
+          - under: remote
+            depth: 3
+      bun:
+        dir: "{stores}/bun"
+        units:
+          - named: ["*@*@@@*"]
+          # And what an install that lost a race to another left behind: bun
+          # extracts into `.tmp` and renames into place, and the loser's copy
+          # stays where it was. Nothing reads it again, and the sweep runs
+          # only while no session is, so it goes whole like a package.
+          - under: .tmp
+            depth: 1
+
+  python:
+    # Python, and the third of the package stores. One entry for the whole
+    # ecosystem rather than one per tool, exactly as Node is: pip, uv, poetry
+    # and pipenv, so switching Python off switches every one of them off and the
+    # settings page draws one box for the language (ADR-0021).
+    label: Python
+
+    # What says a Repo builds it, at the root of a checkout — for the setup
+    # card's warning and nothing else, as Rust's and Go's and Node's are. Two
+    # manifests because Python has two ordinary shapes: `pyproject.toml` is
+    # what uv and every modern build backend read, and `requirements.txt` is
+    # what pip has always read and what plenty of Repos still hold on their
+    # own.
+    detect:
+      - pyproject.toml
+      - requirements.txt
+
+    # Four tools and six variables, each read out of the tool that reads it as
+    # this entry was written — `pip config`, `uv cache dir`,
+    # `poetry config --list`, pipenv's own documented list, against the releases
+    # the dev shell and the CI job pin:
+    #
+    #   PIP_CACHE_DIR   pip's `cache-dir`, which is `--cache-dir` under pip's
+    #                   own documented `PIP_` prefix: every command-line option
+    #                   of pip's is settable as `PIP_<THE OPTION>`, and this is
+    #                   the one that moves the cache. What is under it is
+    #                   `http-v2`, the responses pip has downloaded, and
+    #                   `wheels`, the ones it built out of an sdist — the two
+    #                   halves of what stops two Conversations fetching one
+    #                   distribution twice.
+    #
+    #   UV_CACHE_DIR    uv's, which `uv cache dir` prints and `uv --help` lists
+    #                   as "path to the cache directory". One variable for the
+    #                   lot, the way `DENO_DIR` is: the index responses
+    #                   (`simple-v21`), the wheels and sdists it downloaded, and
+    #                   `archive-v0`, the unpacked wheels it installs *out of*.
+    #
+    #   POETRY_CACHE_DIR
+    #                   poetry's `cache-dir`, under the prefix poetry documents
+    #                   for every one of its settings — `POETRY_`, the setting
+    #                   upper-cased, dots and dashes turned into underscores.
+    #                   Two directories under it and an install offline needs
+    #                   **both**, which is pnpm's shape with one variable rather
+    #                   than two: `artifacts`, the distributions it downloaded,
+    #                   and `cache/repositories/<source>`, the release
+    #                   information it resolved out of the index. An install
+    #                   given the artifacts and not the repositories cache goes
+    #                   to the network for the file's URL and fails — measured,
+    #                   in `tests/package_stores.rs`.
+    #
+    #   PIPENV_CACHE_DIR
+    #                   pipenv's, which its documentation calls the "custom
+    #                   cache directory" and defaults to `~/.cache/pipenv`.
+    #                   **And it is pip's**: pipenv builds the environment it
+    #                   runs pip in out of nothing but this directory —
+    #                   `PIP_CACHE_DIR` pointed here, `PIP_CONFIG_FILE` at the
+    #                   null device, and not one other `PIP_` of the session's
+    #                   passed through. So the `PIP_CACHE_DIR` above does
+    #                   nothing for a pipenv install and this is the variable
+    #                   that does the work, which is the one thing here a proof
+    #                   asserting the environment could not have told anybody.
+    #                   It also means pipenv's store is an HTTP cache with
+    #                   pip's limits, below, and its proof is shaped the way
+    #                   pip's is.
+    #
+    # **And two that are not paths at all**, which is what these two tools cost
+    # that pip and uv did not. A descriptor's value is a variable's value: it is
+    # read as a path where it names a directory and left as the text it is where
+    # it does not, so a setting whose answer is *yes* is as much a descriptor's
+    # business as a directory is.
+    #
+    #   POETRY_VIRTUALENVS_IN_PROJECT
+    #                   poetry's `virtualenvs.in-project`, "create the virtualenv
+    #                   inside the project's root directory". **Poetry keeps its
+    #                   virtual environments under the cache directory above** —
+    #                   `virtualenvs.path` defaults to `{cache-dir}/virtualenvs`,
+    #                   which measurement confirms: with this unset, the venv
+    #                   poetry builds lands in the shared store. A venv holds
+    #                   absolute paths, so one built in another Worktree is
+    #                   broken in this one, and two sessions racing on a shared
+    #                   one is worse than a cold install. So the downloads are
+    #                   shared and the environment is `.venv` in the Worktree.
+    #
+    #   PIPENV_VENV_IN_PROJECT
+    #                   pipenv's, "create virtualenv in project directory".
+    #                   **The premise that brought it here was half wrong, and
+    #                   it is set anyway.** pipenv does *not* keep its
+    #                   environments under its cache variable the way poetry
+    #                   does: they go to `WORKON_HOME`, which is
+    #                   `$XDG_DATA_HOME/virtualenvs` in the session's own empty
+    #                   home — so a shared cache was never a shared venv here.
+    #                   What this buys instead is that a venv in the Worktree
+    #                   outlives the session that made it, where one under a home
+    #                   goes with the sandbox, and that one sentence covers both
+    #                   of these tools rather than two.
+    #
+    # **uv's is under `{stores}` and the other three are not**, which is the one
+    # placement decision here. uv links a package out of `archive-v0` into the
+    # environment — `--link-mode` defaults to `hardlink` on Linux and Windows —
+    # and falls back to copying where the two are on different filesystems. pip
+    # unpacks a wheel into `site-packages` and has nothing to link; poetry
+    # unpacks one out of `artifacts` and pipenv is pip. So those three are as
+    # free as Rust's registry to be a disk of their own.
+    #
+    # **And on Linux uv copies anyway, and says so**, which is the same finding
+    # pnpm, deno and bun landed: a Worktree and this directory are two bind
+    # mounts, and `link(2)` answers `EXDEV` across two mounts whatever disk is
+    # underneath them. uv is the second of the four to *print* it — "Failed to
+    # hardlink files; falling back to full copy" — where deno and bun fall back
+    # without a word. `UV_LINK_MODE=copy` would silence that warning and is
+    # deliberately not set: the warning is true, it is the clearest account of
+    # the thing this stage found, and it goes away when one mount holds both.
+    # See `tests/package_stores.rs`.
+    #
+    # All four are safe for two installs at once, which is the other half of
+    # what a shared store has to be: pip writes a cached response to a temporary
+    # name beside it and renames it into place, uv is documented as safe for
+    # concurrent use and does the same, poetry writes its artifacts and its
+    # release information the same way, and pipenv's store is pip's. Two
+    # Sandboxes installing at the same moment is what says so here, per tool.
+    #
+    # And none of them holds anything that is a session's own. A registry login
+    # is `~/.netrc`, a keyring, or `UV_INDEX_*_PASSWORD` in the environment —
+    # none of them under any of these directories; poetry's own configuration
+    # and the credentials it keeps are under its `config-dir` and `data-dir`,
+    # which are two other directories and neither of them this one. What uv
+    # keeps beside the downloads is `interpreter-v4`, which is what it learned
+    # about the Pythons on this machine: a fact about the machine rather than
+    # about a session.
+    #
+    # **A virtual environment is never shared.** pip and uv put one where the
+    # session asked and read nothing set here to decide, so for those two there
+    # is nothing to say; poetry and pipenv are the two that had to be told, and
+    # the two variables above are the telling. Either way what is shared is
+    # downloads, and every `.venv` stays in the Worktree that made it.
+    #
+    # **pip's cache is an HTTP cache rather than a store an install can be
+    # resolved against**, which is worth knowing before trusting `--no-index`:
+    # pip revalidates an index page on every install, so a requirement named by
+    # *name* cannot be resolved with the index unreachable however full the
+    # cache is. What the cache serves offline is a distribution already asked
+    # for by URL — which is what a pinned requirements file holds, and what
+    # `tests/package_stores.rs` installs. **pipenv inherits that**, its store
+    # being pip's, so what its proof pins by URL is a `Pipfile` entry. uv and
+    # poetry have no such limit: uv resolves out of `simple-v21` under
+    # `--offline`, and poetry out of `cache/repositories` with no flag at all —
+    # neither of those two documents an offline switch, and neither needs one.
+    env:
+      PIP_CACHE_DIR: "{cache}/pip"
+      UV_CACHE_DIR: "{stores}/uv"
+      POETRY_CACHE_DIR: "{cache}/poetry"
+      POETRY_VIRTUALENVS_IN_PROJECT: "true"
+      PIPENV_CACHE_DIR: "{cache}/pipenv"
+      PIPENV_VENV_IN_PROJECT: "1"
+    # The four caches, and not the two `_IN_PROJECT` switches, which name no
+    # directory of ours: a project's environment is in its own Worktree.
+    #
+    # pip's units are its cache's own leaves: a response it downloaded is a
+    # directory of its own under `http-v2`, and a wheel it built is one under
+    # `wheels`, each at a fixed depth of hashed segments. pipenv's store is
+    # pip's, at its root. uv's is an unpacked wheel under `archive-v0`, which
+    # its `wheels-v6` links into rather than copying — a partial archive fails
+    # the install. Poetry's are a distribution under `artifacts`, and under
+    # `cache/repositories/<source>` the two caches it keeps of an index: a
+    # response, which is a directory under `_http_` holding its `.body` beside
+    # what was said about it, and a release's information, a file ten levels
+    # down. Every one of them is keyed by a hash, so a unit gone is a miss
+    # fetched again.
+    stores:
+      pip:
+        dir: "{cache}/pip"
+        units:
+          - under: http-v2
+            depth: 5
+          - under: wheels
+            depth: 5
+      uv:
+        dir: "{stores}/uv"
+        units:
+          - under: archive-v0
+            depth: 1
+      poetry:
+        dir: "{cache}/poetry"
+        units:
+          - under: artifacts
+            depth: 4
+          - under: cache/repositories
+            holding: ["*.body"]
+          - under: cache/repositories
+            depth: 10
+      pipenv:
+        dir: "{cache}/pipenv"
+        units:
+          - under: http-v2
+            depth: 5
+          - under: wheels
+            depth: 5
+
+  dotnet:
+    # .NET, and the last of the package stores. One entry for the ecosystem the
+    # way Node and Python are, and it happens to carry one tool: everything on
+    # a .NET machine installs through NuGet — `dotnet restore`, `dotnet add
+    # package`, `nuget.exe`, MSBuild — so a box per tool would be several boxes
+    # naming one store (ADR-0021).
+    label: .NET
+
+    # **Empty, on purpose, and this is the one descriptor where it is.** A .NET
+    # project is a `*.csproj`, a `*.fsproj` or a `*.sln`, and `detect` matches
+    # literal filenames at the root of a checkout — it has no globs. Adding them
+    # would be behaviour in the server, which is the one thing this stage is
+    # meant to prove unnecessary.
+    #
+    # And it costs nothing but the warning. Detection is the setup card's
+    # warning and nothing else — the variables below are every session's
+    # whatever the Repo holds, exactly as Rust's and Go's are — so what an empty
+    # list gives up is a line .NET never had, and what it keeps is a store that
+    # works for every Repo that installs a package.
+    detect: []
+
+    # Three directories and three variables, each read out of the tool that
+    # reads it as this entry was written — `dotnet nuget locals all --list`,
+    # against the SDK the dev shell pins and the one the runner image carries:
+    #
+    #   NUGET_PACKAGES          the **global packages folder**, which is where
+    #                           restore puts what it downloaded, unpacked, and
+    #                           what a build then compiles against in place.
+    #                           This is the store: a `<PackageReference>` whose
+    #                           exact version is already here resolves out of it
+    #                           with no source configured at all.
+    #
+    #   NUGET_HTTP_CACHE_PATH   and the **http cache**, which is the responses
+    #                           behind it — the service index, the version list
+    #                           and the `.nupkg` as it came off the wire. A
+    #                           second half rather than a duplicate, and each
+    #                           can serve an install the other cannot: with the
+    #                           packages folder emptied and nothing answering on
+    #                           the source, a restore still finishes out of this
+    #                           one. Measured in `tests/package_stores.rs`,
+    #                           which is what says both variables are read.
+    #
+    #   NUGET_SCRATCH           and NuGet's **temp** directory, which holds no
+    #                           downloads at all and is here for the one reason
+    #                           below. Its default is `$TMPDIR/NuGetScratch` and
+    #                           the user's name, which a session's own `dotnet`
+    #                           prints as `temp:` beside the other two.
+    #
+    # **The third variable is what makes two sessions at once safe, and it was
+    # found by two of them damaging the store.** NuGet does guard the global
+    # packages folder against concurrent writers — it extracts a package under
+    # a lock before it renames anything into place — and that lock is a *file*,
+    # in the temp directory above. Every session's `/tmp` is a tmpfs of its own
+    # inside its sandbox, so two Conversations restoring the same package took
+    # two different locks, extracted over each other, and one of them failed on
+    # a temporary file the other had renamed away. Measured: with the two
+    # directories above and not this one, the two-at-once proof in
+    # `tests/package_stores.rs` fails about three runs in five under load. A
+    # lock is only a lock where both parties can see it, so it goes where the
+    # store it guards is.
+    #
+    # **All three under `{cache}`, and nothing here wants `{stores}`.** NuGet never
+    # links a package out of the global packages folder into the project: a
+    # build reads the assemblies where they lie and copies what it needs into
+    # `bin/`. So none of these has to share a filesystem with a Worktree, which
+    # is the whole of what that placeholder is for.
+    #
+    # **And no compiled half.** NuGet has no store of built output to share —
+    # what a build leaves is `obj/` and `bin/` in the project, which is the
+    # Worktree's. So this entry is the downloads and nothing else, where Go's is
+    # two halves and Rust's names a Compile Server.
+    #
+    # Nothing that is written here is a session's own, this third directory
+    # included: what NuGet keeps in its temp directory is lock files and
+    # part-downloads, which is why `dotnet nuget locals temp --clear` is a thing
+    # somebody may do at any moment. Sharing it is the point of it.
+    #
+    # **And each variable names the store rather than the directory above it**,
+    # which for .NET is the difference between sharing downloads and sharing a
+    # session's own things. The user-level `NuGet.Config` — which is where
+    # `<packageSourceCredentials>` goes — is `~/.nuget/NuGet/NuGet.Config`, a
+    # *sibling* of `~/.nuget/packages`: a descriptor that had moved `~/.nuget`
+    # would have handed every Conversation one login. The http cache is the
+    # same shape, `~/.local/share/NuGet/http-cache` beside
+    # `~/.local/share/NuGet/plugin-cache` — and `NUGET_PLUGINS_CACHE_PATH` is
+    # deliberately not set, a credential provider's cached answers about what it
+    # can do being a session's business rather than a download.
+    env:
+      NUGET_PACKAGES: "{cache}/nuget/packages"
+      NUGET_HTTP_CACHE_PATH: "{cache}/nuget/http"
+      NUGET_SCRATCH: "{cache}/nuget/scratch"
+    #
+    # A package's unit is one version of it, `<id>/<version>/` — a restore
+    # that finds part of one fails the build — and the http cache's is one
+    # response, a `.dat` file under a directory per source. The scratch
+    # directory names none and is never swept: it holds the locks the two
+    # above are guarded by, and what else is there is NuGet's own to clear.
+    stores:
+      packages:
+        dir: "{cache}/nuget/packages"
+        units:
+          - depth: 2
+      http:
+        dir: "{cache}/nuget/http"
+        units:
+          - depth: 2
+            named: ["*.dat"]
+      scratch:
+        dir: "{cache}/nuget/scratch"
+
+  cpp:
+    # C and C++, and the second descriptor naming the Compile Server (ADR-0021).
+    # Not a second server: one sccache for the machine, one store and one size,
+    # which is why this entry names the capability Rust's does and sets no
+    # store of its own. The first language naming it is the one that sizes it
+    # — Rust, whether or not Rust is on, so switching Rust off does not shrink
+    # the store to this entry's size — and the settings page draws the size
+    # field on that one alone.
+    label: C/C++
+
+    # C++ has no one manifest, so this is the build files a checkout ordinarily
+    # has one of: CMake's at the root, or under `native/` or `cpp/` beside the
+    # rest of a project, and Meson's. For the setup card's warning and nothing
+    # else, exactly as every other descriptor's `detect` is. A relative path is
+    # joined onto the Repo's root, so the two under a directory are plain data.
+    #
+    # Meson is here although nothing below covers it: it finds an sccache on the
+    # `PATH` for itself, and with none on the server it is as uncached as CMake
+    # is, which is what the warning says.
+    detect:
+      - CMakeLists.txt
+      - native/CMakeLists.txt
+      - cpp/CMakeLists.txt
+      - meson.build
+
+    # CMake's two compiler-launcher variables, and nothing else. CMake 3.17 and
+    # later reads them out of the environment — with the Makefile and Ninja
+    # generators only, and only when a build directory is first configured, so
+    # a build directory configured before this was set goes on compiling
+    # without it until it is configured afresh.
+    #
+    # **Not `CC` and `CXX`.** Those two reach every build that compiles C, not
+    # only a C++ project's: a Rust crate's build script, a Python or Node native
+    # extension, Go with cgo. And beside a launcher they can wrap one compile
+    # twice. The launchers are read by CMake alone, so they change nothing that
+    # is not a CMake project.
+    #
+    # **And not `SCCACHE_DIR` or `SCCACHE_CACHE_SIZE`**, which are Rust's. A
+    # variable two languages set is pushed onto a session twice, and nothing
+    # here would decide between them. The client in a session never reads
+    # either while Verkstead's Compile Server is up: the server reads them, and
+    # it is given its own — see `build_cache.rs`.
+    #
+    # With no sccache on the server this capability is left out whole, so a
+    # session is given neither launcher rather than one naming nothing.
+    #
+    # **What gets nothing**: plain Makefiles and Bazel, and CMake's Visual
+    # Studio and Xcode generators, which ignore the launchers — Visual Studio
+    # being CMake's default on Windows, a Repo there is cached only where it
+    # configures with Ninja. MSVC's `/Zi` debug info is not something sccache
+    # caches either; `/Z7` is.
+    #
+    # **A second Conversation hits** because the Compile Server is told every
+    # Worktree as `SCCACHE_BASEDIRS`, sccache hashing a C/C++ compile with its
+    # absolute paths — sccache 0.14.0 and later; see `build_cache.rs`. And the
+    # server writes each object where the compile names it, so a build
+    # directory outside the Worktree fails rather than missing. The whole of
+    # that, for an installer, is `docs/adoption.md`.
+    capabilities:
+      sccache:
+        env:
+          CMAKE_C_COMPILER_LAUNCHER: "{sccache}"
+          CMAKE_CXX_COMPILER_LAUNCHER: "{sccache}"
+
+  jvm:
+    # The JVM: Maven and Gradle. One entry for the ecosystem the
+    # way Node's is for six tools, since a Repo on the JVM picks one build tool
+    # or the other and the settings page is better off with one box for both
+    # (ADR-0021). Kotlin needs nothing of its own: it builds through one of
+    # these two and resolves out of the same stores.
+    label: JVM
+
+    # Maven's manifest and Gradle's four: a build script in either DSL, and a
+    # settings file, which is all a multi-project build has at its root.
+    detect:
+      - pom.xml
+      - build.gradle
+      - build.gradle.kts
+      - settings.gradle
+      - settings.gradle.kts
+
+    # **Maven has no variable for its local repository**, so this is
+    # `MAVEN_OPTS`, the JVM options `mvn` starts Maven's own JVM with, and three
+    # system properties inside it:
+    #
+    #   maven.repo.local                     the local repository: everything
+    #                                        a build has downloaded, plugins
+    #                                        included, and what `-o` resolves
+    #                                        out of.
+    #
+    #   aether.syncContext.named.factory     and **file locks on it**. Maven
+    #   aether.syncContext.named.nameMapper  3.9's Resolver guards the local
+    #                                        repository only within one JVM by
+    #                                        default (`rwlock-local`), so two
+    #                                        sessions writing at once would each
+    #                                        take a lock the other cannot see.
+    #                                        `file-lock` with `file-gav` puts
+    #                                        one lock file per artifact under
+    #                                        `.locks` in the repository itself,
+    #                                        where every session sharing it
+    #                                        sees it. That is NuGet's lesson,
+    #                                        and Resolver's documentation for
+    #                                        Maven 3.9 names these two values
+    #                                        for exactly this case. `mvn -X`
+    #                                        says it took them: "Creating
+    #                                        adapter using nameMapper 'file-gav'
+    #                                        and factory 'file-lock'".
+    #
+    # Measured against Maven 3.8.8, 3.9.0–3.9.12 and 4.0.0-rc-5. Maven 4 uses
+    # file locks by default, so for it the last two properties change nothing.
+    # Maven 3.8 has no named locks at all and ignores them, so two sessions on
+    # a 3.8 still share the repository with nothing guarding it.
+    #
+    # **System properties, so a Repo's own settings still win.** A
+    # `-Dmaven.repo.local` in a Repo's `.mvn/maven.config` is a *user* property
+    # and beats this one, so a Repo that pins its own repository keeps it. The
+    # same goes for one on the command line. A `-s` there is still read,
+    # though a `<localRepository>` inside that settings file loses to this
+    # property, the way it always loses to `maven.repo.local`.
+    #
+    # **Maven 3's `mvn` splits `MAVEN_OPTS` on whitespace and reads no
+    # quotes**, so a Build Cache path with a space in it would break every
+    # `mvn` in the session: "Could not find or load main class" and the half of
+    # the path after the space. A Windows user name with a space in it gives
+    # one by default. There is no spelling that survives: Maven 4's `mvn`
+    # `eval`s the line instead, so a quote either one reads breaks the other,
+    # and `MAVEN_ARGS` with `${env.…}` in it works only from 3.9.2 and kills
+    # Maven 4 outright. So the loader leaves a line of words out wherever a
+    # directory in it has whitespace (see the placeholders above), and a
+    # session on such a machine builds with a repository of its own, unshared.
+    #
+    # **`MAVEN_USER_HOME` is left alone.** It is where `mvnw` keeps the Maven
+    # releases it downloads, and sharing it would save a download per session.
+    # But the wrapper unpacks into the session's own `/tmp` and then `mv`s the
+    # result into place. Across two mounts that is a copy, not a rename, so a
+    # second session could find a half-copied release there and run it.
+    #
+    # Nothing here is a session's own. `settings.xml`, where a server's
+    # password goes, is under `~/.m2` beside the default repository rather
+    # than inside it, and moving the repository leaves it in the session's
+    # home.
+    env:
+      MAVEN_OPTS: "-Dmaven.repo.local={cache}/maven/repository -Daether.syncContext.named.factory=file-lock -Daether.syncContext.named.nameMapper=file-gav"
+
+      # **Gradle's home is shared whole**, because Gradle has no way to move
+      # only its caches out of it. `GRADLE_USER_HOME` is everything: the
+      # dependencies under `caches/modules-2`, the distributions `gradlew`
+      # downloads under `wrapper/dists`, toolchain JDKs under `jdks/`, and the
+      # rest of `caches/`.
+      #
+      # **Shared whole means its `gradle.properties` and `init.d/` too.** An
+      # init script one session writes there runs in every other session's
+      # builds, which is the case of one session planting a package another
+      # installs, and it is accepted as that.
+      GRADLE_USER_HOME: "{cache}/gradle"
+
+      # **And no daemon.** A Gradle daemon registers itself under the Gradle
+      # home and is reached over the loopback, which every Sandbox shares. So
+      # with one home a second session's `gradle` finds the first session's
+      # idle daemon and runs its build *there*, in the first session's
+      # Sandbox, where the second one's Worktree is not bound. Observed with
+      # 8.14.4: "Could not set process working directory ... could not
+      # setcwd()". This is the hazard the Compile Server exists to remove for
+      # sccache.
+      #
+      # `-Dorg.gradle.daemon=false` is a system property of the client, and it
+      # beats `org.gradle.daemon=true` in a Repo's `gradle.properties` and in
+      # the shared home's, with `org.gradle.jvmargs` beside it or not. Gradle
+      # then runs the build in a single-use daemon forked inside the session's
+      # own Sandbox, gone when the build ends, and registers nothing. Each
+      # build pays for a JVM starting up, which is the price.
+      #
+      # **An explicit `--daemon` on the command line still beats it**, and
+      # registers in the shared home again, where another session's build
+      # reaches it only by saying `--daemon` too: with the daemon off, Gradle
+      # never looks. That is accepted rather than worked around: the failure
+      # it causes is loud.
+      #
+      # **Stage 06 left it so, on 8.14.4 and 9.4.1.** A daemon of Verkstead's
+      # own in a Sandbox of its own does not close the hole: a client that
+      # differs from it in Gradle version, JDK, jvmargs or locale, or finds it
+      # busy, forks its own daemon in its session and registers that in the
+      # shared home anyway, and a build that does reach it runs where every
+      # Worktree is and none of its session's binds are. The per-session
+      # registry, `-Dorg.gradle.daemon.registry.base` at the Sandbox's own
+      # `/tmp`, does close it and keeps most of a daemon's speed, and was
+      # turned down twice: Gradle does not document it. See ADR-0021.
+      #
+      # **Gradle's build cache is the Repo's to switch on.** Its local
+      # directory is `caches/build-cache-1` inside the home above (measured
+      # with 8.14.4), so every Repo with `org.gradle.caching=true` already
+      # shares one cache for the machine, and a task one Conversation built
+      # comes `FROM-CACHE` in another. Nothing here says
+      # `-Dorg.gradle.caching=true`, because a system property would beat a
+      # Repo that wrote `org.gradle.caching=false` on purpose, and caching
+      # changes how a build behaves, not only where it writes. A Repo whose
+      # `settings.gradle` points `buildCache.local` somewhere of its own keeps
+      # that too.
+      #
+      # **Kotlin needs nothing of its own.** The Kotlin Gradle plugin's compile
+      # daemon outlives a build as well, but it is found by run files under the
+      # JVM's `user.home`, `~/.kotlin/daemon` (measured with 2.2.20). That is
+      # the account's home rather than `HOME` or the Gradle home, and no
+      # Sandbox binds it, so each Sandbox's is its own.
+      GRADLE_OPTS: "-Dorg.gradle.daemon=false"
+
+    # Maven's repository, which is the store `MAVEN_OPTS` names inside its
+    # line of flags, and Gradle's home. Not `GRADLE_OPTS`, which names none.
+    #
+    # Maven's unit is one version of an artifact: the directory holding its
+    # `.pom`, or the `_remote.repositories` Maven writes beside whatever it
+    # downloaded — at whatever depth the group puts it. **Its files' times are
+    # the server's `Last-Modified`** rather than when they were downloaded,
+    # which the sweep has to know.
+    #
+    # Gradle's is one version of a module under `files-2.1`. The rest of the
+    # home is Gradle's own databases, the distributions `gradlew` fetched and
+    # the build cache, none of which is given a unit here: Gradle keeps what it
+    # used in a journal of its own rather than in a file's times, and what
+    # cannot be given a unit safely is left alone.
+    stores:
+      maven:
+        dir: "{cache}/maven/repository"
+        units:
+          - holding: ["*.pom", "_remote.repositories"]
+      gradle:
+        dir: "{cache}/gradle"
+        units:
+          - under: caches/modules-2/files-2.1
+            depth: 3

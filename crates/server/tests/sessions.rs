@@ -1138,6 +1138,9 @@ static BRISKLY: LazyLock<Pace> = LazyLock::new(|| Pace {
     // the test was written to read. The ones that are about the cleanup keep
     // [`CLEANING`].
     cleanup: paced(Duration::from_secs(600)),
+    // The stores' sweep at a server's own hour: the first pass, at startup,
+    // finds every fixture's store far under its size and takes nothing.
+    evicting: Pace::default().evicting,
     // Nothing, which is a server's own: the review takes the Worktree as soon
     // as the wrap-up starts, and the tests that want the window before it hold
     // it open themselves.

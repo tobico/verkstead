@@ -35,34 +35,33 @@ use time::format_description::well_known::Rfc3339;
 use tokio_util::io::ReaderStream;
 use verkstead_render::{
     Adopted, AnswerAttached, AnswerAttachmentRemoved, AskingDevice, AtOnceView, Attached,
-    AttachmentRemoved, Author, BaseBranchChoice, BranchRename, BriefEdit, BuildCacheView,
-    CheckRollup, CleanupStepView, CleanupView, CommentedOn, CompanionAdded, CompanionBaseRecorded,
+    AttachmentRemoved, Author, BaseBranchChoice, BranchRename, BriefEdit, CheckRollup,
+    CleanupStepView, CleanupView, CommentedOn, CompanionAdded, CompanionBaseRecorded,
     CompanionBranchRenamed, CompanionModeChoice, CompanionModeChosen, CompanionRemoved,
     CompanionView, CompileCaching, Confirming, ConflictResolution, ConversationArchived,
     ConversationClosed, ConversationEntry, ConversationMove, ConversationSteered,
     ConversationStopped, ConversationUnarchived, ConversationView, Creation, Cursor, DevicesView,
-    DroppedRow, FileDeleted, FileDeleting, FileListsView, FileMade, FileMaking, FileReading,
-    FileRenamed, FileRenaming, FileRootsView, FileStatusView, FileWrite, FileWritten,
+    DiskUse, DroppedRow, Eviction, FileDeleted, FileDeleting, FileListsView, FileMade, FileMaking,
+    FileReading, FileRenamed, FileRenaming, FileRootsView, FileStatusView, FileWrite, FileWritten,
     FolderListing, GrillingStarted, HeaderEdit, IgnoreRule, IgnoredCommentsEdit, InstallPress,
-    Lifecycle, Locked, McpHeader, McpServer, McpServerEdit, McpServersEdit, Merging, MissedOut,
-    NewAdoption, NewCompanion, NewConversation, NewJoin, NewRank, PairingView, Parked,
-    PendingSteerView, Permitting, Process, ProcessChoice, ProcessPicked, ProfileChoice,
-    ProfileEdit, ProfileEntry, PushKey, Registration, RemoteBanner, RemoteView, RepoChoice,
-    RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice, RuleField, RuleRefused, ServeEdit,
-    ServePress, ServerAttached, ServerField, ServerRefused, ServerRemoved, SetReading, SetView,
-    SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedCommit,
-    SharedConversation, ShowArchived, ShowingArchived, Standing, SteerCancelled, SteerForm,
-    SteerOpened, SteerPairingView, SteerSaved, SteerSubmission, Submitted, Subscribed,
-    Subscription, TakenUp, TargetNamed, TargetRecorded, TerminalOpened, TimelineEvent, TokenEdit,
-    TokenSaved, TransferredTo, Transferring, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
+    LanguageCleared, LanguageEdit, LanguageView, Lifecycle, Locked, McpHeader, McpServer,
+    McpServerEdit, McpServersEdit, Merging, MissedOut, NewAdoption, NewCompanion, NewConversation,
+    NewJoin, NewRank, PairingView, Parked, PendingSteerView, Permitting, Process, ProcessChoice,
+    ProcessPicked, ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration, RemoteBanner,
+    RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice, RuleField,
+    RuleRefused, Running, RunningOn, ServeEdit, ServePress, ServerAttached, ServerField,
+    ServerRefused, ServerRemoved, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView,
+    ShareCommented, SharePublished, SharedCommit, SharedConversation, ShowArchived,
+    ShowingArchived, SizeRefused, Standing, SteerCancelled, SteerForm, SteerOpened,
+    SteerPairingView, SteerSaved, SteerSubmission, StoreView, Submitted, Subscribed, Subscription,
+    TakenUp, TargetNamed, TargetRecorded, TerminalOpened, TimelineEvent, TokenEdit, TokenSaved,
+    TransferredTo, Transferring, UnreadEntry, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
 use crate::onboarding::Refusal;
 use crate::peer::workbench::OverTheLink;
-use crate::settings::{
-    AtOnce, Cleanup, CleanupStep, Config, GitAuthor, RuleTrouble, RustBuildCache,
-};
+use crate::settings::{AtOnce, Cleanup, CleanupStep, Config, GitAuthor, RuleTrouble};
 use crate::{AppState, store};
 
 /// The viewer's routes, over the state the agent API is already holding: a
@@ -621,6 +620,9 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // read and the save being the same page's two halves — and one save for
         // the author and the token together, because the page has one button.
         .route("/api/ui/settings", get(settings).post(save_settings))
+        // Emptying one language's stores, which is an act rather than a value
+        // the settings hold, so a route of its own rather than a key of a save.
+        .route("/api/ui/languages/{name}/clear", post(clear_language))
         // One directory of the filesystem, for a path field's browse dropdown.
         // Not a route under anything it belongs to: it serves every field that
         // takes a path — the settings' own, the Repos' form, an Agent Profile's
@@ -1842,21 +1844,28 @@ pub(crate) async fn conversation_view(
     );
 
     // And whether this Repo is one the missing sccache costs anything — see
-    // [`ConversationView::compiles_uncached`]. A `Cargo.toml` at the root is a
-    // look at the filesystem, and it is only worth taking where the other two
-    // halves already hold: the answer is the same for a repository that is not
-    // Rust, and this way the settings file is read only on a server that has
-    // something to warn about.
+    // [`ConversationView::compiles_uncached`]. Whether a switched-on language
+    // compiling through sccache detects the Repo is a look at the filesystem,
+    // and it is only worth taking where the other two halves already hold: the
+    // answer is the same for a repository that builds nothing compiled, and
+    // this way the settings file is read only on a server that has something to
+    // warn about.
     //
     // A missing sccache rather than uncached compiles, which is the platform
     // arm here: where no session compiles through one at all, nothing is
     // missing and there is nothing for the human to go and do — see
     // [`crate::build_cache::compiles_through_an_sccache`]. That is a standing
     // fact about the machine, and the settings page is where it is said.
+    // The switches are the descriptors' — see [`crate::languages`] — because
+    // what a session is given is what the descriptors say, and a card warning
+    // about a language nobody has switched on would be warning about compiles
+    // that never happen.
     let compiles_uncached = !state.sessions.caches_compiles()
         && crate::build_cache::compiles_through_an_sccache(crate::platform::Platform::HERE)
-        && state.settings.config().rust_build_cache().enabled()
-        && crate::build_cache::builds_rust(&conversation.repo.path);
+        && crate::build_cache::repo_builds_through_sccache(
+            &crate::languages::configured(&state.settings.config()),
+            &conversation.repo.path,
+        );
 
     // Which Brief is still being written, where one is. A Brief freezes when its
     // round's grilling starts, so the one open is the newest — and only while the
@@ -5707,10 +5716,98 @@ async fn settings(State(state): State<AppState>) -> HttpResponse {
     Json(as_told(
         &state.settings,
         state.sessions.caches_compiles(),
+        &state.disk_use,
+        &state.sweeps,
         &state.binds,
         taken(&state),
+        running(&state),
     ))
     .into_response()
+}
+
+/// `POST /api/ui/languages/{name}/clear` — empty every store of one language,
+/// sccache's included for Rust, and answer with the settings as they stand
+/// after.
+///
+/// **Refused while a session or a Conversation Terminal runs**, saying how many
+/// of each: both are sandboxed with the stores, and a Clear under one would take
+/// a package from under its build. Refused rather than waited for, the way the
+/// sweep waits, because a human pressed this and is there to be told — and the
+/// refusal is [`crate::build_cache::BuildCache::clearing`]'s, under the lock a
+/// launch is counted under, so the page having drawn the button live is no
+/// promise this goes ahead.
+///
+/// The language's disk use is measured again before the answer, which is a walk
+/// of stores just emptied, so the page draws what is left rather than what was.
+async fn clear_language(State(state): State<AppState>, Path(name): Path<String>) -> HttpResponse {
+    let languages = crate::languages::configured(&state.settings.config());
+
+    let (Some(descriptor), Some(cache)) = (
+        languages
+            .get(&name)
+            .filter(|descriptor| descriptor.names_a_store()),
+        state.sessions.build_cache(),
+    ) else {
+        return Json(LanguageCleared::NoSuchLanguage).into_response();
+    };
+
+    // A server with no cache directory has no stores to clear.
+    let Some(machine) = cache.machine() else {
+        return Json(LanguageCleared::NoSuchLanguage).into_response();
+    };
+
+    let descriptor = descriptor.clone();
+    let cache = cache.clone();
+
+    // Every other language's stores, which a Clear of this one never reaches
+    // into — see [`crate::eviction::emptied`].
+    let others: Vec<std::path::PathBuf> = languages
+        .iter()
+        .filter(|(other, _)| *other != name)
+        .flat_map(|(_, other)| other.stores(&machine))
+        .map(|(_, dir)| dir)
+        .collect();
+
+    let cleared = tokio::task::spawn_blocking(move || {
+        let emptied = crate::eviction::emptied(&cache, &descriptor, &others)?;
+
+        Some((
+            emptied,
+            crate::disk_use::measured_now(&descriptor, &machine),
+        ))
+    })
+    .await;
+
+    match cleared {
+        Ok(None) => Json(LanguageCleared::Running(running(&state))).into_response(),
+        Ok(Some((emptied, held))) => {
+            tracing::info!(
+                language = name,
+                emptied,
+                bytes = held.bytes,
+                "a language's stores were cleared"
+            );
+
+            state.disk_use.measured(&name, held);
+
+            Json(LanguageCleared::Cleared {
+                settings: Box::new(as_told(
+                    &state.settings,
+                    state.sessions.caches_compiles(),
+                    &state.disk_use,
+                    &state.sweeps,
+                    &state.binds,
+                    taken(&state),
+                    running(&state),
+                )),
+            })
+            .into_response()
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, language = name, "clearing a language's stores failed");
+            unavailable("the language's stores could not be cleared")
+        }
+    }
 }
 
 /// How many of the server's places are taken this moment — see
@@ -5723,6 +5820,17 @@ async fn settings(State(state): State<AppState>) -> HttpResponse {
 /// stall.
 fn taken(state: &AppState) -> usize {
     state.drivers.taking(&state.sessions.working()).len()
+}
+
+/// How many sessions and Conversation Terminals are running this moment, which
+/// the Language support pane draws beside each Clear and a Clear is refused
+/// over — those still starting included, because they hold the stores before
+/// they are on either register, and a refusal over one has to name it.
+fn running(state: &AppState) -> Running {
+    Running {
+        sessions: state.sessions.running_or_launching(),
+        terminals: state.terminals.running(),
+    }
 }
 
 /// `POST /api/ui/settings` — write the author and the paths down, and set or
@@ -5766,6 +5874,13 @@ async fn save_settings(
     // none of it belongs on the runtime's threads.
     let caches_compiles = state.sessions.caches_compiles();
 
+    // And the stores' disk use as last measured, which is a register rather
+    // than a file and costs a lock to read — see [`crate::disk_use`].
+    let disk_use = state.disk_use.clone();
+
+    // And when each store was last swept, which is the same.
+    let sweeps = state.sweeps.clone();
+
     // And what the installation configured, for the read that rides back with
     // the save: the page draws both sources, and this is not anything a save
     // can touch.
@@ -5775,6 +5890,9 @@ async fn save_settings(
     // out here because it is two in-process registers rather than a file, and
     // nothing a save touches either.
     let taking = taken(&state);
+
+    // And what is running, which a Clear is refused over — the same.
+    let running = running(&state);
 
     let saved = tokio::task::spawn_blocking(move || {
         // What the rules are to be afterwards, and what is wrong with them —
@@ -5830,16 +5948,30 @@ async fn save_settings(
             }
         };
 
-        if !refused.is_empty() || !refused_servers.is_empty() {
+        // And the sizes, which are values like everything else the page writes
+        // and refused like the two lists above: a word Verkstead cannot read as
+        // a size is a store nothing could hold to it.
+        let refused_sizes = size_refusals(&settings.config().languages(), &edit.languages);
+
+        if !refused.is_empty() || !refused_servers.is_empty() || !refused_sizes.is_empty() {
             return Ok((
                 SettingsSaved {
                     // How things stand, which is how they stood: nothing was
                     // written, and the page draws the errors over what the human
                     // still has in front of them.
-                    settings: as_told(&settings, caches_compiles, &installed, taking),
+                    settings: as_told(
+                        &settings,
+                        caches_compiles,
+                        &disk_use,
+                        &sweeps,
+                        &installed,
+                        taking,
+                        running,
+                    ),
                     verified: None,
                     refused,
                     refused_servers,
+                    refused_sizes,
                     // And nothing was spoken to. A refusal is the whole request
                     // refused, so there is no declaration written down to try.
                     tried: Vec::new(),
@@ -5851,12 +5983,16 @@ async fn save_settings(
         settings.save_config(
             &Config::of(
                 GitAuthor::of(Some(edit.git_author.name), Some(edit.git_author.email)),
-                // The size as it was typed, and an empty field as nothing
-                // configured: clearing it is how the human asks for the default
-                // back, and a size of nothing is not a size.
-                RustBuildCache::of(
-                    edit.rust_build_cache.enabled,
-                    Some(edit.rust_build_cache.size),
+                // The two keys the page writes, per language it drew: the
+                // switch as it stands, and the size as it was typed with an
+                // empty field meaning nothing configured — clearing it is how
+                // the human asks for the default back, and a size of nothing is
+                // not a size. Everything else in a descriptor is an installer's
+                // and is kept from the file below.
+                crate::languages::Languages::of_page(
+                    edit.languages
+                        .into_iter()
+                        .map(|language| (language.name, language.enabled, language.size)),
                 ),
                 // And the Cleanup's two rows, each a switch and a duration as it
                 // was typed — an empty field is the default asked for back, and so
@@ -5904,10 +6040,12 @@ async fn save_settings(
                 edit.instructions,
             )
             // On what the file already holds, for the reason the secrets below are
-            // written that way: `session_path` is the one key in this file the page
-            // has no field for — an install writes it and a hand-edit changes it —
-            // and a save built out of what the page sent would take it away.
-            .keeping_session_path(&settings.config()),
+            // written that way. `session_path` is a key in this file the page has
+            // no field for at all — an install writes it and a hand-edit changes
+            // it — and the descriptor half of every `languages` entry is an
+            // installer's, of which the page draws two keys: a save built out of
+            // what the page sent would take either away.
+            .keeping_what_the_page_never_drew(&settings.config()),
         )?;
 
         // On what the file already holds rather than on nothing: a save writes
@@ -5995,12 +6133,21 @@ async fn save_settings(
 
         Ok::<_, std::io::Error>((
             SettingsSaved {
-                settings: as_told(&settings, caches_compiles, &installed, taking),
+                settings: as_told(
+                    &settings,
+                    caches_compiles,
+                    &disk_use,
+                    &sweeps,
+                    &installed,
+                    taking,
+                    running,
+                ),
                 verified,
                 // Nothing turned down: a save that got this far was one there was
                 // nothing wrong with — of either list.
                 refused: Vec::new(),
                 refused_servers: Vec::new(),
+                refused_sizes: Vec::new(),
                 // Filled in below, off the runtime rather than off this thread:
                 // trying a server is a request over the network, which is the one
                 // thing in this handler that is neither a file nor a process.
@@ -6070,6 +6217,110 @@ fn compile_caching(cached: bool) -> CompileCaching {
     }
 }
 
+/// Every loaded descriptor as the settings page draws it, in the order the
+/// descriptors were written.
+///
+/// What is drawn of one is the three things a page can say about a language it
+/// has never heard of — what to call it, whether it is on, and how big its
+/// store may grow — because that is exactly what a descriptor is: there is no
+/// editor here, and an installer who wants more writes `config.yaml`.
+///
+/// The label falls back to the name the file keys it by, so the page always has
+/// a word to draw. **The size is every language's**, because it is a key of
+/// every entry and a save puts both of the page's keys back for all of them:
+/// a size only the file knows about would be a size the next save emptied.
+/// Whether there is a field for it is whether the language has a store of its
+/// own. What `compiling` says is whether the language names the sccache
+/// capability and, where it does, whether that compiling is really being
+/// cached, which is the server's own environment and the same answer for every
+/// language that asks.
+///
+/// And a language whose entry in `config.yaml` would not load is on the list
+/// like any other, carrying the reason and what it is running on instead — see
+/// [`UnreadEntry`]. On the list rather than left off it, because the language is
+/// still there: it is running on the descriptor Verkstead ships, or off until
+/// the entry is fixed, and either is something for whoever wrote that file to
+/// see.
+fn languages(
+    loaded: &crate::languages::Languages,
+    caches_compiles: bool,
+    disk_use: &crate::disk_use::DiskUse,
+    sweeps: &crate::eviction::Sweeps,
+) -> Vec<LanguageView> {
+    loaded
+        .iter()
+        .map(|(name, descriptor)| LanguageView {
+            name: name.to_owned(),
+            label: descriptor.label().unwrap_or(name).to_owned(),
+            enabled: descriptor.enabled(),
+            // What is written down, as written, where somebody wrote one — it is
+            // what a save puts back — and the default where nobody did, with the
+            // flag beside it saying which of the two this is. The default rides
+            // along on its own: a field showing a value nobody chose should say
+            // so, and it says so as a placeholder.
+            size: descriptor
+                .size_configured()
+                .unwrap_or(crate::languages::default_size(name))
+                .to_owned(),
+            size_configured: descriptor.size_configured().is_some(),
+            default_size: crate::languages::default_size(name).to_owned(),
+            // And why what is written down is not what the store is held to,
+            // where it is not — only a hand-edit can make that so.
+            size_unread: descriptor.size_unread(),
+            store: descriptor.has_store(),
+            // And what that store holds, as last measured: never measured
+            // here, because a walk of a store is not something a read waits
+            // on — see [`crate::disk_use`].
+            disk_use: match (descriptor.names_a_store(), disk_use.of(name)) {
+                (false, _) => DiskUse::NoStore,
+                (true, None) => DiskUse::NotMeasured,
+                (true, Some(held)) => DiskUse::Measured {
+                    bytes: held.bytes,
+                    in_units: held.in_units,
+                },
+            },
+            // And how each of its directories is held to that size, which is
+            // the descriptor's to say: by its tool, by the sweep, or not at
+            // all — said on the page so a store nothing bounds is never a
+            // surprise.
+            stores: descriptor
+                .store_names()
+                .map(|store| StoreView {
+                    name: store.to_owned(),
+                    eviction: match descriptor.bounded(store) {
+                        crate::languages::Bounded::ByItsTool => Eviction::ByItsTool,
+                        crate::languages::Bounded::ByUnit(_) => Eviction::ByUnit,
+                        crate::languages::Bounded::NotAtAll => Eviction::NotSwept,
+                    },
+                })
+                .collect(),
+            // And when the sweep last brought those of them it keeps under the
+            // size there — see [`crate::eviction`].
+            swept: sweeps.of(name).and_then(|at| at.format(&Rfc3339).ok()),
+            // And whether anything reads that size. Not out of the files at
+            // all where something does: this is the server's own environment
+            // and its own platform, and the one thing on this page the human
+            // cannot set.
+            compiling: descriptor
+                .names(crate::languages::SCCACHE)
+                .then(|| compile_caching(caches_compiles)),
+            // And why this language's entry in `config.yaml` was not used,
+            // where it was not — with what it is running on meanwhile, which is
+            // whether anything is actually broken. Asked of the built-ins
+            // rather than carried along from the merge: what says a language
+            // has something to fall back to is that Verkstead ships a
+            // descriptor of that name, and that is the list.
+            unread: descriptor.unread().map(|why| UnreadEntry {
+                why: why.to_owned(),
+                running_on: match crate::languages::built_in().get(name).is_some() {
+                    true => RunningOn::BuiltIn,
+                    false => RunningOn::Nothing,
+                },
+            }),
+        })
+        .collect()
+}
+
 /// The stored word for a resolution as the settings page receives it, and back
 /// again for what a save of that page sends.
 ///
@@ -6103,13 +6354,15 @@ fn stored(resolution: ConflictResolution) -> store::ConflictResolution {
 fn as_told(
     settings: &crate::settings::Settings,
     caches_compiles: bool,
+    disk_use: &crate::disk_use::DiskUse,
+    sweeps: &crate::eviction::Sweeps,
     binds: &crate::sandbox::SandboxConfig,
     taking: usize,
+    running: Running,
 ) -> SettingsView {
     let secrets = settings.secrets();
     let config = settings.config();
     let author = config.git_author();
-    let cache = config.rust_build_cache();
     let cleanup = config.cleanup();
     let at_once = config.at_once();
 
@@ -6118,18 +6371,18 @@ fn as_told(
             name: author.name().unwrap_or_default().to_owned(),
             email: author.email().unwrap_or_default().to_owned(),
         },
-        rust_build_cache: BuildCacheView {
-            enabled: cache.enabled(),
-            // The default where nobody has typed one, with the flag beside it
-            // saying which of the two this is — a field showing a value nobody
-            // chose should say so, and it says so as a placeholder.
-            size: cache.size().to_owned(),
-            size_configured: cache.size_configured().is_some(),
-            // Not out of the files at all: this is the server's own environment
-            // and its own platform, and the one thing on this page the human
-            // cannot set.
-            compiles: compile_caching(caches_compiles),
-        },
+        // Every descriptor this installation loaded, in the order they were
+        // written: the ones embedded in the binary with what `config.yaml` says
+        // merged over them, which is what the next session will be built from —
+        // see [`crate::languages::configured`]. So a language an installer
+        // wrote a descriptor for has a box on this page without anything here
+        // knowing its name.
+        languages: languages(
+            &crate::languages::configured(&config),
+            caches_compiles,
+            disk_use,
+            sweeps,
+        ),
         // And the Cleanup's two rows, each read the way the size above is: the
         // days configured where somebody typed them, and the fallback with the
         // flag beside it saying so, because a value nobody chose should be
@@ -6195,6 +6448,8 @@ fn as_told(
         // one: the box on the page holds a string either way, and there is no
         // third state between an unwritten key and a text of nothing.
         instructions: config.instructions().to_owned(),
+        // And what is running, which is no file's either.
+        running,
         github_token: secrets.github_token().map(|token| TokenSaved {
             last_four: last_four(token),
             at: settings
@@ -6337,6 +6592,46 @@ fn server_refusals(servers: &[crate::settings::McpServer]) -> Vec<ServerRefused>
                 field,
                 why,
             }
+        })
+        .collect()
+}
+
+/// The sizes a save is asking for that are not sizes, one entry per language at
+/// fault, and empty where there is nothing wrong with any of them.
+///
+/// **Only a size that changed.** A word already in `config.yaml` that is not a
+/// size is a hand-edit's, and the page sends it back as it stands on every save
+/// about something else — so refusing it would turn down a tick over a field
+/// nobody touched. The pane says what is wrong with that one instead, and the
+/// store is held to its default meanwhile — see
+/// [`crate::languages::Descriptor::size`].
+///
+/// A blank is nothing configured rather than a size of nothing, so it is never
+/// refused: clearing the field is how the default is asked for back.
+fn size_refusals(written: &crate::languages::Languages, sent: &[LanguageEdit]) -> Vec<SizeRefused> {
+    sent.iter()
+        .filter_map(|language| {
+            let size = language.size.trim();
+
+            if size.is_empty() {
+                return None;
+            }
+
+            let unchanged = written
+                .get(&language.name)
+                .and_then(crate::languages::Descriptor::size_configured)
+                == Some(size);
+
+            if unchanged {
+                return None;
+            }
+
+            let why = crate::languages::bytes(size).err()?;
+
+            Some(SizeRefused {
+                language: language.name.clone(),
+                why,
+            })
         })
         .collect()
 }
@@ -7193,5 +7488,105 @@ mod tests {
             said,
             "attachment; filename=\"notes-2.md\"; filename*=UTF-8''notes-2.md",
         );
+    }
+
+    /// And each language says when its stores were last swept, as RFC 3339,
+    /// and nothing where they have not been since the server started.
+    #[test]
+    fn the_languages_say_when_they_were_last_swept() {
+        let sweeps = crate::eviction::Sweeps::default();
+        let at = time::OffsetDateTime::from_unix_timestamp(1_790_847_000).unwrap();
+
+        sweeps.swept(&[String::from("go")], at);
+
+        let drawn = languages(
+            crate::languages::built_in(),
+            false,
+            &crate::disk_use::DiskUse::default(),
+            &sweeps,
+        );
+        let of = |name: &str| {
+            drawn
+                .iter()
+                .find(|language| language.name == name)
+                .unwrap()
+                .swept
+                .clone()
+        };
+
+        assert_eq!(of("go").as_deref(), Some("2026-10-01T09:30:00Z"));
+        assert_eq!(of("node"), None);
+    }
+
+    /// The settings page's languages are drawn from the disk use as last
+    /// measured, and drawing them while a measurement is held up part way
+    /// answers at once: Rust's figure, measured, and every language after it
+    /// not measured yet — never a read that waits for the walk.
+    #[test]
+    fn the_languages_are_drawn_without_waiting_on_a_measurement() {
+        use std::sync::mpsc;
+
+        let loaded = crate::languages::built_in();
+        let disk_use = crate::disk_use::DiskUse::default();
+
+        let stores: Vec<_> = loaded
+            .iter()
+            .filter(|(_, descriptor)| descriptor.names_a_store())
+            .map(|(name, _)| (name.to_owned(), ()))
+            .collect();
+
+        let (started, starting) = mpsc::channel();
+        let (release, released) = mpsc::channel::<()>();
+        let released = std::sync::Mutex::new(released);
+
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                disk_use.measuring_with(&stores, |_| {
+                    started.send(()).unwrap();
+                    released.lock().unwrap().recv().unwrap();
+                    crate::disk_use::Held::whole(2048)
+                });
+            });
+
+            // Rust measured, and Go's walk held up where it is.
+            starting.recv().unwrap();
+            release.send(()).unwrap();
+            starting.recv().unwrap();
+
+            let drawn = languages(
+                loaded,
+                false,
+                &disk_use,
+                &crate::eviction::Sweeps::default(),
+            );
+            let of = |name: &str| {
+                drawn
+                    .iter()
+                    .find(|language| language.name == name)
+                    .unwrap()
+                    .disk_use
+            };
+
+            assert_eq!(
+                of("rust"),
+                DiskUse::Measured {
+                    bytes: 2048,
+                    in_units: None
+                }
+            );
+            assert_eq!(of("go"), DiskUse::NotMeasured);
+            assert_eq!(of("jvm"), DiskUse::NotMeasured);
+            assert_eq!(
+                of("cpp"),
+                DiskUse::NoStore,
+                "C/C++ names no store, so there is nothing of it to measure",
+            );
+
+            // And let the rest of the pass go: Go's walk and every one after
+            // it, none of which waits on anything but this.
+            for _ in 1..stores.len() {
+                release.send(()).unwrap();
+            }
+        });
     }
 }

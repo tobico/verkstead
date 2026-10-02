@@ -121,6 +121,344 @@ jobs:
             exit 1
           fi
 
+  # The package stores, proved by really installing something inside a Sandbox
+  # — `crates/server/tests/package_stores.rs`, which is where the reasoning is.
+  #
+  # A job of its own rather than more steps in `Rust`, for two reasons. The
+  # tools are this suite's alone and installing them would slow every other
+  # check down; and this is the one job whose business is *having* them, which
+  # is what `VERKSTEAD_TEST_STORES` below says — with it set, a proof skipped
+  # for want of its tool fails rather than printing a line nobody reads. The
+  # `Rust` job runs the same suite as part of the workspace and skips whatever
+  # this runner image has not got, which is the developer's experience and the
+  # right one there.
+  #
+  # It runs beside the other jobs rather than after them, so what it costs the
+  # workflow is its own wall clock and not a minute of anybody else's.
+  #
+  # **And what that comes to.** Measured over the four green runs on `main`
+  # before this job existed, 2026-09-24 to 2026-09-29: the workflow took 16m31s,
+  # 16m49s, 18m57s and 21m50s end to end, and what set every one of those was a
+  # Windows leg — 869 s to 1307 s, against `Rust`'s steady 855–896 s. So the
+  # figure to watch is not this job's own minutes but whether they pass the
+  # Windows legs, and a job that builds one crate's test target and runs a
+  # handful of small installs does not come close. The measurement after it
+  # landed is in this branch's pull request.
+  #
+  # Node's six tools add one tarball, two archives and two `npm install -g`
+  # runs to the setup below, and six installs of one package to the suite.
+  # Python's four add one archive and one `pip install` — the runner's own
+  # interpreter carries pip already — and a proof apiece. Only C/C++'s proof
+  # builds a project, and that one is two source files, so what each ecosystem
+  # costs this job is its toolchain's download rather than its proofs.
+  #
+  # **And .NET costs this job no download at all**: the
+  # runner image carries a .NET SDK under `/usr/lib/dotnet`, which is inside
+  # `/usr` and so inside every bind a session gets. So there is no install step
+  # for it below — only the same line in the tool check every other tool has,
+  # which is what would catch the image moving or dropping it.
+  #
+  # The JVM adds a tarball and an archive — Maven and Gradle, the JDK being
+  # the image's own — and its proofs are real builds, which is the first place
+  # in this job where a proof costs more than its download: a JVM starts
+  # slowly, and a Gradle build in a session starts one per invocation.
+  package-stores:
+    name: Package stores
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      # The same pin as every other job, for the same reason.
+      - name: Install Rust 1.95.0
+        uses: dtolnay/rust-toolchain@1.95.0
+
+      # A key of its own: this job builds one test target of one crate, and a
+      # cache shared with the `Rust` job would have the two evicting each
+      # other.
+      - uses: Swatinem/rust-cache@v2.9.2
+        with:
+          key: package-stores
+
+      # The same bubblewrap the `Rust` job installs, and for the same reason —
+      # see the comment there for why the sysctl goes off as well. Every proof
+      # here runs its install *inside* a sandbox, so without this there is
+      # nothing to install into.
+      - name: Install bubblewrap
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      # **Go, unpacked where a session can reach it.** Not
+      # `actions/setup-go`, and not the runner image's tool cache it installs
+      # from: a session's sandbox is opened onto `/nix`, `/usr`, `/bin`,
+      # `/lib`, `/lib64`, `/etc` and `/run/current-system` and nothing else —
+      # `LINUX_SYSTEM` in `crates/server/src/sandbox.rs` — so a `go` under
+      # `/opt/hostedtoolcache` is a `go` no proof here can run. Every one of
+      # them would skip, on the one job where a skip is a failure.
+      #
+      # The whole tree under `/usr/local` rather than a link to one: `go`
+      # resolves its own `GOROOT` from where its binary really is, so a
+      # symlink from inside a bind into the tool cache lands back outside it.
+      #
+      # Pinned to a release, like every other tool this file installs.
+      - name: Install Go 1.26.8
+        run: |
+          curl -sSfL -o "$RUNNER_TEMP/go.tar.gz" https://go.dev/dl/go1.26.8.linux-amd64.tar.gz
+          sudo tar -C /usr/local -xzf "$RUNNER_TEMP/go.tar.gz"
+          echo /usr/local/go/bin >> "$GITHUB_PATH"
+
+      # **And the JavaScript ecosystem's six, every one of them reachable by a
+      # name on `/usr/local/bin`.** Not the runner image's own Node, which is
+      # whatever the image pins, and not `actions/setup-node`, for the reason
+      # Go is not `actions/setup-go`: the tool cache is outside every bind a
+      # session gets.
+      #
+      # `/usr/local/bin` rather than a directory of this job's own, because
+      # npm, pnpm and Yarn Classic are all `#!/usr/bin/env node` scripts —
+      # `node` being findable on the *session's* `PATH` is what makes them
+      # runnable inside a sandbox at all, and that `PATH`'s floor holds
+      # `/usr/local/bin` and nothing this job could invent. See `LINUX_PATH` in
+      # `crates/server/src/sandbox.rs`.
+      #
+      # The same releases the dev shell's nixpkgs carries, so that a proof that
+      # passes here is a proof of the versions a developer ran it against.
+      - name: Install Node 24.21.0, pnpm and both yarns
+        run: |
+          curl -sSfL -o "$RUNNER_TEMP/node.tar.xz" \
+            https://nodejs.org/dist/v24.21.0/node-v24.21.0-linux-x64.tar.xz
+          sudo mkdir -p /usr/local/node
+          sudo tar -C /usr/local/node --strip-components=1 -xJf "$RUNNER_TEMP/node.tar.xz"
+
+          for tool in node npm npx; do
+            sudo ln -sf "/usr/local/node/bin/$tool" "/usr/local/bin/$tool"
+          done
+
+          sudo /usr/local/node/bin/npm install -g --prefix /usr/local/node \
+            pnpm@11.27.0 yarn@1.22.22
+          sudo ln -sf /usr/local/node/bin/pnpm /usr/local/bin/pnpm
+          sudo ln -sf /usr/local/node/bin/yarn /usr/local/bin/yarn
+
+          # **Berry in a prefix of its own**, because the two yarns are two
+          # different tools and both packages install a program called `yarn`.
+          # Classic reads `YARN_CACHE_FOLDER` and Berry reads
+          # `YARN_GLOBAL_FOLDER`, so a runner carrying one of them is a runner
+          # where half of that is never proved — the name here is the one
+          # `tests/package_stores.rs` looks for and the one the dev shell links
+          # it in under.
+          sudo /usr/local/node/bin/npm install -g --prefix /usr/local/yarn-berry \
+            @yarnpkg/cli-dist@4.14.1
+          sudo ln -sf /usr/local/yarn-berry/bin/yarn /usr/local/bin/yarn-berry
+
+      # **deno and bun, which are the other two of Node's six.** Neither is on
+      # the runner image, and neither needs the Node above: each ships one
+      # binary that is its own runtime, so a copy into `/usr/local/bin` is the
+      # whole of an installation.
+      #
+      # From each project's own release rather than a package manager, for the
+      # reason Go is: what a session may reach is `/nix`, `/usr`, `/bin`,
+      # `/lib`, `/lib64`, `/etc` and `/run/current-system`, and `snap` or the
+      # tool cache is outside all of it.
+      #
+      # The same releases the dev shell's nixpkgs carries, so that a proof that
+      # passes here is a proof of the versions a developer ran it against.
+      - name: Install deno 2.8.3 and bun 1.3.13
+        run: |
+          curl -sSfL -o "$RUNNER_TEMP/deno.zip" \
+            https://github.com/denoland/deno/releases/download/v2.8.3/deno-x86_64-unknown-linux-gnu.zip
+          sudo unzip -q -o "$RUNNER_TEMP/deno.zip" -d /usr/local/bin
+          sudo chmod 0755 /usr/local/bin/deno
+
+          curl -sSfL -o "$RUNNER_TEMP/bun.zip" \
+            https://github.com/oven-sh/bun/releases/download/bun-v1.3.13/bun-linux-x64.zip
+          unzip -q -o "$RUNNER_TEMP/bun.zip" -d "$RUNNER_TEMP/bun"
+          sudo install -m 0755 "$RUNNER_TEMP/bun/bun-linux-x64/bun" /usr/local/bin/bun
+
+      # **uv, the first of the three Python tools this runner has not got.** The
+      # image carries a `python3` under `/usr/bin` with pip in it, which is what
+      # the pip proof runs (`python3 -m pip`, pip being a module of its
+      # interpreter rather than a program of its own) — so nothing here installs
+      # a Python, and poetry and pipenv below are installed *with* that one.
+      # uv is one binary from its project's own release, into `/usr/local/bin`
+      # for the reason deno and bun are: the tool cache is outside every bind a
+      # session gets.
+      #
+      # The same release the dev shell's nixpkgs carries, so that a proof that
+      # passes here is a proof of the version a developer ran it against.
+      - name: Install uv 0.11.21
+        run: |
+          curl -sSfL -o "$RUNNER_TEMP/uv.tar.gz" \
+            https://github.com/astral-sh/uv/releases/download/0.11.21/uv-x86_64-unknown-linux-gnu.tar.gz
+          tar -C "$RUNNER_TEMP" -xzf "$RUNNER_TEMP/uv.tar.gz"
+          sudo install -m 0755 "$RUNNER_TEMP/uv-x86_64-unknown-linux-gnu/uv" /usr/local/bin/uv
+
+      # **poetry and pipenv, which are the Python ecosystem's other two.**
+      # Neither is on the runner image, and neither is a single binary: both are
+      # Python programs, so what installs them is the interpreter that is going
+      # to run them — `python3 -m pip` into the system, which writes their
+      # console scripts to `/usr/local/bin` and their modules beside the
+      # runner's own. Inside every bind a session gets, for the reason Go and
+      # the JavaScript six are: the tool cache is outside all of it.
+      #
+      # `--break-system-packages` because the runner's Python is externally
+      # managed (PEP 668) and this is a throwaway machine whose whole job is to
+      # have these installed — the same check pip's own proof turns off with
+      # `--target`.
+      #
+      # **And `--ignore-installed`, which is a second thing entirely.** That
+      # flag lets pip *write* into the system interpreter; it does not let pip
+      # take anything out of it, and a dpkg-installed distribution has no
+      # `RECORD` for pip to uninstall by. poetry's `dulwich` wants
+      # `urllib3>=2.2.2` and this image carries Debian's 2.0.7, so without this
+      # the step dies on `Cannot uninstall urllib3 2.0.7, RECORD file not
+      # found` and every proof below it is skipped. Nothing is upgraded in
+      # place: what pip installs lands beside what the distribution owns, which
+      # on a runner is the right way round and on anything else would not be.
+      #
+      # The same releases the dev shell's nixpkgs carries, so that a proof that
+      # passes here is a proof of the versions a developer ran it against.
+      - name: Install poetry 2.4.1 and pipenv 2026.5.1
+        run: |
+          sudo python3 -m pip install --break-system-packages --ignore-installed \
+            poetry==2.4.1 pipenv==2026.5.1
+
+      # **And C/C++, whose proof is a build rather than an install**: a CMake
+      # project configured with Ninja and built twice in a session's Sandbox,
+      # every compile going through the Compile Server — so that one needs the
+      # sccache the server runs as well as the two build tools. The C and C++
+      # compilers are the runner image's own, under `/usr/bin`.
+      #
+      # CMake and Ninja from the distribution, into `/usr/bin`, which is inside
+      # every bind a session gets. sccache from its project's own release into
+      # `/usr/local/bin`, for the reason deno and bun are: the distribution's is
+      # several releases behind the one the dev shell's nixpkgs carries, and
+      # this is the release a developer ran the proof against.
+      - name: Install CMake, Ninja and sccache 0.15.0
+        run: |
+          sudo apt-get install -y cmake ninja-build
+
+          curl -sSfL -o "$RUNNER_TEMP/sccache.tar.gz" \
+            https://github.com/mozilla/sccache/releases/download/v0.15.0/sccache-v0.15.0-x86_64-unknown-linux-musl.tar.gz
+          tar -C "$RUNNER_TEMP" -xzf "$RUNNER_TEMP/sccache.tar.gz"
+          sudo install -m 0755 "$RUNNER_TEMP/sccache-v0.15.0-x86_64-unknown-linux-musl/sccache" /usr/local/bin/sccache
+
+      # **And the JVM's: a JDK, Maven and Gradle.** The runner image carries all
+      # three, and all three are the wrong ones to prove with as they stand.
+      #
+      # Its JDKs are Temurin's, under `/usr/lib/jvm` — inside a bind — but the
+      # `java` on its `PATH` is 17 by way of `/etc/alternatives`, and the
+      # `JAVA_HOME` it exports is one no Sandbox is handed. So 21, the major the
+      # dev shell's nixpkgs carries, is linked onto `/usr/local/bin`, which a
+      # session's `PATH` puts ahead of `/usr/bin`: that `java` is the one Maven
+      # and Gradle below start on when nothing names another. Its `javac`
+      # beside it, which the Maven proofs compile their plugin with.
+      #
+      # Its Maven and Gradle are whatever releases it pins. These are the ones
+      # the dev shell's nixpkgs carries, from each project's own distribution,
+      # unpacked whole under `/usr/local` and linked onto `/usr/local/bin` —
+      # both launchers follow their own link back to find their home, so the
+      # link is enough and the home stays inside the bind. Maven's comes off
+      # Maven Central, which carries the same distribution as the Apache
+      # archive: the archive is throttled, and took two minutes for it here.
+      - name: Install JDK 21, Maven 3.9.12 and Gradle 8.14.4
+        run: |
+          sudo ln -sf /usr/lib/jvm/temurin-21-jdk-amd64/bin/java /usr/local/bin/java
+          sudo ln -sf /usr/lib/jvm/temurin-21-jdk-amd64/bin/javac /usr/local/bin/javac
+
+          curl -sSfL -o "$RUNNER_TEMP/maven.tar.gz" \
+            https://repo.maven.apache.org/maven2/org/apache/maven/apache-maven/3.9.12/apache-maven-3.9.12-bin.tar.gz
+          sudo mkdir -p /usr/local/maven
+          sudo tar -C /usr/local/maven --strip-components=1 -xzf "$RUNNER_TEMP/maven.tar.gz"
+          sudo ln -sf /usr/local/maven/bin/mvn /usr/local/bin/mvn
+
+          curl -sSfL -o "$RUNNER_TEMP/gradle.zip" \
+            https://services.gradle.org/distributions/gradle-8.14.4-bin.zip
+          sudo unzip -q -o "$RUNNER_TEMP/gradle.zip" -d /usr/local
+          sudo ln -sf /usr/local/gradle-8.14.4/bin/gradle /usr/local/bin/gradle
+
+          java -version
+
+      # **And Rust's own, which is the one toolchain this runner already has and
+      # cannot use.** The proofs of Rust's cargo half and of its Compile Server
+      # run `cargo` and `rustc` inside a session's Sandbox, and what the step at
+      # the top of this job installed is rustup's, under `~/.cargo` and
+      # `~/.rustup` — outside every bind a session gets, and a proxy besides. So
+      # the toolchain it installed is copied whole under `/usr/local`: the same
+      # 1.95.0 every other job pins, its binaries finding their libraries
+      # relative to where they really are, which stays inside the bind.
+      #
+      # Linked onto `/usr/local/bin`, which a session's `PATH` holds, so the
+      # `cargo` inside one finds this `rustc` beside it. And its directory put
+      # ahead of `~/.cargo/bin` on this job's own `PATH`, because the proofs ask
+      # the `PATH` they are run with which `cargo` there is — and it is the same
+      # release, so the build that runs them is no different for it.
+      - name: Install Rust 1.95.0 where a session can reach it
+        run: |
+          sudo cp -a "$(rustc --print sysroot)" /usr/local/rust
+
+          for tool in cargo rustc; do
+            sudo ln -sf "/usr/local/rust/bin/$tool" "/usr/local/bin/$tool"
+          done
+
+          echo /usr/local/rust/bin >> "$GITHUB_PATH"
+
+          /usr/local/rust/bin/cargo --version
+
+      # And the same question asked of every tool on the list, in a line naming
+      # the one that fails it rather than as a test failure about a shell that
+      # could not find a program — the reason the sandbox-surface step in the
+      # `Rust` job is written the way it is.
+      #
+      # Both halves: installed at all, and installed somewhere a session is
+      # opened onto. The second is the one that catches a runner image moving a
+      # tool, which is how this job would go quietly green while proving
+      # nothing.
+      - name: Every tool a proof installs with is inside the sandbox's binds
+        run: |
+          status=0
+
+          for tool in go zip node npm pnpm yarn yarn-berry deno bun python3 uv poetry pipenv dotnet tar sha1sum sccache cmake ninja cc c++ java javac mvn gradle cargo rustc; do
+            found=$(command -v "$tool" || true)
+
+            if [ -z "$found" ]; then
+              echo "::error::this runner has no $tool, which a package-store proof installs with"
+              status=1
+              continue
+            fi
+
+            real=$(readlink -f "$found")
+
+            case "$real" in
+              /nix/*|/usr/*|/bin/*|/lib/*|/lib64/*|/etc/*|/run/current-system/*)
+                echo "$tool: $real"
+                ;;
+              *)
+                echo "::error::$tool is at $real, which no session's sandbox binds — see LINUX_SYSTEM in crates/server/src/sandbox.rs"
+                status=1
+                ;;
+            esac
+          done
+
+          # And pip, which is the one tool on the list that is not a program:
+          # the pip proof runs `python3 -m pip`, so what has to be there is the
+          # module inside the interpreter above rather than a name on the PATH.
+          if ! python3 -m pip --version; then
+            echo "::error::this runner's python3 has no pip module, which the pip package-store proof installs with"
+            status=1
+          fi
+
+          exit $status
+
+      # `--nocapture` so that a proof's own account of itself is in the log:
+      # what an install printed is the whole of what explains a failure, and a
+      # captured one is a line about an exit status.
+      - name: The proofs
+        run: cargo test -p verkstead-server --test package_stores -- --nocapture
+        env:
+          # What makes a skipped proof a failure here. Any value does; this one
+          # says what it is for.
+          VERKSTEAD_TEST_STORES: required
+
   # What the same sandbox comes to on a Mac, asked of a Mac. What a session may
   # reach is one description said once, and `sandbox-exec` is the second
   # rendering of it — so what settles whether that rendering holds is a probe
