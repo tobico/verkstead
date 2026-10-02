@@ -26,7 +26,11 @@ import styles from "./Archived.module.css";
 /// is in rather than something to do to it. *Show archived* rather than the
 /// whole sentence it could be: it stands under the list of conversations, so
 /// what else it could be showing does not have to be said.
-export function ShowArchived(): JSX.Element {
+/// `children` is what stands at the other end of the line from the switch: the
+/// sidebar puts what this device is forwarding there (see `Forwarding.tsx`),
+/// and the compose page's copy, drawn only while there is no list, puts
+/// nothing — with no Conversation there is no terminal to forward from.
+export function ShowArchived(props: { children?: JSX.Element }): JSX.Element {
   const queries = useQueryClient();
 
   /// The server's answer rather than this device's: the choice is the human's,
@@ -59,12 +63,15 @@ export function ShowArchived(): JSX.Element {
 
   return (
     <div class={`${styles.showArchived} ${shell.paneFoot}`}>
-      <Toggle
-        label="Show archived"
-        on={on()}
-        disabled={showing.isPending || flip.isPending}
-        flip={(wanted) => flip.mutate(wanted)}
-      />
+      <div class={styles.line}>
+        <Toggle
+          label="Show archived"
+          on={on()}
+          disabled={showing.isPending || flip.isPending}
+          flip={(wanted) => flip.mutate(wanted)}
+        />
+        {props.children}
+      </div>
       <Show when={flip.isError}>
         <ErrorLine>
           The setting could not be saved: {flip.error?.message}

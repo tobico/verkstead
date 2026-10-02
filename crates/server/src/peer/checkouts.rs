@@ -1231,7 +1231,7 @@ mod tests {
         }
     }
 
-    /// And both are outside the three prefixes this device keeps to itself.
+    /// And both are outside the prefixes this device keeps to itself.
     #[test]
     fn the_checkouts_are_not_in_a_namespace_kept_back() {
         for prefix in super::super::workbench::KEPT_TO_ITSELF {

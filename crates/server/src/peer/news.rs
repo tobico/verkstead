@@ -12,7 +12,7 @@
 //!
 //! **A hub cannot subscribe to a member's push instead**, which is what settles
 //! the direction: the subscriptions a device pushes to are its own browsers, and
-//! `/api/ui/push/` is one of the three prefixes never served over the link — see
+//! `/api/ui/push/` is one of the prefixes never served over the link — see
 //! [`super::workbench::KEPT_TO_ITSELF`]. And a **Nudge** is the wrong carrier by
 //! construction: it says what *kind* of thing moved and never what it was, and a
 //! notification is a sentence.
@@ -233,7 +233,7 @@ mod tests {
         );
     }
 
-    /// And it is outside the three prefixes this device keeps to itself, which is
+    /// And it is outside the prefixes this device keeps to itself, which is
     /// what it has to be: a member's news arriving on the one namespace a member
     /// is never served would be a route nothing could ever reach.
     #[test]

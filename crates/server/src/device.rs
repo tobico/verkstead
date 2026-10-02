@@ -708,6 +708,11 @@ pub struct Devices {
     /// certificate and what it writes into is this device's own membership, and
     /// both are already in hand.
     peers: Peers,
+
+    /// And where this device holds what it forwards: the loopback addresses a
+    /// **Forward** listens on — see [`crate::forwarding`]. Both loopbacks unless
+    /// said otherwise, see [`Devices::forwarding_on`].
+    forwarding_on: Vec<std::net::IpAddr>,
 }
 
 impl Devices {
@@ -732,6 +737,7 @@ impl Devices {
             browse: Browse::heard_nothing(),
             probe: Probe::asked_nothing(),
             peers,
+            forwarding_on: crate::forwarding::LOOPBACKS.to_vec(),
         }
     }
 
@@ -796,6 +802,25 @@ impl Devices {
     /// membership has no business making them.
     pub fn probing(self, probe: Probe) -> Devices {
         Devices { probe, ..self }
+    }
+
+    /// The same, holding what it forwards on `forwarding_on` rather than on both
+    /// loopbacks — see [`crate::forwarding`].
+    ///
+    /// For a suite standing two devices up on one machine: the server in the
+    /// member's terminal is on this same loopback, so the port it forwards is
+    /// busy at both of them by construction, and what the suite asks of a Forward
+    /// that is taken is asked of an address the member's own server is not on.
+    pub fn forwarding_on(self, forwarding_on: Vec<std::net::IpAddr>) -> Devices {
+        Devices {
+            forwarding_on,
+            ..self
+        }
+    }
+
+    /// Where a Forward listens — see [`Devices::forwarding_on`].
+    pub(crate) fn forwarding_loopbacks(&self) -> &[std::net::IpAddr] {
+        &self.forwarding_on
     }
 
     /// The same, giving every dial this section makes `patience` rather than the

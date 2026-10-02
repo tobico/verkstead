@@ -16,6 +16,13 @@
     "conversation": 7
   },
   {
+    "kind": "ports",
+    "conversation": 7
+  },
+  {
+    "kind": "forwards"
+  },
+  {
     "kind": "set",
     "conversation": 7
   },
