@@ -229,6 +229,21 @@ pub(crate) fn routes() -> axum::Router<AppState> {
             "/api/ui/conversations/{id}/terminals/{number}/attach",
             get(crate::terminals::attach),
         )
+        // And what the terminals a member is attached to are listening on, which
+        // is that member's reading and nobody else's: answered over the link
+        // alone, a browser here being on the machine the ports are on already —
+        // see [`crate::terminals::ports_of`].
+        .route(
+            "/api/ui/conversations/{id}/ports",
+            get(crate::terminals::ports_of),
+        )
+        // And one connection to one of those ports, as an upgrade — over the
+        // link alone too, and only to a port in the caller's own reading: see
+        // [`crate::terminals::connect`].
+        .route(
+            "/api/ui/conversations/{id}/terminals/{number}/ports/{port}",
+            get(crate::terminals::connect),
+        )
         // And the other half of Code: the files of the Worktrees it is drawn
         // over. Beside the terminals' routes, which is what puts them behind the
         // Workbench Key — a session's network is the host's own, so the key is
@@ -685,6 +700,10 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // happens to live, and everything a cluster relays later stands under
         // this same segment.
         .route("/api/ui/devices", get(devices))
+        // And the ports of members' terminals this device is holding on its own
+        // `localhost`, which the sidebar's foot counts: this device's own
+        // reading, held back from the link — see [`crate::forwarding`].
+        .route("/api/ui/forwards", get(crate::forwarding::forwards))
         // And the devices nobody has typed an address for, which is the
         // Discovered list under those rows. A read of its own beside the one
         // above rather than a field of it, and that is the point of it: a browse

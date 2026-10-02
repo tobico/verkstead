@@ -70,7 +70,7 @@
 //! take the press is named in a [`Refusal`] the page draws under the control that
 //! was pressed.
 
-mod bridging;
+pub(crate) mod bridging;
 pub(crate) mod freshness;
 
 use std::pin::Pin;
@@ -186,6 +186,16 @@ async fn relay(State(state): State<AppState>, request: Request) -> Response {
         }
     }
 
+    // A terminal attach is counted as relayed for as long as its socket is
+    // joined, which is what has this device read that terminal's ports again
+    // where a member's `ports` Nudge may have been missed — see
+    // [`crate::forwarding`]. Counted from before the dial, so that the attach
+    // is never one this device does not know it is holding.
+    let attaching = taking
+        .as_ref()
+        .and_then(|_| crate::forwarding::attach_of(&onwards))
+        .map(|conversation| state.forwards.attached(&device, conversation));
+
     let call = Call {
         method: parts.method,
         onwards,
@@ -198,7 +208,7 @@ async fn relay(State(state): State<AppState>, request: Request) -> Response {
 
     match devices.relay(&device, call).await {
         Ok(answered) => match taking {
-            Some(taking) => bridging::bridged(taking, answered),
+            Some(taking) => bridging::bridged(taking, answered, attaching),
             None => handed_back(answered),
         },
 

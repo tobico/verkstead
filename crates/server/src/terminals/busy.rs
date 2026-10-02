@@ -1,6 +1,8 @@
-//! Whether a terminal has something running in it: the one judgement the server
-//! makes about a shell it is holding, and the one a × on a tab asks for
-//! ([ADR 0019](../../../../docs/adr/0019-the-code-pane.md), *Tabs and groups*).
+//! Whether a terminal has something running in it: the judgement a × on a tab
+//! asks for ([ADR 0019](../../../../docs/adr/0019-the-code-pane.md), *Tabs and
+//! groups*). Not the only reading of a terminal's processes any more — what
+//! they listen on is read too, for the device that forwards them, in
+//! [`super::ports`] — but the one that decides anything about the shell itself.
 //!
 //! **Busy is the foreground of the pseudo-terminal being something other than
 //! the shell.** The kernel keeps, for every terminal, which process group is in

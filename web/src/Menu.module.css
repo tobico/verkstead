@@ -82,6 +82,14 @@
   box-shadow: var(--lift);
 }
 
+/* And the same card hung over its trigger rather than under it, for a trigger at
+   the bottom of what it stands in — the sidebar's foot, which is stuck to the
+   bottom of the pane. The same gap and the same far end, from the other edge. */
+.drop.up {
+  top: auto;
+  bottom: calc(100% + 0.3rem);
+}
+
 /* And the same card holding controls rather than rows: the composer's Repo
    dropdown is a branch field, two pickers and the companion rows they
    configure, which is a form and not a list of things to press. So it is given

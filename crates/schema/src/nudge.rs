@@ -53,6 +53,26 @@ pub enum Nudge {
     /// cheap because a folder is one listing and a version is one hash.
     Files { conversation: i64 },
 
+    /// What a Conversation's terminals are listening on moved, or which devices
+    /// hold an attach on one of them did: a server in a terminal opened or
+    /// closed a port, a terminal ended, or a device attached or let go.
+    ///
+    /// **Read by the device that attached rather than by a page.** It is what
+    /// tells a hub to read the member's ports again over the link, and what it
+    /// says is the Conversation and nothing else — which ports, and whose, is
+    /// that reading's, answered per device (see `terminals::ports` on the
+    /// server).
+    Ports { conversation: i64 },
+
+    /// What this device is forwarding moved: a Forward was taken up, skipped,
+    /// taken up after a skip, or ended.
+    ///
+    /// **This device's own and nobody else's**, as the reading it names is: a
+    /// Forward is a listener on this machine's `localhost`, so the Nudge is told
+    /// to the pages in front of it and never down the stream a member holds
+    /// (see `forwarding` on the server).
+    Forwards,
+
     /// A Question Set in a Conversation arrived, was answered, or was closed
     /// unanswered.
     Set { conversation: i64 },

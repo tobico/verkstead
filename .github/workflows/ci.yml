@@ -515,6 +515,14 @@ jobs:
       - name: What the wizard asks a real Mac
         run: 'cargo test -p verkstead-server --lib onboarding::'
 
+      # And what a terminal is listening on, read the Mac's way: `ps` for the
+      # leader's tree and group, `lsof` for their listeners. The test starts a
+      # real listener below a real shell and reads it, then ends it and reads
+      # it gone — which only a real `ps` and `lsof` can answer, so this is the
+      # one runner that proves the Mac's reader. Quoted for the same colon.
+      - name: A terminal's ports, read on a real Mac
+        run: 'cargo test -p verkstead-server --lib terminals::ports::'
+
   # And what the same workspace comes to on Windows, asked of Windows. The
   # session machinery is compiled there like everything else — what a Windows
   # build has not got is the pseudo-terminal under it, and four leaf call sites

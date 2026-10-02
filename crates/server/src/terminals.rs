@@ -84,6 +84,29 @@
 //! **And not a hold on the run**, exactly as typing into a Screen is not: a
 //! terminal opened beside a running session is somebody looking, and somebody
 //! who means to take the work on by hand presses **Stop** first.
+//!
+//! **And what one is listening on, for the devices looking at it from
+//! elsewhere.** A server started in a terminal on this device is one a member
+//! of the cluster attached to it would forward to its own `localhost`, so the
+//! register counts, per terminal, the members whose attach sockets are open on
+//! it — up on the attach and down when the socket ends, as the file watchers'
+//! register counts panes. While any member holds one, the terminal is read every
+//! [`READING`] for the TCP ports something inside it is listening on — see
+//! [`ports`] — and a `ports` Nudge is announced whenever that set moves, or the
+//! members attached to it do. The read stops with the last of them. A terminal
+//! attached only from this device's own browser counts nobody and is not read:
+//! there is nothing to forward to a browser on the machine the port is on.
+//!
+//! A turn is hurried by the terminal printing an address on this machine with a
+//! port, which is a server saying it is up: the read happens then rather than
+//! on the turn, and what it finds is still what is forwarded — see [`printed`].
+//!
+//! What a member reads back is its own and no other's — the terminals *it*
+//! holds an attach on, over the link and nowhere else. See [`ports_of`].
+//!
+//! **And a port in that reading is one the member may connect to**, one
+//! upgrade per connection, joined to this device's loopback byte for byte — and
+//! no other port, terminal or caller is. See [`connect`].
 
 /// Which shell a terminal comes up in: the server user's own where the machine
 /// has given it a usable one, and PowerShell where the machine keeps no such
@@ -94,20 +117,34 @@ pub mod shell;
 /// before it ends the shell — see [`busy`].
 pub mod busy;
 
-use std::collections::HashMap;
+/// And what one is listening on, which is read while a member of the cluster
+/// holds an attach on it — see [`ports`], and [`Terminals::attach`].
+pub mod ports;
+
+/// And a server printing its address, which hurries that read along — see
+/// [`printed`].
+mod printed;
+
+use std::collections::{BTreeSet, HashMap};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use axum::Json;
+use axum::extract::connect_info::ConnectInfo;
 use axum::extract::ws::{WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, Query, State};
+use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response as HttpResponse};
+use axum::{Extension, Json};
 use tokio::sync::oneshot;
-use verkstead_render::{TerminalClosed, TerminalOpened, TerminalView};
+use verkstead_render::{PortsView, TerminalClosed, TerminalOpened, TerminalPorts, TerminalView};
+use verkstead_schema::{ApiError, Nudge};
 
 use crate::AppState;
 use crate::capture::Reading;
+use crate::nudge::Nudges;
+use crate::peer::Caller;
+use crate::peer::workbench::OverTheLink;
 use crate::platform::Platform;
 use crate::sandbox::{Closing, outliving};
 use crate::screen::Live;
@@ -146,6 +183,13 @@ const INTERACTIVE: &str = "-i";
 /// would be a close nothing could ever finish.
 const LINGERING: Duration = Duration::from_secs(2);
 
+/// How often a terminal a member is attached to is read for its ports.
+///
+/// A server somebody has just started is one they are about to open, so the
+/// read has to be quick to notice it; and a read is a walk of `/proc`, which is
+/// nothing to do every couple of seconds for the few terminals anybody is
+/// looking at from another machine.
+const READING: Duration = Duration::from_secs(2);
 /// The terminals this server is holding, by the Conversation each belongs to.
 #[derive(Clone, Default)]
 pub(crate) struct Terminals {
@@ -220,6 +264,23 @@ struct Watched {
     /// end of this for as long as it runs. Awaited rather than read: what it
     /// says is *when*, and there is nothing in it to say.
     ended: oneshot::Receiver<()>,
+
+    /// The process the shell was started as, which is what its ports are read
+    /// from — see [`ports`]. `None` where the platform handed back no id.
+    leader: Option<ports::Tree>,
+
+    /// The members of the cluster holding an attach on it, by Device Id, each
+    /// with how many sockets it has open — see [`Attached`].
+    members: HashMap<String, usize>,
+
+    /// What it was listening on at the last read, which is nothing while no
+    /// member is attached.
+    ports: BTreeSet<u16>,
+
+    /// Whether the read is running, so that a second attach does not start a
+    /// second one — see [`reading`] — and the word that hurries it, which the
+    /// relay following the output holds too. See [`printed`].
+    hurry: Arc<printed::Hurry>,
 }
 
 impl Watched {
@@ -437,11 +498,247 @@ impl Terminals {
         held.live.remove(&number);
     }
 
+    /// Count `member` as attached to one of them for as long as what comes back
+    /// is held, and start reading the terminal's ports if nothing is yet.
+    ///
+    /// `None` where the terminal is not live, which is a socket about to be
+    /// refused anyway. A member's first socket on a terminal is a `ports` Nudge,
+    /// as its last one closing is: which devices are attached is half of what a
+    /// reading says.
+    pub(crate) fn attach(
+        &self,
+        conversation_id: i64,
+        number: i64,
+        member: String,
+        nudges: Nudges,
+    ) -> Option<Attached> {
+        let (first, start) = {
+            let mut open = self.held();
+            let watched = open.get_mut(&conversation_id)?.live.get_mut(&number)?;
+
+            let count = watched.members.entry(member.clone()).or_default();
+            *count += 1;
+
+            let start = watched.hurry.start().then(|| watched.hurry.clone());
+
+            (*count == 1, start)
+        };
+
+        if first {
+            nudges.announce(Nudge::Ports {
+                conversation: conversation_id,
+            });
+        }
+
+        if let Some(hurry) = start {
+            tokio::spawn(reading(
+                self.clone(),
+                conversation_id,
+                number,
+                hurry,
+                nudges.clone(),
+            ));
+        }
+
+        Some(Attached {
+            terminals: self.clone(),
+            conversation_id,
+            number,
+            member,
+            nudges,
+        })
+    }
+
+    /// What `member` is attached to on this Conversation, and what each is
+    /// listening on — the terminals it holds an attach on and no others.
+    pub(crate) fn ports(&self, conversation_id: i64, member: &str) -> Vec<TerminalPorts> {
+        let open = self.held();
+
+        let Some(held) = open.get(&conversation_id) else {
+            return Vec::new();
+        };
+
+        let mut theirs: Vec<TerminalPorts> = held
+            .live
+            .iter()
+            .filter(|(_, watched)| watched.members.contains_key(member))
+            .map(|(&number, watched)| TerminalPorts {
+                number,
+                ports: watched.ports.iter().copied().collect(),
+            })
+            .collect();
+
+        theirs.sort_unstable_by_key(|terminal| terminal.number);
+        theirs
+    }
+
+    /// Whether `member` may be connected to `port` on one of them: an attach of
+    /// its own open on the terminal, and the port in the terminal's reading as it
+    /// stands.
+    ///
+    /// **The reading is the gate**, rather than whether something happens to
+    /// answer on the loopback: a port the terminal never opened is not one it
+    /// offered anybody, whatever else on this machine is listening on it, and a
+    /// port that closed a moment ago is out of the reading on the next turn.
+    fn forwardable(
+        &self,
+        conversation_id: i64,
+        number: i64,
+        member: &str,
+        port: u16,
+    ) -> Result<(), Unforwardable> {
+        let open = self.held();
+
+        let watched = open
+            .get(&conversation_id)
+            .and_then(|held| held.live.get(&number))
+            .ok_or(Unforwardable::NoSuchTerminal)?;
+
+        if !watched.members.contains_key(member) {
+            return Err(Unforwardable::NotAttached);
+        }
+
+        match watched.ports.contains(&port) {
+            true => Ok(()),
+            false => Err(Unforwardable::NotListening),
+        }
+    }
+
     /// The register, locked.
     fn held(&self) -> std::sync::MutexGuard<'_, HashMap<i64, Held>> {
         self.open
             .lock()
             .expect("the terminals register is not poisoned")
+    }
+}
+
+/// One member's attach on one terminal, counted for as long as this is held —
+/// which is as long as the socket is open.
+pub(crate) struct Attached {
+    terminals: Terminals,
+    conversation_id: i64,
+    number: i64,
+    member: String,
+    nudges: Nudges,
+}
+
+impl Drop for Attached {
+    /// Counted down, and the member taken off with its last socket — which is a
+    /// `ports` Nudge, as its first was. The read notices an empty list on its
+    /// next turn and stops there.
+    fn drop(&mut self) {
+        let last = {
+            let mut open = self.terminals.held();
+
+            let Some(watched) = open
+                .get_mut(&self.conversation_id)
+                .and_then(|held| held.live.get_mut(&self.number))
+            else {
+                // The terminal ended under the socket, and the read said so.
+                return;
+            };
+
+            match watched.members.get_mut(&self.member) {
+                Some(count) if *count > 1 => {
+                    *count -= 1;
+                    false
+                }
+                Some(_) => {
+                    watched.members.remove(&self.member);
+                    true
+                }
+                None => false,
+            }
+        };
+
+        if last {
+            self.nudges.announce(Nudge::Ports {
+                conversation: self.conversation_id,
+            });
+        }
+    }
+}
+
+/// Read one terminal's ports every [`READING`] for as long as a member is
+/// attached to it, announcing a `ports` Nudge whenever they move.
+///
+/// Read at once and then on every turn, so that a port somebody opened is in the
+/// reading within one turn of it opening and a port that closed is out of it
+/// within one turn of closing. The walk is on a blocking thread, being a walk of
+/// `/proc`.
+///
+/// **And sooner where the terminal says so**: an address printed while this is
+/// waiting for its turn is the turn — see [`printed`].
+///
+/// **Ends with the last member**, taking the ports with it — a terminal nobody
+/// is attached to from elsewhere has nothing to offer anybody — and **with the
+/// terminal**, which is a Nudge of its own: whoever was attached was reading
+/// ports of a terminal that has gone.
+async fn reading(
+    terminals: Terminals,
+    conversation_id: i64,
+    number: i64,
+    hurry: Arc<printed::Hurry>,
+    nudges: Nudges,
+) {
+    let moved = || {
+        nudges.announce(Nudge::Ports {
+            conversation: conversation_id,
+        })
+    };
+
+    loop {
+        let leader = {
+            let mut open = terminals.held();
+
+            let Some(watched) = open
+                .get_mut(&conversation_id)
+                .and_then(|held| held.live.get_mut(&number))
+            else {
+                drop(open);
+                moved();
+                return;
+            };
+
+            if watched.members.is_empty() {
+                watched.hurry.stop();
+                watched.ports.clear();
+                return;
+            }
+
+            watched.leader.clone()
+        };
+
+        let read = match leader {
+            Some(leader) => tokio::task::spawn_blocking(move || leader.listening())
+                .await
+                .unwrap_or_default(),
+            None => BTreeSet::new(),
+        };
+
+        let changed = {
+            let mut open = terminals.held();
+
+            match open
+                .get_mut(&conversation_id)
+                .and_then(|held| held.live.get_mut(&number))
+            {
+                Some(watched) if watched.ports != read => {
+                    watched.ports = read;
+                    true
+                }
+                _ => false,
+            }
+        };
+
+        if changed {
+            moved();
+        }
+
+        tokio::select! {
+            () = tokio::time::sleep(READING) => {}
+            () = hurry.hurried() => {}
+        }
     }
 }
 
@@ -645,6 +942,7 @@ pub(crate) async fn open(state: &AppState, conversation_id: i64) -> anyhow::Resu
     // terminal is to end, and one back, saying it has — see [`Watched`].
     let (closing, closed) = oneshot::channel();
     let (over, ended) = oneshot::channel();
+    let hurry = Arc::new(printed::Hurry::default());
 
     // On the register before the relay, so that a browser attaching with the
     // shell's first prompt has a Screen to attach to — and so that a shell that
@@ -658,6 +956,10 @@ pub(crate) async fn open(state: &AppState, conversation_id: i64) -> anyhow::Resu
             shell: named,
             closing,
             ended,
+            leader: ports::Tree::of(&child),
+            members: HashMap::new(),
+            ports: BTreeSet::new(),
+            hurry: hurry.clone(),
         },
     );
 
@@ -670,6 +972,7 @@ pub(crate) async fn open(state: &AppState, conversation_id: i64) -> anyhow::Resu
         afterwards,
         lending,
         screen,
+        hurry,
         closed,
         over,
     ));
@@ -711,8 +1014,8 @@ pub(crate) async fn open(state: &AppState, conversation_id: i64) -> anyhow::Resu
     clippy::too_many_arguments,
     reason = "\
     one terminal's whole self: what it runs on, what runs on it, what it leaves \
-    to see to here and away, what it draws on, and a word each way about its \
-    ending"
+    to see to here and away, what it draws on, what hurries its reading, and a \
+    word each way about its ending"
 )]
 async fn follow(
     terminals: Terminals,
@@ -723,10 +1026,12 @@ async fn follow(
     afterwards: Closing,
     lending: Option<crate::mirroring::account::Lending>,
     screen: Live,
+    hurry: Arc<printed::Hurry>,
     mut closing: oneshot::Receiver<()>,
     over: oneshot::Sender<()>,
 ) {
     let mut reading = Reading::default();
+    let mut sniffing = printed::Sniffing::default();
     let mut buffer = vec![0u8; CHUNK];
 
     // Whether the shell has been hung up, and the moment it has to be gone by —
@@ -742,7 +1047,13 @@ async fn follow(
             read = terminal.read(&mut buffer) => match read {
                 // The far end of the terminal is closed, which is the shell gone.
                 Ok(0) => break,
-                Ok(taken) => screen.printed(&reading.take(&buffer[..taken])),
+                Ok(taken) => {
+                    if hurry.reading() && sniffing.names_here(&buffer[..taken]) {
+                        hurry.hurry();
+                    }
+
+                    screen.printed(&reading.take(&buffer[..taken]));
+                }
                 Err(error) => {
                     tracing::error!(
                         error = ?error,
@@ -891,9 +1202,17 @@ fn hang_up(_child: &Child, _conversation_id: i64, _number: i64) {}
 /// A number that is not live is refused as a session's Screen is: there is
 /// nothing to relay, and no read-only grid to fall back to either, a terminal
 /// being memory only.
+///
+/// **And a member's attach is counted**, for as long as its socket is open: that
+/// is what has the terminal read for its ports — see [`Terminals::attach`]. The
+/// member is the one whose certificate the connection was made with, over the
+/// Peer Listener; this device's own browser is nobody's attach and counts for
+/// nothing.
 pub(crate) async fn attach(
     State(state): State<AppState>,
     Path((id, number)): Path<(String, String)>,
+    over_the_link: Option<Extension<OverTheLink>>,
+    caller: Option<Extension<ConnectInfo<Caller>>>,
     watcher: WebSocketUpgrade,
 ) -> HttpResponse {
     // Read as permissively as every other pair of ids here: neither of them
@@ -906,13 +1225,258 @@ pub(crate) async fn attach(
         return crate::ui::no_such_terminal();
     }
 
-    watcher.on_upgrade(move |socket: WebSocket| {
+    let member = match over_the_link {
+        Some(_) => calling(&state, caller).await,
+        None => None,
+    };
+
+    watcher.on_upgrade(move |socket: WebSocket| async move {
+        // Held for as long as the socket is followed, and let go of as this
+        // returns, whichever way it returned.
+        let _attached = member.and_then(|member| {
+            state
+                .terminals
+                .attach(id, number, member, state.nudges.clone())
+        });
+
         crate::screen::follow(
             socket,
-            move || state.terminals.screen(id, number),
+            || state.terminals.screen(id, number),
             format!("conversation {id} terminal #{number}"),
         )
+        .await
     })
+}
+
+/// `GET /api/ui/conversations/{id}/ports` — what the calling member's attached
+/// terminals on this Conversation are listening on.
+///
+/// **Over the link alone.** What it is for is a device forwarding a port on this
+/// machine to its own `localhost`, and this device's own browser is on this
+/// machine already: there is nothing to forward to it. So a browser here is
+/// refused, by name, and a member is answered with the terminals *it* holds an
+/// attach on — none at all where it holds none, and never one another device
+/// attached. See [`Terminals::ports`].
+pub(crate) async fn ports_of(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    over_the_link: Option<Extension<OverTheLink>>,
+    caller: Option<Extension<ConnectInfo<Caller>>>,
+) -> HttpResponse {
+    if over_the_link.is_none() {
+        return crate::ui::refused(
+            StatusCode::FORBIDDEN,
+            ApiError::new(
+                "a terminal's ports are read by a device of the cluster attached to it, \
+                 over the link, and not by a browser on the machine they are on",
+            ),
+        );
+    }
+
+    let terminals = match (id.parse::<i64>(), calling(&state, caller).await) {
+        (Ok(id), Some(member)) => state.terminals.ports(id, &member),
+        _ => Vec::new(),
+    };
+
+    Json(PortsView { terminals }).into_response()
+}
+
+/// What a forwarded connection's upgrade names, and what its `101` answers with.
+///
+/// Not a WebSocket: what crosses is a TCP connection's bytes as they are, with
+/// no frames around them, and a name of its own is what says so to anything
+/// reading the handshake.
+pub(crate) const FORWARD: &str = "verkstead-forward";
+
+/// How long the dial to a port on this device's loopback is given. A loopback
+/// either answers or refuses at once, so this is only ever reached by a server
+/// too wedged to accept — which is a refusal too.
+const DIALLING: Duration = Duration::from_secs(5);
+
+/// Why a member cannot be connected to a port — see [`Terminals::forwardable`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Unforwardable {
+    NoSuchTerminal,
+    NotAttached,
+    NotListening,
+}
+
+/// `GET /api/ui/conversations/{id}/terminals/{number}/ports/{port}`, as an
+/// upgrade — one connection to a port a terminal here is listening on, for a
+/// member forwarding it to its own `localhost`.
+///
+/// **One upgrade per connection.** The member dials this device's loopback at
+/// `port` and, once that has answered, switches protocols and joins the two —
+/// see [`crate::relaying::bridging::crossing`], which is the Relay's own bridge:
+/// bytes crossed both ways, and whichever end goes ending both with a shutdown.
+///
+/// **Refused by name before anything is dialled** unless the caller may have
+/// it: over the link alone, from a member holding an attach on that terminal,
+/// for a port in the terminal's current reading — see
+/// [`Terminals::forwardable`]. And a port that is in the reading but whose
+/// server went between the read and the dial is refused too, rather than
+/// answered with a socket that would carry nothing.
+pub(crate) async fn connect(
+    State(state): State<AppState>,
+    Path((id, number, port)): Path<(String, String, String)>,
+    over_the_link: Option<Extension<OverTheLink>>,
+    caller: Option<Extension<ConnectInfo<Caller>>>,
+    mut request: axum::extract::Request,
+) -> HttpResponse {
+    if over_the_link.is_none() {
+        return crate::ui::refused(
+            StatusCode::FORBIDDEN,
+            ApiError::new(
+                "a terminal's port is connected to for a device of the cluster attached to \
+                 it, over the link, and not for a browser on the machine it is on",
+            ),
+        );
+    }
+
+    let (Ok(id), Ok(number)) = (id.parse::<i64>(), number.parse::<i64>()) else {
+        return crate::ui::no_such_terminal();
+    };
+
+    let Ok(port) = port.parse::<u16>() else {
+        return not_listening(&port);
+    };
+
+    if !crate::relaying::bridging::upgrading(request.headers()) {
+        return crate::ui::refused(
+            StatusCode::BAD_REQUEST,
+            ApiError::new(format!(
+                "a connection to a terminal's port is an upgrade to {FORWARD}, and this \
+                 request asked for none",
+            )),
+        );
+    }
+
+    let Some(member) = calling(&state, caller).await else {
+        return not_attached();
+    };
+
+    match state.terminals.forwardable(id, number, &member, port) {
+        Ok(()) => {}
+        Err(Unforwardable::NoSuchTerminal) => return crate::ui::no_such_terminal(),
+        Err(Unforwardable::NotAttached) => return not_attached(),
+        Err(Unforwardable::NotListening) => return not_listening(&port.to_string()),
+    }
+
+    let Some(taking) = request
+        .extensions_mut()
+        .remove::<hyper::upgrade::OnUpgrade>()
+    else {
+        return crate::ui::refused(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ApiError::new("this connection cannot be upgraded, so no port can be joined to it"),
+        );
+    };
+
+    let Some(dialled) = dialled(port).await else {
+        return crate::ui::refused(
+            StatusCode::BAD_GATEWAY,
+            ApiError::new(format!(
+                "nothing answered on port {port} here: the server in the terminal has \
+                 stopped since it was read",
+            )),
+        );
+    };
+
+    // A task rather than an await, for the reason the Relay's own bridge gives:
+    // the caller's half is only handed over once the `101` below has been
+    // written, which this return is what does.
+    tokio::spawn(async move {
+        match taking.await {
+            Ok(upgraded) => {
+                crate::relaying::bridging::crossing(
+                    hyper_util::rt::TokioIo::new(upgraded),
+                    dialled,
+                )
+                .await;
+            }
+            Err(why) => {
+                tracing::debug!(
+                    %why,
+                    "a member's half of a forwarded connection could not be taken, so \
+                     the port's is let go of",
+                );
+            }
+        }
+    });
+
+    (
+        StatusCode::SWITCHING_PROTOCOLS,
+        [
+            (axum::http::header::CONNECTION, "upgrade"),
+            (axum::http::header::UPGRADE, FORWARD),
+        ],
+    )
+        .into_response()
+}
+
+/// A connection to `port` on this device's loopback, IPv4 first and IPv6 after —
+/// a server in a terminal may have bound either, and the reading does not say
+/// which. `None` where neither answered.
+async fn dialled(port: u16) -> Option<tokio::net::TcpStream> {
+    for loopback in [
+        std::net::IpAddr::from(std::net::Ipv4Addr::LOCALHOST),
+        std::net::IpAddr::from(std::net::Ipv6Addr::LOCALHOST),
+    ] {
+        if let Ok(Ok(stream)) =
+            tokio::time::timeout(DIALLING, tokio::net::TcpStream::connect((loopback, port))).await
+        {
+            return Some(stream);
+        }
+    }
+
+    None
+}
+
+/// The refusal for a caller that holds no attach on the terminal it named.
+fn not_attached() -> HttpResponse {
+    crate::ui::refused(
+        StatusCode::FORBIDDEN,
+        ApiError::new(
+            "a terminal's ports are connected to only for a device holding an attach on it",
+        ),
+    )
+}
+
+/// And for a port the terminal is not listening on, as the reading stands.
+fn not_listening(port: &str) -> HttpResponse {
+    crate::ui::refused(
+        StatusCode::NOT_FOUND,
+        ApiError::new(format!(
+            "the terminal is not listening on port {port}, so it is not one to connect to",
+        )),
+    )
+}
+
+/// Which member of the cluster is on the far end of a request over the link, by
+/// its Device Id — off the certificate its connection was made with.
+///
+/// `None` where there is no saying: no connection to read a certificate off,
+/// which is a namespace stood up in process, or a certificate the membership no
+/// longer holds, which is an unlink between the gate and here.
+async fn calling(
+    state: &AppState,
+    caller: Option<Extension<ConnectInfo<Caller>>>,
+) -> Option<String> {
+    let presented = caller?.0.0.fingerprint()?;
+
+    match state
+        .devices
+        .as_ref()?
+        .membership()
+        .presenting(&presented)
+        .await
+    {
+        Ok(member) => member.map(|member| member.device),
+        Err(why) => {
+            tracing::error!(%why, "the member attached to a terminal could not be read");
+            None
+        }
+    }
 }
 
 /// Whether the human has been asked about a busy shell and said to go ahead.

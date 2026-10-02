@@ -8,6 +8,7 @@ import { vi } from "vitest";
 
 import type {
   DevicesView,
+  ForwardsView,
   SetReading,
   SetView,
   UnreadableSet,
@@ -21,6 +22,9 @@ const ASKING = "/api/ui/devices/asking";
 /// And where this machine says what it is and who it is linked to, which is
 /// the other read that belongs to no one page — see the default below.
 const DEVICES = "/api/ui/devices";
+
+/// And what this machine is forwarding, the third — see the default below.
+const FORWARDS = "/api/ui/forwards";
 
 /// One answer per fetch in the order given. The last answer is repeated,
 /// because a page polls for as long as it is open and a test should not have to
@@ -53,6 +57,12 @@ export function serving(...answers: Array<Answer>) {
   // which draws no device anywhere and is what every test that has not said
   // otherwise is about.
   held.set(`GET ${DEVICES}`, json(devices as DevicesView));
+
+  // And what this machine is forwarding, which the sidebar's foot reads
+  // wherever the sidebar is drawn — see `src/workbench/Forwarding.tsx`.
+  // Nothing, which is what a device that never opened a member's terminal
+  // holds, and draws no item at all.
+  held.set(`GET ${FORWARDS}`, json({ forwards: [] } satisfies ForwardsView));
 
   for (const answer of answers) {
     if (typeof answer === "function") {
