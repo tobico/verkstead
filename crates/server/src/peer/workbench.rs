@@ -21,12 +21,12 @@
 //! gate is [`super::members_only`], put on by [`super::router`] — this module
 //! hands it the routes and names the ones it holds back.
 //!
-//! **Three prefixes are this device's own and are not served here at all** —
+//! **Four prefixes are this device's own and are not served here at all** —
 //! [`KEPT_TO_ITSELF`]. That is what makes *a member's Workbench Key never leaves
 //! it* a fact about the mechanism rather than about which pages happen to exist:
 //! the Remote access reading carries the login link with that key on it, and a
 //! namespace served whole would hand it to whoever holds the other device's
-//! cookie. So the three are refused **by name**, rather than quietly missing, so
+//! cookie. So the four are refused **by name**, rather than quietly missing, so
 //! that a caller can tell *this is not relayed* from *this Verkstead is too old
 //! to have it* — the same distinction the Member Gate's own refusal is a
 //! `Forbidden` rather than a `Not Found` for.
@@ -73,12 +73,19 @@ use crate::AppState;
 /// is one human at one machine deciding who this device is linked to, and not
 /// something another device asks on their behalf. And `/api/ui/push/` is the
 /// subscriptions of the browsers *this* device pushes to, which are its own
-/// phones rather than anybody else's.
+/// phones rather than anybody else's. And `/api/ui/forwards` is the ports this
+/// device is holding on its own `localhost` for its members' terminals, which
+/// is a fact about this machine — see [`crate::forwarding`].
 ///
 /// Spelled without their trailing slash and matched as whole segments below, so
 /// that the bare `/api/ui/remote` the pane reads is held back with everything
 /// under it, and a path that merely begins with those letters is not.
-pub(crate) const KEPT_TO_ITSELF: [&str; 3] = ["/api/ui/remote", "/api/ui/devices", "/api/ui/push"];
+pub(crate) const KEPT_TO_ITSELF: [&str; 4] = [
+    "/api/ui/remote",
+    "/api/ui/devices",
+    "/api/ui/push",
+    "/api/ui/forwards",
+];
 
 /// What says a request arrived over the Peer Listener rather than from this
 /// device's own browser, put beside every request this router answers.
@@ -129,7 +136,7 @@ pub(crate) fn served(state: AppState) -> Router {
         .layer(axum::Extension(OverTheLink))
 }
 
-/// And the three prefixes held back, over everything the gate admits.
+/// And the prefixes held back, over everything the gate admits.
 ///
 /// **A layer over the whole of it rather than a route apiece**, which is what
 /// makes the refusal a fact about the namespace rather than about the endpoints
@@ -142,11 +149,11 @@ pub(crate) fn served(state: AppState) -> Router {
 /// Put on inside [`super::members_only`] and therefore *behind* the Member Gate:
 /// a stranger is refused for not being a member, and has no business learning
 /// which of this device's namespaces are relayed and which are not.
-pub(crate) fn keeping_three_back(routes: Router) -> Router {
+pub(crate) fn keeping_them_back(routes: Router) -> Router {
     routes.layer(axum::middleware::from_fn(kept_back))
 }
 
-/// The check itself: one of the three, or on to the routes.
+/// The check itself: one of the four, or on to the routes.
 async fn kept_back(request: Request, next: Next) -> Response {
     match ours(request.uri().path()) {
         Some(prefix) => refused(prefix),

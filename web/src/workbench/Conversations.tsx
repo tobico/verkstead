@@ -117,6 +117,7 @@ import { Empty, ErrorLine } from "../notices";
 import { Reaching, rowKey, whose, type Device } from "../reaching";
 import { CardActions } from "./Actions";
 import { ShowArchived } from "./Archived";
+import { Forwarding } from "./Forwarding";
 import { caughtUp, pressedRows } from "./eager";
 import styles from "./Conversations.module.css";
 import { SPOKEN } from "./Mark";
@@ -649,7 +650,9 @@ export function Conversations(props: {
           is what stands it against the bottom of the screen while the list is
           short, and what leaves it after the last card once the list is long
           enough to scroll. */}
-      <ShowArchived />
+      <ShowArchived>
+        <Forwarding />
+      </ShowArchived>
     </>
   );
 }

@@ -993,7 +993,13 @@ async fn allow_records_the_device_asking_and_settles_the_request() {
         asking.device.fingerprint(),
         "a member *is* a fingerprint — the certificate the join was posted under",
     );
-    assert!(member.reachable, "it was answering a moment ago");
+
+    // Nothing is said here about whether the row is drawn reachable. The Allow
+    // writes it so, but the router's own refreshers read every member the moment
+    // the joins move — see `merging::refreshing` and `mirroring::refreshing` —
+    // and A answers nothing in this file, so by the time the list is read one of
+    // them may already have dimmed it. Which of the two it reads is a race with
+    // those dials, not something the press decides.
 
     assert!(
         held_joins(&asked.pool).await.unwrap().is_empty(),

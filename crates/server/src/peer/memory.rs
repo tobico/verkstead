@@ -361,7 +361,7 @@ mod tests {
         }
     }
 
-    /// And both are outside the three prefixes this device keeps to itself, which
+    /// And both are outside the prefixes this device keeps to itself, which
     /// is what they have to be: a route served on the one namespace a member is
     /// never served would be a route nothing could ever reach.
     #[test]

@@ -569,7 +569,7 @@ impl Peers {
     /// goes down a link the far end has verified, and nobody over there presses
     /// anything — see [`crate::peer::news`], which is what answers. A hub cannot
     /// subscribe to a member's push instead, the subscriptions a device pushes to
-    /// being one of the three prefixes never served over the link.
+    /// being one of the prefixes never served over the link.
     ///
     /// **What travels is a sentence rather than a variant**, so a news kind a
     /// newer member has and this one has not still reads at the far end — see

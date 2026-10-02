@@ -207,6 +207,27 @@ impl MemberLists {
         }
     }
 
+    /// What one of a member's Conversations is called, as the sidebar calls it —
+    /// `None` where this device holds no row for it.
+    ///
+    /// The viewer's own rule said in Rust (see `titled` in
+    /// `web/src/workbench/naming.ts`): the branch once somebody has settled on
+    /// it, and *Draft* while it is still Verkstead's own invention. Read for the
+    /// list of what this device forwards — see [`crate::forwarding`] — which
+    /// names each Forward by the Conversation its terminal is on.
+    pub(crate) fn title_of(&self, device: &str, id: i64) -> Option<String> {
+        let held = self.held();
+        let row = held.get(device)?.rows.iter().find(|row| row.id == id)?;
+
+        let settled =
+            row.branch_named || (row.state != verkstead_render::Lifecycle::Draft && !row.naming);
+
+        Some(match settled {
+            true => row.branch.clone(),
+            false => "Draft".to_owned(),
+        })
+    }
+
     /// What is held of each of `members`, and nothing of anybody else.
     ///
     /// **The membership is what prunes this.** A device that has been unlinked

@@ -106,7 +106,7 @@ use crate::store;
 /// anything the human would call leaving. Long enough to cover it and short
 /// enough that a pane genuinely closed stops its watcher while somebody is
 /// still looking at the tab it was in.
-const GRACE: Duration = Duration::from_secs(2);
+pub(crate) const GRACE: Duration = Duration::from_secs(2);
 
 /// How long a burst has to be over for before it is announced.
 ///

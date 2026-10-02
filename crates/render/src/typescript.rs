@@ -26,17 +26,18 @@ use crate::{
     Creation, DeviceIdentity, DevicesView, DirectoryListing, DiscoveredDevice, DroppedRow,
     FileDeleted, FileDeleting, FileListsView, FileMade, FileMaking, FileReading, FileRenamed,
     FileRenaming, FileRootsView, FileStatusView, FileWrite, FileWritten, FolderListing,
-    GrillingStarted, InstallPress, LinkedDevice, Locked, NewAdoption, NewCompanion,
-    NewConversation, NewJoin, NewRank, OnboardingView, PendingJoin, Permitting, PrefillView,
-    Preflight, ProcessChoice, ProcessPicked, ProfileChoice, ProfileChosen, ProfileDeleted,
-    ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails, PushKey, Registered, Registration,
-    RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoPairingsView, RepoRemoved, RepoSwitched,
-    RepoView, Resolved, Resumed, RoadmapPane, RoleChoice, Screen, ServeEdit, ServePress,
-    ServerAttached, ServerRemoved, SetReading, SettingsEdit, SettingsSaved, SettingsView,
-    ShareCommented, SharePublished, SharedConversation, ShowArchived, ShowingArchived, Shown,
-    Started, SteerCancelled, SteerForm, SteerOpened, SteerSaved, SteerSubmission, Submitted,
-    Subscribed, Subscription, TakenUp, TargetNamed, TargetRecorded, TerminalClosed, TerminalOpened,
-    TerminalsView, TranscriptView, Transferring, Unsubscribe, UpdateNotice, Watching,
+    ForwardsView, GrillingStarted, InstallPress, LinkedDevice, Locked, NewAdoption, NewCompanion,
+    NewConversation, NewJoin, NewRank, OnboardingView, PendingJoin, Permitting, PortsView,
+    PrefillView, Preflight, ProcessChoice, ProcessPicked, ProfileChoice, ProfileChosen,
+    ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails, PushKey,
+    Registered, Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoPairingsView,
+    RepoRemoved, RepoSwitched, RepoView, Resolved, Resumed, RoadmapPane, RoleChoice, Screen,
+    ServeEdit, ServePress, ServerAttached, ServerRemoved, SetReading, SettingsEdit, SettingsSaved,
+    SettingsView, ShareCommented, SharePublished, SharedConversation, ShowArchived,
+    ShowingArchived, Shown, Started, SteerCancelled, SteerForm, SteerOpened, SteerSaved,
+    SteerSubmission, Submitted, Subscribed, Subscription, TakenUp, TargetNamed, TargetRecorded,
+    TerminalClosed, TerminalOpened, TerminalsView, TranscriptView, Transferring, Unsubscribe,
+    UpdateNotice, Watching,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -255,6 +256,9 @@ fn the_viewers_types_are_written_from_these() {
     TerminalsView::export_all(&config).unwrap();
     TerminalOpened::export_all(&config).unwrap();
     TerminalClosed::export_all(&config).unwrap();
+    // And what a device reads over the link of the ports its attached terminals
+    // are listening on, which no page reads yet: the hub is what asks.
+    PortsView::export_all(&config).unwrap();
 
     // And the other half of Code: the Worktrees its tree stands on, and one
     // folder of one of them. The roots are what bounds the files API — the
@@ -441,6 +445,11 @@ fn the_viewers_types_are_written_from_these() {
     // what dims a row and reads *unreachable* on it.
     DevicesView::export_all(&config).unwrap();
     LinkedDevice::export_all(&config).unwrap();
+
+    // And the ports of members' terminals this device is holding on its own
+    // `localhost`, which the sidebar's foot counts and its popup lists — this
+    // device's own reading, held back from the link.
+    ForwardsView::export_all(&config).unwrap();
 
     // And the devices nobody has typed an address for, which is the Discovered
     // list under those rows: a reading of its own rather than a field of the one
