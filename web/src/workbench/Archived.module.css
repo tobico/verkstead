@@ -30,3 +30,23 @@
 .showArchived label > span {
   white-space: nowrap;
 }
+
+/* The switch and whatever stands at the other end of its line — what this
+   device is forwarding, on the sidebar's copy. One line where the pane is wide
+   enough for both, the switch first; where it is not, the other thing goes
+   under it, still at the far end — the sidebar is often narrower than the two
+   of them side by side. */
+.line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.75rem;
+}
+
+/* Lifted over the pane's sticky header while a menu standing in the foot is
+   open. The foot sticks at `z-index: 0` and the header at `1`, so the menu's
+   backdrop — fixed, but painted inside the foot — would otherwise leave the
+   header uncovered and pressable through a wash meant to take the press. */
+.showArchived:has([aria-expanded="true"]) {
+  z-index: 2;
+}

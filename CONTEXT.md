@@ -1422,8 +1422,8 @@ it.
 namespace**: without a cookie carrying the current key, a 401. **And it never
 leaves the device it was issued on** — a **Relay** is admitted at the far end
 by this device's certificate rather than by anybody's key, the `Cookie` header
-is not passed on, and the three prefixes that would hand one over are refused
-at the **Member Gate**. **The link is
+is not passed on, and the prefixes this device keeps to itself, the one that
+would hand it over among them, are refused at the **Member Gate**. **The link is
 the address with `?key=…` on it**, and opening one is the whole of logging in:
 the server sets the cookie and redirects to the same path without the
 parameter, so the secret is out of the URL bar, the history entry and any
@@ -1743,8 +1743,8 @@ machines.
 **Member** reaches this device's workbench: the same `/api/ui/` router the
 browser asks, mounted a second time over the one state, with the **Member
 Gate** in front of it instead of the **Workbench Key**'s — see **Relay**, which
-is the other end of it, and where the three prefixes this device keeps to
-itself are. Nothing else of the workbench is here: the health check is nobody's
+is the other end of it, and where the four prefixes this device keeps to itself
+are. Nothing else of the workbench is here: the health check is nobody's
 Conversation, and a page of the workbench is something a browser asks the
 device it opened.
 **Two Verksteads on one machine want a port each**, as they want a `--listen`
@@ -2000,9 +2000,10 @@ certificate that pending request is holding rather than against the member
 list. Everything else on that listener is a member's or is refused — including
 a path no route answers, which is refused rather than missed, a stranger having
 no business being told which of this device's endpoints exist.
-**And three prefixes are refused inside it**, which is the one thing a member
-does not reach: `/api/ui/remote/`, `/api/ui/devices/` and `/api/ui/push/` — see
-**Relay**, which is what they are kept back from and why. Inside the gate
+**And four prefixes are refused inside it**, which is the one thing a member
+does not reach: `/api/ui/remote/`, `/api/ui/devices/`, `/api/ui/push/` and
+`/api/ui/forwards` — see **Relay**, which is what they are kept back from and
+why. Inside the gate
 rather than outside, so that a stranger is refused for not being a member and
 learns nothing about which of this device's namespaces are relayed.
 **The refusal says it is a membership rather than a missing path.** A device
@@ -2041,15 +2042,18 @@ three attach endpoints are carried too — a Conversation terminal, a session's
 **Screen** and the **Code** pane's watcher — as a socket rather than a call:
 the same upgrade is put to the member, its own `101` handed back untouched and
 the two connections joined byte for byte, with either end going taking the
-other with it.
+other with it. The same join carries a **Forward**'s connections, one
+upgrade each — the hub's own dial rather than a browser's, and not a Relay of
+anything.
 **What admits it at the far end is this device's certificate**, at the **Member
 Gate**, and the `Cookie` header does not travel. Which is what makes *a
 device's **Workbench Key** never leaves it* a fact about the mechanism: the
-three prefixes the gate refuses inside itself are the other half of it, and
+four prefixes the gate refuses inside itself are the other half of it, and
 `/api/ui/remote/` is there because the **Remote Access** reading carries the
 login link with that key on it. `/api/ui/devices/` is one human at one machine
-deciding who this device is linked to, and `/api/ui/push/` is the browsers
-*this* device pushes to. Refused **by name** rather than quietly missing, so
+deciding who this device is linked to, `/api/ui/push/` is the browsers *this*
+device pushes to, and `/api/ui/forwards` is the ports *this* device holds on
+its own `localhost` — see **Forward**. Refused **by name** rather than quietly missing, so
 that a caller can tell *this is not relayed* from *this Verkstead is too old to
 have it*.
 **Three Device Ids are refused rather than dialled**, each by name: one that is
@@ -2078,7 +2082,7 @@ Conversation done — tells every **Member** the same sentence over the **Peer
 Listener**, behind the **Member Gate** with the announcement and the renewal, and
 each of them pushes it to its own phones. Which is what makes one phone enough for
 a cluster: a phone is installed from one device and subscribes to *that* device's
-browsers, and the subscriptions a device pushes to are one of the three prefixes
+browsers, and the subscriptions a device pushes to are one of the four prefixes
 never served over the link, so a hub cannot subscribe to a member's push instead. A
 **Nudge** is the wrong carrier for it by construction — it says what kind of thing
 moved and never what it was, and a notification is a sentence.
@@ -2098,8 +2102,42 @@ retried, which is what a push service that cannot be reached already costs, and 
 **Timeline** says it in full either way. Nothing is passed on: a device tells its
 own phones what a member told it and no third machine, for the reason the streams
 above carry each device's own news alone.
-_Avoid_: proxy, forwarding, tunnel, the bridge (which is the socket half of it
-alone), remote mode
+_Avoid_: proxy, forwarding (a **Forward** is something else), tunnel, the bridge
+(which is the socket half of it alone), remote mode
+
+**Forward**:
+A server started in a **Terminal** on another **Member**, reachable on this
+device's own `localhost` at the same port for as long as the terminal's tab is
+open here (ADR-0019, *Forwards*). The member reads what the terminal is
+listening on — a listening TCP socket on any address, held by any process in
+the terminal's tree, about every two seconds and only while a device holds an
+attach on it over the link — and the device whose browser has the tab open
+holds a listener on its loopback, IPv4 and IPv6, at the same number. Each
+connection made to it is one upgrade over the **Peer Listener**, which the
+member answers by dialling that port on its own loopback, joined byte for byte
+by the **Relay**'s bridge. A printed `localhost` URL hurries the read and
+forwards nothing by itself.
+**Held by the attaching device and no other**: not every device in the
+cluster, and nothing for a terminal this device's own browser attached, the
+port being on this machine already. A number already bound here is **skipped**
+and said — *port busy here* — rather than remapped or taken, and taken when it
+frees. The member connects only a port it is reporting, and only for a device
+attached to that terminal.
+**It ends on its own**: two seconds after it leaves the reading — the tab
+closed, the port closed, the terminal ended — the watcher's grace, so a pane
+swap keeps it; and at once where the member is unreachable, taken up again
+once it answers while the tab is still open. Ending closes the listener and
+every connection crossing it. Nothing stops one by hand: closing the tab is the
+stop.
+**Said at the sidebar's foot**, *Forwarding 3 ports* beside *Show archived*,
+whose popup lists each as a link with its device and Conversation. That reading
+and its `forwards` Nudge are this device's own and never served over the link.
+**Not the Relay**, which carries the workbench's own calls and sockets to a
+member; a Forward carries whatever a server in a terminal speaks, and none of
+the workbench. **Not the agent's session**, whose ports are never read. **Not
+exposure**: nothing is listened for beyond this device's loopback.
+_Avoid_: tunnel, proxy, port forward (as a verb — a Forward is held, not
+done), exposing, forwarding for the **Relay**
 
 **Merged List**:
 The conversations sidebar of a device that is in a cluster: every **Member**'s

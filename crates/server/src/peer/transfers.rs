@@ -875,7 +875,7 @@ mod tests {
         }
     }
 
-    /// And outside the three prefixes this device keeps to itself, which a
+    /// And outside the prefixes this device keeps to itself, which a
     /// route served on the one namespace a member never reaches would be
     /// nothing at all.
     #[test]
