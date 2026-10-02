@@ -1,0 +1,98 @@
+/* What this device is forwarding, at the foot of the sidebar beside the archived
+   switch. See `Forwarding.tsx`.
+
+   The card, the backdrop and the way it hangs over its trigger are the menu's —
+   `Menu.module.css`. What is here is the trigger, which reads as the line of
+   text it is, and the rows inside the card. */
+
+/* The item stands at the far end of the foot from the switch, on the line the
+   switch is on.
+
+   And it is not the box the card hangs from, which is the menu's ordinary way
+   round: the sidebar is the narrowest pane there is, and a card the width of
+   a hostname and a title hung off a trigger at its right edge runs out of the
+   pane's left side and is clipped there. So the card is positioned against the
+   foot instead — which is sticky, and so a box to position against — and
+   spans it, as wide as the pane and never wider. */
+.forwarding {
+  position: static;
+  margin-left: auto;
+}
+
+/* Words rather than a button, because it is a state this device is in that
+   happens to open onto more of itself: the size of the switch's own label and
+   quieter than it, and never on two lines. */
+.forwarding > button {
+  padding: 0.2rem 0.4rem;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+  white-space: nowrap;
+  background: none;
+  border: 0;
+  border-radius: 0.4rem;
+}
+
+.forwarding > button[aria-expanded="true"] {
+  color: var(--ink);
+}
+
+/* The card, across the foot from padding to padding. */
+.forwarding > [role="menu"] {
+  left: 1.25rem;
+  right: 1.25rem;
+}
+
+/* Every line of a row on one line, cut short rather than wrapped: a title that
+   wrapped would make one Forward look like two. */
+.forwarding [role="menuitem"] > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A skipped row is drawn as a row and dimmed: there is nothing listening here
+   for it, so it is not a link, and it says why in place of opening anything. */
+.skipped {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding: 0.4rem 0.6rem;
+  opacity: 0.6;
+}
+
+.port {
+  font-weight: 600;
+}
+
+.reason {
+  font-size: 0.85rem;
+  font-style: italic;
+}
+
+.device {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  min-width: 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+/* The mark sized against the line it stands in, as the sidebar's cards size
+   theirs. */
+.os {
+  flex: none;
+  width: 1em;
+  height: 1em;
+}
+
+.title {
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+@media (hover: hover) {
+  .forwarding > button:hover {
+    color: var(--accent);
+  }
+}

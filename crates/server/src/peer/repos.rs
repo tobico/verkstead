@@ -149,7 +149,7 @@ mod tests {
         );
     }
 
-    /// And it is outside the three prefixes this device keeps to itself, which is
+    /// And it is outside the prefixes this device keeps to itself, which is
     /// what it has to be: a reading served on the one namespace a member is never
     /// served would be a route nothing could ever reach.
     #[test]

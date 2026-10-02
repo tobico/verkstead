@@ -302,6 +302,11 @@ rustix = { version = "1", features = ["fs", "process", "pty", "termios"] }
 # type is denied to it, `Win32_System_Registry`, which is how it is kept off
 # the sign-in screen, and `Win32_UI_Shell`, which is the one call that deletes a
 # profile directory *and* the machine's record of where it was.
+#
+# `Win32_NetworkManagement_IpHelper` is the table of TCP listeners with the pid
+# that owns each, and `Win32_Networking_WinSock` the two address families it is
+# asked for by: what a terminal is listening on is that table matched against
+# its Job — see `src/terminals/ports.rs`.
 
 # `Win32_System_StationsAndDesktops` is the window station and the desktop a
 # process is on, and two things want it. `src/display.rs` asks whether this
@@ -314,7 +319,9 @@ rustix = { version = "1", features = ["fs", "process", "pty", "termios"] }
 # agent at all.
 windows-sys = { version = "0.61", features = [
   "Win32_Foundation",
+  "Win32_NetworkManagement_IpHelper",
   "Win32_NetworkManagement_NetManagement",
+  "Win32_Networking_WinSock",
   "Win32_Security",
   "Win32_Security_Authentication_Identity",
   "Win32_Security_Authorization",

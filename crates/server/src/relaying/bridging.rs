@@ -43,6 +43,14 @@
 //! untouched, and the browser's dial fails rather than opening onto a socket
 //! that says nothing. Nothing is upgraded on this side until the member has
 //! upgraded on that one.
+//!
+//! **And the join is not the attach sockets' alone.** A Forward's connections
+//! cross the link the same way, one upgrade each, and [`crossing`] is what joins
+//! them at both ends — the hub's accepted connection to the upgrade it carried
+//! it over, and the member's upgrade to its own loopback dial (ADR-0019,
+//! *Forwards*). Those are the hub's own dials rather than a browser's, so they
+//! never come through [`upgrading`] here: see [`crate::forwarding`] and
+//! [`crate::terminals::connect`].
 
 use axum::http::header::{CONNECTION, UPGRADE};
 use axum::http::{HeaderMap, StatusCode};
@@ -55,15 +63,16 @@ use verkstead_schema::ApiError;
 use crate::ui::refused;
 
 /// Whether the browser is asking for the protocol to change rather than making
-/// a call — which is every one of the three attach endpoints, and nothing else
-/// in the namespace.
+/// a call — which is every one of the three attach endpoints a browser dials.
+/// The one other upgrade in the namespace, a terminal's port, is a member's to
+/// dial rather than a browser's — see [`crate::terminals::connect`].
 ///
 /// Read the way [`axum::extract::ws::WebSocketUpgrade`] reads it, because it is
 /// the extractor at the far end of this hop: `Connection` naming `upgrade`
 /// among its tokens, and an `Upgrade` header to say what to. Which protocol is
 /// not this hop's business — the member is the one that has to agree to it — so
 /// the value itself is only carried.
-pub(super) fn upgrading(headers: &HeaderMap) -> bool {
+pub(crate) fn upgrading(headers: &HeaderMap) -> bool {
     headers.contains_key(UPGRADE) && names_upgrade(headers)
 }
 
@@ -148,7 +157,14 @@ pub(super) fn asking(headers: &HeaderMap) -> HeaderMap {
 /// asked for, so it gets the member's own — see this module's documentation. The
 /// browser's upgrade is dropped unused, which leaves the connection exactly what
 /// it was: one that answered a request and may answer another.
-pub(super) fn bridged(taking: OnUpgrade, answered: reqwest::Response) -> Response {
+///
+/// `attaching` is a terminal attach counted as relayed, and is held for exactly
+/// as long as the two halves are joined — see [`crate::forwarding::Attaching`].
+pub(super) fn bridged(
+    taking: OnUpgrade,
+    answered: reqwest::Response,
+    attaching: Option<crate::forwarding::Attaching>,
+) -> Response {
     if answered.status() != StatusCode::SWITCHING_PROTOCOLS {
         return super::handed_back(answered);
     }
@@ -188,6 +204,9 @@ pub(super) fn bridged(taking: OnUpgrade, answered: reqwest::Response) -> Respons
         };
 
         crossing(near, far).await;
+
+        // Let go of only once the two halves are, which is the socket closed.
+        drop(attaching);
     });
 
     switching
@@ -213,7 +232,15 @@ pub(super) fn bridged(taking: OnUpgrade, answered: reqwest::Response) -> Respons
 /// direction that ended is the direction that delivered it, so a member that
 /// closed its socket politely has already had its frame copied by the time this
 /// tears the pair down.
-async fn crossing(
+///
+/// **And a forwarded port's connection is joined the same way**, at both ends:
+/// on the member its own loopback dial and the upgrade it answered, see
+/// [`crate::terminals::connect`], and on the hub the connection a Forward's
+/// listener accepted and the upgrade it was carried over, see
+/// [`crate::forwarding`] — because it is the same promise about a
+/// different pair of sockets: nothing in the bytes is this device's business,
+/// and whichever end goes takes the other.
+pub(crate) async fn crossing(
     near: impl AsyncRead + AsyncWrite + Send + 'static,
     far: impl AsyncRead + AsyncWrite + Send + 'static,
 ) {

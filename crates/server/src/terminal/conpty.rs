@@ -73,7 +73,7 @@ use std::os::windows::process::ExitStatusExt;
 use std::process::ExitStatus;
 use std::ptr;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError, Weak};
 use std::time::Duration;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -354,7 +354,7 @@ impl Terminal {
 
         Ok(Child {
             id: information.dwProcessId,
-            job,
+            job: Arc::new(job),
             exited,
         })
     }
@@ -453,7 +453,7 @@ impl Terminal {
 
         Ok(Child {
             id: information.dwProcessId,
-            job,
+            job: Arc::new(job),
             exited,
         })
     }
@@ -568,7 +568,11 @@ pub struct Child {
     /// The Job everything this session starts is in. Dropping it closes the
     /// last handle to the Job, and a Job with no handles left kills what is
     /// inside it — see this module's own documentation.
-    job: Job,
+    ///
+    /// Shared only as [`Child::job`]'s weak word, which is what a terminal's
+    /// ports are read through. Nothing else holds it strongly, so dropping this
+    /// is still what kills.
+    job: Arc<Job>,
 
     /// How it ended, once it has — see [`Ended`].
     exited: watch::Receiver<Option<Ended>>,
@@ -613,6 +617,17 @@ impl Child {
     /// over is [`Child::wait`].
     pub fn start_kill(&mut self) -> io::Result<()> {
         self.job.terminate(KILLED)
+    }
+
+    /// The Job, as a word that does not keep it: its processes are the whole
+    /// of what a terminal is on this platform, which is what the terminal's
+    /// ports are read from — see [`crate::terminals::ports`].
+    ///
+    /// Weak, so that a read in the middle of a turn is never what holds a Job
+    /// open after its `Child` has been let go of: the reading upgrades it for
+    /// the length of one read and no longer.
+    pub(crate) fn job(&self) -> Weak<Job> {
+        Arc::downgrade(&self.job)
     }
 }
 
