@@ -22,6 +22,16 @@
 //! closes the modal, or when [`LIMIT`] has passed — a modal on a phone that
 //! went in a pocket says nothing as it goes.
 //!
+//! **A wrong code starts again by itself.** Claude Code 2.1.283 refuses a code
+//! two ways, checked against the real harness with a throwaway HOME. A code
+//! with no `#` in it — empty, or cut short — gets [`CUT_SHORT`] on standard
+//! error, and the harness goes on waiting on the same address. A code that is
+//! shaped right but wrong gets `Login failed: Request failed with status code
+//! 400` on standard error, and the harness exits `1`. The first is the modal
+//! back at the same address with a word about it; the second is a fresh
+//! harness with a fresh address, started once the first has gone, so that
+//! there is still only ever one per Profile.
+//!
 //! Claude only, and only a Profile at home on this device: a mirror's account
 //! is a copy, and a login written into a copy is one the next refresh from its
 //! home device writes over.
@@ -55,6 +65,19 @@ pub(crate) const LIMIT: Duration = Duration::from_secs(10 * 60);
 /// code, `Paste code here if prompted > `, with no line ending after it.
 const VISIT: &str = "visit: ";
 
+/// What the harness says on standard error to a code with no `#` in it, before
+/// it goes on waiting for another — see the module note.
+const CUT_SHORT: &str = "Invalid code";
+
+/// What the modal says when the harness asked again for a code cut short.
+const CUT_SHORT_SAID: &str =
+    "That is not the whole code. Copy all of it from the page and paste it again.";
+
+/// What the modal says when the harness refused a code and a fresh login has
+/// taken its place.
+const REFUSED_SAID: &str = "Claude did not accept that code. Open the new address below, \
+                            log in again, and paste the code it gives you.";
+
 /// The words of the harness's line a login runs.
 const LOGGING_IN: &[&str] = &["auth", "login", "--claudeai"];
 
@@ -85,6 +108,9 @@ struct Login {
     run: u64,
     state: LoginState,
     viewers: HashSet<String>,
+
+    /// The address the harness now running printed, once it has.
+    url: Option<String>,
 
     /// Where a code goes to be written to the harness. `None` once it has
     /// ended.
@@ -152,6 +178,7 @@ impl Logins {
                 run,
                 state: LoginState::Starting,
                 viewers,
+                url: None,
                 codes: Some(codes),
                 stop: Some(stop),
             },
@@ -239,12 +266,52 @@ impl Logins {
                 return;
             }
 
+            if let LoginState::Waiting { url, .. } = &state {
+                login.url = Some(url.clone());
+            }
+
             login.state = state;
         }
 
         run.nudges.announce_here(Nudge::Login {
             profile: run.profile.id,
         });
+    }
+
+    /// Whether `run`'s login is checking a code it was handed.
+    fn checking(&self, run: &Run) -> bool {
+        let held = self
+            .held
+            .lock()
+            .expect("the login register is not poisoned");
+
+        held.get(&run.profile.id)
+            .is_some_and(|login| login.run == run.run && login.state == LoginState::Checking)
+    }
+
+    /// The harness asked again for the code it was handed, which was cut
+    /// short: back to waiting on the address it already printed.
+    fn cut_short(&self, run: &Run) {
+        let url = {
+            let held = self
+                .held
+                .lock()
+                .expect("the login register is not poisoned");
+
+            held.get(&run.profile.id)
+                .filter(|login| login.run == run.run && login.state == LoginState::Checking)
+                .and_then(|login| login.url.clone())
+        };
+
+        if let Some(url) = url {
+            self.moved(
+                run,
+                LoginState::Waiting {
+                    url,
+                    refused: Some(CUT_SHORT_SAID.to_owned()),
+                },
+            );
+        }
     }
 
     /// `run`'s login has ended at `state`: nothing more is written to it and
@@ -272,12 +339,24 @@ impl Logins {
         self,
         run: Run,
         mut coded: mpsc::UnboundedReceiver<String>,
-        stopped: oneshot::Receiver<()>,
+        mut stopped: oneshot::Receiver<()>,
     ) {
-        let ending = self.logging_in(&run, &mut coded, stopped).await;
+        let mut refused = None;
+
+        let ending = loop {
+            match self
+                .logging_in(&run, &mut coded, &mut stopped, refused.take())
+                .await
+            {
+                // A fresh harness, now the one that refused the code has gone.
+                // The modal reads as checking until it prints its address.
+                Ending::Refused => refused = Some(REFUSED_SAID.to_owned()),
+                ending => break ending,
+            }
+        };
 
         let state = match ending {
-            Ending::Stopped => return,
+            Ending::Stopped | Ending::Refused => return,
             Ending::Failed(reason) => LoginState::Failed { reason },
             Ending::Exited => match checked(&run).await {
                 true => LoginState::LoggedIn,
@@ -302,7 +381,8 @@ impl Logins {
         &self,
         run: &Run,
         coded: &mut mpsc::UnboundedReceiver<String>,
-        mut stopped: oneshot::Receiver<()>,
+        stopped: &mut oneshot::Receiver<()>,
+        refused: Option<String>,
     ) -> Ending {
         let agents = run.agents.clone();
         let profile = run.profile.clone();
@@ -354,36 +434,43 @@ impl Logins {
         // no line ending, which a read waiting for one would wait on for ever.
         if let Some(stdout) = child.stdout.take() {
             let logins = self.clone();
-            let shown = Run {
-                agents: run.agents.clone(),
-                nudges: run.nudges.clone(),
-                profile: run.profile.clone(),
-                run: run.run,
-            };
+            let shown = run.again();
 
             tokio::spawn(async move {
                 let mut lines = BufReader::new(stdout).lines();
 
                 while let Ok(Some(line)) = lines.next_line().await {
                     if let Some(url) = address_in(&line) {
-                        logins.moved(&shown, LoginState::Waiting { url });
+                        logins.moved(
+                            &shown,
+                            LoginState::Waiting {
+                                url,
+                                refused: refused.clone(),
+                            },
+                        );
                     }
                 }
             });
         }
 
         // And what it says on standard error, kept for the reason a failure
-        // gives.
+        // gives — and watched for a code it is asking for again.
         let said = Arc::new(Mutex::new(Vec::<String>::new()));
 
         if let Some(stderr) = child.stderr.take() {
             let said = said.clone();
+            let logins = self.clone();
+            let shown = run.again();
 
             tokio::spawn(async move {
                 let mut lines = BufReader::new(stderr).lines();
 
                 while let Ok(Some(line)) = lines.next_line().await {
                     let line = line.trim().to_owned();
+
+                    if line.starts_with(CUT_SHORT) {
+                        logins.cut_short(&shown);
+                    }
 
                     if !line.is_empty() {
                         said.lock().expect("not poisoned").push(line);
@@ -399,6 +486,16 @@ impl Logins {
             tokio::select! {
                 exited = child.wait() => break match exited {
                     Ok(status) if status.success() => Ending::Exited,
+                    // Exiting badly with a code in hand is the harness
+                    // refusing it — see the module note.
+                    Ok(status) if self.checking(run) => {
+                        tracing::info!(
+                            profile_id = run.profile.id,
+                            said = %failure(status, &said),
+                            "a login code was refused; starting a fresh login"
+                        );
+                        Ending::Refused
+                    }
                     Ok(status) => Ending::Failed(failure(status, &said)),
                     Err(error) => Ending::Failed(format!("Claude could not be waited on: {error}")),
                 },
@@ -420,7 +517,7 @@ impl Logins {
                     }
                 }
 
-                _ = &mut stopped => {
+                _ = &mut *stopped => {
                     let _ = child.kill().await;
                     break Ending::Stopped;
                 }
@@ -449,12 +546,27 @@ struct Run {
     run: u64,
 }
 
+impl Run {
+    /// The same run, for a task of its own to report on.
+    fn again(&self) -> Run {
+        Run {
+            agents: self.agents.clone(),
+            nudges: self.nudges.clone(),
+            profile: self.profile.clone(),
+            run: self.run,
+        }
+    }
+}
+
 enum Ending {
     /// The harness exited cleanly, which is the half of success it can say.
     Exited,
 
     /// It ended without a login, for the reason given.
     Failed(String),
+
+    /// It refused the code it was handed and exited, and a fresh one is due.
+    Refused,
 
     /// The last device closed the modal, and nobody is left to tell.
     Stopped,

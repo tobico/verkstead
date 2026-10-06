@@ -67,9 +67,17 @@ export function LoggingIn(props: {
     enabled: open.isSuccess,
   }));
 
+  const [code, setCode] = createSignal("");
+
+  // The box is emptied once a code is handed over: one the harness refuses
+  // comes back as a word above the box, and the next is pasted into an empty
+  // one.
   const send = useMutation(() => ({
     mutationFn: (code: string) => sendLoginCode(props.profile, code),
-    onSuccess: settled,
+    onSuccess: (state: LoginState) => {
+      setCode("");
+      settled(state);
+    },
   }));
 
   onMount(() => open.mutate());
@@ -79,8 +87,6 @@ export function LoggingIn(props: {
   onCleanup(() => {
     void closeLogin(props.profile, viewer).catch(() => {});
   });
-
-  const [code, setCode] = createSignal("");
 
   const state = (): LoginState | null =>
     login.data ?? open.data ?? null;
@@ -109,6 +115,9 @@ export function LoggingIn(props: {
                 }
               }}
             >
+              <Show when={waiting().refused}>
+                {(why) => <p class={styles.refused}>{why()}</p>}
+              </Show>
               <p class={styles.said}>
                 1. Open this page and log in. It gives you a code.
               </p>

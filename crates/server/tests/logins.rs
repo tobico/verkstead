@@ -34,12 +34,18 @@ use verkstead_server::{Agents, Gh, open_database, router_running_sessions, store
 /// How long anything here is waited for before the test says what it saw.
 const WAITING: Duration = Duration::from_secs(20);
 
-/// The code the stub takes. Any other is refused.
-const GOOD_CODE: &str = "good-code";
+/// The code the stub takes. Any other is refused, the way Claude Code 2.1.283
+/// refuses one — see [`stub`].
+const GOOD_CODE: &str = "good#code";
 
 /// What stands where `claude` goes. `$0` and `$1` are the words after it —
 /// `auth login` or `auth status` — and the marker is in the script's own text,
 /// which is what a process is found by on the host — see [`running`].
+///
+/// A wrong code is refused the two ways Claude Code 2.1.283 refuses one: a
+/// code with no `#` in it is not a code at all, and is asked for again on the
+/// same address; one that is shaped right but wrong is a failed login, and the
+/// harness exits.
 fn stub(marker: &str) -> String {
     format!(
         r#"# {marker}
@@ -49,8 +55,13 @@ login)
   echo "Opening browser to sign in..."
   echo "If the browser didn't open, visit: https://claude.com/cai/oauth/authorize?code=true&state=$(od -An -N4 -tu4 /dev/urandom | tr -d ' ')"
   printf 'Paste code here if prompted > '
-  read code
-  [ "$code" = "{GOOD_CODE}" ] || {{ echo "Invalid code" >&2; exit 1; }}
+  while read code; do
+    case "$code" in
+    *#*) break ;;
+    *) echo "Invalid code. Please make sure the full code was copied." >&2 ;;
+    esac
+  done
+  [ "$code" = "{GOOD_CODE}" ] || {{ echo "Login failed: Request failed with status code 400" >&2; exit 1; }}
   printf '{{"claudeAiOauth":{{"accessToken":"%s"}}}}' "$code" > "$HOME/.claude/.credentials.json"
   ;;
 status)
@@ -284,7 +295,7 @@ impl Workbench {
             })
             .await
         {
-            Some(LoginState::Waiting { url }) => url,
+            Some(LoginState::Waiting { url, .. }) => url,
             _ => unreachable!(),
         }
     }
@@ -363,6 +374,87 @@ async fn a_code_handed_to_the_login_leaves_the_login_in_the_account() {
 }
 
 #[tokio::test]
+async fn a_refused_code_starts_a_fresh_login_with_a_new_address() {
+    let workbench = Workbench::new(Duration::from_secs(600)).await;
+    let profile = workbench.claude_profile("work").await;
+
+    workbench.opened(profile, "laptop").await;
+    let first = workbench.waiting(profile).await;
+
+    let (status, said) = workbench.coded(profile, "wrong#code").await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+
+    let again = workbench
+        .read_until(
+            profile,
+            |reading| matches!(reading, Some(LoginState::Waiting { url, .. }) if url != &first),
+        )
+        .await;
+
+    let Some(LoginState::Waiting { refused, .. }) = again else {
+        unreachable!()
+    };
+    let refused = refused.expect("the modal is told the code was refused");
+    assert!(refused.contains("did not accept"), "{refused}");
+
+    assert_eq!(workbench.started(profile), 2, "a second login was started");
+    assert_eq!(workbench.running(), 1, "and only once the first had gone");
+    assert_eq!(workbench.login_of("work"), None);
+
+    let (status, said) = workbench.coded(profile, GOOD_CODE).await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+
+    workbench
+        .read_until(profile, |reading| reading == &Some(LoginState::LoggedIn))
+        .await;
+    assert!(workbench.login_of("work").is_some());
+
+    workbench.closed(profile, "laptop").await;
+    workbench.none_running().await;
+}
+
+#[tokio::test]
+async fn a_code_cut_short_is_asked_for_again_on_the_same_address() {
+    let workbench = Workbench::new(Duration::from_secs(600)).await;
+    let profile = workbench.claude_profile("work").await;
+
+    workbench.opened(profile, "laptop").await;
+    let url = workbench.waiting(profile).await;
+
+    let (status, said) = workbench.coded(profile, "good").await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+
+    let again = workbench
+        .read_until(profile, |reading| {
+            matches!(
+                reading,
+                Some(LoginState::Waiting {
+                    refused: Some(_),
+                    ..
+                })
+            )
+        })
+        .await;
+
+    let Some(LoginState::Waiting { url: same, refused }) = again else {
+        unreachable!()
+    };
+    assert_eq!(same, url);
+    let refused = refused.unwrap();
+    assert!(refused.contains("whole code"), "{refused}");
+    assert_eq!(workbench.started(profile), 1);
+
+    let (status, said) = workbench.coded(profile, GOOD_CODE).await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+
+    workbench
+        .read_until(profile, |reading| reading == &Some(LoginState::LoggedIn))
+        .await;
+
+    workbench.closed(profile, "laptop").await;
+}
+
+#[tokio::test]
 async fn a_second_device_joins_the_login_already_running() {
     let workbench = Workbench::new(Duration::from_secs(600)).await;
     let profile = workbench.claude_profile("work").await;
@@ -372,7 +464,10 @@ async fn a_second_device_joins_the_login_already_running() {
 
     assert_eq!(
         workbench.opened(profile, "phone").await,
-        LoginState::Waiting { url: url.clone() },
+        LoginState::Waiting {
+            url: url.clone(),
+            refused: None
+        },
         "the phone is shown the address the laptop's login printed"
     );
     assert_eq!(
@@ -387,7 +482,7 @@ async fn a_second_device_joins_the_login_already_running() {
     tokio::time::sleep(Duration::from_millis(200)).await;
     assert_eq!(
         workbench.reading(profile).await,
-        Some(LoginState::Waiting { url })
+        Some(LoginState::Waiting { url, refused: None })
     );
     assert_eq!(workbench.running(), 1);
 

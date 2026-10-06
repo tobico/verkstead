@@ -52,6 +52,11 @@ device can open.
   `claude auth status`, which exits `0` only for an account that is logged in.
   It is asked in a fresh root, which is the login as the next session will be
   given it.
+  A wrong code is refused one of two ways. A code with no `#` in it gets
+  `Invalid code` and the harness waits on the same address; one shaped right
+  but wrong gets `Login failed: …` and the harness exits `1`. The modal says
+  so either way, and the second starts a fresh login with a fresh address once
+  the old one has gone.
 
 - **One login per Profile.** A second device opening the modal joins the login
   already running and sees the same address. A second process would print a

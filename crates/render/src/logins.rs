@@ -21,6 +21,10 @@ pub enum LoginState {
     Waiting {
         /// The address, as the harness printed it.
         url: String,
+
+        /// Why the last code handed over was not taken, in the words the
+        /// modal shows — where one was handed over and was not.
+        refused: Option<String>,
     },
 
     /// A code has been handed over, and the harness is checking it.

@@ -3396,7 +3396,12 @@ export type LoginState = { "state": "Starting" } | { "state": "Waiting",
 /**
  * The address, as the harness printed it.
  */
-url: string, } | { "state": "Checking" } | { "state": "LoggedIn" } | { "state": "Failed", 
+url: string, 
+/**
+ * Why the last code handed over was not taken, in the words the
+ * modal shows — where one was handed over and was not.
+ */
+refused: string | null, } | { "state": "Checking" } | { "state": "LoggedIn" } | { "state": "Failed", 
 /**
  * What happened, in the words the modal shows.
  */
