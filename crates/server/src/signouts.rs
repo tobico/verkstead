@@ -30,11 +30,24 @@
 //! picks the new login up: on Linux the old session's bind still holds the old
 //! file.
 //!
+//! **A sign-out after a fresh login resumes by itself.** A session can sign
+//! out after the human has already logged in again: its root was built before
+//! the login, and on Linux it still holds the old file. So the account's login
+//! is read as the root is built — see [`Login`] — and where it has been
+//! replaced by the time the session signs out, the stop is one nobody chose
+//! and nobody is woken for. Its Notice says why, and the run is started again
+//! the moment the session has gone — see [`carrying_on`].
+//!
 //! **Claude only.** The other harnesses log in differently, and none of them
 //! has a login Verkstead can run yet — so they have no phrase, and a session on
 //! one is never stopped here.
 
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant, SystemTime};
+
 use sqlx::SqlitePool;
+use tokio::sync::mpsc;
 
 use crate::AppState;
 use crate::limits::{DECORATION, Held};
@@ -102,6 +115,96 @@ pub(crate) enum Home {
     Away(String),
 }
 
+/// The account's login file as it was when a session's root was built, so that
+/// a sign-out can tell a login replaced since from the one it was given.
+///
+/// Only a Claude account at home here: a mirror's file is a copy refreshed
+/// before each launch, and the other harnesses are never stopped here at all.
+#[derive(Debug, Clone)]
+pub(crate) struct Login {
+    path: PathBuf,
+
+    /// When it was last written, or `None` where there was no login then.
+    built: Option<SystemTime>,
+}
+
+impl Login {
+    /// Read the login of `profile`'s account now, just before its root is
+    /// built — or `None` where a sign-out on it cannot resume by itself.
+    pub(crate) fn before_building(profile: &store::Profile) -> Option<Login> {
+        if profile.mirror.is_some() || signed_out_phrase(profile.agent_type()).is_none() {
+            return None;
+        }
+
+        let path = crate::sandbox::root::login_at(&profile.account);
+        let built = written(&path);
+
+        Some(Login { path, built })
+    }
+
+    /// Whether the login has been replaced since the root was built.
+    fn replaced(&self) -> bool {
+        newer(self.built, written(&self.path))
+    }
+}
+
+/// When the file at `path` was last written, or `None` where there is none.
+fn written(path: &std::path::Path) -> Option<SystemTime> {
+    std::fs::metadata(path)
+        .and_then(|metadata| metadata.modified())
+        .ok()
+}
+
+/// Whether a login written at `now` is newer than the one written at `built`:
+/// one that has appeared since, or one written later.
+fn newer(built: Option<SystemTime>, now: Option<SystemTime>) -> bool {
+    match (built, now) {
+        (_, None) => false,
+        (None, Some(_)) => true,
+        (Some(built), Some(now)) => now > built,
+    }
+}
+
+/// The runs stopped because their session signed out on a login that had
+/// already been replaced, on their way to [`carrying_on`].
+///
+/// Held by the sessions register, which is where a session's relay can reach
+/// it from; read by the one task that has the whole of the server to resume
+/// with. Every clone is the same channel.
+#[derive(Clone)]
+pub(crate) struct Late {
+    sender: mpsc::UnboundedSender<i64>,
+    receiver: Arc<Mutex<Option<mpsc::UnboundedReceiver<i64>>>>,
+}
+
+impl Default for Late {
+    fn default() -> Late {
+        let (sender, receiver) = mpsc::unbounded_channel();
+
+        Late {
+            sender,
+            receiver: Arc::new(Mutex::new(Some(receiver))),
+        }
+    }
+}
+
+impl Late {
+    /// Say that `conversation_id` is to carry on once its session has gone.
+    fn carry_on(&self, conversation_id: i64) {
+        // A send that fails is a server with nothing listening, which is one
+        // running no sessions: the stop stays, and a restart takes it up.
+        let _ = self.sender.send(conversation_id);
+    }
+
+    /// The reading end, to the first that asks.
+    fn taken(&self) -> Option<mpsc::UnboundedReceiver<i64>> {
+        self.receiver
+            .lock()
+            .expect("the late sign-outs are not poisoned")
+            .take()
+    }
+}
+
 /// One session, watched for the line that says its account signed out.
 ///
 /// Held by the relay beside [`crate::limits::Watch`] and fed the same records.
@@ -122,6 +225,13 @@ pub(crate) struct Watch {
     /// The phrase, off the agent the Profile runs — see [`signed_out_phrase`].
     phrase: Option<&'static str>,
 
+    /// The account's login as the root was built, where a sign-out may find it
+    /// replaced since — see [`Login`].
+    login: Option<Login>,
+
+    /// And where a run stopped on a replaced login is sent to carry on.
+    late: Late,
+
     printed: Held,
 
     /// Whether the line on screen now has already been stopped on — see
@@ -131,7 +241,9 @@ pub(crate) struct Watch {
 
 impl Watch {
     /// Watch the session printing into `event_id`, run under the Profile
-    /// `profile_id`, called `profile`, which runs `agent_type`.
+    /// `profile_id`, called `profile`, which runs `agent_type`. `login` is the
+    /// account's login as the session's root was built.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn on(
         conversation_id: i64,
         event_id: i64,
@@ -139,6 +251,8 @@ impl Watch {
         profile: String,
         home: Home,
         agent_type: store::AgentType,
+        login: Option<Login>,
+        late: Late,
     ) -> Watch {
         Watch {
             conversation_id,
@@ -147,6 +261,8 @@ impl Watch {
             profile,
             home,
             phrase: signed_out_phrase(agent_type),
+            login,
+            late,
             printed: Held::default(),
             raised: false,
         }
@@ -216,6 +332,12 @@ async fn signed_out(pool: &SqlitePool, nudges: &Nudges, watch: &Watch, said: &st
         }
     };
 
+    // Read now rather than as the line arrived: a login that lands while the
+    // session is saying so is one the next session is given.
+    if watch.login.as_ref().is_some_and(Login::replaced) {
+        return late(pool, nudges, watch, said, lifecycle).await;
+    }
+
     let home = match &watch.home {
         Home::Here => None,
         Home::Away(device) => Some(home_named(pool, device).await),
@@ -258,6 +380,120 @@ async fn signed_out(pool: &SqlitePool, nudges: &Nudges, watch: &Watch, said: &st
             tracing::error!(error = ?error, conversation_id, "a run could not be stopped on a sign-out");
             false
         }
+    }
+}
+
+/// Stop the run whose session signed out on a login that has since been
+/// replaced, and send it on to carry on with the new one.
+///
+/// A stop nobody chose, so nobody is woken and a restart takes it up unasked:
+/// what it is waiting for is the session to go, not the human. The Notice says
+/// why the run went on by itself. `true` on every way of returning but a stop
+/// that could not be written, as [`signed_out`].
+async fn late(
+    pool: &SqlitePool,
+    nudges: &Nudges,
+    watch: &Watch,
+    said: &str,
+    lifecycle: store::Lifecycle,
+) -> bool {
+    let conversation_id = watch.conversation_id;
+
+    let stopped = crate::stopping::stop(
+        pool,
+        nudges,
+        conversation_id,
+        crate::stopping::Decided::Nobody,
+        crate::stalls::driving(lifecycle),
+        &crate::stopping::signed_out_since(&watch.profile, said),
+        Some(watch.event_id),
+    )
+    .await;
+
+    match stopped {
+        Ok(None) => {
+            tracing::info!(
+                conversation_id,
+                session = watch.event_id,
+                "an account signed out on a run that had already stopped"
+            );
+            true
+        }
+        Ok(Some(notice)) => {
+            tracing::info!(
+                conversation_id,
+                notice,
+                session = watch.event_id,
+                profile = watch.profile,
+                "a session signed out on a login since replaced, so the run carries on"
+            );
+            watch.late.carry_on(conversation_id);
+            true
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "a run could not be stopped on a sign-out");
+            false
+        }
+    }
+}
+
+/// How long a run stopped on a replaced login waits for its session, and for
+/// whatever was driving it, to let go before it is started again anyway.
+const LETTING_GO: Duration = Duration::from_secs(30);
+
+/// How often it looks.
+const LOOKING_EVERY: Duration = Duration::from_millis(100);
+
+/// Start again every run a late sign-out stopped, from now until the process
+/// stops — see [`Late`].
+///
+/// Nothing on a server that runs no sessions, which has no sign-out to hear.
+pub(crate) fn carrying_on(state: &AppState) {
+    let Some(mut late) = state.sessions.late().taken() else {
+        return;
+    };
+
+    let state = state.clone();
+
+    tokio::spawn(async move {
+        while let Some(conversation_id) = late.recv().await {
+            tokio::spawn(carry_on(state.clone(), conversation_id));
+        }
+    });
+}
+
+/// Start `conversation_id` again through Resume, once the session that signed
+/// out has gone and the driver that launched it has let go.
+///
+/// Waited for because a driver still holding on is one that may yet launch its
+/// own next step over the stop Resume has just taken away. A wrap-up's
+/// watchers may hold on long after, which is what the limit is for: Resume
+/// over a driver that is still registered is what the press does too.
+async fn carry_on(state: AppState, conversation_id: i64) {
+    let deadline = Instant::now() + LETTING_GO;
+
+    while (state.sessions.working().contains(&conversation_id)
+        || state.drivers.registered(conversation_id))
+        && Instant::now() < deadline
+    {
+        tokio::time::sleep(LOOKING_EVERY).await;
+    }
+
+    match crate::resume::resume(&state, conversation_id, crate::resume::Resuming::LoggedIn).await {
+        Ok(verkstead_render::Resumed::Resumed) => tracing::info!(
+            conversation_id,
+            "a run that signed out on a login since replaced is being driven again"
+        ),
+        Ok(refusal) => tracing::warn!(
+            conversation_id,
+            ?refusal,
+            "a run that signed out on a login since replaced could not be started again"
+        ),
+        Err(error) => tracing::error!(
+            error = ?error,
+            conversation_id,
+            "starting a run that signed out on a login since replaced failed"
+        ),
     }
 }
 
@@ -328,6 +564,33 @@ mod tests {
         saying(text, signed_out_phrase(Claude))
     }
 
+    fn watching() -> Watch {
+        Watch::on(
+            1,
+            2,
+            3,
+            "fable".to_owned(),
+            Home::Here,
+            Claude,
+            None,
+            Late::default(),
+        )
+    }
+
+    /// A login is newer where it has appeared since the root was built, or was
+    /// written later; one that is unchanged, or gone, is not.
+    #[test]
+    fn a_login_is_newer_where_it_was_written_since() {
+        let built = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000);
+        let later = built + Duration::from_secs(1);
+
+        assert!(newer(None, Some(built)), "appeared since");
+        assert!(newer(Some(built), Some(later)), "written since");
+        assert!(!newer(Some(built), Some(built)), "unchanged");
+        assert!(!newer(None, None), "never there");
+        assert!(!newer(Some(built), None), "gone");
+    }
+
     /// The lines claude 2.1.283 ends with the phrase, as it draws them.
     #[test]
     fn the_lines_claude_draws_when_its_login_is_gone_are_recognised() {
@@ -392,7 +655,7 @@ mod tests {
     /// A line split across two chunks is still one line.
     #[test]
     fn a_line_split_across_two_chunks_is_still_one_line() {
-        let mut watch = Watch::on(1, 2, 3, "fable".to_owned(), Home::Here, Claude);
+        let mut watch = watching();
 
         watch.printed("Login expired · Please r");
         watch.printed.looked();
@@ -405,7 +668,7 @@ mod tests {
     /// And the frame and the log are read as well as the terminal.
     #[test]
     fn the_frame_and_the_log_are_read_too() {
-        let watch = Watch::on(1, 2, 3, "fable".to_owned(), Home::Here, Claude);
+        let watch = watching();
         let line = "Not logged in · Please run /login";
 
         assert!(watch.found(line, None).is_some(), "the frame");

@@ -1184,6 +1184,11 @@ pub(crate) struct Sessions {
 
     /// Whose turn it is in each Conversation's Worktree — see [`Sessions::turn`].
     turns: Arc<Mutex<HashMap<i64, Arc<tokio::sync::Mutex<()>>>>>,
+
+    /// And the runs a session stopped by signing out on a login that had
+    /// already been replaced, to be started again once it has gone — see
+    /// [`crate::signouts::Late`].
+    late: crate::signouts::Late,
 }
 
 /// The Worktree of one Conversation, held for as long as one thing is using it.
@@ -1998,6 +2003,7 @@ impl Sessions {
             running: Arc::new(Mutex::new(HashMap::new())),
             launching: Arc::new(Mutex::new(HashMap::new())),
             turns: Arc::new(Mutex::new(HashMap::new())),
+            late: crate::signouts::Late::default(),
         }
     }
 
@@ -2038,6 +2044,7 @@ impl Sessions {
             running: Arc::new(Mutex::new(HashMap::new())),
             launching: Arc::new(Mutex::new(HashMap::new())),
             turns: Arc::new(Mutex::new(HashMap::new())),
+            late: crate::signouts::Late::default(),
         }
     }
 
@@ -2415,6 +2422,12 @@ impl Sessions {
     /// and there is no session for Resume to start.
     pub(crate) fn runs_sessions(&self) -> bool {
         self.agents.is_some()
+    }
+
+    /// Where a run stopped on a replaced login is sent to carry on — see
+    /// [`crate::signouts::carrying_on`], the one reader.
+    pub(crate) fn late(&self) -> &crate::signouts::Late {
+        &self.late
     }
 
     /// The pace the runner works a backlog at — see [`Agents::pace`].
@@ -2869,6 +2882,11 @@ impl Sessions {
             &crate::transfers::may_go_to(pool, devices, conversation_id).await,
         );
 
+        // The account's login as it is now, before the root is built from it: a
+        // sign-out that finds it replaced since is one the run carries on from
+        // by itself — see [`crate::signouts::Login`].
+        let login = crate::signouts::Login::before_building(&pairing.profile);
+
         // The sandbox asks git where the worktree's object database is, and the
         // dev-shell question is a `nix eval` or two. The line itself blocks on
         // the platform that writes the prompt to a file — see [`Agents::argv`].
@@ -3171,6 +3189,8 @@ impl Sessions {
                 Some(mirror) => crate::signouts::Home::Away(mirror.device.clone()),
             },
             pairing.profile.agent_type(),
+            login,
+            self.late.clone(),
         );
 
         let (stop, stopping) = oneshot::channel();

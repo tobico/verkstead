@@ -643,6 +643,17 @@ pub(crate) fn signed_out(profile: &str, said: &str, home: Option<&str>) -> Strin
     format!("the account **{profile}** has signed out: {said}\n\n{login}")
 }
 
+/// Why a run stopped when its session signed out on a login that had already
+/// been replaced: which account, the line the session printed, and that the
+/// run carries on with the new login without anybody doing anything.
+pub(crate) fn signed_out_since(profile: &str, said: &str) -> String {
+    format!(
+        "the account **{profile}** signed out in this session: {said}\n\n\
+         It was logged in again after the session started, so the run carries on by itself \
+         with the new login."
+    )
+}
+
 /// The stop with its first letter up, because it opens the sentence the Notice
 /// is. Every caller names it the way the log does — "implementing the work" —
 /// and a Notice opening in lower case would read as half a line.

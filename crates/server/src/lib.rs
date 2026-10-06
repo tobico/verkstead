@@ -1615,6 +1615,11 @@ fn standing(
     // waiting for a line nobody is going to type.
     nudging::listening(&state);
 
+    // And the task that starts again a run whose session signed out on a login
+    // that had already been replaced, once that session has gone — see
+    // [`signouts::carrying_on`].
+    signouts::carrying_on(&state);
+
     // And the lists this device holds of its members, which is what the sidebar
     // is merged out of: read once now, and again whenever a member says
     // something its own sidebar would be re-read on (ADR-0020, *The opened

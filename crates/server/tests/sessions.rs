@@ -17137,6 +17137,107 @@ async fn a_login_resumes_every_run_it_unblocks() {
     }
 }
 
+/// A stub whose implementation sessions say they have started, wait for the
+/// test's word, and sign out unless the login they were given is
+/// [`GOOD_CODE`] — recording it in `spill` where it is.
+fn signed_out_after_starting(spill: &Path) -> String {
+    let spill = spill.display();
+
+    format!(
+        r#"
+case "$1" in
+claude-grilling-5) ;;
+*)
+    : > {spill}/started
+    while [ ! -e {spill}/go ]; do sleep 0.1; done
+    if ! grep -qs '{GOOD_CODE}' "$HOME/.claude/.credentials.json"; then
+        for pass in 1 2 3 4; do
+            printf '  ⎿  Login expired · Please run /login\r\n'
+            sleep 0.25
+        done
+        sleep 300
+    fi
+    cat "$HOME/.claude/.credentials.json" > {spill}/implemented
+    ;;
+esac
+{rest}
+"#,
+        rest = out_of_window_saying(":"),
+    )
+}
+
+/// A session that signs out after the account was logged in again — its root
+/// built before the login — resumes straight away: no Log in, no push, and the
+/// Timeline says why. The session started in its place is given the new login.
+#[tokio::test]
+async fn a_sign_out_after_a_fresh_login_resumes_by_itself() {
+    let spill = tempfile::tempdir().unwrap();
+    let stub = signed_out_after_starting(spill.path());
+    let spilled = spill.path().to_owned();
+
+    let fixture = grilling_spilling(spill, &stub, PULL_REQUEST).await;
+
+    running_out(&fixture).await;
+
+    let (service, taken) = push_service().await;
+    let phone = Device::new(&service, "phone");
+    fixture.subscribe(&phone).await;
+
+    let deadline = Instant::now() + *PATIENCE;
+    while !spilled.join("started").exists() {
+        assert!(
+            Instant::now() < deadline,
+            "the implementation session never started"
+        );
+        pause(Duration::from_millis(25)).await;
+    }
+
+    // Logged in again behind the running session's back, the way the Profile
+    // card's Log in leaves the account.
+    let account = fixture._elsewhere.path().join("implementation/.claude");
+    std::fs::write(account.join(".credentials.json.new"), GOOD_CODE).unwrap();
+    std::fs::rename(
+        account.join(".credentials.json.new"),
+        account.join(".credentials.json"),
+    )
+    .unwrap();
+
+    std::fs::write(spilled.join("go"), "").unwrap();
+
+    let deadline = Instant::now() + *PATIENCE;
+    let implemented = spilled.join("implemented");
+    while !std::fs::read_to_string(&implemented).is_ok_and(|login| login.contains(GOOD_CODE)) {
+        assert!(
+            Instant::now() < deadline,
+            "the run never carried on with the new login: {}",
+            standing(&fixture.view().await),
+        );
+        pause(Duration::from_millis(25)).await;
+    }
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        view.blocked_on, None,
+        "nothing is left waiting on the human"
+    );
+
+    let said = said(&view);
+    assert_eq!(said.len(), 1, "one Notice: {:?}", notices(&view));
+    assert!(
+        said[0].html.contains("logged in again"),
+        "the Timeline says why the run carried on: {:?}",
+        said[0].html,
+    );
+    assert_eq!(said[0].log_in, None, "and offers no Log in");
+
+    assert_eq!(
+        taken.lock().unwrap().len(),
+        0,
+        "nobody is woken for a run that carried on by itself",
+    );
+}
+
 /// The wording is the backend's, so a Codex session is stopped by codex's own
 /// sentence — and by that one alone.
 ///
