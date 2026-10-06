@@ -634,7 +634,7 @@ pub(crate) fn out_of_window(profile: &str, said: &str) -> String {
 /// Profile at home here, whose Notice carries the Log in press instead.
 pub(crate) fn signed_out(profile: &str, said: &str, home: Option<&str>) -> String {
     let login = match home {
-        None => "Log in, then press Resume.".to_owned(),
+        None => "Log in, and the run carries on by itself.".to_owned(),
         Some(home) => format!(
             "The account is at home on **{home}**, so log in there, then press Resume here."
         ),
@@ -806,7 +806,7 @@ mod tests {
         assert_eq!(
             signed_out("fable", "Login expired · Please run /login", None),
             "the account **fable** has signed out: Login expired · Please run /login\n\n\
-             Log in, then press Resume.",
+             Log in, and the run carries on by itself.",
         );
         assert_eq!(
             signed_out(

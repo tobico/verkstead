@@ -5393,7 +5393,7 @@ async fn login_opened(
     Json(
         state
             .logins
-            .opened(agents, state.nudges.clone(), profile, opened.viewer),
+            .opened(state.clone(), agents, profile, opened.viewer),
     )
     .into_response()
 }

@@ -32,6 +32,9 @@
 //! harness with a fresh address, started once the first has gone, so that
 //! there is still only ever one per Profile.
 //!
+//! **A login that lands resumes what it unblocks**: every run on the Profile
+//! stopped as Signed out — see [`crate::signouts::logged_in`].
+//!
 //! Claude only, and only a Profile at home on this device: a mirror's account
 //! is a copy, and a login written into a copy is one the next refresh from its
 //! home device writes over.
@@ -47,7 +50,7 @@ use tokio::sync::{mpsc, oneshot};
 use verkstead_render::LoginState;
 use verkstead_schema::Nudge;
 
-use crate::nudge::Nudges;
+use crate::AppState;
 use crate::sessions::Agents;
 use crate::store;
 
@@ -145,8 +148,8 @@ impl Logins {
     /// wants to log in, whatever the last one came to.
     pub(crate) fn opened(
         &self,
+        state: AppState,
         agents: Arc<Agents>,
-        nudges: Nudges,
         profile: store::Profile,
         viewer: String,
     ) -> LoginState {
@@ -186,8 +189,8 @@ impl Logins {
 
         tokio::spawn(self.clone().running(
             Run {
+                state,
                 agents,
-                nudges,
                 profile,
                 run,
             },
@@ -273,7 +276,7 @@ impl Logins {
             login.state = state;
         }
 
-        run.nudges.announce_here(Nudge::Login {
+        run.state.nudges.announce_here(Nudge::Login {
             profile: run.profile.id,
         });
     }
@@ -371,7 +374,12 @@ impl Logins {
         if state == LoginState::LoggedIn {
             // The Profile's row says whether its account has a login, and now
             // it has.
-            run.nudges.announce_here(Nudge::Profiles);
+            run.state.nudges.announce_here(Nudge::Profiles);
+
+            tokio::spawn(crate::signouts::logged_in(
+                run.state.clone(),
+                run.profile.id,
+            ));
         }
 
         self.ended(&run, state);
@@ -540,8 +548,8 @@ impl Logins {
 
 /// One login's run: what it was started with, and which run it is.
 struct Run {
+    state: AppState,
     agents: Arc<Agents>,
-    nudges: Nudges,
     profile: store::Profile,
     run: u64,
 }
@@ -550,8 +558,8 @@ impl Run {
     /// The same run, for a task of its own to report on.
     fn again(&self) -> Run {
         Run {
+            state: self.state.clone(),
             agents: self.agents.clone(),
-            nudges: self.nudges.clone(),
             profile: self.profile.clone(),
             run: self.run,
         }

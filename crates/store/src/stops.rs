@@ -625,6 +625,26 @@ pub async fn stopped(pool: &SqlitePool, conversation_id: i64) -> Result<Option<S
     }))
 }
 
+/// The Conversations stopped as Signed out waiting on a login to `profile`, in
+/// the order they were started — what a login on that Profile resumes.
+///
+/// Nothing else is: a run stopped for any other reason is waiting on something
+/// a login does not fix, and one waiting on another Profile is waiting on
+/// another account.
+pub async fn signed_out_on(pool: &SqlitePool, profile: i64) -> Result<Vec<i64>> {
+    let rows: Vec<(i64,)> = sqlx::query_as(
+        "SELECT id FROM conversations
+          WHERE stopped_at IS NOT NULL AND stopped_signed_out = ?
+          ORDER BY id",
+    )
+    .bind(profile)
+    .fetch_all(pool)
+    .await
+    .with_context(|| format!("reading the runs waiting on a login to Profile {profile}"))?;
+
+    Ok(rows.into_iter().map(|(id,)| id).collect())
+}
+
 /// Ask for the run to stop once whatever is running now has reached its end.
 ///
 /// What **Stop** records where a session is still going. Nothing is ended and

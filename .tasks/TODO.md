@@ -16,7 +16,7 @@ logging in a mirrored Profile across the cluster are left for later.
 - [x] 01: Log in from the Profile card — [details](01-log-in-from-the-profile-card.md)
 - [x] 02: A rejected code starts again — [details](02-a-rejected-code-starts-again.md)
 - [x] 03: Signed-out stop — [details](03-signed-out-stop.md)
-- [ ] 04: A login resumes the runs it unblocks — [details](04-a-login-resumes-the-runs-it-unblocks.md)
+- [x] 04: A login resumes the runs it unblocks — [details](04-a-login-resumes-the-runs-it-unblocks.md)
 - [ ] 05: A late sign-out resumes by itself — [details](05-a-late-sign-out-resumes-by-itself.md)
 - [ ] 06: Check before launch — [details](06-check-before-launch.md)
 - [ ] 07: Log in on Windows — [details](07-log-in-on-windows.md)

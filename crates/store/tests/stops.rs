@@ -12,7 +12,7 @@ use std::path::Path;
 use sqlx::SqlitePool;
 use verkstead_store::{
     ConversationRow, Decision, Event, Stopped, Stopping, ask_to_stop, asked_to_stop, clear_stop,
-    close_conversation, conversations, forget_stop, open_database, register_repo,
+    close_conversation, conversations, forget_stop, open_database, register_repo, signed_out_on,
     start_conversation, start_grilling, stop, stop_as_asked, stop_signed_out, stopped, timeline,
 };
 
@@ -239,6 +239,51 @@ async fn a_signed_out_stop_carries_the_profile_it_waits_on() {
         stopped(&pool, id).await.unwrap().unwrap().signed_out,
         None,
         "and the next stop is not left holding the last one's Profile",
+    );
+}
+
+/// A login on a Profile finds the runs stopped as Signed out waiting on it, and
+/// only those: a run stopped for any other reason, or waiting on another
+/// Profile, is none of its business.
+#[tokio::test]
+async fn a_login_finds_the_runs_waiting_on_its_profile() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo = register_repo(&pool, Path::new("/watched/verkstead"), "verkstead", "main")
+        .await
+        .unwrap()
+        .expect("nothing was registered at that path yet")
+        .id;
+
+    let mut ids = Vec::new();
+    for branch in ["first", "second", "by-hand", "elsewhere", "driven"] {
+        ids.push(
+            start_conversation(&pool, repo, branch, THIS_DEVICE)
+                .await
+                .unwrap()
+                .unwrap(),
+        );
+    }
+    let [first, second, by_hand, elsewhere, _driven] = ids[..] else {
+        unreachable!()
+    };
+
+    stop_signed_out(&pool, first, SAID, 7).await.unwrap();
+    stop_signed_out(&pool, second, SAID, 7).await.unwrap();
+    stop(&pool, by_hand, Decision::Human, SAID, None)
+        .await
+        .unwrap();
+    stop_signed_out(&pool, elsewhere, SAID, 8).await.unwrap();
+
+    assert_eq!(signed_out_on(&pool, 7).await.unwrap(), vec![first, second]);
+    assert_eq!(signed_out_on(&pool, 8).await.unwrap(), vec![elsewhere]);
+    assert_eq!(signed_out_on(&pool, 9).await.unwrap(), Vec::<i64>::new());
+
+    clear_stop(&pool, first).await.unwrap();
+
+    assert_eq!(
+        signed_out_on(&pool, 7).await.unwrap(),
+        vec![second],
+        "and a run driven again is not waiting on anything",
     );
 }
 

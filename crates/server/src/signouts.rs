@@ -24,12 +24,19 @@
 //! or a backtick comes after it, and ASCII punctuation is not decoration. See
 //! [`says_so`].
 //!
+//! **A login resumes what it unblocks.** Once a login on the Profile has
+//! landed, every run stopped as Signed out on it is started again through
+//! Resume — see [`logged_in`]. Each one builds a fresh root, which is what
+//! picks the new login up: on Linux the old session's bind still holds the old
+//! file.
+//!
 //! **Claude only.** The other harnesses log in differently, and none of them
 //! has a login Verkstead can run yet — so they have no phrase, and a session on
 //! one is never stopped here.
 
 use sqlx::SqlitePool;
 
+use crate::AppState;
 use crate::limits::{DECORATION, Held};
 use crate::nudge::Nudges;
 use crate::store;
@@ -250,6 +257,47 @@ async fn signed_out(pool: &SqlitePool, nudges: &Nudges, watch: &Watch, said: &st
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, "a run could not be stopped on a sign-out");
             false
+        }
+    }
+}
+
+/// A login on `profile` has landed: resume every run stopped as Signed out
+/// waiting on it.
+///
+/// Through Resume, the same as the press, so what each one starts is what
+/// ought to be running now. A run stopped for any other reason, or waiting on
+/// another Profile, is left as it is. A refusal leaves its run stopped where
+/// the human will find it, and pressing Resume there says why.
+pub(crate) async fn logged_in(state: AppState, profile: i64) {
+    let waiting = match store::signed_out_on(&state.pool, profile).await {
+        Ok(waiting) => waiting,
+        Err(error) => {
+            tracing::error!(error = ?error, profile_id = profile, "reading the runs a login unblocks failed");
+            return;
+        }
+    };
+
+    for conversation_id in waiting {
+        match crate::resume::resume(&state, conversation_id, crate::resume::Resuming::LoggedIn)
+            .await
+        {
+            Ok(verkstead_render::Resumed::Resumed) => tracing::info!(
+                conversation_id,
+                profile_id = profile,
+                "a login unblocked a run, so it is being driven again"
+            ),
+            Ok(refusal) => tracing::warn!(
+                conversation_id,
+                profile_id = profile,
+                ?refusal,
+                "a login unblocked a run, but nothing could be started for it"
+            ),
+            Err(error) => tracing::error!(
+                error = ?error,
+                conversation_id,
+                profile_id = profile,
+                "starting a run a login unblocked failed"
+            ),
         }
     }
 }
