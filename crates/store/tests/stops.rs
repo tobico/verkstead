@@ -13,7 +13,7 @@ use sqlx::SqlitePool;
 use verkstead_store::{
     ConversationRow, Decision, Event, Stopped, Stopping, ask_to_stop, asked_to_stop, clear_stop,
     close_conversation, conversations, forget_stop, open_database, register_repo,
-    start_conversation, start_grilling, stop, stop_as_asked, stopped, timeline,
+    start_conversation, start_grilling, stop, stop_as_asked, stop_signed_out, stopped, timeline,
 };
 
 /// The device every Conversation started here is ranked by, named the way a
@@ -81,6 +81,7 @@ async fn a_stop_lands_with_the_notice_that_explains_it() {
             notice,
             at: it.at.clone(),
             resets: None,
+            signed_out: None,
         },
         "the kind of stop it was, and the Event that says what it was",
     );
@@ -194,6 +195,50 @@ async fn driving_again_clears_the_stop_and_leaves_the_notice() {
             .unwrap()
             .is_some(),
         "which is what leaves room for the next stop to be written",
+    );
+}
+
+/// A run whose account signed out stops carrying the Profile a login is waiting
+/// on, as Verkstead's own brake — and driving again takes the Profile away with
+/// the rest of the stop.
+#[tokio::test]
+async fn a_signed_out_stop_carries_the_profile_it_waits_on() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = conversation(&pool).await;
+
+    let notice = stop_signed_out(&pool, id, SAID, 7)
+        .await
+        .unwrap()
+        .expect("a Conversation that is there stops");
+
+    let it = stopped(&pool, id).await.unwrap().expect("it is stopped");
+
+    assert_eq!(
+        it,
+        Stopped {
+            decision: Decision::Verkstead,
+            notice,
+            at: it.at.clone(),
+            resets: None,
+            signed_out: Some(7),
+        },
+    );
+
+    assert_eq!(
+        stop_signed_out(&pool, id, "and again", 7).await.unwrap(),
+        None,
+        "one stop per Conversation, this kind as much as any",
+    );
+
+    clear_stop(&pool, id).await.unwrap();
+    stop(&pool, id, Decision::Human, "stopped by hand", None)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        stopped(&pool, id).await.unwrap().unwrap().signed_out,
+        None,
+        "and the next stop is not left holding the last one's Profile",
     );
 }
 

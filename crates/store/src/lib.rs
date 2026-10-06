@@ -182,7 +182,7 @@ pub use steers::{
 };
 pub use stops::{
     Decision, Stopped, Stopping, ask_to_stop, asked_to_stop, clear_stop, forget_stop, stop,
-    stop_as_asked, stopped,
+    stop_as_asked, stop_signed_out, stopped,
 };
 pub use transcripts::{append_transcript, transcript, transcript_after};
 pub use transfers::{

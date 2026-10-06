@@ -3638,7 +3638,31 @@ at: string,
  * Rendered and sanitized by the server on the way out, as every piece of
  * markdown on this wire is.
  */
-html: string, };
+html: string, 
+/**
+ * The login this Notice offers, where it is the stop of a run whose
+ * account signed out and the account is at home on this device
+ * (ADR-0022). `None` everywhere else — a mirrored Profile's Notice names
+ * the device to log in on instead, and a stop that has been resumed offers
+ * nothing.
+ */
+log_in: NoticeLogIn | null, };
+
+/**
+ * The Log in press on a signed-out stop's Notice: which Profile it logs in,
+ * and what the modal calls it.
+ */
+export type NoticeLogIn = { 
+/**
+ * The Profile, by its id on this device. Always a Claude one: that is the
+ * one harness Verkstead runs a login for.
+ */
+profile: number, 
+/**
+ * What the human called it, where they called it anything — which the
+ * modal reads beside the harness, the way the Profile's card does.
+ */
+name: string | null, };
 
 /**
  * One thing that moved, said as briefly as it can be said.

@@ -294,6 +294,9 @@ mod sets;
 pub mod settings;
 mod settling;
 mod sharing;
+/// A Claude session's account signing out, and the stop whose Notice offers the
+/// login (ADR-0022).
+mod signouts;
 /// What a session is grilled by: the skills Verkstead ships and installs into
 /// every sandbox.
 ///

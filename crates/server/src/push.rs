@@ -224,6 +224,10 @@ pub(crate) enum News {
         resets: Option<String>,
     },
 
+    /// The account a run was spending signed out, which is a stop that waits
+    /// on a login rather than on a press — see [`crate::signouts`].
+    SignedOut { profile: String },
+
     /// The work the Conversation was for is on a pull request, and the wrap-up
     /// has started.
     OnAPullRequest { number: i64 },
@@ -277,6 +281,9 @@ impl News {
                 profile,
                 resets: None,
             } => format!("{profile} is out of window"),
+            // The account rather than the branch: one login unblocks every run
+            // on it, so the account is what the human has to go and fix.
+            News::SignedOut { profile } => format!("{profile} has signed out"),
             News::OnAPullRequest { number } => format!("{branch} is on pull request #{number}"),
             // Read by the stage rather than by the branch: a stage is a
             // Conversation whose name in the human's head is its number in the
@@ -301,6 +308,7 @@ impl News {
             News::Stopped { .. } => "the stop",
             News::Escalated { .. } => "the session gone idle",
             News::OutOfWindow { .. } => "the stop for a window",
+            News::SignedOut { .. } => "the stop for a sign-out",
             News::OnAPullRequest { .. } => "the pull request",
             News::StageStarted { .. } => "the stage that started",
             News::StageNeedsAuthor { .. } => "the stage that needs a git author",
@@ -894,6 +902,9 @@ mod tests {
             News::OutOfWindow {
                 profile: "implementation".to_owned(),
                 resets: None,
+            },
+            News::SignedOut {
+                profile: "implementation".to_owned(),
             },
             News::OnAPullRequest { number: 41 },
             News::StageStarted {

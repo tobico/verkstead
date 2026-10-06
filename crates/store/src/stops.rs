@@ -160,6 +160,13 @@ pub struct Stopped {
     /// and somebody reading a stop a week later is reading what the session
     /// printed rather than this build's opinion of it.
     pub resets: Option<String>,
+
+    /// The Profile whose account signed out, where that is what stopped the
+    /// run — and `None` on every other stop.
+    ///
+    /// What the Notice's Log in press opens, and what a login on that Profile
+    /// reads to find the runs it unblocks.
+    pub signed_out: Option<i64>,
 }
 
 /// The columns a stop lives in, added to `conversations` rather than declared
@@ -210,6 +217,26 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
 
     if added {
         carried_over(pool).await?;
+    }
+
+    // And the Profile a signed-out stop is waiting on, added on its own rather
+    // than in the list above: a column arriving there is what reads the stops of
+    // before over again, and on a database that has had the others for a year
+    // that would be every halt it ever kept written back over today's stops.
+    // An id and no foreign key: the Profiles are a table migrations rebuild,
+    // and a Profile that has gone is one no login will ever be made for.
+    let there: Option<(String,)> = sqlx::query_as(
+        "SELECT name FROM pragma_table_info('conversations') WHERE name = 'stopped_signed_out'",
+    )
+    .fetch_optional(pool)
+    .await
+    .context("looking for the stopped_signed_out column of a Conversation")?;
+
+    if there.is_none() {
+        sqlx::query("ALTER TABLE conversations ADD COLUMN stopped_signed_out INTEGER")
+            .execute(pool)
+            .await
+            .context("adding the stopped_signed_out column to the Conversations")?;
     }
 
     Ok(())
@@ -348,7 +375,39 @@ pub async fn stop(
         conversation_id,
         decision,
         markdown,
-        resets,
+        Carried {
+            resets,
+            signed_out: None,
+        },
+        Standing::Whatever,
+    )
+    .await?
+    {
+        Stopping::Stopped(notice) => Ok(Some(notice)),
+        Stopping::Already | Stopping::Withdrawn => Ok(None),
+    }
+}
+
+/// The same, for a run whose account signed out: the stop carries the Profile
+/// it is waiting on a login for.
+///
+/// Verkstead's own brake, always: nobody pressed anything, and the human is the
+/// only one who can log the account back in.
+pub async fn stop_signed_out(
+    pool: &SqlitePool,
+    conversation_id: i64,
+    markdown: &str,
+    profile: i64,
+) -> Result<Option<i64>> {
+    match write_stop(
+        pool,
+        conversation_id,
+        Decision::Verkstead,
+        markdown,
+        Carried {
+            resets: None,
+            signed_out: Some(profile),
+        },
         Standing::Whatever,
     )
     .await?
@@ -386,10 +445,21 @@ pub async fn stop_as_asked(
         conversation_id,
         decision,
         markdown,
-        resets,
+        Carried {
+            resets,
+            signed_out: None,
+        },
         Standing::Asked,
     )
     .await
+}
+
+/// What a stop carries beside its Notice: the words about a window coming
+/// back, and the Profile a login is waiting on. Each is one kind of stop's.
+#[derive(Clone, Copy)]
+struct Carried<'a> {
+    resets: Option<&'a str>,
+    signed_out: Option<i64>,
 }
 
 /// What landing a stop came to — see [`stop_as_asked`].
@@ -424,7 +494,7 @@ async fn write_stop(
     conversation_id: i64,
     decision: Decision,
     markdown: &str,
-    resets: Option<&str>,
+    carried: Carried<'_>,
     standing: Standing,
 ) -> Result<Stopping> {
     let mut tx = super::writing(pool, "stopping a Conversation").await?;
@@ -480,15 +550,17 @@ async fn write_stop(
 
     sqlx::query(
         "UPDATE conversations
-            SET stopped_at     = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
-                stopped_by     = ?,
-                stopped_notice = ?,
-                stopped_resets = ?
+            SET stopped_at         = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+                stopped_by         = ?,
+                stopped_notice     = ?,
+                stopped_resets     = ?,
+                stopped_signed_out = ?
           WHERE id = ?",
     )
     .bind(decision.stored())
     .bind(notice)
-    .bind(resets)
+    .bind(carried.resets)
+    .bind(carried.signed_out)
     .bind(conversation_id)
     .execute(&mut *tx)
     .await
@@ -517,10 +589,16 @@ async fn write_stop(
 /// `None` is a Conversation nothing has stopped — which is every one that is
 /// being driven, and every one nothing is supposed to be driving.
 pub async fn stopped(pool: &SqlitePool, conversation_id: i64) -> Result<Option<Stopped>> {
-    type Row = (Option<String>, Option<String>, Option<i64>, Option<String>);
+    type Row = (
+        Option<String>,
+        Option<String>,
+        Option<i64>,
+        Option<String>,
+        Option<i64>,
+    );
 
     let row: Option<Row> = sqlx::query_as(
-        "SELECT stopped_at, stopped_by, stopped_notice, stopped_resets
+        "SELECT stopped_at, stopped_by, stopped_notice, stopped_resets, stopped_signed_out
          FROM conversations WHERE id = ?",
     )
     .bind(conversation_id)
@@ -528,7 +606,7 @@ pub async fn stopped(pool: &SqlitePool, conversation_id: i64) -> Result<Option<S
     .await
     .with_context(|| format!("reading whether Conversation {conversation_id} is stopped"))?;
 
-    let Some((Some(at), by, notice, resets)) = row else {
+    let Some((Some(at), by, notice, resets, signed_out)) = row else {
         return Ok(None);
     };
 
@@ -543,6 +621,7 @@ pub async fn stopped(pool: &SqlitePool, conversation_id: i64) -> Result<Option<S
         notice,
         at,
         resets,
+        signed_out,
     }))
 }
 
@@ -616,7 +695,8 @@ pub async fn clear_stop(pool: &SqlitePool, conversation_id: i64) -> Result<()> {
     sqlx::query(
         "UPDATE conversations
             SET stopped_at = NULL, stopped_by = NULL,
-                stopped_notice = NULL, stopped_resets = NULL
+                stopped_notice = NULL, stopped_resets = NULL,
+                stopped_signed_out = NULL
           WHERE id = ?",
     )
     .bind(conversation_id)

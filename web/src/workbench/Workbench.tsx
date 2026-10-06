@@ -132,6 +132,7 @@ import { Composer, composing } from "./Composer";
 import { Conversations } from "./Conversations";
 import { Document } from "./Document";
 import { Hatch } from "./Hatch";
+import { LogIn } from "./LogIn";
 import { Output } from "./Output";
 import { PullRequest } from "./PullRequest";
 import { Roadmap } from "./Roadmap";
@@ -1168,7 +1169,13 @@ function DetailsPane(props: {
                       html={notice().html}
                       empty="Verkstead wrote nothing down."
                       back={props.back.go}
-                    />
+                    >
+                      {/* A run whose account signed out is waiting on a
+                          login, and this is where it is made. */}
+                      <Show when={notice().log_in}>
+                        {(press) => <LogIn press={press()} />}
+                      </Show>
+                    </Document>
                   )}
                 </Match>
               </Switch>

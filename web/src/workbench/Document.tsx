@@ -33,6 +33,9 @@ export function Document(props: {
   /// as a blank pane.
   empty: string;
   back: () => void;
+  /// What the document offers under itself, where it offers anything: the
+  /// Log in press on a signed-out stop's Notice — see `LogIn.tsx`.
+  children?: JSX.Element;
 }): JSX.Element {
   return (
     <>
@@ -43,6 +46,8 @@ export function Document(props: {
       <Show when={props.html !== ""} fallback={<Empty>{props.empty}</Empty>}>
         <div class={`${styles.document} markdown`} innerHTML={props.html} />
       </Show>
+
+      {props.children}
     </>
   );
 }

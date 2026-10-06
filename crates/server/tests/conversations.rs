@@ -6513,6 +6513,88 @@ async fn the_conversation_view_says_when_a_stop_is_waiting_on_the_human() {
     pool.close().await;
 }
 
+/// A signed-out stop's Notice offers the login for an account at home here,
+/// and nothing for a mirror — whose Notice names the device to log in on
+/// instead (ADR-0022). Only that Notice, and only while the stop stands.
+#[tokio::test]
+async fn a_signed_out_stop_offers_the_login_only_for_an_account_at_home_here() {
+    let (elsewhere, dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, elsewhere.path(), repo_id).await;
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    let here = store::profiles(&pool).await.unwrap().remove(0);
+
+    let notice = store::stop_signed_out(&pool, id, "Signed out.\n", here.id)
+        .await
+        .unwrap()
+        .expect("the Conversation was running");
+
+    let press = |view: &ConversationView| {
+        view.timeline
+            .iter()
+            .filter_map(|event| match event {
+                TimelineEvent::Notice(notice) => Some((notice.id, notice.log_in.clone())),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+
+    assert_eq!(
+        press(&opened(&app, id).await),
+        vec![(
+            notice,
+            Some(verkstead_render::NoticeLogIn {
+                profile: here.id,
+                name: here.name.clone(),
+            })
+        )],
+        "the stop's own Notice carries the press",
+    );
+
+    store::clear_stop(&pool, id).await.unwrap();
+
+    assert_eq!(
+        press(&opened(&app, id).await),
+        vec![(notice, None)],
+        "and a stop that has been taken away offers nothing",
+    );
+
+    let mirror = store::record_mirror(
+        &pool,
+        &store::Mirror {
+            device: "aa00bb11cc22dd33ee44ff5566778899".to_owned(),
+            id: 4,
+            login: true,
+        },
+        &store::ProfileFacts {
+            name: Some("theirs".to_owned()),
+            account: store::Account::Claude {
+                claude_dir: PathBuf::from("/home/someone-else/.claude"),
+                config_file: PathBuf::from("/home/someone-else/.claude.json"),
+            },
+            models: vec!["sonnet".to_owned()],
+            memory: true,
+        },
+    )
+    .await
+    .unwrap();
+
+    let away = store::stop_signed_out(&pool, id, "Signed out away.\n", mirror)
+        .await
+        .unwrap()
+        .expect("the Conversation was driven again");
+
+    assert_eq!(
+        press(&opened(&app, id).await),
+        vec![(notice, None), (away, None)],
+        "a mirror's login is made on its own device, so nothing here offers it",
+    );
+
+    pool.close().await;
+}
+
 /// Whether a Conversation waits on the human, asked of its page and of its row
 /// together.
 ///

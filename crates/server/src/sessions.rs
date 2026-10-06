@@ -3156,6 +3156,23 @@ impl Sessions {
             pairing.profile.agent_type(),
         );
 
+        // And watched beside it for the other thing a session says about its
+        // account: that the account has signed out. The Profile's id as well as
+        // its name, because the stop records which login it is waiting on, and
+        // where it is at home, because that decides whether the Notice offers
+        // the login or names the device it is made on — see [`crate::signouts`].
+        let signouts = crate::signouts::Watch::on(
+            conversation_id,
+            event_id,
+            pairing.profile.id,
+            crate::profiles::shown(pairing.profile.name.as_deref()).to_owned(),
+            match &pairing.profile.mirror {
+                None => crate::signouts::Home::Here,
+                Some(mirror) => crate::signouts::Home::Away(mirror.device.clone()),
+            },
+            pairing.profile.agent_type(),
+        );
+
         let (stop, stopping) = oneshot::channel();
 
         // The two halves of what a driver holds a session by: the judgement the
@@ -3234,7 +3251,7 @@ impl Sessions {
                         &idle,
                         tail,
                         resuming,
-                        limits,
+                        Watches { limits, signouts },
                         stopping,
                     )
                     .await;
@@ -3913,9 +3930,9 @@ struct Printing {
 /// judged by what it draws the two are one act: the frame that says a session is
 /// back at its prompt is drawn by the very text that arrived.
 ///
-/// And `limits` is fed the same text a third time, watching for the one thing a
-/// session says that is about the account rather than about the work — see
-/// [`crate::limits`].
+/// And `watches` are fed the same text a third time, watching for the two
+/// things a session says that are about the account rather than about the
+/// work — see [`Watches`].
 ///
 /// The one thing this loop announces that is not something it wrote down is the
 /// session falling idle, and then waking: a page draws a session that has
@@ -3933,6 +3950,37 @@ struct Printing {
 /// One parameter per thing the loop reads or writes, which is what makes the
 /// list long: gathering them would be a struct built at one call site and taken
 /// apart at the top of this, which is the same list said twice.
+/// The two watchers a session's records are read by for news of its account:
+/// its window spent — see [`crate::limits`] — and its login gone — see
+/// [`crate::signouts`].
+struct Watches {
+    limits: crate::limits::Watch,
+    signouts: crate::signouts::Watch,
+}
+
+impl Watches {
+    fn printed(&mut self, text: &str) {
+        self.limits.printed(text);
+        self.signouts.printed(text);
+    }
+
+    /// Both looked at, every time, whatever the first finds: each holds what it
+    /// has not yet read, and a look skipped is a line left to be read twice.
+    /// `true` is *end the session*, from either.
+    async fn look(
+        &mut self,
+        pool: &SqlitePool,
+        nudges: &Nudges,
+        drawn: &str,
+        said: Option<&str>,
+    ) -> bool {
+        let out_of_window = self.limits.look(pool, nudges, drawn, said).await;
+        let signed_out = self.signouts.look(pool, nudges, drawn, said).await;
+
+        out_of_window || signed_out
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn relay(
     pool: &SqlitePool,
@@ -3943,7 +3991,7 @@ async fn relay(
     idle: &Idle,
     mut tail: Option<Tail>,
     resuming: Option<Resuming>,
-    mut limits: crate::limits::Watch,
+    mut watches: Watches,
     mut stopping: oneshot::Receiver<()>,
 ) -> Ended {
     // The Event alone here: what this loop says for itself it says in the log,
@@ -4002,7 +4050,7 @@ async fn relay(
                         });
                     }
 
-                    limits.printed(&text);
+                    watches.printed(&text);
                     pending.push_str(&text);
                 }
                 Err(error) => {
@@ -4021,7 +4069,7 @@ async fn relay(
                 // that order — see [`crate::limits`], which writes the stop and
                 // leaves the ending here because this is the task it is running
                 // inside.
-                if limits
+                if watches
                     .look(
                         pool,
                         nudges,
@@ -4051,7 +4099,7 @@ async fn relay(
                     // moment it moves: a backend that says its window is spent
                     // in its own log and not on its display would otherwise go
                     // unnoticed until the terminal happened to say something.
-                    if limits
+                    if watches
                         .look(
                             pool,
                             nudges,

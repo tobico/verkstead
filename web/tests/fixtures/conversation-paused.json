@@ -103,14 +103,16 @@
       "Notice": {
         "at": "2026-08-03T09:07:11.000Z",
         "html": "<p>the account <strong>opus</strong> was being spent is out of window: Usage limit reached · continuing automatically at 3pm · esc to cancel</p>\n",
-        "id": 28
+        "id": 28,
+        "log_in": null
       }
     },
     {
       "Notice": {
         "at": "2026-08-03T09:07:11.000Z",
         "html": "<p><strong>Implementing the work</strong> stopped.</p>\n<p>the account <strong>opus</strong> was being spent is out of window: Usage limit reached · continuing automatically at 3pm · esc to cancel</p>\n<h3>The worktree</h3>\n<p>Git had nothing pending, or the repository would not answer.</p>\n<h3>What the last session said</h3>\n<p>It said nothing at all.</p>\n",
-        "id": 29
+        "id": 29,
+        "log_in": null
       }
     }
   ],

@@ -2016,7 +2016,29 @@ pub(crate) async fn conversation_view(
     // carries any: the one thing that tells a run stopped by an exhausted window
     // from a run stopped by anything else. Drawn beside Resume rather than acted
     // on — no stop resumes itself, so every one of them waits for the same press.
-    let resets = stopped.and_then(|stopped| stopped.resets);
+    let resets = stopped.as_ref().and_then(|stopped| stopped.resets.clone());
+
+    // And the login a signed-out stop's Notice offers: on that Notice alone,
+    // only while the stop stands, and only for an account at home here. A
+    // mirror's login is made on its own device, and its Notice says which
+    // (ADR-0022). A Profile that has gone since offers nothing.
+    let log_in = match marked.and_then(|stopped| Some((stopped.notice, stopped.signed_out?))) {
+        Some((notice, profile)) => match store::load_profile(&state.pool, profile).await {
+            Ok(Some(profile)) if profile.mirror.is_none() => Some((
+                notice,
+                verkstead_render::NoticeLogIn {
+                    profile: profile.id,
+                    name: profile.name,
+                },
+            )),
+            Ok(_) => None,
+            Err(error) => {
+                tracing::error!(error = ?error, conversation_id = id, "reading the Profile a signed-out stop waits on failed");
+                None
+            }
+        },
+        None => None,
+    };
 
     // And whether anything about this Conversation is waiting on the human at
     // all, which is the fold the sidebar's own row is drawn by, asked here of
@@ -2385,6 +2407,7 @@ pub(crate) async fn conversation_view(
                         event.id,
                         event.at,
                         &crate::stopping::out_of_window(&pause.profile, &pause.said),
+                        None,
                     ),
                     // Rendered like the handoff and inline like it, being the
                     // other kind of sentence somebody has to be able to read
@@ -2392,9 +2415,18 @@ pub(crate) async fn conversation_view(
                     // anything about. What a stop's Notice says is what stopped,
                     // why, and the evidence — see [`crate::stopping`], which writes
                     // the markdown.
-                    store::Event::Notice(markdown) => {
-                        verkstead_render::notice_event(event.id, event.at, &markdown)
-                    }
+                    //
+                    // The one Notice that carries a press is a signed-out stop's,
+                    // and only while that stop stands — see `log_in` above.
+                    store::Event::Notice(markdown) => verkstead_render::notice_event(
+                        event.id,
+                        event.at,
+                        &markdown,
+                        log_in
+                            .as_ref()
+                            .filter(|(notice, _)| *notice == event.id)
+                            .map(|(_, press)| press.clone()),
+                    ),
                     // And a Manual Task a Verkstead of before set going by hand.
                     // Nothing writes another — a steer into Implementing carries
                     // the instruction now — and nothing rewrote these: the

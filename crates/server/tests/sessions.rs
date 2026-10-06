@@ -16836,6 +16836,131 @@ async fn an_account_out_of_window_stops_the_run_and_tells_the_devices() {
     );
 }
 
+/// A stub that works the backlog, and where the first task lands prints `line`
+/// a few times over and holds — the way claude 2.1.283 sits at its prompt once
+/// its login has gone (ADR-0022).
+fn signing_out(line: &str) -> String {
+    out_of_window_saying(&format!(
+        r#"
+                    for pass in 1 2 3 4; do
+                        printf '  ⎿  {line}\r\n'
+                        sleep 0.25
+                    done
+        "#
+    ))
+}
+
+/// An account that signs out mid-run: the run stops as Signed out with a Notice
+/// naming the account and the line the session printed, the Notice carries a
+/// Log in press for the Profile, the devices are told, and the session is ended.
+#[tokio::test]
+async fn an_account_that_signs_out_stops_the_run_with_a_log_in_press() {
+    let fixture = grilling(&signing_out("Login expired · Please run /login")).await;
+
+    running_out(&fixture).await;
+
+    let (service, taken) = push_service().await;
+    let phone = Device::new(&service, "phone");
+    fixture.subscribe(&phone).await;
+
+    let notice = fixture.stopped().await;
+
+    assert!(
+        notice
+            .html
+            .contains("<strong>Implementing the work</strong> stopped."),
+        "it stopped the way everything else stops: {:?}",
+        notice.html,
+    );
+    assert!(
+        notice
+            .html
+            .contains("the account <strong>implementation</strong> has signed out"),
+        "naming the account whose login went: {:?}",
+        notice.html,
+    );
+    assert!(
+        notice.html.contains("Login expired · Please run /login"),
+        "with the line the session printed: {:?}",
+        notice.html,
+    );
+
+    let pool = open_database(&fixture.database).await.unwrap();
+    let implementation = verkstead_store::profiles(&pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|profile| profile.name.as_deref() == Some("implementation"))
+        .unwrap();
+
+    let stop = fixture.stop_on_the_record().await;
+
+    assert_eq!(
+        stop.decision,
+        Decision::Verkstead,
+        "Verkstead pulled the brake"
+    );
+    assert_eq!(
+        stop.signed_out,
+        Some(implementation.id),
+        "and the stop records which login it is waiting on",
+    );
+
+    assert_eq!(
+        notice.log_in,
+        Some(verkstead_render::NoticeLogIn {
+            profile: implementation.id,
+            name: Some("implementation".to_owned()),
+        }),
+        "the Notice offers the login for an account at home here",
+    );
+    assert_eq!(fixture.view().await.blocked_on, Some(notice.id));
+
+    let pushed = pushes(&taken, 1).await;
+    let told = phone.read(&pushed[0]);
+
+    assert_eq!(told["path"], format!("/conversations/{}", fixture.id));
+    assert_eq!(told["title"], "implementation has signed out");
+
+    pause(Duration::from_secs(2)).await;
+
+    assert_eq!(
+        notices(&fixture.view().await).len(),
+        1,
+        "the line printed four times over is one stop",
+    );
+    assert_eq!(taken.lock().unwrap().len(), 1, "and one push");
+    assert!(
+        outputs(&fixture.view().await)
+            .iter()
+            .all(|session| !session.running),
+        "and no session is running behind the stop",
+    );
+}
+
+/// The phrase in the middle of a line is a mention: claude says the same words
+/// mid-sentence about things that are not this session's login, and an agent
+/// reading ADR-0022 says them too. The run goes on to its next task.
+#[tokio::test]
+async fn the_phrase_mid_line_does_not_stop_the_run() {
+    let fixture = grilling(&signing_out(
+        "Your session has expired. Please run /login to sign in again.",
+    ))
+    .await;
+
+    running_out(&fixture).await;
+
+    fixture
+        .until(|view| (outputs(view).len() >= 3).then_some(()))
+        .await;
+
+    assert!(
+        said(&fixture.view().await).is_empty(),
+        "nothing stopped the run: {:?}",
+        notices(&fixture.view().await),
+    );
+}
+
 /// The wording is the backend's, so a Codex session is stopped by codex's own
 /// sentence — and by that one alone.
 ///

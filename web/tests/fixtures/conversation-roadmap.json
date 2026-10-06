@@ -203,7 +203,8 @@
       "Notice": {
         "at": "2026-08-03T09:07:11.000Z",
         "html": "<p>Stage 01 of the <code>mvp</code> roadmap — <em>Workbench</em> — has started as a Conversation of its own, on <code>workbench</code>.</p>\n",
-        "id": 44
+        "id": 44,
+        "log_in": null
       }
     }
   ],
