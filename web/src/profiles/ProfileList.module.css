@@ -81,6 +81,15 @@
   width: 1em;
 }
 
+/* The Log in press, small and at the card's start edge under what the card
+   says: it is a thing to do about the account rather than what the account
+   is. */
+.profile .logIn {
+  align-self: flex-start;
+  padding: 0.2rem 0.7rem;
+  font-size: 0.85rem;
+}
+
 /* And the same fact said in the pane, over the form: which machine the account is
    on, and that a save or a removal here is put to it. A line of prose rather than
    the card's mark and name, because what it is saying is where the press goes

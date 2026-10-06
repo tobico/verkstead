@@ -3358,6 +3358,51 @@ export type Liveness = "waiting" | "disconnected" | "deferred";
 export type Locked = "Closed" | "AlreadyAnswered" | "AlreadyLocked" | "NoSuchSet";
 
 /**
+ * A device closing the modal. The login is killed once the last one has.
+ */
+export type LoginClosed = { 
+/**
+ * The name the modal opened under — see [`LoginOpened::viewer`].
+ */
+viewer: string, };
+
+/**
+ * The code the login page handed back, typed into the modal.
+ */
+export type LoginCode = { 
+/**
+ * The code, as pasted.
+ */
+code: string, };
+
+/**
+ * A device opening the modal — the one that starts the login, or one joining
+ * a login already running.
+ */
+export type LoginOpened = { 
+/**
+ * A name the modal made up for itself as it opened, so that its closing
+ * is told apart from another device's — see [`LoginClosed`].
+ */
+viewer: string, };
+
+/**
+ * Where a Profile's login has got to.
+ *
+ * Flat on the wire — `{"state": "Waiting", "url": "…"}` — so the viewer
+ * narrows on a field rather than unwrapping a variant name.
+ */
+export type LoginState = { "state": "Starting" } | { "state": "Waiting", 
+/**
+ * The address, as the harness printed it.
+ */
+url: string, } | { "state": "Checking" } | { "state": "LoggedIn" } | { "state": "Failed", 
+/**
+ * What happened, in the words the modal shows.
+ */
+reason: string, };
+
+/**
  * A Manual Task as the page receives it: what was asked for, and when.
  *
  * HTML alone, like the Notice beside it and unlike the Brief: it is a moment on
@@ -3597,7 +3642,7 @@ html: string, };
  * the behaviour every kind used to get — so a new kind is safe to add and an
  * old page stays correct against a newer server.
  */
-export type Nudge = { "kind": "transcript", conversation: number, } | { "kind": "screen", conversation: number, } | { "kind": "commit", conversation: number, } | { "kind": "files", conversation: number, } | { "kind": "ports", conversation: number, } | { "kind": "forwards" } | { "kind": "set", conversation: number, } | { "kind": "liveness", conversation: number, } | { "kind": "conversation", conversation: number, } | { "kind": "conversations" } | { "kind": "repos" } | { "kind": "joins" } | { "kind": "devices" } | { "kind": "discovered" } | { "kind": "profiles" } | { "kind": "everything" };
+export type Nudge = { "kind": "transcript", conversation: number, } | { "kind": "screen", conversation: number, } | { "kind": "commit", conversation: number, } | { "kind": "files", conversation: number, } | { "kind": "ports", conversation: number, } | { "kind": "forwards" } | { "kind": "set", conversation: number, } | { "kind": "liveness", conversation: number, } | { "kind": "conversation", conversation: number, } | { "kind": "conversations" } | { "kind": "repos" } | { "kind": "joins" } | { "kind": "devices" } | { "kind": "discovered" } | { "kind": "profiles" } | { "kind": "login", profile: number, } | { "kind": "everything" };
 
 /**
  * One Nudge as it goes down a stream: what moved, and **whose news it is**.
@@ -3622,7 +3667,7 @@ export type Nudged = {
  * Device Id — absent for this device's own, which is every Nudge a
  * workbench has ever sent about its own work.
  */
-device?: string | null, } & ({ "kind": "transcript", conversation: number, } | { "kind": "screen", conversation: number, } | { "kind": "commit", conversation: number, } | { "kind": "files", conversation: number, } | { "kind": "ports", conversation: number, } | { "kind": "forwards" } | { "kind": "set", conversation: number, } | { "kind": "liveness", conversation: number, } | { "kind": "conversation", conversation: number, } | { "kind": "conversations" } | { "kind": "repos" } | { "kind": "joins" } | { "kind": "devices" } | { "kind": "discovered" } | { "kind": "profiles" } | { "kind": "everything" });
+device?: string | null, } & ({ "kind": "transcript", conversation: number, } | { "kind": "screen", conversation: number, } | { "kind": "commit", conversation: number, } | { "kind": "files", conversation: number, } | { "kind": "ports", conversation: number, } | { "kind": "forwards" } | { "kind": "set", conversation: number, } | { "kind": "liveness", conversation: number, } | { "kind": "conversation", conversation: number, } | { "kind": "conversations" } | { "kind": "repos" } | { "kind": "joins" } | { "kind": "devices" } | { "kind": "discovered" } | { "kind": "profiles" } | { "kind": "login", profile: number, } | { "kind": "everything" });
 
 /**
  * Whether a fresh Verkstead can do anything yet, and what it would take.

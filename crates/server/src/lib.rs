@@ -150,6 +150,9 @@ pub mod key;
 /// suite that proves it stands outside this crate.
 pub mod languages;
 mod limits;
+/// A Profile's login, run by Verkstead in the Profile's own sandbox and drawn in
+/// a modal any device can open.
+mod logins;
 /// Which of a member's Repos is this repository: origin URL first, then name
 /// where neither has one (ADR-0020, *Repos across devices*).
 ///
@@ -443,6 +446,10 @@ pub(crate) struct AppState {
     /// a Conversation has one session and may have any number of terminals, and
     /// what runs on one is the human rather than an agent.
     terminals: terminals::Terminals,
+
+    /// And the logins being run for Profiles — see [`logins`]. One per Profile,
+    /// which is why it is a register shared by every clone of this.
+    logins: logins::Logins,
 
     /// And the ports of members' terminals this device holds on its own
     /// `localhost`, which is the other end of a terminal's ports: read off the
@@ -1463,6 +1470,7 @@ fn standing(
         waits: Waits::new(),
         sessions,
         terminals: terminals::Terminals::new(),
+        logins: logins::Logins::default(),
 
         // And nothing forwarded yet, which is every start: a Forward stands on a
         // tab open in a browser that asks this server — see [`forwarding`].

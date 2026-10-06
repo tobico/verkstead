@@ -190,6 +190,12 @@ pub struct Agents {
     /// life asleep. The pace a server runs at is [`Pace::default`] and nothing
     /// sets it otherwise.
     pace: Pace,
+
+    /// How long a Profile's login is left waiting for its code before it is
+    /// killed — see [`crate::logins`]. [`crate::logins::LIMIT`] in a server,
+    /// and a field for [`Agents::pace`]'s reason: ten minutes is a test that
+    /// spends ten minutes asleep.
+    login_limit: Duration,
 }
 
 impl Agents {
@@ -220,6 +226,7 @@ impl Agents {
             agent: None,
             signature: None,
             pace: Pace::default(),
+            login_limit: crate::logins::LIMIT,
         }
     }
 
@@ -257,6 +264,51 @@ impl Agents {
     /// The same, working the backlog at `pace` — see [`Agents::pace`].
     pub fn at_pace(self, pace: Pace) -> Agents {
         Agents { pace, ..self }
+    }
+
+    /// The same, killing a login left waiting longer than `limit` — see
+    /// [`Agents::login_limit`].
+    pub fn logging_in_within(self, limit: Duration) -> Agents {
+        Agents {
+            login_limit: limit,
+            ..self
+        }
+    }
+
+    /// How long a login is left waiting — see [`Agents::login_limit`].
+    pub(crate) fn login_limit(&self) -> Duration {
+        self.login_limit
+    }
+
+    /// The sandbox a Profile's login is run in, and the line that runs `words`
+    /// of its harness inside it — `auth login --claudeai`, `auth status` — or
+    /// `None` where there is none to build: see [`Sandbox::for_login`].
+    ///
+    /// The harness is whatever stands where every type's binary goes, for
+    /// [`Agents::agent`]'s reason: a test stands a stub there, and the words
+    /// follow it as they would follow `claude`.
+    ///
+    /// Blocks: the account's memory store may be made.
+    pub(crate) fn logging_in(
+        &self,
+        profile: &store::Profile,
+        words: &[&str],
+    ) -> Option<(Sandbox, Vec<String>)> {
+        let sandbox = Sandbox::for_login(
+            profile,
+            &self.homes,
+            &self.skills,
+            self.verkstead.as_ref()?,
+            &self.settings.config(),
+        )?;
+
+        let mut argv = match &self.agent {
+            Some(standing) => standing.clone(),
+            None => vec![binary(profile.agent_type()).to_owned()],
+        };
+        argv.extend(words.iter().map(|word| (*word).to_owned()));
+
+        Some((sandbox, argv))
     }
 
     /// The same, with the prompt `signature` draws where a TUI backend's own

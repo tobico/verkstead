@@ -687,6 +687,139 @@ describe("a member's account that cannot be run from here", () => {
   });
 });
 
+describe("logging an account in", () => {
+  const ADDRESS = "https://claude.com/cai/oauth/authorize?code=true&state=1";
+  const LOGIN = `/api/ui/profiles/${FABLE.id}/login`;
+
+  /// What a POST to `path` was sent with, the last time it was made.
+  const sentTo = (fetching: ReturnType<typeof serving>, path: string) => {
+    const calls = fetching.mock.calls.filter(
+      ([asked, init]) => String(asked) === path && init?.method === "POST",
+    );
+
+    return JSON.parse(String(calls.at(-1)![1]!.body)) as unknown;
+  };
+
+  it("offers a login on a Claude account at home here", async () => {
+    serving(whenever("/api/ui/profiles", json(CLUSTER)));
+    mountCards();
+
+    await waitFor(() => screen.getByText(reads(MIRROR)));
+
+    expect(
+      theCard(reads(CLUSTER[0]!)).querySelector("button")?.textContent,
+    ).toBe("Log in");
+  });
+
+  /// A mirror's account is a copy: its login is made on the machine it is at
+  /// home on, and a login written into the copy is one the next refresh from
+  /// there writes over.
+  it("offers none on a member's account", async () => {
+    serving(whenever("/api/ui/profiles", json(CLUSTER)));
+    mountCards();
+
+    await waitFor(() => screen.getByText(reads(MIRROR)));
+
+    expect(theCard(reads(MIRROR)).querySelector("button")).toBeNull();
+  });
+
+  it("offers none on an account of another harness", async () => {
+    const codex: ProfileEntry = {
+      ...FABLE,
+      id: 9,
+      name: "codex",
+      account: { agent_type: "Codex", home: "/home/me/.codex" },
+    };
+
+    serving(whenever("/api/ui/profiles", json([codex])));
+    mountCards();
+
+    await waitFor(() => screen.getByText(reads(codex)));
+
+    expect(theCard(reads(codex)).querySelector("button")).toBeNull();
+  });
+
+  it("shows the address the login printed and hands it the code", async () => {
+    const fetching = serving(
+      whenever("/api/ui/profiles", json(SAVED)),
+      whenever(LOGIN, json({ state: "Starting" }), "POST"),
+      whenever(LOGIN, json({ state: "Waiting", url: ADDRESS })),
+      whenever(`${LOGIN}/code`, json({ state: "Checking" }), "POST"),
+    );
+    const { open } = mountCards();
+
+    await waitFor(() => screen.getByText(reads(FABLE)));
+    fireEvent.click(theCard(reads(FABLE)).querySelector("button")!);
+
+    // The press is the login's, not the card's: no pane opens under it.
+    expect(open).not.toHaveBeenCalled();
+
+    await waitFor(() => screen.getByText(ADDRESS));
+    expect(screen.getByText(ADDRESS).closest("a")!.getAttribute("href")).toBe(
+      ADDRESS,
+    );
+
+    const viewer = (sentTo(fetching, LOGIN) as { viewer: string }).viewer;
+    expect(viewer).toBeTruthy();
+
+    fireEvent.input(screen.getByLabelText("2. Paste the code here."), {
+      target: { value: "the-code" },
+    });
+    fireEvent.click(screen.getByText("Log in", { selector: "form button" }));
+
+    await waitFor(() => screen.getByText("Checking the code…"));
+    expect(sentTo(fetching, `${LOGIN}/code`)).toEqual({ code: "the-code" });
+  });
+
+  it("tells the server this device has stopped looking when it closes", async () => {
+    const fetching = serving(
+      whenever("/api/ui/profiles", json(SAVED)),
+      whenever(LOGIN, json({ state: "Waiting", url: ADDRESS }), "POST"),
+      whenever(LOGIN, json({ state: "Waiting", url: ADDRESS })),
+      whenever(`${LOGIN}/close`, () =>
+        Promise.resolve(new Response(null, { status: 204 })), "POST"),
+    );
+    mountCards();
+
+    await waitFor(() => screen.getByText(reads(FABLE)));
+    fireEvent.click(theCard(reads(FABLE)).querySelector("button")!);
+    await waitFor(() => screen.getByText(ADDRESS));
+
+    fireEvent.click(screen.getByText("Cancel"));
+
+    await waitFor(() => expect(askedFor(fetching, `${LOGIN}/close`)).toBe(1));
+    expect(sentTo(fetching, `${LOGIN}/close`)).toEqual(sentTo(fetching, LOGIN));
+    expect(screen.queryByText(ADDRESS)).toBeNull();
+  });
+
+  it("says why a login ended without one, and starts another on Try again", async () => {
+    const fetching = serving(
+      whenever("/api/ui/profiles", json(SAVED)),
+      whenever(LOGIN, json({ state: "Starting" }), "POST"),
+      whenever(
+        LOGIN,
+        json({
+          state: "Failed",
+          reason: "The login ran out of time. Open it again to start over.",
+        }),
+      ),
+    );
+    mountCards();
+
+    await waitFor(() => screen.getByText(reads(FABLE)));
+    fireEvent.click(theCard(reads(FABLE)).querySelector("button")!);
+
+    await waitFor(() => screen.getByText(/ran out of time/));
+    fireEvent.click(screen.getByText("Try again"));
+
+    const posts = () =>
+      fetching.mock.calls.filter(
+        ([asked, init]) => String(asked) === LOGIN && init?.method === "POST",
+      ).length;
+    await waitFor(() => expect(posts()).toBe(2));
+  });
+});
+
 describe("the plus that adds one", () => {
   /// An `IconButton`, for the reason the gear at the head of the conversations
   /// is one: it is another thing in the pane that is selected and opened into

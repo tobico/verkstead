@@ -611,6 +611,14 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // is: the viewer speaks one method, and the thing being done is named in
         // the path rather than in the verb.
         .route("/api/ui/profiles/{id}/delete", post(delete_profile))
+        // A Profile's login: opened (started, or joined where one is running),
+        // read, handed its code, and closed — see [`crate::logins`].
+        .route(
+            "/api/ui/profiles/{id}/login",
+            get(login_reading).post(login_opened),
+        )
+        .route("/api/ui/profiles/{id}/login/code", post(login_coded))
+        .route("/api/ui/profiles/{id}/login/close", post(login_closed))
         // Not a thing to fetch but a thing to listen on — see [`crate::nudge`].
         .route("/api/ui/nudges", get(crate::nudge::nudges))
         .route("/api/ui/push/key", get(push_key))
@@ -5301,6 +5309,114 @@ async fn edit_profile(
 /// on its next refresh — so a Conversation on a third device that had picked it is
 /// left with an empty picker, exactly as a local removal leaves one. See
 /// [`crate::mirroring::removed`].
+/// A device opening a Profile's login modal: the login already running for it,
+/// or a new one — see [`crate::logins::Logins::opened`].
+///
+/// Refused for anything but a Claude Profile at home on this device, and on
+/// Windows, where nothing yet runs a login — see
+/// [`crate::sandbox::Sandbox::for_login`].
+async fn login_opened(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(opened): Json<verkstead_render::LoginOpened>,
+) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+
+    let profile = match store::load_profile(&state.pool, id).await {
+        Ok(Some(profile)) => profile,
+        Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, profile_id = id, "reading an Agent Profile failed");
+            return unavailable("the agent profile could not be read");
+        }
+    };
+
+    if profile.agent_type() != store::AgentType::Claude {
+        return refused(
+            StatusCode::CONFLICT,
+            ApiError::new("only a Claude Profile can be logged in from here"),
+        );
+    }
+
+    if profile.mirror.is_some() {
+        return refused(
+            StatusCode::CONFLICT,
+            ApiError::new("log in on the device this Profile is at home on"),
+        );
+    }
+
+    if crate::platform::Platform::HERE == crate::platform::Platform::Windows {
+        return refused(
+            StatusCode::CONFLICT,
+            ApiError::new("logging in from Verkstead is not available on Windows yet"),
+        );
+    }
+
+    let Some(agents) = state.sessions.agents() else {
+        return unavailable("this server runs no sessions, so it cannot log one in");
+    };
+
+    Json(
+        state
+            .logins
+            .opened(agents, state.nudges.clone(), profile, opened.viewer),
+    )
+    .into_response()
+}
+
+/// Where a Profile's login has got to — `null` where none is running.
+async fn login_reading(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+
+    Json(state.logins.reading(id)).into_response()
+}
+
+/// The code the login page handed back, for the login waiting on it.
+async fn login_coded(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(code): Json<verkstead_render::LoginCode>,
+) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+
+    match state.logins.coded(id, &code.code) {
+        Ok(reading) => {
+            state.nudges.announce_here(Nudge::Login { profile: id });
+            Json(reading).into_response()
+        }
+        Err(crate::logins::Refusal::NotRunning) => refused(
+            StatusCode::CONFLICT,
+            ApiError::new("this login is no longer running; open it again"),
+        ),
+        Err(crate::logins::Refusal::NotWaiting) => refused(
+            StatusCode::CONFLICT,
+            ApiError::new("this login is not waiting for a code"),
+        ),
+    }
+}
+
+/// A device closing a Profile's login modal — see
+/// [`crate::logins::Logins::closed`].
+async fn login_closed(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(closed): Json<verkstead_render::LoginClosed>,
+) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+
+    state.logins.closed(id, &closed.viewer);
+
+    StatusCode::NO_CONTENT.into_response()
+}
+
 async fn delete_profile(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
     let Ok(id) = id.parse::<i64>() else {
         return Json(verkstead_render::ProfileDeleted::NoSuchProfile).into_response();
