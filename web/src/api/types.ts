@@ -805,7 +805,7 @@ export type BriefSaved = "Saved" | "NoSuchConversation" | "NotDrafting";
  * a picker, and a Pairing made against one goes on reading as a Pairing — with
  * a broken Profile in it.
  */
-export type Broken = "DirMissing" | "ConfigMissing" | "HomeMissing" | "HomeUnreachable" | "NoLoginAtHome" | "HarnessMissing";
+export type Broken = "DirMissing" | "ConfigMissing" | "HomeMissing" | "HomeUnreachable" | "NoLoginAtHome" | "HarnessMissing" | "SignedOut";
 
 /**
  * One session's Capture, whole, as the details pane receives it.

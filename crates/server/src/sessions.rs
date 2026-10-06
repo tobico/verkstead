@@ -196,6 +196,16 @@ pub struct Agents {
     /// and a field for [`Agents::pace`]'s reason: ten minutes is a test that
     /// spends ten minutes asleep.
     login_limit: Duration,
+
+    /// Whether a press asks `claude auth status` of a Profile's account before
+    /// it starts a session under it — see [`crate::logins::asked`].
+    ///
+    /// On for the real thing and off where something stands where every
+    /// type's binary goes, for the reason [`Agents::desktop_app`] asks nothing
+    /// there: what the suite stands there is a session, and most of what it
+    /// stands there does not answer `auth status` at all. A test that is about
+    /// the asking turns it on — see [`Agents::checking_logins`].
+    checks_logins: bool,
 }
 
 impl Agents {
@@ -227,6 +237,7 @@ impl Agents {
             signature: None,
             pace: Pace::default(),
             login_limit: crate::logins::LIMIT,
+            checks_logins: true,
         }
     }
 
@@ -247,6 +258,7 @@ impl Agents {
     ) -> Agents {
         Agents {
             agent: Some(agent),
+            checks_logins: false,
             ..Agents::new(
                 homes,
                 reachable,
@@ -273,6 +285,20 @@ impl Agents {
             login_limit: limit,
             ..self
         }
+    }
+
+    /// The same, asking the stand-in `auth status` before a press starts a
+    /// session — see [`Agents::checks_logins`].
+    pub fn checking_logins(self) -> Agents {
+        Agents {
+            checks_logins: true,
+            ..self
+        }
+    }
+
+    /// Whether a press asks — see [`Agents::checks_logins`].
+    pub(crate) fn checks_logins(&self) -> bool {
+        self.checks_logins
     }
 
     /// How long a login is left waiting — see [`Agents::login_limit`].

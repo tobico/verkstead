@@ -13,6 +13,9 @@
 //! *this* box. Each is something to go and put right somewhere, which is why
 //! every one of them names the somewhere — the machine, or this one.
 //!
+//! **And one is about an account at home here: it has signed out.** A press
+//! found it with no login, and the card's Log in button is the fix.
+//!
 //! **And the harness one is the onboarding probe's own sentence**, because it
 //! is the onboarding probe's own finding: the dependencies step says whether a
 //! harness is on this machine, and a second vocabulary for one fact would be
@@ -90,6 +93,8 @@ export function troubleReading(said: ProfileTrouble): string {
       return `Its account on ${where} holds no login file, so there is nothing to mirror here. Log in on that machine.`;
     case "HarnessMissing":
       return harnessAbsent(said.agent_type);
+    case "SignedOut":
+      return `Its ${AGENT_NAME[said.agent_type]} account is signed out. Log in to run a session under it.`;
   }
 }
 
@@ -112,5 +117,7 @@ export function brokenBriefly(broken: Broken): string {
       return "no login at home";
     case "HarnessMissing":
       return "not on this machine";
+    case "SignedOut":
+      return "signed out";
   }
 }

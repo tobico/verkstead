@@ -35,6 +35,14 @@
 //! **A login that lands resumes what it unblocks**: every run on the Profile
 //! stopped as Signed out — see [`crate::signouts::logged_in`].
 //!
+//! **And a press is checked before it starts anything.** A press that would
+//! start a session under a Claude Profile at home here asks `claude auth
+//! status` of its account first — see [`asked`]. An account with no login is
+//! remembered as signed out, so the Profile reads as broken on its row and the
+//! press is refused naming it, before a session comes up with nothing to run
+//! on. A login from the card clears it; the press is then the human's to make
+//! again, there being no run to resume.
+//!
 //! Claude only, and only a Profile at home on this device: a mirror's account
 //! is a copy, and a login written into a copy is one the next refresh from its
 //! home device writes over.
@@ -85,8 +93,14 @@ const REFUSED_SAID: &str = "Claude did not accept that code. Open the new addres
 const LOGGING_IN: &[&str] = &["auth", "login", "--claudeai"];
 
 /// And the words that ask whether the account is logged in, which Claude Code
-/// 2.1.283 answers by its exit status: `0` logged in, `1` not.
+/// 2.1.283 answers by its exit status: `0` logged in, `1` not. An API key, in
+/// the environment or from an `apiKeyHelper`, reads as logged in.
 const STATUS: &[&str] = &["auth", "status"];
+
+/// How long that question is waited on before a press goes ahead without the
+/// answer. It reads files and answers at once; one that hangs is a harness
+/// in trouble that the session will show more plainly than a refusal could.
+const STATUS_LIMIT: Duration = Duration::from_secs(20);
 
 /// What the environment's `BROWSER` is inside a login, so that the harness
 /// opens nothing on the server: a program that does nothing and succeeds.
@@ -105,6 +119,11 @@ pub(crate) struct Logins {
     /// What tells an entry from the one that replaced it, so that a run that
     /// was killed does not write its ending over its successor's.
     runs: Arc<AtomicU64>,
+
+    /// The Profiles whose account `claude auth status` last found with no
+    /// login — see [`asked`]. Held here rather than in the store: it is a
+    /// reading of the account, and a restart asks again at the next press.
+    signed_out: Arc<Mutex<HashSet<i64>>>,
 }
 
 struct Login {
@@ -229,6 +248,35 @@ impl Logins {
         login.state = LoginState::Checking;
 
         Ok(login.state.clone())
+    }
+
+    /// The Profiles found signed out, for the rows read off them — see
+    /// [`crate::profiles`].
+    pub(crate) fn signed_out(&self) -> HashSet<i64> {
+        self.signed_out
+            .lock()
+            .expect("the signed-out register is not poisoned")
+            .clone()
+    }
+
+    /// Put down what the account of `profile` was found to be, and say so to
+    /// every device where the Profile's row reads differently for it.
+    fn found(&self, state: &AppState, profile: i64, logged_in: bool) {
+        let moved = {
+            let mut signed_out = self
+                .signed_out
+                .lock()
+                .expect("the signed-out register is not poisoned");
+
+            match logged_in {
+                true => signed_out.remove(&profile),
+                false => signed_out.insert(profile),
+            }
+        };
+
+        if moved {
+            state.nudges.announce_here(Nudge::Profiles);
+        }
     }
 
     /// `viewer` closing the modal on `profile`. The last one to close it ends
@@ -361,9 +409,9 @@ impl Logins {
         let state = match ending {
             Ending::Stopped | Ending::Refused => return,
             Ending::Failed(reason) => LoginState::Failed { reason },
-            Ending::Exited => match checked(&run).await {
-                true => LoginState::LoggedIn,
-                false => LoginState::Failed {
+            Ending::Exited => match status(run.agents.clone(), run.profile.clone()).await {
+                Some(true) => LoginState::LoggedIn,
+                _ => LoginState::Failed {
                     reason: "Claude finished, but the account still reads as logged out. \
                              Try again."
                         .to_owned(),
@@ -373,7 +421,11 @@ impl Logins {
 
         if state == LoginState::LoggedIn {
             // The Profile's row says whether its account has a login, and now
-            // it has.
+            // it has — and it no longer reads as signed out.
+            self.signed_out
+                .lock()
+                .expect("the signed-out register is not poisoned")
+                .remove(&run.profile.id);
             run.state.nudges.announce_here(Nudge::Profiles);
 
             tokio::spawn(crate::signouts::logged_in(
@@ -589,13 +641,51 @@ fn address_in(line: &str) -> Option<String> {
     url.starts_with("https://").then(|| url.to_owned())
 }
 
-/// Whether the account now reads as logged in, asked of the harness in a
-/// fresh root — which is the account's login as the next session would be
-/// given it.
-async fn checked(run: &Run) -> bool {
-    let agents = run.agents.clone();
-    let profile = run.profile.clone();
+/// Ask each of `profiles` that is a Claude account at home here whether it is
+/// logged in, before a press starts a session under it, and remember the
+/// answer for its row — see the module note.
+///
+/// **Nothing is refused here.** The answer is put down where every reading of
+/// the Profile finds it, and the press reads its Profiles after this, so it is
+/// refused by the rule every broken Profile is refused by.
+///
+/// No answer leaves the reading as it was: a Windows server, which cannot run
+/// the harness for a login yet, a sandbox that could not be built, and a
+/// harness that did not answer in time. Each of those goes ahead, and a session
+/// that then finds itself signed out stops the way any signed-out session
+/// does — see [`crate::signouts`].
+pub(crate) async fn asked<'a>(
+    state: &AppState,
+    profiles: impl IntoIterator<Item = &'a store::Profile>,
+) {
+    let Some(agents) = state.sessions.agents() else {
+        return;
+    };
 
+    if !agents.checks_logins() {
+        return;
+    }
+
+    let mut seen = HashSet::new();
+
+    for profile in profiles {
+        if profile.mirror.is_some()
+            || profile.agent_type() != store::AgentType::Claude
+            || !seen.insert(profile.id)
+        {
+            continue;
+        }
+
+        if let Some(logged_in) = status(agents.clone(), profile.clone()).await {
+            state.logins.found(state, profile.id, logged_in);
+        }
+    }
+}
+
+/// Whether the account of `profile` reads as logged in, asked of the harness
+/// in a fresh root — which is the account's login as the next session would be
+/// given it. `None` where nothing could answer: see [`asked`].
+async fn status(agents: Arc<Agents>, profile: store::Profile) -> Option<bool> {
     let built = tokio::task::spawn_blocking(move || {
         let (sandbox, argv) = agents.logging_in(&profile, STATUS)?;
         sandbox.command(&argv).ok()
@@ -604,20 +694,23 @@ async fn checked(run: &Run) -> bool {
     .ok()
     .flatten();
 
-    let Some((rendering, closing)) = built else {
-        return false;
-    };
+    let (rendering, closing) = built?;
 
     let status = match std::process::Command::try_from(&rendering) {
-        Ok(command) => tokio::process::Command::from(command)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .kill_on_drop(true)
-            .status()
-            .await
-            .is_ok_and(|status| status.success()),
-        Err(_) => false,
+        Ok(command) => {
+            let asking = tokio::process::Command::from(command)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .kill_on_drop(true)
+                .status();
+
+            match tokio::time::timeout(STATUS_LIMIT, asking).await {
+                Ok(Ok(status)) => Some(status.success()),
+                Ok(Err(_)) | Err(_) => None,
+            }
+        }
+        Err(_) => None,
     };
 
     closed(closing).await;

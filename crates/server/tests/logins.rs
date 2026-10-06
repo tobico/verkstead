@@ -21,7 +21,9 @@ use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
-use verkstead_render::LoginState;
+use verkstead_render::{
+    AgentType, Broken, GrillingStarted, LoginState, ProfileEntry, ProfileTrouble,
+};
 use verkstead_server::attachments::Attachments;
 use verkstead_server::build_cache::BuildCache;
 use verkstead_server::handoffs::Handoffs;
@@ -107,7 +109,16 @@ impl Workbench {
             Attachments::under(dir.path()),
             Settings::in_data_dir(dir.path()),
         )
-        .logging_in_within(limit);
+        .logging_in_within(limit)
+        .checking_logins();
+
+        // Who a branch Verkstead cuts is committed by, which a press that
+        // starts work is refused without.
+        std::fs::write(
+            dir.path().join("config.yaml"),
+            "git_author:\n  name: Verkstead Test\n  email: test@verkstead.invalid\n",
+        )
+        .unwrap();
 
         let app = router_running_sessions(
             pool.clone(),
@@ -165,6 +176,98 @@ impl Workbench {
         std::fs::write(&config_file, "{}\n").unwrap();
 
         (claude_dir, config_file)
+    }
+
+    /// A draft Investigate on a fresh repository, run under `profile`, with
+    /// everything settled but whether its account is logged in.
+    async fn investigation_under(&self, profile: i64) -> i64 {
+        let repo = self.accounts.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+
+        for args in [
+            &["init", "--initial-branch", "main"][..],
+            &["config", "user.email", "test@verkstead.invalid"],
+            &["config", "user.name", "Verkstead Test"],
+            &["commit", "--allow-empty", "-m", "first"],
+        ] {
+            let ran = std::process::Command::new("git")
+                .args(args)
+                .current_dir(&repo)
+                .output()
+                .unwrap();
+            assert!(ran.status.success(), "git {args:?}");
+        }
+
+        let (status, said) = self
+            .press("/api/ui/repos", serde_json::json!({ "path": repo }))
+            .await;
+        assert_eq!(status, StatusCode::OK, "{said}");
+        let repo_id = store::registered_repos(&self.pool).await.unwrap()[0].id;
+
+        let (status, said) = self
+            .press(
+                "/api/ui/conversations",
+                serde_json::json!({ "repo_id": repo_id }),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "{said}");
+        let started: serde_json::Value = serde_json::from_str(&said).unwrap();
+        let id = started["Started"]["id"].as_i64().expect("{said}");
+
+        for (path, body) in [
+            (
+                "implementation-pairing",
+                serde_json::json!({ "profile_id": profile, "model": "claude-opus-5" }),
+            ),
+            ("process", serde_json::json!({ "process": "Investigate" })),
+            (
+                "brief",
+                serde_json::json!({ "markdown": "Find out why it is slow." }),
+            ),
+        ] {
+            let (status, said) = self
+                .press(&format!("/api/ui/conversations/{id}/{path}"), body)
+                .await;
+            assert_eq!(status, StatusCode::OK, "{path}: {said}");
+        }
+
+        id
+    }
+
+    /// Press the start of `conversation`, and hand back what it answered.
+    async fn pressed(&self, conversation: i64) -> GrillingStarted {
+        let (status, said) = self
+            .press(
+                &format!("/api/ui/conversations/{conversation}/grill"),
+                serde_json::json!({}),
+            )
+            .await;
+
+        assert_eq!(status, StatusCode::OK, "{said}");
+        serde_json::from_str(&said).unwrap()
+    }
+
+    /// Why the Profile's row says it cannot be run under, if it does.
+    async fn broken(&self, profile: i64) -> Option<Broken> {
+        let answered = self
+            .app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/ui/profiles")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let bytes = answered.into_body().collect().await.unwrap().to_bytes();
+        let rows: Vec<ProfileEntry> = serde_json::from_slice(&bytes).unwrap();
+
+        rows.into_iter()
+            .find(|row| row.id == profile)
+            .expect("the Profile is on the list")
+            .broken
     }
 
     fn login_of(&self, name: &str) -> Option<String> {
@@ -596,4 +699,60 @@ async fn a_profile_of_another_harness_is_not_logged_in_here() {
         .await;
 
     assert_eq!(status, StatusCode::CONFLICT, "{said}");
+}
+
+/// A press that would start a session under a Claude account with no login is
+/// refused naming it, before anything starts; the row says so too; and a login
+/// from the card puts both right, so the same press then goes ahead.
+#[tokio::test]
+async fn a_press_under_a_signed_out_account_is_refused_until_it_logs_in() {
+    let workbench = Workbench::new(Duration::from_secs(600)).await;
+    let profile = workbench.claude_profile("work").await;
+    let conversation = workbench.investigation_under(profile).await;
+
+    assert_eq!(
+        workbench.broken(profile).await,
+        None,
+        "nothing has asked yet, so nothing reads as wrong",
+    );
+
+    assert_eq!(
+        workbench.pressed(conversation).await,
+        GrillingStarted::ProfileBroken(ProfileTrouble {
+            broken: Broken::SignedOut,
+            agent_type: AgentType::Claude,
+            device: None,
+        }),
+    );
+    assert_eq!(workbench.broken(profile).await, Some(Broken::SignedOut));
+
+    let refused = store::load_conversation(&workbench.pool, conversation)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        refused.state,
+        store::Lifecycle::Draft,
+        "nothing was started"
+    );
+    assert_eq!(refused.worktree, None, "and nothing was checked out");
+
+    workbench.opened(profile, "laptop").await;
+    workbench.waiting(profile).await;
+    let (status, said) = workbench.coded(profile, GOOD_CODE).await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+    workbench
+        .read_until(profile, |reading| reading == &Some(LoginState::LoggedIn))
+        .await;
+    workbench.closed(profile, "laptop").await;
+
+    assert_eq!(
+        workbench.broken(profile).await,
+        None,
+        "the login put the row right",
+    );
+    assert_eq!(
+        workbench.pressed(conversation).await,
+        GrillingStarted::Started
+    );
 }

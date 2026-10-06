@@ -4146,9 +4146,9 @@ pub enum GrillingStarted {
     NoReviewProfile,
 
     /// A chosen Profile cannot be run under as things stand — its account is
-    /// not where it was left, or it is a member's and something about this
-    /// device or that one is in the way. Which of them, said the way the
-    /// Profile's own row says it.
+    /// not where it was left or has signed out, or it is a member's and
+    /// something about this device or that one is in the way. Which of them,
+    /// said the way the Profile's own row says it.
     ProfileBroken(crate::ProfileTrouble),
 
     /// The Brief is empty, and the Brief is what the grilling starts from.

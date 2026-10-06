@@ -714,6 +714,24 @@ describe("logging an account in", () => {
     ).toBe("Log in");
   });
 
+  /// A press found the account with no login: the card says so, and the
+  /// Log in button beside it is the fix.
+  it("says an account here that signed out, with the login beside it", async () => {
+    serving(
+      whenever("/api/ui/profiles", json([{ ...FABLE, broken: "SignedOut" }])),
+    );
+    mountCards();
+
+    await waitFor(() => screen.getByText(reads(FABLE)));
+
+    const card = theCard(reads(FABLE));
+
+    expect(card.querySelector(`.${styles.broken}`)!.textContent).toBe(
+      "Its Claude Code account is signed out. Log in to run a session under it.",
+    );
+    expect(card.querySelector("button")?.textContent).toBe("Log in");
+  });
+
   /// A mirror's account is a copy: its login is made on the machine it is at
   /// home on, and a login written into the copy is one the next refresh from
   /// there writes over.
