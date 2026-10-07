@@ -305,6 +305,22 @@ testers.runNixOSTest {
         git
         pkgs.curl
         pkgs.nodejs
+
+        # And a `claude` that answers the one question a press asks before it
+        # launches anything: `claude auth status`, run in a sandbox under the
+        # Profile's account, whose failure reads as an account signed out and
+        # refuses the press. With no `claude` here at all the sandbox's exec
+        # fails, and says exactly that. Anything else is refused, which is what
+        # a session met before this was here — nothing in this test needs one
+        # to get further than its sandbox starting.
+        (pkgs.writeShellScriptBin "claude" ''
+          if [ "$*" = "auth status" ]; then
+              exit 0
+          fi
+
+          echo "the VM test's stand-in for claude runs nothing but auth status" >&2
+          exit 1
+        '')
       ];
 
       # A sandbox under the packaged unit, run on demand rather than at boot.
