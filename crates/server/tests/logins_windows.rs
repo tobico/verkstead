@@ -50,8 +50,16 @@ use verkstead_server::{Agents, Gh, open_database, router_running_sessions, store
 ///
 /// Longer than the Unix arm's: a login here is a logon and a boundary written
 /// before PowerShell has said a word, and a first `powershell.exe` on a runner
-/// is slow on its own.
-const WAITING: Duration = Duration::from_secs(120);
+/// is slow on its own. **The first process the session account starts on a
+/// runner** is slower again — 194 seconds has been seen — and this suite sorts
+/// ahead of `tests/sessions_windows.rs`, so it is often that one. Its
+/// `PATIENCE`, for that reason.
+const WAITING: Duration = Duration::from_secs(360);
+
+/// The limit the login that is left past its limit is given: long enough for a
+/// warm account to print its address first, which took up to half a minute on
+/// the runner, so that what the limit kills is a stub that is running.
+const LIMIT: Duration = Duration::from_secs(60);
 
 /// The code the stub takes. Any other is refused, the way Claude Code 2.1.283
 /// refuses one that is shaped right but wrong.
@@ -498,7 +506,18 @@ async fn the_last_device_closing_the_modal_kills_the_login() {
 
 #[tokio::test]
 async fn a_login_left_past_its_limit_is_killed() {
-    let workbench = Workbench::new(Duration::from_secs(5)).await;
+    // A first login to the address and closed, so that the one the limit is
+    // about starts on an account that is warm — a cold one can outlast any
+    // limit short enough to wait out before it prints a word.
+    let warming = Workbench::new(Duration::from_secs(600)).await;
+    let warmed = warming.claude_profile("warming").await;
+
+    warming.opened(warmed, "laptop").await;
+    warming.waiting(warmed).await;
+    warming.closed(warmed, "laptop").await;
+    warming.none_running(warmed).await;
+
+    let workbench = Workbench::new(LIMIT).await;
     let profile = workbench.claude_profile("work").await;
 
     workbench.opened(profile, "laptop").await;
