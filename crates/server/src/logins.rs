@@ -797,8 +797,9 @@ fn address_in(line: &str) -> Option<String> {
 /// the Profile finds it, and the press reads its Profiles after this, so it is
 /// refused by the rule every broken Profile is refused by.
 ///
-/// No answer leaves the reading as it was: a sandbox that could not be built,
-/// and a harness that did not answer in time. Each of those goes ahead, and a
+/// No answer leaves the reading as it was: a harness that is not on this
+/// machine, a sandbox that could not be built, and a harness that did not
+/// answer in time. Each of those goes ahead, and a
 /// session that then finds itself signed out stops the way any signed-out
 /// session does — see [`crate::signouts`].
 ///
@@ -825,6 +826,20 @@ pub(crate) async fn asked<'a>(
         if profile.mirror.is_some()
             || profile.agent_type() != store::AgentType::Claude
             || !seen.insert(profile.id)
+        {
+            continue;
+        }
+
+        // A harness that is not on this machine is no answer either, rather
+        // than an account signed out: the sandbox would fail to run it, and
+        // that failure would read as `auth status` saying no. What is wrong
+        // there is the machine, and the dependencies step is what says so.
+        let machine = state.onboarding.machine().clone();
+        let program = agents.harness(store::AgentType::Claude);
+
+        if !tokio::task::spawn_blocking(move || machine.runs(&program))
+            .await
+            .unwrap_or(true)
         {
             continue;
         }
