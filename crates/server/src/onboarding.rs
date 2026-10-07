@@ -650,7 +650,23 @@ impl Machine {
     /// Blocks: one `PATH` walk, which is why every caller is already off the
     /// runtime.
     pub(crate) fn harness(&self, agent_type: store::AgentType) -> bool {
-        present(&self.installed(sessions::binary(agent_type)))
+        self.runs(sessions::binary(agent_type))
+    }
+
+    /// And the same probe asked of whatever is to run, which is a harness's
+    /// name — or, where a test stands something else there, the path it stands
+    /// — see [`crate::sessions::Agents::harness`]. A path is there or it is
+    /// not: there is nothing on a `PATH` to look it up on.
+    ///
+    /// Blocks: one `PATH` walk, or one `stat`.
+    pub(crate) fn runs(&self, program: &str) -> bool {
+        let named = Path::new(program);
+
+        if named.is_absolute() {
+            return named.is_file();
+        }
+
+        present(&self.installed(program))
     }
 
     /// And every one of them, which is what a device answers a member asking

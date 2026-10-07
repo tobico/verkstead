@@ -85,6 +85,12 @@ struct Workbench {
 
 impl Workbench {
     async fn new(limit: Duration) -> Workbench {
+        Workbench::harnessed(limit, None).await
+    }
+
+    /// The same, with `harness` standing where every type's binary goes in
+    /// place of the stub.
+    async fn harnessed(limit: Duration, harness: Option<Vec<String>>) -> Workbench {
         let dir = tempfile::tempdir().unwrap();
         let home = tempfile::tempdir().unwrap();
         let accounts = tempfile::tempdir().unwrap();
@@ -98,7 +104,7 @@ impl Workbench {
         );
 
         let agents = Agents::running(
-            vec!["/bin/sh".to_owned(), "-c".to_owned(), stub(&marker)],
+            harness.unwrap_or_else(|| vec!["/bin/sh".to_owned(), "-c".to_owned(), stub(&marker)]),
             Homes::on(Platform::HERE, home.path().to_owned(), dir.path()),
             Reachable::at(LISTENING),
             SandboxConfig::default(),
@@ -755,4 +761,24 @@ async fn a_press_under_a_signed_out_account_is_refused_until_it_logs_in() {
         workbench.pressed(conversation).await,
         GrillingStarted::Started
     );
+}
+
+/// And a harness that is not on this machine at all is no answer, rather than
+/// an account signed out: nothing ran to ask, so the press goes ahead and the
+/// row reads as nothing wrong.
+#[tokio::test]
+async fn a_harness_that_is_not_there_does_not_read_as_signed_out() {
+    let workbench = Workbench::harnessed(
+        Duration::from_secs(600),
+        Some(vec!["/nonexistent/verkstead-test/claude".to_owned()]),
+    )
+    .await;
+    let profile = workbench.claude_profile("work").await;
+    let conversation = workbench.investigation_under(profile).await;
+
+    assert_eq!(
+        workbench.pressed(conversation).await,
+        GrillingStarted::Started
+    );
+    assert_eq!(workbench.broken(profile).await, None);
 }

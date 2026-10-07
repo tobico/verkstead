@@ -89,13 +89,14 @@ jobs:
       # that one is said in crate names: the toolkit the tray app linked, what a
       # Rust GUI would reach for instead, and the libraries any of them draws
       # through. Two names would only say that the one way a toolkit used to
-      # arrive is still shut.
+      # arrive is still shut. `glib` but not `glibc`, which every closure
+      # carries.
       - name: The daemon package links no toolkit
         run: |
           closure=$(nix path-info --recursive .#verkstead-source)
           echo "$closure"
           if printf '%s\n' "$closure" \
-            | grep -Ei -- 'gtk|gdk|glib|appindicator|pango|cairo|wayland|libx11|libxkbcommon'; then
+            | grep -Ei -- 'gtk|gdk|glib([^c]|$)|appindicator|pango|cairo|wayland|libx11|libxkbcommon'; then
             echo "::error::A GUI toolkit must not be in the headless package's closure, and is."
             exit 1
           fi
