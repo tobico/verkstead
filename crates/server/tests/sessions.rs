@@ -16836,6 +16836,408 @@ async fn an_account_out_of_window_stops_the_run_and_tells_the_devices() {
     );
 }
 
+/// A stub that works the backlog, and where the first task lands prints `line`
+/// a few times over and holds — the way claude 2.1.283 sits at its prompt once
+/// its login has gone (ADR-0022).
+fn signing_out(line: &str) -> String {
+    out_of_window_saying(&format!(
+        r#"
+                    for pass in 1 2 3 4; do
+                        printf '  ⎿  {line}\r\n'
+                        sleep 0.25
+                    done
+        "#
+    ))
+}
+
+/// An account that signs out mid-run: the run stops as Signed out with a Notice
+/// naming the account and the line the session printed, the Notice carries a
+/// Log in press for the Profile, the devices are told, and the session is ended.
+#[tokio::test]
+async fn an_account_that_signs_out_stops_the_run_with_a_log_in_press() {
+    let fixture = grilling(&signing_out("Login expired · Please run /login")).await;
+
+    running_out(&fixture).await;
+
+    let (service, taken) = push_service().await;
+    let phone = Device::new(&service, "phone");
+    fixture.subscribe(&phone).await;
+
+    let notice = fixture.stopped().await;
+
+    assert!(
+        notice
+            .html
+            .contains("<strong>Implementing the work</strong> stopped."),
+        "it stopped the way everything else stops: {:?}",
+        notice.html,
+    );
+    assert!(
+        notice
+            .html
+            .contains("the account <strong>implementation</strong> has signed out"),
+        "naming the account whose login went: {:?}",
+        notice.html,
+    );
+    assert!(
+        notice.html.contains("Login expired · Please run /login"),
+        "with the line the session printed: {:?}",
+        notice.html,
+    );
+
+    let pool = open_database(&fixture.database).await.unwrap();
+    let implementation = verkstead_store::profiles(&pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|profile| profile.name.as_deref() == Some("implementation"))
+        .unwrap();
+
+    let stop = fixture.stop_on_the_record().await;
+
+    assert_eq!(
+        stop.decision,
+        Decision::Verkstead,
+        "Verkstead pulled the brake"
+    );
+    assert_eq!(
+        stop.signed_out,
+        Some(implementation.id),
+        "and the stop records which login it is waiting on",
+    );
+
+    assert_eq!(
+        notice.log_in,
+        Some(verkstead_render::NoticeLogIn {
+            profile: implementation.id,
+            name: Some("implementation".to_owned()),
+        }),
+        "the Notice offers the login for an account at home here",
+    );
+    assert_eq!(fixture.view().await.blocked_on, Some(notice.id));
+
+    let pushed = pushes(&taken, 1).await;
+    let told = phone.read(&pushed[0]);
+
+    assert_eq!(told["path"], format!("/conversations/{}", fixture.id));
+    assert_eq!(told["title"], "implementation has signed out");
+
+    pause(Duration::from_secs(2)).await;
+
+    assert_eq!(
+        notices(&fixture.view().await).len(),
+        1,
+        "the line printed four times over is one stop",
+    );
+    assert_eq!(taken.lock().unwrap().len(), 1, "and one push");
+    assert!(
+        outputs(&fixture.view().await)
+            .iter()
+            .all(|session| !session.running),
+        "and no session is running behind the stop",
+    );
+}
+
+/// The phrase in the middle of a line is a mention: claude says the same words
+/// mid-sentence about things that are not this session's login, and an agent
+/// reading ADR-0022 says them too. The run goes on to its next task.
+#[tokio::test]
+async fn the_phrase_mid_line_does_not_stop_the_run() {
+    let fixture = grilling(&signing_out(
+        "Your session has expired. Please run /login to sign in again.",
+    ))
+    .await;
+
+    running_out(&fixture).await;
+
+    fixture
+        .until(|view| (outputs(view).len() >= 3).then_some(()))
+        .await;
+
+    assert!(
+        said(&fixture.view().await).is_empty(),
+        "nothing stopped the run: {:?}",
+        notices(&fixture.view().await),
+    );
+}
+
+/// The code the login stub below takes, and what it writes into the account as
+/// its login.
+const GOOD_CODE: &str = "good#code";
+
+/// A stub whose implementation and investigation sessions sign out until the
+/// account holds [`GOOD_CODE`], and record the login they were given in
+/// `spill` once it does. It answers `auth login` and `auth status` the way
+/// claude 2.1.283 does over plain pipes — see `tests/logins.rs`.
+fn signed_out_until_logged_in(spill: &Path) -> String {
+    let spill = spill.display();
+
+    format!(
+        r#"
+case "$0 $1" in
+"auth login")
+    echo "If the browser didn't open, visit: https://claude.com/cai/oauth/authorize?code=true"
+    printf 'Paste code here if prompted > '
+    read code
+    printf '%s' "$code" > "$HOME/.claude/.credentials.json"
+    exit 0
+    ;;
+"auth status")
+    [ -f "$HOME/.claude/.credentials.json" ]
+    exit $?
+    ;;
+esac
+signed_out() {{
+    if ! grep -qs '{GOOD_CODE}' "$HOME/.claude/.credentials.json"; then
+        for pass in 1 2 3 4; do
+            printf '  ⎿  Not logged in · Please run /login\r\n'
+            sleep 0.25
+        done
+        sleep 300
+    fi
+}}
+case "$2" in
+*investigating/SKILL.md*)
+    signed_out
+    cat "$HOME/.claude/.credentials.json" > {spill}/investigated
+    printf 'found it\n'
+    sleep 300
+    ;;
+esac
+case "$1" in
+claude-grilling-5) ;;
+*)
+    signed_out
+    cat "$HOME/.claude/.credentials.json" > {spill}/implemented
+    ;;
+esac
+{rest}
+"#,
+        rest = out_of_window_saying(":"),
+    )
+}
+
+/// Read Conversation `id` back until `reached` holds of it, or give up.
+async fn until_on<T>(
+    fixture: &Grilling,
+    id: i64,
+    reached: impl Fn(&ConversationView) -> Option<T>,
+) -> T {
+    let deadline = Instant::now() + *PATIENCE;
+
+    loop {
+        let view: ConversationView =
+            get(&fixture.app, &format!("/api/ui/conversations/{id}")).await;
+
+        if let Some(reached) = reached(&view) {
+            return reached;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "Conversation {id} never got there: {}",
+            standing(&view),
+        );
+
+        pause(Duration::from_millis(25)).await;
+    }
+}
+
+/// One login resumes every run stopped as Signed out on its Profile — here an
+/// implementation run and an investigation beside it, both under the
+/// implementation Profile — and each resumed session is given the new login.
+#[tokio::test]
+async fn a_login_resumes_every_run_it_unblocks() {
+    let spill = tempfile::tempdir().unwrap();
+    let stub = signed_out_until_logged_in(spill.path());
+    let spilled = spill.path().to_owned();
+
+    let fixture = grilling_spilling(spill, &stub, PULL_REQUEST).await;
+
+    let investigating = composed_beside(&fixture, Process::Investigate).await;
+    grilled(&fixture, investigating).await;
+
+    running_out(&fixture).await;
+
+    let pool = open_database(&fixture.database).await.unwrap();
+    let implementation = verkstead_store::profiles(&pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|profile| profile.name.as_deref() == Some("implementation"))
+        .unwrap()
+        .id;
+
+    // Both stopped as Signed out on the one Profile, with nothing left running.
+    for id in [fixture.id, investigating] {
+        until_on(&fixture, id, |view| {
+            (view.blocked_on.is_some() && outputs(view).iter().all(|output| !output.running))
+                .then_some(())
+        })
+        .await;
+
+        assert_eq!(
+            verkstead_store::stopped(&pool, id)
+                .await
+                .unwrap()
+                .and_then(|stop| stop.signed_out),
+            Some(implementation),
+            "Conversation {id} is waiting on the implementation Profile's login",
+        );
+    }
+
+    let _: verkstead_render::LoginState = post(
+        &fixture.app,
+        &format!("/api/ui/profiles/{implementation}/login"),
+        &serde_json::json!({ "viewer": "phone" }),
+    )
+    .await;
+
+    let deadline = Instant::now() + *PATIENCE;
+    loop {
+        let reading: Option<verkstead_render::LoginState> = get(
+            &fixture.app,
+            &format!("/api/ui/profiles/{implementation}/login"),
+        )
+        .await;
+
+        if matches!(reading, Some(verkstead_render::LoginState::Waiting { .. })) {
+            break;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "the login never waited: {reading:?}"
+        );
+        pause(Duration::from_millis(25)).await;
+    }
+
+    let _: verkstead_render::LoginState = post(
+        &fixture.app,
+        &format!("/api/ui/profiles/{implementation}/login/code"),
+        &serde_json::json!({ "code": GOOD_CODE }),
+    )
+    .await;
+
+    for id in [fixture.id, investigating] {
+        until_on(&fixture, id, |view| view.blocked_on.is_none().then_some(())).await;
+    }
+
+    for given in ["implemented", "investigated"] {
+        let deadline = Instant::now() + *PATIENCE;
+        let path = spilled.join(given);
+
+        while !std::fs::read_to_string(&path).is_ok_and(|login| login.contains(GOOD_CODE)) {
+            assert!(
+                Instant::now() < deadline,
+                "the resumed {given} session was never given the new login",
+            );
+            pause(Duration::from_millis(25)).await;
+        }
+    }
+}
+
+/// A stub whose implementation sessions say they have started, wait for the
+/// test's word, and sign out unless the login they were given is
+/// [`GOOD_CODE`] — recording it in `spill` where it is.
+fn signed_out_after_starting(spill: &Path) -> String {
+    let spill = spill.display();
+
+    format!(
+        r#"
+case "$1" in
+claude-grilling-5) ;;
+*)
+    : > {spill}/started
+    while [ ! -e {spill}/go ]; do sleep 0.1; done
+    if ! grep -qs '{GOOD_CODE}' "$HOME/.claude/.credentials.json"; then
+        for pass in 1 2 3 4; do
+            printf '  ⎿  Login expired · Please run /login\r\n'
+            sleep 0.25
+        done
+        sleep 300
+    fi
+    cat "$HOME/.claude/.credentials.json" > {spill}/implemented
+    ;;
+esac
+{rest}
+"#,
+        rest = out_of_window_saying(":"),
+    )
+}
+
+/// A session that signs out after the account was logged in again — its root
+/// built before the login — resumes straight away: no Log in, no push, and the
+/// Timeline says why. The session started in its place is given the new login.
+#[tokio::test]
+async fn a_sign_out_after_a_fresh_login_resumes_by_itself() {
+    let spill = tempfile::tempdir().unwrap();
+    let stub = signed_out_after_starting(spill.path());
+    let spilled = spill.path().to_owned();
+
+    let fixture = grilling_spilling(spill, &stub, PULL_REQUEST).await;
+
+    running_out(&fixture).await;
+
+    let (service, taken) = push_service().await;
+    let phone = Device::new(&service, "phone");
+    fixture.subscribe(&phone).await;
+
+    let deadline = Instant::now() + *PATIENCE;
+    while !spilled.join("started").exists() {
+        assert!(
+            Instant::now() < deadline,
+            "the implementation session never started"
+        );
+        pause(Duration::from_millis(25)).await;
+    }
+
+    // Logged in again behind the running session's back, the way the Profile
+    // card's Log in leaves the account.
+    let account = fixture._elsewhere.path().join("implementation/.claude");
+    std::fs::write(account.join(".credentials.json.new"), GOOD_CODE).unwrap();
+    std::fs::rename(
+        account.join(".credentials.json.new"),
+        account.join(".credentials.json"),
+    )
+    .unwrap();
+
+    std::fs::write(spilled.join("go"), "").unwrap();
+
+    let deadline = Instant::now() + *PATIENCE;
+    let implemented = spilled.join("implemented");
+    while !std::fs::read_to_string(&implemented).is_ok_and(|login| login.contains(GOOD_CODE)) {
+        assert!(
+            Instant::now() < deadline,
+            "the run never carried on with the new login: {}",
+            standing(&fixture.view().await),
+        );
+        pause(Duration::from_millis(25)).await;
+    }
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        view.blocked_on, None,
+        "nothing is left waiting on the human"
+    );
+
+    let said = said(&view);
+    assert_eq!(said.len(), 1, "one Notice: {:?}", notices(&view));
+    assert!(
+        said[0].html.contains("logged in again"),
+        "the Timeline says why the run carried on: {:?}",
+        said[0].html,
+    );
+    assert_eq!(said[0].log_in, None, "and offers no Log in");
+
+    assert_eq!(
+        taken.lock().unwrap().len(),
+        0,
+        "nobody is woken for a run that carried on by itself",
+    );
+}
+
 /// The wording is the backend's, so a Codex session is stopped by codex's own
 /// sentence — and by that one alone.
 ///

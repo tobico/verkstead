@@ -1,0 +1,70 @@
+/* A Profile's login — see `LoggingIn.tsx`. The shared chrome is
+   `Modal.module.css`; what is here is the one card's own. */
+.login {
+  width: min(32rem, calc(100% - 2rem));
+}
+
+.login .title {
+  margin-top: 0;
+  font-weight: 600;
+}
+
+.login .said {
+  display: block;
+  margin: 0.75rem 0 0;
+}
+
+/* The address, which is long and is read as a whole or copied, never typed:
+   broken anywhere rather than overflowing the card. */
+.login .address {
+  margin: 0.4rem 0 0.5rem;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+/* The copy button, quiet beside the address, the way the Remote access pane
+   draws its own. */
+.login .copy {
+  padding: 0.15rem 0.5rem;
+  font: inherit;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+  background: transparent;
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.login .code {
+  box-sizing: border-box;
+  width: 100%;
+  margin-top: 0.4rem;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
+
+.login .refused {
+  margin: 0.75rem 0 0;
+  color: var(--stopped);
+}
+
+/* The pair of presses, the confirm row every card in the app that asks
+   something carries — see `Joining.module.css`. */
+.login .out {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: 1rem;
+}
+
+.login .out button {
+  flex: 1 1 9rem;
+}
+
+@media (hover: hover) {
+  .login .copy:hover {
+    color: var(--ink);
+    background: var(--card);
+  }
+}

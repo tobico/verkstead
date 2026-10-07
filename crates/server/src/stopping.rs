@@ -80,6 +80,20 @@ pub(crate) enum Decided<'a> {
         resets: Option<&'a str>,
     },
 
+    /// Verkstead pulled the brake because the account the run was spending has
+    /// signed out — see [`crate::signouts`].
+    ///
+    /// Pushed like the two above, and recorded with the Profile it is waiting
+    /// on, which is what the Notice's Log in press opens and what a login on
+    /// that Profile looks for.
+    SignedOut {
+        /// The Profile, by its id on this device.
+        id: i64,
+
+        /// And what it is called, which is what the push names.
+        profile: &'a str,
+    },
+
     /// The human pressed Stop or Force stop.
     Human,
 
@@ -99,7 +113,9 @@ impl<'a> Decided<'a> {
     /// way it once did.
     fn decision(self) -> store::Decision {
         match self {
-            Self::Verkstead | Self::OutOfWindow { .. } => store::Decision::Verkstead,
+            Self::Verkstead | Self::OutOfWindow { .. } | Self::SignedOut { .. } => {
+                store::Decision::Verkstead
+            }
             Self::Human => store::Decision::Human,
             Self::Nobody => store::Decision::Circumstance,
         }
@@ -110,7 +126,15 @@ impl<'a> Decided<'a> {
     fn resets(self) -> Option<&'a str> {
         match self {
             Self::OutOfWindow { resets, .. } => resets,
-            Self::Verkstead | Self::Human | Self::Nobody => None,
+            Self::Verkstead | Self::SignedOut { .. } | Self::Human | Self::Nobody => None,
+        }
+    }
+
+    /// And the Profile a login is waiting on, which is a signed-out stop's alone.
+    fn signed_out(self) -> Option<i64> {
+        match self {
+            Self::SignedOut { id, .. } => Some(id),
+            Self::Verkstead | Self::OutOfWindow { .. } | Self::Human | Self::Nobody => None,
         }
     }
 
@@ -128,6 +152,9 @@ impl<'a> Decided<'a> {
             Self::OutOfWindow { profile, resets } => Some(crate::push::News::OutOfWindow {
                 profile: profile.to_owned(),
                 resets: resets.map(str::to_owned),
+            }),
+            Self::SignedOut { profile, .. } => Some(crate::push::News::SignedOut {
+                profile: profile.to_owned(),
             }),
             Self::Human | Self::Nobody => None,
         }
@@ -386,15 +413,19 @@ async fn land(
             )
             .await?
         }
-        false => match store::stop(
-            pool,
-            conversation_id,
-            decided.decision(),
-            &said,
-            decided.resets(),
-        )
-        .await?
-        {
+        false => match match decided.signed_out() {
+            Some(profile) => store::stop_signed_out(pool, conversation_id, &said, profile).await?,
+            None => {
+                store::stop(
+                    pool,
+                    conversation_id,
+                    decided.decision(),
+                    &said,
+                    decided.resets(),
+                )
+                .await?
+            }
+        } {
             Some(notice) => store::Stopping::Stopped(notice),
             None => store::Stopping::Already,
         },
@@ -595,6 +626,34 @@ pub(crate) fn out_of_window(profile: &str, said: &str) -> String {
     format!("the account **{profile}** was being spent is out of window: {said}")
 }
 
+/// Why a run stopped when the account it was spending signed out: which
+/// account, the line the session printed, and where the login is made.
+///
+/// `home` is the device a mirrored Profile is at home on, by the name it is
+/// shown under — the one place its login can be made (ADR-0022). `None` is a
+/// Profile at home here, whose Notice carries the Log in press instead.
+pub(crate) fn signed_out(profile: &str, said: &str, home: Option<&str>) -> String {
+    let login = match home {
+        None => "Log in, and the run carries on by itself.".to_owned(),
+        Some(home) => format!(
+            "The account is at home on **{home}**, so log in there, then press Resume here."
+        ),
+    };
+
+    format!("the account **{profile}** has signed out: {said}\n\n{login}")
+}
+
+/// Why a run stopped when its session signed out on a login that had already
+/// been replaced: which account, the line the session printed, and that the
+/// run carries on with the new login without anybody doing anything.
+pub(crate) fn signed_out_since(profile: &str, said: &str) -> String {
+    format!(
+        "the account **{profile}** signed out in this session: {said}\n\n\
+         It was logged in again after the session started, so the run carries on by itself \
+         with the new login."
+    )
+}
+
 /// The stop with its first letter up, because it opens the sentence the Notice
 /// is. Every caller names it the way the log does — "implementing the work" —
 /// and a Notice opening in lower case would read as half a line.
@@ -749,6 +808,27 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+
+    /// A signed-out stop at home here says to log in, the press being on the
+    /// Notice; a mirror's names the device it is at home on and says to log in
+    /// there, there being no press (ADR-0022).
+    #[test]
+    fn a_signed_out_stop_says_where_the_login_is_made() {
+        assert_eq!(
+            signed_out("fable", "Login expired · Please run /login", None),
+            "the account **fable** has signed out: Login expired · Please run /login\n\n\
+             Log in, and the run carries on by itself.",
+        );
+        assert_eq!(
+            signed_out(
+                "theirs",
+                "Login expired · Please run /login",
+                Some("laptop")
+            ),
+            "the account **theirs** has signed out: Login expired · Please run /login\n\n\
+             The account is at home on **laptop**, so log in there, then press Resume here.",
+        );
+    }
 
     /// Evidence the human cannot tell is partial is worse than less of it, so
     /// what was left out is said rather than silently cut.

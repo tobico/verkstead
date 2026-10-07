@@ -1,0 +1,6 @@
+/* The Log in press under a signed-out stop's Notice — see `LogIn.tsx`. Set off
+   from the markdown above it, and as wide as its word. */
+.logIn {
+  align-self: flex-start;
+  margin-top: 1rem;
+}

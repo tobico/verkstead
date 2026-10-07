@@ -26,6 +26,7 @@ mod device;
 mod files;
 mod forwarding;
 mod joining;
+mod logins;
 mod onboarding;
 mod profiles;
 mod push;
@@ -52,19 +53,19 @@ pub use conversations::{
     ConversationMove, ConversationSteered, ConversationStopped, ConversationUnarchived,
     ConversationView, DroppedRow, GrillingStarted, HandoffEvent, Lifecycle, ManualTaskEvent,
     MergedRow, Merging, MovedEvent, NewAdoption, NewCompanion, NewConversation, NewRank,
-    NoticeEvent, Parked, PendingSteerView, PinnedEvent, PortsView, Process, ProcessChoice,
-    ProcessPicked, ProposalView, PullRequestCheck, PullRequestComment, PullRequestCommit,
-    PullRequestDetails, PullRequestEvent, PullRequestSummary, QuestionSetEvent, RepoChoice,
-    RepoSwitched, ResolveConflictsEvent, Resolved, Resumed, RoadmapPane, RowDevice, Screen,
-    ServerAttached, ServerRemoved, SetRow, ShareView, ShowArchived, ShowingArchived, Shown, Size,
-    StageDocument, StageEntry, StageListEvent, StageListReached, StageSource, StageState, Started,
-    SteerAdditionView, SteerCancelled, SteerCompanionRefusal, SteerEvent, SteerForm, SteerOpened,
-    SteerPairingView, SteerRecordView, SteerSaved, SteerSubmission, SteerTarget, SteerUpgradeView,
-    TakenUp, TargetNamed, TargetRecorded, TaskDocument, TaskEntry, TaskListEvent, TaskListReached,
-    TaskSource, TerminalClosed, TerminalOpened, TerminalPorts, TerminalView, TerminalsView,
-    TimelineEvent, TransferredTo, Uncommitted, UnreadableSetEvent, Watching, Worktree,
-    agent_output_event, agent_output_pinned, backlog_pane, brief_event, commit_event, commit_pane,
-    handoff_event, manual_task_event, moved_event, notice_event, proposal_view,
+    NoticeEvent, NoticeLogIn, Parked, PendingSteerView, PinnedEvent, PortsView, Process,
+    ProcessChoice, ProcessPicked, ProposalView, PullRequestCheck, PullRequestComment,
+    PullRequestCommit, PullRequestDetails, PullRequestEvent, PullRequestSummary, QuestionSetEvent,
+    RepoChoice, RepoSwitched, ResolveConflictsEvent, Resolved, Resumed, RoadmapPane, RowDevice,
+    Screen, ServerAttached, ServerRemoved, SetRow, ShareView, ShowArchived, ShowingArchived, Shown,
+    Size, StageDocument, StageEntry, StageListEvent, StageListReached, StageSource, StageState,
+    Started, SteerAdditionView, SteerCancelled, SteerCompanionRefusal, SteerEvent, SteerForm,
+    SteerOpened, SteerPairingView, SteerRecordView, SteerSaved, SteerSubmission, SteerTarget,
+    SteerUpgradeView, TakenUp, TargetNamed, TargetRecorded, TaskDocument, TaskEntry, TaskListEvent,
+    TaskListReached, TaskSource, TerminalClosed, TerminalOpened, TerminalPorts, TerminalView,
+    TerminalsView, TimelineEvent, TransferredTo, Uncommitted, UnreadableSetEvent, Watching,
+    Worktree, agent_output_event, agent_output_pinned, backlog_pane, brief_event, commit_event,
+    commit_pane, handoff_event, manual_task_event, moved_event, notice_event, proposal_view,
     pull_request_details, pull_request_event, pull_request_reached, question_set_event,
     resolve_conflicts_event, roadmap_pane, stage_list, stage_list_event, stage_list_reached,
     steer_event, task_list, task_list_event, task_list_reached, unreadable_set_event,
@@ -79,6 +80,7 @@ pub use files::{
 };
 pub use forwarding::{ForwardSkip, ForwardStanding, ForwardView, ForwardsView};
 pub use joining::{AskingDevice, JoinHeld, JoinSettled, NewJoin, PendingJoin};
+pub use logins::{LoginClosed, LoginCode, LoginOpened, LoginState};
 pub use onboarding::{
     AccountView, Dependency, DependencyState, DependencyView, Distro, InstallPress, InstallState,
     OnboardingView, Platform, PrefillView, Prefilled, RunPhase, RunView, Seen, Source, StepsView,

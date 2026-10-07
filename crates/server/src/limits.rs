@@ -219,12 +219,12 @@ fn says_so(line: &str, phrase: &str) -> bool {
 /// Whitespace and the non-ASCII symbols a display draws with — the box borders,
 /// the bullets, the spinner glyphs. Deliberately not every non-alphanumeric
 /// character: see [`says_so`] for what the wider rule cost.
-fn decoration(character: char) -> bool {
+pub(crate) fn decoration(character: char) -> bool {
     character.is_whitespace() || (!character.is_ascii() && !character.is_alphanumeric())
 }
 
 /// The same as a pattern, so the trim above reads as what it does.
-const DECORATION: fn(char) -> bool = decoration;
+pub(crate) const DECORATION: fn(char) -> bool = decoration;
 
 /// When the window resets, in the words the sentence said it in — or `None`
 /// where it named no such thing.
@@ -314,6 +314,56 @@ fn digits(said: &str, count: usize) -> bool {
     said.len() == count && said.bytes().all(|byte| byte.is_ascii_digit())
 }
 
+/// What a session has printed since the last look, less whatever has already
+/// been looked at.
+///
+/// Held across looks so that a sentence arriving in two chunks is still one
+/// sentence: a read off a terminal lands wherever the kernel put it, and the
+/// phrase falling across the boundary is the ordinary case rather than the
+/// strange one. Shared with [`crate::signouts`], whose sentence arrives the
+/// same way.
+#[derive(Default)]
+pub(crate) struct Held {
+    text: String,
+}
+
+impl Held {
+    /// Take a chunk of what the session printed.
+    pub(crate) fn push(&mut self, text: &str) {
+        self.text.push_str(text);
+    }
+
+    /// Everything not yet looked at.
+    pub(crate) fn text(&self) -> &str {
+        &self.text
+    }
+
+    /// Everything up to the last newline has been looked at now. What is kept
+    /// is the line still being printed, which is where the next chunk carries
+    /// on from — bounded, because a session that has printed this much without
+    /// one is not one whose earliest bytes hold the sentence.
+    pub(crate) fn looked(&mut self) {
+        let printed = self.text.len();
+
+        let kept = match self.text.rfind('\n') {
+            Some(ends) => ends + 1,
+            None => printed.saturating_sub(HELD),
+        };
+
+        // On a character boundary, because what is being held is text.
+        if let Some(from) = self
+            .text
+            .char_indices()
+            .map(|(at, _)| at)
+            .find(|at| *at >= kept)
+        {
+            self.text.drain(..from);
+        } else if kept > 0 {
+            self.text.clear();
+        }
+    }
+}
+
 /// One session, watched for the sentence that says its account is out of window.
 ///
 /// Held by the relay and fed everything the session leaves behind — what it
@@ -341,14 +391,8 @@ pub(crate) struct Watch {
     /// as, whatever is edited while it runs.
     phrase: Option<&'static str>,
 
-    /// What the session has printed since the last look, less whatever has
-    /// already been looked at.
-    ///
-    /// Held across looks so that a sentence arriving in two chunks is still one
-    /// sentence: a read off a terminal lands wherever the kernel put it, and the
-    /// phrase falling across the boundary is the ordinary case rather than the
-    /// strange one.
-    printed: String,
+    /// What the session has printed since the last look — see [`Held`].
+    printed: Held,
 
     /// Whether the banner on screen now has already been stopped on.
     ///
@@ -390,7 +434,7 @@ impl Watch {
             event_id,
             profile,
             phrase: exhausted_phrase(agent_type),
-            printed: String::new(),
+            printed: Held::default(),
             raised: false,
         }
     }
@@ -400,7 +444,7 @@ impl Watch {
     /// Cheap on purpose: this is called with everything that comes off the
     /// terminal, and the reading happens at the flush.
     pub(crate) fn printed(&mut self, text: &str) {
-        self.printed.push_str(text);
+        self.printed.push(text);
     }
 
     /// The sentence in any of the three records this session leaves behind that
@@ -416,7 +460,7 @@ impl Watch {
     /// `None` on every record there is where this backend has no phrase, which
     /// is the whole of the skip: see [`exhausted_phrase`].
     fn found(&self, drawn: &str, said: Option<&str>) -> Option<Exhausted> {
-        saying(&self.printed, self.phrase)
+        saying(self.printed.text(), self.phrase)
             .or_else(|| saying(drawn, self.phrase))
             .or_else(|| saying(said.unwrap_or_default(), self.phrase))
     }
@@ -449,32 +493,11 @@ impl Watch {
         // the second. The terminal alone: the frame and the log's last line are
         // the same frame and the same line between repaints, so a look that read
         // either as news would read news twice a second for ever.
-        let printed_something = !self.printed.is_empty();
+        let printed_something = !self.printed.text().is_empty();
 
         let found = self.found(drawn, said);
 
-        // Everything up to the last newline has been looked at now. What is kept
-        // is the line still being printed, which is where the next chunk carries
-        // on from — bounded, because a session that has printed this much
-        // without one is not one whose earliest bytes hold the sentence.
-        let printed = self.printed.len();
-
-        let kept = match self.printed.rfind('\n') {
-            Some(ends) => ends + 1,
-            None => printed.saturating_sub(HELD),
-        };
-
-        // On a character boundary, because what is being held is text.
-        if let Some(from) = self
-            .printed
-            .char_indices()
-            .map(|(at, _)| at)
-            .find(|at| *at >= kept)
-        {
-            self.printed.drain(..from);
-        } else if kept > 0 {
-            self.printed.clear();
-        }
+        self.printed.looked();
 
         let Some(found) = found else {
             // The session printed something that was not the banner, so it has
@@ -949,13 +972,13 @@ mod tests {
 
         watch.printed("Usage limit reac");
         assert_eq!(
-            exhausted(&watch.printed, Claude),
+            exhausted(watch.printed.text(), Claude),
             None,
             "half a sentence is not one"
         );
 
         watch.printed("hed · continuing shortly\n");
-        assert!(exhausted(&watch.printed, Claude).is_some());
+        assert!(exhausted(watch.printed.text(), Claude).is_some());
     }
 
     /// The reset is kept in the words the display drew it in. A clock time is

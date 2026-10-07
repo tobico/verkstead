@@ -39,6 +39,7 @@
 //! running in it. See [`super::Homes`].
 
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 /// The copy of `.claude.json` as the account last had it, which is what a
@@ -58,7 +59,7 @@ pub(crate) struct Sharing(Arc<Mutex<HashMap<Root, Running>>>);
 
 /// Which root: the Conversation's id, and what the root is called in its
 /// directory — `.claude` or `.codex`.
-type Root = (i64, &'static str);
+type Root = (PathBuf, &'static str);
 
 #[derive(Debug, Default)]
 struct Running {
@@ -111,14 +112,19 @@ impl Sharing {
     /// sessions start one at a time on a machine with one human at it, and what
     /// the lock is keeping is a profile from being emptied out from under a
     /// session already running in it.
+    ///
+    /// **Keyed by the directory the roots are built in** rather than by the
+    /// Conversation's id, because that directory is what is being shared, and a
+    /// Profile's login has one of its own with no Conversation behind it — see
+    /// [`super::Homes::for_login`].
     pub(crate) fn launched<T>(
         &self,
-        conversation: i64,
+        built: &Path,
         named: &'static str,
         launch: impl FnOnce(Launch) -> std::io::Result<T>,
     ) -> std::io::Result<(T, Share)> {
         let mut held = self.0.lock().expect("the root register is not poisoned");
-        let root = (conversation, named);
+        let root = (built.to_owned(), named);
 
         // Whether anything of the Conversation is running in any root of it,
         // which is what says whether the HOME they are all in may be emptied.
@@ -126,9 +132,9 @@ impl Sharing {
         // root as running in a moment.
         let empties = !held
             .iter()
-            .any(|((held, _), running)| *held == conversation && running.launches > 0);
+            .any(|((held, _), running)| held == built && running.launches > 0);
 
-        let running = held.entry(root).or_default();
+        let running = held.entry(root.clone()).or_default();
 
         let launched = launch(Launch {
             builds: running.launches == 0,
@@ -168,31 +174,33 @@ mod tests {
     fn the_first_launch_builds_and_the_rest_share_until_every_one_has_ended() {
         let sharing = Sharing::default();
 
-        let builds = |sharing: &Sharing, conversation| {
+        let builds = |sharing: &Sharing, conversation: &str| {
             sharing
-                .launched(conversation, ".claude", |launch| Ok(launch.builds))
+                .launched(Path::new(conversation), ".claude", |launch| {
+                    Ok(launch.builds)
+                })
                 .unwrap()
         };
 
-        let (built, session) = builds(&sharing, 7);
+        let (built, session) = builds(&sharing, "7");
         assert!(built, "nothing else is running, so this one builds");
 
-        let (built, terminal) = builds(&sharing, 7);
+        let (built, terminal) = builds(&sharing, "7");
         assert!(
             !built,
             "a session is running in it, so a terminal shares it"
         );
 
-        let (built, _elsewhere) = builds(&sharing, 8);
+        let (built, _elsewhere) = builds(&sharing, "8");
         assert!(built, "and another Conversation's root is its own");
 
         drop(session);
-        let (built, second) = builds(&sharing, 7);
+        let (built, second) = builds(&sharing, "7");
         assert!(!built, "the terminal is still running in it");
 
         drop(terminal);
         drop(second);
-        let (built, _) = builds(&sharing, 7);
+        let (built, _) = builds(&sharing, "7");
         assert!(built, "and once nothing is, it is built afresh");
     }
 
@@ -203,12 +211,12 @@ mod tests {
         let sharing = Sharing::default();
 
         let (built, _session) = sharing
-            .launched(7, ".claude", |launch| Ok(launch.builds))
+            .launched(Path::new("7"), ".claude", |launch| Ok(launch.builds))
             .unwrap();
         assert!(built);
 
         let (built, _terminal) = sharing
-            .launched(7, ".codex", |launch| Ok(launch.builds))
+            .launched(Path::new("7"), ".codex", |launch| Ok(launch.builds))
             .unwrap();
         assert!(
             built,
@@ -222,14 +230,14 @@ mod tests {
 
         assert!(
             sharing
-                .launched(7, ".claude", |_| Err::<(), _>(std::io::Error::other(
-                    "refused"
-                )))
+                .launched(Path::new("7"), ".claude", |_| Err::<(), _>(
+                    std::io::Error::other("refused")
+                ))
                 .is_err()
         );
 
         let (built, _) = sharing
-            .launched(7, ".claude", |launch| Ok(launch.builds))
+            .launched(Path::new("7"), ".claude", |launch| Ok(launch.builds))
             .unwrap();
         assert!(built);
     }
@@ -239,12 +247,12 @@ mod tests {
         let sharing = Sharing::default();
 
         let (first, _one) = sharing
-            .launched(7, ".claude", |launch| Ok(launch.baseline))
+            .launched(Path::new("7"), ".claude", |launch| Ok(launch.baseline))
             .unwrap();
         *first.lock().unwrap() = b"given\n".to_vec();
 
         let (second, _two) = sharing
-            .launched(7, ".claude", |launch| Ok(launch.baseline))
+            .launched(Path::new("7"), ".claude", |launch| Ok(launch.baseline))
             .unwrap();
         assert_eq!(*second.lock().unwrap(), b"given\n");
     }

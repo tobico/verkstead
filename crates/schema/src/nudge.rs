@@ -145,6 +145,13 @@ pub enum Nudge {
     /// callers, and a second device watching is what it is waiting for.
     Profiles,
 
+    /// Where a Profile's login has got to moved: the harness printed the
+    /// address, took a code, finished, or was killed.
+    ///
+    /// What lets a second device's modal show the address the first one's
+    /// login printed, without either of them asking again.
+    Login { profile: i64 },
+
     /// Everything of one device's, which is the widest thing there is to say:
     /// read back whatever of it is on screen.
     ///

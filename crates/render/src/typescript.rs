@@ -27,17 +27,17 @@ use crate::{
     FileDeleted, FileDeleting, FileListsView, FileMade, FileMaking, FileReading, FileRenamed,
     FileRenaming, FileRootsView, FileStatusView, FileWrite, FileWritten, FolderListing,
     ForwardsView, GrillingStarted, InstallPress, LanguageCleared, LinkedDevice, Locked,
-    NewAdoption, NewCompanion, NewConversation, NewJoin, NewRank, OnboardingView, PendingJoin,
-    Permitting, PortsView, PrefillView, Preflight, ProcessChoice, ProcessPicked, ProfileChoice,
-    ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails,
-    PushKey, Registered, Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry,
-    RepoPairingsView, RepoRemoved, RepoSwitched, RepoView, Resolved, Resumed, RoadmapPane,
-    RoleChoice, Screen, ServeEdit, ServePress, ServerAttached, ServerRemoved, SetReading,
-    SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedConversation,
-    ShowArchived, ShowingArchived, Shown, Started, SteerCancelled, SteerForm, SteerOpened,
-    SteerSaved, SteerSubmission, Submitted, Subscribed, Subscription, TakenUp, TargetNamed,
-    TargetRecorded, TerminalClosed, TerminalOpened, TerminalsView, TranscriptView, Transferring,
-    Unsubscribe, UpdateNotice, Watching,
+    LoginClosed, LoginCode, LoginOpened, LoginState, NewAdoption, NewCompanion, NewConversation,
+    NewJoin, NewRank, OnboardingView, PendingJoin, Permitting, PortsView, PrefillView, Preflight,
+    ProcessChoice, ProcessPicked, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit,
+    ProfileEntry, ProfileSaved, PullRequestDetails, PushKey, Registered, Registration,
+    RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoPairingsView, RepoRemoved, RepoSwitched,
+    RepoView, Resolved, Resumed, RoadmapPane, RoleChoice, Screen, ServeEdit, ServePress,
+    ServerAttached, ServerRemoved, SetReading, SettingsEdit, SettingsSaved, SettingsView,
+    ShareCommented, SharePublished, SharedConversation, ShowArchived, ShowingArchived, Shown,
+    Started, SteerCancelled, SteerForm, SteerOpened, SteerSaved, SteerSubmission, Submitted,
+    Subscribed, Subscription, TakenUp, TargetNamed, TargetRecorded, TerminalClosed, TerminalOpened,
+    TerminalsView, TranscriptView, Transferring, Unsubscribe, UpdateNotice, Watching,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -380,6 +380,12 @@ fn the_viewers_types_are_written_from_these() {
     // A `ProfileEntry` writes the account it carries — the agent type and that
     // type's own fields, flat — and the broken-ness beside it.
     ProfileEntry::export_all(&config).unwrap();
+
+    // A Profile's login, as the modal draws it and what it sends.
+    LoginState::export_all(&config).unwrap();
+    LoginOpened::export_all(&config).unwrap();
+    LoginCode::export_all(&config).unwrap();
+    LoginClosed::export_all(&config).unwrap();
     ProfileEdit::export_all(&config).unwrap();
     ProfileSaved::export_all(&config).unwrap();
     ProfileDeleted::export_all(&config).unwrap();

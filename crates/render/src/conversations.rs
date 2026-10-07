@@ -2299,6 +2299,27 @@ pub struct NoticeEvent {
     /// Rendered and sanitized by the server on the way out, as every piece of
     /// markdown on this wire is.
     pub html: String,
+
+    /// The login this Notice offers, where it is the stop of a run whose
+    /// account signed out and the account is at home on this device
+    /// (ADR-0022). `None` everywhere else — a mirrored Profile's Notice names
+    /// the device to log in on instead, and a stop that has been resumed offers
+    /// nothing.
+    pub log_in: Option<NoticeLogIn>,
+}
+
+/// The Log in press on a signed-out stop's Notice: which Profile it logs in,
+/// and what the modal calls it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct NoticeLogIn {
+    /// The Profile, by its id on this device. Always a Claude one: that is the
+    /// one harness Verkstead runs a login for.
+    pub profile: i64,
+
+    /// What the human called it, where they called it anything — which the
+    /// modal reads beside the harness, the way the Profile's card does.
+    pub name: Option<String>,
 }
 
 /// A Manual Task as the page receives it: what was asked for, and when.
@@ -3438,11 +3459,20 @@ pub fn handoff_event(id: i64, at: String, markdown: &str) -> TimelineEvent {
 
 /// A notice as an Event, rendered the same way and for the same reason: it is a
 /// sentence somebody has to be able to read.
-pub fn notice_event(id: i64, at: String, markdown: &str) -> TimelineEvent {
+///
+/// `log_in` is the press it carries, where it carries one — see
+/// [`NoticeEvent::log_in`].
+pub fn notice_event(
+    id: i64,
+    at: String,
+    markdown: &str,
+    log_in: Option<NoticeLogIn>,
+) -> TimelineEvent {
     TimelineEvent::Notice(NoticeEvent {
         id,
         at,
         html: crate::markdown::to_html(markdown),
+        log_in,
     })
 }
 
@@ -4116,9 +4146,9 @@ pub enum GrillingStarted {
     NoReviewProfile,
 
     /// A chosen Profile cannot be run under as things stand — its account is
-    /// not where it was left, or it is a member's and something about this
-    /// device or that one is in the way. Which of them, said the way the
-    /// Profile's own row says it.
+    /// not where it was left or has signed out, or it is a member's and
+    /// something about this device or that one is in the way. Which of them,
+    /// said the way the Profile's own row says it.
     ProfileBroken(crate::ProfileTrouble),
 
     /// The Brief is empty, and the Brief is what the grilling starts from.

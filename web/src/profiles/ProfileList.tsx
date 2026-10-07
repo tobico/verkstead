@@ -142,6 +142,7 @@ import { Listbox } from "../picking";
 import { PaneHead } from "../workbench/PaneHead";
 import app from "../App.module.css";
 import styles from "./ProfileList.module.css";
+import { LoggingIn } from "./LoggingIn";
 
 /// What each way of being refused a save says, once, wherever it is met.
 ///
@@ -446,6 +447,8 @@ function ProfileCard(props: {
   /// What pressing it does, which is opening that pane.
   press: () => void;
 }): JSX.Element {
+  const [loggingIn, setLoggingIn] = createSignal(false);
+
   return (
     <li>
       <CardButton
@@ -496,9 +499,42 @@ function ProfileCard(props: {
         <Show when={!props.profile.login && props.profile.device === null}>
           <Note>{NOT_USABLE_AWAY}</Note>
         </Show>
+        {/* And the login, which the server runs in the Profile's own sandbox
+            — see `LoggingIn.tsx`. A Claude account at home here only: a
+            mirror's account is a copy, and its login is made on the machine it
+            is at home on. A press of its own inside the card, so it stands out
+            of the card's press and the card's keys alike. */}
+        <Show when={loggable(props.profile)}>
+          <button
+            type="button"
+            class={`${styles.logIn!} secondary`}
+            onClick={(event) => {
+              event.stopPropagation();
+              setLoggingIn(true);
+            }}
+            onKeyDown={(event) => event.stopPropagation()}
+          >
+            Log in
+          </button>
+        </Show>
       </CardButton>
+      {/* Beside the card rather than inside it, so that nothing pressed in the
+          modal is a press on the card. */}
+      <Show when={loggingIn()}>
+        <LoggingIn
+          profile={props.profile.id}
+          called={summary(props.profile)}
+          close={() => setLoggingIn(false)}
+        />
+      </Show>
     </li>
   );
+}
+
+/// Whether a card offers a login: a Claude Profile at home on this device —
+/// see ADR-0022 for why no other.
+function loggable(profile: ProfileEntry): boolean {
+  return profile.account.agent_type === "Claude" && profile.device === null;
 }
 
 /// And the form that adds or rewrites one, which is the details pane a card —

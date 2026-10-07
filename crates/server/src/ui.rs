@@ -611,6 +611,14 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // is: the viewer speaks one method, and the thing being done is named in
         // the path rather than in the verb.
         .route("/api/ui/profiles/{id}/delete", post(delete_profile))
+        // A Profile's login: opened (started, or joined where one is running),
+        // read, handed its code, and closed — see [`crate::logins`].
+        .route(
+            "/api/ui/profiles/{id}/login",
+            get(login_reading).post(login_opened),
+        )
+        .route("/api/ui/profiles/{id}/login/code", post(login_coded))
+        .route("/api/ui/profiles/{id}/login/close", post(login_closed))
         // Not a thing to fetch but a thing to listen on — see [`crate::nudge`].
         .route("/api/ui/nudges", get(crate::nudge::nudges))
         .route("/api/ui/push/key", get(push_key))
@@ -2008,7 +2016,29 @@ pub(crate) async fn conversation_view(
     // carries any: the one thing that tells a run stopped by an exhausted window
     // from a run stopped by anything else. Drawn beside Resume rather than acted
     // on — no stop resumes itself, so every one of them waits for the same press.
-    let resets = stopped.and_then(|stopped| stopped.resets);
+    let resets = stopped.as_ref().and_then(|stopped| stopped.resets.clone());
+
+    // And the login a signed-out stop's Notice offers: on that Notice alone,
+    // only while the stop stands, and only for an account at home here. A
+    // mirror's login is made on its own device, and its Notice says which
+    // (ADR-0022). A Profile that has gone since offers nothing.
+    let log_in = match marked.and_then(|stopped| Some((stopped.notice, stopped.signed_out?))) {
+        Some((notice, profile)) => match store::load_profile(&state.pool, profile).await {
+            Ok(Some(profile)) if profile.mirror.is_none() => Some((
+                notice,
+                verkstead_render::NoticeLogIn {
+                    profile: profile.id,
+                    name: profile.name,
+                },
+            )),
+            Ok(_) => None,
+            Err(error) => {
+                tracing::error!(error = ?error, conversation_id = id, "reading the Profile a signed-out stop waits on failed");
+                None
+            }
+        },
+        None => None,
+    };
 
     // And whether anything about this Conversation is waiting on the human at
     // all, which is the fold the sidebar's own row is drawn by, asked here of
@@ -2377,6 +2407,7 @@ pub(crate) async fn conversation_view(
                         event.id,
                         event.at,
                         &crate::stopping::out_of_window(&pause.profile, &pause.said),
+                        None,
                     ),
                     // Rendered like the handoff and inline like it, being the
                     // other kind of sentence somebody has to be able to read
@@ -2384,9 +2415,18 @@ pub(crate) async fn conversation_view(
                     // anything about. What a stop's Notice says is what stopped,
                     // why, and the evidence — see [`crate::stopping`], which writes
                     // the markdown.
-                    store::Event::Notice(markdown) => {
-                        verkstead_render::notice_event(event.id, event.at, &markdown)
-                    }
+                    //
+                    // The one Notice that carries a press is a signed-out stop's,
+                    // and only while that stop stands — see `log_in` above.
+                    store::Event::Notice(markdown) => verkstead_render::notice_event(
+                        event.id,
+                        event.at,
+                        &markdown,
+                        log_in
+                            .as_ref()
+                            .filter(|(notice, _)| *notice == event.id)
+                            .map(|(_, press)| press.clone()),
+                    ),
                     // And a Manual Task a Verkstead of before set going by hand.
                     // Nothing writes another — a steer into Implementing carries
                     // the instruction now — and nothing rewrote these: the
@@ -5301,6 +5341,106 @@ async fn edit_profile(
 /// on its next refresh — so a Conversation on a third device that had picked it is
 /// left with an empty picker, exactly as a local removal leaves one. See
 /// [`crate::mirroring::removed`].
+/// A device opening a Profile's login modal: the login already running for it,
+/// or a new one — see [`crate::logins::Logins::opened`].
+///
+/// Refused for anything but a Claude Profile at home on this device — see
+/// [`crate::sandbox::Sandbox::for_login`].
+async fn login_opened(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(opened): Json<verkstead_render::LoginOpened>,
+) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+
+    let profile = match store::load_profile(&state.pool, id).await {
+        Ok(Some(profile)) => profile,
+        Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, profile_id = id, "reading an Agent Profile failed");
+            return unavailable("the agent profile could not be read");
+        }
+    };
+
+    if profile.agent_type() != store::AgentType::Claude {
+        return refused(
+            StatusCode::CONFLICT,
+            ApiError::new("only a Claude Profile can be logged in from here"),
+        );
+    }
+
+    if profile.mirror.is_some() {
+        return refused(
+            StatusCode::CONFLICT,
+            ApiError::new("log in on the device this Profile is at home on"),
+        );
+    }
+
+    let Some(agents) = state.sessions.agents() else {
+        return unavailable("this server runs no sessions, so it cannot log one in");
+    };
+
+    Json(
+        state
+            .logins
+            .opened(state.clone(), agents, profile, opened.viewer),
+    )
+    .into_response()
+}
+
+/// Where a Profile's login has got to — `null` where none is running.
+async fn login_reading(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+
+    Json(state.logins.reading(id)).into_response()
+}
+
+/// The code the login page handed back, for the login waiting on it.
+async fn login_coded(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(code): Json<verkstead_render::LoginCode>,
+) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+
+    match state.logins.coded(id, &code.code) {
+        Ok(reading) => {
+            state.nudges.announce_here(Nudge::Login { profile: id });
+            Json(reading).into_response()
+        }
+        Err(crate::logins::Refusal::NotRunning) => refused(
+            StatusCode::CONFLICT,
+            ApiError::new("this login is no longer running; open it again"),
+        ),
+        Err(crate::logins::Refusal::NotWaiting) => refused(
+            StatusCode::CONFLICT,
+            ApiError::new("this login is not waiting for a code"),
+        ),
+    }
+}
+
+/// A device closing a Profile's login modal — see
+/// [`crate::logins::Logins::closed`].
+async fn login_closed(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(closed): Json<verkstead_render::LoginClosed>,
+) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+
+    state.logins.closed(id, &closed.viewer);
+
+    StatusCode::NO_CONTENT.into_response()
+}
+
 async fn delete_profile(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
     let Ok(id) = id.parse::<i64>() else {
         return Json(verkstead_render::ProfileDeleted::NoSuchProfile).into_response();

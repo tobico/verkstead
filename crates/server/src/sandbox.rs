@@ -698,6 +698,32 @@ pub(crate) fn taken_back(data_dir: &Path, conversation: i64) {
     granting::remembering::forget(data_dir, conversation);
 }
 
+/// The id a Profile's login keeps its boundary under on the platform whose
+/// boundary is an identity, where a boundary is kept by Conversation and a
+/// login has none — see [`Sandbox::for_login`].
+///
+/// **The Profile's id turned negative, which no Conversation's is.** A
+/// Conversation's id is a SQLite row id, which begins at one, and zero is the
+/// Compile Server's — see `entries::NOBODYS`. A Profile's id begins at one too,
+/// so no two Profiles share one of these either.
+///
+/// Swept at startup by the ordinary rule, which takes back every record whose
+/// Conversation is not working — see [`crate::boundaries`] — and is the right
+/// answer for these: no login outlives the server that ran it.
+pub(crate) fn login_boundary(profile_id: i64) -> i64 {
+    -profile_id
+}
+
+/// The boundary a Profile's login ran behind, taken off this machine once the
+/// login is over — what a Conversation's close is to its session's. Nothing at
+/// all where there is none, which is the two platforms whose boundary is a
+/// wrapper.
+///
+/// Blocks: it walks back the directory trees the entries were written on.
+pub(crate) fn login_taken_back(homes: &Homes, profile_id: i64) {
+    taken_back(&homes.data, login_boundary(profile_id));
+}
+
 /// The machine's own half of a session's `PATH`: the `PATH` the server itself
 /// was started with, composed for `platform` — see [`composed`], which is where
 /// the rules are, and [`path`], which is this behind Verkstead's own directory.
@@ -2871,6 +2897,32 @@ impl Homes {
         }
     }
 
+    /// And a Profile's own, for the login Verkstead runs for it — see
+    /// [`Sandbox::for_login`].
+    ///
+    /// **Beside the Conversations' and named apart from them**, so that a
+    /// Profile and a Conversation that happen to share an id are two
+    /// directories: a login is built and emptied as a session is, and the
+    /// session whose HOME it emptied would be gone with it.
+    ///
+    /// The directory Claude is started in is under it too, there being no
+    /// Worktree: an empty one of the login's own, made here — see [`Home::place`].
+    pub(crate) fn for_login(&self, profile_id: i64) -> Home {
+        let built = self.root.join(format!("login-{profile_id}"));
+
+        let path = match self.platform {
+            Platform::MacOs | Platform::Windows => built.clone(),
+            Platform::Linux => self.servers.clone(),
+        };
+
+        Home {
+            handoffs: handoffs::inside(self.platform, &path),
+            path,
+            built,
+            sharing: self.sharing.clone(),
+        }
+    }
+
     /// And where the account of a **mirror** Profile is kept on this device: a
     /// home of its own per Profile, under the Data Directory.
     ///
@@ -2933,6 +2985,18 @@ impl Home {
     /// built out of goes in.
     pub(crate) fn built(&self) -> &Path {
         &self.built
+    }
+
+    /// And the directory a login is started in, which is the login's own
+    /// rather than anybody's checkout: beside the HOME rather than inside it,
+    /// because the HOME is emptied as each launch builds it — see
+    /// [`Homes::for_login`].
+    fn place(&self) -> PathBuf {
+        let built = &self.built;
+        let mut named = built.file_name().unwrap_or_default().to_owned();
+        named.push(".place");
+
+        built.with_file_name(named)
     }
 
     /// And the root's own `projects/` on the host, which is where a Claude
@@ -3611,7 +3675,10 @@ pub struct Sandbox {
     /// writes the handoff: it is somewhere to put what is Verkstead's rather
     /// than the project's, and which session is doing that does not change what
     /// the surface is.
-    handoff_dir: PathBuf,
+    ///
+    /// `None` for a Profile's login, which is no Conversation's and hands
+    /// nothing off — see [`Sandbox::for_login`].
+    handoff_dir: Option<PathBuf>,
 
     /// And the Conversation's attached files, **read-only** at
     /// [`attachments::INSIDE`] — every session, whether or not anything has
@@ -3678,7 +3745,10 @@ pub struct Sandbox {
 
     /// Where the session inside reaches Verkstead: this Conversation's own base
     /// URL, which is what `verkstead ask` puts its Sets to.
-    server: String,
+    ///
+    /// `None` for a Profile's login, which has no Conversation to ask from and
+    /// so is told of no server at all — see [`Sandbox::for_login`].
+    server: Option<String>,
 
     /// Everything bound beyond that surface: the Conversation's companion repos
     /// first, each by its own mode, then what the installation's Sandbox
@@ -3727,7 +3797,10 @@ pub struct Sandbox {
     /// — see [`entries::Entries::of_conversation`] — and the Data Directory,
     /// because that is where the record of them goes and what the account's own
     /// name is arithmetic over.
-    conversation: i64,
+    ///
+    /// For a Profile's login, which is no Conversation's, it is the id its
+    /// boundary is kept under instead — see [`login_boundary`].
+    conversation: Option<i64>,
     data_dir: PathBuf,
 
     /// And the account a session of this Conversation is started as, where this
@@ -3967,7 +4040,7 @@ impl Sandbox {
             root,
             skills: skills.clone(),
             verkstead: verkstead.clone(),
-            handoff_dir,
+            handoff_dir: Some(handoff_dir),
             // Resolved here rather than handed in, for the reason the handoff
             // directory above is: which directory is this Conversation's is its
             // id, and no caller is in a position to decide otherwise. Made as it
@@ -3984,7 +4057,7 @@ impl Sandbox {
             // it works off — and so that a name the settings no longer declare
             // is gone before anything can be built around it.
             mcp_servers: config.attached_among(&conversation.mcp_servers, secrets),
-            server: reachable.asking_from(homes.platform(), conversation.id),
+            server: Some(reachable.asking_from(homes.platform(), conversation.id)),
             binds,
             shell: None,
             // The descriptors' own, filled in against this machine: which
@@ -3993,7 +4066,7 @@ impl Sandbox {
             // the `PATH` above leads with.
             build_cache: cache.shared(config, homes.platform(), verkstead.bin()),
             platform: homes.platform(),
-            conversation: conversation.id,
+            conversation: Some(conversation.id),
             data_dir: homes.data.clone(),
             // Both halves off files rather than off the machine, for the reason
             // the token and the author above are: the name comes off the Data
@@ -4011,6 +4084,113 @@ impl Sandbox {
             servers_home: homes.servers.clone(),
             // Taken by whoever spawns, which is the one that knows it is about
             // to run something — see [`Sandbox::compiling_through`].
+            compiles: None,
+        })
+    }
+
+    /// The sandbox a Profile's login is run in: the account's root, built the
+    /// way a session's is, and nothing of any Conversation's.
+    ///
+    /// **The same root a session gets, which is the whole point.** A login
+    /// written into it is written back to the account by what a session's
+    /// ending already does — see [`Sandbox::credentials_closing`] — on each
+    /// platform by that platform's own means, so there is no second way for a
+    /// login to reach an account to keep in step with the first.
+    ///
+    /// **No Worktree, no handoff, no server.** It is started in an empty
+    /// directory of its own — see [`Home::place`] — and is told of no
+    /// Conversation to ask from, because it has none. Nothing the installation
+    /// binds is bound either: those are for working on code, and nothing here
+    /// does.
+    ///
+    /// **On Windows it runs as the session account**, as a session does, behind
+    /// a boundary of its own kept under [`login_boundary`] — there being no
+    /// Conversation to keep it under — and taken back when the login ends: see
+    /// [`login_taken_back`].
+    ///
+    /// `None` wherever the directory cannot be made or the account cannot be
+    /// joined, for [`Sandbox::for_conversation`]'s reasons.
+    pub fn for_login(
+        profile: &store::Profile,
+        homes: &Homes,
+        skills: &Skills,
+        verkstead: &Executable,
+        secrets: &Secrets,
+        config: &Config,
+    ) -> Option<Sandbox> {
+        let home = homes.for_login(profile.id);
+        let place = home.place();
+
+        if let Err(error) = std::fs::create_dir_all(&place) {
+            tracing::error!(
+                profile_id = profile.id,
+                path = %place.display(),
+                error = ?error,
+                "the directory a Profile's login is started in could not be made, so no login \
+                 was started"
+            );
+
+            return None;
+        }
+
+        if across_volumes(
+            homes.platform(),
+            home.path(),
+            &profile.account,
+            profile.memory,
+        )
+        .is_some()
+        {
+            return None;
+        }
+
+        // Started in the place and named after it: Claude names a `projects/`
+        // entry for the directory it was started in and trusts it, and a login
+        // has the one directory to name, which is said as both halves.
+        let root = match &profile.account {
+            store::Account::Claude { claude_dir, .. } => {
+                root::Root::claude(homes.platform(), claude_dir, &place, &place)
+            }
+            store::Account::Codex { home } => root::Root::codex(home),
+            store::Account::Grok { home } => root::Root::grok(home),
+            store::Account::OpenCode { home } => root::Root::opencode(home),
+        }
+        .remembering(profile.memory);
+
+        if root.made_in_account().is_err() {
+            return None;
+        }
+
+        Some(Sandbox {
+            worktree: place.clone(),
+            git_dir: place,
+            account: profile.account.clone(),
+            root,
+            skills: skills.clone(),
+            verkstead: verkstead.clone(),
+            handoff_dir: None,
+            attachments: None,
+            home,
+            github_token: None,
+            git_author: config.git_author().clone(),
+            instructions: String::new(),
+            mcp_servers: Vec::new(),
+            server: None,
+            binds: Vec::new(),
+            shell: None,
+            build_cache: None,
+            platform: homes.platform(),
+            conversation: Some(login_boundary(profile.id)),
+            data_dir: homes.data.clone(),
+            // Off the same two files a session's is, and for its reason — see
+            // [`Sandbox::for_conversation`].
+            session_account: (homes.platform() == Platform::Windows).then(|| {
+                account::Logon::of(
+                    homes.session_account(),
+                    secrets.session_account_password().unwrap_or_default(),
+                )
+            }),
+            servers_home: homes.servers.clone(),
             compiles: None,
         })
     }
@@ -4113,7 +4293,7 @@ impl Sandbox {
         let ((rendering, closing), share) =
             self.home
                 .sharing
-                .launched(self.conversation, self.root.named(), |launch| {
+                .launched(self.home.built(), self.root.named(), |launch| {
                     self.launched(argv, launch, saying)
                 })?;
 
@@ -4325,7 +4505,9 @@ impl Sandbox {
     fn boundary(&self, surface: &Surface) -> Option<Boundary<'_>> {
         (self.platform == Platform::Windows).then(|| Boundary {
             data_dir: &self.data_dir,
-            conversation: self.conversation,
+            conversation: self
+                .conversation
+                .expect("a sandbox for the Windows platform is a Conversation's or a login's"),
             entries: granting::entries(surface, Some(&self.servers_home)),
             standing: granting::standing_of(surface, Some(&self.servers_home)),
         })
@@ -4352,11 +4534,18 @@ impl Sandbox {
             .as_ref()
             .expect("a sandbox for the Windows platform names the account its sessions run as");
 
+        let (what, which) = match self.conversation {
+            Some(key) if key < 0 => (format!("the login of Profile {}", -key), "login"),
+            key => (
+                format!("a session of Conversation {}", key.unwrap_or_default()),
+                "session",
+            ),
+        };
+
         account::machine::Account::resolving(logon).map_err(|missing| {
             std::io::Error::other(format!(
-                "a session of Conversation {} runs as this installation's own local account \
-                 and there is not one, so no session was started: {missing}",
-                self.conversation,
+                "{what} runs as this installation's own local account and there is not one, so \
+                 no {which} was started: {missing}",
             ))
         })
     }
@@ -4459,7 +4648,9 @@ impl Sandbox {
         // the link away again. Which of the two it is under is
         // [`handoffs::inside`]'s, and this is the one place a session reaches
         // it.
-        surface.elsewhere(&self.handoff_dir, self.home.handoffs(), Reach::ReadWrite);
+        if let Some(handoff_dir) = &self.handoff_dir {
+            surface.elsewhere(handoff_dir, self.home.handoffs(), Reach::ReadWrite);
+        }
 
         // The skills, at a path of Verkstead's own outside HOME entirely — what
         // a session reads there is what this binary ships. Read-only, because
@@ -4556,17 +4747,19 @@ impl Sandbox {
             // would: the environment is cleared, and an interface told nothing
             // draws for the dumbest terminal it knows about.
             .set("TERM", terminal::TERM)
-            // What makes a session's Question Sets its own Conversation's. The
-            // variable the bundled CLI reads, scoped to one Conversation, so
-            // nothing is inferred from the project or the branch — two
-            // Conversations against one Repo would be indistinguishable by
-            // either.
-            .set("VERKSTEAD_SERVER", &self.server)
             // And which backend this session is, which is what tailors the
             // Guide it reads — see [`AGENT_TYPE`]. Off the account's own shape,
             // so nothing has to be plumbed through to say which agent is being
             // launched.
             .set(AGENT_TYPE, self.account.agent_type().word());
+
+        // What makes a session's Question Sets its own Conversation's. The
+        // variable the bundled CLI reads, scoped to one Conversation, so nothing
+        // is inferred from the project or the branch — two Conversations against
+        // one Repo would be indistinguishable by either.
+        if let Some(server) = &self.server {
+            surface.set("VERKSTEAD_SERVER", server);
+        }
 
         // And the names nothing on Windows runs without, which the two Unixes
         // have no equivalent of — see [`windows_names`].

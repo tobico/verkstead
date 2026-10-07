@@ -470,6 +470,12 @@ function standsFor(device: Device, moved: Nudge): readonly QueryKey[] | null {
     case "profiles":
       return [keyOf(device, "profiles")];
 
+    // Where a Profile's login has got to moved — which is what shows a second
+    // device's modal the address the first one's login printed. This device's
+    // own: a login is only ever run where the account is at home.
+    case "login":
+      return [["login", moved.profile]];
+
     // What a member's terminals are listening on moved. That is read by the
     // device that attached to them, over the link, rather than by any page: a
     // browser on the machine the ports are on has nothing to forward, so there

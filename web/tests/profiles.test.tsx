@@ -51,7 +51,7 @@ import button from "../src/IconButton.module.css";
 import { ProfileList, ProfilePane } from "../src/profiles/ProfileList";
 import styles from "../src/profiles/ProfileList.module.css";
 import head from "../src/workbench/PaneHead.module.css";
-import { drawn } from "./bench";
+import { drawn, nudged } from "./bench";
 import {
   browse,
   held,
@@ -101,9 +101,12 @@ function client(): QueryClient {
 function mounting(what: () => JSX.Element) {
   const queries = client();
 
-  return render(() => (
-    <QueryClientProvider client={queries}>{what()}</QueryClientProvider>
-  ));
+  return {
+    ...render(() => (
+      <QueryClientProvider client={queries}>{what()}</QueryClientProvider>
+    )),
+    queries,
+  };
 }
 
 /// The cards in the middle pane, and what pressing one of them asked for.
@@ -684,6 +687,204 @@ describe("a member's account that cannot be run from here", () => {
     await waitFor(() => screen.getByText(reads(FABLE)));
 
     expect(document.body.textContent).not.toContain("No login file");
+  });
+});
+
+describe("logging an account in", () => {
+  const ADDRESS = "https://claude.com/cai/oauth/authorize?code=true&state=1";
+  const LOGIN = `/api/ui/profiles/${FABLE.id}/login`;
+
+  /// What a POST to `path` was sent with, the last time it was made.
+  const sentTo = (fetching: ReturnType<typeof serving>, path: string) => {
+    const calls = fetching.mock.calls.filter(
+      ([asked, init]) => String(asked) === path && init?.method === "POST",
+    );
+
+    return JSON.parse(String(calls.at(-1)![1]!.body)) as unknown;
+  };
+
+  it("offers a login on a Claude account at home here", async () => {
+    serving(whenever("/api/ui/profiles", json(CLUSTER)));
+    mountCards();
+
+    await waitFor(() => screen.getByText(reads(MIRROR)));
+
+    expect(
+      theCard(reads(CLUSTER[0]!)).querySelector("button")?.textContent,
+    ).toBe("Log in");
+  });
+
+  /// A press found the account with no login: the card says so, and the
+  /// Log in button beside it is the fix.
+  it("says an account here that signed out, with the login beside it", async () => {
+    serving(
+      whenever("/api/ui/profiles", json([{ ...FABLE, broken: "SignedOut" }])),
+    );
+    mountCards();
+
+    await waitFor(() => screen.getByText(reads(FABLE)));
+
+    const card = theCard(reads(FABLE));
+
+    expect(card.querySelector(`.${styles.broken}`)!.textContent).toBe(
+      "Its Claude Code account is signed out. Log in to run a session under it.",
+    );
+    expect(card.querySelector("button")?.textContent).toBe("Log in");
+  });
+
+  /// A mirror's account is a copy: its login is made on the machine it is at
+  /// home on, and a login written into the copy is one the next refresh from
+  /// there writes over.
+  it("offers none on a member's account", async () => {
+    serving(whenever("/api/ui/profiles", json(CLUSTER)));
+    mountCards();
+
+    await waitFor(() => screen.getByText(reads(MIRROR)));
+
+    expect(theCard(reads(MIRROR)).querySelector("button")).toBeNull();
+  });
+
+  it("offers none on an account of another harness", async () => {
+    const codex: ProfileEntry = {
+      ...FABLE,
+      id: 9,
+      name: "codex",
+      account: { agent_type: "Codex", home: "/home/me/.codex" },
+    };
+
+    serving(whenever("/api/ui/profiles", json([codex])));
+    mountCards();
+
+    await waitFor(() => screen.getByText(reads(codex)));
+
+    expect(theCard(reads(codex)).querySelector("button")).toBeNull();
+  });
+
+  it("shows the address the login printed and hands it the code", async () => {
+    const fetching = serving(
+      whenever("/api/ui/profiles", json(SAVED)),
+      whenever(LOGIN, json({ state: "Starting" }), "POST"),
+      whenever(LOGIN, json({ state: "Waiting", url: ADDRESS, refused: null })),
+      whenever(`${LOGIN}/code`, json({ state: "Checking" }), "POST"),
+    );
+    const { open } = mountCards();
+
+    await waitFor(() => screen.getByText(reads(FABLE)));
+    fireEvent.click(theCard(reads(FABLE)).querySelector("button")!);
+
+    // The press is the login's, not the card's: no pane opens under it.
+    expect(open).not.toHaveBeenCalled();
+
+    await waitFor(() => screen.getByText(ADDRESS));
+    expect(screen.getByText(ADDRESS).closest("a")!.getAttribute("href")).toBe(
+      ADDRESS,
+    );
+
+    const viewer = (sentTo(fetching, LOGIN) as { viewer: string }).viewer;
+    expect(viewer).toBeTruthy();
+
+    fireEvent.input(screen.getByLabelText("2. Paste the code here."), {
+      target: { value: "the-code" },
+    });
+    fireEvent.click(screen.getByText("Log in", { selector: "form button" }));
+
+    await waitFor(() => screen.getByText("Checking the code…"));
+    expect(sentTo(fetching, `${LOGIN}/code`)).toEqual({ code: "the-code" });
+  });
+
+  it("says a refused code was not taken, over the fresh address", async () => {
+    const FRESH = "https://claude.com/cai/oauth/authorize?code=true&state=fresh";
+    const REFUSED = "Claude did not accept that code.";
+    let refused = false;
+
+    serving(
+      whenever("/api/ui/profiles", json(SAVED)),
+      whenever(LOGIN, json({ state: "Starting" }), "POST"),
+      whenever(LOGIN, () =>
+        json(
+          refused
+            ? { state: "Waiting", url: FRESH, refused: REFUSED }
+            : { state: "Waiting", url: ADDRESS, refused: null },
+        )(),
+      ),
+      whenever(
+        `${LOGIN}/code`,
+        () => {
+          refused = true;
+          return json({ state: "Checking" })();
+        },
+        "POST",
+      ),
+    );
+    const { queries } = mountCards();
+
+    await waitFor(() => screen.getByText(reads(FABLE)));
+    fireEvent.click(theCard(reads(FABLE)).querySelector("button")!);
+    await waitFor(() => screen.getByText(ADDRESS));
+    expect(screen.queryByText(REFUSED)).toBeNull();
+
+    fireEvent.input(screen.getByLabelText("2. Paste the code here."), {
+      target: { value: "wrong#code" },
+    });
+    fireEvent.click(screen.getByText("Log in", { selector: "form button" }));
+    await waitFor(() => screen.getByText("Checking the code…"));
+
+    // The fresh login's address, as the Nudge its printing sent brings it.
+    await nudged(queries);
+    await waitFor(() => screen.getByText(FRESH));
+    screen.getByText(REFUSED);
+    expect(
+      (screen.getByLabelText("2. Paste the code here.") as HTMLInputElement)
+        .value,
+    ).toBe("");
+  });
+
+  it("tells the server this device has stopped looking when it closes", async () => {
+    const fetching = serving(
+      whenever("/api/ui/profiles", json(SAVED)),
+      whenever(LOGIN, json({ state: "Waiting", url: ADDRESS, refused: null }), "POST"),
+      whenever(LOGIN, json({ state: "Waiting", url: ADDRESS, refused: null })),
+      whenever(`${LOGIN}/close`, () =>
+        Promise.resolve(new Response(null, { status: 204 })), "POST"),
+    );
+    mountCards();
+
+    await waitFor(() => screen.getByText(reads(FABLE)));
+    fireEvent.click(theCard(reads(FABLE)).querySelector("button")!);
+    await waitFor(() => screen.getByText(ADDRESS));
+
+    fireEvent.click(screen.getByText("Cancel"));
+
+    await waitFor(() => expect(askedFor(fetching, `${LOGIN}/close`)).toBe(1));
+    expect(sentTo(fetching, `${LOGIN}/close`)).toEqual(sentTo(fetching, LOGIN));
+    expect(screen.queryByText(ADDRESS)).toBeNull();
+  });
+
+  it("says why a login ended without one, and starts another on Try again", async () => {
+    const fetching = serving(
+      whenever("/api/ui/profiles", json(SAVED)),
+      whenever(LOGIN, json({ state: "Starting" }), "POST"),
+      whenever(
+        LOGIN,
+        json({
+          state: "Failed",
+          reason: "The login ran out of time. Open it again to start over.",
+        }),
+      ),
+    );
+    mountCards();
+
+    await waitFor(() => screen.getByText(reads(FABLE)));
+    fireEvent.click(theCard(reads(FABLE)).querySelector("button")!);
+
+    await waitFor(() => screen.getByText(/ran out of time/));
+    fireEvent.click(screen.getByText("Try again"));
+
+    const posts = () =>
+      fetching.mock.calls.filter(
+        ([asked, init]) => String(asked) === LOGIN && init?.method === "POST",
+      ).length;
+    await waitFor(() => expect(posts()).toBe(2));
   });
 });
 

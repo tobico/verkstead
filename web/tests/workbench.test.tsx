@@ -6890,6 +6890,7 @@ const ASIDE: TimelineEvent = {
     id: 12,
     at: "2026-08-03T09:07:11.000Z",
     html: "<p>Verkstead had something to say about this one.</p>\n",
+    log_in: null,
   },
 };
 
@@ -16961,6 +16962,75 @@ describe("the notice of a stop", () => {
   });
 });
 
+describe("a run stopped because its account signed out", () => {
+  /// The press the server puts on the stop's own notice, for an account at
+  /// home on this device (ADR-0022).
+  const PRESS = { profile: 2, name: "opus" };
+  const LOGIN = `/api/ui/profiles/${PRESS.profile}/login`;
+
+  /// The stopped conversation with that press on its notice, or none.
+  const signedOut = (
+    log_in: typeof PRESS | null,
+  ): Partial<ConversationView> => ({
+    timeline: STOPPED.timeline.map((entry) =>
+      "Notice" in entry && entry.Notice.id === SAID.id
+        ? { Notice: { ...entry.Notice, log_in } }
+        : entry,
+    ),
+  });
+
+  it("offers the login under its notice, and opens the modal on it", async () => {
+    const fetching = theStopped(
+      signedOut(PRESS),
+      whenever(LOGIN, json({ state: "Starting" }), "POST"),
+      whenever(LOGIN, json({ state: "Starting" })),
+    );
+    const { container } = mount(`/conversations/${STOPPED.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.timeline} .${timeline.notice}`),
+    );
+    await drawn(container, `.${shell.detailsPane} .${documentPane.document}`);
+
+    const press = [
+      ...container.querySelectorAll(`.${shell.detailsPane} button`),
+    ].find((button) => button.textContent === "Log in");
+
+    expect(press).toBeTruthy();
+    fireEvent.click(press!);
+
+    // The same modal the Profile's card opens, named the way the card reads.
+    await waitFor(() =>
+      screen.getByText("Log in to Claude for Claude Code — opus"),
+    );
+    await waitFor(() =>
+      expect(
+        fetching.mock.calls.some(
+          ([asked, init]) => String(asked) === LOGIN && init?.method === "POST",
+        ),
+      ).toBe(true),
+    );
+  });
+
+  /// A mirror's notice names the device to log in on, and has nothing to
+  /// press — which is the server leaving the press off, as on every other stop.
+  it("offers nothing where the server put no press on the notice", async () => {
+    theStopped(signedOut(null));
+    const { container } = mount(`/conversations/${STOPPED.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.timeline} .${timeline.notice}`),
+    );
+    await drawn(container, `.${shell.detailsPane} .${documentPane.document}`);
+
+    expect(
+      [...container.querySelectorAll(`.${shell.detailsPane} button`)].some(
+        (button) => button.textContent === "Log in",
+      ),
+    ).toBe(false);
+  });
+});
+
 /// A conversation stopped because the account it was spending ran out of
 /// window, carrying a Pause a Verkstead of before left on its timeline.
 const WAITING = paused as ConversationView;
@@ -19963,6 +20033,7 @@ const LANDED: TimelineEvent = {
     id: 99,
     at: "2026-08-03T09:07:11.000Z",
     html: "<p>The session stopped.</p>\n",
+    log_in: null,
   },
 };
 
@@ -20040,11 +20111,13 @@ describe("the selection following the end of the record", () => {
     id: 981,
     at: "2026-08-03T09:07:11.000Z",
     html: "<p>The session started.</p>\n",
+    log_in: null,
   };
   const SAID_NEXT: NoticeEvent = {
     id: 982,
     at: "2026-08-03T09:09:23.000Z",
     html: "<p>The session stopped.</p>\n",
+    log_in: null,
   };
 
   /// The three Conversations, with the grilling one's record growing the way a

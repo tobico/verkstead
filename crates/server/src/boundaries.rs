@@ -319,6 +319,34 @@ mod tests {
         assert_eq!(remembered(held.path()), Vec::<i64>::new());
     }
 
+    /// And a Profile's login, whose boundary is kept under an id no
+    /// Conversation has — see `sandbox::login_boundary`. A server that died
+    /// with a login running left it standing, and the sweep takes it back
+    /// beside a working Conversation's, which it keeps.
+    #[tokio::test]
+    async fn a_logins_boundary_left_behind_goes_and_a_working_conversations_stays() {
+        let held = tempfile::tempdir().unwrap();
+        let (pool, repo) = database(held.path()).await;
+
+        let grilling = conversation(&pool, held.path(), repo, Lifecycle::Grilling).await;
+
+        remembering::wrote(
+            held.path(),
+            &Remembered {
+                conversation: crate::sandbox::login_boundary(grilling),
+                account: "vk-0123456789ab".to_owned(),
+                sid: "S-1-5-21-1-2-3-1001".to_owned(),
+                entries: Vec::new(),
+                cut: Vec::new(),
+            },
+        )
+        .unwrap();
+
+        swept(&pool, held.path()).await;
+
+        assert_eq!(remembered(held.path()), vec![grilling]);
+    }
+
     /// A reading that failed takes nothing back, which is the rule every sweep
     /// here keeps: an empty keep-set is every live Conversation there is.
     #[tokio::test]

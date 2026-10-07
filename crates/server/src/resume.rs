@@ -79,7 +79,7 @@ use crate::store::{self, Lifecycle};
 /// Who asked for the run to start again.
 ///
 /// Two things turn on it and nothing else does, the recompute itself being the
-/// same for all four — which is the whole point of there being one.
+/// same for all five — which is the whole point of there being one.
 ///
 /// **The fix attempts a wrapping Conversation's checks have already spent.** A
 /// human who has read what stopped and pressed Resume is asking for another go,
@@ -125,6 +125,15 @@ pub(crate) enum Resuming {
     /// attempts the run really has spent — a move is not a fresh go at the
     /// checks, it is the same go on another machine.
     Arrived,
+
+    /// Or a login on the Profile whose account had signed out (ADR-0022): the
+    /// stop it unblocks is taken away and the work started again.
+    ///
+    /// A restart in every respect that decides anything. Nobody pressed
+    /// Resume: the login was the account's business, a steer half-written
+    /// against the stopped run is still the human's, and an attempt at the
+    /// checks spent before the sign-out is one the run really has spent.
+    LoggedIn,
 }
 
 /// Press Resume: recompute what should be driving this Conversation, clear the
@@ -538,7 +547,7 @@ async fn recompute(
                 // the five taking a registration of its own as it is spawned,
                 // which is the handover the press makes by holding its across
                 // the spawn.
-                Resuming::Restarted | Resuming::Arrived => {
+                Resuming::Restarted | Resuming::Arrived | Resuming::LoggedIn => {
                     crate::wrapping::watching(
                         state,
                         conversation_id,
@@ -1062,7 +1071,9 @@ async fn starting(
 ) -> anyhow::Result<()> {
     match resuming {
         Resuming::Landed => Ok(()),
-        Resuming::Restarted | Resuming::Arrived => clear(state, conversation_id).await,
+        Resuming::Restarted | Resuming::Arrived | Resuming::LoggedIn => {
+            clear(state, conversation_id).await
+        }
         Resuming::Pressed => {
             store::discard_pending_steer(&state.pool, conversation_id).await?;
 

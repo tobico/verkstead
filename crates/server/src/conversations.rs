@@ -1484,6 +1484,11 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
         return Ok(GrillingStarted::NotDrafting);
     }
 
+    // Whether each Claude account it would run under is logged in, asked
+    // before the Profiles are read so that one with no login reads as broken
+    // below and is refused by name — see [`crate::logins::asked`].
+    crate::logins::asked(state, chosen(&conversation)).await;
+
     // Read as rows rather than judged off the ids, which is the same reading the
     // pane gets — a Profile whose pair has gone is not one to launch a session
     // under, and the id alone cannot say so.
@@ -2372,6 +2377,11 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
     // All of them, rather than only the one the work runs under: a stage
     // inherits every one from its predecessor, so what this one is adopted with
     // is what every stage after it starts with.
+    //
+    // And whether each Claude account among them is logged in, asked first so
+    // that one with no login reads as broken — see [`crate::logins::asked`].
+    crate::logins::asked(state, chosen(&conversation)).await;
+
     let grilling = crate::profiles::pairing(state, conversation.grilling_pairing.clone()).await?;
     let implementation =
         crate::profiles::pairing(state, conversation.implementation_pairing.clone()).await?;
@@ -3261,6 +3271,10 @@ pub(crate) async fn take_up(state: &AppState, id: i64, discarding: &[i64]) -> Re
     if !takes_a_target(conversation.process) {
         return Ok(TakenUp::NotHoldingOne);
     }
+
+    // Whether each Claude account it would run under is logged in, asked
+    // first for the reason a grill start asks — see [`crate::logins::asked`].
+    crate::logins::asked(state, chosen(&conversation)).await;
 
     // Read as rows rather than judged off the ids, exactly as a grill start
     // reads them: a Profile whose pair has gone is not one to run a session
@@ -4951,6 +4965,24 @@ fn unready(
         .flatten()
         .find_map(|pairing| trouble(&pairing.profile))
         .map(Unready::ProfileBroken)
+}
+
+/// Every Profile a Conversation has chosen for a role, for a press to ask
+/// about before it reads them — see [`crate::logins::asked`].
+fn chosen(conversation: &store::Conversation) -> impl Iterator<Item = &store::Profile> {
+    let review = match &conversation.review_pairing {
+        store::Picked::Under(pairing) => Some(pairing),
+        store::Picked::Nothing | store::Picked::Skipped => None,
+    };
+
+    [
+        conversation.grilling_pairing.as_ref(),
+        conversation.implementation_pairing.as_ref(),
+        review,
+    ]
+    .into_iter()
+    .flatten()
+    .map(|pairing| &pairing.profile)
 }
 
 /// What is wrong with one chosen Profile, in the three facts the row's own

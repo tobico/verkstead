@@ -190,6 +190,22 @@ pub struct Agents {
     /// life asleep. The pace a server runs at is [`Pace::default`] and nothing
     /// sets it otherwise.
     pace: Pace,
+
+    /// How long a Profile's login is left waiting for its code before it is
+    /// killed — see [`crate::logins`]. [`crate::logins::LIMIT`] in a server,
+    /// and a field for [`Agents::pace`]'s reason: ten minutes is a test that
+    /// spends ten minutes asleep.
+    login_limit: Duration,
+
+    /// Whether a press asks `claude auth status` of a Profile's account before
+    /// it starts a session under it — see [`crate::logins::asked`].
+    ///
+    /// On for the real thing and off where something stands where every
+    /// type's binary goes, for the reason [`Agents::desktop_app`] asks nothing
+    /// there: what the suite stands there is a session, and most of what it
+    /// stands there does not answer `auth status` at all. A test that is about
+    /// the asking turns it on — see [`Agents::checking_logins`].
+    checks_logins: bool,
 }
 
 impl Agents {
@@ -220,6 +236,8 @@ impl Agents {
             agent: None,
             signature: None,
             pace: Pace::default(),
+            login_limit: crate::logins::LIMIT,
+            checks_logins: true,
         }
     }
 
@@ -240,6 +258,7 @@ impl Agents {
     ) -> Agents {
         Agents {
             agent: Some(agent),
+            checks_logins: false,
             ..Agents::new(
                 homes,
                 reachable,
@@ -257,6 +276,74 @@ impl Agents {
     /// The same, working the backlog at `pace` — see [`Agents::pace`].
     pub fn at_pace(self, pace: Pace) -> Agents {
         Agents { pace, ..self }
+    }
+
+    /// The same, killing a login left waiting longer than `limit` — see
+    /// [`Agents::login_limit`].
+    pub fn logging_in_within(self, limit: Duration) -> Agents {
+        Agents {
+            login_limit: limit,
+            ..self
+        }
+    }
+
+    /// The same, asking the stand-in `auth status` before a press starts a
+    /// session — see [`Agents::checks_logins`].
+    pub fn checking_logins(self) -> Agents {
+        Agents {
+            checks_logins: true,
+            ..self
+        }
+    }
+
+    /// Whether a press asks — see [`Agents::checks_logins`].
+    pub(crate) fn checks_logins(&self) -> bool {
+        self.checks_logins
+    }
+
+    /// How long a login is left waiting — see [`Agents::login_limit`].
+    pub(crate) fn login_limit(&self) -> Duration {
+        self.login_limit
+    }
+
+    /// The sandbox a Profile's login is run in, and the line that runs `words`
+    /// of its harness inside it — `auth login --claudeai`, `auth status` — or
+    /// `None` where there is none to build: see [`Sandbox::for_login`].
+    ///
+    /// The harness is whatever stands where every type's binary goes, for
+    /// [`Agents::agent`]'s reason: a test stands a stub there, and the words
+    /// follow it as they would follow `claude`.
+    ///
+    /// Blocks: the account's memory store may be made.
+    pub(crate) fn logging_in(
+        &self,
+        profile: &store::Profile,
+        words: &[&str],
+    ) -> Option<(Sandbox, Vec<String>)> {
+        let sandbox = Sandbox::for_login(
+            profile,
+            &self.homes,
+            &self.skills,
+            self.verkstead.as_ref()?,
+            &self.settings.secrets(),
+            &self.settings.config(),
+        )?;
+
+        let mut argv = match &self.agent {
+            Some(standing) => standing.clone(),
+            None => vec![binary(profile.agent_type()).to_owned()],
+        };
+        argv.extend(words.iter().map(|word| (*word).to_owned()));
+
+        Some((sandbox, argv))
+    }
+
+    /// And the boundary those ran behind, taken back once the login of
+    /// `profile_id` is over — see [`crate::sandbox::login_taken_back`].
+    ///
+    /// Blocks.
+    pub(crate) fn login_over(&self, profile_id: i64) {
+        crate::sandbox::login_taken_back(&self.homes, profile_id);
     }
 
     /// The same, with the prompt `signature` draws where a TUI backend's own
@@ -1132,6 +1219,11 @@ pub(crate) struct Sessions {
 
     /// Whose turn it is in each Conversation's Worktree — see [`Sessions::turn`].
     turns: Arc<Mutex<HashMap<i64, Arc<tokio::sync::Mutex<()>>>>>,
+
+    /// And the runs a session stopped by signing out on a login that had
+    /// already been replaced, to be started again once it has gone — see
+    /// [`crate::signouts::Late`].
+    late: crate::signouts::Late,
 }
 
 /// The Worktree of one Conversation, held for as long as one thing is using it.
@@ -1946,6 +2038,7 @@ impl Sessions {
             running: Arc::new(Mutex::new(HashMap::new())),
             launching: Arc::new(Mutex::new(HashMap::new())),
             turns: Arc::new(Mutex::new(HashMap::new())),
+            late: crate::signouts::Late::default(),
         }
     }
 
@@ -1986,6 +2079,7 @@ impl Sessions {
             running: Arc::new(Mutex::new(HashMap::new())),
             launching: Arc::new(Mutex::new(HashMap::new())),
             turns: Arc::new(Mutex::new(HashMap::new())),
+            late: crate::signouts::Late::default(),
         }
     }
 
@@ -2363,6 +2457,12 @@ impl Sessions {
     /// and there is no session for Resume to start.
     pub(crate) fn runs_sessions(&self) -> bool {
         self.agents.is_some()
+    }
+
+    /// Where a run stopped on a replaced login is sent to carry on — see
+    /// [`crate::signouts::carrying_on`], the one reader.
+    pub(crate) fn late(&self) -> &crate::signouts::Late {
+        &self.late
     }
 
     /// The pace the runner works a backlog at — see [`Agents::pace`].
@@ -2817,6 +2917,11 @@ impl Sessions {
             &crate::transfers::may_go_to(pool, devices, conversation_id).await,
         );
 
+        // The account's login as it is now, before the root is built from it: a
+        // sign-out that finds it replaced since is one the run carries on from
+        // by itself — see [`crate::signouts::Login`].
+        let login = crate::signouts::Login::before_building(&pairing.profile);
+
         // The sandbox asks git where the worktree's object database is, and the
         // dev-shell question is a `nix eval` or two. The line itself blocks on
         // the platform that writes the prompt to a file — see [`Agents::argv`].
@@ -3104,6 +3209,25 @@ impl Sessions {
             pairing.profile.agent_type(),
         );
 
+        // And watched beside it for the other thing a session says about its
+        // account: that the account has signed out. The Profile's id as well as
+        // its name, because the stop records which login it is waiting on, and
+        // where it is at home, because that decides whether the Notice offers
+        // the login or names the device it is made on — see [`crate::signouts`].
+        let signouts = crate::signouts::Watch::on(
+            conversation_id,
+            event_id,
+            pairing.profile.id,
+            crate::profiles::shown(pairing.profile.name.as_deref()).to_owned(),
+            match &pairing.profile.mirror {
+                None => crate::signouts::Home::Here,
+                Some(mirror) => crate::signouts::Home::Away(mirror.device.clone()),
+            },
+            pairing.profile.agent_type(),
+            login,
+            self.late.clone(),
+        );
+
         let (stop, stopping) = oneshot::channel();
 
         // The two halves of what a driver holds a session by: the judgement the
@@ -3182,7 +3306,7 @@ impl Sessions {
                         &idle,
                         tail,
                         resuming,
-                        limits,
+                        Watches { limits, signouts },
                         stopping,
                     )
                     .await;
@@ -3861,9 +3985,9 @@ struct Printing {
 /// judged by what it draws the two are one act: the frame that says a session is
 /// back at its prompt is drawn by the very text that arrived.
 ///
-/// And `limits` is fed the same text a third time, watching for the one thing a
-/// session says that is about the account rather than about the work — see
-/// [`crate::limits`].
+/// And `watches` are fed the same text a third time, watching for the two
+/// things a session says that are about the account rather than about the
+/// work — see [`Watches`].
 ///
 /// The one thing this loop announces that is not something it wrote down is the
 /// session falling idle, and then waking: a page draws a session that has
@@ -3881,6 +4005,37 @@ struct Printing {
 /// One parameter per thing the loop reads or writes, which is what makes the
 /// list long: gathering them would be a struct built at one call site and taken
 /// apart at the top of this, which is the same list said twice.
+/// The two watchers a session's records are read by for news of its account:
+/// its window spent — see [`crate::limits`] — and its login gone — see
+/// [`crate::signouts`].
+struct Watches {
+    limits: crate::limits::Watch,
+    signouts: crate::signouts::Watch,
+}
+
+impl Watches {
+    fn printed(&mut self, text: &str) {
+        self.limits.printed(text);
+        self.signouts.printed(text);
+    }
+
+    /// Both looked at, every time, whatever the first finds: each holds what it
+    /// has not yet read, and a look skipped is a line left to be read twice.
+    /// `true` is *end the session*, from either.
+    async fn look(
+        &mut self,
+        pool: &SqlitePool,
+        nudges: &Nudges,
+        drawn: &str,
+        said: Option<&str>,
+    ) -> bool {
+        let out_of_window = self.limits.look(pool, nudges, drawn, said).await;
+        let signed_out = self.signouts.look(pool, nudges, drawn, said).await;
+
+        out_of_window || signed_out
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn relay(
     pool: &SqlitePool,
@@ -3891,7 +4046,7 @@ async fn relay(
     idle: &Idle,
     mut tail: Option<Tail>,
     resuming: Option<Resuming>,
-    mut limits: crate::limits::Watch,
+    mut watches: Watches,
     mut stopping: oneshot::Receiver<()>,
 ) -> Ended {
     // The Event alone here: what this loop says for itself it says in the log,
@@ -3950,7 +4105,7 @@ async fn relay(
                         });
                     }
 
-                    limits.printed(&text);
+                    watches.printed(&text);
                     pending.push_str(&text);
                 }
                 Err(error) => {
@@ -3969,7 +4124,7 @@ async fn relay(
                 // that order — see [`crate::limits`], which writes the stop and
                 // leaves the ending here because this is the task it is running
                 // inside.
-                if limits
+                if watches
                     .look(
                         pool,
                         nudges,
@@ -3999,7 +4154,7 @@ async fn relay(
                     // moment it moves: a backend that says its window is spent
                     // in its own log and not on its display would otherwise go
                     // unnoticed until the terminal happened to say something.
-                    if limits
+                    if watches
                         .look(
                             pool,
                             nudges,

@@ -24,6 +24,7 @@ import type {
   AttachmentRemoved,
   BacklogPane,
   Locked,
+  LoginState,
   BaseRecorded,
   BranchRenamed,
   BriefSaved,
@@ -1787,6 +1788,33 @@ export function editProfile(
 /// which is in the path.
 export function deleteProfile(id: number): Promise<ProfileDeleted> {
   return post<ProfileDeleted>(`/api/ui/profiles/${id}/delete`);
+}
+
+/// Open a Profile's login: the one already running for it, joined, or a new
+/// one started. `viewer` is a name the modal made up for itself, so that its
+/// closing is told apart from another device's.
+export function openLogin(profile: number, viewer: string): Promise<LoginState> {
+  return post<LoginState>(`/api/ui/profiles/${profile}/login`, { viewer });
+}
+
+/// Where a Profile's login has got to — `null` where none is running.
+export function loadLogin(profile: number): Promise<LoginState | null> {
+  return get<LoginState | null>(`/api/ui/profiles/${profile}/login`);
+}
+
+/// The code the login page handed back, for the login waiting on it.
+export function sendLoginCode(
+  profile: number,
+  code: string,
+): Promise<LoginState> {
+  return post<LoginState>(`/api/ui/profiles/${profile}/login/code`, { code });
+}
+
+/// This device closing the modal. The last one to close it ends the login.
+export async function closeLogin(profile: number, viewer: string): Promise<void> {
+  const at = `/api/ui/profiles/${profile}/login/close`;
+
+  await refused(at, await sent(at, { viewer }));
 }
 
 /// Choose which account and model a conversation's grilling session runs under.

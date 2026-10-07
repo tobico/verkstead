@@ -30,7 +30,7 @@
 //! will later be run under; the bind-mounting arrives with the stage that runs
 //! one.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
@@ -182,6 +182,7 @@ pub(crate) async fn picked(state: &AppState, picked: store::Picked) -> Result<Pi
 async fn entries(state: &AppState, profiles: Vec<store::Profile>) -> Result<Vec<ProfileEntry>> {
     let homes = homes_of(&state.pool, &profiles).await?;
     let machine = state.onboarding.machine().clone();
+    let signed_out = state.logins.signed_out();
 
     Ok(tokio::task::spawn_blocking(move || {
         // Whether each harness a mirror in this batch runs is on this machine,
@@ -209,7 +210,7 @@ async fn entries(state: &AppState, profiles: Vec<store::Profile>) -> Result<Vec<
 
                 ProfileEntry {
                     id: profile.id,
-                    broken: broken(&profile, home.as_ref(), &harnesses),
+                    broken: broken(&profile, home.as_ref(), &harnesses, &signed_out),
                     login: lends(&profile),
                     device: home,
                     name: profile.name,
@@ -401,10 +402,16 @@ fn runnable(pairing: Option<&PairingView>) -> bool {
 /// **And that is the whole of it for a mirror**: a row that passes all three is
 /// a row to run under, and there is nothing about this filesystem to go and put
 /// right.
+///
+/// **One of this device's own may also have signed out** — [`Broken::SignedOut`]
+/// — where a press found its account with no login. Asked after its paths,
+/// which a login could not put right. `signed_out` is what
+/// [`crate::logins::asked`] found.
 fn broken(
     profile: &store::Profile,
     home: Option<&RowDevice>,
     harnesses: &HashMap<store::AgentType, bool>,
+    signed_out: &HashSet<i64>,
 ) -> Option<Broken> {
     if profile.mirror.is_some() {
         if home.is_some_and(|home| !home.reachable) {
@@ -457,7 +464,9 @@ fn broken(
         }
     }
 
-    None
+    signed_out
+        .contains(&profile.id)
+        .then_some(Broken::SignedOut)
 }
 
 /// What the human typed, checked — or the reason it is not going to be saved.

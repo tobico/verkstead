@@ -148,6 +148,14 @@ pub enum Broken {
     /// this type is launched as — so a mirror reads it in that step's own word
     /// rather than in a second vocabulary for one fact.
     HarnessMissing,
+
+    /// The Claude account at home here has no login: `claude auth status` said
+    /// so when a press was about to start a session under it.
+    ///
+    /// Remembered from that press rather than asked at every read, the asking
+    /// being a run of the harness. It goes when a login from the card lands,
+    /// or when the next press finds the account logged in after all.
+    SignedOut,
 }
 
 /// Why a press that would have started a session was refused over a Profile:
