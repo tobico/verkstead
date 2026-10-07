@@ -5454,7 +5454,7 @@ async fn two_maven_builds_at_once_fill_one_repository_and_a_third_builds_out_of_
 /// properties would pass it most runs. The debug log is not a race: Resolver
 /// names the lock factory and the name mapper it built, and they are the ones
 /// the descriptor set. `rwlock-local` and `gaecv` are what 3.9 says without
-/// them.
+/// them; 3.10 takes file locks by default, and says so only by class.
 ///
 /// And the lock files are where every session sees them: `.locks` inside the
 /// shared repository, not in the session's own `/tmp`.
@@ -5502,10 +5502,21 @@ async fn the_repository_and_the_locks_maven_names_for_itself_are_the_ones_the_de
          said:\n{}",
         asked.said,
     );
+    // Maven 3.9 names the two by the names the properties gave. 3.10 prints
+    // the instances instead — and wraps the mapper, so its name is not in the
+    // line at all — but the factory's class is, and a file-lock factory
+    // refuses any mapper whose names are not files.
     assert!(
         asked
             .said
-            .contains("Creating adapter using nameMapper 'file-gav' and factory 'file-lock'"),
+            .contains("Creating adapter using nameMapper 'file-gav' and factory 'file-lock'")
+            || asked
+                .said
+                .lines()
+                .any(|line| line.contains("Creating adapter using")
+                    && line.contains(
+                        "and factory 'org.eclipse.aether.named.providers.FileLockNamedLockFactory@"
+                    )),
         "and the locks it takes on it are files, which two sessions both see. \
          It said:\n{}",
         asked.said,
