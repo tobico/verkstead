@@ -482,20 +482,20 @@ impl Logins {
             let (mut rendering, closing) = sandbox.command(&argv).ok()?;
             rendering.set("BROWSER", NO_BROWSER);
 
-            Some((Harness::started(&rendering), closing))
+            Some((rendering, closing))
         })
         .await
         .ok()
         .flatten();
 
-        let Some((started, closing)) = built else {
+        let Some((rendering, closing)) = built else {
             return Ending::Failed(
                 "Verkstead could not build a sandbox to log in from. The server's log says why."
                     .to_owned(),
             );
         };
 
-        let mut child = match started {
+        let mut child = match Harness::start(rendering).await {
             Ok(child) => child,
             Err(error) => {
                 tracing::error!(
@@ -679,6 +679,24 @@ struct Harness {
 }
 
 impl Harness {
+    /// `rendering` started, from a thread that outlives it.
+    ///
+    /// **Not from a blocking thread on Linux.** `bwrap --die-with-parent` kills
+    /// its child when the thread that started it ends, not the process, and
+    /// the runtime ends a blocking thread once it has idled for ten seconds —
+    /// so a login started from one died long before a human could hand it a
+    /// code. On Windows the logon blocks, and what ends the harness with the
+    /// server is a Job rather than the thread — see
+    /// [`crate::sandbox::outliving`].
+    async fn start(rendering: Rendering) -> io::Result<Harness> {
+        match Platform::HERE {
+            Platform::Windows => tokio::task::spawn_blocking(move || Harness::started(&rendering))
+                .await
+                .map_err(io::Error::other)?,
+            Platform::Linux | Platform::MacOs => Harness::started(&rendering),
+        }
+    }
+
     /// `rendering` started. Blocks on Windows, where the logon is made.
     fn started(rendering: &Rendering) -> io::Result<Harness> {
         #[cfg(windows)]
@@ -841,17 +859,15 @@ pub(crate) async fn asked<'a>(
 async fn status(agents: Arc<Agents>, profile: store::Profile) -> Option<bool> {
     let built = tokio::task::spawn_blocking(move || {
         let (sandbox, argv) = agents.logging_in(&profile, STATUS)?;
-        let (rendering, closing) = sandbox.command(&argv).ok()?;
-
-        Some((Harness::started(&rendering), closing))
+        sandbox.command(&argv).ok()
     })
     .await
     .ok()
     .flatten();
 
-    let (started, closing) = built?;
+    let (rendering, closing) = built?;
 
-    let status = match started {
+    let status = match Harness::start(rendering).await {
         Ok(mut asking) => {
             // Nothing to type, and what it says is read and thrown away
             // rather than left unread: a harness writing into a pipe nobody

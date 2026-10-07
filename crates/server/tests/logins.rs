@@ -476,6 +476,37 @@ async fn a_code_handed_to_the_login_leaves_the_login_in_the_account() {
     assert_eq!(workbench.reading(profile).await, None);
 }
 
+/// A human takes longer than a few seconds over the page the address opens, and
+/// the login is still there when they come back with the code. `bwrap
+/// --die-with-parent` kills its child when the *thread* that started it ends,
+/// and the runtime's blocking threads end once they have idled for ten
+/// seconds — so a login started from one of those died with it.
+#[tokio::test]
+async fn a_login_outlives_the_thread_its_sandbox_was_built_on() {
+    let workbench = Workbench::new(Duration::from_secs(600)).await;
+    let profile = workbench.claude_profile("work").await;
+
+    workbench.opened(profile, "laptop").await;
+    workbench.waiting(profile).await;
+
+    tokio::time::sleep(Duration::from_secs(15)).await;
+    assert!(
+        matches!(
+            workbench.reading(profile).await,
+            Some(LoginState::Waiting { .. })
+        ),
+        "{:?}",
+        workbench.reading(profile).await
+    );
+
+    let (status, said) = workbench.coded(profile, GOOD_CODE).await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+
+    workbench
+        .read_until(profile, |reading| reading == &Some(LoginState::LoggedIn))
+        .await;
+}
+
 #[tokio::test]
 async fn a_refused_code_starts_a_fresh_login_with_a_new_address() {
     let workbench = Workbench::new(Duration::from_secs(600)).await;
