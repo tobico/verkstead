@@ -36,6 +36,7 @@ session-account = { max-threads = 1 }
 [[profile.default.overrides]]
 filter = '''
     binary_id(verkstead-server::sessions_windows)
+  | binary_id(verkstead-server::logins_windows)
   | binary_id(verkstead-server::sandbox_windows)
   | binary_id(verkstead-server::account_windows)
   | binary_id(verkstead-cli::sandbox_windows)

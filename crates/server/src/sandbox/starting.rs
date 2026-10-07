@@ -18,13 +18,14 @@
 //! made on the far side of the boundary by a launcher of Verkstead's own — see
 //! [`crate::terminal::launcher`], which is what `as_the_account` starts.
 //!
-//! And beside them, the other two ways of starting a rendering.
+//! And beside them, the other three ways of starting a rendering.
 //! [`off_a_console`], for everything that reads what a process printed rather
-//! than watching it — the boundary suite, the ask test. And [`left_running`],
-//! for the one process this server starts and then simply keeps: the Compile
-//! Server, which is neither drawn nor read nor waited for. A rendering that
-//! names an account cannot go through `Command` at all, so all three go through
-//! here.
+//! than watching it — the boundary suite, the ask test. [`held_open`], for the
+//! one process that is answered while it runs: a Profile's login, handed its
+//! code after it has printed where to get one. And [`left_running`], for the
+//! one process this server starts and then simply keeps: the Compile Server,
+//! which is neither drawn nor read nor waited for. A rendering that names an
+//! account cannot go through `Command` at all, so all four go through here.
 
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, c_void};
@@ -152,6 +153,76 @@ pub fn left_running(rendering: &Rendering, logon: &Logon) -> io::Result<Running>
     })
 }
 
+/// `rendering` started as the account over three pipes, and **all three handed
+/// back open**: its input to be written as the caller has something to write,
+/// and its output and its complaints to be read as it says them.
+///
+/// The fourth way of starting one, and the one caller is a Profile's login —
+/// see [`crate::logins`]. [`off_a_console`] will not do for it: that writes all
+/// of a process's input up front and waits for the end, and a login prints an
+/// address first and only then is handed the code somebody got by visiting it.
+/// So this is [`over_pipes`] stopped at the moment the process is up, with the
+/// three ends this process holds given to the caller instead of to threads of
+/// its own — and the process itself as a [`Running`], to be waited for and
+/// killed.
+///
+/// Reading what it prints is the caller's to do, and to keep doing: a process
+/// that has filled a pipe nobody is reading is one waiting on the reader.
+pub fn held_open(rendering: &Rendering, logon: &Logon) -> io::Result<HeldOpen> {
+    let (given, typing) = piped(Reads::TheChild)?;
+    let (printing, printed) = piped(Reads::ThisProcess)?;
+    let (complaining, complained) = piped(Reads::ThisProcess)?;
+
+    let mut line = command_line(rendering);
+    let environment = environment(rendering);
+    let chdir = rendering.chdir().map(|chdir| wide(chdir.as_os_str()));
+
+    let information = as_the_account(
+        logon,
+        &mut line,
+        &environment,
+        chdir.as_deref(),
+        [given.0, printing.0, complaining.0],
+        0,
+        &rendering.program().to_string_lossy(),
+    )?;
+
+    drop(Handle(information.hThread));
+
+    // The child's ends of all three, let go of here for [`over_pipes`]'s
+    // reason: a pipe whose write end this process is still holding is one the
+    // caller's read would wait on for ever.
+    drop(given);
+    drop(printing);
+    drop(complaining);
+
+    Ok(HeldOpen {
+        running: Running {
+            process: Handle(information.hProcess),
+            id: information.dwProcessId,
+        },
+        typing,
+        printed,
+        complained,
+    })
+}
+
+/// A process started by [`held_open`]: the process, and this process's end of
+/// each of its three pipes.
+#[derive(Debug)]
+pub struct HeldOpen {
+    pub running: Running,
+
+    /// Its standard input. Dropping it is what says *that is the whole of it*.
+    pub typing: File,
+
+    /// Its standard output.
+    pub printed: File,
+
+    /// And its standard error.
+    pub complained: File,
+}
+
 /// The machine's own null device, which is what a process with nothing to say
 /// and nobody typing at it is given.
 const NOWHERE: &str = "NUL";
@@ -163,7 +234,7 @@ const NOWHERE: &str = "NUL";
 /// It is not one — a process started as somebody else is
 /// `CreateProcessWithLogonW` — so the three things a caller does with a child
 /// are here: ask whether it is still up, end it, and wait for it. See
-/// [`left_running`], which is the only thing that makes one.
+/// [`left_running`] and [`held_open`], the two things that make one.
 #[derive(Debug)]
 pub struct Running {
     process: Handle,

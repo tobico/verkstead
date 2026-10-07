@@ -698,6 +698,32 @@ pub(crate) fn taken_back(data_dir: &Path, conversation: i64) {
     granting::remembering::forget(data_dir, conversation);
 }
 
+/// The id a Profile's login keeps its boundary under on the platform whose
+/// boundary is an identity, where a boundary is kept by Conversation and a
+/// login has none — see [`Sandbox::for_login`].
+///
+/// **The Profile's id turned negative, which no Conversation's is.** A
+/// Conversation's id is a SQLite row id, which begins at one, and zero is the
+/// Compile Server's — see `entries::NOBODYS`. A Profile's id begins at one too,
+/// so no two Profiles share one of these either.
+///
+/// Swept at startup by the ordinary rule, which takes back every record whose
+/// Conversation is not working — see [`crate::boundaries`] — and is the right
+/// answer for these: no login outlives the server that ran it.
+pub(crate) fn login_boundary(profile_id: i64) -> i64 {
+    -profile_id
+}
+
+/// The boundary a Profile's login ran behind, taken off this machine once the
+/// login is over — what a Conversation's close is to its session's. Nothing at
+/// all where there is none, which is the two platforms whose boundary is a
+/// wrapper.
+///
+/// Blocks: it walks back the directory trees the entries were written on.
+pub(crate) fn login_taken_back(homes: &Homes, profile_id: i64) {
+    taken_back(&homes.data, login_boundary(profile_id));
+}
+
 /// The machine's own half of a session's `PATH`: the `PATH` the server itself
 /// was started with, composed for `platform` — see [`composed`], which is where
 /// the rules are, and [`path`], which is this behind Verkstead's own directory.
@@ -3772,8 +3798,8 @@ pub struct Sandbox {
     /// because that is where the record of them goes and what the account's own
     /// name is arithmetic over.
     ///
-    /// `None` for a Profile's login, which is never built on Windows — see
-    /// [`Sandbox::for_login`].
+    /// For a Profile's login, which is no Conversation's, it is the id its
+    /// boundary is kept under instead — see [`login_boundary`].
     conversation: Option<i64>,
     data_dir: PathBuf,
 
@@ -4077,21 +4103,21 @@ impl Sandbox {
     /// binds is bound either: those are for working on code, and nothing here
     /// does.
     ///
-    /// `None` on Windows, where a login would need a process started as the
-    /// session account with its input held open, which nothing here does yet;
-    /// and wherever the directory cannot be made or the account cannot be
+    /// **On Windows it runs as the session account**, as a session does, behind
+    /// a boundary of its own kept under [`login_boundary`] — there being no
+    /// Conversation to keep it under — and taken back when the login ends: see
+    /// [`login_taken_back`].
+    ///
+    /// `None` wherever the directory cannot be made or the account cannot be
     /// joined, for [`Sandbox::for_conversation`]'s reasons.
     pub fn for_login(
         profile: &store::Profile,
         homes: &Homes,
         skills: &Skills,
         verkstead: &Executable,
+        secrets: &Secrets,
         config: &Config,
     ) -> Option<Sandbox> {
-        if homes.platform() == Platform::Windows {
-            return None;
-        }
-
         let home = homes.for_login(profile.id);
         let place = home.place();
 
@@ -4154,9 +4180,16 @@ impl Sandbox {
             shell: None,
             build_cache: None,
             platform: homes.platform(),
-            conversation: None,
+            conversation: Some(login_boundary(profile.id)),
             data_dir: homes.data.clone(),
-            session_account: None,
+            // Off the same two files a session's is, and for its reason — see
+            // [`Sandbox::for_conversation`].
+            session_account: (homes.platform() == Platform::Windows).then(|| {
+                account::Logon::of(
+                    homes.session_account(),
+                    secrets.session_account_password().unwrap_or_default(),
+                )
+            }),
             servers_home: homes.servers.clone(),
             compiles: None,
         })
@@ -4474,7 +4507,7 @@ impl Sandbox {
             data_dir: &self.data_dir,
             conversation: self
                 .conversation
-                .expect("a sandbox for the Windows platform is a Conversation's"),
+                .expect("a sandbox for the Windows platform is a Conversation's or a login's"),
             entries: granting::entries(surface, Some(&self.servers_home)),
             standing: granting::standing_of(surface, Some(&self.servers_home)),
         })
@@ -4501,11 +4534,18 @@ impl Sandbox {
             .as_ref()
             .expect("a sandbox for the Windows platform names the account its sessions run as");
 
+        let (what, which) = match self.conversation {
+            Some(key) if key < 0 => (format!("the login of Profile {}", -key), "login"),
+            key => (
+                format!("a session of Conversation {}", key.unwrap_or_default()),
+                "session",
+            ),
+        };
+
         account::machine::Account::resolving(logon).map_err(|missing| {
             std::io::Error::other(format!(
-                "a session of Conversation {} runs as this installation's own local account \
-                 and there is not one, so no session was started: {missing}",
-                self.conversation.unwrap_or_default(),
+                "{what} runs as this installation's own local account and there is not one, so \
+                 no {which} was started: {missing}",
             ))
         })
     }

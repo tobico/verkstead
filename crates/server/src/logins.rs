@@ -15,6 +15,12 @@
 //! input, and the modal draws the address as a link and takes the code in a
 //! box. Nothing about it needs a screen.
 //!
+//! **On Windows as the session account**, the way a session runs there — so
+//! started by Verkstead's own logon rather than the standard library's spawn,
+//! with its input held open for the code (see [`Harness`]), and behind a
+//! boundary of its own that is taken back when the login ends (see
+//! [`crate::sandbox::login_taken_back`]).
+//!
 //! **One login per Profile.** A second device opening the modal joins the one
 //! already running and is shown the same address, because a second process
 //! would print a second address and only one of the two codes would ever be
@@ -48,17 +54,20 @@
 //! home device writes over.
 
 use std::collections::{HashMap, HashSet};
-use std::process::Stdio;
+use std::io;
+use std::process::{ExitStatus, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::{mpsc, oneshot};
 use verkstead_render::LoginState;
 use verkstead_schema::Nudge;
 
 use crate::AppState;
+use crate::platform::Platform;
+use crate::sandbox::Rendering;
 use crate::sessions::Agents;
 use crate::store;
 
@@ -105,6 +114,13 @@ const STATUS_LIMIT: Duration = Duration::from_secs(20);
 /// What the environment's `BROWSER` is inside a login, so that the harness
 /// opens nothing on the server: a program that does nothing and succeeds.
 /// Found on `PATH` rather than at `/bin/true`, which NixOS does not have.
+///
+/// **The same word on Windows, where it is usually nothing at all.** Claude
+/// Code 2.1.283 runs `BROWSER` with the address where it is set, and otherwise
+/// `rundll32 url,OpenURL` — which would open a browser on the server's own
+/// screen as the session account. A machine with Git's `usr\bin` on its `PATH`
+/// has a `true` there; one without fails to start it, which the harness takes
+/// as a browser that did not open, and it prints the address either way.
 const NO_BROWSER: &str = "true";
 
 /// Every Profile's login that is running, or has ended with a device still
@@ -407,16 +423,30 @@ impl Logins {
         };
 
         let state = match ending {
-            Ending::Stopped | Ending::Refused => return,
-            Ending::Failed(reason) => LoginState::Failed { reason },
-            Ending::Exited => match status(run.agents.clone(), run.profile.clone()).await {
-                Some(true) => LoginState::LoggedIn,
-                _ => LoginState::Failed {
-                    reason: "Claude finished, but the account still reads as logged out. \
-                             Try again."
-                        .to_owned(),
+            Ending::Stopped | Ending::Refused => None,
+            Ending::Failed(reason) => Some(LoginState::Failed { reason }),
+            Ending::Exited => Some(
+                match status(run.agents.clone(), run.profile.clone()).await {
+                    Some(true) => LoginState::LoggedIn,
+                    _ => LoginState::Failed {
+                        reason: "Claude finished, but the account still reads as logged out. \
+                                 Try again."
+                            .to_owned(),
+                    },
                 },
-            },
+            ),
+        };
+
+        // The boundary every harness of this login ran behind, which is held
+        // from the first of them to the question asked after the last — see
+        // [`crate::sandbox::login_taken_back`]. Taken back before the modal is
+        // told, so that a device opening it again starts behind a fresh one.
+        let agents = run.agents.clone();
+        let profile = run.profile.id;
+        let _ = tokio::task::spawn_blocking(move || agents.login_over(profile)).await;
+
+        let Some(state) = state else {
+            return;
         };
 
         if state == LoginState::LoggedIn {
@@ -452,29 +482,20 @@ impl Logins {
             let (mut rendering, closing) = sandbox.command(&argv).ok()?;
             rendering.set("BROWSER", NO_BROWSER);
 
-            Some((rendering, closing))
+            Some((Harness::started(&rendering), closing))
         })
         .await
         .ok()
         .flatten();
 
-        let Some((rendering, closing)) = built else {
+        let Some((started, closing)) = built else {
             return Ending::Failed(
                 "Verkstead could not build a sandbox to log in from. The server's log says why."
                     .to_owned(),
             );
         };
 
-        let child = std::process::Command::try_from(&rendering).and_then(|command| {
-            tokio::process::Command::from(command)
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .kill_on_drop(true)
-                .spawn()
-        });
-
-        let mut child = match child {
+        let mut child = match started {
             Ok(child) => child,
             Err(error) => {
                 tracing::error!(
@@ -487,12 +508,12 @@ impl Logins {
             }
         };
 
-        let mut stdin = child.stdin.take();
+        let mut stdin = child.typing.take();
 
         // The address, off the harness's output as it prints it. Read on a
         // task of its own, because what is printed after it is a prompt with
         // no line ending, which a read waiting for one would wait on for ever.
-        if let Some(stdout) = child.stdout.take() {
+        if let Some(stdout) = child.printed.take() {
             let logins = self.clone();
             let shown = run.again();
 
@@ -517,7 +538,7 @@ impl Logins {
         // gives — and watched for a code it is asking for again.
         let said = Arc::new(Mutex::new(Vec::<String>::new()));
 
-        if let Some(stderr) = child.stderr.take() {
+        if let Some(stderr) = child.complained.take() {
             let said = said.clone();
             let logins = self.clone();
             let shown = run.again();
@@ -544,7 +565,7 @@ impl Logins {
 
         let ending = loop {
             tokio::select! {
-                exited = child.wait() => break match exited {
+                exited = child.process.wait() => break match exited {
                     Ok(status) if status.success() => Ending::Exited,
                     // Exiting badly with a code in hand is the harness
                     // refusing it — see the module note.
@@ -578,12 +599,12 @@ impl Logins {
                 }
 
                 _ = &mut *stopped => {
-                    let _ = child.kill().await;
+                    child.process.kill().await;
                     break Ending::Stopped;
                 }
 
                 () = &mut limit => {
-                    let _ = child.kill().await;
+                    child.process.kill().await;
                     break Ending::Failed(
                         "The login ran out of time. Open it again to start over.".to_owned(),
                     );
@@ -632,6 +653,133 @@ enum Ending {
     Stopped,
 }
 
+/// The harness, started over three pipes, whichever of the two ways it was
+/// started — what a `tokio::process::Child` is where the standard library
+/// started it, and where it did not.
+///
+/// **Because on Windows it cannot.** A login there runs as the session account
+/// (ADR-0014), which is `CreateProcessWithLogonW` — see
+/// [`crate::sandbox::starting::held_open`]. What comes back from that is three
+/// pipes and a process handle, and this is them made into what the login reads
+/// and writes on the runtime: each pipe a file whose reads and writes go to the
+/// runtime's blocking threads, and the process waited for on one of its own.
+///
+/// Killed as it is dropped, on both platforms.
+struct Harness {
+    /// Its standard input, where a code is written.
+    typing: Option<Box<dyn AsyncWrite + Send + Unpin>>,
+
+    /// Its standard output, where the address is printed.
+    printed: Option<Box<dyn AsyncRead + Send + Unpin>>,
+
+    /// And its standard error, where a refusal is said.
+    complained: Option<Box<dyn AsyncRead + Send + Unpin>>,
+
+    process: Process,
+}
+
+impl Harness {
+    /// `rendering` started. Blocks on Windows, where the logon is made.
+    fn started(rendering: &Rendering) -> io::Result<Harness> {
+        #[cfg(windows)]
+        if let Some(logon) = rendering.account() {
+            let held = crate::sandbox::starting::held_open(rendering, logon)?;
+            let running = Arc::new(held.running);
+
+            let (exit, exited) = oneshot::channel();
+            let waiting = running.clone();
+
+            tokio::task::spawn_blocking(move || {
+                let _ = exit.send(waiting.wait());
+            });
+
+            return Ok(Harness {
+                typing: Some(Box::new(tokio::fs::File::from_std(held.typing))),
+                printed: Some(Box::new(tokio::fs::File::from_std(held.printed))),
+                complained: Some(Box::new(tokio::fs::File::from_std(held.complained))),
+                process: Process::AsTheAccount { running, exited },
+            });
+        }
+
+        let mut child = tokio::process::Command::from(std::process::Command::try_from(rendering)?)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()?;
+
+        Ok(Harness {
+            typing: child
+                .stdin
+                .take()
+                .map(|stdin| Box::new(stdin) as Box<dyn AsyncWrite + Send + Unpin>),
+            printed: child
+                .stdout
+                .take()
+                .map(|stdout| Box::new(stdout) as Box<dyn AsyncRead + Send + Unpin>),
+            complained: child
+                .stderr
+                .take()
+                .map(|stderr| Box::new(stderr) as Box<dyn AsyncRead + Send + Unpin>),
+            process: Process::Ordinarily(Box::new(child)),
+        })
+    }
+}
+
+/// The process of a [`Harness`].
+enum Process {
+    /// Started by the standard library, which is both of the platforms whose
+    /// boundary is a wrapper in front of the process.
+    Ordinarily(Box<tokio::process::Child>),
+
+    /// And started as the session account, with a blocking thread waiting for
+    /// it to end and saying so on `exited`.
+    #[cfg(windows)]
+    AsTheAccount {
+        running: Arc<crate::sandbox::starting::Running>,
+        exited: oneshot::Receiver<io::Result<ExitStatus>>,
+    },
+}
+
+impl Process {
+    /// How it ended, once it has. Safe to give up on before it answers, and
+    /// asked again; not asked again once it has.
+    async fn wait(&mut self) -> io::Result<ExitStatus> {
+        match self {
+            Process::Ordinarily(child) => child.wait().await,
+
+            #[cfg(windows)]
+            Process::AsTheAccount { exited, .. } => exited
+                .await
+                .unwrap_or_else(|_| Err(io::Error::other("nothing was left waiting for it"))),
+        }
+    }
+
+    /// Ended. One that has ended already is not an error.
+    async fn kill(&mut self) {
+        match self {
+            Process::Ordinarily(child) => {
+                let _ = child.kill().await;
+            }
+
+            #[cfg(windows)]
+            Process::AsTheAccount { running, .. } => {
+                let _ = running.kill();
+            }
+        }
+    }
+}
+
+/// What `kill_on_drop` is for the one the standard library started.
+#[cfg(windows)]
+impl Drop for Process {
+    fn drop(&mut self) {
+        if let Process::AsTheAccount { running, .. } = self {
+            let _ = running.kill();
+        }
+    }
+}
+
 /// The address in a line the harness printed, where it is the line that
 /// carries one — see [`VISIT`].
 fn address_in(line: &str) -> Option<String> {
@@ -649,11 +797,16 @@ fn address_in(line: &str) -> Option<String> {
 /// the Profile finds it, and the press reads its Profiles after this, so it is
 /// refused by the rule every broken Profile is refused by.
 ///
-/// No answer leaves the reading as it was: a Windows server, which cannot run
-/// the harness for a login yet, a sandbox that could not be built, and a
-/// harness that did not answer in time. Each of those goes ahead, and a session
-/// that then finds itself signed out stops the way any signed-out session
-/// does — see [`crate::signouts`].
+/// No answer leaves the reading as it was: a sandbox that could not be built,
+/// and a harness that did not answer in time. Each of those goes ahead, and a
+/// session that then finds itself signed out stops the way any signed-out
+/// session does — see [`crate::signouts`].
+///
+/// **And nothing is asked on Windows.** The question runs behind a boundary
+/// there, as the login does, and a boundary is access-control entries written
+/// on the account's directories — the slow half of a session's start, paid
+/// again in front of every press. A press goes ahead unasked, and a session
+/// that finds itself signed out stops the same way.
 pub(crate) async fn asked<'a>(
     state: &AppState,
     profiles: impl IntoIterator<Item = &'a store::Profile>,
@@ -662,7 +815,7 @@ pub(crate) async fn asked<'a>(
         return;
     };
 
-    if !agents.checks_logins() {
+    if !agents.checks_logins() || Platform::HERE == Platform::Windows {
         return;
     }
 
@@ -688,24 +841,35 @@ pub(crate) async fn asked<'a>(
 async fn status(agents: Arc<Agents>, profile: store::Profile) -> Option<bool> {
     let built = tokio::task::spawn_blocking(move || {
         let (sandbox, argv) = agents.logging_in(&profile, STATUS)?;
-        sandbox.command(&argv).ok()
+        let (rendering, closing) = sandbox.command(&argv).ok()?;
+
+        Some((Harness::started(&rendering), closing))
     })
     .await
     .ok()
     .flatten();
 
-    let (rendering, closing) = built?;
+    let (started, closing) = built?;
 
-    let status = match std::process::Command::try_from(&rendering) {
-        Ok(command) => {
-            let asking = tokio::process::Command::from(command)
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .kill_on_drop(true)
-                .status();
+    let status = match started {
+        Ok(mut asking) => {
+            // Nothing to type, and what it says is read and thrown away
+            // rather than left unread: a harness writing into a pipe nobody
+            // reads is one that stops when the pipe is full.
+            drop(asking.typing.take());
 
-            match tokio::time::timeout(STATUS_LIMIT, asking).await {
+            for mut said in [asking.printed.take(), asking.complained.take()]
+                .into_iter()
+                .flatten()
+            {
+                tokio::spawn(async move {
+                    let _ = tokio::io::copy(&mut said, &mut tokio::io::sink()).await;
+                });
+            }
+
+            // A harness that did not answer in time is killed as it is
+            // dropped — see [`Harness`].
+            match tokio::time::timeout(STATUS_LIMIT, asking.process.wait()).await {
                 Ok(Ok(status)) => Some(status.success()),
                 Ok(Err(_)) | Err(_) => None,
             }

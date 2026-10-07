@@ -96,12 +96,15 @@ device can open.
   refuses the launch before a session starts, and the Profile reads as broken
   — signed out — until the card's Log in fixes it.
 
-## Not yet
-
-- **Windows.** A login there would be started as the session account with its
-  standard input held open for the code. Nothing in `sandbox/starting.rs`
-  does that yet: what is there writes all of a process's input up front. Until
-  it does, the Log in press is refused on Windows with a message that says so.
+- **On Windows, as the session account.** A login there is started the way
+  a session is, by Verkstead's own logon, with its standard input held open for
+  the code (`sandbox::starting::held_open`). It runs behind a boundary of its
+  own, kept under the Profile's id made negative, since a boundary is kept by
+  Conversation and no Conversation's id is negative. That boundary is taken
+  back when the login ends, and swept at startup like any other.
+  The check before a launch is not made on Windows: it would write a boundary
+  on the account's directories in front of every press. A session that finds
+  itself signed out there stops the way it does anywhere.
 
 ## Consequences
 

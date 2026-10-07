@@ -19,4 +19,4 @@ logging in a mirrored Profile across the cluster are left for later.
 - [x] 04: A login resumes the runs it unblocks — [details](04-a-login-resumes-the-runs-it-unblocks.md)
 - [x] 05: A late sign-out resumes by itself — [details](05-a-late-sign-out-resumes-by-itself.md)
 - [x] 06: Check before launch — [details](06-check-before-launch.md)
-- [ ] 07: Log in on Windows — [details](07-log-in-on-windows.md)
+- [x] 07: Log in on Windows — [details](07-log-in-on-windows.md)

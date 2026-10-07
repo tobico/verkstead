@@ -5344,8 +5344,7 @@ async fn edit_profile(
 /// A device opening a Profile's login modal: the login already running for it,
 /// or a new one — see [`crate::logins::Logins::opened`].
 ///
-/// Refused for anything but a Claude Profile at home on this device, and on
-/// Windows, where nothing yet runs a login — see
+/// Refused for anything but a Claude Profile at home on this device — see
 /// [`crate::sandbox::Sandbox::for_login`].
 async fn login_opened(
     State(state): State<AppState>,
@@ -5376,13 +5375,6 @@ async fn login_opened(
         return refused(
             StatusCode::CONFLICT,
             ApiError::new("log in on the device this Profile is at home on"),
-        );
-    }
-
-    if crate::platform::Platform::HERE == crate::platform::Platform::Windows {
-        return refused(
-            StatusCode::CONFLICT,
-            ApiError::new("logging in from Verkstead is not available on Windows yet"),
         );
     }
 

@@ -325,6 +325,7 @@ impl Agents {
             &self.homes,
             &self.skills,
             self.verkstead.as_ref()?,
+            &self.settings.secrets(),
             &self.settings.config(),
         )?;
 
@@ -335,6 +336,14 @@ impl Agents {
         argv.extend(words.iter().map(|word| (*word).to_owned()));
 
         Some((sandbox, argv))
+    }
+
+    /// And the boundary those ran behind, taken back once the login of
+    /// `profile_id` is over — see [`crate::sandbox::login_taken_back`].
+    ///
+    /// Blocks.
+    pub(crate) fn login_over(&self, profile_id: i64) {
+        crate::sandbox::login_taken_back(&self.homes, profile_id);
     }
 
     /// The same, with the prompt `signature` draws where a TUI backend's own
