@@ -2323,6 +2323,29 @@ describe("the agent control on a compose page", () => {
     await waitFor(() => expect(agentReads()).toBe("Opus 5 — opus +2"));
   });
 
+  /// The count is never what gives way to a long name: the words are cut with an
+  /// ellipsis and the ` +N` stands beside them whole, outside the part that is
+  /// cut — a reading that lost its count to a long profile name would be saying
+  /// one account runs everything.
+  it("keeps the count out of the words a long name cuts", async () => {
+    theWorkbench(...REMEMBERED, json(null));
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await pickRepo(container, REPOS[1]!.id);
+    await waitFor(() => expect(agentReads()).toBe("Opus 5 — opus +2"));
+
+    const value = container.querySelector(
+      `.${setup.agentOption} > button .${setup.optionValue}`,
+    )!;
+    const words = value.querySelector(`.${setup.optionWords}`)!;
+    const count = value.querySelector(`.${setup.optionCount}`)!;
+
+    expect(words.textContent).toBe("Opus 5 — opus");
+    expect(count.textContent).toBe(" +2");
+    expect(words.contains(count)).toBe(false);
+  });
+
   /// And says it once where there is nothing else to say: a role on the same
   /// Pairing adds nothing, and neither does a role picked away — *No review* is
   /// an answer rather than another account.

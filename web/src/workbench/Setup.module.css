@@ -96,11 +96,27 @@
   min-width: 0;
 }
 
+/* The value itself: the words, and the count after them where a trigger has
+   one. A line of its own so that the two can give way differently — the words
+   are what is cut where the trigger is too narrow for them, and the count is
+   kept whole beside them, a reading that lost its `+2` to a long profile name
+   being one that said a single account ran everything. */
 .optionValue {
+  display: flex;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.optionWords {
   min-width: 0;
   overflow: hidden;
-  white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+/* Its leading space kept, a flex item dropping the white space it starts with. */
+.optionCount {
+  flex: none;
+  white-space: pre;
 }
 
 /* And the caret, level with the two lines rather than with either of them. */
