@@ -44,24 +44,81 @@
   font-size: 0.9rem;
 }
 
-/* And the details pane: the checkbox, what stands in the way of it, and the size
-   hanging off it. */
-.languages .warning {
-  margin: 0.85rem 0 0;
+/* And the details pane: a row a language, and what stands in the way of one
+   under it. */
+.languages {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
 }
 
-/* What a language compiling through another's Compile Server says where the
-   size would be: indented as that size would be, and in the quiet the card
-   names what is on in — it is a fact about the machine, not something to do. */
-.shares {
-  margin: 0.85rem 0 0;
-  padding: 0 0 0 1.6rem;
+.languages .warning {
+  margin: 0.5rem 0 0;
+}
+
+/* The checkbox at one end and the link to its panel at the other, on one line:
+   the row is what somebody scanning the pane reads, and everything else is
+   behind the link. */
+.row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+/* The link, which is the panel's trigger: drawn as a link rather than as a
+   button, because it is a reading first — what the cache holds — and the panel
+   behind it second. In the accent while its language is on. */
+.cache > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0;
   font-size: 0.9rem;
+  color: var(--accent);
+  white-space: nowrap;
+  background: none;
+  border: 0;
+}
+
+/* And quieter while it is off: an unticked language that still holds
+   something is worth a way to it, and not worth the eye. */
+.quiet > button {
   color: var(--ink-soft);
 }
 
-/* The space above the size is the nested group's own — see `Check.module.css`,
-   which is where the indent it is read by lives too. */
+.arrow {
+  font-size: 0.75em;
+}
+
+.cache > button[aria-expanded="true"],
+.cache > button:focus-visible {
+  text-decoration: underline;
+}
+
+@media (hover: hover) {
+  .cache > button:not(:disabled):hover {
+    text-decoration: underline;
+  }
+}
+
+/* The panel the link drops, hung off the row rather than off the link: the
+   link's anchor gives up its positioning, so the card's far edge is the row's
+   and it can be no wider than the row is — a pane narrower than the card would
+   otherwise have it spread off the window's near edge. */
+.row > .cache {
+  position: static;
+}
+
+.cache > [role="group"] {
+  width: min(22rem, 100%);
+}
+
+.cache > [role="group"] > * + * {
+  margin-top: 0.6rem;
+}
 
 .sizing label {
   display: block;
@@ -70,15 +127,9 @@
   color: var(--ink-soft);
 }
 
-/* The box and its press on one line: the value is short — `30G` — so a field
-   the width of the pane would say it was expecting prose. */
-.field {
-  display: flex;
-  gap: 0.5rem;
-  align-items: center;
-}
-
-.field input {
+/* The value is short — `30G` — so a field the width of the panel would say it
+   was expecting prose. */
+.sizing input {
   width: 7rem;
   font: inherit;
   font-family: ui-monospace, SFMono-Regular, monospace;
@@ -89,24 +140,19 @@
   padding: 0.5rem 0.6rem;
 }
 
-.field button {
-  padding: 0.5rem 1rem;
-  font: inherit;
-  font-weight: 600;
-  color: var(--paper);
-  background: var(--accent);
-  border: 1px solid var(--accent);
-  border-radius: 0.4rem;
-  cursor: pointer;
+.sizing input:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
-.field button:disabled {
-  cursor: not-allowed;
-  opacity: 0.65;
+.sizing input:focus-visible {
+  border-color: var(--accent);
 }
 
-.field input:disabled {
-  cursor: not-allowed;
+@media (hover: hover) {
+  .sizing input:not(:disabled):hover {
+    border-color: var(--ink-soft);
+  }
 }
 
 .failure {
@@ -114,58 +160,24 @@
   font-size: 0.9rem;
 }
 
-.field input:focus-visible {
-  border-color: var(--accent);
-}
-
-@media (hover: hover) {
-  .field input:not(:disabled):hover {
-    border-color: var(--ink-soft);
-  }
-
-  .field button:not(:disabled):hover {
-    background: var(--accent-deep);
-    border-color: var(--accent-deep);
-  }
-}
-
-/* What the store holds on disk, under the field it is measured against: a
-   reading rather than a control, so in the quiet the label above it is in. */
-.held {
-  margin: 0.45rem 0 0;
+/* A reading rather than a control — what the store holds, which directories,
+   when it was last trimmed — so in the quiet the field's label is in. */
+.note {
+  margin: 0;
   font-size: 0.85rem;
   color: var(--ink-soft);
 }
 
-/* How each directory of the store is held to the size: as quiet as the reading
-   above it, one line apiece. */
-.bounds {
-  margin: 0.35rem 0 0;
-  padding-left: 1.1rem;
-  font-size: 0.85rem;
-  color: var(--ink-soft);
-}
-
-.bounds li + li {
-  margin-top: 0.15rem;
-}
-
-/* A Clear and what it does, or what it waits on, under the size: indented as the
-   size is, and its press quieter than Save's — it is not the thing the pane is
-   for. */
+/* A Clear and what it does, or what it waits on, at the foot of the panel: its
+   press quieter than anything filled, since it is not what the panel is for. */
 .clearing {
   display: flex;
   gap: 0.6rem;
   align-items: baseline;
-  margin: 0.6rem 0 0;
-  padding: 0 0 0 1.6rem;
-}
-
-.clearing .held {
-  margin: 0;
 }
 
 .clearing button {
+  flex: none;
   padding: 0.35rem 0.8rem;
   font: inherit;
   color: inherit;

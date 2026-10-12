@@ -1202,7 +1202,15 @@ Timeline events:
   git card, each Agent Profile, the Repos as one card — **Language support**,
   whose
   card lists the languages a session gets build support for and whose pane holds
-  the checkbox per language and the configuration hanging off it (*revised
+  one row per language — its checkbox, and beside it a link saying what its
+  cache holds against its size, `Cache usage: 3.2/30GB`, which opens a panel
+  holding the size and everything else about that language's store (*revised
+  2026-10-12, building language-support-settings*: the size, a Save, what the
+  store held, a line per store directory, when it was last swept and a Clear
+  hung under every box, which was the same four sentences six times over and a
+  line per directory each claiming the size the directories are held to
+  together; the sccache warning that stood at the pane's foot is in the Rust and
+  C/C++ panels now, and still on the card) (*revised
   2026-09-15, building settings-ui-tidy*: it was **Rust build cache** at
   `/settings/build-cache`, whose card said how the cache stood in a sentence and
   whose pane held a switch, a paragraph about it and the size; the old slug is no
@@ -1234,8 +1242,8 @@ Timeline events:
   quietly stopped resolving is what nobody goes looking for. What is on a card is
   what a list is scanned for and the rest is in the pane — a Profile's account
   paths, the models it lists, its agent type as a field and Remove; Language
-  support's checkbox per language and the size of the Rust cache's compiled
-  half. **A Profile's card is one line: the harness's mark, the harness's name,
+  support's checkbox per language and, behind the link beside it, each store's
+  size and Clear. **A Profile's card is one line: the harness's mark, the harness's name,
   and the Profile's own name after an em dash** — "Claude Code — Personal", and
   "Claude Code" for the one nobody named, there being nothing for a name to tell
   it apart from — with the warning under it where its account has gone
