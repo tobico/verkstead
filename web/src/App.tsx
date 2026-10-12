@@ -1,6 +1,6 @@
 //! The application: everything under the API routes the agents use.
 
-import { Navigate, Route, Router, useParams } from "@solidjs/router";
+import { Navigate, Route, Router, useNavigate, useParams } from "@solidjs/router";
 import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
 import { Show, onCleanup, onMount, type JSX } from "solid-js";
 
@@ -12,6 +12,7 @@ import { loadOnboarding, retrying } from "./api/client";
 import { useReading } from "./freshness";
 import { dress } from "./head";
 import { Empty } from "./notices";
+import { follow } from "./opened";
 import { listenForNudges } from "./nudge";
 import { SettingsPage, panes } from "./settings/SettingsPage";
 import { SetupPage } from "./setup/SetupPage";
@@ -126,7 +127,7 @@ export function Gate(): JSX.Element {
 /// page that will only redirect again.
 function Onboarding(): JSX.Element {
   return (
-    <Router root={Shell}>
+    <Router root={Followed}>
       <Route path={SETUP} component={SetupPage} />
       <Route path="*" component={() => <Navigate href={SETUP} />} />
     </Router>
@@ -136,7 +137,7 @@ function Onboarding(): JSX.Element {
 /// And the app as it has always been.
 function Verkstead(): JSX.Element {
   return (
-    <Router root={Shell}>
+    <Router root={Followed}>
       {/* The workbench has the root: it is what Verkstead is for, and what a
           device with a window opens on. The Conversation in the URL is a
           record of which one is open rather than a document of its own — the
@@ -266,6 +267,22 @@ export function Shell(props: { children?: JSX.Element }): JSX.Element {
       <Joining />
     </>
   );
+}
+
+/// The shell as both route tables root it: [`Shell`], and a click on one of the
+/// app's own notifications followed to what it was about — in this page, by
+/// routing, rather than in a page loaded again. See `opened.ts`.
+///
+/// **Apart from the shell because following is routing**, and the shell is also
+/// mounted where there is no router to route with: a click is news from the desk
+/// rather than a press on any page, so it is held at the router's root, the one
+/// place inside the router whatever page is open and there once. Nothing at all
+/// in a browser, there being no bridge to hear it over.
+function Followed(props: { children?: JSX.Element }): JSX.Element {
+  const navigate = useNavigate();
+  onMount(() => onCleanup(follow((path) => navigate(path))));
+
+  return <Shell>{props.children}</Shell>;
 }
 
 /// Where the Terminal pane stood, sending whoever asked for it on to Code

@@ -371,6 +371,7 @@ async fn the_prefixes_this_device_keeps_to_itself_are_refused_by_name() {
         "/api/ui/devices/discovered",
         "/api/ui/devices/nothing-answers-this",
         "/api/ui/push/key",
+        "/api/ui/push/notices",
         "/api/ui/push/nothing-answers-this",
     ] {
         let (status, said) = asked(&linked, Showing::A(&linked.member), path).await;

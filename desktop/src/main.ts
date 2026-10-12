@@ -8,10 +8,10 @@
 //! itself are `app` and the process's own environment — see the wall in
 //! `eslint.config.js`, and `window.ts`, which is the other file on it.
 //!
-//! **And it is what answers the page**, over the six channels
+//! **And it is what answers the page**, over the channels
 //! [`bridge.ts`](./bridge.js) names: the settings read, a set enacted in the
 //! run it arrives in, the log file opened, the startup registration read and
-//! written, and the window dressed to whatever head the page turned out to have
+//! written, whether this desktop shows notifications at all, and the window dressed to whatever head the page turned out to have
 //! drawn — its controls overlay recoloured, or a Mac's traffic lights moved into
 //! the row that head stands in. Each of them is something only this process can do — a file
 //! under Electron's user data, an icon on somebody's panel, a file handed to
@@ -28,6 +28,13 @@
 //! question; then the binary; and only then a child. Everything before the
 //! child is an app that can refuse having made nothing at all.
 //!
+//! **And it holds the notices stream for the rest of the run**, drawing each
+//! notice the phones get as the platform's own notification while the window
+//! is not in front — Web Push being refused inside Electron, which ships
+//! without Google's push client. Reading the stream and the showing rule are
+//! [`notices.ts`](./notices.js)'s, which vitest runs; the `Notification` is
+//! here.
+//!
 //! **And a launch may be a login's rather than a human's.** The flag
 //! [`HIDDEN`](./startup.js) is what says so where the registration is a command
 //! line, and the platform itself is what says so on a Mac, whose login item
@@ -39,12 +46,12 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 
-import { app, BrowserWindow, dialog, ipcMain } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Notification } from "electron";
 
 import { artwork } from "./artwork.js";
 import { AUTOSCROLLING } from "./autoscroll.js";
 import { FILE } from "./bounds.js";
-import { ASKED, HEAD, LOGS, PRELOAD, REGISTER, SET, STARTUP } from "./bridge.js";
+import { ASKED, HEAD, LOGS, NOTIFIABLE, PRELOAD, REGISTER, SET, STARTUP } from "./bridge.js";
 import { cli, type Install, OVERRIDE } from "./cli.js";
 import { closing } from "./closing.js";
 import { buttoned, lights, overlaid, overlay, worn } from "./decorations.js";
@@ -53,6 +60,7 @@ import { keyIn } from "./key.js";
 import { takeOver as takeOverAgent } from "./launchd.js";
 import { heard, keep, say } from "./log.js";
 import { shortcuts } from "./menu.js";
+import { hold, type Notice, opens, showing } from "./notices.js";
 import { dataDir, logDir } from "./platform.js";
 import { takeOver as takeOverValue } from "./runkey.js";
 import { changed, FILE as DESKTOP, set, type Settings, settings } from "./settings.js";
@@ -70,8 +78,8 @@ import { taken } from "./taken.js";
 import { opening } from "./opening.js";
 import { logs, lower, raise, type Trayed } from "./tray.js";
 import { APPDIR, stripped, unmounted } from "./unmounted.js";
-import { forward, open } from "./window.js";
-import { ADDRESS, HEALTH, HOST, LISTEN, ORIGIN, PORT } from "./workbench.js";
+import { forward, open, type Opened } from "./window.js";
+import { ADDRESS, HEALTH, HOST, LISTEN, NOTICES, ORIGIN, PORT } from "./workbench.js";
 
 /// What the human is told when the CLI is not where the app looked.
 ///
@@ -176,8 +184,8 @@ function give(code: number): void {
 /// **In this run rather than at the next launch**, which is what makes the
 /// Desktop page a control rather than a form: the icon goes or comes back as
 /// the switch is moved, and what a close means changes with it — the policy is
-/// read out of the file at the moment of the press, so there is nothing to
-/// re-read it here.
+/// read out of the file at the moment of the press, and the notifications
+/// switch at the moment of each notice, so there is nothing to re-read here.
 ///
 /// **What is refused writes nothing.** [`changed`](./settings.js) is what says
 /// so, and what comes back then is the settings as they stand — which is a
@@ -302,6 +310,68 @@ function wearing(window: BrowserWindow | null, platform: NodeJS.Platform, pushed
 
   say(`the page's head is ${head.paper} with ${head.ink} marks, ${head.band}px tall`);
   window.setTitleBarOverlay(overlay(head));
+}
+
+/// The notifications on the screen, held until each is clicked or closed.
+///
+/// **Held because a notification nobody references is collected**, and its
+/// click handler with it: Electron's `Notification` is a JavaScript object over
+/// the platform's, and one that has gone out of scope by the time it is clicked
+/// is a click that does nothing.
+const onDesk = new Set<Notification>();
+
+/// Draw a notice as the platform's own notification, unless the window is in
+/// front — which already draws the news — and when it is clicked, open what it
+/// is about and bring the window forward, the three steps the tray's Open takes.
+///
+/// What it is about is where a tap on the phone lands: the page is told the path
+/// and routes there in place, or the window is loaded on it where there is no
+/// page to tell yet — see [`Opened.visit`](./window.js).
+///
+/// The sentence is the title and the repo the body, with the platform's own
+/// sound. Every notice is logged whichever way it went, so that a notification
+/// somebody did not see is a line saying why.
+function noticed({ window, visit }: Opened, arrived: Notice, on: boolean): void {
+  const verdict = showing(
+    {
+      visible: window.isVisible(),
+      minimized: window.isMinimized(),
+      focused: window.isFocused(),
+    },
+    on,
+  );
+
+  if (!verdict.show) {
+    say(`a notice is withheld, because ${verdict.why} — ${arrived.title}`);
+    return;
+  }
+
+  if (!Notification.isSupported()) {
+    say(`a notice cannot be shown, because this desktop has no notifications — ${arrived.title}`);
+    return;
+  }
+
+  const shown = new Notification({
+    title: arrived.title,
+    body: arrived.project ?? "",
+    silent: false,
+  });
+
+  shown.on("click", () => {
+    onDesk.delete(shown);
+    say(`a notification was clicked, so the window opens what it is about — ${arrived.title}`);
+    visit(opens(arrived));
+    forward(window);
+  });
+  shown.on("close", () => onDesk.delete(shown));
+  shown.on("failed", (_event, error) => {
+    onDesk.delete(shown);
+    say(`a notification failed — ${error}`);
+  });
+
+  onDesk.add(shown);
+  shown.show();
+  say(`a notice is shown — ${arrived.title}`);
 }
 
 async function run(): Promise<void> {
@@ -610,10 +680,11 @@ async function run(): Promise<void> {
   // asked to be started on is left exactly as it is.
   starts.refresh();
 
-  // The bridge's six acts, enacted here because here is the process that can
+  // The bridge's seven acts, enacted here because here is the process that can
   // — the file is read and written, the icon is raised and lowered, the log
   // file is handed to whatever the desktop reads text with, the platform is
-  // asked about its startup registration, and the window is dressed to the
+  // asked about its startup registration and whether it shows notifications at
+  // all, and the window is dressed to the
   // page's own head. Registered before the window is opened, because the page is
   // loaded the moment there is one and a page that asked before this would be
   // asking nobody.
@@ -622,6 +693,7 @@ async function run(): Promise<void> {
   ipcMain.handle(LOGS, () => logs(kept, by));
   ipcMain.handle(STARTUP, () => starts.standing());
   ipcMain.handle(REGISTER, (_event, asked: unknown) => ticked(starts, asked));
+  ipcMain.handle(NOTIFIABLE, () => Notification.isSupported());
 
   // And the one that is a statement rather than a question, so `on` rather than
   // `handle`. The window is the one the push came *from* rather than `onscreen`:
@@ -654,7 +726,7 @@ async function run(): Promise<void> {
   // The key is read at every load rather than once here: **Reset key** on the
   // phone writes that file while this window is open, and a link built from a
   // secret read at startup is a 401 with extra steps.
-  const window = open({
+  const opened = open({
     origin: ORIGIN,
     secret: () => (data === undefined ? undefined : keyIn(data)),
     state: join(userData, FILE),
@@ -680,6 +752,7 @@ async function run(): Promise<void> {
     // else's program, and one machine opens both.
     by,
   });
+  const window = opened.window;
   onscreen = window;
 
   // **And a Dock activation is the window coming back**, which is the other half
@@ -709,6 +782,27 @@ async function run(): Promise<void> {
   } else {
     say("the desktop settings say no tray icon, so there is none — and closing the window quits");
   }
+
+  // **And the notices stream, held for the rest of the run** — the phones' push
+  // brought to this desk, which Web Push inside Electron cannot do (ADR-0020,
+  // *Amended: notifications are the app's own*). Opened only now, once the
+  // server has answered and there is a window for a click to bring forward, and
+  // logged in with the key read afresh at every opening, as the window's link
+  // is. Let go as the app quits, so that a drop at the end is not news.
+  const listening = new AbortController();
+  app.on("will-quit", () => listening.abort());
+  void hold(
+    {
+      url: NOTICES,
+      secret: () => (data === undefined ? undefined : keyIn(data)),
+      // The switch read at every notice, as the close policy is read at every
+      // press: a set is enacted in the run it is made in, and the stream is held
+      // either way so that turning it back on needs nothing reopened.
+      heard: (arrived) => noticed(opened, arrived, settings(desk).notifications),
+      say,
+    },
+    listening.signal,
+  );
 
   // And the launch that asked for the window while there was not one yet, which
   // is a press of the icon over a Verkstead still coming up.

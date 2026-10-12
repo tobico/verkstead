@@ -15,14 +15,25 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import { ASKED, HEAD, LOGS, NAME, PRELOAD, REGISTER, SET, STARTUP } from "../src/bridge.js";
+import {
+  ASKED,
+  HEAD,
+  LOGS,
+  NAME,
+  NOTIFIABLE,
+  OPEN,
+  PRELOAD,
+  REGISTER,
+  SET,
+  STARTUP,
+} from "../src/bridge.js";
 
 /// Every channel the bridge crosses on, which is the list both tests below read.
 /// [`HEAD`] among them though it is the one that goes the other way: a channel is
 /// a name in a renderer's namespace whichever direction the message travels in,
 /// and a push that shared a name with a question would be an overlay recoloured by
 /// a set.
-const CHANNELS = [ASKED, SET, LOGS, STARTUP, REGISTER, HEAD];
+const CHANNELS = [ASKED, SET, LOGS, STARTUP, REGISTER, NOTIFIABLE, HEAD, OPEN];
 
 /// This project's own directory, which is what `src/` is under.
 const project = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -38,6 +49,15 @@ describe("the channels", () => {
     for (const channel of CHANNELS) {
       expect(channel, channel).toMatch(/^verkstead:/);
     }
+  });
+});
+
+/// The one channel the page's side of the bridge names as well, because the page
+/// listens on it through the preload — so it is pinned here and in
+/// `web/tests/opened.test.ts` to the same literal.
+describe("the channel a clicked notification is told on", () => {
+  it("is the app's own word for opening", () => {
+    expect(OPEN).toBe("verkstead:open");
   });
 });
 

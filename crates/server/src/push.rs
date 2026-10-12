@@ -59,6 +59,13 @@
 //! as the local push is behind the record: a member that is switched off costs a
 //! notification and nothing else, and nothing is queued and nothing is retried.
 //!
+//! **And the app on this machine hears all of it too**, whether or not any phone
+//! is subscribed: [`notify`] announces every notice on a local channel before it
+//! goes looking for subscriptions, and [`notices`] is the stream the desktop app
+//! holds to it — the third carrier of news, beside the phones' push and the
+//! Nudge. Electron ships without Google's push client, so the app on the same
+//! machine as its sidecar is told directly rather than through a push service.
+//!
 //! Coming the other way, [`heard_from`] is a third kind beside [`News`] and
 //! [`Word`]: a member's news, whose sentence this device did not write, titled
 //! with the device in front of it and opened at that device's own URL. It relays
@@ -66,21 +73,30 @@
 //! passing on a third one's news would be saying that news was its own.
 
 use std::collections::HashMap;
+use std::convert::Infallible;
 use std::path::PathBuf;
 use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
+use axum::extract::State;
+use axum::response::Sse;
+use axum::response::sse::{Event, KeepAlive};
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use p256::ecdsa::signature::Signer;
 use serde::Serialize;
 use sqlx::SqlitePool;
 use time::OffsetDateTime;
+use tokio::sync::broadcast;
+use tokio_stream::wrappers::BroadcastStream;
+use tokio_stream::{Stream, StreamExt};
 use verkstead_render::RelayedNews;
 use verkstead_schema::QuestionSet;
 use verkstead_store::{PushSubscription, VapidKeys};
 use web_push_native::{Auth, WebPushBuilder};
+
+use crate::AppState;
 
 /// How long a push service should hold a notification for a phone that is off
 /// or out of signal. Half a day: a Question Set older than that has either been
@@ -699,13 +715,86 @@ pub(crate) fn mentioned(pool: &SqlitePool, word: Word) {
     });
 }
 
+/// How many notices a stream may fall behind before it is ended. A notice is
+/// something a human is meant to look at, and sixteen at once is more than
+/// anybody reads: a reader that far behind reconnects, as a Nudge stream does.
+const NOTICE_BACKLOG: usize = 16;
+
+/// Every Verkstead in this process and the channel its notices are announced on,
+/// by the database it writes them down in — held the way [`THE_CLUSTER`] is, and
+/// for its reason: the places that send news hold a pool and nothing else.
+///
+/// **A channel is made by the first stream to listen**, so a Verkstead nobody is
+/// listening to holds none and an announcement there is a lookup that finds
+/// nothing: a stream nobody holds costs nothing and queues nothing.
+static THE_NOTICES: LazyLock<Mutex<HashMap<PathBuf, broadcast::Sender<String>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Announce a notice to whatever is holding [`notices`] open — the same JSON a
+/// phone's service worker is handed.
+///
+/// A send error means nobody is listening any more, which is the ordinary case.
+fn shown(pool: &SqlitePool, notice: &[u8]) {
+    let Some(listening) = THE_NOTICES
+        .lock()
+        .unwrap_or_else(|held| held.into_inner())
+        .get(&keyed(pool))
+        .cloned()
+    else {
+        return;
+    };
+
+    let _ = listening.send(String::from_utf8_lossy(notice).into_owned());
+}
+
+/// Listen to the notices announced for the Verkstead writing into `pool`.
+fn listen(pool: &SqlitePool) -> broadcast::Receiver<String> {
+    THE_NOTICES
+        .lock()
+        .unwrap_or_else(|held| held.into_inner())
+        .entry(keyed(pool))
+        .or_insert_with(|| broadcast::channel(NOTICE_BACKLOG).0)
+        .subscribe()
+}
+
+/// `GET /api/ui/push/notices` — every notice this device pushes to its phones,
+/// as it is pushed, for the desktop app on this machine to show.
+///
+/// **Under the push prefix on purpose**: `/api/ui/push/` is one of the prefixes
+/// never served over the link — see [`crate::peer::workbench::KEPT_TO_ITSELF`] —
+/// so a member can never hold this, and a member's news reaches the stream the
+/// way it reaches the phones, through [`heard_from`], with its device in front.
+///
+/// Each event is named `notice` and carries the JSON a service worker is handed:
+/// the path a click opens, the title, and the project where there is one. A
+/// reader that falls behind has its stream ended, and reconnects.
+pub(crate) async fn notices(
+    State(state): State<AppState>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    // Subscribed to before the response goes back, so a notice landing while the
+    // app is still opening the stream is one it hears.
+    let notices = BroadcastStream::new(listen(&state.pool))
+        .take_while(Result::is_ok)
+        .map(|notice| {
+            Ok(Event::default()
+                .event("notice")
+                .data(notice.expect("a notice that was not one ended the stream above")))
+        });
+
+    Sse::new(notices).keep_alive(KeepAlive::new().interval(crate::nudge::KEEP_ALIVE))
+}
+
 /// Send the notice to every device, and prune the ones the push services have
-/// finished with.
+/// finished with — having first announced it to the app on this machine, which
+/// is told whether or not any phone is subscribed: a desktop with no phone paired
+/// is exactly the install the stream is for.
 ///
 /// One device at a time rather than all at once: this is a single human's
 /// handful of devices, and the timeout bounds what a slow push service can cost
 /// the ones behind it.
 async fn notify(pool: &SqlitePool, about: &str, notice: &[u8]) -> Result<()> {
+    shown(pool, notice);
+
     let devices = verkstead_store::push_subscriptions(pool).await?;
     if devices.is_empty() {
         return Ok(());

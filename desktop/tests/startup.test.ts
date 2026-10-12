@@ -30,7 +30,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { type Registry, RUN } from "../src/registry.js";
-import type { Settings } from "../src/settings.js";
+import { DEFAULTS, type Settings } from "../src/settings.js";
 import {
   APP_ID,
   ARGS,
@@ -698,7 +698,7 @@ describe("a Mac's own account of a login start", () => {
 });
 
 describe("a login start", () => {
-  const tray = (trayIcon: boolean): Settings => ({ whenClosed: "tray", trayIcon });
+  const tray = (trayIcon: boolean): Settings => ({ ...DEFAULTS, trayIcon });
 
   /// The reading `--no-open` made of a login for the tray app: there is an icon
   /// to reach Verkstead by, so no window arrives over whatever the human is

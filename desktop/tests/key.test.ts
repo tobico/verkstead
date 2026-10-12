@@ -89,4 +89,20 @@ describe("the login link", () => {
   it("hands the secret over exactly as the file spells it", () => {
     expect(link(ORIGIN, "-_abcXYZ0189")).toBe(`${ORIGIN}/?key=-_abcXYZ0189`);
   });
+
+  /// A clicked notification while the window had no page to tell: the handshake
+  /// redirects to the path it was handed, so the link carries the notice's.
+  it("is pointed at a path where it is given one", () => {
+    expect(link(ORIGIN, "aSecret", "/conversations/7/events/12")).toBe(
+      `${ORIGIN}/conversations/7/events/12?key=aSecret`,
+    );
+  });
+
+  /// And one that already has a query keeps it, the gate putting back whatever
+  /// else was on it.
+  it("adds the key to a query the path already has", () => {
+    expect(link(ORIGIN, "aSecret", "/settings?pane=remote")).toBe(
+      `${ORIGIN}/settings?pane=remote&key=aSecret`,
+    );
+  });
 });

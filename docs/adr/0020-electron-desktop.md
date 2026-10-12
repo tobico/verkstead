@@ -202,3 +202,67 @@ mechanism this paragraph named for it was one electron-builder has not got.
 - **Electron Forge**, or the project as a package inside `web/`. Rejected for
   electron-builder's three targets in one configuration, and for a project
   that consumes a built binary rather than sharing a toolchain.
+
+## Amended: notifications are the app's own
+
+Decided in the grilling of 2026-10-12 (Sets 1018 and 1019).
+
+**Web Push cannot reach the window.** The switch on the Settings head offered
+it inside the app because every check passes there — the loopback is a secure
+context, the service worker registers, `PushManager` exists — and then the
+subscribe is refused inside Chromium with *push service error*, the refusal a
+de-Googled browser gives, because Electron ships Chromium without Google's
+push client. No key, no server change and no retry gets past it: there is no
+push service for a loopback to talk to.
+
+So **the sidecar tells the app directly, and the app shows the platform's
+own notification.** The one function in the server that every push already
+passes through — a Set arriving, a stop, a session gone idle, an account out
+of window or signed out, a pull request, a roadmap moving on, Done, a device
+asking to join, and a member's relayed news — announces each notice on a local
+stream as well, `GET /api/ui/push/notices`, under the prefix never served over
+the cluster link, carrying exactly what a phone gets: the sentence, the path a
+tap opens, the repo. The main process holds that stream for the app's whole
+run, logged in with the Workbench Key the way the window is, and shows each
+notice as a native notification: the sentence as the title, the repo as the
+body, the platform's own sound. A notice while the stream is down is lost, as
+a push is when its service is: nothing is queued and nothing is replayed, and
+the Timeline says it in full either way.
+
+**Shown only while the window is not in front** — hidden to the tray,
+minimised, behind another app, or never shown on a login start. A focused
+window already draws the news, which is the one thing a desktop can tell that
+a phone cannot. **A click brings the window forward** the way the tray's Open
+does and opens the notice's path in the page already loaded, over a channel
+from the app to the page — the first on the bridge in that direction with an
+answer to act on — so nothing reloads; a window whose page is not there is
+loaded on the path instead.
+
+**The switch is the app's setting inside the app, and on by default.** The
+same switch on the Settings head, which outside the app is the Web Push switch
+it always was, reads and writes `notifications` in `desktop.json` over the
+bridge — beside the close policy, and for the same reason: whether this desk
+lights up is a fact about the desk, never sent to the server. No browser
+permission stands behind it. Where the platform cannot show one, the line
+under the switch says so; a refusal in the OS's own settings is the OS's to
+lift. **Everything the phones get**, a member's news and a join included: one
+function sends it all, and a desktop that was told less than a phone would be
+one the human learns not to trust. **And a Mac asks its permission at the
+first notification** (Set 1021 Q9): Electron can raise that prompt only by
+showing one, a launch asks nothing of the human, and a welcome shown at the
+first Conversation started was rejected as a notification about nothing.
+
+### Considered Options
+
+- **The page showing them, off its own Nudge stream.** Rejected: the page
+  drops its stream when it is not being looked at, which is exactly when a
+  notification is worth showing, and a Nudge carries no sentence by design
+  (ADR-0009).
+- **Making Web Push work in Electron with a third-party FCM receiver.**
+  Rejected: Firebase credentials, Google in the loop, and a round trip to the
+  internet for a message between two processes on one machine.
+- **A separate checkbox in the Desktop section.** Rejected: the head's switch
+  already means *tell this device*, and two controls for one setting are one
+  too many.
+- **Showing every notification, as the phone does.** Rejected for the focus
+  rule: a toast over the very page that just drew the news is noise.

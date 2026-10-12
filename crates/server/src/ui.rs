@@ -624,6 +624,9 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         .route("/api/ui/push/key", get(push_key))
         .route("/api/ui/push/subscribe", post(subscribe))
         .route("/api/ui/push/unsubscribe", post(unsubscribe))
+        // The notices themselves, for the desktop app on this machine to show —
+        // see [`crate::push::notices`].
+        .route("/api/ui/push/notices", get(crate::push::notices))
         // What Verkstead has been told, and telling it. One route for both, the
         // read and the save being the same page's two halves — and one save for
         // the author and the token together, because the page has one button.

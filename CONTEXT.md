@@ -1330,7 +1330,9 @@ _Avoid_: autostart setting, startup preference, run at login option
 What the desktop app keeps about the machine it is running on, and the
 **Desktop** section at the top of the settings page that draws them: **When the
 window is closed** — keep running in the tray, ask before quitting, or quit,
-keeping running being the default — and **Show tray icon**. A JSON file of
+keeping running being the default — **Show tray icon**, and **notifications**,
+on by default so that a fresh install is told about a Set with nothing pressed.
+A JSON file of
 Electron's own under its user data, beside the one the window's place is
 remembered in, rather than anything the server was ever told (ADR-0020):
 whether this machine's Verkstead keeps running when its window is closed is a
@@ -1358,6 +1360,17 @@ only window is a Verkstead nobody can reach. **And the app is what validates
 one**: a value that is not one of the three positions, or not a boolean, changes
 nothing and answers with the settings as they stand, so the control it came from
 goes back where it was.
+**The third is not drawn in the section at all: it is the switch on the
+Settings head**, which inside the app means the app's own `notifications`
+(ADR-0020, *Amended: notifications are the app's own*). Electron has no push
+service, so the app shows each notice its sidecar streams to it as the
+platform's own notification, and the head's switch is read and written over the
+bridge with no browser permission and no push subscription anywhere in it —
+off withholds the next notice that moment, on shows the one after, and the
+stream is held either way. The line under it speaks only where this desktop
+cannot show a notification at all; a refusal in the OS's own settings is the
+OS's to lift. The same switch in a browser on this machine, or on a phone, is
+the Web Push switch it always was.
 **Two things stand on that section without being settings of it.** **Launch on
 Startup** is the **Startup Registration** itself, read from the platform through
 the bridge and written to it, never copied into the file; and **View Logs** is
@@ -2128,7 +2141,9 @@ has just told its own browsers something — a run stopped, a session gone idle,
 account out of window, work on a pull request, a roadmap moved on or run out, a
 Conversation done — tells every **Member** the same sentence over the **Peer
 Listener**, behind the **Member Gate** with the announcement and the renewal, and
-each of them pushes it to its own phones. Which is what makes one phone enough for
+each of them pushes it to its own phones — and tells its own notice stream, the
+third carrier beside the push and the **Nudge**, which the desktop app holds to
+show the same notice on the machine itself. Which is what makes one phone enough for
 a cluster: a phone is installed from one device and subscribes to *that* device's
 browsers, and the subscriptions a device pushes to are one of the four prefixes
 never served over the link, so a hub cannot subscribe to a member's push instead. A
@@ -5482,6 +5497,15 @@ that has just been taken up says, having no way to know what it missed while it
 was down. A member that is not answering is not announced about at all: the page
 keeps what it last read and goes stale, exactly as it does when its own stream is
 down. See **Relay**, which is the hop those streams come back over.
+
+**Not the carrier for a notification**, which is a sentence where a Nudge only
+points. News worth a human's attention goes out on two other carriers instead:
+the phones' push, and **the notice stream** — `/api/ui/push/notices`, which tells
+the desktop app on the same machine every notice the phones get, in the same
+words and whether or not any phone is subscribed, because Electron ships without
+the push client a browser's subscription needs. Kept under the push prefix, so it
+is never served over the link: a member's news reaches it the way it reaches the
+phones, relayed, with the device in front.
 
 Not the nudge in **Store-and-nudge Ask**, which is a line of English typed into
 an agent's terminal. This one is a signal to a browser and never leaves the

@@ -63,9 +63,12 @@ export function keyIn(dataDir: string): string | undefined {
 /// The login link against `origin`: the address with the key on it, which is the
 /// whole of how this window is let in.
 ///
-/// Pointed at the root rather than at a path, as the server's own `link` is: the
-/// workbench opens where it always opens and the handshake redirects there with
-/// the parameter taken off.
+/// Pointed at the root unless it is told otherwise, as the server's own `link`
+/// is: the workbench opens where it always opens and the handshake redirects
+/// there with the parameter taken off. **And at a path where it is told one**,
+/// which is a clicked notification's while the window had no page to tell — the
+/// handshake redirects to whatever path it was handed, so the window is let in
+/// and lands on the notice in the one load.
 ///
 /// **The secret is written as the file spells it**, unescaped. The gate reads the
 /// parameter by splitting the query rather than by decoding it — see
@@ -73,6 +76,8 @@ export function keyIn(dataDir: string): string | undefined {
 /// What makes that safe at both ends is the alphabet a key is spelled in: base64
 /// with the URL alphabet and no padding, whose every character is one no URL has
 /// to escape.
-export function link(origin: string, secret: string): string {
-  return `${origin.replace(/\/+$/, "")}/?${QUERY}=${secret}`;
+export function link(origin: string, secret: string, path = "/"): string {
+  const joined = path.includes("?") ? "&" : "?";
+
+  return `${origin.replace(/\/+$/, "")}${path}${joined}${QUERY}=${secret}`;
 }

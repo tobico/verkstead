@@ -36,6 +36,11 @@
 //! of `window.verkstead` whichever direction a value goes in, which is what makes
 //! it the one place either side of the bridge is read off.
 //!
+//! **And one of them is the app telling the page.** A click on one of the app's
+//! own notifications opens where a tap on the phone does, and what goes there is
+//! the page: the app says the path over [`OPEN`], and `opened.ts` routes to it in
+//! place, so nothing reloads and nothing half typed is lost.
+//!
 //! What this module holds is the shape and the reading of the window, and
 //! nothing else: the words the section is drawn in are `Desktop.tsx`'s, and what
 //! a set *means* is the app's — see `changed` in `desktop/src/settings.ts`.
@@ -46,6 +51,12 @@
 /// as a missing feature. The same literal as `NAME` in `desktop/src/bridge.ts`,
 /// and the two suites pin it on both sides.
 export const NAME = "verkstead";
+
+/// The channel a clicked notification's path is told to the page on — `OPEN` in
+/// `desktop/src/bridge.ts`, said again here for the reason [`NAME`] is: the page
+/// never names it, the preload listening on it for the page, but it is the
+/// literal the two sides meet at, so the two suites pin it on both.
+export const OPEN = "verkstead:open";
 
 /// The platform a Mac reads as, which is the one the close radio is not drawn
 /// on: closing a window there leaves the application running in the Dock, and
@@ -71,6 +82,11 @@ export interface DesktopSettings {
   /// Whether there is an icon in the tray — and so whether the app can be
   /// reached at all once its window is off the screen.
   trayIcon: boolean;
+
+  /// Whether the app shows a notice from its sidecar as the platform's own
+  /// notification — on by default. Inside the app this is what the switch on
+  /// the Settings head moves, rather than a browser's push subscription.
+  notifications: boolean;
 }
 
 /// How **Launch on Startup** stands on this machine — `Registration` in
@@ -158,6 +174,11 @@ export interface Bridge {
   /// on this page.
   register(on: boolean): Promise<Registration>;
 
+  /// Whether this desktop can show a notification at all — `NOTIFIABLE` in
+  /// `desktop/src/bridge.ts`. A Linux desktop with no notification daemon is
+  /// the one that says no, and the switch says so under it.
+  notifiable(): Promise<boolean>;
+
   /// Say what the head is drawn in and how tall its band stands, so that the
   /// window's controls overlay is the same strip of paper the head beneath it is.
   ///
@@ -166,6 +187,13 @@ export interface Bridge {
   /// does nothing at all — and a page awaiting an acknowledgement would be
   /// awaiting one at every flip of the colour scheme.
   head(worn: Head): void;
+
+  /// Hear the path of every one of the app's notifications that is clicked,
+  /// for the page to go to in place, and answer with what stops listening.
+  ///
+  /// Listening is also how the app knows there is a page to tell: a click while
+  /// nothing is is the window loaded on the path instead.
+  opening(heard: (path: string) => void): () => void;
 }
 
 /// The bridge this page is drawn over, or `null` where there is none — which is
@@ -200,6 +228,8 @@ function shaped(held: unknown): held is Bridge {
     typeof reached.logs === "function" &&
     typeof reached.startup === "function" &&
     typeof reached.register === "function" &&
-    typeof reached.head === "function"
+    typeof reached.notifiable === "function" &&
+    typeof reached.head === "function" &&
+    typeof reached.opening === "function"
   );
 }

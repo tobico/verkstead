@@ -15,12 +15,14 @@ import { DEFAULTS, POSITIONS, type Settings } from "../src/settings.js";
 /// A desk with an icon on its panel, which is every machine that has not turned
 /// one off.
 const withTray = (whenClosed: Settings["whenClosed"]): Settings => ({
+  ...DEFAULTS,
   whenClosed,
   trayIcon: true,
 });
 
 /// And the same desk with the icon turned off.
 const without = (whenClosed: Settings["whenClosed"]): Settings => ({
+  ...DEFAULTS,
   whenClosed,
   trayIcon: false,
 });
@@ -75,7 +77,7 @@ describe("with the tray off", () => {
   /// The setting is not overwritten by any of this — it is read past, and
   /// turning the icon back on is the position doing what it says again.
   it("restores the position when the icon comes back", () => {
-    const chosen: Settings = { whenClosed: "tray", trayIcon: false };
+    const chosen: Settings = { whenClosed: "tray", trayIcon: false, notifications: true };
 
     expect(closing(chosen, "linux")).toBe("quit");
     expect(closing({ ...chosen, trayIcon: true }, "linux")).toBe("hide");

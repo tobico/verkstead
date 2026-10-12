@@ -1,5 +1,5 @@
-//! The app's own settings: what closing the window means, and whether there is
-//! an icon in the tray.
+//! The app's own settings: what closing the window means, whether there is an
+//! icon in the tray, and whether the app shows notifications.
 //!
 //! **A file of the app's own, beside the one the window's place is kept in**
 //! ([`bounds.ts`](./bounds.js)), and for the same reason (ADR-0020). Whether
@@ -10,10 +10,12 @@
 //! on. So nothing here goes on the wire — the split the per-device push switch
 //! already made.
 //!
-//! **Two settings, and the shape is the whole of what the page and the bridge
-//! read**: `whenClosed`, which is one of three positions, and `trayIcon`. The
-//! defaults are keep running in the tray and an icon shown, which is the app
-//! the human who has never opened the Desktop page is using.
+//! **Three settings, and the shape is the whole of what the page and the bridge
+//! read**: `whenClosed`, which is one of three positions, `trayIcon` and
+//! `notifications`. The defaults are keep running in the tray, an icon shown
+//! and notifications on, which is the app the human who has never opened the
+//! Desktop page is using — told about a Set with nothing pressed (ADR-0020,
+//! *Amended: notifications are the app's own*).
 //!
 //! **A file that is not what this wrote reads as the defaults one setting at a
 //! time.** Not all-or-nothing: a hand that edited the file and mistyped one
@@ -61,11 +63,16 @@ export interface Settings {
   /// Whether there is an icon in the tray — and so, whether the app can be
   /// reached at all once its window is off the screen.
   trayIcon: boolean;
+
+  /// Whether a notice from the sidecar is shown as the platform's own
+  /// notification. The switch on the Settings head, inside the app.
+  notifications: boolean;
 }
 
 /// The app somebody who has never opened the Desktop page is using: it keeps
-/// running in the tray, and there is a tray to keep running in.
-export const DEFAULTS: Settings = { whenClosed: "tray", trayIcon: true };
+/// running in the tray, there is a tray to keep running in, and it says when a
+/// Set is waiting.
+export const DEFAULTS: Settings = { whenClosed: "tray", trayIcon: true, notifications: true };
 
 /// What this machine's settings are, out of `file`.
 ///
@@ -101,6 +108,8 @@ export function settings(file: string): Settings {
   return {
     whenClosed: position(held.whenClosed) ?? DEFAULTS.whenClosed,
     trayIcon: typeof held.trayIcon === "boolean" ? held.trayIcon : DEFAULTS.trayIcon,
+    notifications:
+      typeof held.notifications === "boolean" ? held.notifications : DEFAULTS.notifications,
   };
 }
 
@@ -149,6 +158,12 @@ export function changed(sent: unknown): Partial<Settings> | undefined {
           return undefined;
         }
         wanted.trayIcon = value;
+        break;
+      case "notifications":
+        if (typeof value !== "boolean") {
+          return undefined;
+        }
+        wanted.notifications = value;
         break;
       default:
         return undefined;
