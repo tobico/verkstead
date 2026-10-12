@@ -950,14 +950,15 @@ places a Brief is written — the draft's composer and the compose page — and 
 nothing else.
 **On the compose page a pick is held rather than attached**, there being no
 Conversation to attach it to: the chip is drawn at once and its × takes it off,
-nothing is recorded anywhere, and **Start work** or **Save as draft** puts the
-held servers on the Conversation it makes, in the same replay that sends the
-held files. So a page left without a press attaches nothing to anything, and
-the chips go with the files on a reload — a name is a reference to a
-declaration, and one picked out of a menu a moment ago is one the settings
-still hold. Not offered while a roadmap is loaded, the box being locked to a
-card, and what was picked before one was loaded is held with the files until it
-is cleared.
+nothing is recorded on the server, and **Start work** or **Save as draft** puts
+the held servers on the Conversation it makes, in the same replay that sends the
+held files. So a page left without a press attaches nothing to anything — **but
+the picks are kept on the device with the brief**, so leaving the page and
+coming back, or reloading it, finds the chips where they were. A name is text,
+as a picked file is not. Kept that long it can outlive its declaration, and its
+chip then says the server is gone, as a Conversation's does. Not offered while
+a roadmap is loaded, the box being locked to a card, and what was picked before
+one was loaded is held with the files until it is cleared.
 **Every session of the Conversation** is launched with it, whichever of the four
 harnesses runs it and whichever role the session is in, and **all of a server's
 tools are allowed** — the decision to trust one was made when it was attached,

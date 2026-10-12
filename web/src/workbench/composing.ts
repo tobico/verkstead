@@ -42,11 +42,11 @@
 //! because the Brief freezes when it starts and a file arriving after that
 //! would be refused.
 //!
-//! **And the MCP servers picked at that same control go up with them**, held in
-//! the page as they are and attached by name once there is a Conversation to
-//! attach them to — before the kickoff for the files' own reason, the servers
-//! freezing when the Brief does. See [`Compose`](./Compose.tsx) for why a name
-//! is held in the page rather than written to the device.
+//! **And the MCP servers picked at that same control go up with them**, attached
+//! by name once there is a Conversation to attach them to — before the kickoff
+//! for the files' own reason, the servers freezing when the Brief does. Unlike
+//! the files they are held on the device with the rest of it, a name being text
+//! a device can write down: see [`Composed.servers`].
 //!
 //! **A roadmap loaded into the page is held the same way and creates the other
 //! kind of Conversation.** Picking one out of the Adopt dropdown writes it into
@@ -266,6 +266,17 @@ export type Composed = {
   /// names the same machine from every device of the cluster. The one the work
   /// ends up on is not sent — see [`create`].
   permitted: string[];
+
+  /// The MCP servers picked at the Attach control, by the name the settings
+  /// declare each under, in the order they were picked.
+  ///
+  /// **Kept here rather than in the page**, because the page is left: a human
+  /// who attached one, went to look at something and came back found the brief
+  /// they had typed and not the server they had picked. A name is text, so it
+  /// is kept the way the brief is. What that costs is a reference that can
+  /// outlive its declaration, which the page draws as gone — the composer's
+  /// chip for the same thing — and the replay is refused over by name.
+  servers: string[];
 };
 
 /// The box written into, with the Target filled out of it.
@@ -324,6 +335,7 @@ export function blank(): Composed {
     review: null,
     adopting: null,
     permitted: [],
+    servers: [],
   };
 }
 
@@ -391,7 +403,8 @@ export function empty(state: Composed): boolean {
     state.implementation === null &&
     state.review === null &&
     state.adopting === null &&
-    state.permitted.length === 0
+    state.permitted.length === 0 &&
+    state.servers.length === 0
   );
 }
 
@@ -490,7 +503,6 @@ export async function create(
   state: Composed,
   work: boolean,
   files: Holding,
-  servers: Array<string>,
 ): Promise<Created> {
   const held = state.adopting;
   if (held === null && state.repo === null) {
@@ -636,7 +648,7 @@ export async function create(
     // is which declarations it has, and the declaration itself stays in the
     // settings. A name nothing is declared by any more is refused here rather
     // than dropped, the human having picked it on purpose.
-    for (const name of servers) {
+    for (const name of state.servers) {
       const outcome = await attachServer(to, id, name);
       if (outcome !== "Attached") {
         refused.push(
@@ -1116,6 +1128,13 @@ function parsed(body: string): Composed | null {
       held.permitted === undefined ||
       (Array.isArray(held.permitted) &&
         held.permitted.every((one) => typeof one === "string"))
+    ) ||
+    // And one from before the servers were kept has none, which is nothing
+    // picked.
+    !(
+      held.servers === undefined ||
+      (Array.isArray(held.servers) &&
+        held.servers.every((one) => typeof one === "string"))
     )
   ) {
     return null;
@@ -1160,6 +1179,7 @@ function parsed(body: string): Composed | null {
     review: held.review,
     adopting: held.adopting ?? null,
     permitted: held.permitted ?? [],
+    servers: held.servers ?? [],
   };
 }
 

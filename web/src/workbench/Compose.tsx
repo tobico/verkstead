@@ -72,13 +72,15 @@
 //! its chip beside the pills at once and leaves the menu, and the chip's × takes
 //! it off and puts it back.
 //!
-//! **What is picked here is held with the files rather than attached**, there
-//! being no Conversation to attach it to: nothing is recorded anywhere until
-//! Start or Save as draft, and the press puts the servers on the Conversation it
-//! makes in the same replay that gives it its files. Which is also why a page
-//! left without a press attaches nothing to anything — and why the chips go with
-//! the files on a reload, a name held for a Conversation nobody made being a
-//! reference to a declaration that may not be there next time.
+//! **What is picked here is held rather than attached**, there being no
+//! Conversation to attach it to: nothing is recorded on the server until Start
+//! or Save as draft, and the press puts the servers on the Conversation it makes
+//! in the same replay that gives it its files. Which is also why a page left
+//! without a press attaches nothing to anything. **But held on the device with
+//! the brief rather than in the page with the files**, so leaving the page and
+//! coming back finds the chips where they were — a name being text, as a `File`
+//! is not. A name kept that long can outlive its declaration, and its chip then
+//! says the server is gone, as the composer's does.
 //!
 //! The one thing it reads that a saved composer has no need of is the repo's own
 //! memory of what it was last grilled with — or, for a repo nothing has grilled,
@@ -142,6 +144,7 @@ import {
   listAbandonedRoadmaps,
   listRepos,
   loadRepoPairings,
+  loadSettings,
 } from "../api/client";
 import type { Process, RepoEntry } from "../api/types";
 import { useReading } from "../freshness";
@@ -296,17 +299,25 @@ function Compose(props: {
   // page does and the press is what sends them.
   const files = holding();
 
-  // And the MCP servers picked at that same control, held beside them for as
-  // long as this page lasts: there is no Conversation to attach one to, so a
-  // pick is a chip and nothing else until a press — which puts them on the
-  // Conversation it makes, in the replay that sends the files.
-  //
-  // Held in the page rather than written to the device, though a name is text a
-  // device could write down: it is a *reference* to a declaration on the
-  // settings page, and one picked out of a menu a moment ago is one the
-  // settings still hold. A device that offered a name back a week later would
-  // be offering a reference nothing has to answer to.
-  const [servers, setServers] = createSignal<Array<string>>([]);
+  // And the MCP servers picked at that same control, which are part of what is
+  // written back: there is no Conversation to attach one to, so a pick is a
+  // chip and nothing else until a press — which puts them on the Conversation
+  // it makes, in the replay that sends the files. Kept on the device with the
+  // brief, so a page left and come back to still has them (see
+  // `Composed.servers`).
+  const servers = (): Array<string> => state().servers;
+  const setServers = (change: (was: Array<string>) => Array<string>) =>
+    setState((was) => ({ ...was, servers: change(was.servers) }));
+
+  // And the declarations they name, read only while one is held: a kept name
+  // can outlive its declaration, and its chip has to be able to say so. The
+  // same reading the Attach menu's rows make, so the two agree.
+  const settings = useReading(() => ({
+    queryKey: ["settings"],
+    queryFn: loadSettings,
+    enabled: servers().length > 0,
+    freshness: { reconcile: "id" } as const,
+  }));
 
   // And written back whenever it moves. Every keystroke, which is what makes
   // this survive a reload — there is nowhere else it is being kept, and a page
@@ -514,7 +525,7 @@ function Compose(props: {
   const [gone, setGone] = createSignal(false);
 
   const make = useMutation(() => ({
-    mutationFn: (work: boolean) => create(state(), work, files, servers()),
+    mutationFn: (work: boolean) => create(state(), work, files),
     onSuccess: (outcome) => {
       // Which device the whole of that replay was put to, read before the page
       // is put back to a blank one: it is what the Conversation was made on, so
@@ -539,11 +550,6 @@ function Compose(props: {
       setGone(false);
       clear();
       setState(blank());
-      // The servers with it, for the same reason the held files empty
-      // themselves as they go up: they are on the Conversation now, and a name
-      // left here would be one this device offered to attach to whatever it
-      // composed next.
-      setServers([]);
       leaveRefusals(to, outcome.conversation, outcome.refused, outcome.stopped);
 
       // The sidebar is one list merged from the whole cluster and read off this
@@ -571,9 +577,11 @@ function Compose(props: {
     chips: () =>
       servers().map((name) => ({
         name,
-        // Nothing here is ever *gone*: a name held in the page was picked out
-        // of a menu drawn off the settings a moment ago, and there is no
-        // reference to outlive its declaration until one is on a Conversation.
+        // Gone only once the settings have been read and say so: a chip is
+        // not drawn as missing on the strength of a read still in flight.
+        gone:
+          settings.data !== undefined &&
+          !settings.data.mcp_servers.some((one) => one.name === name),
         remove: () => setServers((was) => was.filter((one) => one !== name)),
         removing: make.isPending,
       })),
