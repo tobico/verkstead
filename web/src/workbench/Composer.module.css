@@ -358,3 +358,22 @@
 .attach {
   margin-right: auto;
 }
+
+/* The MCP Servers section of the Attach menu, under *Attach file*: ruled off
+   from it and headed, because a server is a different kind of thing to put on
+   the work from a file. The heading is the dimmed voice the setup row's labels
+   speak in, and nothing to press. See `ServerRows` in `Composer.tsx`. */
+.servers {
+  margin-top: 0.3rem;
+  padding-top: 0.3rem;
+  border-top: 1px solid var(--edge);
+}
+
+/* At the start of the card whatever the row the trigger stands in says: the
+   presses' row is aligned to its far end, and the menu's rows set their own. */
+.serversHead {
+  padding: 0.3rem 0.6rem 0.15rem;
+  text-align: start;
+  font-size: 0.75rem;
+  color: var(--ink-soft);
+}

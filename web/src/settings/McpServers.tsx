@@ -78,10 +78,12 @@ import { QuietButton } from "../QuietButton";
 import { loadSettings, saveSettings } from "../api/client";
 import type {
   HeaderEdit,
+  McpServerEdit,
   McpServersEdit,
   ServerField,
   ServerRefused,
   ServerTried,
+  SettingsEdit,
   SettingsSaved,
   SettingsView,
 } from "../api/types";
@@ -171,6 +173,46 @@ function useSettings() {
     queryKey: ["settings"],
     queryFn: loadSettings,
     freshness: { reconcile: "id" },
+  }));
+}
+
+/// A save of the settings that is about the MCP servers and nothing else: the
+/// declarations as `servers` says, and every other section as it stands.
+///
+/// Shared by the two places a declaration is written — this pane, and the
+/// *Add a server…* modal the Attach menu opens (see `AddServer.tsx`) — so that
+/// what one of them leaves alone the other leaves alone too.
+export function savingServers(
+  told: SettingsView | undefined,
+  servers: McpServersEdit,
+): SettingsEdit {
+  return {
+    git_author: told?.git_author ?? { name: "", email: "" },
+    // Untouched. This has no business with the credentials, and a blank token
+    // field read as *clear this* is exactly what `Keep` is here to stop.
+    github_token: "Keep",
+    share_on_done: told?.share_on_done ?? false,
+    // And the ignore rules left exactly where they are: a save that spoke for
+    // them could be refused over a pattern it never showed anybody.
+    ignored_comments: "Keep",
+    mcp_servers: servers,
+    // And everything else in `config.yaml`, as it stands — see
+    // [`heldConfig`]. A save writes the whole file, so a section left out would
+    // be a section emptied.
+    ...heldConfig(told),
+  };
+}
+
+/// The declarations as they stand, as a save sends them back unchanged: each
+/// header named, and its value kept.
+export function standing(told: SettingsView | undefined): McpServerEdit[] {
+  return (told?.mcp_servers ?? []).map((server) => ({
+    name: server.name,
+    url: server.url,
+    headers: server.headers.map((header) => ({
+      name: header.name,
+      value: "Keep",
+    })),
   }));
 }
 
@@ -271,11 +313,6 @@ export function McpServersPane(props: {
   const [tries, setTries] = createSignal<ServerTried[]>([]);
 
   const told = (): SettingsView | undefined => settings.data;
-
-  /// Everything else in `config.yaml` this pane is not about, as it stands — see
-  /// [`heldConfig`]. A save writes the whole file, so a section left out would
-  /// be a section emptied.
-  const held = () => heldConfig(told());
 
   /// The rows as they are drawn: what has been edited, or what is declared while
   /// nothing has been.
@@ -444,22 +481,9 @@ export function McpServersPane(props: {
   };
 
   const save = useMutation(() => ({
-    mutationFn: () =>
-      saveSettings({
-        git_author: told()?.git_author ?? { name: "", email: "" },
-        // Untouched. This pane has no business with the credentials, and a blank
-        // token field read as *clear this* is exactly what `Keep` is here to
-        // stop.
-        github_token: "Keep",
-        share_on_done: told()?.share_on_done ?? false,
-        // And the ignore rules left exactly where they are: this pane has
-        // nothing to say about them, and one that spoke for them could have its
-        // own save refused over a pattern it never showed anybody.
-        ignored_comments: "Keep",
-        // And the one thing this pane is about — see [`edit`].
-        mcp_servers: edit(),
-        ...held(),
-      }),
+    // The one thing this pane is about — see [`edit`] — and everything else as
+    // it stands. See [`savingServers`].
+    mutationFn: () => saveSettings(savingServers(told(), edit())),
     onSuccess: (saved: SettingsSaved) => {
       // A refusal is the whole save refused — nothing was written — so nothing
       // here is spent and nothing is read back: what the human typed stays in

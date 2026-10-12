@@ -155,6 +155,7 @@ import { ErrorLine, Note } from "../notices";
 import * as pairing from "../pairing";
 import { ShowArchived } from "./Archived";
 import { Conversations } from "./Conversations";
+import { addingServer } from "./AddServer";
 import { ServerRows } from "./Composer";
 import styles from "./Composer.module.css";
 import { PaneHead } from "./PaneHead";
@@ -560,6 +561,13 @@ function Compose(props: {
     },
   }));
 
+  // And the card the menu's *Add a server…* opens: what it declares is held
+  // here as a chip, as a pick off the menu is, there being no Conversation yet
+  // to attach it to. See `AddServer.tsx`.
+  const adding = addingServer((name) =>
+    setServers((was) => (was.includes(name) ? was : [...was, name])),
+  );
+
   // And the one piece the attaching UI is drawn through, here and on the
   // composer of a draft alike: the pills inside the box, the paperclip in the
   // row of presses, and the drop the box itself takes. What is different here
@@ -603,6 +611,10 @@ function Compose(props: {
           // finished with it.
           shut();
           setServers((was) => [...was, name]);
+        }}
+        add={() => {
+          shut();
+          adding.open();
         }}
       />
     ),
@@ -1116,6 +1128,8 @@ function Compose(props: {
           </div>
         </div>
       </Reaching.Provider>
+
+      {adding.modal()}
 
       {/* And the corner of the page, where there is no sidebar to keep it in:
           the switch that says whether what has been put away is drawn. It is

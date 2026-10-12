@@ -1,0 +1,135 @@
+/* The card *Add a server…* opens from the Attach menu — see `AddServer.tsx`.
+   The card and everything around it is `Modal.module.css`; what is here is what
+   it holds, drawn as the Create repo card beside it draws its form, so the two
+   modals a composer opens read as one kind of thing. */
+
+.adding h3 {
+  margin: 0 0 0.85rem;
+  font-size: 1rem;
+}
+
+.note {
+  margin: 0 0 0.85rem;
+}
+
+/* A label over every box, because what has to be understood before typing is
+   what the box is for. */
+.form label {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+.form input {
+  width: 100%;
+  min-width: 0;
+  font: inherit;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  color: inherit;
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  padding: 0.5rem 0.6rem;
+}
+
+.form .second {
+  margin-top: 0.85rem;
+}
+
+/* The headers, each a name and a value side by side with the × after them —
+   stacked where the card is too narrow for two boxes on a line. */
+.headers {
+  margin: 0.85rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.5rem;
+}
+
+.header + .header {
+  margin-top: 0.6rem;
+}
+
+.headerField {
+  flex: 1 1 9rem;
+  min-width: 0;
+}
+
+/* The × that takes a header off: quiet until it is reached for, as the one on a
+   companion row is. Level with the boxes rather than with their labels. */
+.forget {
+  flex: 0 0 auto;
+  margin-bottom: 0.45rem;
+  padding: 0 0.3rem;
+  font: inherit;
+  font-size: 1.1rem;
+  line-height: 1;
+  color: var(--ink-soft);
+  background: none;
+  border: 0;
+  border-radius: 0.3rem;
+  cursor: pointer;
+}
+
+.addHeader {
+  margin-top: 0.85rem;
+}
+
+.buttons {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+/* The press that does the thing, filled; the cancel beside it is `.secondary`
+   in `styles/base.css`, stood out of the way with a `:where` that weighs
+   nothing — the Create repo card's rule, for its reason. */
+.buttons button:not(:where(.cancel)) {
+  padding: 0.5rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--paper);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.buttons button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.failure {
+  margin: 0.5rem 0 0;
+  font-size: 0.9rem;
+}
+
+.form input:focus-visible {
+  border-color: var(--accent);
+}
+
+.forget:focus-visible {
+  color: var(--ink);
+}
+
+@media (hover: hover) {
+  .form input:hover {
+    border-color: var(--ink-soft);
+  }
+
+  .forget:hover {
+    color: var(--accent);
+  }
+
+  .buttons button:not(:where(.cancel)):not(:disabled):hover {
+    background: var(--accent-deep);
+    border-color: var(--accent-deep);
+  }
+}
