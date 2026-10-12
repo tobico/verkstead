@@ -137,7 +137,15 @@
    lowercase letters, digits and hyphens by the settings page's own rule, so
    there is neither an extension to keep nor a length to lose. */
 .serverName {
-  min-width: 0;
+  flex: none;
+}
+
+/* And so not capped the way a pill is: the cap is for a file's name, which is
+   cut to fit it, and a chip's name is never cut — held to a pill's width, the
+   name was squeezed under the words beside it on a chip whose declaration has
+   gone, and the two ran together. */
+.attachment.server {
+  max-width: none;
 }
 
 /* And the chip whose declaration has gone. The accent comes off it — there is
