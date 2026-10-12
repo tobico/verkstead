@@ -1587,7 +1587,7 @@ mod tests {
             FolderListing::Missing
         );
 
-        std::fs::remove_dir_all(&worktree).unwrap();
+        gone(&worktree);
 
         assert_eq!(
             folder(&[root(&worktree)], &worktree),
@@ -1832,7 +1832,7 @@ mod tests {
         // is its own sentence for whoever asked for one by hand.
         assert_eq!(read(&[root(&worktree)], &worktree), FileReading::NotAFile);
 
-        std::fs::remove_dir_all(&worktree).unwrap();
+        gone(&worktree);
         assert_eq!(
             read(&[root(&worktree)], &worktree.join("README.md")),
             FileReading::RootGone
@@ -1975,7 +1975,7 @@ mod tests {
             "nothing of this conversation's\n"
         );
 
-        std::fs::remove_dir_all(&worktree).unwrap();
+        gone(&worktree);
         assert_eq!(
             write(&roots, &worktree.join("README.md"), "", "mine\n"),
             FileWritten::RootGone
@@ -2219,7 +2219,7 @@ mod tests {
 
         assert!(!elsewhere.join("mine.rs").exists());
 
-        std::fs::remove_dir_all(&worktree).unwrap();
+        gone(&worktree);
         assert_eq!(
             make(&roots, &worktree.join("mine.rs"), Making::File),
             FileMade::RootGone
@@ -2481,7 +2481,7 @@ mod tests {
         );
         assert!(!elsewhere.join("NOTES.md").exists());
 
-        std::fs::remove_dir_all(&worktree).unwrap();
+        gone(&worktree);
         assert_eq!(
             rename(&roots, &worktree.join("README.md"), "NOTES.md"),
             FileRenamed::RootGone
@@ -2636,7 +2636,7 @@ mod tests {
         );
         assert!(worktree.join(".git/config").exists());
 
-        std::fs::remove_dir_all(&worktree).unwrap();
+        gone(&worktree);
         assert_eq!(
             delete(&roots, &worktree.join("README.md")),
             FileDeleted::RootGone
