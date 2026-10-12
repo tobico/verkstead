@@ -1,12 +1,8 @@
 /* The sandbox binds every session gets — see `SandboxBinds.tsx`.
 
-   Two halves in two panes, like the sections above it: the card carries how the
-   list stands and what is wrong with it, and the rows that rewrite it stand in
-   the details pane beside it.
-
-   What a card *is* is `CardButton.module.css`'s: the surface, the fill it takes
-   while its pane is open, and what it does under the pointer. What a row is is
-   `PathEditor.module.css`'s. What is here is only what stands around them. */
+   The Sandbox binds part of the Sandbox pane, whose card is the Sandbox's — see
+   `Sandbox.tsx`. What a row is is `PathEditor.module.css`'s. What is here is
+   only what stands around them. */
 
 .failure {
   margin: 1rem 0 0;

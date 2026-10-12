@@ -1,5 +1,6 @@
-//! The sandbox binds on the settings page: the extra paths every sandbox is
-//! given, over and above the worktree a session works in.
+//! The sandbox binds — the **Sandbox binds** part of the settings page's Sandbox
+//! section: the extra paths every sandbox is given, over and above the worktree
+//! a session works in.
 //!
 //! They are said in two places — the installation's flags or environment, and
 //! `config.yaml` — and a session gets the union of the two. So both are drawn
@@ -22,24 +23,22 @@
 //! that sentence is how somebody learns the installer has to widen the unit
 //! before what they saved can work.
 //!
-//! The card counts the ones the server cannot see. A path that has quietly
+//! The Sandbox card counts the ones the server cannot see — [`unseen`], which this
+//! file hands it. A path that has quietly
 //! stopped resolving is exactly what nobody goes looking for, so the one warning
 //! there is has to be where somebody scanning the settings will meet it.
 //!
 //! Every bind is here, because every bind is a path each sandbox gets. A bind
 //! could once be written for one Repo — `name=path` — and that grammar is gone:
 //! an entry still in it reaches no session, draws no row, and is dropped from
-//! the file by the next save this pane makes.
+//! the file by the next save this part makes.
 //!
-//! Two halves in two panes, like every other section: a card in the middle pane
-//! saying how the list stands and whether anything is wrong with it, and the
-//! editing in the details pane it opens, at `/settings/sandbox-binds`. Both read
-//! the one settings query the sections above them read.
+//! A part rather than a section of its own: the card is the Sandbox's, and the
+//! pane it opens at `/settings/sandbox` holds this under the build caches — see
+//! `Sandbox.tsx`. Both read the one settings query the sections above them read.
 //!
-//! The pane is the list and nothing else: one line saying what the section is
-//! for, the rows, and the field that adds another. There is no heading inside it
-//! — the pane's own title says what these are, and a section with one subsection
-//! was saying it twice.
+//! The part is the list and nothing else: its heading, one line saying what it
+//! is for, the rows, and the field that adds another.
 //!
 //! A row saves on its own press. Adding one is the Add beside the field and
 //! taking one away is the Remove on the row, and each is a save of the whole

@@ -1,4 +1,5 @@
-//! How much Verkstead runs at once, on the settings page: how many stages of one
+//! How much Verkstead runs at once — the **Scheduling** section of the settings
+//! page, whose limits are its **Concurrency** part: how many stages of one
 //! roadmap may be under way together, and how many Conversations take a place
 //! across the whole server.
 //!
@@ -34,7 +35,7 @@
 //!
 //! Two halves in two panes, like every section beside it: a card in the middle
 //! pane saying how much runs at once, and the fields that change it in the
-//! details pane it opens, at `/settings/at-once`. Both read the one settings
+//! details pane it opens, at `/settings/scheduling`. Both read the one settings
 //! query the rest of the page reads, and the save goes through the one settings
 //! endpoint — so the author, the token and the rest ride along as they stand.
 //!

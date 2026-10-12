@@ -1,5 +1,5 @@
-//! Which languages a session gets build support for, on the settings page: one
-//! row per **descriptor** the server loaded — a checkbox, and beside it how much
+//! Which languages a session gets build support for — the **Build caches** part
+//! of the settings page's Sandbox section: one row per **descriptor** the server loaded — a checkbox, and beside it how much
 //! its cache holds against the size it may grow to, opening a panel with the
 //! rest.
 //!
@@ -22,9 +22,9 @@
 //! ships or off altogether. A language is never dropped from the list over it:
 //! it is still there, and which of the two happened is the thing to know.
 //!
-//! One of two things on this page that are about a **Sandbox** rather than about
-//! who Verkstead is — the Sandbox binds section is the other — and the only one
-//! of the two that is on with nothing configured. Every path that section adds
+//! One of the two parts of the Sandbox section — the Sandbox binds are the
+//! other — and the only one of the two that is on with nothing configured.
+//! Every path that part adds
 //! is a hole somebody typed on purpose; what a language opens is Verkstead's own
 //! directory, holding nothing but build output, so it can be opened for a human
 //! who never asked and the only control over it here is the one that *closes*
@@ -36,15 +36,15 @@
 //! touched it, and the size field shows the default as a placeholder rather than
 //! as a value somebody chose.
 //!
-//! Two halves in two panes, which is what the settings page is: a card in the
-//! middle pane naming the languages that have build support on, and the controls
-//! that change them in the details pane it opens, at `/settings/languages`. What
-//! the human cannot fix from the browser — no sccache where the server can see
-//! one — is on the card as well as in the panels of the languages it is about,
-//! the way the credentials' warnings are: whoever needs to read it is precisely
-//! whoever is not editing.
+//! A part rather than a section of its own: the card is the Sandbox's, at
+//! `/settings/sandbox`, and this file hands it [`cachesOn`] and
+//! [`cacheWarnings`] for its line — see `Sandbox.tsx`. What the human cannot fix
+//! from the browser — no sccache where the server can see one, an entry that
+//! would not load — is on that card as well as in the panels of the languages it
+//! is about, the way the credentials' warnings are: whoever needs to read it is
+//! precisely whoever is not editing.
 //!
-//! Both halves read the one query, which is the one the credentials above them
+//! The card and the part read the one query, which is the one the credentials above them
 //! read: one payload holds both files, and a read apiece would be two opinions
 //! about what is saved.
 //!

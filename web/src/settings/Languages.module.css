@@ -1,12 +1,7 @@
 /* Which languages a session gets build support for — see `Languages.tsx`.
 
-   Two halves in two panes, like the credentials above it: the card carries the
-   languages that are on and the warning about what the browser cannot fix, and
-   the controls that change them stand in the details pane beside it.
-
-   What a card *is* is `CardButton.module.css`'s: the surface, the fill it takes
-   while its pane is open, and what it does under the pointer. What is here is
-   only what stands on it. */
+   The Build caches part of the Sandbox pane, whose card is the Sandbox's — see
+   `Sandbox.tsx`. What is here is only what stands in the part. */
 
 /* Something the human would have to leave the browser to fix. Drawn as a notice
    rather than as an error — nothing has failed, and what it says is what will be

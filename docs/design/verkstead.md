@@ -251,7 +251,7 @@ flowchart LR
   half was configuration the workbench could not draw and a second rule to read
   every entry by. The flag refuses one by name; an entry still in it in
   `config.yaml` reaches no session, draws no row and is dropped from the file by
-  the next save the Sandbox binds pane makes. It is the only path list left of
+  the next save the Sandbox pane's binds make. It is the only path list left of
   the two that were said this way (*revised 2026-09-06, onboarding stage 01*: the
   watched paths were the other, and went). The two sets union, and each keeps
   its own answer to a bind that is not there: the flag's refuses startup, the
@@ -281,7 +281,7 @@ flowchart LR
   and is now about defaults rather than about who may configure it: this hole is
   one directory of Verkstead's own making, holding nothing but build output, so
   it can be opened for somebody who never asked and the only control over it is
-  the one that *takes it away*. Every bind on the Sandbox binds pane is somebody
+  the one that *takes it away*. Every bind on the Sandbox pane is somebody
   else's directory, and is opened only because it was typed there.
 - **Companion repos** (*settled 2026-08-27, staging companion-repos — being
   built by that roadmap*): a conversation may add other registered repos to its
@@ -1199,9 +1199,14 @@ Timeline events:
 - **The page is read as cards and panes** (*settled 2026-08-29, building
   settings-redesign*). Everything on it that used to open a modal is a card in
   the middle pane and a details pane beside it: everything git is told as one
-  git card, each Agent Profile, the Repos as one card — **Language support**,
-  whose
-  card lists the languages a session gets build support for and whose pane holds
+  git card, each Agent Profile, the Repos as one card — **Sandbox**, at
+  `/settings/sandbox` directly below the git card, whose pane holds two parts
+  under a heading each (*revised 2026-10-12, building compose-page-ui-fixes*:
+  the two were sections of their own, **Language support** at
+  `/settings/languages` and **Sandbox binds** at `/settings/sandbox-binds`, and
+  both slugs are no such page now rather than redirects; they are one question,
+  what the sandbox a session starts in holds). **Build caches**, the first part,
+  was Language support, and holds
   one row per language — its checkbox, and beside it a link saying what its
   cache holds against its size, `Cache usage: 3.2/30GB`, which opens a panel
   holding the size and everything else about that language's store (*revised
@@ -1215,8 +1220,8 @@ Timeline events:
   `/settings/build-cache`, whose card said how the cache stood in a sentence and
   whose pane held a switch, a paragraph about it and the size; the old slug is no
   such page rather than a redirect, the way `/profiles` and `/repos` were
-  retired), and **Sandbox binds**, whose card counts the paths every sandbox
-  gets and whose pane edits them (*added 2026-08-30, grilling
+  retired), and **Sandbox binds**, the second part, which edits the paths every
+  sandbox gets (*added 2026-08-30, grilling
   configurable-paths*; *revised 2026-09-06, onboarding stage 01*: it counted the
   watched paths as well and its pane edited both; *revised 2026-09-15, building
   settings-ui-tidy*: it was **Paths** at `/settings/paths`, over a pane holding
@@ -1224,30 +1229,41 @@ Timeline events:
   — that subsection is the section now, at `/settings/sandbox-binds`, its one
   line says what the section configures, and what it counts and adds is a
   *path*; the old slug is no such page rather than a redirect), and
-  **Instructions**, whose card says whether a text is configured and what it
-  reaches and whose pane holds the box that rewrites it, at
-  `/settings/instructions` directly below Language support (*added 2026-09-18,
-  building built-roots/03-instructions-text*). The Sandbox binds card sits
-  directly below the Repos (*revised 2026-09-06, onboarding
-  stage 01*: it sat directly above them, because a watched path was
-  what a Repo was registered from and a machine with none had nothing to put on
-  that list — with the boundary gone the Repos are what a machine is set up by
-  and the binds are the afterthought). **Every bind is a row on the pane and a
+  **Instructions**, whose card says whether a text is configured and whose pane
+  holds the box that rewrites it, at `/settings/instructions` directly below
+  the Sandbox (*added 2026-09-18, building built-roots/03-instructions-text*).
+  The Sandbox binds card sat directly below the Repos until it was folded into
+  the Sandbox (*revised 2026-09-06, onboarding stage 01*: it sat directly above
+  them, because a watched path was what a Repo was registered from and a
+  machine with none had nothing to put on that list). **How much runs at once**
+  is **Scheduling** now, at `/settings/scheduling`, its limits a
+  **Concurrency** part of the pane (*revised 2026-10-12, building
+  compose-page-ui-fixes*: `/settings/at-once` is no such page now). **Every bind is a row on the pane and a
   row on that pane is every bind**, there being one kind of them (*revised
   2026-09-15, building settings-ui-tidy*: a bind written for a registered Repo
   was drawn on that Repo's own pane, under a **Sandbox configuration** heading,
   and one written for a name nothing held was drawn here as a stray saying so;
-  both went with the grammar that made them). That card's count of entries the
-  server cannot see is what the warning on it is drawn from: a bind that has
-  quietly stopped resolving is what nobody goes looking for. What is on a card is
+  both went with the grammar that made them). The Sandbox card's count of binds
+  the server cannot see is what the warning on it is drawn from: a bind that has
+  quietly stopped resolving is what nobody goes looking for. **Every section's
+  card is one line** — its name at the near end and how it stands at the far one
+  in a few words, `2 build caches · 3 binds`, cut with an ellipsis rather than
+  wrapped, and in the stopped colour where the section is waiting on the human:
+  `No GitHub token`, `No sccache`, `1 bind unseen` (*revised 2026-10-12, building
+  compose-page-ui-fixes*: each card said how its section stood in a sentence or
+  two, which was read once and read past forever after). What is on a card is
   what a list is scanned for and the rest is in the pane — a Profile's account
-  paths, the models it lists, its agent type as a field and Remove; Language
-  support's checkbox per language and, behind the link beside it, each store's
+  paths, the models it lists, its agent type as a field and Remove; the Build
+  caches' checkbox per language and, behind the link beside it, each store's
   size and Clear. **A Profile's card is one line: the harness's mark, the harness's name,
   and the Profile's own name after an em dash** — "Claude Code — Personal", and
   "Claude Code" for the one nobody named, there being nothing for a name to tell
-  it apart from — with the warning under it where its account has gone
-  (*revised 2026-09-15, building settings-ui-tidy*: it read as the Profile's
+  it apart from — and at the far end which machine the account is on, where
+  it is not this one, and **Log in**, or **Logged in** where it is, for a Claude
+  account at home here (*revised 2026-10-12, building compose-page-ui-fixes*:
+  the Log in press stood on a line of its own under the name, whether or not
+  the account was logged in already), with the warning under it where its
+  account has gone (*revised 2026-09-15, building settings-ui-tidy*: it read as the Profile's
   name alone, **Default** where there was none, over a line of every model id
   the account can launch). Adding a Profile is a plus icon on the section's
   heading line, centred on the heading the way every heading row draws what
