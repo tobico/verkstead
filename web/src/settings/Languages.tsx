@@ -73,10 +73,11 @@
 //! **Two ways to save, because there are two kinds of control.** A checkbox
 //! saves itself the moment it is ticked — a box that needed a second press to
 //! mean anything is not a box. A size is typed, so it saves when the typing is
-//! done: on Enter, or on leaving the field. Not on a blur with nothing typed, nor
-//! on one where what is typed is what the field was already showing, nor on one
+//! done: on Enter, or on leaving the field — closing the panel included, by
+//! Escape as much as by a press away. Not on a blur with nothing typed, nor on
+//! one where what is typed is what the field was already showing, nor on one
 //! repeating a size the server has just turned down — every close of the panel
-//! is a blur, and a close is not a request to write `config.yaml`.
+//! leaves the field, and a close is not a request to write `config.yaml`.
 //!
 //! Which is why **a tick sends the sizes the server last gave it** rather than
 //! what the fields hold. One request writes the whole file, so a tick has to say
@@ -229,9 +230,9 @@ function useSettings() {
 function uncompiled(): JSX.Element {
   return (
     <p class={styles.warning}>
-      No sccache is installed where the server can see it, so{" "}
-      <em>compiles</em> are not cached, and every session compiles again what
-      the last one did. Install sccache on the server to cache them.
+      No sccache is installed where the server can see it, so <em>compiles</em>{" "}
+      are not cached, and every session compiles again what the last one did.
+      Install sccache on the server to cache them.
     </p>
   );
 }
@@ -630,7 +631,6 @@ export function LanguagesCard(props: {
   );
 }
 
-
 /// And the controls that change them, which is the details pane the card opens.
 ///
 /// There is no Save over the whole of it and no Cancel: a checkbox is its own
@@ -744,8 +744,9 @@ export function LanguagesPane(props: {
             {
               why: refusal.why,
               size:
-                asked.edit.find((language) => language.name === refusal.language)
-                  ?.size ?? "",
+                asked.edit.find(
+                  (language) => language.name === refusal.language,
+                )?.size ?? "",
             },
           ]),
         ),
@@ -836,145 +837,154 @@ export function LanguagesPane(props: {
   /// What a language's panel holds, top to bottom, each line only where it
   /// applies. Built when the panel opens and reading the language as it stands
   /// from then on, so an answer arriving redraws what is open.
-  const panel = (set: () => SettingsView, language: () => LanguageView) => (
-    <>
-      <Show when={sized(set(), language())}>
-        <form
-          class={styles.sizing}
-          onSubmit={(ev) => {
-            ev.preventDefault();
-            commit(language());
-          }}
-        >
-          <label for={`language-size-${language().name}`}>
-            How large its store may grow
-          </label>
-          <input
-            id={`language-size-${language().name}`}
-            type="text"
-            autocapitalize="off"
-            autocorrect="off"
-            spellcheck={false}
-            disabled={!sizeable(set(), language())}
-            // The default, so an empty box reads as the size nobody has chosen
-            // rather than as no size at all.
-            placeholder={language().default_size}
-            value={size(language())}
-            onInput={(ev) =>
-              setTyped((held) => ({
-                ...held,
-                [language().name]: ev.currentTarget.value,
-              }))
-            }
-            onBlur={() => settle(language())}
-          />
+  ///
+  /// And settling the field as it is thrown away, because not every close is a
+  /// blur: Escape takes the panel out of the page with the field still focused,
+  /// and a focused element removed fires no blur. A close that was one has
+  /// already sent its save, which [`settle`] does not send twice.
+  const panel = (set: () => SettingsView, language: () => LanguageView) => {
+    onCleanup(() => settle(language()));
 
-          <Show when={refused()[language().name]}>
-            {(turned) => (
-              <ErrorLine class={styles.failure}>
-                <code>{turned().size}</code> {turned().why}.
-              </ErrorLine>
-            )}
-          </Show>
-
-          {/* And a size a hand-edit wrote that is not one: kept as written,
-              and the store held to the default. */}
-          <Show when={language().size_unread}>
-            {(why) => (
-              <p class={styles.warning}>
-                Its size in <code>config.yaml</code>,{" "}
-                <code>{language().size}</code>, {why()}, so its store is held
-                to {language().default_size}.
-              </p>
-            )}
-          </Show>
-        </form>
-      </Show>
-
-      {/* A language compiling through another's Compile Server, which is all
-          there is to say about its cache. */}
-      <Show
-        when={
-          language().compiling !== null &&
-          sizer(set())?.name !== language().name
-        }
-      >
-        <p class={styles.note}>
-          Compiles through the Compile Server {sizer(set())?.label} sizes, so
-          its cache is {sizer(set())?.label}'s and its size is set there.
-        </p>
-      </Show>
-
-      <Show when={held(language().disk_use)}>
-        {(said) => <p class={styles.note}>{said()}</p>}
-      </Show>
-
-      <Show when={language().stores.length > 0}>
-        <p class={styles.note}>
-          Kept in{" "}
-          <For each={language().stores}>
-            {(store, at) => (
-              <>
-                {at() > 0 && ", "}
-                <code>{store.name}</code>
-              </>
-            )}
-          </For>
-          .
-        </p>
-      </Show>
-
-      <Show when={twice(language())}>
-        <p class={styles.note}>
-          sccache holds its compile cache to this size by itself, so together
-          with the rest the store may hold up to twice it.
-        </p>
-      </Show>
-
-      <For
-        each={language().stores.filter(
-          (store) => store.eviction === "NotSwept",
-        )}
-      >
-        {(store) => (
-          <p class={styles.note}>
-            <code>{store.name}</code> is never trimmed, so it grows as its tool
-            fills it.
-          </p>
-        )}
-      </For>
-
-      <Show when={sweptSaid(language(), now())}>
-        {(swept) => (
-          <p class={styles.note} title={swept().stamp}>
-            {swept().said}
-          </p>
-        )}
-      </Show>
-
-      <Show when={warned(language())}>{uncompiled()}</Show>
-
-      {/* And a Clear, on or off: a language switched off still holds what it
-          fetched. */}
-      <Show when={language().disk_use !== "NoStore"}>
-        <div class={styles.clearing}>
-          <button
-            type="button"
-            disabled={
-              clearing.isPending || clearWaits(set().running) !== undefined
-            }
-            onClick={() => clearing.mutate(language())}
+    return (
+      <>
+        <Show when={sized(set(), language())}>
+          <form
+            class={styles.sizing}
+            onSubmit={(ev) => {
+              ev.preventDefault();
+              commit(language());
+            }}
           >
-            Clear
-          </button>
-          <span class={styles.note}>
-            {clearWaits(set().running) ??
-              "Empties its store; the next install fetches again."}
-          </span>
-        </div>
-      </Show>
-    </>
-  );
+            <label for={`language-size-${language().name}`}>
+              How large its store may grow
+            </label>
+            <input
+              id={`language-size-${language().name}`}
+              type="text"
+              autocapitalize="off"
+              autocorrect="off"
+              spellcheck={false}
+              disabled={!sizeable(set(), language())}
+              // The default, so an empty box reads as the size nobody has chosen
+              // rather than as no size at all.
+              placeholder={language().default_size}
+              value={size(language())}
+              onInput={(ev) =>
+                setTyped((held) => ({
+                  ...held,
+                  [language().name]: ev.currentTarget.value,
+                }))
+              }
+              onBlur={() => settle(language())}
+            />
+
+            <Show when={refused()[language().name]}>
+              {(turned) => (
+                <ErrorLine class={styles.failure}>
+                  <code>{turned().size}</code> {turned().why}.
+                </ErrorLine>
+              )}
+            </Show>
+
+            {/* And a size a hand-edit wrote that is not one: kept as written,
+              and the store held to the default. */}
+            <Show when={language().size_unread}>
+              {(why) => (
+                <p class={styles.warning}>
+                  Its size in <code>config.yaml</code>,{" "}
+                  <code>{language().size}</code>, {why()}, so its store is held
+                  to {language().default_size}.
+                </p>
+              )}
+            </Show>
+          </form>
+        </Show>
+
+        {/* A language compiling through another's Compile Server, which is all
+          there is to say about its cache. */}
+        <Show
+          when={
+            language().compiling !== null &&
+            sizer(set())?.name !== language().name
+          }
+        >
+          <p class={styles.note}>
+            Compiles through the Compile Server {sizer(set())?.label} sizes, so
+            its cache is {sizer(set())?.label}'s and its size is set there.
+          </p>
+        </Show>
+
+        <Show when={held(language().disk_use)}>
+          {(said) => <p class={styles.note}>{said()}</p>}
+        </Show>
+
+        <Show when={language().stores.length > 0}>
+          <p class={styles.note}>
+            Kept in{" "}
+            <For each={language().stores}>
+              {(store, at) => (
+                <>
+                  {at() > 0 && ", "}
+                  <code>{store.name}</code>
+                </>
+              )}
+            </For>
+            .
+          </p>
+        </Show>
+
+        <Show when={twice(language())}>
+          <p class={styles.note}>
+            sccache holds its compile cache to this size by itself, so together
+            with the rest the store may hold up to twice it.
+          </p>
+        </Show>
+
+        <For
+          each={language().stores.filter(
+            (store) => store.eviction === "NotSwept",
+          )}
+        >
+          {(store) => (
+            <p class={styles.note}>
+              <code>{store.name}</code> is never trimmed, so it grows as its
+              tool fills it.
+            </p>
+          )}
+        </For>
+
+        <Show when={sweptSaid(language(), now())}>
+          {(swept) => (
+            <p class={styles.note} title={swept().stamp}>
+              {swept().said}
+            </p>
+          )}
+        </Show>
+
+        <Show when={warned(language())}>{uncompiled()}</Show>
+
+        {/* And a Clear, on or off: a language switched off still holds what it
+          fetched. */}
+        <Show when={language().disk_use !== "NoStore"}>
+          <div class={styles.clearing}>
+            <button
+              type="button"
+              disabled={
+                clearing.isPending || clearWaits(set().running) !== undefined
+              }
+              onClick={() => clearing.mutate(language())}
+            >
+              Clear
+            </button>
+            <span class={styles.note}>
+              {clearWaits(set().running) ??
+                "Empties its store; the next install fetches again."}
+            </span>
+          </div>
+        </Show>
+      </>
+    );
+  };
 
   return (
     <>

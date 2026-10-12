@@ -167,10 +167,7 @@ function mountPane() {
   return { ...mounting(() => <LanguagesPane back={back} />), back };
 }
 
-function theSettings(
-  standing: SettingsView,
-  ...answers: Array<Answer>
-) {
+function theSettings(standing: SettingsView, ...answers: Array<Answer>) {
   return serving(whenever("/api/ui/settings", json(standing)), ...answers);
 }
 
@@ -322,7 +319,10 @@ describe("the card", () => {
   it("says nothing under the heading while they are all off", async () => {
     theSettings(
       off(
-        off(off(off(off(off(off(off(TOLD), GO), NODE), PYTHON), DOTNET), CPP), JVM),
+        off(
+          off(off(off(off(off(off(TOLD), GO), NODE), PYTHON), DOTNET), CPP),
+          JVM,
+        ),
         GLEAM,
       ),
     );
@@ -525,9 +525,7 @@ describe("the link beside each language", () => {
     theSettings(measured(measured(TOLD, RUST, 3.2 * GB), GO, 0.4 * GB));
     mountPane();
 
-    await waitFor(() =>
-      expect(linkSaid("Rust")).toBe("Cache usage: 3.2/50GB"),
-    );
+    await waitFor(() => expect(linkSaid("Rust")).toBe("Cache usage: 3.2/50GB"));
     expect(linkSaid("Go"), "one decimal, so a small cache is not 0").toBe(
       "Cache usage: 0.4/10GB",
     );
@@ -937,9 +935,7 @@ describe("saying how much a store holds", () => {
 
 /// The Clear at the foot of a language's panel.
 function theClear(panel: HTMLElement): HTMLButtonElement {
-  return panel.querySelector<HTMLButtonElement>(
-    `.${styles.clearing} button`,
-  )!;
+  return panel.querySelector<HTMLButtonElement>(`.${styles.clearing} button`)!;
 }
 
 describe("clearing a store", () => {
@@ -1187,6 +1183,31 @@ describe("changing the languages", () => {
         size: "20G",
       }),
     );
+  });
+
+  /// And on closing the panel by Escape, which takes the field out of the page
+  /// with the focus still in it — no blur — and is leaving it all the same.
+  it("saves a size when the panel is closed by Escape", async () => {
+    const fetching = theSettings(
+      compiling(TOLD),
+      json(answering(compiling(TOLD))),
+    );
+    mountPane();
+
+    const panel = await opened("Go");
+    fireEvent.input(theSize(GO), { target: { value: "20G" } });
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    await waitFor(() => expect(panel.isConnected).toBe(false));
+    await waitFor(() =>
+      expect(languagesSent(fetching)[1]).toEqual({
+        name: GO,
+        enabled: true,
+        size: "20G",
+      }),
+    );
+    await settled();
+    expect(saves(fetching)).toBe(1);
   });
 
   /// But not on leaving one nobody typed in, nor one put back to what it was
