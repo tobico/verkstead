@@ -191,6 +191,7 @@ import paneHeadCss from "../src/workbench/PaneHead.module.css?raw";
 // Develop is called.
 import {
   away,
+  DESCRIPTION,
   OFFERED,
   PROCESS,
   ROLES,
@@ -338,6 +339,7 @@ import { art, marked } from "./marking";
 import {
   actionRows,
   offered,
+  opened,
   pick,
   picker,
   press,
@@ -5028,6 +5030,31 @@ describe("a conversation's process", () => {
       "FixMergeIssues",
     ]);
     expect(offers("Process")).toContain("Fix merge issues");
+  });
+
+  /// Each row says what kind of work it is under its name, as a row of the
+  /// actions menu does — but as a description rather than a name: the option is
+  /// still called by its one word, and the sentence is what `aria-describedby`
+  /// points at. Drawn in the rows only, so the closed handle still reads the
+  /// word and nothing under it.
+  it("says what each process is under its name, as a description", async () => {
+    theWorkbench();
+    mount(`/conversations/${OPEN.id}`);
+    const control = await theProcess();
+
+    expect(control.textContent).not.toContain(DESCRIPTION[OPEN.process]);
+
+    opened("Process");
+
+    for (const process of OFFERED) {
+      const row = screen.getByRole("option", { name: PROCESS[process] });
+      const said = document.getElementById(
+        row.getAttribute("aria-describedby")!,
+      );
+
+      expect(row.contains(said)).toBe(true);
+      expect(said!.textContent).toBe(DESCRIPTION[process]);
+    }
   });
 
   /// Saved the moment it is touched, the way the pairings beside it are: there

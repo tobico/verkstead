@@ -365,6 +365,21 @@ export function Listbox<T>(
     /// The rows' own reading stands wherever a caller hands in nothing.
     closed?: (option: T) => string;
 
+    /// A sentence under a row's words, saying what picking it means — the
+    /// Process control's, where *Develop* alone does not tell the human what
+    /// kind of work they are choosing.
+    ///
+    /// **In the dropped rows only.** The closed control says what was picked,
+    /// and somebody glancing at it has already read the sentence once. And a
+    /// description rather than part of the name: the row is still called by its
+    /// words alone — named by them through `aria-labelledby`, since a name read
+    /// off the row's contents would carry the sentence with it — and the
+    /// sentence is reached through `aria-describedby`, so a screen reader
+    /// walking the list hears the word first rather than a whole sentence per
+    /// row. Which is where this parts from the actions menu, whose rows are
+    /// buttons holding both.
+    says?: (option: T) => string;
+
     /// The control's own label, drawn inside the handle rather than above it.
     ///
     /// For the composer's setup row, where a trigger is a dimmed label over its
@@ -466,6 +481,11 @@ export function Listbox<T>(
   });
 
   telling(props, standing);
+
+  /// The ids of a row's words and of its sentence, off the row's own — see
+  /// `says` above, and [`Reading`], which draws the two.
+  const wordsId = (index: number): string => `${rowId(index)}-words`;
+  const saysId = (index: number): string => `${rowId(index)}-says`;
 
   return (
     <div class={[styles.listbox, props.class].filter(Boolean).join(" ")}>
@@ -586,6 +606,12 @@ export function Listbox<T>(
                   aria-selected={
                     props.value(option) === shown() ? "true" : "false"
                   }
+                  aria-labelledby={
+                    props.says ? wordsId(index()) : undefined
+                  }
+                  aria-describedby={
+                    props.says ? saysId(index()) : undefined
+                  }
                   onClick={() => take(index())}
                 >
                   <Reading
@@ -593,6 +619,8 @@ export function Listbox<T>(
                     mark={props.mark}
                     icon={props.icon}
                     label={props.label}
+                    says={props.says}
+                    row={rowId(index())}
                   />
                 </div>
               )}
@@ -661,11 +689,19 @@ export function Listbox<T>(
 /// the second is left out row by row where that row has no machine to name:
 /// nothing is put in front of the words, so no row carries a gap where a mark
 /// would have been.
+///
+/// And the sentence under the words, where a row is handed one — see
+/// [`Listbox`]'s `says`. Only the rows hand it in, so the closed control drawn
+/// out of this same component stays the one line it always was.
 function Reading<T>(props: {
   of: T;
   mark?: (option: T) => AgentType | null;
   icon?: (option: T) => IconDefinition | undefined;
   label: (option: T) => string;
+  says?: (option: T) => string;
+  /// The row's id, which the words' and the sentence's are made off for the
+  /// row's `aria-labelledby` and `aria-describedby` to name.
+  row?: string;
 }): JSX.Element {
   return (
     <>
@@ -673,9 +709,27 @@ function Reading<T>(props: {
       <Show when={props.icon?.(props.of)}>
         {(of) => <Icon of={of()} class={styles.mark!} />}
       </Show>
-      {/* The words in a span of their own, so the closed control can cut a
-          reading too long for it and the rows under it never have to. */}
-      <span class={styles.words}>{props.label(props.of)}</span>
+      <Show
+        when={props.says}
+        fallback={
+          /* The words in a span of their own, so the closed control can cut a
+             reading too long for it and the rows under it never have to. */
+          <span class={styles.words}>{props.label(props.of)}</span>
+        }
+      >
+        {(says) => (
+          /* The words over the sentence, the pair of them one column beside
+             the mark, so the sentence starts under the word it is about. */
+          <span class={styles.described}>
+            <span id={`${props.row}-words`} class={styles.words}>
+              {props.label(props.of)}
+            </span>
+            <span id={`${props.row}-says`} class={styles.says}>
+              {says()(props.of)}
+            </span>
+          </span>
+        )}
+      </Show>
     </>
   );
 }

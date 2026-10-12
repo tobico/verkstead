@@ -28,6 +28,26 @@ export const PROCESS: Record<Process, string> = {
   FixMergeIssues: "Fix merge issues",
 };
 
+/// And the sentence under each one's name in the picker's dropped rows: what
+/// kind of work it is, said before the human picks it rather than found out
+/// after.
+///
+/// The human's own words, kept as they wrote them — *PR* included — because a
+/// sentence about which Process to pick is theirs to phrase. Drawn in the rows
+/// and nowhere else: the closed control and a frozen Brief say which one was
+/// picked, and somebody reading either has already chosen.
+///
+/// All five, for [`PROCESS`]'s reason: a row offered with no sentence under it
+/// would be the one row of the list that left the human guessing.
+export const DESCRIPTION: Record<Process, string> = {
+  Develop:
+    "Work on something complex, starting with a grilling session and proceeding through a step-by-step development process",
+  Investigate: "Ask questions about a code base without committing any code",
+  Review: "Review an existing PR or branch, and fix any issues found",
+  Tinker: "Make a series of simple one-off changes with minimal fuss",
+  FixMergeIssues: "Fix up a PR which is unable to merge",
+};
+
 /// And which of them the picker offers, in the order it draws them.
 ///
 /// **The viewer's list, and the server keeps the other** — `LANDED` in

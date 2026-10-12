@@ -132,6 +132,7 @@ import { reading, type Picked } from "./agent";
 import { AUTOMATIC, chosen } from "./naming";
 import {
   away,
+  DESCRIPTION,
   label,
   OFFERED,
   PROCESS,
@@ -1216,6 +1217,7 @@ export function ProcessPicker(props: {
         options={options()}
         value={(process) => process}
         label={(process) => PROCESS[process]}
+        says={(process) => DESCRIPTION[process]}
         chosen={props.chosen}
         disabled={props.disabled}
         pick={(picked) => props.pick(picked as Process)}
