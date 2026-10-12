@@ -2951,6 +2951,13 @@ describe("moving a saved draft to another device", () => {
           "POST",
         ),
       ),
+      ...OPEN.mcp_servers.map((server) =>
+        whenever(
+          at(`/conversations/${MOVED}/mcp-servers/${server.name}`),
+          json("Attached"),
+          "POST",
+        ),
+      ),
       whenever(moved, json("Closed"), "POST"),
       whenever(at(`/conversations/${MOVED}`), json(ARRIVED)),
       ...answers,
@@ -3081,6 +3088,49 @@ describe("moving a saved draft to another device", () => {
         writes(fetching, at(`/conversations/${MOVED}/attachments/${attachment.name}`)),
       ).toBe(1);
     }
+  });
+
+  /// And its MCP servers, by name: a name means the declaration of that name
+  /// wherever the work goes, so the draft over there is given the same ones —
+  /// a chip already saying its server is gone included, the reference being
+  /// the human's to take off rather than the move's.
+  it("carries every attached MCP server by name", async () => {
+    const fetching = moving();
+    const { container } = await draft();
+
+    await moveTo(container);
+    await move(THEIRS[1]!);
+
+    await waitFor(() => expect(writes(fetching, moved)).toBe(1));
+
+    for (const server of OPEN.mcp_servers) {
+      expect(
+        writes(fetching, at(`/conversations/${MOVED}/mcp-servers/${server.name}`)),
+      ).toBe(1);
+    }
+  });
+
+  /// And a server the target declares nothing by is one more refusal to carry,
+  /// as a refused file is — the old draft left open, the move being one the
+  /// human finishes by hand.
+  it("carries a refused server as a refusal, and closes nothing", async () => {
+    const fetching = moving(
+      whenever(
+        at(`/conversations/${MOVED}/mcp-servers/docs`),
+        json("NoSuchServer"),
+        "POST",
+      ),
+    );
+    const { container } = await draft();
+
+    await moveTo(container);
+    await move(THEIRS[0]!);
+
+    await screen.findByText(
+      `docs could not be attached: ${SERVER_REFUSAL.NoSuchServer}`,
+    );
+
+    expect(writes(fetching, moved)).toBe(0);
   });
 
   /// And what a Repo id, a companion's Repo id and a Pairing's Profile id are
@@ -5208,11 +5258,12 @@ describe("the MCP servers a compose page holds", () => {
     );
   });
 
-  /// A name is text a device could write down, and this one is not written
-  /// down: what it refers to is a declaration on the settings page, and one
-  /// picked out of a menu a moment ago is one the settings still hold. So the
-  /// chips go the way the pills go, and the brief stays.
-  it("keeps the brief through a reload and holds no server", async () => {
+  /// A name is text a device can write down, so it is written down with the
+  /// rest of what is being composed: leaving the page and coming back — or
+  /// reloading it — finds the chips where they were, beside the brief. The
+  /// files are the one thing a page cannot keep, a `File` being a handle rather
+  /// than text.
+  it("keeps the brief and the servers through a reload", async () => {
     creating();
     const first = mount("/compose");
 
@@ -5222,14 +5273,58 @@ describe("the MCP servers a compose page holds", () => {
     await pickServer("docs");
     await waitFor(() => expect(chips(first.container)).toEqual(["docs"]));
 
-    await waitFor(() => expect(localStorage.getItem(COMPOSING)).toBeTruthy());
+    await waitFor(() => expect(stored().servers).toEqual(["docs"]));
     first.unmount();
 
     const again = mount("/compose");
     const box = await composing(again.container);
 
     await waitFor(() => expect(box.value).toBe("Make the widget"));
-    expect(chips(again.container)).toEqual([]);
+    expect(chips(again.container)).toEqual(["docs"]);
+  });
+
+  /// And a page holding nothing but a server is still a page worth coming back
+  /// to: the pick was made on purpose.
+  it("keeps a server picked on a page with nothing else on it", async () => {
+    creating();
+    const first = mount("/compose");
+
+    await composing(first.container);
+    await pickServer("docs");
+    await waitFor(() => expect(chips(first.container)).toEqual(["docs"]));
+    await waitFor(() => expect(localStorage.getItem(COMPOSING)).toBeTruthy());
+    first.unmount();
+
+    const again = mount("/compose");
+    await composing(again.container);
+
+    await waitFor(() => expect(chips(again.container)).toEqual(["docs"]));
+  });
+
+  /// A name kept on the device is a reference that can outlive its
+  /// declaration, so one deleted from the settings while the page was away is
+  /// drawn the way the composer draws it — saying the server is gone, and
+  /// still taken off by its ×.
+  it("says so where a kept server's declaration has gone", async () => {
+    localStorage.setItem(
+      COMPOSING,
+      JSON.stringify({ ...blank(), brief: "Make the widget", servers: ["archive"] }),
+    );
+    creating();
+    const { container } = mount("/compose");
+
+    await composing(container);
+
+    const gone = await waitFor(() => {
+      const found = [...container.querySelectorAll<HTMLElement>(`.${pill.missing}`)];
+      expect(found).toHaveLength(1);
+      return found[0]!;
+    });
+    expect(gone.textContent).toContain("archive");
+    expect(gone.textContent).toContain("no longer declared");
+
+    fireEvent.click(within(gone).getByRole("button", { name: "Remove archive" }));
+    await waitFor(() => expect(chips(container)).toEqual([]));
   });
 
   /// And a page left without a press has attached nothing to anything: what was
@@ -5304,6 +5399,7 @@ describe("what a device holds between visits", () => {
       review: null,
       adopting: null,
       permitted: ["0011223344556677889900aabbccddee"],
+      servers: ["docs"],
     };
 
     keep(held);

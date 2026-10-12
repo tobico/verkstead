@@ -950,14 +950,15 @@ places a Brief is written — the draft's composer and the compose page — and 
 nothing else.
 **On the compose page a pick is held rather than attached**, there being no
 Conversation to attach it to: the chip is drawn at once and its × takes it off,
-nothing is recorded anywhere, and **Start work** or **Save as draft** puts the
-held servers on the Conversation it makes, in the same replay that sends the
-held files. So a page left without a press attaches nothing to anything, and
-the chips go with the files on a reload — a name is a reference to a
-declaration, and one picked out of a menu a moment ago is one the settings
-still hold. Not offered while a roadmap is loaded, the box being locked to a
-card, and what was picked before one was loaded is held with the files until it
-is cleared.
+nothing is recorded on the server, and **Start work** or **Save as draft** puts
+the held servers on the Conversation it makes, in the same replay that sends the
+held files. So a page left without a press attaches nothing to anything — **but
+the picks are kept on the device with the brief**, so leaving the page and
+coming back, or reloading it, finds the chips where they were. A name is text,
+as a picked file is not. Kept that long it can outlive its declaration, and its
+chip then says the server is gone, as a Conversation's does. Not offered while
+a roadmap is loaded, the box being locked to a card, and what was picked before
+one was loaded is held with the files until it is cleared.
 **Every session of the Conversation** is launched with it, whichever of the four
 harnesses runs it and whichever role the session is in, and **all of a server's
 tools are allowed** — the decision to trust one was made when it was attached,
@@ -2555,8 +2556,10 @@ on it through the route a paperclip uses. That read is the one read of an
 attachment there is. The base goes because it is not one of the ids: an override
 is a branch *name* picked out of that repository's own list, so it means what it
 means wherever the repository is cloned, and a target that has not got that branch
-refuses it by name like any other field. What cannot travel says so by being asked
-again: the companions are ids in the old device's registry and are left behind,
+refuses it by name like any other field. The attached **MCP server**s go by name
+for the same reason, a name meaning that device's declaration of it, and one the
+target declares nothing by is refused by name. What cannot travel says so by
+being asked again: the companions are ids in the old device's registry and are left behind,
 and the **Pairings** are Profile ids on the old machine, so the new draft arrives
 showing the target's own prefill — which is exactly what a draft created there
 would have arrived showing. **The old draft is
@@ -2690,9 +2693,10 @@ the composition, are uploaded once the Conversation is made as one more field
 of the replay, and a reload before the press keeps the text and loses the
 files. A refused upload is a refusal said on the draft's composer like any
 other. Not offered while a roadmap is loaded, the box being locked to a card.
-The **MCP server**s picked at that same control are held beside them and go up
-in the same replay, attached by name once there is a Conversation to attach
-them to.
+The **MCP server**s picked at that same control go up in the same replay,
+attached by name once there is a Conversation to attach them to — but they are
+kept on the device with the brief rather than in the page with the files, so a
+reload keeps them.
 
 **Kept through Close and Trim, and gone at Deleted.** A Steer can bring a Closed
 Conversation back, and a file cannot be made again the way a Worktree can; a
