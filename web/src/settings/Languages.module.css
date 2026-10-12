@@ -60,6 +60,7 @@
    the row is what somebody scanning the pane reads, and everything else is
    behind the link. */
 .row {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -103,10 +104,16 @@
   }
 }
 
-/* The panel the link drops: hung off the link's far end, which is the pane's
-   far edge, so it spreads back across the row rather than off the window. */
+/* The panel the link drops, hung off the row rather than off the link: the
+   link's anchor gives up its positioning, so the card's far edge is the row's
+   and it can be no wider than the row is — a pane narrower than the card would
+   otherwise have it spread off the window's near edge. */
+.row > .cache {
+  position: static;
+}
+
 .cache > [role="group"] {
-  width: min(22rem, calc(100vw - 2.5rem));
+  width: min(22rem, 100%);
 }
 
 .cache > [role="group"] > * + * {
