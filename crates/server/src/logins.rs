@@ -111,6 +111,17 @@ const STATUS: &[&str] = &["auth", "status"];
 /// in trouble that the session will show more plainly than a refusal could.
 const STATUS_LIMIT: Duration = Duration::from_secs(20);
 
+/// And how long it is waited on once a login has exited, to say whether the
+/// login landed.
+///
+/// **Longer, because nothing but the modal is waiting on it**, and what an
+/// answer that came too late reads as is a login that failed — the human told
+/// to start again over a login that is sitting in the account. On Windows this
+/// is also the only time the question is asked at all (see [`asked`]), and
+/// there it is a logon as the session account and a cold start of the harness
+/// behind it, which on a slow machine can outlast [`STATUS_LIMIT`] on its own.
+const LANDED_LIMIT: Duration = Duration::from_secs(120);
+
 /// What the environment's `BROWSER` is inside a login, so that the harness
 /// opens nothing on the server: a program that does nothing and succeeds.
 /// Found on `PATH` rather than at `/bin/true`, which NixOS does not have.
@@ -426,7 +437,7 @@ impl Logins {
             Ending::Stopped | Ending::Refused => None,
             Ending::Failed(reason) => Some(LoginState::Failed { reason }),
             Ending::Exited => Some(
-                match status(run.agents.clone(), run.profile.clone()).await {
+                match status(run.agents.clone(), run.profile.clone(), LANDED_LIMIT).await {
                     Some(true) => LoginState::LoggedIn,
                     _ => LoginState::Failed {
                         reason: "Claude finished, but the account still reads as logged out. \
@@ -862,7 +873,7 @@ pub(crate) async fn asked<'a>(
             continue;
         }
 
-        if let Some(logged_in) = status(agents.clone(), profile.clone()).await {
+        if let Some(logged_in) = status(agents.clone(), profile.clone(), STATUS_LIMIT).await {
             state.logins.found(state, profile.id, logged_in);
         }
     }
@@ -870,8 +881,9 @@ pub(crate) async fn asked<'a>(
 
 /// Whether the account of `profile` reads as logged in, asked of the harness
 /// in a fresh root — which is the account's login as the next session would be
-/// given it. `None` where nothing could answer: see [`asked`].
-async fn status(agents: Arc<Agents>, profile: store::Profile) -> Option<bool> {
+/// given it, waited on for `limit`. `None` where nothing could answer: see
+/// [`asked`].
+async fn status(agents: Arc<Agents>, profile: store::Profile, limit: Duration) -> Option<bool> {
     let built = tokio::task::spawn_blocking(move || {
         let (sandbox, argv) = agents.logging_in(&profile, STATUS)?;
         sandbox.command(&argv).ok()
@@ -900,7 +912,7 @@ async fn status(agents: Arc<Agents>, profile: store::Profile) -> Option<bool> {
 
             // A harness that did not answer in time is killed as it is
             // dropped — see [`Harness`].
-            match tokio::time::timeout(STATUS_LIMIT, asking.process.wait()).await {
+            match tokio::time::timeout(limit, asking.process.wait()).await {
                 Ok(Ok(status)) => Some(status.success()),
                 Ok(Err(_)) | Err(_) => None,
             }
