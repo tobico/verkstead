@@ -886,6 +886,13 @@ export type Target = {
 /// new Conversation through the route a paperclip uses. One the target will not
 /// take is one more refusal to carry, and so is one this device could not read.
 ///
+/// **And the MCP servers travel**, by name, the way the compose page's go up: a
+/// name means the declaration of that name on whichever device reads it, so the
+/// draft over there is launched with the same ones wherever that device declares
+/// them. One it declares nothing by is a refusal to carry, as a file is — and a
+/// chip already saying its server is gone goes too, the reference being the
+/// human's to take off rather than the move's to drop.
+///
 /// **Nothing is undone by a refusal**, which is [`create`]'s rule again. The new
 /// Conversation is real from its first request, so a field the target would not
 /// take leaves the rest of the work on it — and the old draft is closed only
@@ -944,6 +951,15 @@ export async function moveTo(
       outcome === "Recorded",
       `The base branch could not be recorded: ${BASE_REFUSAL[outcome]}`,
     );
+  }
+
+  for (const server of draft.mcp_servers) {
+    const outcome = await attachServer(to.reaching, id, server.name);
+    if (outcome !== "Attached") {
+      refused.push(
+        `${server.name} could not be attached: ${SERVER_REFUSAL[outcome]}`,
+      );
+    }
   }
 
   for (const attachment of draft.attachments) {

@@ -2951,6 +2951,13 @@ describe("moving a saved draft to another device", () => {
           "POST",
         ),
       ),
+      ...OPEN.mcp_servers.map((server) =>
+        whenever(
+          at(`/conversations/${MOVED}/mcp-servers/${server.name}`),
+          json("Attached"),
+          "POST",
+        ),
+      ),
       whenever(moved, json("Closed"), "POST"),
       whenever(at(`/conversations/${MOVED}`), json(ARRIVED)),
       ...answers,
@@ -3081,6 +3088,49 @@ describe("moving a saved draft to another device", () => {
         writes(fetching, at(`/conversations/${MOVED}/attachments/${attachment.name}`)),
       ).toBe(1);
     }
+  });
+
+  /// And its MCP servers, by name: a name means the declaration of that name
+  /// wherever the work goes, so the draft over there is given the same ones —
+  /// a chip already saying its server is gone included, the reference being
+  /// the human's to take off rather than the move's.
+  it("carries every attached MCP server by name", async () => {
+    const fetching = moving();
+    const { container } = await draft();
+
+    await moveTo(container);
+    await move(THEIRS[1]!);
+
+    await waitFor(() => expect(writes(fetching, moved)).toBe(1));
+
+    for (const server of OPEN.mcp_servers) {
+      expect(
+        writes(fetching, at(`/conversations/${MOVED}/mcp-servers/${server.name}`)),
+      ).toBe(1);
+    }
+  });
+
+  /// And a server the target declares nothing by is one more refusal to carry,
+  /// as a refused file is — the old draft left open, the move being one the
+  /// human finishes by hand.
+  it("carries a refused server as a refusal, and closes nothing", async () => {
+    const fetching = moving(
+      whenever(
+        at(`/conversations/${MOVED}/mcp-servers/docs`),
+        json("NoSuchServer"),
+        "POST",
+      ),
+    );
+    const { container } = await draft();
+
+    await moveTo(container);
+    await move(THEIRS[0]!);
+
+    await screen.findByText(
+      `docs could not be attached: ${SERVER_REFUSAL.NoSuchServer}`,
+    );
+
+    expect(writes(fetching, moved)).toBe(0);
   });
 
   /// And what a Repo id, a companion's Repo id and a Pairing's Profile id are

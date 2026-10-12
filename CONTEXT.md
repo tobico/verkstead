@@ -2556,8 +2556,10 @@ on it through the route a paperclip uses. That read is the one read of an
 attachment there is. The base goes because it is not one of the ids: an override
 is a branch *name* picked out of that repository's own list, so it means what it
 means wherever the repository is cloned, and a target that has not got that branch
-refuses it by name like any other field. What cannot travel says so by being asked
-again: the companions are ids in the old device's registry and are left behind,
+refuses it by name like any other field. The attached **MCP server**s go by name
+for the same reason, a name meaning that device's declaration of it, and one the
+target declares nothing by is refused by name. What cannot travel says so by
+being asked again: the companions are ids in the old device's registry and are left behind,
 and the **Pairings** are Profile ids on the old machine, so the new draft arrives
 showing the target's own prefill — which is exactly what a draft created there
 would have arrived showing. **The old draft is
