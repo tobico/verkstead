@@ -9,7 +9,7 @@
 //! Two shapes under the settings, because there are two kinds of thing the
 //! pane draws:
 //!
-//! - `desktop`, `git`, `sandbox`, `instructions`, `mcp-servers`, `at-once`,
+//! - `desktop`, `git`, `sandbox`, `instructions`, `mcp-servers`, `scheduling`,
 //!   `cleanup`, `remote` and `repos` — what the desktop app does about its own
 //!   window, everything git is told, what a session's sandbox holds (the build
 //!   caches and the extra paths), the text every session is given, the MCP
@@ -70,7 +70,7 @@ export const WORDS = [
   "sandbox",
   "instructions",
   "mcp-servers",
-  "at-once",
+  "scheduling",
   "cleanup",
   "remote",
   "repos",

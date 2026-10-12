@@ -302,8 +302,8 @@ function Settings(props: {
             it. A card of its own with room in its pane for the limit across the
             whole server, which is the same question asked wider. */}
         <AtOnceCard
-          open={props.opening === "at-once"}
-          press={() => props.select("at-once")}
+          open={props.opening === "scheduling"}
+          press={() => props.select("scheduling")}
         />
         {/* And what becomes of a Conversation once the human has archived it:
             the trim that takes its bulk, and the delete that takes the whole of
@@ -389,7 +389,7 @@ function Details(props: {
       <Match when={props.opening === "mcp-servers"}>
         <McpServersPane back={props.back} />
       </Match>
-      <Match when={props.opening === "at-once"}>
+      <Match when={props.opening === "scheduling"}>
         <AtOncePane back={props.back} />
       </Match>
       <Match when={props.opening === "cleanup"}>

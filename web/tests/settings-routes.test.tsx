@@ -89,7 +89,8 @@ describe("the settings page's own paths", () => {
   /// the words those stood at are gone too; Paths became Sandbox binds at
   /// `/settings/sandbox-binds`; and Language support, renamed Build caches, and
   /// the Sandbox binds became the two parts of one Sandbox pane at
-  /// `/settings/sandbox`, so both of their words are gone as well. Each is no
+  /// `/settings/sandbox`, so both of their words are gone as well; and How much
+  /// runs at once became Scheduling at `/settings/scheduling`. Each is no
   /// such page rather than a redirect, the way `/profiles` and `/repos` were
   /// retired when those pages folded into this one. A link somebody kept is a
   /// record of what was picked rather than a promise that it is still there.
@@ -100,6 +101,7 @@ describe("the settings page's own paths", () => {
     "paths",
     "languages",
     "sandbox-binds",
+    "at-once",
   ]) {
     it(`refuses /${word}, which a section has moved off`, () => {
       expect(at(`${SETTINGS}/${word}`)).toBe(MISSED);
