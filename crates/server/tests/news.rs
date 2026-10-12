@@ -173,7 +173,7 @@ impl Phone {
 
 /// What the service worker draws a notification from: the sentence, the
 /// repository under it, and where a tap goes.
-#[derive(Debug, serde::Deserialize)]
+#[derive(Debug, PartialEq, serde::Deserialize)]
 struct Notice {
     title: String,
     path: String,
@@ -252,6 +252,79 @@ async fn nowhere() -> String {
     let address = listener.local_addr().unwrap();
     drop(listener);
     format!("127.0.0.1:{}", address.port())
+}
+
+// ---------------------------------------------------------------------------
+// The app on the machine, and the stream it holds
+// ---------------------------------------------------------------------------
+
+/// The desktop app on a device, holding that device's notice stream open.
+struct Holding {
+    body: Body,
+
+    /// What has been read off the stream and is not a whole frame yet.
+    buffered: String,
+}
+
+impl Holding {
+    /// Open the stream the way the app does. Returns once the response is in
+    /// hand, which is after the handler has subscribed.
+    async fn open(on: &Verkstead) -> Holding {
+        let response = on
+            .workbench
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/ui/push/notices")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        Holding {
+            body: response.into_body(),
+            buffered: String::new(),
+        }
+    }
+
+    /// The next notice off the stream, skipping the keep-alive comments.
+    async fn notice(&mut self) -> Notice {
+        let waited = tokio::time::timeout(WAITING, async {
+            loop {
+                if let Some(end) = self.buffered.find("\n\n") {
+                    let frame: String = self.buffered.drain(..end + 2).collect();
+
+                    if frame.lines().any(|line| line == "event: notice") {
+                        let data = frame
+                            .lines()
+                            .find_map(|line| line.strip_prefix("data: "))
+                            .expect("a notice carries data");
+
+                        return serde_json::from_str(data).expect("the notice has to be JSON");
+                    }
+
+                    continue;
+                }
+
+                let chunk = self
+                    .body
+                    .frame()
+                    .await
+                    .expect("the stream ended")
+                    .unwrap()
+                    .into_data()
+                    .expect("the stream carries data frames");
+
+                self.buffered.push_str(std::str::from_utf8(&chunk).unwrap());
+            }
+        })
+        .await;
+
+        waited.unwrap_or_else(|_| panic!("no notice came down the stream"))
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -707,5 +780,64 @@ async fn news_a_member_told_this_device_is_not_passed_on() {
         count(&received, &on_c),
         0,
         "A told its own phones and nobody else's: news over the link is a device's own",
+    );
+}
+
+// ---------------------------------------------------------------------------
+// The stream the desktop app holds
+// ---------------------------------------------------------------------------
+
+/// A Conversation reaching Done is announced to the app on the machine, with no
+/// phone subscribed anywhere.
+///
+/// **Which is the install the stream is for**: a desktop with no phone paired.
+/// The phones' push looks for subscriptions and finds none; the stream is told
+/// before it looks.
+#[tokio::test]
+async fn the_app_hears_the_work_is_done_with_no_phone_subscribed() {
+    let alone = Verkstead::answering(A).await;
+    let mut app = Holding::open(&alone).await;
+
+    let conversation = alone.working_on(BRANCH).await;
+
+    push::the_work_is_done(&alone.pool, conversation);
+
+    assert_eq!(
+        app.notice().await,
+        Notice {
+            title: format!("{BRANCH} is done"),
+            path: format!("/conversations/{conversation}"),
+            project: Some(REPO.to_owned()),
+        },
+    );
+}
+
+/// A member's news, relayed over the Peer Listener, reaches the app on the device
+/// it was relayed to with the member in front of the sentence — the same notice
+/// that device's phones would have been shown.
+#[tokio::test]
+async fn the_app_hears_a_members_news_with_the_device_leading_it() {
+    let a = Verkstead::answering(A).await;
+    let b = Verkstead::answering(B).await;
+
+    a.linked_to(&b.device, B_MACHINE, B_OS, vec![b.at()]).await;
+    b.linked_to(&a.device, A_MACHINE, "Linux", vec![a.at()])
+        .await;
+
+    let mut on_a = Holding::open(&a).await;
+
+    let conversation = b.working_on(BRANCH).await;
+
+    push::the_work_is_done(&b.pool, conversation);
+
+    assert_eq!(
+        on_a.notice().await,
+        Notice {
+            title: format!("{B_MACHINE} — {BRANCH} is done"),
+            path: format!("/devices/{B}/conversations/{conversation}"),
+            project: Some(REPO.to_owned()),
+        },
+        "the app on A is told which machine the work was on, and a click opens B's \
+         Conversation rather than A's of the same number",
     );
 }

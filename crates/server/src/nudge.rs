@@ -70,7 +70,7 @@ const NUDGE_BACKLOG: usize = 16;
 /// page and the server may close a connection that has gone silent, and a
 /// reconnect is the slow way to find out the world moved — this is what keeps
 /// the stream open rather than reopened.
-const KEEP_ALIVE: Duration = Duration::from_secs(15);
+pub(crate) const KEEP_ALIVE: Duration = Duration::from_secs(15);
 
 /// Word that the world moved in a way the store has no reason to announce: a
 /// Question Set arriving, a session saying something.

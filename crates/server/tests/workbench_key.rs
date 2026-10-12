@@ -124,6 +124,9 @@ async fn nothing_without_the_key_reaches_the_namespace_or_a_page() {
         "/api/ui/settings",
         "/api/ui/conversations",
         "/api/ui/members/0011223344556677889900aabbccddee/conversations",
+        // The notices the desktop app shows, which would hand a session the
+        // title of every Set and stop as it happened.
+        "/api/ui/push/notices",
     ] {
         let response = get(&app, path).await;
 

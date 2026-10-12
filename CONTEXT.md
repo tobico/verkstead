@@ -2127,7 +2127,9 @@ has just told its own browsers something — a run stopped, a session gone idle,
 account out of window, work on a pull request, a roadmap moved on or run out, a
 Conversation done — tells every **Member** the same sentence over the **Peer
 Listener**, behind the **Member Gate** with the announcement and the renewal, and
-each of them pushes it to its own phones. Which is what makes one phone enough for
+each of them pushes it to its own phones — and tells its own notice stream, the
+third carrier beside the push and the **Nudge**, which the desktop app holds to
+show the same notice on the machine itself. Which is what makes one phone enough for
 a cluster: a phone is installed from one device and subscribes to *that* device's
 browsers, and the subscriptions a device pushes to are one of the four prefixes
 never served over the link, so a hub cannot subscribe to a member's push instead. A
@@ -5478,6 +5480,15 @@ that has just been taken up says, having no way to know what it missed while it
 was down. A member that is not answering is not announced about at all: the page
 keeps what it last read and goes stale, exactly as it does when its own stream is
 down. See **Relay**, which is the hop those streams come back over.
+
+**Not the carrier for a notification**, which is a sentence where a Nudge only
+points. News worth a human's attention goes out on two other carriers instead:
+the phones' push, and **the notice stream** — `/api/ui/push/notices`, which tells
+the desktop app on the same machine every notice the phones get, in the same
+words and whether or not any phone is subscribed, because Electron ships without
+the push client a browser's subscription needs. Kept under the push prefix, so it
+is never served over the link: a member's news reaches it the way it reaches the
+phones, relayed, with the device in front.
 
 Not the nudge in **Store-and-nudge Ask**, which is a line of English typed into
 an agent's terminal. This one is a signal to a browser and never leaves the
