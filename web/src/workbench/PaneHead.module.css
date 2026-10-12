@@ -42,6 +42,40 @@
   -webkit-app-region: drag;
 }
 
+/* Inside the app, the head is a desktop's header bar rather than a page's
+   heading, so that the window sits among the other apps on the desktop instead
+   of looking like a web page given a frame. GNOME's header bar is the measure,
+   in its own numbers: a row of thirty-four-pixel buttons with sixteen-pixel
+   icons, six pixels of paper above the row and six below, and the title in the
+   bold of the body text rather than at a heading's size. Each of those said in
+   rem at a sixteen-pixel root, so a human who drew their text larger has a bar
+   that grew with it — and the band the window's controls are drawn over is
+   these same numbers added up, in `head.ts`.
+
+   The six above are the chrome's — see `Panes.module.css` — so the head gives
+   up the rem it hangs into above everywhere else, and keeps only its six below.
+
+   Nothing of it reaches a browser or a phone: `data-app` is on the root only
+   where the app's bridge is (see `mark` in `head.ts`), and the head they are
+   served is the one they have always had. */
+:root[data-app] .head {
+  gap: 0.5rem 0.8rem;
+  margin: 0;
+  padding: 0 0 0.375rem;
+  --icon-pad: 0.5rem;
+  --icon-size: 1rem;
+}
+
+/* The title as a header bar sets one: the body's size, bold, and a line as tall
+   as the row's buttons, so a head with no buttons in it stands exactly as tall as
+   one with them and the band below the window's controls is the same strip on
+   every pane. */
+:root[data-app] .head h1 {
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: calc(2rem + 2px);
+}
+
 /* And the text in a head gives up taking a selection — inside the app, and only
    there. That is the price of the region rather than an oversight: a bar the
    pointer sweeps a selection across cannot also be the bar the window moves by,

@@ -65,11 +65,11 @@ export const INK = "#1c1a17";
 
 /// How tall the overlay stands, in pixels.
 ///
-/// The head's band, added up out of the rules that draw it: a rem and a quarter
-/// of the pane chrome's own top padding, less the rem the head hangs back up
-/// into it, plus the head's rem above the row and its rem below, and a row as
-/// tall as the icon buttons standing in it. About seventy-five pixels where a
-/// rem is sixteen.
+/// The head's band, which is drawn as a GNOME header bar is (see `web/src/head.ts`
+/// and the rules it names): six pixels of the pane chrome's paper above the row,
+/// a row as tall as the thirty-four-pixel icon buttons standing in it, and six
+/// pixels below. Forty-six pixels where a rem is sixteen — libadwaita's own bar,
+/// less the hairline it draws under it.
 ///
 /// **Which is one of the two that is wrong on somebody's machine**: a human who
 /// has told their browser to draw text larger has a taller head, and no constant
@@ -77,22 +77,20 @@ export const INK = "#1c1a17";
 /// rem its own browser is drawing and pushes what comes out — `band` in
 /// `web/src/head.ts`, which is this sum said where the rem can be asked for. This
 /// is the value the window opens at in the moment before it is.
-export const BAND = 75;
+export const BAND = 46;
 
 /// How far down the window the middle of the head's *first row* sits, in pixels.
 ///
 /// The other measurement written in rem, and the other one the page redoes for
 /// itself — `middle` in `web/src/head.ts`. A shorter sum than the band's, out of
-/// the front of the same rules: the chrome's rem and a quarter less the rem the
-/// head hangs back up into it, the head's rem above its row, and half the row.
-/// About thirty-nine pixels where a rem is sixteen.
+/// the front of the same rules: the six pixels of chrome above the row, and half
+/// the row. Twenty-three pixels where a rem is sixteen.
 ///
-/// **Which is not the middle of the band**, and that is the whole reason it is a
-/// value of its own. The band carries the head's rem *below* the row as well and
-/// a quarter-rem of chrome above it, so its own middle sits a couple of pixels
-/// higher than the row's — and the row is what a head's title and controls stand
-/// in, so the row is what the traffic lights are centred in.
-export const MIDDLE = 39;
+/// **Which is the middle of the band today**, the head having as much paper under
+/// its row as over it, and is still a value of its own: the row is what a head's
+/// title and controls stand in, so the row is what the traffic lights are centred
+/// in, and a head drawn with more below its row than above would part the two.
+export const MIDDLE = 23;
 
 /// How tall the traffic lights stand, in pixels — which is what the point they
 /// are moved to has to be worked out against, the point being their top-left

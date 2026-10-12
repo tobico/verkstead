@@ -212,6 +212,14 @@
   padding-top: 0;
 }
 
+/* Inside the app, the six pixels of paper a desktop's header bar keeps above its
+   row, rather than the rem and a quarter a page's heading stands under — the head
+   is drawn as a header bar there. See `PaneHead.module.css`, where the rest of
+   the bar is, and `head.ts`, where the band it comes to is added up. */
+:root[data-app] .pane > .paneChrome {
+  padding-top: 0.375rem;
+}
+
 /* The record thins out into what is stuck rather than being cut off against it:
    a rem of paper fading to nothing, over whatever is passing beneath.
 

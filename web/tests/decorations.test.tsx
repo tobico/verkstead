@@ -70,7 +70,7 @@ import bare from "../src/DragBar.module.css";
 // none of it.
 import barely from "../src/DragBar.module.css?raw";
 import { CLEAR, insets, reserved, type Area } from "../src/controls";
-import { band, dress, middle, worn } from "../src/head";
+import { band, dress, mark, middle, worn } from "../src/head";
 import { IconButton } from "../src/IconButton";
 import { Menu } from "../src/Menu";
 import { Panes } from "../src/Panes";
@@ -78,6 +78,7 @@ import shell from "../src/Panes.module.css";
 // And the frame's stylesheet as text, for the rules that say which head stands
 // at an edge of the window: jsdom holds no breakpoint and lays out no grid.
 import stylesheet from "../src/Panes.module.css?raw";
+import heads from "../src/workbench/PaneHead.module.css?raw";
 import { Switch } from "../src/Switch";
 import { ALL_THREE, BESIDE } from "../src/widths";
 import type { OnboardingView } from "../src/api/types";
@@ -690,14 +691,15 @@ describe("how tall the head's band stands", () => {
     document.documentElement.style.removeProperty("font-size");
   });
 
-  /// The same seventy-five the window opens at — `BAND` in
+  /// The same forty-six the window opens at — the height of a GNOME header bar's
+  /// row of buttons and the six pixels either side of it — `BAND` in
   /// `desktop/src/decorations.ts`, which that package's suite pins as a number.
   /// Both sides, because the app and the page have to agree about it: one is what
   /// the overlay is until the page loads and the other is what it is afterwards,
   /// and a window that changed height at the moment its page arrived would be the
   /// visible form of them disagreeing.
   it("is the head's band at a sixteen-pixel root", () => {
-    expect(band()).toBe(75);
+    expect(band()).toBe(46);
   });
 
   /// The whole reason it is measured on the page rather than compiled into the
@@ -706,11 +708,11 @@ describe("how tall the head's band stands", () => {
   it("follows the rem the page is actually drawn at", () => {
     document.documentElement.style.fontSize = "20px";
 
-    expect(band()).toBe(93);
+    expect(band()).toBe(57);
 
     document.documentElement.style.fontSize = "12px";
 
-    expect(band()).toBe(57);
+    expect(band()).toBe(35);
   });
 
   /// Electron measures the overlay in whole pixels, so a fraction is a rectangle
@@ -727,22 +729,22 @@ describe("where the middle of the head's first row sits", () => {
     document.documentElement.style.removeProperty("font-size");
   });
 
-  /// The thirty-nine the window opens at — `MIDDLE` in
+  /// The twenty-three the window opens at — `MIDDLE` in
   /// `desktop/src/decorations.ts`, which that package's suite pins as a number and
   /// works the traffic lights' point out of. Both sides, for the reason the band is
   /// pinned on both: the moment before the page loads and the moment after it are
   /// the same answer, so a Mac's lights do not jump when the workbench arrives.
   it("is the row's middle at a sixteen-pixel root", () => {
-    expect(middle()).toBe(39);
+    expect(middle()).toBe(23);
   });
 
-  /// Inside the band and below the middle of it, which is the whole reason it is a
-  /// measurement of its own rather than the band halved: the band carries the rem
-  /// the head keeps *below* its row and a quarter rem of chrome above it, so the
-  /// row's middle sits lower than the strip's.
-  it("is past the middle of the band and inside it", () => {
-    expect(middle()).toBeGreaterThan(band() / 2);
-    expect(middle()).toBeLessThan(band());
+  /// At the middle of the band, within the rounding: the head is a header bar
+  /// now, with as much paper under its row as over it, so the row a Mac's lights
+  /// are centred in and the strip the other two platforms' controls are centred
+  /// in are one line. Still a measurement of its own, because a head drawn with
+  /// more below its row than above it would part them again.
+  it("is the middle of the band", () => {
+    expect(Math.abs(middle() - band() / 2)).toBeLessThanOrEqual(0.5);
   });
 
   /// And it follows the rem, for the reason the band does: the rules that put the
@@ -753,11 +755,11 @@ describe("where the middle of the head's first row sits", () => {
   it("follows the rem the page is actually drawn at", () => {
     document.documentElement.style.fontSize = "20px";
 
-    expect(middle()).toBe(49);
+    expect(middle()).toBe(29);
 
     document.documentElement.style.fontSize = "12px";
 
-    expect(middle()).toBe(30);
+    expect(middle()).toBe(18);
   });
 
   /// Whole pixels, a point being whole pixels — and the rounding is the page's to
@@ -782,7 +784,7 @@ describe("what the head is drawn in", () => {
     document.body.style.backgroundColor = "rgb(250, 248, 245)";
     document.body.style.color = "rgb(28, 26, 23)";
 
-    expect(worn()).toEqual({ paper: "#faf8f5", ink: "#1c1a17", band: 75, middle: 39 });
+    expect(worn()).toEqual({ paper: "#faf8f5", ink: "#1c1a17", band: 46, middle: 23 });
   });
 
   /// And the other scheme, which is the same read a moment later: the page says
@@ -832,7 +834,38 @@ describe("what the head is drawn in", () => {
       fontSize: "16px",
     }));
 
-    expect(worn()).toEqual({ paper: "#faf8f5", ink: "#1c1a17", band: 75, middle: 39 });
+    expect(worn()).toEqual({ paper: "#faf8f5", ink: "#1c1a17", band: 46, middle: 23 });
+  });
+});
+
+/// The mark the header-bar sizing is written against: `data-app` on the root,
+/// inside the app and nowhere else — a browser and a phone keep the head they
+/// have always had.
+describe("marking the document as the app's", () => {
+  afterEach(() => {
+    delete document.documentElement.dataset.app;
+    vi.unstubAllGlobals();
+  });
+
+  it("marks the root where the app's bridge is on the window", () => {
+    theApp("linux");
+
+    mark();
+
+    expect(document.documentElement.hasAttribute("data-app")).toBe(true);
+  });
+
+  it("leaves a browser's document unmarked", () => {
+    mark();
+
+    expect(document.documentElement.hasAttribute("data-app")).toBe(false);
+  });
+
+  /// And the rules it is read by are the app's alone: the header bar's padding is
+  /// written against the mark, so a browser is never drawn as the desktop app.
+  it("is what the header-bar rules are written against", () => {
+    expect(heads).toContain(":root[data-app] .head {");
+    expect(stylesheet).toContain(":root[data-app] .pane > .paneChrome {");
   });
 });
 
@@ -880,13 +913,13 @@ describe("telling the app", () => {
 
     const stop = dress();
 
-    expect(pushed).toEqual([{ paper: "#faf8f5", ink: "#1c1a17", band: 75, middle: 39 }]);
+    expect(pushed).toEqual([{ paper: "#faf8f5", ink: "#1c1a17", band: 46, middle: 23 }]);
 
     watching.flip("rgb(23, 22, 20)", "rgb(236, 231, 224)");
 
     expect(pushed).toEqual([
-      { paper: "#faf8f5", ink: "#1c1a17", band: 75, middle: 39 },
-      { paper: "#171614", ink: "#ece7e0", band: 75, middle: 39 },
+      { paper: "#faf8f5", ink: "#1c1a17", band: 46, middle: 23 },
+      { paper: "#171614", ink: "#ece7e0", band: 46, middle: 23 },
     ]);
 
     stop();

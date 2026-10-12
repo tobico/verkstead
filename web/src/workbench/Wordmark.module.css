@@ -33,3 +33,15 @@
   height: var(--size);
   margin-left: 0.2rem;
 }
+
+/* Inside the app, the mark in the head is a header bar's title like every other
+   pane's — the bold of the body text, with the icon at a size that sits in the
+   bar's row rather than over it. See `PaneHead.module.css`, where the bar is. */
+:root[data-app] .wordmark {
+  gap: 0.5rem;
+  font-size: 1rem;
+}
+
+:root[data-app] .wordmark img {
+  --size: 1.5rem;
+}

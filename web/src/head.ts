@@ -11,9 +11,10 @@
 //! app has no opinion about either value.
 //!
 //! **And the two measurements are the page's for a neighbouring reason.** The
-//! band is written in rem — a rem and a quarter of chrome padding, the head's own
-//! rem above its row and below it, and a row as tall as the icon buttons standing
-//! in it — while what the overlay is sized in is whole pixels. A constant compiled
+//! band is written in rem — the head inside the app is drawn as a GNOME header
+//! bar, six pixels of paper either side of a row as tall as the icon buttons
+//! standing in it, each a rem's worth of those pixels — while what the overlay is
+//! sized in is whole pixels. A constant compiled
 //! into the app would be right on one machine and wrong on the next: a human who
 //! has told their browser to draw text larger has a taller head. So [`band`] is
 //! those same rules added up where the rem can be asked for, and the page pushes
@@ -22,8 +23,9 @@
 //! **And [`middle`] is the shorter sum beside it, which a Mac is what needs.**
 //! The lights there are moved into the head's *first row* rather than painted
 //! over the whole band (Set 889 Q4a), and the row is not the band: the band
-//! carries the chrome's quarter-rem above the row and the head's rem below it as
-//! well. So the app is told where the row's middle sits and centres the buttons on
+//! carries the paper above the row and below it as well — an even six pixels
+//! each today, so the two middles meet, but only for as long as the head is drawn
+//! that way. So the app is told where the row's middle sits and centres the buttons on
 //! it — and the arithmetic stays here, where the rules that draw the head are
 //! already added up once, rather than being written into the app a second time.
 //!
@@ -44,32 +46,32 @@ import { bridge, type Head } from "./settings/bridge";
 /// notice it gets that they have changed.
 const SCHEME = "(prefers-color-scheme: dark)";
 
-/// A rem and a quarter of chrome above the head — `.pane > .paneChrome`'s own top
-/// padding in `Panes.module.css`, which is what the record would otherwise slide
-/// up against the underside of the title through.
-const CHROME = 1.25;
+/// The paper above the head — `.pane > .paneChrome`'s top padding inside the app,
+/// in `Panes.module.css`. Six pixels where a rem is sixteen, which is what a
+/// GNOME header bar keeps above its row of buttons.
+const CHROME = 0.375;
 
-/// Less the rem the head hangs back up into it — `.head`'s negative top margin in
-/// `workbench/PaneHead.module.css`, which is the room its controls hang in.
-const HANG = 1;
+/// The head's own room above its row inside the app, and below it — `.head`'s
+/// padding in `workbench/PaneHead.module.css`. Nothing above, the chrome's six
+/// pixels being the whole of it, and the header bar's six below: the one below is
+/// the paper between the head and whatever follows it inside the sticky block,
+/// and it is part of the band because it is part of the paper.
+const ABOVE = 0;
+const BELOW = 0.375;
 
-/// The head's own rem above its row, and its rem below — the same rule's padding.
-/// The one below is the gap between the header and whatever follows it inside the
-/// sticky block, and it is part of the band because it is part of the paper.
-const ABOVE = 1;
-const BELOW = 1;
+/// And the row itself, as tall as the icon buttons standing in it: `0.5rem` of
+/// padding either side of an icon `1rem` tall — `IconButton.module.css`, at the
+/// size a head inside the app hands it. A header bar's thirty-four-pixel button
+/// with its edges, and the tallest thing a head carries, so the thing the row is
+/// the height of.
+const ROW = 2;
 
-/// And the row itself, as tall as the icon buttons standing in it: `0.6rem` of
-/// padding either side of a line `1.1rem` tall — `IconButton.module.css`. The
-/// tallest thing a head carries, and so the thing the row is the height of.
-const ROW = 2.3;
-
-/// How far down the band the row itself starts, in rem: the chrome's padding less
-/// the rem the head hangs back up into it, and the head's own rem above the row.
+/// How far down the band the row itself starts, in rem: the chrome's paper, and
+/// the head's own room above the row.
 ///
 /// The front of the same sum the band is, and the half of it that says where the
 /// row is rather than how tall the whole strip stands.
-const DOWN = CHROME - HANG + ABOVE;
+const DOWN = CHROME + ABOVE;
 
 /// What all of that comes to, in rem.
 const REMS = DOWN + BELOW + ROW;
@@ -104,8 +106,9 @@ export function band(): number {
 /// The row rather than the band, which is the whole of why this is a second
 /// measurement: the band is the strip of paper the controls are drawn over, and
 /// the row is the line inside it that a head's title and its buttons stand in.
-/// Half a rem and change separates the two middles, which is enough to see in
-/// three circles beside a wordmark.
+/// The header bar keeps as much paper under its row as over it, so the two
+/// middles meet today — and a head drawn otherwise is three circles beside a
+/// wordmark that this, and not the band, keeps level.
 ///
 /// Measured from the top of the window because that is where the band starts: the
 /// app has no title bar, so the first pixel of the page is the first pixel of the
@@ -127,6 +130,22 @@ export function worn(): Head | undefined {
   const colours = drawn();
 
   return colours === undefined ? undefined : { ...colours, band: band(), middle: middle() };
+}
+
+/// Mark the document as drawn inside the app, where it is: `data-app` on the
+/// root, which is what the head's header-bar sizing is written against — see
+/// `PaneHead.module.css`, `Panes.module.css`, `IconButton.module.css` and
+/// `Wordmark.module.css`.
+///
+/// **Nothing at all outside the app**, for [`dress`]'s reason: a browser on this
+/// machine and a phone on the tailnet have no bridge and no window to sit among
+/// other desktop apps, and keep the head they have always been drawn with. Before
+/// the first render rather than after it, so no head is ever drawn at the one
+/// size and then the other.
+export function mark(): void {
+  if (bridge() !== null) {
+    document.documentElement.dataset.app = "";
+  }
 }
 
 /// Tell the app what its head is drawn in, and again at every flip of the colour
