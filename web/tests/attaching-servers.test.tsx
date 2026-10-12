@@ -17,7 +17,13 @@
 import { fireEvent, screen, waitFor, within } from "@solidjs/testing-library";
 import { describe, expect, it } from "vitest";
 
-import type { BriefEvent, ConversationView, SettingsView } from "../src/api/types";
+import type {
+  BriefEvent,
+  ConversationView,
+  SettingsEdit,
+  SettingsSaved,
+  SettingsView,
+} from "../src/api/types";
 import pill from "../src/Attaching.module.css";
 import composer from "../src/workbench/Composer.module.css";
 import shell from "../src/Panes.module.css";
@@ -110,8 +116,25 @@ describe("the Attach menu on a draft's composer", () => {
     const menu = await openMenu(await openComposer());
 
     // `docs` and `archive` are on the Conversation already, so what is left to
-    // offer is the one declaration it has not been given.
-    expect(rows(menu)).toEqual(["Attach file", "tickets"]);
+    // offer is the one declaration it has not been given — and, last, the way
+    // to declare another.
+    expect(rows(menu)).toEqual(["Attach file", "tickets", "Add a server…"]);
+  });
+
+  /// The servers are a section of the menu of their own, under a heading, with
+  /// the way to declare another at its foot: *Attach file* is a different kind
+  /// of thing to put on the work, and the section says which rows are which.
+  it("groups the servers under MCP Servers, with Add a server last", async () => {
+    theWorkbench();
+
+    const menu = await openMenu(await openComposer());
+    const section = within(menu).getByRole("group", { name: "MCP Servers" });
+
+    expect(rows(section)).toEqual(["tickets", "Add a server…"]);
+    expect(section.textContent).toContain("MCP Servers");
+    expect(
+      within(section).queryByRole("menuitem", { name: "Attach file" }),
+    ).toBeNull();
   });
 
   /// A server the Conversation holds is not in the menu: it has a chip of its
@@ -125,9 +148,9 @@ describe("the Attach menu on a draft's composer", () => {
   });
 
   /// And with nothing declared it is still a menu, rather than falling back to
-  /// the plain button: what the human wants then is to go and declare one, and
-  /// that is something a menu can say.
-  it("holds Attach file and the way to the settings where none is declared", async () => {
+  /// the plain button: what the human wants then is to declare one, and the
+  /// section's last row is how.
+  it("holds Attach file and Add a server where none is declared", async () => {
     theWorkbench(
       whenever("/api/ui/settings", json(declaring())),
       whenever(`/api/ui/conversations/${OPEN.id}`, json({ ...OPEN, mcp_servers: [] })),
@@ -135,11 +158,10 @@ describe("the Attach menu on a draft's composer", () => {
 
     const menu = await openMenu(await openComposer());
 
-    expect(rows(menu)).toEqual(["Attach file", "Declare an MCP server…"]);
+    expect(rows(menu)).toEqual(["Attach file", "Add a server…"]);
     expect(
-      screen.getByRole("menuitem", { name: "Declare an MCP server…" })
-        .getAttribute("href"),
-    ).toBe("/settings/mcp-servers");
+      within(menu).getByRole("group", { name: "MCP Servers" }),
+    ).toBeTruthy();
   });
 
   /// Picking one is a request naming it, and nothing else — what the
@@ -191,6 +213,304 @@ describe("the Attach menu on a draft's composer", () => {
     // go, and a card still hanging under the trigger would be a list
     // rearranging itself under the hand that had finished with it.
     expect(screen.queryByRole("menu", { name: "Attach" })).toBeNull();
+  });
+});
+
+/// Declaring a server from the menu, without going to the settings for it: the
+/// modal *Add a server…* opens, the save it makes through the settings endpoint,
+/// and the attach that follows it.
+describe("adding a server from the Attach menu", () => {
+  /// What a save that landed answers with: the settings holding `servers`.
+  function landed(servers: SettingsView["mcp_servers"]): SettingsSaved {
+    return {
+      settings: { ...SETTINGS, mcp_servers: servers },
+      verified: null,
+      refused: [],
+      refused_servers: [],
+      refused_sizes: [],
+      tried: [],
+    };
+  }
+
+  /// The modal, opened from the menu's last row.
+  async function openAdding(pane: HTMLElement): Promise<HTMLElement> {
+    const menu = await openMenu(pane);
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Add a server…" }));
+
+    return waitFor(() => screen.getByRole("dialog", { name: "Add an MCP server" }));
+  }
+
+  /// The press is a save of the whole list — every declaration as it stands,
+  /// each header kept, and the new one at the end — and then the attach of the
+  /// name it was saved under, which is what *confirmed* means here.
+  it("declares the server and attaches it to the Conversation", async () => {
+    const NEW = { name: "wiki", url: "https://mcp.example.com/wiki" };
+    const fetching = theWorkbench(
+      whenever(
+        "/api/ui/settings",
+        json(
+          landed([
+            ...SETTINGS.mcp_servers,
+            { ...NEW, headers: [{ name: "Authorization", set: true }] },
+          ]),
+        ),
+        "POST",
+      ),
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/mcp-servers/wiki`,
+        json("Attached"),
+        "POST",
+      ),
+    );
+
+    const pane = await openComposer();
+    const dialog = await openAdding(pane);
+
+    // And the menu goes with the press that opened the modal.
+    expect(screen.queryByRole("menu", { name: "Attach" })).toBeNull();
+
+    fireEvent.input(within(dialog).getByLabelText("Name"), {
+      target: { value: NEW.name },
+    });
+    fireEvent.input(within(dialog).getByLabelText("URL"), {
+      target: { value: NEW.url },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Add a header" }));
+    fireEvent.input(within(dialog).getByLabelText("Header"), {
+      target: { value: "Authorization" },
+    });
+    fireEvent.input(within(dialog).getByLabelText("Value"), {
+      target: { value: "Bearer abc" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Add server" }));
+
+    await waitFor(() =>
+      expect(
+        writes(fetching, `/api/ui/conversations/${OPEN.id}/mcp-servers/wiki`),
+      ).toHaveLength(1),
+    );
+
+    const [saved] = writes(fetching, "/api/ui/settings");
+    const body = JSON.parse(String(saved!.body)) as SettingsEdit;
+    expect(body.mcp_servers).toEqual({
+      Set: {
+        servers: [
+          ...SETTINGS.mcp_servers.map((one) => ({
+            name: one.name,
+            url: one.url,
+            headers: one.headers.map((header) => ({
+              name: header.name,
+              value: "Keep",
+            })),
+          })),
+          {
+            ...NEW,
+            headers: [{ name: "Authorization", value: { Set: { value: "Bearer abc" } } }],
+          },
+        ],
+      },
+    });
+    // And everything else on the settings left as it stands.
+    expect(body.github_token).toBe("Keep");
+    expect(body.ignored_comments).toBe("Keep");
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: "Add an MCP server" }),
+      ).toBeNull(),
+    );
+  });
+
+  /// A save turned down over the new declaration is said at the box it names,
+  /// in the modal, with what was typed left there — and nothing is attached.
+  it("says in the modal what the declaration was refused over", async () => {
+    const fetching = theWorkbench(
+      whenever(
+        "/api/ui/settings",
+        json({
+          ...landed(SETTINGS.mcp_servers),
+          refused_servers: [
+            {
+              server: SETTINGS.mcp_servers.length,
+              field: "Name",
+              why: "Another server is already called docs.",
+            },
+          ],
+        }),
+        "POST",
+      ),
+    );
+
+    const pane = await openComposer();
+    const dialog = await openAdding(pane);
+
+    fireEvent.input(within(dialog).getByLabelText("Name"), {
+      target: { value: "docs" },
+    });
+    fireEvent.input(within(dialog).getByLabelText("URL"), {
+      target: { value: "https://mcp.example.com/other" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Add server" }));
+
+    await waitFor(() =>
+      expect(dialog.textContent).toContain("Another server is already called docs."),
+    );
+    expect(
+      (within(dialog).getByLabelText("Name") as HTMLInputElement).value,
+    ).toBe("docs");
+    expect(
+      fetching.mock.calls.filter(
+        ([asked, init]) =>
+          String(asked).includes("/mcp-servers/") && init?.method === "POST",
+      ),
+    ).toHaveLength(0);
+  });
+
+  /// A server that did not answer when it was saved is still declared — it may
+  /// be reachable from inside a session's network and never from here — but the
+  /// card stays up to say so, with the attach one press further on, so a
+  /// mistyped URL is caught where it was typed.
+  it("holds the card open on a server that was not reached, until Attach anyway", async () => {
+    const NEW = { name: "wiki", url: "https://mcp.example.com/wikki" };
+    const fetching = theWorkbench(
+      whenever(
+        "/api/ui/settings",
+        json({
+          ...landed([...SETTINGS.mcp_servers, { ...NEW, headers: [] }]),
+          tried: [{ server: "wiki", outcome: { Refused: { why: "Nothing answered at that address." } } }],
+        }),
+        "POST",
+      ),
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/mcp-servers/wiki`,
+        json("Attached"),
+        "POST",
+      ),
+    );
+
+    const dialog = await openAdding(await openComposer());
+    fireEvent.input(within(dialog).getByLabelText("Name"), {
+      target: { value: NEW.name },
+    });
+    fireEvent.input(within(dialog).getByLabelText("URL"), {
+      target: { value: NEW.url },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Add server" }));
+
+    await waitFor(() =>
+      expect(dialog.textContent).toContain("Nothing answered at that address."),
+    );
+    expect(
+      writes(fetching, `/api/ui/conversations/${OPEN.id}/mcp-servers/wiki`),
+    ).toHaveLength(0);
+
+    // Pressable once the save has settled, which is a moment after its answer.
+    const anyway = await waitFor(() => {
+      const press = within(dialog).getByRole<HTMLButtonElement>("button", {
+        name: "Attach anyway",
+      });
+      expect(press.disabled).toBe(false);
+      return press;
+    });
+    fireEvent.click(anyway);
+
+    await waitFor(() =>
+      expect(
+        writes(fetching, `/api/ui/conversations/${OPEN.id}/mcp-servers/wiki`),
+      ).toHaveLength(1),
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: "Add an MCP server" }),
+      ).toBeNull(),
+    );
+  });
+
+  /// And trying again with the URL put right rewrites the declaration that was
+  /// just saved rather than declaring the name a second time, which the server
+  /// would refuse.
+  it("rewrites the declaration it saved on a try again", async () => {
+    let saves = 0;
+    const fetching = theWorkbench(
+      whenever(
+        "/api/ui/settings",
+        (init) => {
+          saves += 1;
+          const sent = JSON.parse(String(init!.body)) as SettingsEdit;
+          const servers =
+            sent.mcp_servers === "Keep" ? [] : sent.mcp_servers.Set.servers;
+          return json({
+            ...landed(
+              servers.map((one) => ({
+                name: one.name,
+                url: one.url,
+                headers: [],
+              })),
+            ),
+            tried:
+              saves === 1
+                ? [{ server: "wiki", outcome: { Refused: { why: "Nothing answered." } } }]
+                : [{ server: "wiki", outcome: { Reached: { named: null } } }],
+          })();
+        },
+        "POST",
+      ),
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/mcp-servers/wiki`,
+        json("Attached"),
+        "POST",
+      ),
+    );
+
+    const dialog = await openAdding(await openComposer());
+    fireEvent.input(within(dialog).getByLabelText("Name"), {
+      target: { value: "wiki" },
+    });
+    fireEvent.input(within(dialog).getByLabelText("URL"), {
+      target: { value: "https://mcp.example.com/wikki" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Add server" }));
+    await waitFor(() => expect(dialog.textContent).toContain("Nothing answered."));
+
+    fireEvent.input(within(dialog).getByLabelText("URL"), {
+      target: { value: "https://mcp.example.com/wiki" },
+    });
+    fireEvent.click(
+      await waitFor(() => within(dialog).getByRole("button", { name: "Try again" })),
+    );
+
+    await waitFor(() =>
+      expect(
+        writes(fetching, `/api/ui/conversations/${OPEN.id}/mcp-servers/wiki`),
+      ).toHaveLength(1),
+    );
+
+    const second = JSON.parse(
+      String(writes(fetching, "/api/ui/settings")[1]!.body),
+    ) as SettingsEdit;
+    const names =
+      second.mcp_servers === "Keep"
+        ? []
+        : second.mcp_servers.Set.servers.map((one) => [one.name, one.url]);
+    expect(names).toEqual([
+      ...SETTINGS.mcp_servers.map((one) => [one.name, one.url]),
+      ["wiki", "https://mcp.example.com/wiki"],
+    ]);
+  });
+
+  /// And Cancel leaves without saving anything.
+  it("saves nothing on Cancel", async () => {
+    const fetching = theWorkbench();
+
+    const dialog = await openAdding(await openComposer());
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: "Add an MCP server" }),
+      ).toBeNull(),
+    );
+    expect(writes(fetching, "/api/ui/settings")).toHaveLength(0);
   });
 });
 

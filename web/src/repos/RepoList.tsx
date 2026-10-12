@@ -88,7 +88,6 @@ import {
   type JSX,
 } from "solid-js";
 
-import { CardButton } from "../CardButton";
 import { Modal } from "../Modal";
 import { PaneSticky } from "../Panes";
 import { PathField } from "../PathField";
@@ -113,6 +112,7 @@ import { rowPress } from "../rows";
 import { useSettings } from "../settings/PathEditor";
 import { PaneHead } from "../workbench/PaneHead";
 import styles from "./RepoList.module.css";
+import { SettingsCard } from "../settings/SettingsCard";
 
 /// The ways a registration is answered with a sentence rather than a Repo.
 ///
@@ -206,15 +206,13 @@ export function ReposCard(props: {
       </Match>
       <Match when={repos.data}>
         {(registered) => (
-          <CardButton
-            as="article"
+          <SettingsCard
             class={styles.reposCard}
+            title="Repos"
             open={props.open}
             press={props.press}
-          >
-            <h2>Repos</h2>
-            <p class={styles.standing}>{counted(registered().length)}</p>
-          </CardButton>
+            status={counted(registered().length)}
+          />
         )}
       </Match>
     </Switch>
@@ -224,10 +222,10 @@ export function ReposCard(props: {
 /// How the card says how many there are, in English rather than as `1 repos`.
 function counted(many: number): string {
   if (many === 0) {
-    return "No repos are registered yet.";
+    return "None registered";
   }
 
-  return `${many} ${many === 1 ? "repo" : "repos"} registered.`;
+  return `${many} ${many === 1 ? "repo" : "repos"}`;
 }
 
 /// And every one of them by name, which is the details pane the card opens.

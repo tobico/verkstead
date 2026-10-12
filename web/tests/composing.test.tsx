@@ -35,6 +35,7 @@ import type {
   RepoEntry,
   RepoPairingsView,
   RepoView,
+  SettingsSaved,
   SettingsView,
   TakenUp,
   TargetRecorded,
@@ -2321,6 +2322,29 @@ describe("the agent control on a compose page", () => {
     await pickRepo(container, REPOS[1]!.id);
 
     await waitFor(() => expect(agentReads()).toBe("Opus 5 — opus +2"));
+  });
+
+  /// The count is never what gives way to a long name: the words are cut with an
+  /// ellipsis and the ` +N` stands beside them whole, outside the part that is
+  /// cut — a reading that lost its count to a long profile name would be saying
+  /// one account runs everything.
+  it("keeps the count out of the words a long name cuts", async () => {
+    theWorkbench(...REMEMBERED, json(null));
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await pickRepo(container, REPOS[1]!.id);
+    await waitFor(() => expect(agentReads()).toBe("Opus 5 — opus +2"));
+
+    const value = container.querySelector(
+      `.${setup.agentOption} > button .${setup.optionValue}`,
+    )!;
+    const words = value.querySelector(`.${setup.optionWords}`)!;
+    const count = value.querySelector(`.${setup.optionCount}`)!;
+
+    expect(words.textContent).toBe("Opus 5 — opus");
+    expect(count.textContent).toBe(" +2");
+    expect(words.contains(count)).toBe(false);
   });
 
   /// And says it once where there is nothing else to say: a role on the same
@@ -5060,13 +5084,14 @@ describe("the MCP servers a compose page holds", () => {
     expect(offeredIn(await attachMenu())).toEqual([
       "Attach file",
       ...SETTINGS.mcp_servers.map((one) => one.name),
+      "Add a server…",
     ]);
   });
 
-  /// And with nothing declared it is still a menu, with the way to the section
-  /// where a declaration is made — this page falling back to a plain button
-  /// would be the control the human had to learn twice, drawn twice.
-  it("holds Attach file and the way to the settings where none is declared", async () => {
+  /// And with nothing declared it is still a menu, with the way to declare one
+  /// — this page falling back to a plain button would be the control the human
+  /// had to learn twice, drawn twice.
+  it("holds Attach file and Add a server where none is declared", async () => {
     creating(whenever("/api/ui/settings", json(declaring())));
     const { container } = mount("/compose");
 
@@ -5074,13 +5099,56 @@ describe("the MCP servers a compose page holds", () => {
 
     expect(offeredIn(await attachMenu())).toEqual([
       "Attach file",
-      "Declare an MCP server…",
+      "Add a server…",
     ]);
-    expect(
-      screen
-        .getByRole("menuitem", { name: "Declare an MCP server…" })
-        .getAttribute("href"),
-    ).toBe("/settings/mcp-servers");
+  });
+
+  /// A server declared from the menu's card is held as a chip, as a pick is:
+  /// the declaration is saved — that is the settings, which exist — and the
+  /// attach waits for the press, there being no Conversation yet.
+  it("holds a server declared from the card as a chip", async () => {
+    const fetching = creating(
+      whenever(
+        "/api/ui/settings",
+        json({
+          settings: {
+            ...SETTINGS,
+            mcp_servers: [
+              ...SETTINGS.mcp_servers,
+              { name: "wiki", url: "https://mcp.example.com/wiki", headers: [] },
+            ],
+          },
+          verified: null,
+          refused: [],
+          refused_servers: [],
+          refused_sizes: [],
+          tried: [],
+        } satisfies SettingsSaved),
+        "POST",
+      ),
+    );
+    const { container } = mount("/compose");
+
+    await composing(container);
+    fireEvent.click(
+      within(await attachMenu()).getByRole("menuitem", { name: "Add a server…" }),
+    );
+
+    const dialog = await waitFor(() =>
+      screen.getByRole("dialog", { name: "Add an MCP server" }),
+    );
+    fireEvent.input(within(dialog).getByLabelText("Name"), {
+      target: { value: "wiki" },
+    });
+    fireEvent.input(within(dialog).getByLabelText("URL"), {
+      target: { value: "https://mcp.example.com/wiki" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Add server" }));
+
+    await waitFor(() => expect(chips(container)).toEqual(["wiki"]));
+    expect(writes(fetching, "/api/ui/settings")).toBe(1);
+    expect(writes(fetching, attach("wiki"))).toBe(0);
+    expect(stored().servers).toEqual(["wiki"]);
   });
 
   /// A pick draws its chip at once and nothing reaches the server: there is no
@@ -5112,7 +5180,11 @@ describe("the MCP servers a compose page holds", () => {
     await pickServer("docs");
     await waitFor(() => expect(chips(container)).toEqual(["docs"]));
 
-    expect(offeredIn(await attachMenu())).toEqual(["Attach file", "tickets"]);
+    expect(offeredIn(await attachMenu())).toEqual([
+      "Attach file",
+      "tickets",
+      "Add a server…",
+    ]);
     shutMenu();
 
     fireEvent.click(screen.getByRole("button", { name: "Remove docs" }));
@@ -5121,6 +5193,7 @@ describe("the MCP servers a compose page holds", () => {
     expect(offeredIn(await attachMenu())).toEqual([
       "Attach file",
       ...SETTINGS.mcp_servers.map((one) => one.name),
+      "Add a server…",
     ]);
   });
 

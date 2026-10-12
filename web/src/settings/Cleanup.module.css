@@ -10,29 +10,8 @@
    only what stands on it. */
 
 .cleanupCard {
-  margin-bottom: 1.5rem;
-}
-
-.cleanupCard h2 {
-  margin: 0 0 0.75rem;
-  font-size: 1.1rem;
-}
-
-/* What happens and when, a line apiece: the same quiet the build cache says
-   how it stands in. */
-.standing {
-  margin: 0 0 0.35rem;
-  font-size: 0.9rem;
-  color: var(--ink-soft);
-}
-
-.standing:last-of-type {
-  margin-bottom: 0;
-}
-
-.standing .days {
-  font-family: ui-monospace, SFMono-Regular, monospace;
-  color: var(--ink);
+  /* The look is `SettingsCard.module.css`'s; this names the card. */
+  min-width: 0;
 }
 
 /* The two durations read as a delete that lands first. Not an error and not a

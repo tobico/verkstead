@@ -1,0 +1,12 @@
+/* The Sandbox section — see `Sandbox.tsx`. The card is a `SettingsCard` and
+   named here only to be told apart; the pane is its two parts, a clear space
+   between them so each reads as its own. */
+.sandboxCard {
+  min-width: 0;
+}
+
+.parts {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}

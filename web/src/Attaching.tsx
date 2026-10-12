@@ -40,9 +40,11 @@
 //! files in it are attached, and it is not. A picker cannot offer one at all.
 //!
 //! **And the paperclip grows into a menu where the caller has more to offer at
-//! it.** The draft's composer offers the MCP servers declared in the settings,
-//! so its control is a menu whose first row is *Attach file* — the press this
-//! button always was — and whose others are the caller's. Where a caller offers
+//! it** — drawn as a plus then, a list of things to put on the work being no
+//! longer a picture of a file. The draft's composer offers the MCP servers
+//! declared in the settings, so its control is a menu whose first row is
+//! *Attach file* — the press this button always was — and whose others are the
+//! caller's. Where a caller offers
 //! nothing, which is the compose page and every answer sheet, it is the plain
 //! button it has always been. What the rows *are* is the caller's whole
 //! business: this knows there is a menu and not what is in it.
@@ -63,7 +65,7 @@
 
 import { For, Show, createSignal, type JSX } from "solid-js";
 
-import { faPaperclip, faPlug } from "@fortawesome/free-solid-svg-icons";
+import { faPaperclip, faPlug, faPlus } from "@fortawesome/free-solid-svg-icons";
 
 import styles from "./Attaching.module.css";
 import { Icon } from "./Icon";
@@ -473,9 +475,10 @@ function Attach(props: {
 /// itself. So a caller with nothing else to offer keeps the plain button, and
 /// nothing about attaching a file is written twice.
 ///
-/// The trigger is the same paperclip and is named *Attach* rather than *Attach a
-/// file*: what it opens is a list of things to attach, and one of them is a
-/// file.
+/// The trigger is a plus rather than the paperclip, and is named *Attach* rather
+/// than *Attach a file*: what it opens is a list of things to put on the work,
+/// and a file is only one of them. The paperclip stays the plain button's,
+/// which attaches a file and nothing else.
 ///
 /// The shut goes to the file row and to the caller's rows alike: every row here
 /// is a press that has done its work by the time it returns, and which of the
@@ -498,7 +501,7 @@ function AttachMenu(props: {
         label="Attach"
         name="Attach"
         closer={(close) => (shut = close)}
-        trigger={<Icon of={faPaperclip} />}
+        trigger={<Icon of={faPlus} />}
       >
         {() => (
           <>

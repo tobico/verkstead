@@ -56,7 +56,6 @@
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { Match, Show, Switch as Choose, createSignal, type JSX } from "solid-js";
 
-import { CardButton } from "../CardButton";
 import { Check, Nested } from "../Check";
 import { PaneSticky } from "../Panes";
 import { loadSettings, saveSettings } from "../api/client";
@@ -78,6 +77,7 @@ import {
   heldPaths,
 } from "./held";
 import styles from "./Cleanup.module.css";
+import { SettingsCard } from "./SettingsCard";
 
 /// The settings as they stand, read once for the two panes that draw them — the
 /// same read, by the same key, that every other section of this page makes.
@@ -87,23 +87,6 @@ function useSettings() {
     queryFn: loadSettings,
     freshness: { reconcile: "id" },
   }));
-}
-
-/// How one of the two steps stands, in a line: who it is about, what happens to
-/// them, and how long after the archiving.
-///
-/// The days are drawn as the number they are whether or not anybody typed them,
-/// because what the card answers is *when*, and the default is as much an answer
-/// to that as a choice would be.
-function standing(step: CleanupStepView, who: string, does: string): JSX.Element {
-  return (
-    <p class={styles.standing}>
-      <Show when={step.enabled} fallback={<>{who} are never {does}.</>}>
-        {who} are {does} <span class={styles.days}>{step.days} days</span> after
-        archiving.
-      </Show>
-    </p>
-  );
 }
 
 /// Whether the two durations read as a delete that arrives before the trim ever
@@ -132,6 +115,11 @@ function deletedFirstNote(): JSX.Element {
   );
 }
 
+/// One of the two steps, in the card's line: after how long, or never.
+function after(step: CleanupStepView, does: string): string {
+  return step.enabled ? `${does} after ${step.days} days` : `${does} never`;
+}
+
 /// What becomes of an archived Conversation, as the card that opens the
 /// section.
 export function CleanupCard(props: {
@@ -154,19 +142,16 @@ export function CleanupCard(props: {
       </Match>
       <Match when={settings.data?.cleanup}>
         {(cleanup) => (
-          <CardButton
-            as="article"
+          <SettingsCard
             class={styles.cleanupCard}
+            title="Cleanup"
             open={props.open}
             press={props.press}
-          >
-            <h2>Cleanup</h2>
-
-            {standing(cleanup().trim, "Archived conversations", "trimmed")}
-            {standing(cleanup().delete, "They", "deleted for good")}
-
-            <Show when={deletedFirst(cleanup())}>{deletedFirstNote()}</Show>
-          </CardButton>
+            status={`${after(cleanup().trim, "Trim")} · ${after(
+              cleanup().delete,
+              "delete",
+            )}`}
+          />
         )}
       </Match>
     </Choose>

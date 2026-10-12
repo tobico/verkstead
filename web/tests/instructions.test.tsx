@@ -34,6 +34,7 @@ import {
   InstructionsPane,
 } from "../src/settings/Instructions";
 import styles from "../src/settings/Instructions.module.css";
+import line from "../src/settings/SettingsCard.module.css";
 import { json, serving, whenever } from "./serving";
 import told from "./fixtures/settings.json" with { type: "json" };
 import unset from "./fixtures/settings-unset.json" with { type: "json" };
@@ -152,29 +153,37 @@ function theBox(): HTMLTextAreaElement {
   return screen.getByLabelText("Instructions") as HTMLTextAreaElement;
 }
 
+/// The status on the card, the one line at its far end saying how the section
+/// stands — or `null` where the card is not drawn yet.
+function theStatus(container: ParentNode): HTMLElement | null {
+  return container.querySelector<HTMLElement>(
+    `.${styles.instructionsCard} .${line.status}`,
+  );
+}
+
 describe("the card", () => {
   /// The one thing somebody scanning the page is after: whether there is a
-  /// text, and what it reaches either way.
-  it("says what the text reaches, and where it sits", async () => {
+  /// text. Said in one word on the card's line; what it reaches, and where it
+  /// sits against a repository's own, is the pane's to say.
+  it("says there is a text where one is configured", async () => {
     theSettings(TOLD);
-    mountCard();
+    const { container } = mountCard();
 
-    await waitFor(() => screen.getByText(/Given to every session/));
-    expect(screen.getByText(/Given to every session/).textContent).toContain(
-      "above whatever instructions its repository carries",
+    await waitFor(() =>
+      expect(theStatus(container)?.textContent).toBe("Configured"),
     );
   });
 
   /// And a Verkstead nobody has typed one into says so, rather than saying
   /// nothing: an empty section on a settings page reads as one that is broken.
+  /// Not as a warning, though — no text is an ordinary state, and nothing is
+  /// waiting on the human.
   it("says so where nobody has typed one", async () => {
     theSettings(UNSET);
-    mountCard();
+    const { container } = mountCard();
 
-    await waitFor(() => screen.getByText(/Nothing is configured/));
-    expect(screen.getByText(/Nothing is configured/).textContent).toContain(
-      "only what its repository carries",
-    );
+    await waitFor(() => expect(theStatus(container)?.textContent).toBe("None"));
+    expect(theStatus(container)!.classList).not.toContain(line.warn);
   });
 
   it("opens the pane on a press", async () => {
@@ -218,17 +227,18 @@ describe("the pane", () => {
     expect(screen.queryByText(/Could not read the settings/)).toBeNull();
   });
 
-  /// Both halves of what the section is for, said where somebody is about to
-  /// type into it: where the text goes, and what it does not displace.
-  it("says what the text reaches and what it leaves alone", async () => {
+  /// What the section is for, said where somebody is about to type into it —
+  /// in the one sentence it needs, and with room under it before the box.
+  it("says what the text is for, over the box", async () => {
     theSettings(TOLD);
     mountPane();
 
     const note = await waitFor(() =>
-      screen.getByText(/Given to every session as the agent's own/),
+      screen.getByText(
+        "Additional instructions for the agent to include in every initial prompt.",
+      ),
     );
-    expect(note.textContent).toContain("whatever agent its profile runs");
-    expect(note.textContent).toContain("read as it always was, under this");
+    expect(note.classList.contains(styles.lead!)).toBe(true);
   });
 
   /// The press sends the box, and everything else as the read left it — one

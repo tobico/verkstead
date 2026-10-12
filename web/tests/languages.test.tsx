@@ -1,12 +1,13 @@
-//! Language support on the settings page: which languages the card names, what
-//! the checkboxes in its pane put on the wire, and the link beside each one —
-//! what its cache holds — with the panel behind it holding the size and the
+//! The build caches on the settings page: what the checkboxes in the Build
+//! caches part of the Sandbox pane put on the wire, and the link beside each one
+//! — what its cache holds — with the panel behind it holding the size and the
 //! rest.
 //!
-//! Two halves mounted apart, because that is what they are: a card in the middle
-//! pane naming the languages that have build support on, and the controls that
-//! change them in the details pane it opens. Each is mounted on its own, and the
-//! pair together only where the round trip is what is being asked about.
+//! The part mounted on its own, as `BuildCaches`, because that is what it is:
+//! one of the two parts the Sandbox pane draws under its head. What the Sandbox
+//! card says of the caches — the warnings, and how many are on — and the pane
+//! that holds this part are `sandbox.test.tsx`'s, where the card and both
+//! parts are asked about together.
 //!
 //! **The page is drawn from what the server loaded**, so the fixture carries the
 //! descriptors Verkstead ships and one an installer wrote into `config.yaml`. A
@@ -39,13 +40,7 @@ import type {
   SettingsSaved,
   SettingsView,
 } from "../src/api/types";
-import card from "../src/CardButton.module.css";
-import {
-  LanguagesCard,
-  LanguagesPane,
-  bytesSaid,
-  usageSaid,
-} from "../src/settings/Languages";
+import { BuildCaches, bytesSaid, usageSaid } from "../src/settings/Languages";
 import styles from "../src/settings/Languages.module.css";
 import { type Answer, json, serving, whenever } from "./serving";
 import told from "./fixtures/settings.json" with { type: "json" };
@@ -139,9 +134,8 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-/// Whatever half of the section a test is about, over one query client: both
-/// halves read the same two files, so a test mounting the pair is reading them
-/// once, exactly as the page does.
+/// The part a test is about, over a query client of its own, as the page holds
+/// it.
 function mounting(what: () => JSX.Element) {
   const queries = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -152,19 +146,9 @@ function mounting(what: () => JSX.Element) {
   ));
 }
 
-/// The card in the middle pane, and what pressing it asked for.
-function mountCard(open = false) {
-  const press = vi.fn();
-  return {
-    ...mounting(() => <LanguagesCard open={open} press={press} />),
-    press,
-  };
-}
-
-/// The controls in the details pane, and what its way back asked for.
+/// The controls in the Build caches part of the Sandbox pane.
 function mountPane() {
-  const back = vi.fn();
-  return { ...mounting(() => <LanguagesPane back={back} />), back };
+  return mounting(() => <BuildCaches />);
 }
 
 function theSettings(standing: SettingsView, ...answers: Array<Answer>) {
@@ -196,17 +180,6 @@ function sent(fetching: ReturnType<typeof serving>): unknown {
 function languagesSent(fetching: ReturnType<typeof serving>) {
   return (sent(fetching) as { languages: Array<Record<string, unknown>> })
     .languages;
-}
-
-/// The card itself, once it is drawn — waited for, because it stands on a read.
-async function theCard(container: ParentNode): Promise<HTMLElement> {
-  return await waitFor(() => {
-    const face = container.querySelector<HTMLElement>(
-      `.${styles.languagesCard}`,
-    );
-    expect(face, "expected the card to be drawn").not.toBeNull();
-    return face!;
-  });
 }
 
 /// One of the boxes on the pane, by the label the server gave its language.
@@ -287,137 +260,18 @@ function measured(
 
 const GB = 2 ** 30;
 
-describe("the card", () => {
-  /// The summary is the list of languages that have build support on, in the
-  /// labels the descriptors gave them.
-  it("names every language that is on", async () => {
-    theSettings(compiling(TOLD));
-    const { container } = mountCard();
-
-    await waitFor(() =>
-      expect(container.querySelector(`.${styles.standing}`)?.textContent).toBe(
-        "Rust, Go, Node, Python, .NET, C/C++, JVM, Gleam",
-      ),
-    );
-  });
-
-  /// And the one an installer wrote goes when it is switched off, the same way
-  /// the built-in does: there is nothing about either that the card knows.
-  it("drops a language that is switched off", async () => {
-    theSettings(compiling(off(TOLD, GLEAM)));
-    const { container } = mountCard();
-
-    await waitFor(() =>
-      expect(container.querySelector(`.${styles.standing}`)?.textContent).toBe(
-        "Rust, Go, Node, Python, .NET, C/C++, JVM",
-      ),
-    );
-  });
-
-  /// And nothing at all under the heading where none are: a card saying a
-  /// machine builds nothing would be a line nobody needs.
-  it("says nothing under the heading while they are all off", async () => {
-    theSettings(
-      off(
-        off(
-          off(off(off(off(off(off(TOLD), GO), NODE), PYTHON), DOTNET), CPP),
-          JVM,
-        ),
-        GLEAM,
-      ),
-    );
-    const { container } = mountCard();
-
-    const face = await theCard(container);
-    expect(face.textContent).toBe("Language support");
-    expect(container.querySelector(`.${styles.standing}`)).toBeNull();
-  });
-
-  /// What the human cannot fix from the browser, said where they would
-  /// otherwise wonder why nothing got faster — and on the card rather than
-  /// only in the pane, because whoever needs to read it is whoever is not
-  /// editing.
-  it("warns when there is no sccache for the server to compile through", async () => {
-    theSettings(UNSET);
-    const { container } = mountCard();
-
-    await waitFor(() => screen.getByText(/No sccache is installed/));
-    const warning = container.querySelector(`.${styles.warning}`);
-    expect(warning).not.toBeNull();
-    expect(
-      warning!.textContent,
-      "C/C++ compiles through it too, and has no crates or downloads",
-    ).not.toMatch(/crate|download|dependenc/i);
-  });
-
-  /// And nothing about it while the languages that want one are switched off,
-  /// because a warning about a language's compiles is only true while there is
-  /// a language compiling. Both of them: C/C++
-  /// compiles through the same Compile Server, so it is uncached too.
-  it("says nothing about sccache while the languages that want one are off", async () => {
-    theSettings(off(off(UNSET), CPP));
-    const { container } = mountCard();
-
-    await theCard(container);
-    expect(screen.queryByText(/No sccache is installed/)).toBeNull();
-  });
-
-  it("says nothing about sccache where the server found one", async () => {
-    theSettings(compiling(UNSET));
-    mountCard();
-
-    await waitFor(() =>
-      screen.getByText("Rust, Go, Node, Python, .NET, C/C++, JVM"),
-    );
-    expect(screen.queryByText(/No sccache is installed/)).toBeNull();
-  });
-
-  /// And a language whose entry the server could not read, said here too: the
-  /// card is what somebody scanning the page sees, and a file that wants
-  /// editing is exactly the sort of thing they would want telling about.
-  it("names a language whose entry could not be read", async () => {
-    theSettings(unread(compiling(TOLD), GLEAM, "Nothing"));
-    const { container } = mountCard();
-
-    await waitFor(() =>
-      expect(container.querySelector(`.${styles.warning}`)?.textContent).toBe(
-        "Verkstead could not read what config.yaml says about Gleam.",
-      ),
-    );
-  });
-
-  it("opens the pane when it is pressed", async () => {
-    theSettings(TOLD);
-    const { container, press } = mountCard();
-
-    const face = await theCard(container);
-    fireEvent.click(face);
-
-    expect(press).toHaveBeenCalled();
-  });
-
-  it("reads as open while its pane is", async () => {
-    theSettings(TOLD);
-    const { container } = mountCard(true);
-
-    const face = await theCard(container);
-    expect(face.classList).toContain(card.open);
-    expect(face.getAttribute("aria-pressed")).toBe("true");
-  });
-
-  it("says so when the server could not be read at all", async () => {
-    serving(() =>
-      Promise.resolve(
-        new Response("nope", { status: 500, statusText: "Server Error" }),
-      ),
-    );
-    mountCard();
-
-    await waitFor(() => screen.getByText(/Could not read the settings/));
-  });
-});
-
 describe("the languages as the pane draws them", () => {
+  /// The part says what it is under a heading of its own, because the pane's
+  /// head is the Sandbox's and the binds stand beside it under theirs.
+  it("heads the part Build caches", async () => {
+    theSettings(TOLD);
+    const { container } = mountPane();
+
+    await waitFor(() => expect(theCheck().checked).toBe(true));
+    expect(container.querySelector("h3")?.textContent).toBe("Build caches");
+    expect(container.querySelector("h1")).toBeNull();
+  });
+
   /// A box per descriptor the server loaded, under the label it gave — the one
   /// an installer wrote included, which is the whole of what *the file only*
   /// comes to: they write `config.yaml` and the box is here next time.
@@ -506,7 +360,7 @@ describe("the languages as the pane draws them", () => {
   });
 
   /// Nothing about sccache at the foot of the pane: it is in the panels of the
-  /// languages it is about, and on the card.
+  /// languages it is about, and on the Sandbox card.
   it("says nothing about sccache at the foot of the pane", async () => {
     theSettings(UNSET);
     mountPane();
@@ -1313,31 +1167,6 @@ describe("changing the languages", () => {
     fireEvent.keyDown(document, { key: "Escape" });
     await opened("Go");
     expect(screen.getByText(/is not a size/)).toBeTruthy();
-  });
-
-  /// What the pane saved is what the card goes back to saying, because the
-  /// answer is a fresh read of the files that both halves are drawn from.
-  it("takes a language off the card when the pane unticks it", async () => {
-    theSettings(TOLD, json(answering(off(TOLD))));
-    const { container } = mounting(() => (
-      <>
-        <LanguagesCard open press={() => {}} />
-        <LanguagesPane back={() => {}} />
-      </>
-    ));
-
-    await waitFor(() => expect(theCheck().checked).toBe(true));
-    expect(container.querySelector(`.${styles.standing}`)?.textContent).toBe(
-      "Rust, Go, Node, Python, .NET, C/C++, JVM, Gleam",
-    );
-
-    fireEvent.click(theCheck());
-
-    await waitFor(() =>
-      expect(container.querySelector(`.${styles.standing}`)?.textContent).toBe(
-        "Go, Node, Python, .NET, C/C++, JVM, Gleam",
-      ),
-    );
   });
 
   /// A save that would not land keeps the page honest about it: a settings page

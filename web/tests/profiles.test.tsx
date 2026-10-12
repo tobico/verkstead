@@ -162,7 +162,7 @@ function picks(): HTMLElement[] {
 /// The memory switch, by the words beside it.
 function memorySwitch(): HTMLInputElement {
   return screen.getByRole("checkbox", {
-    name: /Share this account's memory/,
+    name: "Enable agent memory",
   }) as HTMLInputElement;
 }
 
@@ -694,6 +694,11 @@ describe("logging an account in", () => {
   const ADDRESS = "https://claude.com/cai/oauth/authorize?code=true&state=1";
   const LOGIN = `/api/ui/profiles/${FABLE.id}/login`;
 
+  /// The saved profiles with the first of them holding no login yet, which is
+  /// the account a card offers a login to — one logged in already says so
+  /// instead.
+  const SIGNED_OUT = [{ ...FABLE, login: false }, ...SAVED.slice(1)];
+
   /// What a POST to `path` was sent with, the last time it was made.
   const sentTo = (fetching: ReturnType<typeof serving>, path: string) => {
     const calls = fetching.mock.calls.filter(
@@ -703,8 +708,13 @@ describe("logging an account in", () => {
     return JSON.parse(String(calls.at(-1)![1]!.body)) as unknown;
   };
 
-  it("offers a login on a Claude account at home here", async () => {
-    serving(whenever("/api/ui/profiles", json(CLUSTER)));
+  it("offers a login on a Claude account at home here with none", async () => {
+    serving(
+      whenever(
+        "/api/ui/profiles",
+        json([{ ...CLUSTER[0]!, login: false }, ...CLUSTER.slice(1)]),
+      ),
+    );
     mountCards();
 
     await waitFor(() => screen.getByText(reads(MIRROR)));
@@ -712,6 +722,38 @@ describe("logging an account in", () => {
     expect(
       theCard(reads(CLUSTER[0]!)).querySelector("button")?.textContent,
     ).toBe("Log in");
+  });
+
+  /// One line, the way every section card on the page is: the reading at the
+  /// near end, and where it is logged in at the far one.
+  it("stands the reading and the login on one line", async () => {
+    serving(whenever("/api/ui/profiles", json(CLUSTER)));
+    mountCards();
+
+    await waitFor(() => screen.getByText(reads(MIRROR)));
+
+    const card = theCard(reads(CLUSTER[0]!));
+    const line = card.querySelector(`.${styles.line}`)!;
+
+    expect(line.querySelector(`.${styles.title}`)).not.toBeNull();
+    expect(line.querySelector(`.${styles.loggedIn}`)).not.toBeNull();
+  });
+
+  /// And says so instead where it is logged in already: a press that would only
+  /// log the same account in again is not one to offer, and *Logged in* is the
+  /// fact the button stood in the place of.
+  it("says an account here with a login is logged in, and offers none", async () => {
+    serving(whenever("/api/ui/profiles", json(CLUSTER)));
+    mountCards();
+
+    await waitFor(() => screen.getByText(reads(MIRROR)));
+
+    const card = theCard(reads(CLUSTER[0]!));
+    expect(CLUSTER[0]!.login).toBe(true);
+    expect(card.querySelector("button")).toBeNull();
+    expect(card.querySelector(`.${styles.loggedIn}`)?.textContent).toBe(
+      "Logged in",
+    );
   });
 
   /// A press found the account with no login: the card says so, and the
@@ -762,7 +804,7 @@ describe("logging an account in", () => {
 
   it("shows the address the login printed and hands it the code", async () => {
     const fetching = serving(
-      whenever("/api/ui/profiles", json(SAVED)),
+      whenever("/api/ui/profiles", json(SIGNED_OUT)),
       whenever(LOGIN, json({ state: "Starting" }), "POST"),
       whenever(LOGIN, json({ state: "Waiting", url: ADDRESS, refused: null })),
       whenever(`${LOGIN}/code`, json({ state: "Checking" }), "POST"),
@@ -798,7 +840,7 @@ describe("logging an account in", () => {
     let refused = false;
 
     serving(
-      whenever("/api/ui/profiles", json(SAVED)),
+      whenever("/api/ui/profiles", json(SIGNED_OUT)),
       whenever(LOGIN, json({ state: "Starting" }), "POST"),
       whenever(LOGIN, () =>
         json(
@@ -841,7 +883,7 @@ describe("logging an account in", () => {
 
   it("tells the server this device has stopped looking when it closes", async () => {
     const fetching = serving(
-      whenever("/api/ui/profiles", json(SAVED)),
+      whenever("/api/ui/profiles", json(SIGNED_OUT)),
       whenever(LOGIN, json({ state: "Waiting", url: ADDRESS, refused: null }), "POST"),
       whenever(LOGIN, json({ state: "Waiting", url: ADDRESS, refused: null })),
       whenever(`${LOGIN}/close`, () =>
@@ -862,7 +904,7 @@ describe("logging an account in", () => {
 
   it("says why a login ended without one, and starts another on Try again", async () => {
     const fetching = serving(
-      whenever("/api/ui/profiles", json(SAVED)),
+      whenever("/api/ui/profiles", json(SIGNED_OUT)),
       whenever(LOGIN, json({ state: "Starting" }), "POST"),
       whenever(
         LOGIN,
@@ -1131,6 +1173,19 @@ describe("the pane a card opens", () => {
         memory: true,
       }),
     );
+  });
+
+  /// The tick is laid out as every other on/off control on the page is, with its
+  /// gap between the box and the words — the form's own rule for the labels
+  /// over its fields is not what draws it.
+  it("draws the memory tick as a tick, its words beside the box", async () => {
+    serving(whenever("/api/ui/profiles", json(SAVED)));
+    mountPane(FABLE.id);
+
+    const tick = await waitFor(() => memorySwitch());
+    const row = tick.closest("label")!;
+
+    expect(row.parentElement!.classList.contains(styles.memory!)).toBe(true);
   });
 
   /// The switch reads as the profile was saved, and a rewrite sends it back

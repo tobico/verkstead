@@ -75,11 +75,11 @@ describe("the title bar", () => {
 });
 
 describe("the overlay's band", () => {
-  /// The head's band at a sixteen-pixel root: a rem and a quarter of chrome
-  /// padding less the rem the head hangs back up into it, the head's rem above
-  /// the row and its rem below, and a row as tall as the icon buttons in it.
-  it("stands about as tall as a pane head", () => {
-    expect(BAND).toBe(75);
+  /// The head's band at a sixteen-pixel root, which is a GNOME header bar's: six
+  /// pixels of paper above the row and six below it, and a row as tall as the
+  /// thirty-four-pixel buttons standing in it.
+  it("stands as tall as a header bar", () => {
+    expect(BAND).toBe(46);
   });
 
   /// Electron measures the overlay in whole pixels, and a fraction handed to it
@@ -92,11 +92,10 @@ describe("the overlay's band", () => {
 });
 
 describe("the row the head's title stands in", () => {
-  /// The front of the band's own sum, at a sixteen-pixel root: a rem and a quarter
-  /// of chrome padding less the rem the head hangs back up into it, the head's rem
-  /// above its row, and half of the row itself.
-  it("has its middle about forty pixels down the window", () => {
-    expect(MIDDLE).toBe(39);
+  /// The front of the band's own sum, at a sixteen-pixel root: the six pixels of
+  /// paper above the row, and half of the row itself.
+  it("has its middle about twenty-three pixels down the window", () => {
+    expect(MIDDLE).toBe(23);
   });
 
   /// Whole pixels and above nothing, the same as the band: this is half of a point
@@ -106,14 +105,12 @@ describe("the row the head's title stands in", () => {
     expect(MIDDLE).toBeGreaterThan(0);
   });
 
-  /// And it is not the middle of the band, which is the whole reason it crosses the
-  /// bridge at all: the band carries the head's rem *below* the row and a quarter
-  /// rem of chrome above it, so its middle sits a couple of pixels higher than the
-  /// row's. Lights centred on the band would be lights centred on nothing a head
-  /// draws.
-  it("sits below the middle of the band, rather than at it", () => {
-    expect(MIDDLE).toBeGreaterThan(BAND / 2);
-    expect(MIDDLE).toBeLessThan(BAND);
+  /// And at the middle of the band, the head having as much paper under its row as
+  /// over it — so a Mac's lights and the other platforms' overlay are centred on
+  /// one line. Still a value of its own, because the page is what says where the
+  /// row is, and a head drawn otherwise would part the two again.
+  it("sits at the middle of the band", () => {
+    expect(MIDDLE).toBe(BAND / 2);
   });
 });
 
@@ -130,7 +127,7 @@ describe("where a Mac's traffic lights go", () => {
   /// the inset the platform draws its corner at.
   it("centres them on the row the page said it drew", () => {
     expect(lights(PUSHED)).toEqual({ x: INSET, y: PUSHED.middle - LIGHTS / 2 });
-    expect(lights(OPENS)).toEqual({ x: 20, y: 31 });
+    expect(lights(OPENS)).toEqual({ x: 20, y: 15 });
   });
 
   /// And it follows the head rather than a constant: a page drawn at a larger text
@@ -197,8 +194,8 @@ describe("what the window opens wearing", () => {
   /// see `band` and `middle` in `web/src/head.ts`, and that suite for the other
   /// half of this.
   it("is what the head's band and row come to at a sixteen-pixel root", () => {
-    expect(OPENS.band).toBe(75);
-    expect(OPENS.middle).toBe(39);
+    expect(OPENS.band).toBe(46);
+    expect(OPENS.middle).toBe(23);
   });
 });
 
@@ -243,7 +240,7 @@ describe("a head pushed over the bridge", () => {
 
   /// And the row's middle the same way, for the same reason: a point is whole
   /// pixels, and the page's arithmetic against its own rem lands where it lands —
-  /// the row's middle at a sixteen-pixel root is thirty-nine and two fifths.
+  /// on a fraction at any root but the one it is written at.
   it("has its row's middle rounded the same way", () => {
     expect(worn({ ...PUSHED, middle: 39.4 })?.middle).toBe(39);
     expect(worn({ ...PUSHED, middle: 48.5 })?.middle).toBe(49);

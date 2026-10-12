@@ -945,7 +945,20 @@ export function dropping(props: {
     if (!rows) return;
 
     const anchor = (props.box?.() ?? props.anchor()).getBoundingClientRect();
+
     const drop = rows.getBoundingClientRect();
+
+    // The height the rows ask for: what they stand at — or, on a sheet that
+    // grows to the room the window has (`--grows`, beside `--room` below), the
+    // whole of what is in them, which the room the last measure left them may be
+    // hiding. Read off the content rather than by taking that room away for a
+    // moment: a box made too short to scroll, however briefly, is one whose
+    // scroll the browser throws away, and this runs on every scroll — the rows'
+    // own included.
+    const grows = getComputedStyle(rows).getPropertyValue("--grows").trim() !== "";
+    const asked = grows
+      ? rows.scrollHeight + rows.offsetHeight - rows.clientHeight
+      : drop.height;
 
     // Over the anchor only where the rows do not fit under it, and then only
     // where there is more room over it: the ordinary way round is the one to be
@@ -954,7 +967,7 @@ export function dropping(props: {
     // nothing about *which* rows — the list is capped and scrolls from its top
     // either way.
     const over =
-      anchor.bottom + drop.height > window.innerHeight &&
+      anchor.bottom + asked > window.innerHeight &&
       anchor.top > window.innerHeight - anchor.bottom;
 
     // How wide the rows will stand: the anchor's width, which is what they are
@@ -974,6 +987,20 @@ export function dropping(props: {
       GUTTER,
       Math.min(anchor.left, window.innerWidth - width - GUTTER),
     );
+
+    // And how much of the window there is on the side they hang, for a sheet
+    // that lets a list grow past the ordinary cap — the Process control's,
+    // whose few rows each carry a sentence and are meant to be read whole
+    // rather than scrolled. Capped by this instead, so a short window still
+    // scrolls them rather than hanging them off its edge. Such a sheet says
+    // so with `--grows`, which is what has the measure above read the rows'
+    // whole height rather than the height this leaves them. A property of the
+    // box rather than one of `placing`'s, so that it is written by the measure
+    // that worked it out and by nothing else.
+    const room = over
+      ? anchor.top - 2 * GUTTER
+      : window.innerHeight - anchor.bottom - 2 * GUTTER;
+    rows.style.setProperty("--room", `${Math.max(0, room)}px`);
 
     setAbove(over);
     setPlacing({

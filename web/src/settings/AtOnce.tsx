@@ -1,4 +1,5 @@
-//! How much Verkstead runs at once, on the settings page: how many stages of one
+//! How much Verkstead runs at once — the **Scheduling** section of the settings
+//! page, whose limits are its **Concurrency** part: how many stages of one
 //! roadmap may be under way together, and how many Conversations take a place
 //! across the whole server.
 //!
@@ -34,7 +35,7 @@
 //!
 //! Two halves in two panes, like every section beside it: a card in the middle
 //! pane saying how much runs at once, and the fields that change it in the
-//! details pane it opens, at `/settings/at-once`. Both read the one settings
+//! details pane it opens, at `/settings/scheduling`. Both read the one settings
 //! query the rest of the page reads, and the save goes through the one settings
 //! endpoint — so the author, the token and the rest ride along as they stand.
 //!
@@ -53,9 +54,14 @@
 //! refused and the line says what a number here can be.
 
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
-import { Match, Show, Switch as Choose, createSignal, type JSX } from "solid-js";
+import {
+  Match,
+  Show,
+  Switch as Choose,
+  createSignal,
+  type JSX,
+} from "solid-js";
 
-import { CardButton } from "../CardButton";
 import { PaneSticky } from "../Panes";
 import { loadSettings, saveSettings } from "../api/client";
 import type {
@@ -74,9 +80,10 @@ import {
   heldPaths,
 } from "./held";
 import styles from "./AtOnce.module.css";
+import { SettingsCard } from "./SettingsCard";
 
 /// What the section is called, in the one place both panes read it from.
-const TITLE = "How much runs at once";
+const TITLE = "Scheduling";
 
 /// The settings as they stand, read once for the two panes that draw them — the
 /// same read, by the same key, that every other section of this page makes.
@@ -86,6 +93,12 @@ function useSettings() {
     queryFn: loadSettings,
     freshness: { reconcile: "id" },
   }));
+}
+
+/// A count with the word it counts, so the line reads `1 stage` rather than
+/// `1 stages`.
+function counted(many: number, one: string): string {
+  return `${many} ${one}${many === 1 ? "" : "s"}`;
 }
 
 /// How much Verkstead runs at once, as the card that opens the section.
@@ -109,56 +122,16 @@ export function AtOnceCard(props: {
       </Match>
       <Match when={settings.data?.at_once}>
         {(atOnce) => (
-          <CardButton
-            as="article"
+          <SettingsCard
             class={styles.atOnceCard}
+            title={TITLE}
             open={props.open}
             press={props.press}
-          >
-            <h2>{TITLE}</h2>
-
-            {/* Both numbers drawn whether or not anybody chose them, the way the
-                Cleanup's durations are: what the card answers is *how many*, and
-                a default is as much an answer to that as a choice would be.
-                In the words that agree with each — one is the number somebody is
-                most likely to have set, and *up to 1 stages* would say nobody
-                read the line back. */}
-            <p class={styles.standing}>
-              <Show
-                when={atOnce().roadmap_stages === 1}
-                fallback={
-                  <>
-                    Up to{" "}
-                    <span class={styles.places}>
-                      {atOnce().roadmap_stages} stages
-                    </span>{" "}
-                    of one roadmap at a time.
-                  </>
-                }
-              >
-                <span class={styles.places}>One stage</span> of one roadmap at a
-                time.
-              </Show>
-            </p>
-
-            <p class={styles.standing}>
-              <Show
-                when={atOnce().conversations === 1}
-                fallback={
-                  <>
-                    Up to{" "}
-                    <span class={styles.places}>
-                      {atOnce().conversations} conversations
-                    </span>{" "}
-                    across the whole server.
-                  </>
-                }
-              >
-                <span class={styles.places}>One conversation</span> across the
-                whole server.
-              </Show>
-            </p>
-          </CardButton>
+            status={`${counted(atOnce().roadmap_stages, "stage")} · ${counted(
+              atOnce().conversations,
+              "conversation",
+            )}`}
+          />
         )}
       </Match>
     </Choose>
@@ -319,93 +292,99 @@ export function AtOncePane(props: {
         </Match>
         <Match when={atOnce()}>
           {(set) => (
-            <form class={styles.atOnce} onSubmit={commit}>
-              {/* The one thing about these numbers a human cannot work out from
+            // The limits are the Concurrency part of Scheduling: under a
+            // heading of their own, so what else is said about when work runs
+            // has a part of its own to stand in beside them.
+            <section class={styles.part}>
+              <h3>Concurrency</h3>
+              <form class={styles.atOnce} onSubmit={commit}>
+                {/* The one thing about these numbers a human cannot work out from
                   them: which work is counted. A stage nobody is waiting on and a
                   stage waiting on an answer take a place alike, so a roadmap — or
                   a whole server — can be holding all of them without anything
                   running. */}
-              <Note>
-                Every stage that is under way holds a place, including one
-                waiting on an answer from you, and so does every conversation
-                with a session running or a run being driven. A change takes
-                effect at the next start and stops nothing already running.
-              </Note>
+                <Note>
+                  Every stage that is under way holds a place, including one
+                  waiting on an answer from you, and so does every conversation
+                  with a session running or a run being driven. A change takes
+                  effect at the next start and stops nothing already running.
+                </Note>
 
-              <label for="at-once-roadmap-stages">
-                Stages of one roadmap at once
-              </label>
-              <div class={styles.field}>
-                <input
-                  id="at-once-roadmap-stages"
-                  type="text"
-                  inputmode="numeric"
-                  autocapitalize="off"
-                  autocorrect="off"
-                  spellcheck={false}
-                  // The default, so an empty box reads as the number nobody has
-                  // chosen rather than as no number at all.
-                  placeholder={String(set().roadmap_stages)}
-                  value={stages()}
-                  disabled={save.isPending}
-                  onInput={(ev) => setStagesTyped(ev.currentTarget.value)}
-                />
-                <button type="submit" disabled={save.isPending}>
-                  Save
-                </button>
-              </div>
+                <label for="at-once-roadmap-stages">
+                  Stages of one roadmap at once
+                </label>
+                <div class={styles.field}>
+                  <input
+                    id="at-once-roadmap-stages"
+                    type="text"
+                    inputmode="numeric"
+                    autocapitalize="off"
+                    autocorrect="off"
+                    spellcheck={false}
+                    // The default, so an empty box reads as the number nobody has
+                    // chosen rather than as no number at all.
+                    placeholder={String(set().roadmap_stages)}
+                    value={stages()}
+                    disabled={save.isPending}
+                    onInput={(ev) => setStagesTyped(ev.currentTarget.value)}
+                  />
+                  <button type="submit" disabled={save.isPending}>
+                    Save
+                  </button>
+                </div>
 
-              <Show when={stagesTrouble()}>
-                {(why) => (
-                  <ErrorLine class={styles.failure}>{why()}</ErrorLine>
-                )}
-              </Show>
+                <Show when={stagesTrouble()}>
+                  {(why) => (
+                    <ErrorLine class={styles.failure}>{why()}</ErrorLine>
+                  )}
+                </Show>
 
-              <label for="at-once-conversations">
-                Conversations across the whole server
-              </label>
-              <div class={styles.field}>
-                <input
-                  id="at-once-conversations"
-                  type="text"
-                  inputmode="numeric"
-                  autocapitalize="off"
-                  autocorrect="off"
-                  spellcheck={false}
-                  placeholder={String(set().conversations)}
-                  value={conversations()}
-                  disabled={save.isPending}
-                  onInput={(ev) => setServerTyped(ev.currentTarget.value)}
-                />
-                <button type="submit" disabled={save.isPending}>
-                  Save
-                </button>
-              </div>
+                <label for="at-once-conversations">
+                  Conversations across the whole server
+                </label>
+                <div class={styles.field}>
+                  <input
+                    id="at-once-conversations"
+                    type="text"
+                    inputmode="numeric"
+                    autocapitalize="off"
+                    autocorrect="off"
+                    spellcheck={false}
+                    placeholder={String(set().conversations)}
+                    value={conversations()}
+                    disabled={save.isPending}
+                    onInput={(ev) => setServerTyped(ev.currentTarget.value)}
+                  />
+                  <button type="submit" disabled={save.isPending}>
+                    Save
+                  </button>
+                </div>
 
-              <Show when={serverTrouble()}>
-                {(why) => (
-                  <ErrorLine class={styles.failure}>{why()}</ErrorLine>
-                )}
-              </Show>
+                <Show when={serverTrouble()}>
+                  {(why) => (
+                    <ErrorLine class={styles.failure}>{why()}</ErrorLine>
+                  )}
+                </Show>
 
-              {/* What the limit above is measured against, beside it: a server
+                {/* What the limit above is measured against, beside it: a server
                   holding every place starts nothing more until one comes free,
                   and this is what says so rather than leaving it to look like a
                   stall. As of the read this pane was drawn from — it can stand
                   above the limit, a press going ahead over it. */}
-              <p class={styles.taken}>
-                <span class={styles.places}>
-                  {set().places_taken} of {set().conversations}
-                </span>{" "}
-                taken when this was read.
-              </p>
+                <p class={styles.taken}>
+                  <span class={styles.places}>
+                    {set().places_taken} of {set().conversations}
+                  </span>{" "}
+                  taken when this was read.
+                </p>
 
-              <Show when={save.isError}>
-                <ErrorLine class={styles.failure}>
-                  The settings could not be saved: {save.error?.message}
-                </ErrorLine>
-              </Show>
-            </form>
+                <Show when={save.isError}>
+                  <ErrorLine class={styles.failure}>
+                    The settings could not be saved: {save.error?.message}
+                  </ErrorLine>
+                </Show>
+              </form>
+            </section>
           )}
         </Match>
       </Choose>

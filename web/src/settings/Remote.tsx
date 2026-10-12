@@ -181,12 +181,12 @@ import {
   type JSX,
 } from "solid-js";
 
-import { faHourglassHalf } from "@fortawesome/free-solid-svg-icons";
+import { faChevronDown, faHourglassHalf } from "@fortawesome/free-solid-svg-icons";
 
-import { CardButton } from "../CardButton";
 import { Check } from "../Check";
 import { Copy } from "../Copy";
 import { Icon } from "../Icon";
+import { Menu } from "../Menu";
 import { Modal } from "../Modal";
 import { PaneSticky } from "../Panes";
 import {
@@ -215,6 +215,7 @@ import { Empty, ErrorLine, Note } from "../notices";
 import { PaneHead } from "../workbench/PaneHead";
 import { Qr } from "./Qr";
 import styles from "./Remote.module.css";
+import { SettingsCard } from "./SettingsCard";
 
 /// Where a machine with no Tailscale on it gets one. The one thing this section
 /// has to say that nothing on this page can do.
@@ -363,56 +364,27 @@ function useDiscovered() {
 /// Counted off the rows the list draws rather than answered beside them, so the
 /// sentence and the list cannot come to disagree about one membership.
 function linked(count: number): string {
-  if (count === 0) return "No other devices are linked.";
-  if (count === 1) return "One other device is linked.";
+  if (count === 0) return "no devices linked";
 
-  return `${count} other devices are linked.`;
+  return `${count} ${count === 1 ? "device" : "devices"} linked`;
 }
 
-/// How things stand, in the one line somebody scanning the page is after.
-///
-/// The card's line, and the card's alone: the pane below it is the controls
-/// themselves, and a box that is ticked has already said that the workbench is
-/// served.
-function standing(told: RemoteView): JSX.Element {
-  return (
-    <Choose>
-      <Match when={absent(told)}>
-        No Tailscale on this machine, so the workbench is reachable only from
-        the machine it runs on.
-      </Match>
-      <Match when={down(told)}>
-        Tailscale is installed here and not up, so there is no tailnet address
-        to reach the workbench at.
-      </Match>
-      <Match when={unreadable(told)}>
-        Tailscale answered in a way this build could not read, so what it is
-        doing cannot be told from here.
-      </Match>
-      <Match when={up(told)} keyed>
-        {(here) => (
-          <Choose>
-            <Match when={serving(here.serve)} keyed>
-              {(on) => (
-                <>
-                  Served to the tailnet at{" "}
-                  <span class={styles.address}>{on.address}</span>.
-                </>
-              )}
-            </Match>
-            <Match when={here.serve.serve === "Off"}>
-              On the tailnet as <span class={styles.address}>{here.node}</span>,
-              with the workbench not served to it.
-            </Match>
-            <Match when={here.serve.serve === "Unreadable"}>
-              On the tailnet as <span class={styles.address}>{here.node}</span>.
-              What is served to it could not be read.
-            </Match>
-          </Choose>
-        )}
-      </Match>
-    </Choose>
-  );
+/// What the card says about Tailscale, in a few words: where the workbench is
+/// served, or why it is not.
+function summary(told: RemoteView): string {
+  if (absent(told)) return "No Tailscale";
+  if (down(told)) return "Tailscale is down";
+  if (unreadable(told)) return "Tailscale unreadable";
+
+  const here = up(told);
+  if (here === null) return "";
+
+  const on = serving(here.serve);
+  // The host alone: the scheme is the same on every tailnet, and the line has
+  // the devices to say after it.
+  if (on) return on.address.replace(/^https?:\/\//, "");
+
+  return here.serve.serve === "Off" ? "Not served" : "Serve unreadable";
 }
 
 /// How this machine is reached, as the card that opens the section.
@@ -437,27 +409,20 @@ export function RemoteCard(props: {
       </Match>
       <Match when={remote.data}>
         {(told) => (
-          <CardButton
-            as="article"
+          <SettingsCard
             class={styles.remoteCard}
+            title="Remote access"
             open={props.open}
             press={props.press}
-          >
-            <h2>Remote access</h2>
-
-            {/* The Tailscale sentence and the devices clause in the one line,
-                the clause after whichever of the six the machine turned out to
-                be: it is true of every one of them, so it follows all of them
-                rather than being written into one. Absent until the devices
-                read lands, and absent for good if it fails — what Tailscale is
-                doing is still worth saying on its own. */}
-            <p class={styles.standing}>
-              {standing(told())}{" "}
-              <Show when={devices.data}>
-                {(here) => <>{linked(here().members.length)}</>}
-              </Show>
-            </p>
-          </CardButton>
+            status={
+              <>
+                {summary(told())}
+                <Show when={devices.data}>
+                  {(here) => <> · {linked(here().members.length)}</>}
+                </Show>
+              </>
+            }
+          />
         )}
       </Match>
     </Choose>
@@ -1284,6 +1249,14 @@ function Waiting(props: { on: PendingJoin; fingerprint: string }): JSX.Element {
 /// port unless its host was told another, and the human should not have to know
 /// which that is. One typed with a port is asked at it.
 ///
+/// **Behind a dropdown rather than standing open**: the pane reads what the
+/// machine is, and a field under the list for good was the one form on it that
+/// most visits had no use for. So *Link another device* is a link-styled
+/// trigger, and the box, the press and the line about what happens next are a
+/// panel under it — which shuts once the press goes through, the row it asked
+/// for being on the pane by then, and stays down over a refusal, that being the
+/// only place the refusal has to be said in.
+///
 /// What the press answers with is the section read again, so the pending row
 /// arrives out of this answer rather than out of a second request. A refusal is
 /// drawn in the words the dial put it in: a machine that is off, an address
@@ -1293,11 +1266,15 @@ function Add(): JSX.Element {
   const queries = useQueryClient();
   const [typed, setTyped] = createSignal("");
 
+  // The panel's own way to shut, handed over as it is built.
+  let shut = (): void => {};
+
   const ask = useMutation(() => ({
     mutationFn: (address: string) => addDevice(address),
     onSuccess: (reading: DevicesView) => {
       queries.setQueryData(["devices"], reading);
       setTyped("");
+      shut();
     },
   }));
 
@@ -1309,40 +1286,58 @@ function Add(): JSX.Element {
   };
 
   return (
-    <form class={styles.adding} onSubmit={press}>
-      <label for="link-address">Link another device</label>
+    <Menu
+      panel
+      class={styles.adding!}
+      name="Link another device"
+      closer={(close) => (shut = close)}
+      trigger={
+        <>
+          Link another device
+          {/* Which way the panel comes down, and no part of what the link
+              says. */}
+          <Icon of={faChevronDown} />
+        </>
+      }
+    >
+      {() => (
+        <form class={styles.linking} onSubmit={press}>
+          <label for="link-address">Address</label>
 
-      <div class={styles.field}>
-        <input
-          id="link-address"
-          type="text"
-          autocapitalize="off"
-          autocorrect="off"
-          spellcheck={false}
-          placeholder="hostname or address"
-          value={typed()}
-          disabled={ask.isPending}
-          onInput={(ev) => setTyped(ev.currentTarget.value)}
-        />
-        <button
-          type="submit"
-          disabled={ask.isPending || typed().trim().length === 0}
-        >
-          {ask.isPending ? "Asking…" : "Add"}
-        </button>
-      </div>
+          <div class={styles.field}>
+            <input
+              id="link-address"
+              type="text"
+              autocapitalize="off"
+              autocorrect="off"
+              spellcheck={false}
+              placeholder="hostname or address"
+              value={typed()}
+              disabled={ask.isPending}
+              onInput={(ev) => setTyped(ev.currentTarget.value)}
+            />
+            <button
+              type="submit"
+              disabled={ask.isPending || typed().trim().length === 0}
+            >
+              {ask.isPending ? "Asking…" : "Add"}
+            </button>
+          </div>
 
-      <Note>
-        Asks that device to link with this one. Somebody has to allow it there,
-        and the fingerprint shown here is what they will be comparing against.
-      </Note>
+          <Note>
+            Asks that device to link with this one. Somebody has to allow it
+            there, and the fingerprint shown here is what they will be comparing
+            against.
+          </Note>
 
-      <Show when={ask.isError}>
-        <ErrorLine class={styles.failure}>
-          The device could not be asked: {ask.error?.message}
-        </ErrorLine>
-      </Show>
-    </form>
+          <Show when={ask.isError}>
+            <ErrorLine class={styles.failure}>
+              The device could not be asked: {ask.error?.message}
+            </ErrorLine>
+          </Show>
+        </form>
+      )}
+    </Menu>
   );
 }
 

@@ -10,37 +10,25 @@
    only what stands on it. */
 
 .atOnceCard {
-  margin-bottom: 1.5rem;
-}
-
-.atOnceCard h2 {
-  margin: 0 0 0.75rem;
-  font-size: 1.1rem;
-}
-
-/* How much, a line each: the same quiet the sections around it say how they
-   stand in. */
-.standing {
-  margin: 0;
-  font-size: 0.9rem;
-  color: var(--ink-soft);
-}
-
-.standing + .standing {
-  margin-top: 0.3rem;
-}
-
-/* The number itself in the face a number is read in here, the way the Cleanup's
-   durations are drawn on their own card. */
-.standing .places {
-  font-family: ui-monospace, SFMono-Regular, monospace;
-  color: var(--ink);
+  /* The look is `SettingsCard.module.css`'s; this names the card. */
+  min-width: 0;
 }
 
 /* And the details pane: the line about what holds a place, then a field and a
    press each. */
 .atOnce {
   margin-top: 0.85rem;
+}
+
+/* The Concurrency part of the Scheduling pane, headed as a part of a pane is
+   on the Git and Sandbox panes. */
+.part {
+  margin-top: 0.85rem;
+}
+
+.part h3 {
+  margin: 0;
+  font-size: 1rem;
 }
 
 .atOnce label {

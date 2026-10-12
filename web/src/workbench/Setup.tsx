@@ -467,11 +467,14 @@ export function RepoOptions(props: {
           <span class={styles.optionLabel}>Repo</span>
           <span class={styles.optionLine}>
             <span class={styles.optionValue}>
-              {props.name}
+              <span class={styles.optionWords}>{props.name}</span>
               {/* The companions counted rather than named: the row is one line
                   and the names are inside the panel, where they can be read
-                  beside what the work will do with them. */}
-              <Show when={props.alongside}>{(many) => <> +{many()}</>}</Show>
+                  beside what the work will do with them. Beside the name rather
+                  than in it, so a long one is cut and the count never is. */}
+              <Show when={props.alongside}>
+                {(many) => <span class={styles.optionCount}> +{many()}</span>}
+              </Show>
             </span>
           </span>
           {/* Which way the panel comes down, beside the label and the value
@@ -1412,12 +1415,16 @@ export function AgentOptions(props: {
                   choice, so the trigger and the panel read as one thing. */}
               <HarnessMark of={shown().mark} />
               <span class={styles.optionValue}>
-                {shown().words}
+                <span class={styles.optionWords}>{shown().words}</span>
                 {/* The other roles counted rather than named, which is the Repo
                     trigger's own convention for the companions beside it: the
                     row is one line, and what each role is on is inside the
-                    panel. */}
-                <Show when={shown().also}>{(many) => <> +{many()}</>}</Show>
+                    panel. Beside the words rather than in them, for that
+                    trigger's reason: a long profile name is cut, and the count
+                    never is. */}
+                <Show when={shown().also}>
+                  {(many) => <span class={styles.optionCount}> +{many()}</span>}
+                </Show>
               </span>
             </span>
             {/* Which way the panel comes down, beside the label and the value

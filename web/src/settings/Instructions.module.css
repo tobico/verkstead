@@ -11,20 +11,8 @@
    stands around them. */
 
 .instructionsCard {
-  margin-bottom: 1.5rem;
-}
-
-.instructionsCard h2 {
-  margin: 0 0 0.75rem;
-  font-size: 1.1rem;
-}
-
-/* How it stands, in a line: the same quiet the sections above it say what is
-   configured in. */
-.standing {
-  margin: 0;
-  font-size: 0.9rem;
-  color: var(--ink-soft);
+  /* The look is `SettingsCard.module.css`'s; this names the card. */
+  min-width: 0;
 }
 
 /* And the details pane: the line saying what the text is for, the box, and the
@@ -40,6 +28,13 @@
    `.grow` is what keeps it as tall as what is in it once there is anything. */
 .field textarea {
   min-height: 9rem;
+}
+
+/* The line over the box, with the room under it every other pane's note has
+   before the field it is about — left to the note's own margin, the box stood
+   against its last line. */
+.lead {
+  margin: 0 0 0.85rem;
 }
 
 /* The press under the box rather than beside it, which is where the durations

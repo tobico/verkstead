@@ -1,31 +1,7 @@
 /* Which languages a session gets build support for — see `Languages.tsx`.
 
-   Two halves in two panes, like the credentials above it: the card carries the
-   languages that are on and the warning about what the browser cannot fix, and
-   the controls that change them stand in the details pane beside it.
-
-   What a card *is* is `CardButton.module.css`'s: the surface, the fill it takes
-   while its pane is open, and what it does under the pointer. What is here is
-   only what stands on it. */
-
-.languagesCard {
-  margin-bottom: 1.5rem;
-}
-
-.languagesCard h2 {
-  margin: 0 0 0.75rem;
-  font-size: 1.1rem;
-}
-
-/* The languages that are on, in a line: the same quiet the credentials say what
-   is configured in. Nothing at all where none are — there is no line saying a
-   machine builds nothing, because the heading has already said what the card is
-   about. */
-.standing {
-  margin: 0;
-  font-size: 0.9rem;
-  color: var(--ink-soft);
-}
+   The Build caches part of the Sandbox pane, whose card is the Sandbox's — see
+   `Sandbox.tsx`. What is here is only what stands in the part. */
 
 /* Something the human would have to leave the browser to fix. Drawn as a notice
    rather than as an error — nothing has failed, and what it says is what will be
@@ -56,15 +32,23 @@
   margin: 0.5rem 0 0;
 }
 
-/* The checkbox at one end and the link to its panel at the other, on one line:
-   the row is what somebody scanning the pane reads, and everything else is
-   behind the link. */
+/* The checkbox and the link to its panel, on one line: the row is what
+   somebody scanning the pane reads, and everything else is behind the link.
+
+   In two columns rather than at the two ends of the line. The links read as
+   one column beside the ticks, starting at one edge just past the longest of
+   the language names — at the far end of a wide pane, each was a reading too
+   far from the language it was about to be read as that language's. The first
+   column is a width rather than the label's own, so every row's link starts at
+   the same place; a name longer than it wraps rather than pushing its link out
+   of line. */
 .row {
+  --names: 7rem;
   position: relative;
-  display: flex;
+  display: grid;
+  grid-template-columns: var(--names) minmax(0, 1fr);
   align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
+  column-gap: 0.75rem;
   min-width: 0;
 }
 
@@ -105,15 +89,19 @@
 }
 
 /* The panel the link drops, hung off the row rather than off the link: the
-   link's anchor gives up its positioning, so the card's far edge is the row's
-   and it can be no wider than the row is — a pane narrower than the card would
-   otherwise have it spread off the window's near edge. */
+   link's anchor gives up its positioning, so the card is measured against the
+   row — from the link's column, under the link, and no wider than the rest of
+   the row is, so a pane narrower than the card does not have it spread off the
+   window's edge. */
 .row > .cache {
   position: static;
+  justify-self: start;
 }
 
 .cache > [role="group"] {
-  width: min(22rem, 100%);
+  right: auto;
+  left: calc(var(--names) + 0.75rem);
+  width: min(22rem, calc(100% - var(--names) - 0.75rem));
 }
 
 .cache > [role="group"] > * + * {
@@ -196,4 +184,12 @@
   .clearing button:not(:disabled):hover {
     border-color: var(--ink-soft);
   }
+}
+
+/* The part's heading inside the Sandbox pane — see `Sandbox.tsx` — drawn as the
+   Git pane's are: a heading over the rows, the pane's own title being the
+   section's. */
+.heading {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
 }

@@ -845,8 +845,8 @@ _Avoid_: container, jail, isolation, environment
 The extra writable binds a Sandbox gets beyond that surface — a package
 registry's, a cache Verkstead does not provide — as one set every Sandbox gets.
 Configured in two places, the installation *and* the workbench:
-`--sandbox-bind DIR`, and the same grammar on the settings page's Sandbox binds
-section. A bind could once name a Repo — `--sandbox-bind NAME=DIR`, given only to
+`--sandbox-bind DIR`, and the same grammar in the Sandbox binds part of the
+settings page's Sandbox section. A bind could once name a Repo — `--sandbox-bind NAME=DIR`, given only to
 sessions working in the Repo registered under that name — and that grammar is
 gone: the flag refuses one, and an entry still in it in `config.yaml` reaches no
 session and draws no row.
@@ -942,9 +942,15 @@ human's to take off.
 than disappearing — the reference was made on purpose, and taking it off is the
 human's — while attaching a name nothing is declared by is refused, the menu it
 was picked from having been drawn a moment earlier.
-**With nothing declared the control is still a menu**: *Attach file*, and the
-way to the section where a declaration is made. A control that fell back to a
-plain button would be one the human had to learn twice. The menu is at both
+**The servers are a section of the Attach menu of their own**, headed **MCP
+Servers** under *Attach file*, with **Add a server…** at its foot: a card asking
+what a new declaration on the settings page asks, saved as that page saves one,
+and attached to the work once the save lands — a request on a draft, a held
+chip on the compose page. A server the save could not reach is still declared,
+so the card stays up saying so, with *Attach anyway* and *Try again*.
+**With nothing declared the control is still a menu**: *Attach file*, and *Add a
+server…*. A control that fell back to a plain button would be one the human had
+to learn twice. The menu is at both
 places a Brief is written — the draft's composer and the compose page — and the
 **Answer** to a Question Set is where it is not: that one attaches files and
 nothing else.
@@ -1079,7 +1085,7 @@ working build cache to one mistyped variable is the worse experience for not
 having checked. What was written stays written, exactly as it was typed,
 because a save from the settings page writes the whole file and an entry
 nothing could read is still text somebody is about to fix — and while it is
-there the **Language support** pane draws that language's box off with the
+there the **Build caches** part of the Sandbox pane draws that language's box off with the
 reason under it, naming the variable where a variable is what was
 refused, and saying which of the two became of it.
 _Avoid_: language plugin, language definition, toolchain, language config
@@ -1111,7 +1117,7 @@ and `%LOCALAPPDATA%\Verkstead\Cache` on Windows, the local rather than the
 roaming application data because a compiled crate follows nobody between
 machines. The packaged unit says `/var/cache/verkstead`); which languages a
 Sandbox gets at all, and how big each one's stores may grow, is the human's, in
-the workbench settings — a row per descriptor under **Language support**: its
+the workbench settings — a row per descriptor under **Build caches**: its
 box, and on every one that has a store of its own a link saying what the store
 holds against its size, which opens the size, a Clear and the rest (C/C++'s
 link saying instead that its objects are Rust's sccache's). It is kept under those sizes

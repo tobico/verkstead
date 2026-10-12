@@ -2,6 +2,7 @@
 import { render } from "solid-js/web";
 
 import { App } from "./App";
+import { mark } from "./head";
 import { registerWorker } from "./push/worker";
 
 // Imported here rather than linked from the document so that vite hashes them
@@ -31,5 +32,11 @@ if (!app) {
 // worker, and the notifications switch waits on the registration being in
 // control, so the sooner it is asked for the sooner the switch can answer.
 registerWorker();
+
+// And the document marked as the app's where it is, before anything is drawn:
+// the heads are sized as a desktop's header bars inside the app, and a head that
+// rendered at the browser's size first would jump on the first frame. See `mark`
+// in `head.ts`.
+mark();
 
 render(() => <App />, app);

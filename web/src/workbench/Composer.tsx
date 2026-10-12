@@ -49,15 +49,17 @@
 //! the compose page alike (see [`Attaching`](../Attaching.tsx)), with only what
 //! becomes of a chosen file different between them.
 //!
-//! **And the paperclip is a menu**, here and on the compose page alike, an
-//! answer sheet's being the one that stays a plain button: *Attach file* first,
-//! and under it the MCP servers declared on the settings page. Picking one puts
-//! it on the Conversation and draws a chip for it in that same row, and the
-//! chip's × takes it off again and puts it back in the menu. With none declared
-//! it is still a menu — *Attach file*, and the way to the settings section where
-//! one is declared — because a control that changed shape with the settings
-//! would be a control the human had to find twice. The rows are [`ServerRows`],
-//! which both pages draw.
+//! **And the paperclip is a menu**, drawn as a plus, here and on the compose
+//! page alike, an answer sheet's being the one that stays a plain paperclip
+//! button: *Attach file* first, and under it an **MCP Servers** section — the
+//! servers declared on the settings page, and *Add a server…* at its foot,
+//! which declares one in a card and attaches it in the same press (see
+//! `AddServer.tsx`). Picking one puts it on the Conversation and draws a chip
+//! for it in that same row, and the chip's × takes it off again and puts it
+//! back in the menu. With none declared it is still a menu — *Attach file*, and
+//! *Add a server…* — because a control that changed shape with the settings
+//! would be a control the human had to find twice. The section is
+//! [`ServerRows`], which both pages draw.
 //!
 //! What is this pane's alone is that a pick lands on the server as it is made:
 //! there is a Conversation under this composer, so the chip comes back off the
@@ -85,7 +87,6 @@
 //!
 //! [`Brief`]: ./Brief.tsx
 
-import { A } from "@solidjs/router";
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import {
   For,
@@ -93,6 +94,7 @@ import {
   Show,
   Switch as Choose,
   createSignal,
+  createUniqueId,
   type JSX,
 } from "solid-js";
 
@@ -127,6 +129,7 @@ import shell from "../Panes.module.css";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
 import { keyOf, useDevice } from "../reaching";
+import { addingServer } from "./AddServer";
 import { Adoption } from "./Adoption";
 import styles from "./Composer.module.css";
 import { refusedOnCreate, stoppedOnCreate } from "./composing";
@@ -198,6 +201,12 @@ export function Composer(props: {
     frozen: () => props.brief.frozen,
   });
 
+  // And the card the menu's *Add a server…* opens, which declares one and puts
+  // it on this Conversation the way picking its row would have. Drawn beside
+  // the menu rather than inside it, the menu's rows going with the press that
+  // opened it — see `AddServer.tsx`.
+  const adding = addingServer((name) => servers.attach(name));
+
   // And the one piece the whole of the attaching UI is drawn through, here and
   // on the compose page alike — the pills inside the box, the paperclip in the
   // row of presses, and the drop the box itself takes. See `Attaching.tsx`.
@@ -222,6 +231,10 @@ export function Composer(props: {
           // rearranging itself under the hand that had finished with it.
           shut();
           servers.attach(name);
+        }}
+        add={() => {
+          shut();
+          adding.open();
         }}
       />
     ),
@@ -314,6 +327,8 @@ export function Composer(props: {
           )}
         </Show>
       </div>
+
+      {adding.modal()}
     </>
   );
 }
@@ -846,13 +861,18 @@ function serversOn(what: {
   return { chips, attach, refused };
 }
 
-/// The rows an Attach menu holds under *Attach file*: one per declared MCP
-/// server that is not on already.
+/// The section an Attach menu holds under *Attach file*: **MCP Servers**, one
+/// row per declared server that is not on already, and *Add a server…* at its
+/// foot.
 ///
 /// **Both pages that write a Brief draw these**, which is why what is already
 /// on arrives as a list of names rather than as the Conversation: the composer
 /// reads them off the record and the compose page off what it is holding, and
 /// the menu is the same menu either way — see [`Compose`](./Compose.tsx).
+///
+/// A section of its own under a heading, rather than more rows after *Attach
+/// file*: a server is a different kind of thing to put on the work from a file,
+/// and the heading says which rows are which.
 ///
 /// The declarations are read here rather than beside the Conversation, and read
 /// when the menu opens rather than when the pane does — the rows of a menu are
@@ -864,14 +884,17 @@ function serversOn(what: {
 /// row: the menu is what can still be put on, and the × on the chip is what puts
 /// one back.
 ///
-/// **And with nothing declared it is still a menu**, with the way to the
-/// settings section where a declaration is made. A control that fell back to a
-/// plain button would be one the human had to learn twice — and the answer to
-/// an empty menu is to go and declare one, which is a thing the menu can say.
+/// **And *Add a server…* is always the last row**, with servers declared or
+/// without: it opens the card that declares one and attaches it in one press
+/// (see `AddServer.tsx`), so a menu with nothing declared is still one with
+/// something to do in it. The card is the caller's to draw, outliving the rows
+/// as it has to — this is only the press that opens it.
 export function ServerRows(props: {
   /// The names that are on already, in whatever the page holds them in.
   attached: Array<string>;
   attach: (name: string) => void;
+  /// Open the card that declares a new one — see [`addingServer`].
+  add: () => void;
 }): JSX.Element {
   const settings = useReading(() => ({
     queryKey: ["settings"],
@@ -887,30 +910,29 @@ export function ServerRows(props: {
       (server) => !attached().has(server.name),
     );
 
+  const heading = createUniqueId();
+
   return (
-    <Choose>
-      {/* The two nothing can be picked out of yet, each a row that says which
-          it is and cannot be pressed — a menu that came down empty would say
-          neither. */}
-      <Match when={settings.isPending}>
-        <button type="button" role="menuitem" disabled>
-          Reading the settings…
-        </button>
-      </Match>
-      <Match when={settings.isError}>
-        <button type="button" role="menuitem" disabled>
-          The settings could not be read.
-        </button>
-      </Match>
-      <Match when={settings.data}>
-        <Show
-          when={(settings.data?.mcp_servers.length ?? 0) > 0}
-          fallback={
-            <A href="/settings/mcp-servers" role="menuitem">
-              Declare an MCP server…
-            </A>
-          }
-        >
+    <div role="group" aria-labelledby={heading} class={styles.servers}>
+      <div id={heading} role="presentation" class={styles.serversHead}>
+        MCP Servers
+      </div>
+
+      <Choose>
+        {/* The two nothing can be picked out of yet, each a row that says which
+            it is and cannot be pressed — a section that came down empty would
+            say neither. */}
+        <Match when={settings.isPending}>
+          <button type="button" role="menuitem" disabled>
+            Reading the settings…
+          </button>
+        </Match>
+        <Match when={settings.isError}>
+          <button type="button" role="menuitem" disabled>
+            The settings could not be read.
+          </button>
+        </Match>
+        <Match when={settings.data}>
           <For each={offerable()}>
             {(server) => (
               <button
@@ -922,9 +944,13 @@ export function ServerRows(props: {
               </button>
             )}
           </For>
-        </Show>
-      </Match>
-    </Choose>
+        </Match>
+      </Choose>
+
+      <button type="button" role="menuitem" onClick={() => props.add()}>
+        Add a server…
+      </button>
+    </div>
   );
 }
 

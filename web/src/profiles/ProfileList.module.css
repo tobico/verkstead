@@ -48,17 +48,46 @@
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
+  /* At the padding of the section cards above it — see
+     `SettingsCard.module.css` — being one more line in the same list. */
+  padding: 0.75rem 1rem;
+}
+
+/* Its one line: the reading at the near end, taking what is left and cut there,
+   and what the account's state is at the far end, keeping its own width. */
+.profile .line {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  min-width: 0;
 }
 
 /* The reading: the harness's mark and the words beside it, laid out the way a
    picker row lays the same pair out — see `picking.module.css`. A flex row so
-   the mark keeps its own box beside words that wrap, rather than a glyph in the
-   middle of a sentence. */
+   the mark keeps its own box beside the words, rather than a glyph in the
+   middle of a sentence; and the words cut with an ellipsis, a card being a
+   line. */
 .profile .title {
   display: flex;
+  flex: 1 1 0;
   align-items: center;
   gap: 0.4rem;
+  min-width: 0;
   font-weight: 600;
+}
+
+.profile .reading {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.profile .end {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 0.75rem;
 }
 
 /* And which machine the account is on, under the reading, where it is not this
@@ -85,9 +114,15 @@
    says: it is a thing to do about the account rather than what the account
    is. */
 .profile .logIn {
-  align-self: flex-start;
   padding: 0.2rem 0.7rem;
   font-size: 0.85rem;
+}
+
+/* And what stands there instead where the account is logged in already: the
+   fact, quiet, at the size of the press it replaces. */
+.profile .loggedIn {
+  font-size: 0.85rem;
+  color: var(--ink-soft);
 }
 
 /* And the same fact said in the pane, over the form: which machine the account is
@@ -128,6 +163,19 @@
 
 .form label code {
   font-size: 0.9em;
+}
+
+/* The memory tick, which is a `Check` and laid out by `Check.module.css` — the
+   box, a gap, the words — rather than by the rule above for the labels over the
+   fields, which drew it as a block and took the gap away. With the room under it
+   every field here has before the next thing in the form. */
+.form .memory > label {
+  display: flex;
+  margin-bottom: 0;
+}
+
+.memory {
+  margin-bottom: 0.85rem;
 }
 
 /* The typed fields: the name, the account's paths, and the model id added by

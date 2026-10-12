@@ -58,7 +58,6 @@
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { For, Match, Show, Switch as Choose, onMount, type JSX } from "solid-js";
 
-import { CardButton } from "../CardButton";
 import { Check } from "../Check";
 import { PaneSticky } from "../Panes";
 import { QuietButton } from "../QuietButton";
@@ -76,6 +75,7 @@ import {
   type WhenClosed,
 } from "./bridge";
 import styles from "./Desktop.module.css";
+import { SettingsCard } from "./SettingsCard";
 
 /// What the settings the bridge answers with are held under.
 ///
@@ -178,16 +178,16 @@ function Card(props: {
   /// `desktop/src/closing.ts`, said in words.
   const closes = (stands: DesktopSettings): string => {
     if (!stands.trayIcon) {
-      return "Closing the window quits Verkstead.";
+      return "Quits on close";
     }
 
     switch (stands.whenClosed) {
       case "tray":
-        return "Closing the window keeps Verkstead running in the tray.";
+        return "Keeps running in the tray";
       case "ask":
-        return "Closing the window asks before quitting.";
+        return "Asks before quitting";
       case "quit":
-        return "Closing the window quits Verkstead.";
+        return "Quits on close";
     }
   };
 
@@ -197,8 +197,8 @@ function Card(props: {
     const where = mac() ? "the menu bar" : "the tray";
 
     return stands.trayIcon
-      ? `There is an icon in ${where}.`
-      : `There is no icon in ${where}.`;
+      ? `Icon in ${where}`
+      : `No icon in ${where}`;
   };
 
   return (
@@ -214,21 +214,13 @@ function Card(props: {
       </Match>
       <Match when={desktop.data}>
         {(stands) => (
-          <CardButton
-            as="article"
+          <SettingsCard
             class={styles.desktopCard}
+            title="Desktop"
             open={props.open}
             press={props.press}
-          >
-            <h2>Desktop</h2>
-
-            {/* Not on a Mac: there is no close policy there to report, the
-                platform having its own. */}
-            <Show when={!mac()}>
-              <p class={styles.standing}>{closes(stands())}</p>
-            </Show>
-            <p class={styles.standing}>{icon(stands())}</p>
-          </CardButton>
+            status={mac() ? icon(stands()) : closes(stands())}
+          />
         )}
       </Match>
     </Choose>
@@ -450,10 +442,6 @@ function Pane(props: { reach: Bridge; back: () => void }): JSX.Element {
                 <QuietButton onClick={() => viewing.mutate()}>
                   View Logs
                 </QuietButton>
-                <Note>
-                  This run's log file, which is what the tray's own View Logs
-                  opens.
-                </Note>
               </div>
 
               <Show when={registering.isError}>

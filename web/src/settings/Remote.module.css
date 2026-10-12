@@ -10,22 +10,8 @@
    stands on it. */
 
 .remoteCard {
-  margin-bottom: 1.5rem;
-}
-
-.remoteCard h2 {
-  margin: 0 0 0.75rem;
-  font-size: 1.1rem;
-}
-
-/* How things stand, in a line: the same quiet the sections above say what is
-   configured in. Drawn on the card and at the head of the pane, because it is
-   the same sentence in both. */
-.standing {
-  margin: 0;
-  font-size: 0.9rem;
-  color: var(--ink-soft);
-  line-height: 1.5;
+  /* The look is `SettingsCard.module.css`'s; this names the card. */
+  min-width: 0;
 }
 
 /* A tailnet name or a `ts.net` address, picked out of the prose around it: it
@@ -421,7 +407,6 @@
   }
 }
 
-
 /* And the devices out there that this one is not in a cluster with, under a word
    of their own: the rows above are the cluster, and these are what could join it.
    Set off by the same air the box below it stands in rather than by a rule — one
@@ -484,7 +469,40 @@
   margin-top: 1.25rem;
 }
 
-.adding label {
+/* The trigger, drawn as the link it reads as: the accent, the pane's small
+   size, and the chevron saying a panel comes down from it rather than a page
+   being gone to. Everything a button arrives with given up — the chrome's
+   `.trigger` keeps the font and the pointer. */
+.adding > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0;
+  font-size: 0.9rem;
+  color: var(--accent);
+  background: none;
+  border: 0;
+}
+
+.adding > button svg {
+  font-size: 0.8em;
+}
+
+@media (hover: hover) {
+  .adding > button:hover {
+    text-decoration: underline;
+  }
+}
+
+/* The panel it drops: from the near edge, the trigger standing at the start of
+   its line, and as wide as the form needs without leaving the window. */
+.adding > [role="group"] {
+  right: auto;
+  left: 0;
+  width: min(24rem, calc(100vw - 2.5rem));
+}
+
+.linking label {
   display: block;
   margin-bottom: 0.5rem;
   font-size: 0.9rem;

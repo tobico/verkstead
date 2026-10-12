@@ -100,7 +100,6 @@
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { Index, Match, Show, Switch, createSignal, type JSX } from "solid-js";
 
-import { CardButton } from "../CardButton";
 import { Check } from "../Check";
 import { PaneSticky } from "../Panes";
 import { QuietButton } from "../QuietButton";
@@ -126,6 +125,7 @@ import { PaneHead } from "../workbench/PaneHead";
 import { heldConfig } from "./held";
 import { TokenScopes } from "./scopes";
 import styles from "./Git.module.css";
+import { SettingsCard } from "./SettingsCard";
 
 /// What the section is called, wherever it names itself: the card's heading and
 /// the pane's head.
@@ -165,10 +165,17 @@ function authorless(told: SettingsView): boolean {
   return told.git_author.name === "" || told.git_author.email === "";
 }
 
-/// And nothing at all is worth no line of its own, because the warning says it:
-/// what the card is for is showing what *is* configured.
-function authored(told: SettingsView): boolean {
-  return told.git_author.name !== "" || told.git_author.email !== "";
+/// What the card says, in a line: who commits and which token is saved — or,
+/// where either is missing, that it is, which is the line in the warning colour.
+function summary(told: SettingsView): string {
+  const tokenless = told.github_token === null;
+  const author = authorless(told);
+
+  if (tokenless && author) return "No GitHub token or git author";
+  if (tokenless) return "No GitHub token";
+  if (author) return "No git author";
+
+  return `${told.git_author.name} · token …${told.github_token!.last_four}`;
 }
 
 /// What git has been told, as the card that opens it.
@@ -199,42 +206,14 @@ export function GitCard(props: {
       </Match>
       <Match when={settings.data}>
         {(told) => (
-          <CardButton
-            as="article"
+          <SettingsCard
             class={styles.gitCard}
+            title={TITLE}
             open={props.open}
             press={props.press}
-          >
-            <h2>{TITLE}</h2>
-
-            {/* What a token that is not there costs, said here rather than
-                found out by a session that could not push at midnight. */}
-            <Show when={told().github_token === null}>
-              <p class={styles.warning}>
-                No GitHub token is configured, so sessions cannot reach GitHub.
-              </p>
-            </Show>
-            <Show when={told().github_token}>{(saved) => standing(saved())}</Show>
-
-            <Show when={authorless(told())}>
-              <p class={styles.warning}>
-                No git author is configured, so commits inside a session fail
-                asking who the author is.
-              </p>
-            </Show>
-            {/* Written the way git writes an author, which is the form it is
-                going to be used in. */}
-            <Show when={authored(told())}>
-              <p class={styles.authorStanding}>
-                Commits are by{" "}
-                <span class={styles.authorName}>{told().git_author.name}</span>{" "}
-                <span class={styles.authorEmail}>
-                  &lt;{told().git_author.email}&gt;
-                </span>
-                .
-              </p>
-            </Show>
-          </CardButton>
+            warn={told().github_token === null || authorless(told())}
+            status={summary(told())}
+          />
         )}
       </Match>
     </Switch>

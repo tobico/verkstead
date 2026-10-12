@@ -11,20 +11,8 @@
    rather than two questions. */
 
 .serversCard {
-  margin-bottom: 1.5rem;
-}
-
-.serversCard h2 {
-  margin: 0 0 0.75rem;
-  font-size: 1.1rem;
-}
-
-/* How it stands, in a line: the same quiet the sections above it say what is
-   configured in. */
-.standing {
-  margin: 0;
-  font-size: 0.9rem;
-  color: var(--ink-soft);
+  /* The look is `SettingsCard.module.css`'s; this names the card. */
+  min-width: 0;
 }
 
 /* And the details pane: the line saying what a declaration is, the rows, and the

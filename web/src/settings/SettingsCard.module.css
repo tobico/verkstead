@@ -1,0 +1,38 @@
+/* One settings section as the page lists it — see `SettingsCard.tsx`. What a
+   card *is* is `CardButton.module.css`'s; what is here is the one line on it.
+
+   The title at the near end and the status at the far one, on a line: the title
+   keeps its own width, and the status takes what is left and is cut there,
+   which is why the two are a flex row with the shrinking all on one side. */
+.card {
+  display: flex;
+  align-items: baseline;
+  gap: 1rem;
+  margin-bottom: 0.25rem;
+  padding: 0.75rem 1rem;
+}
+
+.card h2 {
+  flex: none;
+  margin: 0;
+  font-size: 1rem;
+}
+
+/* How it stands: small and quiet, against the far edge, and cut rather than
+   wrapped — a card is one line. */
+.status {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+  text-align: right;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* And where the section is waiting on the human, in the stopped colour the
+   warnings in the panes are drawn down one edge in. */
+.warn {
+  color: var(--stopped);
+}

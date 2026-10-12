@@ -16,29 +16,8 @@
    only what stands on it. */
 
 .gitCard {
-  margin-bottom: 1.5rem;
-}
-
-.gitCard h2 {
-  margin: 0 0 0.75rem;
-  font-size: 1.1rem;
-}
-
-/* A setting that is not there, and what it costs. Drawn as a notice rather than
-   as an error — nothing has failed yet, and what it is saying is what will fail
-   if this is left as it is. The stopped red rather than the accent: it is the
-   same "this is waiting on you" the workbench marks a halted run with.
-
-   No fill of its own, unlike the block this was on the page: it stands on a
-   card now, and the card shifts a step under the hand and another while its
-   pane is open. An edge and the red down its side say it on all three. */
-.gitCard .warning {
-  margin: 0 0 0.85rem;
-  padding: 0.7rem 0.9rem;
-  border: 1px solid var(--edge);
-  border-inline-start: 3px solid var(--stopped);
-  border-radius: 0.6rem;
-  font-size: 0.9rem;
+  /* The look is `SettingsCard.module.css`'s; this names the card. */
+  min-width: 0;
 }
 
 /* What a token has to be able to do, under the section's heading and above
@@ -88,23 +67,6 @@
   font-size: 0.9rem;
 }
 
-/* The author as a line rather than as two fields, written the way git writes
-   one — which is the form it is going to be used in. */
-.authorStanding {
-  margin: 0;
-  font-size: 0.9rem;
-  color: var(--ink-soft);
-}
-
-.authorName,
-.authorEmail {
-  color: var(--ink);
-}
-
-.authorEmail {
-  font-family: ui-monospace, SFMono-Regular, monospace;
-}
-
 /* The form itself, which is the details pane: the three sections under one Save,
    with nothing around them but the pane's own head. */
 .form section {
@@ -144,8 +106,10 @@
    is here. Said as a child rather than as a descendant because the sharing
    switch below carries a label of its own that is laid out by
    `Switch.module.css` — a block rule reaching into it would put the switch
-   under its own words. */
-.form section > label {
+   under its own words. And the labels inside an ignore rule's row, which are
+   the same labels over the same fields one element further down. */
+.form section > label,
+.form .rule > label {
   display: block;
   margin-bottom: 0.35rem;
   font-size: 0.9rem;
@@ -159,7 +123,10 @@
   margin-bottom: 0.6rem;
 }
 
-.form input {
+/* Every typed field — and not the sharing tick, which is a `Check` and drawn by
+   `Check.module.css`: caught by a bare `input`, it was stretched to the width of
+   the form and pushed its words off the far edge. */
+.form input:not([type="checkbox"]) {
   display: block;
   width: 100%;
   margin-bottom: 0.85rem;
@@ -291,7 +258,7 @@
 
 /* The field being typed in, which is no pointer's doing: the border says which
    of them the token or the author is going into. */
-.form input:focus-visible {
+.form input:not([type="checkbox"]):focus-visible {
   border-color: var(--accent);
 }
 
@@ -300,7 +267,7 @@
    are in — the clear's red here, and the keep's darkening border out of
    `.secondary` in `styles/base.css`. */
 @media (hover: hover) {
-  .form input:hover,
+  .form input:not([type="checkbox"]):hover,
   .form select:hover {
     border-color: var(--ink-soft);
   }

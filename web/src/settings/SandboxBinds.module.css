@@ -1,48 +1,18 @@
 /* The sandbox binds every session gets — see `SandboxBinds.tsx`.
 
-   Two halves in two panes, like the sections above it: the card carries how the
-   list stands and what is wrong with it, and the rows that rewrite it stand in
-   the details pane beside it.
-
-   What a card *is* is `CardButton.module.css`'s: the surface, the fill it takes
-   while its pane is open, and what it does under the pointer. What a row is is
-   `PathEditor.module.css`'s. What is here is only what stands around them. */
-
-.bindsCard {
-  margin-bottom: 1.5rem;
-}
-
-.bindsCard h2 {
-  margin: 0 0 0.75rem;
-  font-size: 1.1rem;
-}
-
-/* How the list stands, in a line: the same quiet the build cache says what is
-   configured in. */
-.standing {
-  margin: 0;
-  font-size: 0.9rem;
-  color: var(--ink-soft);
-}
-
-/* Something the human cannot fix from this page alone: an entry naming what the
-   server cannot see. Drawn as a notice rather than as an error, the way the
-   build cache's is: nothing has failed, and what it says is what will not work
-   until somebody acts on it.
-
-   No fill of its own: on the card it stands on a surface that shifts a step
-   under the hand and another while its pane is open, and an edge with the red
-   down its side says it on all three. */
-.warning {
-  margin: 0 0 0.85rem;
-  padding: 0.7rem 0.9rem;
-  border: 1px solid var(--edge);
-  border-inline-start: 3px solid var(--stopped);
-  border-radius: 0.6rem;
-  font-size: 0.9rem;
-}
+   The Sandbox binds part of the Sandbox pane, whose card is the Sandbox's — see
+   `Sandbox.tsx`. What a row is is `PathEditor.module.css`'s. What is here is
+   only what stands around them. */
 
 .failure {
   margin: 1rem 0 0;
   font-size: 0.9rem;
+}
+
+/* The part's heading inside the Sandbox pane — see `Sandbox.tsx` — drawn as the
+   Git pane's are: a heading over the rows, the pane's own title being the
+   section's. */
+.heading {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
 }

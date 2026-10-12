@@ -14,9 +14,12 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 0.6rem;
+  /* Its size is the slot's to say where a slot has one: a head inside the app
+     is a desktop's header bar and asks for the bar's own button — see
+     `PaneHead.module.css`. Everywhere else, the ⋯'s size. */
+  padding: var(--icon-pad, 0.6rem);
   font: inherit;
-  font-size: 1.1rem;
+  font-size: var(--icon-size, 1.1rem);
   line-height: 1;
   color: var(--ink-soft);
   background: transparent;

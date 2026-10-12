@@ -1,5 +1,5 @@
-//! Which languages a session gets build support for, on the settings page: one
-//! row per **descriptor** the server loaded — a checkbox, and beside it how much
+//! Which languages a session gets build support for — the **Build caches** part
+//! of the settings page's Sandbox section: one row per **descriptor** the server loaded — a checkbox, and beside it how much
 //! its cache holds against the size it may grow to, opening a panel with the
 //! rest.
 //!
@@ -22,9 +22,9 @@
 //! ships or off altogether. A language is never dropped from the list over it:
 //! it is still there, and which of the two happened is the thing to know.
 //!
-//! One of two things on this page that are about a **Sandbox** rather than about
-//! who Verkstead is — the Sandbox binds section is the other — and the only one
-//! of the two that is on with nothing configured. Every path that section adds
+//! One of the two parts of the Sandbox section — the Sandbox binds are the
+//! other — and the only one of the two that is on with nothing configured.
+//! Every path that part adds
 //! is a hole somebody typed on purpose; what a language opens is Verkstead's own
 //! directory, holding nothing but build output, so it can be opened for a human
 //! who never asked and the only control over it here is the one that *closes*
@@ -36,15 +36,15 @@
 //! touched it, and the size field shows the default as a placeholder rather than
 //! as a value somebody chose.
 //!
-//! Two halves in two panes, which is what the settings page is: a card in the
-//! middle pane naming the languages that have build support on, and the controls
-//! that change them in the details pane it opens, at `/settings/languages`. What
-//! the human cannot fix from the browser — no sccache where the server can see
-//! one — is on the card as well as in the panels of the languages it is about,
-//! the way the credentials' warnings are: whoever needs to read it is precisely
-//! whoever is not editing.
+//! A part rather than a section of its own: the card is the Sandbox's, at
+//! `/settings/sandbox`, and this file hands it [`cachesOn`] and
+//! [`cacheWarnings`] for its line — see `Sandbox.tsx`. What the human cannot fix
+//! from the browser — no sccache where the server can see one, an entry that
+//! would not load — is on that card as well as in the panels of the languages it
+//! is about, the way the credentials' warnings are: whoever needs to read it is
+//! precisely whoever is not editing.
 //!
-//! Both halves read the one query, which is the one the credentials above them
+//! The card and the part read the one query, which is the one the credentials above them
 //! read: one payload holds both files, and a read apiece would be two opinions
 //! about what is saved.
 //!
@@ -161,11 +161,9 @@ import {
   type JSX,
 } from "solid-js";
 
-import { CardButton } from "../CardButton";
 import { Check } from "../Check";
 import { Icon } from "../Icon";
 import { Menu } from "../Menu";
-import { PaneSticky } from "../Panes";
 import { clearLanguage, loadSettings, saveSettings } from "../api/client";
 import type {
   DiskUse,
@@ -180,7 +178,6 @@ import type {
 import { useReading } from "../freshness";
 import { settledAge, utcStamp } from "../set/when";
 import { Empty, ErrorLine } from "../notices";
-import { PaneHead } from "../workbench/PaneHead";
 import {
   heldAtOnce,
   heldCleanup,
@@ -192,7 +189,7 @@ import styles from "./Languages.module.css";
 
 /// What the section is called, wherever it names itself: the card's heading and
 /// the pane's head.
-const TITLE = "Language support";
+const TITLE = "Build caches";
 
 /// The settings as they stand, read once for the two panes that draw them.
 ///
@@ -579,67 +576,30 @@ function standing(told: SettingsView | undefined): string[] {
     .map((language) => language.label);
 }
 
-/// What has build support, as the card that opens it.
-///
-/// What is on the card is what somebody scanning the page is after: which
-/// languages a session builds with help, and the one thing about that which
-/// wants doing somewhere else. The controls are in the pane.
-export function LanguagesCard(props: {
-  /// Whether the pane beside this is the one that is open.
-  open: boolean;
-  /// What pressing it does, which is opening that pane.
-  press: () => void;
-}): JSX.Element {
-  const settings = useSettings();
-
-  return (
-    <Choose>
-      <Match when={settings.isPending}>
-        <Empty>Loading…</Empty>
-      </Match>
-      <Match when={settings.isError}>
-        <ErrorLine>
-          Could not read the settings: {settings.error?.message}
-        </ErrorLine>
-      </Match>
-      <Match when={settings.data}>
-        {(told) => (
-          <CardButton
-            as="article"
-            class={styles.languagesCard}
-            open={props.open}
-            press={props.press}
-          >
-            <h2>{TITLE}</h2>
-
-            <Show when={warnedAny(told())}>{uncompiled()}</Show>
-
-            <Show when={unread(told()).length > 0}>
-              <p class={styles.warning}>
-                Verkstead could not read what <code>config.yaml</code> says
-                about {unread(told()).join(", ")}.
-              </p>
-            </Show>
-
-            <Show when={standing(told()).length > 0}>
-              <p class={styles.standing}>{standing(told()).join(", ")}</p>
-            </Show>
-          </CardButton>
-        )}
-      </Match>
-    </Choose>
-  );
+/// What the Sandbox card says about the build caches where something is waiting
+/// on the human — an entry `config.yaml` holds that could not be read, and
+/// compiles nothing caches — or nothing at all where nothing is. See
+/// `Sandbox.tsx`, which is the card.
+export function cacheWarnings(told: SettingsView): string[] {
+  return [
+    unread(told).length > 0 ? "Unreadable config entry" : null,
+    warnedAny(told) ? "No sccache" : null,
+  ].filter((said): said is string => said !== null);
 }
 
-/// And the controls that change them, which is the details pane the card opens.
+/// And how many languages have their build cache on, which is what it says
+/// otherwise.
+export function cachesOn(told: SettingsView): number {
+  return standing(told).length;
+}
+
+/// And the controls that change them: the Build caches part of the Sandbox
+/// pane, under its own heading — see `Sandbox.tsx`, which is the pane.
 ///
 /// There is no Save over the whole of it and no Cancel: a checkbox is its own
 /// press, a size saves when the typing is done, and a details pane is left by
 /// opening something else or by the way back a narrow window draws.
-export function LanguagesPane(props: {
-  /// The way back to the settings, which is the pane this one was entered from.
-  back: () => void;
-}): JSX.Element {
+export function BuildCaches(): JSX.Element {
   const queries = useQueryClient();
   const settings = useSettings();
 
@@ -987,10 +947,8 @@ export function LanguagesPane(props: {
   };
 
   return (
-    <>
-      <PaneSticky>
-        <PaneHead back={{ to: "Settings", go: props.back }} title={TITLE} />
-      </PaneSticky>
+    <section>
+      <h3 class={styles.heading}>{TITLE}</h3>
 
       <Choose>
         <Match when={settings.isPending}>
@@ -1076,6 +1034,6 @@ export function LanguagesPane(props: {
           )}
         </Match>
       </Choose>
-    </>
+    </section>
   );
 }
