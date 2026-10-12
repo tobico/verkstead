@@ -55,7 +55,6 @@
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { Match, Show, Switch as Choose, createSignal, type JSX } from "solid-js";
 
-import { CardButton } from "../CardButton";
 import { PaneSticky } from "../Panes";
 import { loadSettings, saveSettings } from "../api/client";
 import type {
@@ -74,6 +73,7 @@ import {
   heldPaths,
 } from "./held";
 import styles from "./AtOnce.module.css";
+import { SettingsCard } from "./SettingsCard";
 
 /// What the section is called, in the one place both panes read it from.
 const TITLE = "How much runs at once";
@@ -86,6 +86,12 @@ function useSettings() {
     queryFn: loadSettings,
     freshness: { reconcile: "id" },
   }));
+}
+
+/// A count with the word it counts, so the line reads `1 stage` rather than
+/// `1 stages`.
+function counted(many: number, one: string): string {
+  return `${many} ${one}${many === 1 ? "" : "s"}`;
 }
 
 /// How much Verkstead runs at once, as the card that opens the section.
@@ -109,56 +115,16 @@ export function AtOnceCard(props: {
       </Match>
       <Match when={settings.data?.at_once}>
         {(atOnce) => (
-          <CardButton
-            as="article"
+          <SettingsCard
             class={styles.atOnceCard}
+            title={TITLE}
             open={props.open}
             press={props.press}
-          >
-            <h2>{TITLE}</h2>
-
-            {/* Both numbers drawn whether or not anybody chose them, the way the
-                Cleanup's durations are: what the card answers is *how many*, and
-                a default is as much an answer to that as a choice would be.
-                In the words that agree with each — one is the number somebody is
-                most likely to have set, and *up to 1 stages* would say nobody
-                read the line back. */}
-            <p class={styles.standing}>
-              <Show
-                when={atOnce().roadmap_stages === 1}
-                fallback={
-                  <>
-                    Up to{" "}
-                    <span class={styles.places}>
-                      {atOnce().roadmap_stages} stages
-                    </span>{" "}
-                    of one roadmap at a time.
-                  </>
-                }
-              >
-                <span class={styles.places}>One stage</span> of one roadmap at a
-                time.
-              </Show>
-            </p>
-
-            <p class={styles.standing}>
-              <Show
-                when={atOnce().conversations === 1}
-                fallback={
-                  <>
-                    Up to{" "}
-                    <span class={styles.places}>
-                      {atOnce().conversations} conversations
-                    </span>{" "}
-                    across the whole server.
-                  </>
-                }
-              >
-                <span class={styles.places}>One conversation</span> across the
-                whole server.
-              </Show>
-            </p>
-          </CardButton>
+            status={`${counted(atOnce().roadmap_stages, "stage")} · ${counted(
+              atOnce().conversations,
+              "conversation",
+            )}`}
+          />
         )}
       </Match>
     </Choose>

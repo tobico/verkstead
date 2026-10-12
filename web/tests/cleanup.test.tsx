@@ -35,6 +35,7 @@ import card from "../src/CardButton.module.css";
 import check from "../src/Check.module.css";
 import { CleanupCard, CleanupPane } from "../src/settings/Cleanup";
 import styles from "../src/settings/Cleanup.module.css";
+import settingsCard from "../src/settings/SettingsCard.module.css";
 import { json, serving, whenever } from "./serving";
 import told from "./fixtures/settings.json" with { type: "json" };
 import unset from "./fixtures/settings-unset.json" with { type: "json" };
@@ -180,6 +181,14 @@ async function theCard(container: ParentNode): Promise<HTMLElement> {
   });
 }
 
+/// The card's one line of how the section stands — waited for, as the card is.
+async function theStatus(container: ParentNode): Promise<HTMLElement> {
+  const face = await theCard(container);
+  const line = face.querySelector<HTMLElement>(`.${settingsCard.status}`);
+  expect(line, "expected the card to say how the section stands").not.toBeNull();
+  return line!;
+}
+
 /// The two checkboxes, each by the words beside it.
 function box(named: RegExp): HTMLInputElement {
   return screen.getByRole("checkbox", { name: named }) as HTMLInputElement;
@@ -201,53 +210,50 @@ const trimGroup = (container: ParentNode) => groups(container)[0]!;
 const deleteGroup = (container: ParentNode) => groups(container)[1]!;
 
 describe("the card", () => {
-  /// The shape of the whole section, said in the two lines somebody scanning
+  /// The shape of the whole section, said in the one line somebody scanning
   /// the page reads: nobody has to open anything for a trim to happen, and
   /// nothing is ever deleted for somebody who has not asked.
   it("says what happens to an archived conversation and when", async () => {
     theSettings(UNSET);
-    mountCard();
+    const { container } = mountCard();
 
-    await waitFor(() => screen.getByText(/trimmed/));
-    expect(screen.getByText(/trimmed/).textContent).toContain("3 days");
-    expect(screen.getByText(/never deleted/)).toBeTruthy();
+    const line = await theStatus(container);
+    expect(line.textContent).toBe("Trim after 3 days · delete never");
+    // And as a reading, not a warning: a Verkstead nobody has been to is
+    // waiting on nobody.
+    expect(line.classList).not.toContain(settingsCard.warn);
   });
 
   it("says the durations somebody chose", async () => {
     theSettings(TOLD);
-    mountCard();
+    const { container } = mountCard();
 
-    await waitFor(() => screen.getByText(/trimmed/));
-    expect(screen.getByText(/trimmed/).textContent).toContain("5 days");
-    expect(screen.getByText(/deleted for good/).textContent).toContain(
-      "90 days",
-    );
+    const line = await theStatus(container);
+    expect(line.textContent).toBe("Trim after 5 days · delete after 90 days");
   });
 
   it("says so where the trim is switched off", async () => {
     theSettings(step(TOLD, "trim", { enabled: false }));
-    mountCard();
+    const { container } = mountCard();
 
-    await waitFor(() => screen.getByText(/never trimmed/));
+    const line = await theStatus(container);
+    expect(line.textContent).toBe("Trim never · delete after 90 days");
   });
 
-  /// The one thing the two numbers can say that is worth pointing out, and it
-  /// is a reading rather than a fault: the clocks are independent, so a delete
-  /// sooner than the trim simply arrives first.
-  it("says when the delete lands before the trim ever would", async () => {
+  /// The two numbers as they stand even where the delete arrives first: the
+  /// clocks are independent, so that is a reading rather than a fault, and the
+  /// card's line is too short to explain it — the pane is where the ordering
+  /// is said, so the card says the durations and nothing more, and not as a
+  /// warning.
+  it("says the durations as they stand when the delete lands first", async () => {
     theSettings(step(TOLD, "delete", { days: 2 }));
     const { container } = mountCard();
 
-    await waitFor(() => screen.getByText(/The delete comes first/));
-    expect(container.querySelector(`.${styles.ordering}`)).not.toBeNull();
-  });
-
-  it("says nothing about the ordering while the delete is off", async () => {
-    theSettings(UNSET);
-    mountCard();
-
-    await waitFor(() => screen.getByText(/never deleted/));
+    const line = await theStatus(container);
+    expect(line.textContent).toBe("Trim after 5 days · delete after 2 days");
+    expect(line.classList).not.toContain(settingsCard.warn);
     expect(screen.queryByText(/The delete comes first/)).toBeNull();
+    expect(container.querySelector(`.${styles.ordering}`)).toBeNull();
   });
 
   it("opens the pane when it is pressed", async () => {
@@ -542,6 +548,16 @@ describe("changing the cleanup", () => {
     );
 
     await waitFor(() => screen.getByText(/The delete comes first/));
+  });
+
+  /// And the ordering is only said where there is one: with the delete off there
+  /// is nothing to arrive first, however small the number left in its field.
+  it("says nothing about the ordering while the delete is off", async () => {
+    theSettings(step(TOLD, "delete", { enabled: false, days: 2 }));
+    mountPane();
+
+    await waitFor(() => expect(theDelete().checked).toBe(false));
+    expect(screen.queryByText(/The delete comes first/)).toBeNull();
   });
 
   it("says so when the save fails", async () => {

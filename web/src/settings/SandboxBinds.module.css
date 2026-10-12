@@ -9,12 +9,8 @@
    `PathEditor.module.css`'s. What is here is only what stands around them. */
 
 .bindsCard {
-  margin-bottom: 1.5rem;
-}
-
-.bindsCard h2 {
-  margin: 0 0 0.75rem;
-  font-size: 1.1rem;
+  /* The look is `SettingsCard.module.css`'s; this names the card. */
+  min-width: 0;
 }
 
 /* How the list stands, in a line: the same quiet the build cache says what is

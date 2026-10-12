@@ -72,7 +72,6 @@
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { Index, Match, Show, Switch as Choose, createSignal, type JSX } from "solid-js";
 
-import { CardButton } from "../CardButton";
 import { PaneSticky } from "../Panes";
 import { QuietButton } from "../QuietButton";
 import { loadSettings, saveSettings } from "../api/client";
@@ -92,6 +91,7 @@ import { Empty, ErrorLine, Note } from "../notices";
 import { PaneHead } from "../workbench/PaneHead";
 import { heldConfig } from "./held";
 import styles from "./McpServers.module.css";
+import { SettingsCard } from "./SettingsCard";
 
 /// What the section is called, in the one place both panes read it from.
 const TITLE = "MCP servers";
@@ -247,29 +247,17 @@ export function McpServersCard(props: {
       </Match>
       <Match when={settings.data}>
         {(told) => (
-          <CardButton
-            as="article"
+          <SettingsCard
             class={styles.serversCard}
+            title={TITLE}
             open={props.open}
             press={props.press}
-          >
-            <h2>{TITLE}</h2>
-
-            <p class={styles.standing}>
-              <Show
-                when={told().mcp_servers.length > 0}
-                fallback={
-                  <>
-                    Nothing is declared, so a conversation has no server to
-                    attach.
-                  </>
-                }
-              >
-                {counted(told().mcp_servers.length, "server", "servers")}{" "}
-                declared, to attach to a conversation from its Attach button.
-              </Show>
-            </p>
-          </CardButton>
+            status={
+              told().mcp_servers.length > 0
+                ? counted(told().mcp_servers.length, "server", "servers")
+                : "None declared"
+            }
+          />
         )}
       </Match>
     </Choose>

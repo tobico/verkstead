@@ -12,9 +12,9 @@
 //! credentials — and the pair is mounted together only where a round trip is
 //! what is being asked about: what the form saved, said back on the card.
 //!
-//! So this suite is in five parts: what is readable on the card without
-//! opening anything — the token's state, the author, and the warnings about
-//! whichever is missing — what the form does in its pane, what each of the two
+//! So this suite is in five parts: what is readable on the card's one line
+//! without opening anything — who commits are by and which token is saved, or
+//! the warning that either is missing — what the form does in its pane, what each of the two
 //! controls that save themselves beside it does, and what the page itself draws
 //! around the lot.
 //!
@@ -58,6 +58,7 @@ import card from "../src/CardButton.module.css";
 import { GitCard, GitPane } from "../src/settings/Git";
 import styles from "../src/settings/Git.module.css";
 import scopes from "../src/settings/scopes.module.css";
+import line from "../src/settings/SettingsCard.module.css";
 import instructions from "../src/settings/Instructions.module.css";
 import languages from "../src/settings/Languages.module.css";
 import binds from "../src/settings/SandboxBinds.module.css";
@@ -211,40 +212,47 @@ function wanted(container: HTMLElement): string[] {
   );
 }
 
+/// The one line the Git card draws at its far end, once the settings are read:
+/// the status `SettingsCard` puts beside the heading.
+async function theLine(container: HTMLElement): Promise<HTMLElement> {
+  return drawn<HTMLElement>(container, `.${styles.gitCard} .${line.status}`);
+}
+
 describe("the card", () => {
-  it("says of a saved token its last four characters and when it was written", async () => {
+  /// A saved token is named by its last four characters and nothing else: when
+  /// it was written is the pane's to say, the card having room for which token
+  /// it is and no more.
+  it("says of a saved token its last four characters", async () => {
     theSettings(TOLD);
     const { container } = mountCard();
 
-    await waitFor(() => screen.getByText(TOLD.github_token!.last_four));
+    const status = await theLine(container);
 
-    expect(container.querySelector(`.${styles.lastFour}`)!.textContent).toBe(
-      TOLD.github_token!.last_four,
+    expect(status.textContent).toMatch(
+      new RegExp(` · token …${TOLD.github_token!.last_four}$`),
     );
-    expect(container.querySelector(`.${styles.tokenStanding} span`)!.textContent).toBe(
-      "2026-08-03 09:07 UTC",
-    );
+    expect(screen.queryByText(/2026-08-03/)).toBeNull();
   });
 
-  /// The author is a line rather than two fields, because reading it is what the
-  /// card is for and rewriting it is the pane's.
+  /// The author is the name alone, ahead of the token, because reading who
+  /// commits are by is what the card is for and the email beside it is the
+  /// pane's to show and rewrite.
   it("says who commits are by", async () => {
     theSettings(TOLD);
     const { container } = mountCard();
 
-    await waitFor(() => screen.getByText(/Commits are by/));
+    const status = await theLine(container);
 
-    expect(container.querySelector(`.${styles.authorName}`)!.textContent).toBe(
-      TOLD.git_author.name,
+    expect(status.textContent).toBe(
+      `${TOLD.git_author.name} · token …${TOLD.github_token!.last_four}`,
     );
-    expect(container.querySelector(`.${styles.authorEmail}`)!.textContent).toContain(
-      TOLD.git_author.email,
-    );
+    expect(status.classList).not.toContain(line.warn);
+    expect(screen.queryByText(new RegExp(TOLD.git_author.email))).toBeNull();
   });
 
   /// It is a card like every other card in the app: pressed to open the pane
   /// beside it, and drawn as the open one while that pane is what is being
-  /// read. An `article` rather than a button, because it holds paragraphs.
+  /// read. An `article` rather than a button, as every settings card is drawn.
   it("opens the pane when it is pressed", async () => {
     theSettings(TOLD);
     const { container, press } = mountCard();
@@ -279,54 +287,61 @@ describe("what is not configured", () => {
   /// Said here rather than found out by a session that could not push at
   /// midnight: neither of these is read out of a home directory any more. On the
   /// card rather than in the form, because whoever needs to read them is
-  /// precisely whoever is not editing.
-  it("warns that sessions cannot reach GitHub with no token", async () => {
-    theSettings(UNSET);
-    mountCard();
+  /// precisely whoever is not editing — in the warning colour, and in the
+  /// fewest words that name what is missing, the pane being where why is said.
+  it("warns that there is no GitHub token", async () => {
+    theSettings({ ...UNSET, git_author: TOLD.git_author });
+    const { container } = mountCard();
 
-    await waitFor(() => screen.getByText(/sessions cannot reach GitHub/));
+    const status = await theLine(container);
+
+    expect(status.textContent).toBe("No GitHub token");
+    expect(status.classList).toContain(line.warn);
   });
 
-  it("warns that commits fail with no author", async () => {
-    theSettings(UNSET);
-    mountCard();
+  it("warns that there is no git author", async () => {
+    theSettings({ ...TOLD, git_author: { name: "", email: "" } });
+    const { container } = mountCard();
 
-    await waitFor(() =>
-      screen.getByText(/commits inside a session fail asking who the author is/),
-    );
+    const status = await theLine(container);
+
+    expect(status.textContent).toBe("No git author");
+    expect(status.classList).toContain(line.warn);
   });
 
-  /// And says nothing else about an author nobody has given: the warning is the
-  /// whole of it, where a line naming the halves would be naming two blanks.
+  /// And with neither, the one line names both — and nothing else: a line
+  /// naming the author's halves or a token would be naming blanks.
   it("says nothing of an author with neither half", async () => {
     theSettings(UNSET);
-    mountCard();
+    const { container } = mountCard();
 
-    await waitFor(() => screen.getByText(/sessions cannot reach GitHub/));
-    expect(screen.queryByText(/Commits are by/)).toBeNull();
+    const status = await theLine(container);
+
+    expect(status.textContent).toBe("No GitHub token or git author");
+    expect(status.classList).toContain(line.warn);
   });
 
   /// Half an author is as broken as none: git complains by name about whichever
-  /// half it has not been given.
+  /// half it has not been given — so the card warns rather than naming the half
+  /// there is, which is a name commits would still fail under.
   it("warns about an author with only half of one", async () => {
     theSettings({ ...TOLD, git_author: { name: "Ada Lovelace", email: "" } });
-    mountCard();
+    const { container } = mountCard();
 
-    await waitFor(() =>
-      screen.getByText(/commits inside a session fail asking who the author is/),
-    );
-    // And still says the half there is, which is the half being checked.
-    expect(screen.getByText("Ada Lovelace")).toBeTruthy();
+    const status = await theLine(container);
+
+    expect(status.textContent).toBe("No git author");
+    expect(status.classList).toContain(line.warn);
   });
 
   it("says neither where both are configured", async () => {
     theSettings(TOLD);
-    mountCard();
+    const { container } = mountCard();
 
-    await waitFor(() => screen.getByText(TOLD.github_token!.last_four));
+    const status = await theLine(container);
 
-    expect(screen.queryByText(/sessions cannot reach GitHub/)).toBeNull();
-    expect(screen.queryByText(/commits inside a session fail/)).toBeNull();
+    expect(status.textContent).not.toMatch(/^No /);
+    expect(status.classList).not.toContain(line.warn);
   });
 
   /// With nothing configured the field is the form rather than a detour from it:
@@ -345,7 +360,8 @@ describe("what is not configured", () => {
     theSettings(UNSET, json(SAVED));
     const { container } = mountBoth();
 
-    await waitFor(() => screen.getByText(/sessions cannot reach GitHub/));
+    const status = await theLine(container);
+    expect(status.textContent).toBe("No GitHub token or git author");
 
     fireEvent.input(screen.getByLabelText(/Token, pasted/), {
       target: { value: TOKEN },
@@ -359,11 +375,20 @@ describe("what is not configured", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     // The settings landing is what clears them, so it is what to wait for: an
-    // assertion that they are absent would pass while the save was still out.
-    await drawn(container, `.${styles.gitCard} .${styles.tokenStanding}`);
+    // assertion that the warning is gone would pass on a line not yet redrawn
+    // as readily as on one that was.
+    await waitFor(() =>
+      expect(
+        container.querySelector(`.${styles.gitCard} .${line.status}`)!
+          .textContent,
+      ).toBe(
+        `${SAVED.settings.git_author.name} · token …${SAVED.settings.github_token!.last_four}`,
+      ),
+    );
 
-    expect(screen.queryByText(/sessions cannot reach GitHub/)).toBeNull();
-    expect(screen.queryByText(/commits inside a session fail/)).toBeNull();
+    expect(
+      container.querySelector(`.${styles.gitCard} .${line.status}`)!.classList,
+    ).not.toContain(line.warn);
   });
 });
 
@@ -523,12 +548,13 @@ describe("saving", () => {
 
   /// The author round-trips onto the card: what the save answered with is what
   /// the page goes back to showing, because that is a fresh read of the files
-  /// rather than an echo of what was sent.
+  /// rather than an echo of what was sent. The name is what changes, since the
+  /// name is the half of the author the card's line carries.
   it("shows on the card the author the save came back with", async () => {
     const rewritten: SettingsSaved = {
       settings: {
         ...SAVED.settings,
-        git_author: { name: "Ada Lovelace", email: "ada@analytical.engine" },
+        git_author: { name: "Augusta Ada King", email: "ada@example.com" },
       },
       verified: null,
       refused: [],
@@ -540,17 +566,16 @@ describe("saving", () => {
     const { container } = mountBoth();
     await waitFor(() => screen.getByLabelText("Email"));
 
-    fireEvent.input(screen.getByLabelText("Email"), {
-      target: { value: "ada@analytical.engine" },
+    fireEvent.input(screen.getByLabelText("Name"), {
+      target: { value: "Augusta Ada King" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() =>
       expect(
-        container.querySelector(
-          `.${styles.gitCard} .${styles.authorEmail}`,
-        )!.textContent,
-      ).toContain("ada@analytical.engine"),
+        container.querySelector(`.${styles.gitCard} .${line.status}`)!
+          .textContent,
+      ).toMatch(/^Augusta Ada King · token …/),
     );
   });
 
@@ -794,13 +819,17 @@ describe("replacing and clearing the token", () => {
       }),
     );
 
-    // And the card is the unset one again, warning and all, with the author it
-    // never sent away.
-    await waitFor(() => screen.getByText(/sessions cannot reach GitHub/));
+    // And the card warns of the token alone: the author it never sent away is
+    // still there, or the line would be naming it missing too.
+    await waitFor(() =>
+      expect(
+        container.querySelector(`.${styles.gitCard} .${line.status}`)!
+          .textContent,
+      ).toBe("No GitHub token"),
+    );
     expect(
-      container.querySelector(`.${styles.gitCard} .${styles.authorName}`)!
-        .textContent,
-    ).toBe(TOLD.git_author.name);
+      container.querySelector(`.${styles.gitCard} .${line.status}`)!.classList,
+    ).toContain(line.warn);
   });
 });
 
@@ -1417,7 +1446,7 @@ describe("the settings page", () => {
   it("stands on the three panes, with the conversations beside it", async () => {
     const { container } = thePage();
 
-    await waitFor(() => screen.getByText(TOLD.github_token!.last_four));
+    await drawn(container, `.${styles.gitCard} .${line.status}`);
 
     expect(panes(container).map((pane) => pane.getAttribute("aria-label"))).toEqual([
       "Conversations",
@@ -1523,7 +1552,7 @@ describe("the settings page", () => {
   it("keeps the notifications switch on the pane head's line", async () => {
     const { container } = thePage();
 
-    await waitFor(() => screen.getByText(TOLD.github_token!.last_four));
+    await drawn(container, `.${styles.gitCard} .${line.status}`);
 
     expect(
       container.querySelector(`.${head.head} .${notifications.notifications}`),

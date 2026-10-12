@@ -48,6 +48,7 @@ import {
   type RepoRefused,
 } from "../src/repos/RepoList";
 import styles from "../src/repos/RepoList.module.css";
+import settingsCard from "../src/settings/SettingsCard.module.css";
 import head from "../src/workbench/PaneHead.module.css";
 import { drawn } from "./bench";
 import {
@@ -175,20 +176,21 @@ describe("the card", () => {
     const fetching = theRepos();
     mountCard();
 
-    await waitFor(() => screen.getByText(/registered/));
+    await waitFor(() => screen.getByText(`${REPOS.length} repos`));
     expect(fetching).toHaveBeenCalledWith("/api/ui/repos", expect.anything());
   });
 
-  /// A count is the whole of what the card says: every item on the list it
-  /// opens is a name, and there is nothing else about one to scan for.
+  /// A count is the whole of what the card says, in its one line beside the
+  /// title: every item on the list it opens is a name, and there is nothing
+  /// else about one to scan for.
   it("says how many are registered", async () => {
     theRepos();
     const { container } = mountCard();
 
     await waitFor(() =>
       expect(
-        container.querySelector(`.${styles.standing}`)!.textContent,
-      ).toBe(`${REPOS.length} repos registered.`),
+        container.querySelector(`.${settingsCard.status}`)?.textContent,
+      ).toBe(`${REPOS.length} repos`),
     );
     expect(container.querySelector("h2")!.textContent).toBe("Repos");
   });
@@ -198,14 +200,19 @@ describe("the card", () => {
     serving(whenever("/api/ui/repos", json([FIRST])));
     mountCard();
 
-    await waitFor(() => screen.getByText("1 repo registered."));
+    await waitFor(() => screen.getByText("1 repo"));
   });
 
+  /// And none is said as none rather than as `0 repos` — and as a reading,
+  /// not a warning: a Verkstead with nothing registered yet is waiting on
+  /// nobody, the first Repo being registered from wherever it is wanted.
   it("says so plainly when none are registered", async () => {
     serving(whenever("/api/ui/repos", json([])));
     mountCard();
 
-    await waitFor(() => screen.getByText("No repos are registered yet."));
+    const line = await waitFor(() => screen.getByText("None registered"));
+    expect(line.classList).toContain(settingsCard.status);
+    expect(line.classList).not.toContain(settingsCard.warn);
   });
 
   /// A card is pressed to open the pane beside it, like every other card on

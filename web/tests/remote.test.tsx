@@ -31,7 +31,7 @@
 //! every other device in its cluster, a row apiece. It is drawn on every state
 //! of the pane —
 //! a machine with no Tailscale at all still has an identity — and the clause
-//! the card carries follows every one of the six sentences above it.
+//! the card carries follows whatever its line says about Tailscale.
 //!
 //! The reads are fixtures the server's own tests wrote, so what the page is
 //! drawn from is the shape the endpoint really answers with — see
@@ -218,15 +218,29 @@ function openedAt(hostname: string) {
   vi.stubGlobal("location", { hostname });
 }
 
+/// The card's one line, the whole of it: what it says about Tailscale and the
+/// devices clause after it, read off the status the card draws at its far end.
+///
+/// Waited for, because both halves are reads of their own, and the clause is
+/// only drawn once the devices have answered — so a test asking for the whole
+/// line asks for it once it holds the clause.
+async function theLine(): Promise<string> {
+  return waitFor(() => {
+    const line = document.querySelector("article h2 + span")?.textContent;
+
+    expect(line).toMatch(/ · (no devices|\d+ devices?) linked$/);
+    return line!;
+  });
+}
+
 describe("the card", () => {
   /// A machine with nothing installed says so on the card, because that is the
-  /// one somebody scanning the page has the most to do about.
-  it("says a machine with no Tailscale is only reachable from itself", async () => {
+  /// one somebody scanning the page has the most to do about — in the fewest
+  /// words that name it, the pane being where the install is pointed at.
+  it("says a machine with no Tailscale has none", async () => {
     mountCard(ABSENT);
 
-    await waitFor(() =>
-      expect(screen.getByText(/No Tailscale on this machine/)).toBeTruthy(),
-    );
+    expect(await theLine()).toBe("No Tailscale · no devices linked");
   });
 
   /// And one whose daemon is not answering is its own answer rather than a
@@ -235,34 +249,27 @@ describe("the card", () => {
   it("tells a Tailscale that is not up apart from a serve that is off", async () => {
     mountCard(DOWN);
 
-    await waitFor(() =>
-      expect(screen.getByText(/installed here and not up/)).toBeTruthy(),
-    );
-
-    expect(screen.queryByText(/not served to it/)).toBeNull();
+    expect(await theLine()).toBe("Tailscale is down · no devices linked");
+    expect(screen.queryByText(/Not served/)).toBeNull();
   });
 
-  /// A machine that is up and not serving names itself, and says the workbench
-  /// is not on it.
-  it("names the node of a machine that is up and serving nothing", async () => {
+  /// A machine that is up and not serving says the workbench is not served —
+  /// and nothing more: the node it would be served on is the pane's to say,
+  /// the card having room for how things stand and no more.
+  it("says a machine that is up and serving nothing is not served", async () => {
     mountCard(OFF);
 
-    await waitFor(() =>
-      expect(screen.getByText("workbench.tailnet-name.ts.net")).toBeTruthy(),
-    );
-
-    expect(screen.getByText(/not served to it/)).toBeTruthy();
+    expect(await theLine()).toBe("Not served · no devices linked");
+    expect(screen.queryByText(/workbench\.tailnet-name\.ts\.net/)).toBeNull();
   });
 
   /// And one that is serving says where, which is the address a phone is
-  /// pointed at.
+  /// pointed at — the host alone, the scheme being the same on every tailnet.
   it("says where a served workbench answers", async () => {
     mountCard(SERVING);
 
-    await waitFor(() =>
-      expect(
-        screen.getByText("https://workbench.tailnet-name.ts.net"),
-      ).toBeTruthy(),
+    expect(await theLine()).toBe(
+      "workbench.tailnet-name.ts.net · no devices linked",
     );
   });
 });
@@ -1394,9 +1401,7 @@ describe("a join waiting to be confirmed", () => {
   it("counts for nothing on the card", async () => {
     mountCard(SERVING, WAITING);
 
-    await waitFor(() =>
-      expect(screen.getByText(/No other devices are linked\./)).toBeTruthy(),
-    );
+    expect(await theLine()).toMatch(/ · no devices linked$/);
   });
 
   /// And it draws **this device's** fingerprint, which is the whole point of
@@ -1681,27 +1686,23 @@ describe("unlinking a device", () => {
 });
 
 describe("the devices clause on the card", () => {
-  /// It reads right after every one of the six sentences the card says about
+  /// It reads right after every one of the things the card says about
   /// Tailscale, rather than being written into one of them: what it says is
   /// true of a machine in any of those states.
   it("follows whatever the card said about Tailscale", async () => {
-    for (const [named, told] of [
-      ["with no Tailscale", ABSENT],
-      ["with the daemon down", DOWN],
-      ["whose Tailscale could not be read", UNREADABLE_SERVE],
-      ["serving nothing", OFF],
-      ["serving the workbench", SERVING],
+    for (const [named, told, said] of [
+      ["with no Tailscale", ABSENT, "No Tailscale"],
+      ["with the daemon down", DOWN, "Tailscale is down"],
+      ["whose serve could not be read", UNREADABLE_SERVE, "Serve unreadable"],
+      ["serving nothing", OFF, "Not served"],
+      ["serving the workbench", SERVING, "workbench.tailnet-name.ts.net"],
     ] as const) {
       const { unmount } = mountCard(told);
 
-      const standing = await waitFor(() =>
-        screen.getByText(/No other devices are linked\./),
-      );
-
       // In the one line rather than under it, so that the card reads as one
-      // sentence about this machine.
-      expect(standing.textContent, `the machine ${named}`).toMatch(
-        /\. No other devices are linked\.$/,
+      // line about this machine.
+      expect(await theLine(), `the machine ${named}`).toBe(
+        `${said} · no devices linked`,
       );
 
       unmount();
@@ -1714,23 +1715,18 @@ describe("the devices clause on the card", () => {
   it("counts the devices linked rather than the rows drawn", async () => {
     mountCard(SERVING);
 
-    await waitFor(() =>
-      expect(screen.getByText(/No other devices are linked/)).toBeTruthy(),
-    );
-
-    expect(screen.queryByText(/1 other device/)).toBeNull();
+    expect(await theLine()).toMatch(/ · no devices linked$/);
+    expect(screen.queryByText(/1 device linked/)).toBeNull();
   });
 
-  /// One reads as a sentence rather than as a figure, and more than one counts.
+  /// One is a device and more than one are devices.
   it("says one and says many", async () => {
     const { unmount } = mountCard(SERVING, {
       ...LINKED,
       members: LINKED.members.slice(0, 1),
     });
 
-    await waitFor(() =>
-      expect(screen.getByText(/One other device is linked\./)).toBeTruthy(),
-    );
+    expect(await theLine()).toMatch(/ · 1 device linked$/);
 
     unmount();
 
@@ -1739,20 +1735,16 @@ describe("the devices clause on the card", () => {
       members: [...LINKED.members, ...LINKED.members, ...LINKED.members],
     });
 
-    await waitFor(() =>
-      expect(screen.getByText(/6 other devices are linked\./)).toBeTruthy(),
-    );
+    expect(await theLine()).toMatch(/ · 6 devices linked$/);
   });
 
   /// And the number is the rows the list draws rather than a figure answered
-  /// beside them: one membership, one answer about it, so the sentence cannot
-  /// come to disagree with what the pane is showing.
+  /// beside them: one membership, one answer about it, so the line cannot come
+  /// to disagree with what the pane is showing.
   it("counts the rows the list draws", async () => {
     mountCard(SERVING, LINKED);
 
-    await waitFor(() =>
-      expect(screen.getByText(/2 other devices are linked\./)).toBeTruthy(),
-    );
+    expect(await theLine()).toMatch(/ · 2 devices linked$/);
   });
 });
 

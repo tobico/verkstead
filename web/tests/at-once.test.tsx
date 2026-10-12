@@ -41,6 +41,7 @@ import type { SettingsSaved, SettingsView } from "../src/api/types";
 import card from "../src/CardButton.module.css";
 import { AtOnceCard, AtOncePane } from "../src/settings/AtOnce";
 import styles from "../src/settings/AtOnce.module.css";
+import line from "../src/settings/SettingsCard.module.css";
 import { json, serving, whenever } from "./serving";
 import told from "./fixtures/settings.json" with { type: "json" };
 import unset from "./fixtures/settings-unset.json" with { type: "json" };
@@ -177,6 +178,16 @@ async function theCard(container: ParentNode): Promise<HTMLElement> {
   });
 }
 
+/// The status on the card once it is drawn: the one line at its far end saying
+/// how the section stands.
+async function theStatus(container: ParentNode): Promise<HTMLElement> {
+  const status = (await theCard(container)).querySelector<HTMLElement>(
+    `.${line.status}`,
+  );
+  expect(status, "expected the card to carry a status").not.toBeNull();
+  return status!;
+}
+
 /// The roadmap's own field, by the words beside it.
 async function theField(): Promise<HTMLInputElement> {
   return (await waitFor(() =>
@@ -200,45 +211,56 @@ const theServerSave = () => theSaves()[1]!;
 describe("the card", () => {
   /// What somebody scanning the page is after: how much of their machine this is
   /// helping itself to. Drawn whether or not anybody chose it, because the
-  /// default is as much an answer to *how many* as a choice would be.
+  /// default is as much an answer to *how many* as a choice would be. The
+  /// roadmap's limit comes first on the line, as a count of stages.
   it("says how much of one roadmap runs at once", async () => {
     theSettings(UNSET);
-    mountCard();
+    const { container } = mountCard();
 
-    await waitFor(() => screen.getByText(/of one roadmap at a time/));
-    expect(screen.getByText("3 stages")).toBeTruthy();
+    expect((await theStatus(container)).textContent).toMatch(/^3 stages · /);
   });
 
-  /// And the other limit beside it, because there are two and the card is what
-  /// somebody scanning the page reads both off.
+  /// And the other limit beside it on the same line, because there are two and
+  /// the card is what somebody scanning the page reads both off.
   it("says how many conversations the whole server runs at once", async () => {
     theSettings(UNSET);
-    mountCard();
+    const { container } = mountCard();
 
-    await waitFor(() => screen.getByText(/across the whole server/));
-    expect(screen.getByText("4 conversations")).toBeTruthy();
+    expect((await theStatus(container)).textContent).toBe(
+      "3 stages · 4 conversations",
+    );
   });
 
-  /// And the numbers somebody chose, in the words that agree with them: *one
+  /// And the numbers somebody chose, in the words that agree with them: *1
   /// stage* rather than *1 stages*, this being the number a human is most likely
   /// to have set.
   it("says the numbers somebody chose, in words that agree with them", async () => {
     theSettings(TOLD);
-    mountCard();
+    const { container } = mountCard();
 
-    await waitFor(() => screen.getByText(/of one roadmap at a time/));
-    expect(screen.getByText("One stage")).toBeTruthy();
-    expect(screen.getByText("2 conversations")).toBeTruthy();
+    expect((await theStatus(container)).textContent).toBe(
+      "1 stage · 2 conversations",
+    );
   });
 
-  /// And the singular on the server's line too, which is the number somebody
+  /// And the singular on the server's count too, which is the number somebody
   /// reaches for on a machine that is doing too much.
   it("says one conversation in the singular", async () => {
     theSettings(limited(TOLD, { conversations: 1 }));
-    mountCard();
+    const { container } = mountCard();
 
-    await waitFor(() => screen.getByText(/across the whole server/));
-    expect(screen.getByText("One conversation")).toBeTruthy();
+    expect((await theStatus(container)).textContent).toBe(
+      "1 stage · 1 conversation",
+    );
+  });
+
+  /// And never as a warning: a limit is a choice, not something waiting on
+  /// anybody.
+  it("draws its line in the quiet colour", async () => {
+    theSettings(UNSET);
+    const { container } = mountCard();
+
+    expect((await theStatus(container)).classList).not.toContain(line.warn);
   });
 
   it("opens the pane when it is pressed", async () => {

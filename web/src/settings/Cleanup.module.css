@@ -10,12 +10,8 @@
    only what stands on it. */
 
 .cleanupCard {
-  margin-bottom: 1.5rem;
-}
-
-.cleanupCard h2 {
-  margin: 0 0 0.75rem;
-  font-size: 1.1rem;
+  /* The look is `SettingsCard.module.css`'s; this names the card. */
+  min-width: 0;
 }
 
 /* What happens and when, a line apiece: the same quiet the build cache says

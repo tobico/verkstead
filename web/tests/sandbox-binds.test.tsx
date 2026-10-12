@@ -50,6 +50,7 @@ import {
 } from "../src/settings/SandboxBinds";
 import rowStyles from "../src/settings/PathEditor.module.css";
 import styles from "../src/settings/SandboxBinds.module.css";
+import line from "../src/settings/SettingsCard.module.css";
 import { browse, held, listingAt, rows as offered, tap } from "./fields";
 import { json, serving, whenever, type Answer } from "./serving";
 import told from "./fixtures/settings.json" with { type: "json" };
@@ -215,6 +216,14 @@ async function theCard(container: ParentNode): Promise<HTMLElement> {
   });
 }
 
+/// The status on a drawn card: the one line at its far end saying how the
+/// section stands.
+function statusOf(face: ParentNode): HTMLElement {
+  const status = face.querySelector<HTMLElement>(`.${line.status}`);
+  expect(status, "expected the card to carry a status").not.toBeNull();
+  return status!;
+}
+
 /// The pane once the read it stands on has landed.
 ///
 /// Waited for on the field that adds a path rather than on a row: the list is
@@ -237,7 +246,7 @@ function path(row: ParentNode): string {
 
 describe("the card", () => {
   /// What somebody scanning the page is after: what the section is, and how
-  /// much of the list stands.
+  /// much of the list stands — the title at one end, the count at the other.
   it("says how many paths stand", async () => {
     theSettings(seen(TOLD));
     const { container } = mountCard();
@@ -245,56 +254,54 @@ describe("the card", () => {
     const face = await theCard(container);
 
     expect(face.querySelector("h2")!.textContent).toBe("Sandbox binds");
-    expect(container.querySelector(`.${styles.standing}`)!.textContent).toBe(
-      "2 paths.",
-    );
+    expect(statusOf(face).textContent).toBe("2 paths");
   });
 
   /// A machine nobody has added one to is the ordinary state rather than one
-  /// half set up, so the card counts and says nothing else.
+  /// half set up, so the card counts and says nothing else, in the quiet
+  /// colour.
   it("says nothing is wrong where nothing is configured at all", async () => {
     theSettings(UNSET);
     const { container } = mountCard();
 
-    await theCard(container);
+    const face = await theCard(container);
 
-    expect(container.querySelector(`.${styles.standing}`)!.textContent).toBe(
-      "0 paths.",
-    );
-    expect(container.querySelector(`.${styles.warning}`)).toBeNull();
+    expect(statusOf(face).textContent).toBe("0 paths");
+    expect(statusOf(face).classList).not.toContain(line.warn);
   });
 
   /// And the other thing the browser can see and the human cannot: an entry that
-  /// is saved, is in the file, and does nothing.
+  /// is saved, is in the file, and does nothing. Counted after the paths, on the
+  /// same line.
   it("counts every entry the server cannot see", async () => {
     theSettings(TOLD);
     const { container } = mountCard();
 
-    await theCard(container);
+    const face = await theCard(container);
 
-    await waitFor(() => screen.getByText(/2 entries the server cannot see/));
+    expect(statusOf(face).textContent).toBe("2 paths · 2 unseen");
   });
 
-  /// And it sends the human here to read why: this is where every row anybody
-  /// can do anything about stands.
-  it("sends the human to this section to read why", async () => {
+  /// And that line is in the warning colour, which is what sends the human
+  /// here to read why: the card no longer says so in words, and this section's
+  /// pane is where every row anybody can do anything about stands.
+  it("draws the line as a warning while an entry is unseen", async () => {
     theSettings(TOLD);
     const { container } = mountCard();
 
-    await theCard(container);
+    const face = await theCard(container);
 
-    await waitFor(() =>
-      screen.getByText(/2 entries the server cannot see\. Open this section/),
-    );
+    expect(statusOf(face).classList).toContain(line.warn);
   });
 
   it("says nothing of the kind where every entry resolves", async () => {
     theSettings(seen(TOLD));
     const { container } = mountCard();
 
-    await theCard(container);
+    const face = await theCard(container);
 
-    expect(container.querySelector(`.${styles.warning}`)).toBeNull();
+    expect(statusOf(face).textContent).not.toMatch(/unseen/);
+    expect(statusOf(face).classList).not.toContain(line.warn);
   });
 
   it("opens the pane when it is pressed", async () => {

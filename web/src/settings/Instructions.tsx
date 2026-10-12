@@ -40,7 +40,6 @@ import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { Match, Show, Switch as Choose, createSignal, type JSX } from "solid-js";
 
 import app from "../App.module.css";
-import { CardButton } from "../CardButton";
 import { PaneSticky } from "../Panes";
 import { loadSettings, saveSettings } from "../api/client";
 import type { SettingsSaved, SettingsView } from "../api/types";
@@ -49,6 +48,7 @@ import { Empty, ErrorLine, Note } from "../notices";
 import { PaneHead } from "../workbench/PaneHead";
 import { heldAtOnce, heldCleanup, heldLanguages, heldPaths } from "./held";
 import styles from "./Instructions.module.css";
+import { SettingsCard } from "./SettingsCard";
 
 /// What the section is called, in the one place both panes read it from.
 const TITLE = "Instructions";
@@ -89,29 +89,13 @@ export function InstructionsCard(props: {
       </Match>
       <Match when={settings.data}>
         {(told) => (
-          <CardButton
-            as="article"
+          <SettingsCard
             class={styles.instructionsCard}
+            title={TITLE}
             open={props.open}
             press={props.press}
-          >
-            <h2>{TITLE}</h2>
-
-            <p class={styles.standing}>
-              <Show
-                when={told().instructions !== ""}
-                fallback={
-                  <>
-                    Nothing is configured, so a session is told only what its
-                    repository carries.
-                  </>
-                }
-              >
-                Given to every session, whatever agent runs it, above whatever
-                instructions its repository carries.
-              </Show>
-            </p>
-          </CardButton>
+            status={told().instructions !== "" ? "Configured" : "None"}
+          />
         )}
       </Match>
     </Choose>

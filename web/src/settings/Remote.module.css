@@ -10,12 +10,8 @@
    stands on it. */
 
 .remoteCard {
-  margin-bottom: 1.5rem;
-}
-
-.remoteCard h2 {
-  margin: 0 0 0.75rem;
-  font-size: 1.1rem;
+  /* The look is `SettingsCard.module.css`'s; this names the card. */
+  min-width: 0;
 }
 
 /* How things stand, in a line: the same quiet the sections above say what is
@@ -420,7 +416,6 @@
     border-color: var(--accent-deep);
   }
 }
-
 
 /* And the devices out there that this one is not in a cluster with, under a word
    of their own: the rows above are the cluster, and these are what could join it.

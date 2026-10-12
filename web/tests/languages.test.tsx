@@ -47,6 +47,7 @@ import {
   usageSaid,
 } from "../src/settings/Languages";
 import styles from "../src/settings/Languages.module.css";
+import line from "../src/settings/SettingsCard.module.css";
 import { type Answer, json, serving, whenever } from "./serving";
 import told from "./fixtures/settings.json" with { type: "json" };
 import unset from "./fixtures/settings-unset.json" with { type: "json" };
@@ -209,6 +210,14 @@ async function theCard(container: ParentNode): Promise<HTMLElement> {
   });
 }
 
+/// The status on a drawn card — the one line at its far end saying how the
+/// section stands — or `null` where there is no card yet.
+function statusOf(container: ParentNode): HTMLElement | null {
+  return container.querySelector<HTMLElement>(
+    `.${styles.languagesCard} .${line.status}`,
+  );
+}
+
 /// One of the boxes on the pane, by the label the server gave its language.
 function theCheck(label = "Rust"): HTMLInputElement {
   return screen.getByRole("checkbox", { name: label }) as HTMLInputElement;
@@ -288,17 +297,19 @@ function measured(
 const GB = 2 ** 30;
 
 describe("the card", () => {
-  /// The summary is the list of languages that have build support on, in the
-  /// labels the descriptors gave them.
+  /// The status is the list of languages that have build support on, in the
+  /// labels the descriptors gave them, and in the quiet colour, because
+  /// nothing is waiting on anybody.
   it("names every language that is on", async () => {
     theSettings(compiling(TOLD));
     const { container } = mountCard();
 
     await waitFor(() =>
-      expect(container.querySelector(`.${styles.standing}`)?.textContent).toBe(
+      expect(statusOf(container)?.textContent).toBe(
         "Rust, Go, Node, Python, .NET, C/C++, JVM, Gleam",
       ),
     );
+    expect(statusOf(container)!.classList).not.toContain(line.warn);
   });
 
   /// And the one an installer wrote goes when it is switched off, the same way
@@ -308,15 +319,16 @@ describe("the card", () => {
     const { container } = mountCard();
 
     await waitFor(() =>
-      expect(container.querySelector(`.${styles.standing}`)?.textContent).toBe(
+      expect(statusOf(container)?.textContent).toBe(
         "Rust, Go, Node, Python, .NET, C/C++, JVM",
       ),
     );
   });
 
-  /// And nothing at all under the heading where none are: a card saying a
-  /// machine builds nothing would be a line nobody needs.
-  it("says nothing under the heading while they are all off", async () => {
+  /// And where none are, the line says so in two words rather than going
+  /// blank: a card is one line, title and status, and a status missing would
+  /// read as one still loading.
+  it("says none are on while they are all off", async () => {
     theSettings(
       off(
         off(
@@ -329,25 +341,24 @@ describe("the card", () => {
     const { container } = mountCard();
 
     const face = await theCard(container);
-    expect(face.textContent).toBe("Language support");
-    expect(container.querySelector(`.${styles.standing}`)).toBeNull();
+    expect(face.querySelector("h2")?.textContent).toBe("Language support");
+    expect(statusOf(container)?.textContent).toBe("None on");
+    expect(statusOf(container)!.classList).not.toContain(line.warn);
   });
 
   /// What the human cannot fix from the browser, said where they would
   /// otherwise wonder why nothing got faster — and on the card rather than
   /// only in the pane, because whoever needs to read it is whoever is not
-  /// editing.
+  /// editing. In the fewest words that name it, and in the warning colour,
+  /// taking the line the languages would have had: the pane says why.
   it("warns when there is no sccache for the server to compile through", async () => {
     theSettings(UNSET);
     const { container } = mountCard();
 
-    await waitFor(() => screen.getByText(/No sccache is installed/));
-    const warning = container.querySelector(`.${styles.warning}`);
-    expect(warning).not.toBeNull();
-    expect(
-      warning!.textContent,
-      "C/C++ compiles through it too, and has no crates or downloads",
-    ).not.toMatch(/crate|download|dependenc/i);
+    await waitFor(() =>
+      expect(statusOf(container)?.textContent).toBe("No sccache"),
+    );
+    expect(statusOf(container)!.classList).toContain(line.warn);
   });
 
   /// And nothing about it while the languages that want one are switched off,
@@ -358,32 +369,50 @@ describe("the card", () => {
     theSettings(off(off(UNSET), CPP));
     const { container } = mountCard();
 
-    await theCard(container);
-    expect(screen.queryByText(/No sccache is installed/)).toBeNull();
+    await waitFor(() => expect(statusOf(container)).not.toBeNull());
+    expect(statusOf(container)!.textContent).not.toMatch(/sccache/);
+    expect(statusOf(container)!.classList).not.toContain(line.warn);
   });
 
   it("says nothing about sccache where the server found one", async () => {
     theSettings(compiling(UNSET));
-    mountCard();
+    const { container } = mountCard();
 
     await waitFor(() =>
-      screen.getByText("Rust, Go, Node, Python, .NET, C/C++, JVM"),
+      expect(statusOf(container)?.textContent).toBe(
+        "Rust, Go, Node, Python, .NET, C/C++, JVM",
+      ),
     );
-    expect(screen.queryByText(/No sccache is installed/)).toBeNull();
+    expect(statusOf(container)!.classList).not.toContain(line.warn);
   });
 
   /// And a language whose entry the server could not read, said here too: the
   /// card is what somebody scanning the page sees, and a file that wants
-  /// editing is exactly the sort of thing they would want telling about.
-  it("names a language whose entry could not be read", async () => {
+  /// editing is exactly the sort of thing they would want telling about. The
+  /// card says only that there is one, in the warning colour; which language
+  /// and what the file says is the pane's to tell.
+  it("says when a language's entry could not be read", async () => {
     theSettings(unread(compiling(TOLD), GLEAM, "Nothing"));
     const { container } = mountCard();
 
     await waitFor(() =>
-      expect(container.querySelector(`.${styles.warning}`)?.textContent).toBe(
-        "Verkstead could not read what config.yaml says about Gleam.",
+      expect(statusOf(container)?.textContent).toBe("Unreadable config entry"),
+    );
+    expect(statusOf(container)!.classList).toContain(line.warn);
+  });
+
+  /// And both at once where both are so, one after the other on the one line,
+  /// because neither is the less waiting on the human for the other.
+  it("says both warnings where both hold", async () => {
+    theSettings(unread(TOLD, GLEAM, "Nothing"));
+    const { container } = mountCard();
+
+    await waitFor(() =>
+      expect(statusOf(container)?.textContent).toBe(
+        "Unreadable config entry · No sccache",
       ),
     );
+    expect(statusOf(container)!.classList).toContain(line.warn);
   });
 
   it("opens the pane when it is pressed", async () => {
@@ -1316,9 +1345,11 @@ describe("changing the languages", () => {
   });
 
   /// What the pane saved is what the card goes back to saying, because the
-  /// answer is a fresh read of the files that both halves are drawn from.
+  /// answer is a fresh read of the files that both halves are drawn from. With
+  /// an sccache found, so the line is the languages rather than the warning
+  /// that would take it.
   it("takes a language off the card when the pane unticks it", async () => {
-    theSettings(TOLD, json(answering(off(TOLD))));
+    theSettings(compiling(TOLD), json(answering(off(compiling(TOLD)))));
     const { container } = mounting(() => (
       <>
         <LanguagesCard open press={() => {}} />
@@ -1327,14 +1358,14 @@ describe("changing the languages", () => {
     ));
 
     await waitFor(() => expect(theCheck().checked).toBe(true));
-    expect(container.querySelector(`.${styles.standing}`)?.textContent).toBe(
+    expect(statusOf(container)?.textContent).toBe(
       "Rust, Go, Node, Python, .NET, C/C++, JVM, Gleam",
     );
 
     fireEvent.click(theCheck());
 
     await waitFor(() =>
-      expect(container.querySelector(`.${styles.standing}`)?.textContent).toBe(
+      expect(statusOf(container)?.textContent).toBe(
         "Go, Node, Python, .NET, C/C++, JVM, Gleam",
       ),
     );

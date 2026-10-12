@@ -48,7 +48,6 @@
 
 import { Match, Show, Switch as Choose, type JSX } from "solid-js";
 
-import { CardButton } from "../CardButton";
 import { PaneSticky } from "../Panes";
 import type { BindEntry, PathsView } from "../api/types";
 import { Empty, ErrorLine, Note } from "../notices";
@@ -64,6 +63,7 @@ import {
   without,
 } from "./PathEditor";
 import styles from "./SandboxBinds.module.css";
+import { SettingsCard } from "./SettingsCard";
 
 /// The binds, as the rows this pane draws — every one of them, whichever of the
 /// two sources said it.
@@ -80,13 +80,6 @@ function drawn(paths: PathsView | undefined): Row<BindEntry>[] {
 function unseen(paths: PathsView | undefined): number {
   return (paths?.binds ?? []).filter((entry) => unresolved(entry.resolution))
     .length;
-}
-
-/// What the card says about them: how many, and where to go and read why.
-function unseenSays(paths: PathsView | undefined): string {
-  const many = counted(unseen(paths), "entry", "entries");
-
-  return `${many} the server cannot see. Open this section to read why.`;
 }
 
 /// A count with the word it counts, so that a line reads as English rather than
@@ -120,25 +113,18 @@ export function SandboxBindsCard(props: {
       </Match>
       <Match when={settings.data?.paths}>
         {(paths) => (
-          <CardButton
-            as="article"
+          <SettingsCard
             class={styles.bindsCard}
+            title="Sandbox binds"
             open={props.open}
             press={props.press}
-          >
-            <h2>Sandbox binds</h2>
-
-            {/* The one thing the browser can see and the human cannot: a row
-                that is saved, is in the file, and does nothing, because what it
-                names is not where the server is looking. */}
-            <Show when={unseen(paths()) > 0}>
-              <p class={styles.warning}>{unseenSays(paths())}</p>
-            </Show>
-
-            <p class={styles.standing}>
-              {counted(paths().binds.length, "path", "paths")}.
-            </p>
-          </CardButton>
+            warn={unseen(paths()) > 0}
+            status={
+              unseen(paths()) > 0
+                ? `${counted(paths().binds.length, "path", "paths")} · ${unseen(paths())} unseen`
+                : counted(paths().binds.length, "path", "paths")
+            }
+          />
         )}
       </Match>
     </Choose>

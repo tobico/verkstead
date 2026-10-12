@@ -161,7 +161,6 @@ import {
   type JSX,
 } from "solid-js";
 
-import { CardButton } from "../CardButton";
 import { Check } from "../Check";
 import { Icon } from "../Icon";
 import { Menu } from "../Menu";
@@ -189,6 +188,7 @@ import {
   heldPaths,
 } from "./held";
 import styles from "./Languages.module.css";
+import { SettingsCard } from "./SettingsCard";
 
 /// What the section is called, wherever it names itself: the card's heading and
 /// the pane's head.
@@ -579,6 +579,21 @@ function standing(told: SettingsView | undefined): string[] {
     .map((language) => language.label);
 }
 
+/// What the card says, in a line: what is waiting on the human first — an entry
+/// `config.yaml` holds that could not be read, and compiles nothing caches —
+/// and otherwise which languages are on.
+function summary(told: SettingsView): string {
+  const waiting = [
+    unread(told).length > 0 ? "Unreadable config entry" : null,
+    warnedAny(told) ? "No sccache" : null,
+  ].filter((said): said is string => said !== null);
+
+  if (waiting.length > 0) return waiting.join(" · ");
+
+  const on = standing(told);
+  return on.length > 0 ? on.join(", ") : "None on";
+}
+
 /// What has build support, as the card that opens it.
 ///
 /// What is on the card is what somebody scanning the page is after: which
@@ -604,27 +619,14 @@ export function LanguagesCard(props: {
       </Match>
       <Match when={settings.data}>
         {(told) => (
-          <CardButton
-            as="article"
+          <SettingsCard
             class={styles.languagesCard}
+            title={TITLE}
             open={props.open}
             press={props.press}
-          >
-            <h2>{TITLE}</h2>
-
-            <Show when={warnedAny(told())}>{uncompiled()}</Show>
-
-            <Show when={unread(told()).length > 0}>
-              <p class={styles.warning}>
-                Verkstead could not read what <code>config.yaml</code> says
-                about {unread(told()).join(", ")}.
-              </p>
-            </Show>
-
-            <Show when={standing(told()).length > 0}>
-              <p class={styles.standing}>{standing(told()).join(", ")}</p>
-            </Show>
-          </CardButton>
+            warn={warnedAny(told()) || unread(told()).length > 0}
+            status={summary(told())}
+          />
         )}
       </Match>
     </Choose>

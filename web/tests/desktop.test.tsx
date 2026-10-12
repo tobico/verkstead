@@ -48,6 +48,7 @@ import type {
 import check from "../src/Check.module.css";
 import { DesktopCard, DesktopPane } from "../src/settings/Desktop";
 import styles from "../src/settings/Desktop.module.css";
+import settingsCard from "../src/settings/SettingsCard.module.css";
 import git from "../src/settings/Git.module.css";
 import {
   NAME,
@@ -217,22 +218,26 @@ function chosen(container: ParentNode): string | undefined {
 }
 
 describe("the card", () => {
-  it("says what closing the window does, and where the icon is", async () => {
+  /// Off a Mac the card's one line is what closing the window does — the thing
+  /// the human came to it to find out — and that alone: where the icon stands
+  /// is the pane's to say, the line having room for one reading and the close
+  /// being the one that differs between the positions.
+  it("says what closing the window does, and nothing of the icon", async () => {
     standingIn();
-    mountCard();
+    const { container } = mountCard();
 
-    await screen.findByText(
-      "Closing the window keeps Verkstead running in the tray.",
-    );
-    screen.getByText("There is an icon in the tray.");
+    const line = await screen.findByText("Keeps running in the tray");
+    expect(line.classList).toContain(settingsCard.status);
+    expect(line.classList).not.toContain(settingsCard.warn);
+    expect(container.textContent).not.toMatch(/Icon in/);
   });
 
   /// Each position in its own words, which is what the card answers: the human
   /// came to it to find out what closing the window does.
   it("says of each position what it comes to", async () => {
     for (const [whenClosed, said] of [
-      ["ask", "Closing the window asks before quitting."],
-      ["quit", "Closing the window quits Verkstead."],
+      ["ask", "Asks before quitting"],
+      ["quit", "Quits on close"],
     ] as const) {
       standingIn({ ...DEFAULTS, whenClosed, trayIcon: true });
       const { unmount } = mountCard();
@@ -250,18 +255,27 @@ describe("the card", () => {
     standingIn({ ...DEFAULTS, whenClosed: "tray", trayIcon: false });
     mountCard();
 
-    await screen.findByText("Closing the window quits Verkstead.");
-    screen.getByText("There is no icon in the tray.");
+    await screen.findByText("Quits on close");
+    expect(screen.queryByText("Keeps running in the tray")).toBeNull();
   });
 
   /// A Mac has no close policy of this page's to report: closing a window there
-  /// leaves the application in the Dock, and the icon is the menu bar's.
+  /// leaves the application in the Dock. So its line is where the icon stands
+  /// instead, which is the menu bar's — and says so both ways.
   it("says nothing of closing on a Mac, and names the menu bar", async () => {
     standingIn(DEFAULTS, "darwin");
-    mountCard();
+    const { unmount } = mountCard();
 
-    await screen.findByText("There is an icon in the menu bar.");
-    expect(screen.queryByText(/Closing the window/)).toBeNull();
+    await screen.findByText("Icon in the menu bar");
+    expect(
+      screen.queryByText(/Keeps running|Asks before|Quits on close/),
+    ).toBeNull();
+    unmount();
+    vi.unstubAllGlobals();
+
+    standingIn({ ...DEFAULTS, trayIcon: false }, "darwin");
+    mountCard();
+    await screen.findByText("No icon in the menu bar");
   });
 
   it("opens the pane when it is pressed", async () => {

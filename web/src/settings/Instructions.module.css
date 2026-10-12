@@ -11,12 +11,8 @@
    stands around them. */
 
 .instructionsCard {
-  margin-bottom: 1.5rem;
-}
-
-.instructionsCard h2 {
-  margin: 0 0 0.75rem;
-  font-size: 1.1rem;
+  /* The look is `SettingsCard.module.css`'s; this names the card. */
+  min-width: 0;
 }
 
 /* How it stands, in a line: the same quiet the sections above it say what is

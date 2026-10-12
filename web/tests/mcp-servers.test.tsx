@@ -43,6 +43,7 @@ import {
   McpServersPane,
 } from "../src/settings/McpServers";
 import styles from "../src/settings/McpServers.module.css";
+import settingsCard from "../src/settings/SettingsCard.module.css";
 import { json, serving, whenever } from "./serving";
 import told from "./fixtures/settings.json" with { type: "json" };
 import unset from "./fixtures/settings-unset.json" with { type: "json" };
@@ -234,24 +235,29 @@ function keeping(server: McpServer, url: string = server.url) {
 }
 
 describe("the card", () => {
-  /// What somebody scanning the page is after: how many are declared, and what
-  /// that comes to for a Conversation.
-  it("says how many are declared and what they are for", async () => {
+  /// What somebody scanning the page is after: how many are declared, in the
+  /// card's one line. What that comes to for a Conversation — the Attach
+  /// button — is the pane's to say, and the names are behind the press.
+  it("says how many are declared", async () => {
     theSettings(TOLD);
-    mountCard();
+    const { container } = mountCard();
 
-    const line = await waitFor(() => screen.getByText(/2 servers declared/));
-    expect(line.textContent).toContain("Attach button");
+    const line = await waitFor(() => screen.getByText("2 servers"));
+    expect(line.classList).toContain(settingsCard.status);
+    expect(line.classList).not.toContain(settingsCard.warn);
+    expect(container.textContent).not.toMatch(/Attach/);
   });
 
   /// And a Verkstead nobody has declared one on says so, rather than saying
   /// nothing: an empty section on a settings page reads as one that is broken.
+  /// Not as a warning, though — declaring none is a choice, not something the
+  /// section is waiting on.
   it("says so where nothing is declared", async () => {
     theSettings(UNSET);
     mountCard();
 
-    const line = await waitFor(() => screen.getByText(/Nothing is declared/));
-    expect(line.textContent).toContain("no server to attach");
+    const line = await waitFor(() => screen.getByText("None declared"));
+    expect(line.classList).not.toContain(settingsCard.warn);
   });
 
   it("opens the pane on a press", async () => {
