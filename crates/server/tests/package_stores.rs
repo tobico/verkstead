@@ -1365,21 +1365,24 @@ enum Racing {
     /// what ten of the eleven tools give.
     BothFinish,
 
-    /// One of the two may fail, and the store is still there for whoever comes
-    /// next — **Yarn Classic, measured**.
+    /// Either of the two may fail — **both, now and then** — and the store is
+    /// still there for whoever comes next: **Yarn Classic, measured**.
     ///
     /// Classic creates its cache entry at the entry's *final* path and fills it
     /// afterwards, so a second install that arrives in between sees the
     /// directory, takes the entry for complete, and opens a `.yarn-tarball.tgz`
     /// the first one has not written yet: `ENOENT`, and that install stops.
-    /// About one run in four here.
+    /// About one run in four here. Rarer, the two collide both ways and both
+    /// stop — the first finding its own half-made entry gone from under it —
+    /// which CI met on 2026-10-12.
     ///
     /// **What is not damaged is the store**, which is the thing this proof is
     /// really for and which is asserted below whichever of the two lost: a third
     /// install with the registry gone still installs out of it and still runs
     /// what it installed. So the cache stays shared — one download for the
     /// machine is what it is for — and what a collision costs is the install
-    /// that hit it, which is re-run.
+    /// that hit it, which is re-run — so where both lost, the proof re-runs
+    /// one, alone, over whatever the collision left, and that one must finish.
     ///
     /// Berry is [`Racing::BothFinish`] and needs none of this: its cache is one
     /// zip per package written under a temporary name and renamed, so there is
@@ -1513,7 +1516,7 @@ async fn one_javascript_tools_store(proof: Installs) {
     let first = starting(&machine.sandbox(0, &cache, vec![]), &filling);
     let second = starting(&machine.sandbox(1, &cache, vec![]), &filling);
 
-    let first = finished(first);
+    let mut first = finished(first);
     let second = finished(second);
 
     match proof.racing {
@@ -1528,15 +1531,26 @@ async fn one_javascript_tools_store(proof: Installs) {
         // is true — see [`Racing::OneMayLose`]. What the store was left in is
         // the third install's to say, below, which is the assertion that
         // matters either way.
-        Racing::OneMayLose => assert!(
-            first.worked || second.worked,
-            "one of the two racing {} installs has to finish, whichever loses: \
-             a collision that takes them both is a store nobody filled. The \
-             first said:\n{}\nand the second said:\n{}",
-            proof.tool,
-            first.said,
-            second.said,
-        ),
+        //
+        // **Where both lost**, the first is run again, alone, as
+        // `docs/adoption.md` tells a human to: over whatever the collision
+        // left in the store, it has to finish.
+        Racing::OneMayLose => {
+            if !first.worked && !second.worked {
+                let again = installing(&machine.sandbox(0, &cache, vec![]), &filling);
+
+                assert!(
+                    again.worked,
+                    "both racing {} installs collided, and the first run again \
+                     on its own has to finish over what they left. The first \
+                     said:\n{}\nthe second said:\n{}\nand the re-run \
+                     said:\n{}",
+                    proof.tool, first.said, second.said, again.said,
+                );
+
+                first = again;
+            }
+        }
     }
 
     // The lockfile a Repo would have committed, carried to the two that follow:

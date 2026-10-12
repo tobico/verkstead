@@ -1294,12 +1294,13 @@ installs. Nothing a descriptor can do changes that: the grammar sets variables,
 and there is no rung below the environment to set one on.
 
 **Two Conversations installing with Yarn Classic at the same moment may cost one
-of them its install.** Classic is the one tool of the eleven whose cache is not
+of them its install, and now and then both.** Classic is the one tool of the eleven whose cache is not
 safe for two writers: it makes a cache entry at that entry's final name and
 fills it afterwards, so an install arriving in between finds the directory,
 takes it for complete, and fails on a file that is not written yet — a yarn
-error naming a `.yarn-tarball.tgz` under the cache. **Nothing is damaged**: the
-store is left usable, and the install is right the second time. The cache stays
+error naming a `.yarn-tarball.tgz` under the cache, or saying the tarball
+"appears to be corrupt" over a file of the entry it could not find. **Nothing is
+damaged**: the store is left usable, and the install is right the second time. The cache stays
 shared because that is the trade — one download for the machine against a
 collision you re-run — and it is written here so it is recognised rather than
 debugged. The other ten tools, Yarn Berry included, are safe for two at once.
