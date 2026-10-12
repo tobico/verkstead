@@ -15,4 +15,4 @@ on by default (ADR-0020, *Amended: notifications are the app's own*).
 - [x] 02: The app shows a notification — [details](02-the-app-shows-a-notification.md)
 - [x] 03: A click opens the notice's path — [details](03-a-click-opens-the-notices-path.md)
 - [x] 04: The switch inside the app, on by default — [details](04-the-switch-inside-the-app.md)
-- [ ] 05: The platform legs and the docs — [details](05-the-platform-legs-and-the-docs.md)
+- [x] 05: The platform legs and the docs — [details](05-the-platform-legs-and-the-docs.md)

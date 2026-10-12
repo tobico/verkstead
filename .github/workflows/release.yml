@@ -635,7 +635,7 @@ jobs:
       - name: Install what running this file here wants
         run: |
           sudo apt-get update
-          sudo apt-get install -y xvfb dbus-x11 fuse3 binutils
+          sudo apt-get install -y xvfb dbus-x11 fuse3 binutils dunst
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
       - uses: actions/checkout@v7.0.1
@@ -890,6 +890,135 @@ jobs:
             fi
           done
           cat "$log"
+
+      # **And a notice reaches the desktop as a notification**, which is the
+      # other thing this app is downloaded for once the window is shut: the
+      # sidecar streams every notice the phones get to the app, and the app
+      # draws each as the platform's own notification (ADR-0020, *Amended:
+      # notifications are the app's own*). Asserted end to end on the file
+      # itself — the stream held, a Set asked, the notification shown, and a
+      # notification daemon on the runner saying it was handed one.
+      #
+      # **A daemon, deliberately, for the reason the bus above is one.** Electron
+      # draws a Linux notification through libnotify, which it loads at runtime
+      # rather than links — the AppImage carries a copy beside Electron for a
+      # desktop without one — and libnotify hands it to whatever owns
+      # `org.freedesktop.Notifications` on the session bus. With nothing there
+      # the app would still say it showed one, so `dunst` owns the name on a bus
+      # of this step's own, and the `Notify` call read off that bus is the word that
+      # the daemon was handed the notification, with the title the Set gave it.
+      #
+      # **Started `--hidden`, which is a login's start**: the app draws a notice
+      # only while its window is not in front, because a window in front already
+      # draws the news — and a window that never came up is the one case of that
+      # with nothing about a window manager or focus left to chance. The tray is
+      # on by default, which is what lets a hidden start be one.
+      #
+      # **The Set is asked the way a session asks one**, by the binary inside the
+      # mounted image, from a Conversation over this checkout made through the
+      # same two routes the development guide's quickstart scripts. `--deferred`
+      # so the ask returns as soon as the Set is stored rather than waiting on an
+      # answer nobody here will give.
+      - name: A notice is shown as a notification, and the daemon is handed it
+        timeout-minutes: 5
+        env:
+          XDG_STATE_HOME: ${{ runner.temp }}/state
+          VERKSTEAD_DATA_DIR: ${{ runner.temp }}/data
+        run: |
+          Xvfb :99 -screen 0 1024x768x24 &
+          screen=$!
+          export DISPLAY=:99
+          for _ in $(seq 50); do
+            if [ -e /tmp/.X11-unix/X99 ]; then
+              break
+            fi
+            sleep 0.2
+          done
+
+          # One bus for the daemon, the app and the question asked of the daemon
+          # afterwards, which `dbus-run-session` around a single command cannot
+          # give three commands.
+          eval "$(dbus-launch --sh-syntax)"
+          dunst > dunst.log 2>&1 &
+          daemon=$!
+          for _ in $(seq 50); do
+            if dunstctl is-paused > /dev/null 2>&1; then
+              break
+            fi
+            sleep 0.2
+          done
+          # What crossed the bus to the daemon, which is the record: dunst keeps
+          # a notification in its history only once it has closed, and one on
+          # the screen is in no list a command can read.
+          dbus-monitor --session \
+            "type='method_call',interface='org.freedesktop.Notifications',member='Notify'" \
+            > notify.log 2>&1 &
+          monitor=$!
+
+          log="$XDG_STATE_HOME/verkstead/verkstead.log"
+          rm -f "$log"
+          key=$(cat "$VERKSTEAD_DATA_DIR/workbench.key")
+
+          ./"$APPIMAGE" --hidden &
+          app=$!
+
+          # The stream is opened once the server answers, so this is the wait
+          # for both — and a Set asked before it is held is a notice nobody hears.
+          for _ in $(seq 150); do
+            if grep -q "the notices stream is held" "$log" 2> /dev/null; then
+              break
+            fi
+            sleep 0.2
+          done
+
+          # A repository of the step's own to ask from, on a `main` with one
+          # commit: the checkout is a detached HEAD with no default branch, which
+          # a Repo is refused for.
+          repo="$RUNNER_TEMP/asking"
+          git init -q -b main "$repo"
+          git -C "$repo" -c user.name=release -c user.email=release@localhost \
+            commit -q --allow-empty -m "the repository a Set is asked from"
+          curl --fail --silent --show-error -X POST \
+            --cookie "workbench_key=$key" -H 'Content-Type: application/json' \
+            -d "{\"path\":\"$repo\"}" http://127.0.0.1:8422/api/ui/repos
+          echo
+          curl --fail --silent --show-error -X POST \
+            --cookie "workbench_key=$key" -H 'Content-Type: application/json' \
+            -d '{"repo_id":1}' http://127.0.0.1:8422/api/ui/conversations
+          echo
+          (cd "$repo" && VERKSTEAD_SERVER=http://127.0.0.1:8422/conversations/1 \
+            "$MOUNTED/resources/cli/verkstead" ask --deferred "$GITHUB_WORKSPACE/examples/questions.yaml")
+
+          for _ in $(seq 100); do
+            if grep -q "a notice is shown" "$log" 2> /dev/null; then
+              break
+            fi
+            sleep 0.2
+          done
+          # A moment for the daemon, which hears it after the app has said so.
+          sleep 1
+
+          kill "$app" "$monitor" "$daemon" "$screen" || true
+          kill "$DBUS_SESSION_BUS_PID" || true
+          cat "$log" 2> /dev/null || echo "There is no log at $log."
+
+          for said in "the notices stream is held" "a notice is shown"; do
+            if ! grep -q "$said" "$log" 2> /dev/null; then
+              echo "::error::The app's log does not say \"$said\"."
+              exit 1
+            fi
+          done
+          if grep -q "a notification failed" "$log"; then
+            echo "::error::The app showed a notification and the platform refused it."
+            exit 1
+          fi
+
+          cat notify.log
+          if ! grep -q '"Rate limiting for the public API"' notify.log; then
+            echo "::error::The notification daemon was never handed the notification."
+            cat dunst.log
+            exit 1
+          fi
 
       # Under an artifact name that says which desktop this is rather than what
       # the file is called. `publish` fetches the CLI binaries by a
@@ -1304,6 +1433,106 @@ jobs:
             fi
           done
           cat "$log"
+
+      # **And a notice reaches the desktop as a notification** — the stream the
+      # sidecar holds open to the app, a Set asked, and the notification drawn —
+      # asserted on the app out of the mount as the AppImage's leg asserts it on
+      # the file, and for the same reasons: started `--hidden`, so no window is
+      # in front to make the notice redundant, and the Set asked by the binary
+      # inside the bundle from a Conversation over this checkout.
+      #
+      # **What this leg is for beyond the other two is the signature.** The
+      # bundle is ad-hoc signed rather than by a Developer ID, and the
+      # notification centre is the one part of macOS that may decline an app it
+      # cannot place; Electron says so with a `failed` event, which the app logs.
+      # So the line saying it was shown, the absence of that refusal, and
+      # `usernoted` presenting it are all read. Measured on macos-15: an ad-hoc
+      # bundle installed in `/Applications` is presented, and the same bundle
+      # run out of the mounted image is refused — so it is installed first.
+      - name: A notice is shown as a notification
+        timeout-minutes: 5
+        env:
+          VERKSTEAD_DATA_DIR: ${{ runner.temp }}/data
+        run: |
+          log="$HOME/Library/Logs/Verkstead/verkstead.log"
+          rm -f "$log"
+          key=$(cat "$VERKSTEAD_DATA_DIR/workbench.key")
+
+          # Installed the way a downloader installs it, by copying it out of
+          # the image into `/Applications` — which is where LaunchServices
+          # learns the bundle's identifier. The notification centre finds an
+          # app through that record, and run straight out of the mount it has
+          # none: `usernoted` answers "LSApplicationRecord failed to find
+          # net.tobico.Verkstead" and Electron's `failed` says the app is not
+          # allowed to notify.
+          installed=/Applications/Verkstead.app
+          ditto "$APP" "$installed"
+          /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
+            -f "$installed"
+
+          "$installed/Contents/MacOS/Verkstead" --hidden &
+          app=$!
+
+          for _ in $(seq 150); do
+            if grep -q "the notices stream is held" "$log" 2> /dev/null; then
+              break
+            fi
+            sleep 0.2
+          done
+
+          # A repository of the step's own to ask from, on a `main` with one
+          # commit: the checkout is a detached HEAD with no default branch, which
+          # a Repo is refused for.
+          repo="$RUNNER_TEMP/asking"
+          git init -q -b main "$repo"
+          git -C "$repo" -c user.name=release -c user.email=release@localhost \
+            commit -q --allow-empty -m "the repository a Set is asked from"
+          curl --fail --silent --show-error -X POST \
+            --cookie "workbench_key=$key" -H 'Content-Type: application/json' \
+            -d "{\"path\":\"$repo\"}" http://127.0.0.1:8422/api/ui/repos
+          echo
+          curl --fail --silent --show-error -X POST \
+            --cookie "workbench_key=$key" -H 'Content-Type: application/json' \
+            -d '{"repo_id":1}' http://127.0.0.1:8422/api/ui/conversations
+          echo
+          (cd "$repo" && VERKSTEAD_SERVER=http://127.0.0.1:8422/conversations/1 \
+            "$installed/Contents/Resources/cli/verkstead" ask --deferred "$GITHUB_WORKSPACE/examples/questions.yaml")
+
+          for _ in $(seq 100); do
+            if grep -q "a notice is shown" "$log" 2> /dev/null; then
+              break
+            fi
+            sleep 0.2
+          done
+          # Time for a refusal, which arrives after the show it refuses.
+          sleep 3
+
+          # And the notification centre's own word that it took it: `usernoted`
+          # logs every notification it presents, by the bundle identifier it
+          # validated the app under. A refusal never gets this far.
+          presented=$(log show --last 2m --style compact \
+            --predicate 'process == "usernoted"' |
+            grep 'Presenting <NotificationRecord app:"net.tobico.Verkstead"' || true)
+
+          kill "$app" || true
+          cat "$log" 2> /dev/null || echo "There is no log at $log."
+
+          for said in "the notices stream is held" "a notice is shown"; do
+            if ! grep -q "$said" "$log" 2> /dev/null; then
+              echo "::error::The app's log does not say \"$said\"."
+              exit 1
+            fi
+          done
+          if grep -q "a notification failed" "$log"; then
+            echo "::error::The app showed a notification and the notification centre refused it."
+            exit 1
+          fi
+
+          printf '%s\n' "$presented"
+          if [ -z "$presented" ]; then
+            echo "::error::The notification centre presented nothing from net.tobico.Verkstead."
+            exit 1
+          fi
 
       # Before the upload and whatever the assertions said, because the mount is
       # inside the directory the artifact is read out of and nothing else on this
@@ -1831,6 +2060,110 @@ jobs:
             fi
           done
           cat "$log"
+
+      # **And a notice reaches the desktop as a toast** — the stream the sidecar
+      # holds open to the app, a Set asked, and the notification drawn —
+      # asserted on what the install left, as the other two legs assert it, and
+      # for their reasons: started `--hidden`, so no window is in front to make
+      # the notice redundant, and the Set asked by the installed CLI from a
+      # Conversation over this checkout.
+      #
+      # **What this leg is for beyond the other two is the AppUserModelID.** A
+      # Windows toast belongs to an application id, and Windows shows one only
+      # for an id something on the machine has claimed — here the Start-menu
+      # entry the msi wrote, which carries the id `main.ts` sets. A toast under
+      # an id nothing claims is dropped, and Electron says so with a `failed`
+      # event, which the app logs. So the line saying it was shown and the
+      # absence of that refusal are both read.
+      - name: A notice is shown as a toast
+        timeout-minutes: 5
+        env:
+          LOCALAPPDATA: ${{ runner.temp }}\state
+          VERKSTEAD_DATA_DIR: ${{ runner.temp }}\data
+        run: |
+          log="$(cygpath -u "$LOCALAPPDATA")/Verkstead/verkstead.log"
+          rm -f "$log"
+          data="$(cygpath -u "$VERKSTEAD_DATA_DIR")"
+          key=$(cat "$data/workbench.key")
+
+          "$INSTALL/Verkstead.exe" --hidden > app.log 2>&1 &
+          app=$!
+
+          for _ in $(seq 150); do
+            if grep -q "the notices stream is held" "$log" 2> /dev/null; then
+              break
+            fi
+            sleep 0.2
+          done
+
+          # A repository of the step's own to ask from, on a `main` with one
+          # commit: the checkout is a detached HEAD with no default branch, which
+          # a Repo is refused for.
+          repo="$(cygpath -u "$RUNNER_TEMP")/asking"
+          git init -q -b main "$repo"
+          git -C "$repo" -c user.name=release -c user.email=release@localhost \
+            commit -q --allow-empty -m "the repository a Set is asked from"
+          # The path as the server reads one here, with forward slashes so that
+          # nothing has to be escaped to put it in JSON.
+          curl --fail --silent --show-error -X POST \
+            --cookie "workbench_key=$key" -H 'Content-Type: application/json' \
+            -d "{\"path\":\"$(cygpath -m "$repo")\"}" http://127.0.0.1:8422/api/ui/repos
+          echo
+          curl --fail --silent --show-error -X POST \
+            --cookie "workbench_key=$key" -H 'Content-Type: application/json' \
+            -d '{"repo_id":1}' http://127.0.0.1:8422/api/ui/conversations
+          echo
+          (cd "$repo" && VERKSTEAD_SERVER=http://127.0.0.1:8422/conversations/1 \
+            "$INSTALL/resources/cli/verkstead.exe" ask --deferred "$GITHUB_WORKSPACE/examples/questions.yaml")
+
+          for _ in $(seq 100); do
+            if grep -q "a notice is shown" "$log" 2> /dev/null; then
+              break
+            fi
+            sleep 0.2
+          done
+          # Time for a refusal, which arrives after the show it refuses.
+          sleep 3
+
+          # And Windows' own record of it: the notification platform writes
+          # every toast it accepts into this user's database, under the
+          # application id it was raised for — so a row under the Start-menu
+          # entry's id, carrying the Set's title, is the toast delivered rather
+          # than only asked for.
+          toasts=$(python - "$USERPROFILE/AppData/Local/Microsoft/Windows/Notifications/wpndatabase.db" << 'EOF'
+          import sqlite3, sys
+          db = sqlite3.connect(f"file:{sys.argv[1]}?mode=ro", uri=True)
+          for handler, payload in db.execute(
+              "select h.PrimaryId, n.Payload from Notification n"
+              " join NotificationHandler h on n.HandlerId = h.RecordId"
+              " where n.Type = 'toast'"
+          ):
+              print(handler, (payload or b"").decode("utf-8", "replace").replace("\r\n", " "))
+          EOF
+          )
+
+          taskkill //F //IM verkstead.exe > /dev/null 2>&1 || true
+          kill -9 "$app" 2> /dev/null || true
+          cat app.log
+          cat "$log" 2> /dev/null || echo "There is no log at $log."
+
+          for said in "the notices stream is held" "a notice is shown"; do
+            if ! grep -q "$said" "$log" 2> /dev/null; then
+              echo "::error::The app's log does not say \"$said\"."
+              exit 1
+            fi
+          done
+          if grep -q "a notification failed" "$log"; then
+            echo "::error::The app showed a toast and Windows refused it."
+            exit 1
+          fi
+
+          printf '%s\n' "$toasts"
+          if ! printf '%s\n' "$toasts" |
+            grep -q "^net.tobico.Verkstead .*Rate limiting for the public API"; then
+            echo "::error::Windows holds no toast from net.tobico.Verkstead with the Set's title."
+            exit 1
+          fi
 
       # **A package installed over another, which no leg has ever done.**
       # Windows is the only platform where the question arises — an AppImage and

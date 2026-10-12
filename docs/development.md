@@ -452,6 +452,54 @@ plus this build directory, which breaks the next time either moves — so the
 whole path is written and under vitest, and the writing is what is refused. Its
 account is CONTEXT.md's **Desktop Settings** and **Startup Registration**.
 
+**And every notice the phones get is a notification on this desk**, drawn by
+the app rather than by Web Push, which Electron cannot do: it ships without
+Google's push client, so a subscribe inside the window is refused however many
+checks pass on the loopback ([ADR-0020](adr/0020-electron-desktop.md), *Amended:
+notifications are the app's own*). The app holds `GET /api/ui/push/notices`
+open on its sidecar for the whole run — a stream of the same JSON a phone's
+service worker is handed — and the log says `the notices stream is held` each
+time it opens. A notice is shown **only while the window is not in front**:
+hidden to the tray, minimised, behind another app, or never shown by a
+`--hidden` start. A window in front already draws the news, so a notice that
+arrives then is logged as withheld and nothing else. A click on one opens what
+it is about, which is the page a tap on the phone opens. The switch is the
+notifications switch on the Settings head, which inside the app is the app's
+own `notifications` in `desktop.json`, on unless it is turned off.
+
+To see one from a checkout, start the app, make a Conversation the way step 3
+of the quickstart does, close the window to the tray, and ask a Set deferred so
+the command returns. Every line about a notice is in the log either way: shown,
+withheld and why, or failed.
+
+```console
+$ verkstead ask --deferred --server http://127.0.0.1:8422/conversations/1 examples/questions.yaml
+```
+
+**A headless run needs a notification daemon on its session bus.** On Linux
+Electron draws through libnotify, which it loads at runtime, and libnotify hands
+the notification to whatever owns `org.freedesktop.Notifications`. Under Xvfb
+there is nothing, so the app says it showed one that nobody drew. Give the run a
+bus of its own and a daemon on it, and ask the daemon afterwards — this is what
+the AppImage's release leg does:
+
+```console
+$ eval "$(dbus-launch --sh-syntax)"
+$ dunst &
+$ (cd desktop && pnpm start -- --hidden) &
+$ dunstctl history    # after the ask: the Set's title, if it arrived
+```
+
+A desktop session has its own daemon already, so nothing above is needed there.
+On a Mac the notification centre is the daemon, and it finds an app through
+LaunchServices. A packed `Verkstead.app` run straight out of the mounted dmg is
+refused with *Notifications are not allowed for this application*, and the same
+bundle copied into `/Applications` is presented, ad-hoc signature and all.
+`log show --predicate 'process == "usernoted"'` says which of the two happened.
+On Windows the daemon is the Action Center, under the AppUserModelID the
+Start-menu entry carries. A run from a checkout has no such entry, so a toast
+from `pnpm start` there may not appear where the installed app's would.
+
 One directory is made outside it: the **Build Cache**, at
 `$XDG_CACHE_HOME/verkstead` — `~/.cache/verkstead` on most machines — unless
 `--build-cache-dir` says otherwise. Every session gets it writable, with
