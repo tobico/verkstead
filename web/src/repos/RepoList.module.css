@@ -11,10 +11,24 @@
    row is a name and a press, so it is a row rather than a card: a card is a
    surface something is read off, and there is one word to read here. */
 
+/* The card spaced and headed as every other settings card is — see
+   `.serversCard` in `McpServers.module.css` and its neighbours. Left to the
+   browser, its heading took a heading's own margins, which put air above the
+   title inside the card and none under the card before the next one. */
+.reposCard {
+  margin-bottom: 1.5rem;
+}
+
+.reposCard h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.1rem;
+}
+
 /* What the card says under its heading: how many are registered, which is the
    whole of what a list is scanned for when every item is a name. */
 .reposCard .standing {
   margin: 0;
+  font-size: 0.9rem;
   color: var(--ink-soft);
 }
 
