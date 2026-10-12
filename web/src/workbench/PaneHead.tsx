@@ -35,7 +35,10 @@
 //! name of what they are reading. So the giving-up is worn where the bridge is,
 //! the way the bare drag bar is drawn where it is — see `DragBar.tsx`.
 
+import { faChevronLeft } from "@fortawesome/free-solid-svg-icons";
 import { Show, type JSX } from "solid-js";
+
+import { IconButton } from "../IconButton";
 
 import styles from "./PaneHead.module.css";
 import shell from "../Panes.module.css";
@@ -69,13 +72,32 @@ export function PaneHead(props: {
     >
       <Show when={props.back}>
         {(back) => (
-          <button
-            type="button"
-            class={`${styles.back} ${shell.paneBack}`}
-            onClick={() => back().go()}
+          <Show
+            when={app}
+            fallback={
+              <button
+                type="button"
+                class={`${styles.back} ${shell.paneBack}`}
+                onClick={() => back().go()}
+              >
+                ← {back().to}
+              </button>
+            }
           >
-            ← {back().to}
-          </button>
+            {/* Inside the app, a header bar's back button: an arrow at the
+                start of the title's row rather than a link on a line of its own
+                above it, so a narrow window's head stays the one row the
+                window's controls are drawn beside. Named for where it goes,
+                the arrow saying none of it. The frame's name all the same, so
+                the widths that have nowhere to go back to take it away. */}
+            <IconButton
+              of={faChevronLeft}
+              label={`Back to ${back().to}`}
+              open={false}
+              press={() => back().go()}
+              class={`${styles.backArrow} ${shell.paneBack}`}
+            />
+          </Show>
         )}
       </Show>
 

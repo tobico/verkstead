@@ -176,9 +176,19 @@
    conversations are on screen by then — and that one is said in
    `Panes.module.css`, where the pane it names is. */
 @media (min-width: 80rem) {
-  .back {
+  .back,
+  .backArrow {
     display: none;
   }
+}
+
+/* The app's way back, which is a header bar's back button at the start of the
+   title's row — see `PaneHead.tsx`. Its own width and no more, the title beside
+   it taking the rest; and pulled to the bar's edge by the button's own padding,
+   so the arrow lines up with where a title stands in a head that has none. */
+.backArrow {
+  flex: none;
+  margin-left: -0.5rem;
 }
 
 /* Under the pointer, the underline a link takes: this is drawn as one and is

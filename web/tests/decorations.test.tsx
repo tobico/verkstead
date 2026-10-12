@@ -301,6 +301,46 @@ describe("the head", () => {
   });
 });
 
+/// The way back inside the app, which is a header bar's back button: an arrow at
+/// the start of the title's row rather than a link on a line of its own above
+/// it, so a narrow window's head stays one row — the band the window's controls
+/// are drawn over.
+describe("the way back inside the app", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("is an arrow before the title, named for where it goes", () => {
+    theApp("linux");
+    const go = vi.fn();
+    const { container, getByRole } = render(() => (
+      <PaneHead back={{ to: "Timeline", go }} title="Code" />
+    ));
+
+    const back = getByRole("button", { name: "Back to Timeline" });
+
+    expect(back.textContent).toBe("");
+    expect(back.querySelector("svg")).not.toBeNull();
+    // Still the frame's way back, so the widths that take it away still do.
+    expect(back.classList.contains(shell.paneBack!)).toBe(true);
+    expect(container.querySelector(`.${styles.back}`)).toBeNull();
+    // Before the title, in the one row.
+    expect(
+      back.compareDocumentPosition(container.querySelector("h1")!) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    fireEvent.click(back);
+    expect(go).toHaveBeenCalledOnce();
+  });
+
+  it("stays the link above the title in a browser", () => {
+    const { getByRole } = render(() => (
+      <PaneHead back={{ to: "Timeline", go: () => {} }} title="Code" />
+    ));
+
+    expect(getByRole("button", { name: "← Timeline" })).toBeTruthy();
+  });
+});
+
 describe("what a head excepts", () => {
   /// The way out of the pane, which is the one to look at twice: it is a button
   /// across the whole width of the row, so a head whose way out dragged the
@@ -381,15 +421,23 @@ describe("a browser", () => {
   });
 
   /// And the same head as the app's but for the one name that gives up the
-  /// selection, which is the whole of what the bridge changes about a head. The
-  /// region itself is not on that list and does not need to be: a rule a browser
-  /// ignores needs no guarding, and asking about one would be a branch drawn for
-  /// nothing.
-  it("is handed the app's head but for what gives up the selection", () => {
+  /// selection and the way back — a link above the title here, the header bar's
+  /// arrow beside it there (see "the way back inside the app") — which is the
+  /// whole of what the bridge changes about a head. The region itself is not on
+  /// that list and does not need to be: a rule a browser ignores needs no
+  /// guarding, and asking about one would be a branch drawn for nothing.
+  it("is handed the app's head but for what gives up the selection and the way back", () => {
+    /// The head's markup with its way back taken out, whichever shape it was.
+    const without = (head: HTMLElement): string => {
+      const copy = head.cloneNode(true) as HTMLElement;
+      copy.querySelector(`.${shell.paneBack}`)?.remove();
+      return copy.outerHTML;
+    };
+
     const browser = aHead();
     const drawn = headOf(browser.container);
     const bare = [...drawn.classList];
-    const markup = drawn.outerHTML;
+    const markup = without(drawn);
     browser.unmount();
 
     theApp("linux");
@@ -399,7 +447,7 @@ describe("a browser", () => {
     expect([...app.classList]).toEqual([...bare, styles.inApp]);
     // And nothing else about it moved: the same tags, the same attributes, the
     // same controls — one class deep and no further.
-    expect(app.outerHTML.replace(` ${styles.inApp}`, "")).toBe(markup);
+    expect(without(app).replace(` ${styles.inApp}`, "")).toBe(markup);
   });
 });
 
