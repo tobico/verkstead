@@ -1078,8 +1078,8 @@ working build cache to one mistyped variable is the worse experience for not
 having checked. What was written stays written, exactly as it was typed,
 because a save from the settings page writes the whole file and an entry
 nothing could read is still text somebody is about to fix — and while it is
-there the **Language support** pane draws that language's two controls off with
-the reason beside them, naming the variable where a variable is what was
+there the **Language support** pane draws that language's box off with the
+reason under it, naming the variable where a variable is what was
 refused, and saying which of the two became of it.
 _Avoid_: language plugin, language definition, toolchain, language config
 
@@ -1110,9 +1110,10 @@ and `%LOCALAPPDATA%\Verkstead\Cache` on Windows, the local rather than the
 roaming application data because a compiled crate follows nobody between
 machines. The packaged unit says `/var/cache/verkstead`); which languages a
 Sandbox gets at all, and how big each one's stores may grow, is the human's, in
-the workbench settings — a box per descriptor under **Language support**, with
-a size, the disk use beside it and a Clear under every one that has a store of
-its own (C/C++'s objects being Rust's sccache's). It is kept under those sizes
+the workbench settings — a row per descriptor under **Language support**: its
+box, and on every one that has a store of its own a link saying what the store
+holds against its size, which opens the size, a Clear and the rest (C/C++'s
+link saying instead that its objects are Rust's sccache's). It is kept under those sizes
 by sccache for the compiled half and by the **Sweep** for the rest. The one control
 there that only ever *closes* a hole — the **Sandbox
 Configuration** beside it opens them, and does so only for what somebody typed.

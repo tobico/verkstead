@@ -903,7 +903,8 @@ Conversation. The other half, the compiled objects, wants an `sccache` on the
 `PATH` the server was started from: with one there, every session's `rustc`
 goes through the single Compile Server Verkstead runs, and a dependency is
 compiled once for the machine too. The workbench's Language support page says
-which of the two you have. A C/C++ Repo goes through the same server only where
+which of the two you have: with no sccache, the card says so, and so does the
+panel behind Rust's row. A C/C++ Repo goes through the same server only where
 CMake is told `-G Ninja`: the Visual Studio generator it picks by default
 ignores the launcher variables (see [C/C++ through the Compile
 Server](#cc-through-the-compile-server)).
@@ -1091,7 +1092,7 @@ behind it — your Gleam, with a typo in it — goes **off** rather than on at
 nothing.
 
 The **Language support** pane is where you find out. That language's box is
-drawn with its controls off and a sentence saying why: the reason, naming the
+drawn off with a sentence under it saying why: the reason, naming the
 variable where a variable is what was refused, and which of the two became of
 it. Nothing of what you typed is thrown away — a save from that page writes the
 whole of `config.yaml` and puts your entry back exactly as it was — so the fix
@@ -1103,7 +1104,9 @@ session spawn: nothing restarts.
 C/C++ is the second descriptor naming the `sccache` capability, and it names
 the same one Rust's does: one **Compile Server** for the machine, one store and
 one size, so there is no second server and no size field of its own on the
-settings page. Its box turns C and C++ compiles through that server on and off.
+settings page: the link beside its box says it compiles through Rust's cache,
+and the size is in Rust's panel. Its box turns C and C++ compiles through that
+server on and off.
 This is the whole of it:
 
 ```yaml
@@ -1420,22 +1423,29 @@ in the Build Cache, so it is not shared between Conversations.
 
 **Every language with a store has a size, and its stores are kept under it**,
 so a machine that has run Verkstead for a year has not had its disk filled with
-packages for projects nobody has opened since. The **Language support** pane
-draws a size field under each such language, its default as the placeholder:
-**10G**, and **30G for Rust**. C/C++ draws none, because it compiles into
-Rust's sccache rather than a store of its own. A size is written in sccache's
+packages for projects nobody has opened since. On the **Language support**
+pane each such language's row carries a link saying what its store holds
+against its size — `Cache usage: 3.2/30GB` — and the link opens a panel with
+the size field in it, its default as the placeholder: **10G**, and **30G for
+Rust**. A size saves when you press Enter or leave the field. A language that
+is switched off still has its store, so its row keeps a quieter link, `Holds
+1.8GB`, while there is anything in it. C/C++ has no size field, because it
+compiles into Rust's sccache rather than a store of its own. A size is written in sccache's
 own grammar — a whole number with `K`, `M`, `G` or `T` after it, in binary
 multiples — because Verkstead reads it as well as sccache, and one word should
 mean the same to both. The page refuses a size it cannot read, and says why. A
 size written by hand in `config.yaml` that cannot be read is taken as the
 default, and the pane says that too.
 
-Beside the size the pane shows **what the language's stores hold on disk**, and
-how much of that is in the packages the sweep holds to the size. It is measured in the background, every quarter of an hour and straight after a
-sweep or a Clear, so it may be a few minutes old, and just after the server
-starts it reads *not measured yet*. The walk follows no symlink and counts a
-hardlinked file once. Under that, a line per store says **how it is bounded**,
-and a last line says when the language was last swept.
+The link's first figure is **everything the language's stores hold on disk**,
+and the panel says how much of that is in packages, which is the part the
+sweep holds to the size. It is measured in the background, every quarter of an
+hour and straight after a sweep or a Clear, so it may be a few minutes old, and
+just after the server starts it reads *not measured yet*. The walk follows no
+symlink and counts a hardlinked file once. Under that, the panel names the
+language's store directories on one line, says where one is bounded other than
+by the sweep — sccache by itself, so Rust may hold up to twice its size, and a
+store that is never trimmed — and says when the language was last trimmed.
 
 #### What is evicted
 
@@ -1452,7 +1462,7 @@ descriptor says which:
   until the units of the language's swept stores together are under its size. A unit is one
   package, never one file of one: a Go module or a Maven artifact with one file
   missing is a broken store rather than a smaller one.
-- **Not at all**: a store naming neither is never swept, and the pane says so.
+- **Not at all**: a store naming neither is never swept, and the panel says so.
   What could not be given a unit safely is left this way rather than guessed
   at.
 
@@ -1550,12 +1560,12 @@ session and no Conversation Terminal, both of which reach the stores. A sweep th
 something runs happens at the first moment after that when nothing does,
 rather than an hour later, so a machine that is idle for ten minutes a day is
 swept every day. **A machine that is never idle is never swept.** That was
-decided rather than overlooked, and the pane's *Last swept …* line is where it
-shows: it is the last pass that went through that language's stores to the
-end, whether or not it found anything to take. The server keeps it in memory,
-so after a restart, until the first such pass, the line says the language has
-not been swept since the server started, and that a sweep waits until no
-session or terminal is running.
+decided rather than overlooked, and the panel's *Last trimmed …* line is where
+it shows, the exact time behind it as a tooltip: it is the last pass that went
+through that language's stores to the end, whether or not it found anything to
+take. The server keeps it in memory, so after a restart, until the first such
+pass, the line says the language has not been trimmed since the server
+started, and that trimming waits until no session or terminal is running.
 
 **Nothing ever sees half a unit.** Each unit is renamed aside into
 `.verkstead-swept`, at the top of the Build Cache or of the directory beside
@@ -1571,8 +1581,9 @@ copied instead. Read-only units are made writable first.
 the Compile Server stopped first so its index does not go on describing
 objects that are gone; the next session starts it again. The store
 directories stay, empty, and the next install fetches what it needs again.
-**Clear is refused while anything runs**, rather than waiting: the button is
-off and says how many sessions and terminals it is waiting on, and the server
+**Clear is refused while anything runs**, rather than waiting: the button, at
+the foot of the language's panel, is off and says how many sessions and
+terminals it is waiting on, and the server
 refuses one that arrives anyway. Clear goes through the sweep's machinery, so
 it too renames aside before deleting, and a launch pressed meanwhile waits for
 it.
