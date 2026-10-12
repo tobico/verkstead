@@ -366,6 +366,138 @@ describe("adding a server from the Attach menu", () => {
     ).toHaveLength(0);
   });
 
+  /// A server that did not answer when it was saved is still declared — it may
+  /// be reachable from inside a session's network and never from here — but the
+  /// card stays up to say so, with the attach one press further on, so a
+  /// mistyped URL is caught where it was typed.
+  it("holds the card open on a server that was not reached, until Attach anyway", async () => {
+    const NEW = { name: "wiki", url: "https://mcp.example.com/wikki" };
+    const fetching = theWorkbench(
+      whenever(
+        "/api/ui/settings",
+        json({
+          ...landed([...SETTINGS.mcp_servers, { ...NEW, headers: [] }]),
+          tried: [{ server: "wiki", outcome: { Refused: { why: "Nothing answered at that address." } } }],
+        }),
+        "POST",
+      ),
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/mcp-servers/wiki`,
+        json("Attached"),
+        "POST",
+      ),
+    );
+
+    const dialog = await openAdding(await openComposer());
+    fireEvent.input(within(dialog).getByLabelText("Name"), {
+      target: { value: NEW.name },
+    });
+    fireEvent.input(within(dialog).getByLabelText("URL"), {
+      target: { value: NEW.url },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Add server" }));
+
+    await waitFor(() =>
+      expect(dialog.textContent).toContain("Nothing answered at that address."),
+    );
+    expect(
+      writes(fetching, `/api/ui/conversations/${OPEN.id}/mcp-servers/wiki`),
+    ).toHaveLength(0);
+
+    // Pressable once the save has settled, which is a moment after its answer.
+    const anyway = await waitFor(() => {
+      const press = within(dialog).getByRole<HTMLButtonElement>("button", {
+        name: "Attach anyway",
+      });
+      expect(press.disabled).toBe(false);
+      return press;
+    });
+    fireEvent.click(anyway);
+
+    await waitFor(() =>
+      expect(
+        writes(fetching, `/api/ui/conversations/${OPEN.id}/mcp-servers/wiki`),
+      ).toHaveLength(1),
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: "Add an MCP server" }),
+      ).toBeNull(),
+    );
+  });
+
+  /// And trying again with the URL put right rewrites the declaration that was
+  /// just saved rather than declaring the name a second time, which the server
+  /// would refuse.
+  it("rewrites the declaration it saved on a try again", async () => {
+    let saves = 0;
+    const fetching = theWorkbench(
+      whenever(
+        "/api/ui/settings",
+        (init) => {
+          saves += 1;
+          const sent = JSON.parse(String(init!.body)) as SettingsEdit;
+          const servers =
+            sent.mcp_servers === "Keep" ? [] : sent.mcp_servers.Set.servers;
+          return json({
+            ...landed(
+              servers.map((one) => ({
+                name: one.name,
+                url: one.url,
+                headers: [],
+              })),
+            ),
+            tried:
+              saves === 1
+                ? [{ server: "wiki", outcome: { Refused: { why: "Nothing answered." } } }]
+                : [{ server: "wiki", outcome: { Reached: { named: null } } }],
+          })();
+        },
+        "POST",
+      ),
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/mcp-servers/wiki`,
+        json("Attached"),
+        "POST",
+      ),
+    );
+
+    const dialog = await openAdding(await openComposer());
+    fireEvent.input(within(dialog).getByLabelText("Name"), {
+      target: { value: "wiki" },
+    });
+    fireEvent.input(within(dialog).getByLabelText("URL"), {
+      target: { value: "https://mcp.example.com/wikki" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Add server" }));
+    await waitFor(() => expect(dialog.textContent).toContain("Nothing answered."));
+
+    fireEvent.input(within(dialog).getByLabelText("URL"), {
+      target: { value: "https://mcp.example.com/wiki" },
+    });
+    fireEvent.click(
+      await waitFor(() => within(dialog).getByRole("button", { name: "Try again" })),
+    );
+
+    await waitFor(() =>
+      expect(
+        writes(fetching, `/api/ui/conversations/${OPEN.id}/mcp-servers/wiki`),
+      ).toHaveLength(1),
+    );
+
+    const second = JSON.parse(
+      String(writes(fetching, "/api/ui/settings")[1]!.body),
+    ) as SettingsEdit;
+    const names =
+      second.mcp_servers === "Keep"
+        ? []
+        : second.mcp_servers.Set.servers.map((one) => [one.name, one.url]);
+    expect(names).toEqual([
+      ...SETTINGS.mcp_servers.map((one) => [one.name, one.url]),
+      ["wiki", "https://mcp.example.com/wiki"],
+    ]);
+  });
+
   /// And Cancel leaves without saving anything.
   it("saves nothing on Cancel", async () => {
     const fetching = theWorkbench();

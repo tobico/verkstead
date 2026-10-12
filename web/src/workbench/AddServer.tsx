@@ -19,6 +19,13 @@
 //! A refusal is the whole save refused and nothing written, exactly as it is on
 //! the settings pane — so the card stays up with what was typed in it, and says
 //! why at the box the refusal names.
+//!
+//! **And a server that did not answer holds the card up too.** A save speaks to
+//! what it wrote down, and one that was not reached is still declared — it may
+//! be reachable from inside a session's network and never from here — so the
+//! card says so where the URL was typed and waits: *Attach anyway* goes on with
+//! it, and *Try again* saves what the boxes say now over the declaration it
+//! just made, which is where a mistyped URL is put right.
 
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import {
@@ -104,20 +111,29 @@ function AddServer(props: {
   );
   const [elsewhere, setElsewhere] = createSignal<string | null>(null);
 
+  // The name this card has already declared, where a save landed and the
+  // server it wrote down did not answer — and why not. A save after that one is
+  // a rewrite of that declaration rather than a second of the same name.
+  const [declared, setDeclared] = createSignal<string | null>(null);
+  const [unreached, setUnreached] = createSignal<string | null>(null);
+
+  /// What is declared already, as the save sends it back — less the one this
+  /// card made, which the boxes are now the account of.
+  const others = () =>
+    standing(settings.data).filter((one) => one.name !== declared());
+
   /// What is about to be written about one header's value: a typed one set, and
   /// a blank one nothing — there being nothing kept for a header that is new.
   const becomes = (header: Typed): HeaderEdit =>
     header.value === "" ? "Keep" : { Set: { value: header.value } };
 
   const save = useMutation(() => ({
-    mutationFn: () => {
-      const told = settings.data;
-
-      return saveSettings(
-        savingServers(told, {
+    mutationFn: () =>
+      saveSettings(
+        savingServers(settings.data, {
           Set: {
             servers: [
-              ...standing(told),
+              ...others(),
               {
                 name: name().trim(),
                 url: url().trim(),
@@ -131,12 +147,11 @@ function AddServer(props: {
             ],
           },
         }),
-      );
-    },
+      ),
     onSuccess: (saved: SettingsSaved) => {
       // Where the new declaration stood in what was sent, which is how a
       // refusal names it: after every one already declared.
-      const at = standing(settings.data).length;
+      const at = others().length;
 
       const mine = saved.refused_servers.filter((one) => one.server === at);
       const other = [
@@ -159,7 +174,17 @@ function AddServer(props: {
       // fresh read of the files, so the menu's next opening offers what is
       // declared now.
       queries.setQueryData(["settings"], saved.settings);
-      props.added(name().trim());
+
+      const called = name().trim();
+      const tried = saved.tried.find((one) => one.server === called)?.outcome;
+
+      if (tried && "Refused" in tried) {
+        setDeclared(called);
+        setUnreached(tried.Refused.why);
+        return;
+      }
+
+      props.added(called);
     },
   }));
 
@@ -172,6 +197,7 @@ function AddServer(props: {
 
     setTrouble({});
     setElsewhere(null);
+    setUnreached(null);
     save.mutate();
   };
 
@@ -223,6 +249,15 @@ function AddServer(props: {
         />
         <Show when={trouble().Url}>
           {(why) => <ErrorLine class={styles.failure}>{why()}</ErrorLine>}
+        </Show>
+        {/* Under the box it is most likely about, in the words the settings
+            pane says it in. */}
+        <Show when={unreached()}>
+          {(why) => (
+            <ErrorLine class={styles.failure}>
+              It is declared, but it was not reached when it was saved. {why()}
+            </ErrorLine>
+          )}
         </Show>
 
         {/* The headers it is spoken to with — an API key or a bearer token,
@@ -299,9 +334,32 @@ function AddServer(props: {
         </QuietButton>
 
         <div class={styles.buttons}>
-          <button type="submit" disabled={!ready() || save.isPending}>
-            {save.isPending ? "Adding…" : "Add server"}
-          </button>
+          <Show
+            when={unreached() !== null}
+            fallback={
+              <button type="submit" disabled={!ready() || save.isPending}>
+                {save.isPending ? "Adding…" : "Add server"}
+              </button>
+            }
+          >
+            {/* The declaration stands either way, so going on with it is the
+                press that does the thing, and saving it again is the quieter
+                one beside it. */}
+            <button
+              type="button"
+              disabled={save.isPending}
+              onClick={() => props.added(declared()!)}
+            >
+              Attach anyway
+            </button>
+            <button
+              type="submit"
+              class={`${styles.cancel} secondary`}
+              disabled={!ready() || save.isPending}
+            >
+              {save.isPending ? "Trying…" : "Try again"}
+            </button>
+          </Show>
           {/* Drawn as well as the ways out the modal already has: Escape and a
               press on the backdrop are for a keyboard and a cursor, and this is
               the one a thumb has. */}
