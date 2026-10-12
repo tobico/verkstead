@@ -2693,9 +2693,10 @@ the composition, are uploaded once the Conversation is made as one more field
 of the replay, and a reload before the press keeps the text and loses the
 files. A refused upload is a refusal said on the draft's composer like any
 other. Not offered while a roadmap is loaded, the box being locked to a card.
-The **MCP server**s picked at that same control are held beside them and go up
-in the same replay, attached by name once there is a Conversation to attach
-them to.
+The **MCP server**s picked at that same control go up in the same replay,
+attached by name once there is a Conversation to attach them to — but they are
+kept on the device with the brief rather than in the page with the files, so a
+reload keeps them.
 
 **Kept through Close and Trim, and gone at Deleted.** A Steer can bring a Closed
 Conversation back, and a file cannot be made again the way a Worktree can; a
