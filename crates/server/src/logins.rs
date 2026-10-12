@@ -109,7 +109,17 @@ const STATUS: &[&str] = &["auth", "status"];
 /// How long that question is waited on before a press goes ahead without the
 /// answer. It reads files and answers at once; one that hangs is a harness
 /// in trouble that the session will show more plainly than a refusal could.
-const STATUS_LIMIT: Duration = Duration::from_secs(20);
+///
+/// **Longer on Windows**, where it is only asked once a login has ended (see
+/// [`asked`]), so nothing is held up by it but the modal reading as checking:
+/// there the harness is a fresh process of the session account's, and a
+/// `powershell.exe` started that way has taken half a minute on a runner
+/// before it said a word — past twenty seconds, which read the login that had
+/// just landed as one that had not.
+const STATUS_LIMIT: Duration = match Platform::HERE {
+    Platform::Windows => Duration::from_secs(120),
+    Platform::Linux | Platform::MacOs => Duration::from_secs(20),
+};
 
 /// What the environment's `BROWSER` is inside a login, so that the harness
 /// opens nothing on the server: a program that does nothing and succeeds.
