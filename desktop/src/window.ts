@@ -222,18 +222,21 @@ export function open(workbench: Workbench): Opened {
   let at = "/";
 
   // Whether the page now in the window is listening for where a click opens —
-  // said by the page itself over the bridge, and forgotten the moment the window
-  // starts on another document, which is a page that will have to say so again.
+  // said by the page itself over the bridge, and forgotten the moment another
+  // document replaces it, which is a page that will have to say so again.
   let listening = false;
 
   window.webContents.ipc.on(OPEN, (_event, said: unknown) => {
     listening = said === true;
   });
 
-  window.webContents.on("did-start-navigation", (details) => {
-    if (details.isMainFrame && !details.isSameDocument) {
-      listening = false;
-    }
+  // **On arriving rather than on starting.** `did-start-navigation` fires before
+  // `will-navigate` has had its say, so a link off the loopback — which
+  // `will-navigate` hands to the browser, leaving the page exactly where it was
+  // — would be forgotten as a page that had gone. `did-navigate` is the main
+  // frame's alone and fires only once a new document is in, refusals included.
+  window.webContents.on("did-navigate", () => {
+    listening = false;
   });
 
   const load = (): void => {
