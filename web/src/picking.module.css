@@ -93,11 +93,17 @@
 /* And the control it turns into: two lines rather than one, with the caret
    beside both. A grid, because the caret is level with the pair of them rather
    than with either — it says which way the rows come down, and what they come
-   down from is the whole handle. */
+   down from is the whole handle.
+
+   The gap between the columns only. The control's own `gap` is a row's, and
+   left to the grid it would open as much again between the label and the value
+   — which put this control's value line lower than the menu triggers' beside it
+   in the composer's row, and made it the one taller handle of the set. */
 .control.headed {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
+  gap: 0 0.4rem;
 }
 
 .control.headed .line {
