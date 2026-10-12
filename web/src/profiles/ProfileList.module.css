@@ -138,6 +138,19 @@
   font-size: 0.9em;
 }
 
+/* The memory tick, which is a `Check` and laid out by `Check.module.css` — the
+   box, a gap, the words — rather than by the rule above for the labels over the
+   fields, which drew it as a block and took the gap away. With the room under it
+   every field here has before the next thing in the form. */
+.form .memory > label {
+  display: flex;
+  margin-bottom: 0;
+}
+
+.memory {
+  margin-bottom: 0.85rem;
+}
+
 /* The typed fields: the name, the account's paths, and the model id added by
    hand. Said by type rather than by element, because the ticks the models are
    picked with are inputs too and a width of the pane is not what a checkbox

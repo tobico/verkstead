@@ -162,7 +162,7 @@ function picks(): HTMLElement[] {
 /// The memory switch, by the words beside it.
 function memorySwitch(): HTMLInputElement {
   return screen.getByRole("checkbox", {
-    name: /Share this account's memory/,
+    name: "Enable agent memory",
   }) as HTMLInputElement;
 }
 
@@ -1158,6 +1158,19 @@ describe("the pane a card opens", () => {
         memory: true,
       }),
     );
+  });
+
+  /// The tick is laid out as every other on/off control on the page is, with its
+  /// gap between the box and the words — the form's own rule for the labels
+  /// over its fields is not what draws it.
+  it("draws the memory tick as a tick, its words beside the box", async () => {
+    serving(whenever("/api/ui/profiles", json(SAVED)));
+    mountPane(FABLE.id);
+
+    const tick = await waitFor(() => memorySwitch());
+    const row = tick.closest("label")!;
+
+    expect(row.parentElement!.classList.contains(styles.memory!)).toBe(true);
   });
 
   /// The switch reads as the profile was saved, and a rewrite sends it back

@@ -1058,14 +1058,16 @@ export function ProfileForm(props: {
           given the account's memory and transcripts, or starts with an empty
           store of its own. Drawn under the account because it is about what
           of the account a session is given. */}
-      <Check
-        label="Share this account's memory with its sessions"
-        on={form().memory}
-        flip={(memory) => {
-          setEdited({ ...form(), memory });
-          setRefused(null);
-        }}
-      />
+      <div class={styles.memory}>
+        <Check
+          label="Enable agent memory"
+          on={form().memory}
+          flip={(memory) => {
+            setEdited({ ...form(), memory });
+            setRefused(null);
+          }}
+        />
+      </div>
 
       <div class={styles.buttons}>
         <button type="submit" disabled={save.isPending}>
