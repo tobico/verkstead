@@ -945,6 +945,10 @@ export function dropping(props: {
     if (!rows) return;
 
     const anchor = (props.box?.() ?? props.anchor()).getBoundingClientRect();
+
+    // The rows measured at the height their own sheet asks for, before the room
+    // the last measure left them is taken off it again — see `--room` below.
+    rows.style.removeProperty("--room");
     const drop = rows.getBoundingClientRect();
 
     // Over the anchor only where the rows do not fit under it, and then only
@@ -974,6 +978,19 @@ export function dropping(props: {
       GUTTER,
       Math.min(anchor.left, window.innerWidth - width - GUTTER),
     );
+
+    // And how much of the window there is on the side they hang, for a sheet
+    // that lets a list grow past the ordinary cap — the Process control's,
+    // whose few rows each carry a sentence and are meant to be read whole
+    // rather than scrolled. Capped by this instead, so a short window still
+    // scrolls them rather than hanging them off its edge. A property of the
+    // box rather than one of `placing`'s, because it has to come off again
+    // before the next measure reads the rows, and the style binding would not
+    // put back a value it thinks it already set.
+    const room = over
+      ? anchor.top - 2 * GUTTER
+      : window.innerHeight - anchor.bottom - 2 * GUTTER;
+    rows.style.setProperty("--room", `${Math.max(0, room)}px`);
 
     setAbove(over);
     setPlacing({

@@ -150,12 +150,21 @@
 
 /* And the Process control, whose rows are a word with a sentence under it —
    what kind of work each one is. Wider than the repo names' readable width, so
-   the longest sentence wraps to three lines rather than six, and still well
-   short of the pairings' double one. Capped against the window as every other
-   list here is, which is where a phone's rows come to be as wide as they can. */
+   the longest sentence wraps to three lines rather than six — and every line a
+   sentence is spared is height the list does not need — and still short of the
+   pairings' double one. Capped against the window as every other
+   list here is, which is where a phone's rows come to be as wide as they can.
+
+   And as tall as the rows are, rather than the ordinary cap: there are only a
+   handful of them, each a word and a sentence, and a list that made the human
+   scroll to read the last Process was hiding a choice behind a gesture. Capped
+   by the room the window has on the side the rows hang instead — `--room`,
+   which the measure in `picking.tsx` writes onto the box — so a short window
+   still scrolls them rather than losing the end of them off its edge. */
 .processPick > [data-drop] {
-  min-width: 18rem;
-  max-width: min(22rem, calc(100vw - 2.5rem));
+  min-width: min(24rem, calc(100vw - 2.5rem));
+  max-width: min(26rem, calc(100vw - 2.5rem));
+  max-height: var(--room, none);
 }
 
 /* The Repo control before there is a repo, which is a listbox where the picked
