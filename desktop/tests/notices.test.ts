@@ -11,7 +11,7 @@ import type { AddressInfo } from "node:net";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { Frames, hold, type Notice, notice, pause, showing } from "../src/notices.js";
+import { Frames, hold, type Notice, notice, opens, pause, showing } from "../src/notices.js";
 
 /// A Set's notice, as the server writes one.
 const ASKED: Notice = {
@@ -137,6 +137,30 @@ describe("whether a notice is shown", () => {
       show: false,
       why: "notifications are switched off",
     });
+  });
+});
+
+describe("where a click opens", () => {
+  /// The four kinds of path the server sends, each landing where a tap on the
+  /// phone lands.
+  it("is the notice's own path", () => {
+    for (const path of [
+      "/conversations/7/events/12",
+      "/conversations/7",
+      "/settings/remote",
+      "/devices/laptop/conversations/7",
+    ]) {
+      expect(opens({ path, title: "news" })).toBe(path);
+    }
+  });
+
+  /// A click is a navigation of the app's own window, which never leaves
+  /// localhost: two slashes is another host to a browser, and a path with no
+  /// slash in front is no path of this origin's.
+  it("is the root where the path would leave the workbench", () => {
+    for (const path of ["//elsewhere.example/x", "http://elsewhere.example/", "", "/\\elsewhere"]) {
+      expect(opens({ path, title: "news" }), path).toBe("/");
+    }
   });
 });
 

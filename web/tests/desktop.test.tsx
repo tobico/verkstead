@@ -159,6 +159,9 @@ function standingIn(
     head: (worn) => {
       asked.head(worn);
     },
+    // Nothing on this page listens for a clicked notification — the app's shell
+    // does, see `opened.ts` — so nothing is ever told here.
+    opening: () => () => {},
   };
 
   vi.stubGlobal(NAME, bridge);

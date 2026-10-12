@@ -198,6 +198,25 @@ export function showing(seen: Seen, on: boolean): Showing {
   return { show: true };
 }
 
+/// Where a click on `arrived` opens, as a path on the workbench: the notice's
+/// own, or the workbench's root where that is not a path of this origin's.
+///
+/// **Checked because it becomes a navigation of the app's own window**, and both
+/// ways a click goes put it on the window's origin by joining it to the end: a
+/// path that did not lead with one slash, or led with two — `//elsewhere`, which
+/// a browser reads as another host — is a window walked off the loopback by
+/// whatever the stream said. The stream is the app's own sidecar, but a click is
+/// a navigation and the window's rule is that it never leaves localhost.
+export function opens(arrived: Notice): string {
+  const path = arrived.path;
+
+  if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\")) {
+    return "/";
+  }
+
+  return path;
+}
+
 /// How long to wait before opening the stream again, `after` that many failures
 /// in a row: short at first, because a drop is usually a moment, and never more
 /// than the bound, because a notice is only worth anything while it is news.

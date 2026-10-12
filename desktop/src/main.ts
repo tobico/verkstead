@@ -60,7 +60,7 @@ import { keyIn } from "./key.js";
 import { takeOver as takeOverAgent } from "./launchd.js";
 import { heard, keep, say } from "./log.js";
 import { shortcuts } from "./menu.js";
-import { hold, type Notice, showing } from "./notices.js";
+import { hold, type Notice, opens, showing } from "./notices.js";
 import { dataDir, logDir } from "./platform.js";
 import { takeOver as takeOverValue } from "./runkey.js";
 import { changed, FILE as DESKTOP, set, type Settings, settings } from "./settings.js";
@@ -78,7 +78,7 @@ import { taken } from "./taken.js";
 import { opening } from "./opening.js";
 import { logs, lower, raise, type Trayed } from "./tray.js";
 import { APPDIR, stripped, unmounted } from "./unmounted.js";
-import { forward, open } from "./window.js";
+import { forward, open, type Opened } from "./window.js";
 import { ADDRESS, HEALTH, HOST, LISTEN, NOTICES, ORIGIN, PORT } from "./workbench.js";
 
 /// What the human is told when the CLI is not where the app looked.
@@ -321,13 +321,17 @@ function wearing(window: BrowserWindow | null, platform: NodeJS.Platform, pushed
 const onDesk = new Set<Notification>();
 
 /// Draw a notice as the platform's own notification, unless the window is in
-/// front — which already draws the news — and bring the window forward when it
-/// is clicked, the three steps the tray's Open takes.
+/// front — which already draws the news — and when it is clicked, open what it
+/// is about and bring the window forward, the three steps the tray's Open takes.
+///
+/// What it is about is where a tap on the phone lands: the page is told the path
+/// and routes there in place, or the window is loaded on it where there is no
+/// page to tell yet — see [`Opened.visit`](./window.js).
 ///
 /// The sentence is the title and the repo the body, with the platform's own
 /// sound. Every notice is logged whichever way it went, so that a notification
 /// somebody did not see is a line saying why.
-function noticed(window: BrowserWindow, arrived: Notice): void {
+function noticed({ window, visit }: Opened, arrived: Notice): void {
   const verdict = showing(
     {
       visible: window.isVisible(),
@@ -355,7 +359,8 @@ function noticed(window: BrowserWindow, arrived: Notice): void {
 
   shown.on("click", () => {
     onDesk.delete(shown);
-    say(`a notification was clicked, so the window is brought forward — ${arrived.title}`);
+    say(`a notification was clicked, so the window opens what it is about — ${arrived.title}`);
+    visit(opens(arrived));
     forward(window);
   });
   shown.on("close", () => onDesk.delete(shown));
@@ -719,7 +724,7 @@ async function run(): Promise<void> {
   // The key is read at every load rather than once here: **Reset key** on the
   // phone writes that file while this window is open, and a link built from a
   // secret read at startup is a 401 with extra steps.
-  const window = open({
+  const opened = open({
     origin: ORIGIN,
     secret: () => (data === undefined ? undefined : keyIn(data)),
     state: join(userData, FILE),
@@ -745,6 +750,7 @@ async function run(): Promise<void> {
     // else's program, and one machine opens both.
     by,
   });
+  const window = opened.window;
   onscreen = window;
 
   // **And a Dock activation is the window coming back**, which is the other half
@@ -787,7 +793,7 @@ async function run(): Promise<void> {
     {
       url: NOTICES,
       secret: () => (data === undefined ? undefined : keyIn(data)),
-      heard: (arrived) => noticed(window, arrived),
+      heard: (arrived) => noticed(opened, arrived),
       say,
     },
     listening.signal,

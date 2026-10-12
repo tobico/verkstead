@@ -49,6 +49,13 @@
 //! stands in — and the options that ask for that are
 //! [`decorations.ts`](./decorations.js)'s, for the reason every other value here
 //! is somewhere else. Where they go afterwards is the page's, over the bridge.
+//!
+//! **And a clicked notification is a page told where to go, where there is one
+//! to tell.** The page says over [`OPEN`](./bridge.js) when it starts listening
+//! and when it stops, and a navigation to a new document is a page that is no
+//! longer there — so a click on a window with a listening page routes it in
+//! place, and a click on one still loading or sitting on a refusal is the window
+//! loaded on the notice's path instead. See [`Opened.visit`].
 
 import { BrowserWindow, dialog, screen, shell } from "electron";
 
@@ -62,6 +69,7 @@ import {
   remembered,
   STILL,
 } from "./bounds.js";
+import { OPEN } from "./bridge.js";
 import { CANCEL, type Closing, QUIT, WARNING } from "./closing.js";
 import { DECORATIONS } from "./decorations.js";
 import { where } from "./elsewhere.js";
@@ -133,8 +141,20 @@ export interface Workbench {
   by: Opening | undefined;
 }
 
+/// The window as it was opened, and the one thing about it that needs what only
+/// opening it knew: how to go somewhere on the workbench.
+export interface Opened {
+  readonly window: BrowserWindow;
+
+  /// Go to `path` on the workbench — told to the page, where one is listening,
+  /// so that it routes there in place with nothing reloaded and nothing drafted
+  /// lost; and the window loaded on it otherwise, logged in on the way, which is
+  /// a window not yet on the workbench arriving there on the notice.
+  visit(path: string): void;
+}
+
 /// Open the window on the workbench, logged in and where it was left.
-export function open(workbench: Workbench): BrowserWindow {
+export function open(workbench: Workbench): Opened {
   // The displays as they are *now*, which is the whole question: the file was
   // written on whatever was plugged in last time.
   const place = fit(remembered(workbench.state), screen.getAllDisplays(), SIZE);
@@ -196,6 +216,26 @@ export function open(workbench: Workbench): BrowserWindow {
   // refusal has exactly one retry behind it however many times it is met.
   let recovering = false;
 
+  // Where the window is to be loaded: the root, until a click with no page to
+  // tell says otherwise. Kept rather than passed, so that the reload a refusal
+  // makes is a reload of where the window was going.
+  let at = "/";
+
+  // Whether the page now in the window is listening for where a click opens —
+  // said by the page itself over the bridge, and forgotten the moment the window
+  // starts on another document, which is a page that will have to say so again.
+  let listening = false;
+
+  window.webContents.ipc.on(OPEN, (_event, said: unknown) => {
+    listening = said === true;
+  });
+
+  window.webContents.on("did-start-navigation", (details) => {
+    if (details.isMainFrame && !details.isSameDocument) {
+      listening = false;
+    }
+  });
+
   const load = (): void => {
     const secret = workbench.secret();
 
@@ -206,7 +246,10 @@ export function open(workbench: Workbench): BrowserWindow {
       say(`no workbench key to read yet, so the window opens on ${workbench.origin} bare`);
     }
 
-    const target = secret === undefined ? workbench.origin : link(workbench.origin, secret);
+    const target =
+      secret === undefined
+        ? `${workbench.origin.replace(/\/+$/, "")}${at}`
+        : link(workbench.origin, secret, at);
 
     // The origin rather than the link, here and everywhere: these lines go to a
     // file a menu item opens on somebody's desk, and a key written there is a
@@ -226,6 +269,9 @@ export function open(workbench: Workbench): BrowserWindow {
   window.webContents.on("did-navigate", (_event, _url, code) => {
     if (code !== REFUSED) {
       recovering = false;
+      // Arrived, so a click's path has been landed on and the next load is the
+      // workbench's own again.
+      at = "/";
       return;
     }
 
@@ -242,7 +288,19 @@ export function open(workbench: Workbench): BrowserWindow {
   say(`the window is opening on ${workbench.origin}`);
   load();
 
-  return window;
+  const visit = (path: string): void => {
+    if (listening) {
+      say(`the page is told to open ${path}`);
+      window.webContents.send(OPEN, path);
+      return;
+    }
+
+    say(`there is no page listening yet, so the window is loaded on ${path}`);
+    at = path;
+    load();
+  };
+
+  return { window, visit };
 }
 
 /// Keep where the window is, for the next run to open at.

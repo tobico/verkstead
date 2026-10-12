@@ -13,7 +13,7 @@
 //! nothing here is a page with no Desktop section, and that is the whole
 //! mechanism.
 //!
-//! **What is in this file is what crosses**: the name, the six channels, and
+//! **What is in this file is what crosses**: the name, the seven channels, and
 //! the shape. It holds no behaviour and touches no disk on purpose — the
 //! preload imports it, so everything it imports is loaded inside the window,
 //! and what the app *does* about each of them is `main.ts`'s while what they
@@ -21,10 +21,12 @@
 //! registration is [`startup.ts`](./startup.js)'s, and the head's colours and
 //! height are [`decorations.ts`](./decorations.js)'s.
 //!
-//! **And five of the six go one way while the last goes the other.** Everything
+//! **And five of the seven go one way while the last two go others.** Everything
 //! the page *asks* is an `invoke` and comes back answered; the head is something
 //! the page *says* — the app cannot know what the viewer resolved its tokens to,
-//! and there is nothing to answer once it has been told. See [`HEAD`].
+//! and there is nothing to answer once it has been told. See [`HEAD`]. And a
+//! notification clicked is something the *app* says, which the page acts on by
+//! going where it leads. See [`OPEN`].
 
 import type { Head } from "./decorations.js";
 import type { Settings } from "./settings.js";
@@ -96,14 +98,33 @@ export const REGISTER = "verkstead:register";
 /// is [`Head`](./decorations.js).
 export const HEAD = "verkstead:head";
 
+/// And the channel a **clicked notification's path** is told to the page on —
+/// the first on this bridge that goes from the app to the page and is acted on
+/// there (ADR-0020, *Amended: notifications are the app's own*).
+///
+/// **The app knows the click and the page knows how to go somewhere.** A click
+/// lands where a tap on the phone lands — the Timeline Event a Set is read on,
+/// a Conversation, the Remote access pane — and the page routes there in place,
+/// so nothing reloads and nothing half typed into a composer is lost. A load of
+/// the path would be the same page arrived at by throwing away the one that was
+/// there.
+///
+/// **And the page says on the same channel whether it is listening**, `true`
+/// when it starts and `false` when it stops, because a path told to a window
+/// whose page is still loading, or sitting on a refusal, is told to nobody.
+/// Where nothing is listening the window is loaded on the path instead — see
+/// `window.ts`, which is what keeps count.
+export const OPEN = "verkstead:open";
+
 /// What `window.verkstead` is, where there is one.
 ///
-/// Six acts and one value, which is the whole of what the page needs: what
+/// Seven acts and one value, which is the whole of what the page needs: what
 /// machine this is, the settings read and written, the log file opened, the
-/// startup registration read and written, and the head's colours and height
-/// said. Everything the page *asks* is asynchronous, because everything but the
-/// platform is a question for the process on the other side of the bridge; the
-/// one thing it *says* answers with nothing at all.
+/// startup registration read and written, the head's colours and height said,
+/// and a clicked notification's path heard. Everything the page *asks* is
+/// asynchronous, because everything but the platform is a question for the
+/// process on the other side of the bridge; the one thing it *says* answers
+/// with nothing at all, and the one thing it *hears* is a listener it hands in.
 export interface Bridge {
   /// Which platform the app is running on — `process.platform`, read in the
   /// preload where there is a process to read it from.
@@ -150,4 +171,13 @@ export interface Bridge {
   /// platform with an overlay recolours it, a Mac moves its buttons, and neither
   /// is news the page can act on — see [`HEAD`].
   head(worn: Head): void;
+
+  /// Hear the path of every notification that is clicked, relative to the
+  /// workbench, for the page to go to in place. Answers with what stops
+  /// listening.
+  ///
+  /// Listening is what tells the app there is a page to tell, so a click while
+  /// there is none — the window still loading, or on a refusal — is the window
+  /// loaded on the path instead. See [`OPEN`].
+  opening(heard: (path: string) => void): () => void;
 }

@@ -15,7 +15,7 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import { ASKED, HEAD, LOGS, NAME, PRELOAD, REGISTER, SET, STARTUP } from "../src/bridge.js";
+import { ASKED, HEAD, LOGS, NAME, OPEN, PRELOAD, REGISTER, SET, STARTUP } from "../src/bridge.js";
 
 /// Every channel the bridge crosses on, which is the list both tests below read.
 /// [`HEAD`] among them though it is the one that goes the other way: a channel is
@@ -38,6 +38,15 @@ describe("the channels", () => {
     for (const channel of CHANNELS) {
       expect(channel, channel).toMatch(/^verkstead:/);
     }
+  });
+});
+
+/// The one channel the page's side of the bridge names as well, because the page
+/// listens on it through the preload — so it is pinned here and in
+/// `web/tests/opened.test.ts` to the same literal.
+describe("the channel a clicked notification is told on", () => {
+  it("is the app's own word for opening", () => {
+    expect(OPEN).toBe("verkstead:open");
   });
 });
 
