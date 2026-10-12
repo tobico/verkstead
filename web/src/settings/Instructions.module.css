@@ -38,6 +38,13 @@
   min-height: 9rem;
 }
 
+/* The line over the box, with the room under it every other pane's note has
+   before the field it is about — left to the note's own margin, the box stood
+   against its last line. */
+.lead {
+  margin: 0 0 0.85rem;
+}
+
 /* The press under the box rather than beside it, which is where the durations
    on the Cleanup pane put theirs: a field this wide has no room to its right,
    and a press under prose is where a form ends anyway. */

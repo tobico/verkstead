@@ -200,12 +200,10 @@ export function InstructionsPane(props: {
         <Match when={told()}>
           <form class={styles.instructions} onSubmit={commit}>
             {/* What the section is for, in the one line a pane on this page
-                says its own in. Both halves of it: where the text goes, and
-                what it does not displace. */}
-            <Note>
-              Given to every session as the agent's own global instructions,
-              whatever agent its profile runs. A repository's own CLAUDE.md or
-              AGENTS.md is read as it always was, under this.
+                says its own in. */}
+            <Note class={styles.lead}>
+              Additional instructions for the agent to include in every initial
+              prompt.
             </Note>
 
             {/* A copy of what has been typed gives the field its height — see

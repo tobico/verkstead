@@ -227,17 +227,18 @@ describe("the pane", () => {
     expect(screen.queryByText(/Could not read the settings/)).toBeNull();
   });
 
-  /// Both halves of what the section is for, said where somebody is about to
-  /// type into it: where the text goes, and what it does not displace.
-  it("says what the text reaches and what it leaves alone", async () => {
+  /// What the section is for, said where somebody is about to type into it —
+  /// in the one sentence it needs, and with room under it before the box.
+  it("says what the text is for, over the box", async () => {
     theSettings(TOLD);
     mountPane();
 
     const note = await waitFor(() =>
-      screen.getByText(/Given to every session as the agent's own/),
+      screen.getByText(
+        "Additional instructions for the agent to include in every initial prompt.",
+      ),
     );
-    expect(note.textContent).toContain("whatever agent its profile runs");
-    expect(note.textContent).toContain("read as it always was, under this");
+    expect(note.classList.contains(styles.lead!)).toBe(true);
   });
 
   /// The press sends the box, and everything else as the read left it — one
