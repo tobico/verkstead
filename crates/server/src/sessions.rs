@@ -296,6 +296,16 @@ impl Agents {
         }
     }
 
+    /// What a harness of `agent_type` is run as: its own binary's name, or the
+    /// first word of whatever stands in for every type's — see
+    /// [`Agents::agent`].
+    pub(crate) fn harness(&self, agent_type: store::AgentType) -> String {
+        self.agent
+            .as_ref()
+            .and_then(|standing| standing.first().cloned())
+            .unwrap_or_else(|| binary(agent_type).to_owned())
+    }
+
     /// Whether a press asks — see [`Agents::checks_logins`].
     pub(crate) fn checks_logins(&self) -> bool {
         self.checks_logins

@@ -848,6 +848,12 @@ testers.runNixOSTest {
                         }
                         for which, step in stood["cleanup"].items()
                     },
+                    "at_once": {
+                        which: str(stood["at_once"][which])
+                        if stood["at_once"][f"{which}_configured"]
+                        else ""
+                        for which in ("roadmap_stages", "conversations")
+                    },
                     "conflict_resolution": stood["conflict_resolution"],
                     "share_on_done": stood["share_on_done"],
                     "sandbox_binds": [
@@ -856,6 +862,7 @@ testers.runNixOSTest {
                         if entry["source"] == "Settings"
                     ],
                     "ignored_comments": "Keep",
+                    "mcp_servers": "Keep",
                     "instructions": stood["instructions"],
                 },
             )
