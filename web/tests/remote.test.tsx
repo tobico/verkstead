@@ -1257,10 +1257,34 @@ forgotten it",
 
 describe("adding a device", () => {
   /// The box and the press, which are the one thing on this pane that is
-  /// configured rather than read.
+  /// configured rather than read — behind the *Link another device* dropdown,
+  /// opened first where it is not open already.
   function theAddress(): HTMLInputElement {
-    return screen.getByLabelText("Link another device") as HTMLInputElement;
+    const trigger = screen.getByRole("button", { name: /Link another device/ });
+    if (trigger.getAttribute("aria-expanded") !== "true") {
+      fireEvent.click(trigger);
+    }
+    return screen.getByLabelText("Address") as HTMLInputElement;
   }
+
+  /// The form is not on the pane until it is asked for: the pane reads what the
+  /// machine is, and linking another is one dropdown away rather than a field
+  /// standing under the list for good.
+  it("keeps the form behind the dropdown until it is opened", async () => {
+    mountPane(SERVING);
+
+    const trigger = await waitFor(() =>
+      screen.getByRole("button", { name: /Link another device/ }),
+    );
+
+    expect(screen.queryByLabelText("Address")).toBeNull();
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+
+    fireEvent.click(trigger);
+
+    expect(screen.getByRole("group", { name: "Link another device" })).toBeTruthy();
+    expect(screen.getByLabelText("Address")).toBeTruthy();
+  });
 
   /// The box stands on every state of the pane, for the reason the list does:
   /// a machine that has never heard of a tailnet has a device of its own, and
@@ -1287,9 +1311,8 @@ describe("adding a device", () => {
   it("will not be pressed on an empty address", async () => {
     mountPane(SERVING);
 
-    const press = await waitFor(
-      () => screen.getByText("Add") as HTMLButtonElement,
-    );
+    await waitFor(() => theAddress());
+    const press = screen.getByText("Add") as HTMLButtonElement;
 
     expect(press.disabled).toBe(true);
 
@@ -1333,9 +1356,10 @@ describe("adding a device", () => {
     });
   });
 
-  /// And the box empties on a press that went through, so the next address is
-  /// typed into an empty one rather than over the last.
-  it("empties the box on a press that went through", async () => {
+  /// And the dropdown shuts on a press that went through, the row it asked for
+  /// being on the pane under it — and opened again, the box is empty, so the
+  /// next address is typed into an empty one rather than over the last.
+  it("shuts on a press that went through, and opens again empty", async () => {
     stubbing(
       whenever("/api/ui/remote", json(SERVING)),
       theDevice(),
@@ -1349,7 +1373,8 @@ describe("adding a device", () => {
     fireEvent.input(theAddress(), { target: { value: "192.168.1.31" } });
     fireEvent.click(screen.getByText("Add"));
 
-    await waitFor(() => expect(theAddress().value).toBe(""));
+    await waitFor(() => expect(screen.queryByLabelText("Address")).toBeNull());
+    expect(theAddress().value).toBe("");
   });
 
   /// A press that did not get through says what the far end said, in the far

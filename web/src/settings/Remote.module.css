@@ -479,7 +479,40 @@
   margin-top: 1.25rem;
 }
 
-.adding label {
+/* The trigger, drawn as the link it reads as: the accent, the pane's small
+   size, and the chevron saying a panel comes down from it rather than a page
+   being gone to. Everything a button arrives with given up — the chrome's
+   `.trigger` keeps the font and the pointer. */
+.adding > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0;
+  font-size: 0.9rem;
+  color: var(--accent);
+  background: none;
+  border: 0;
+}
+
+.adding > button svg {
+  font-size: 0.8em;
+}
+
+@media (hover: hover) {
+  .adding > button:hover {
+    text-decoration: underline;
+  }
+}
+
+/* The panel it drops: from the near edge, the trigger standing at the start of
+   its line, and as wide as the form needs without leaving the window. */
+.adding > [role="group"] {
+  right: auto;
+  left: 0;
+  width: min(24rem, calc(100vw - 2.5rem));
+}
+
+.linking label {
   display: block;
   margin-bottom: 0.5rem;
   font-size: 0.9rem;
