@@ -461,29 +461,63 @@ function ProfileCard(props: {
         open={props.open}
         press={props.press}
       >
-        {/* The harness's mark and the reading beside it, drawn the way the
-            picker rows draw the same pair: a list of accounts is sorted by
-            backend, and the shape is what a reader finds it by before any of
-            the words. */}
-        <span class={styles.title}>
-          <HarnessMark of={props.profile.account.agent_type} />
-          {summary(props.profile)}
-        </span>
-        {/* And which machine the account is on, where it is not this one: every
-            device lists every member's accounts as one list, so which machine a
-            row's account sits on is a fact on the row rather than a section it
-            is filed under. Drawn the way a sidebar row draws the same fact —
-            the mark for the operating system and the name after it, the mark
-            unlabelled because the words beside it say it. Nothing at all for
-            this device's own, which is every row where there is no cluster. */}
-        <Show when={props.profile.device}>
-          {(device) => (
-            <span class={styles.device}>
-              <Icon of={osIcon(device().os)} class={styles.os} />
-              {device().name}
-            </span>
-          )}
-        </Show>
+        {/* One line, as every section card on the page is: the reading at the
+            near end — cut rather than wrapped — and at the far one which
+            machine the account is on and whether it is logged in. */}
+        <div class={styles.line}>
+          {/* The harness's mark and the reading beside it, drawn the way the
+              picker rows draw the same pair: a list of accounts is sorted by
+              backend, and the shape is what a reader finds it by before any of
+              the words. */}
+          <span class={styles.title}>
+            <HarnessMark of={props.profile.account.agent_type} />
+            <span class={styles.reading}>{summary(props.profile)}</span>
+          </span>
+          <span class={styles.end}>
+            {/* And which machine the account is on, where it is not this one: every
+                device lists every member's accounts as one list, so which machine a
+                row's account sits on is a fact on the row rather than a section it
+                is filed under. Drawn the way a sidebar row draws the same fact —
+                the mark for the operating system and the name after it, the mark
+                unlabelled because the words beside it say it. Nothing at all for
+                this device's own, which is every row where there is no cluster. */}
+            <Show when={props.profile.device}>
+              {(device) => (
+                <span class={styles.device}>
+                  <Icon of={osIcon(device().os)} class={styles.os} />
+                  {device().name}
+                </span>
+              )}
+            </Show>
+            {/* And the login, which the server runs in the Profile's own sandbox
+                — see `LoggingIn.tsx`. A Claude account at home here only: a
+                mirror's account is a copy, and its login is made on the machine it
+                is at home on. A press of its own inside the card, so it stands out
+                of the card's press and the card's keys alike. */}
+            <Show when={loggable(props.profile)}>
+              <Show
+                when={!loggedIn(props.profile)}
+                fallback={
+                  // The fact the press would only have made true again: an account
+                  // logged in here already is not one to offer a login to.
+                  <span class={styles.loggedIn}>Logged in</span>
+                }
+              >
+                <button
+                  type="button"
+                  class={`${styles.logIn!} secondary`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setLoggingIn(true);
+                  }}
+                  onKeyDown={(event) => event.stopPropagation()}
+                >
+                  Log in
+                </button>
+              </Show>
+            </Show>
+          </span>
+        </div>
         {/* Said here rather than left to be found out when a session will not
             start: the profile was checked when it was saved, and what has become
             of its pair since is the server's to report on every read. */}
@@ -497,33 +531,6 @@ function ProfileCard(props: {
             this is the same account read where it lives. */}
         <Show when={!props.profile.login && props.profile.device === null}>
           <Note>{NOT_USABLE_AWAY}</Note>
-        </Show>
-        {/* And the login, which the server runs in the Profile's own sandbox
-            — see `LoggingIn.tsx`. A Claude account at home here only: a
-            mirror's account is a copy, and its login is made on the machine it
-            is at home on. A press of its own inside the card, so it stands out
-            of the card's press and the card's keys alike. */}
-        <Show when={loggable(props.profile)}>
-          <Show
-            when={!loggedIn(props.profile)}
-            fallback={
-              // The fact the press would only have made true again: an account
-              // logged in here already is not one to offer a login to.
-              <span class={styles.loggedIn}>Logged in</span>
-            }
-          >
-            <button
-              type="button"
-              class={`${styles.logIn!} secondary`}
-              onClick={(event) => {
-                event.stopPropagation();
-                setLoggingIn(true);
-              }}
-              onKeyDown={(event) => event.stopPropagation()}
-            >
-              Log in
-            </button>
-          </Show>
         </Show>
       </CardButton>
       {/* Beside the card rather than inside it, so that nothing pressed in the

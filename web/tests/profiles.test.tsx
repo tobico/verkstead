@@ -724,6 +724,21 @@ describe("logging an account in", () => {
     ).toBe("Log in");
   });
 
+  /// One line, the way every section card on the page is: the reading at the
+  /// near end, and where it is logged in at the far one.
+  it("stands the reading and the login on one line", async () => {
+    serving(whenever("/api/ui/profiles", json(CLUSTER)));
+    mountCards();
+
+    await waitFor(() => screen.getByText(reads(MIRROR)));
+
+    const card = theCard(reads(CLUSTER[0]!));
+    const line = card.querySelector(`.${styles.line}`)!;
+
+    expect(line.querySelector(`.${styles.title}`)).not.toBeNull();
+    expect(line.querySelector(`.${styles.loggedIn}`)).not.toBeNull();
+  });
+
   /// And says so instead where it is logged in already: a press that would only
   /// log the same account in again is not one to offer, and *Logged in* is the
   /// fact the button stood in the place of.
