@@ -49,8 +49,15 @@
 }
 
 /* Which of the two is being typed in is the box's to say, the field inside it
-   having nothing left to say it with. */
-.box:focus-within {
+   having nothing left to say it with.
+
+   Except while one of the setup row's dropdowns is down. Where the focus is
+   then is the dropdown's business — on its trigger, inside its panel, or
+   nowhere, a listbox's rows being nothing a browser focuses — so the border
+   came and went with each press inside the open card for reasons the human
+   could not see. The open card is what is being looked at, and the box says
+   nothing about focus until it is put away. */
+.box:focus-within:not(:has([aria-expanded="true"])) {
   border-color: var(--accent);
 }
 
