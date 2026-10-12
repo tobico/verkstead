@@ -616,6 +616,18 @@ describe("View Logs", () => {
     await waitFor(() => expect(asked.logs).toHaveBeenCalled());
   });
 
+  /// The button on its own: what it opens is said by its name, and a line under
+  /// it saying the same thing again was nothing anybody needed to read.
+  it("stands with no note under it", async () => {
+    standingIn();
+    mountPane();
+
+    const press = await screen.findByText("View Logs");
+
+    expect(press.parentElement!.querySelector("p")).toBeNull();
+    expect(screen.queryByText(/log file/)).toBeNull();
+  });
+
   /// And with the tray off as readily as with it on (ADR-0020). A switch
   /// somebody can turn off cannot be the only way to a log file, and the desktop
   /// most likely to have the tray off is the one the tray misbehaved on — which

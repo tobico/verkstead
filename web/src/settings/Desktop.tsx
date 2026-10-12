@@ -442,10 +442,6 @@ function Pane(props: { reach: Bridge; back: () => void }): JSX.Element {
                 <QuietButton onClick={() => viewing.mutate()}>
                   View Logs
                 </QuietButton>
-                <Note>
-                  This run's log file, which is what the tray's own View Logs
-                  opens.
-                </Note>
               </div>
 
               <Show when={registering.isError}>
