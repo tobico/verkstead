@@ -28,6 +28,13 @@
 //! question; then the binary; and only then a child. Everything before the
 //! child is an app that can refuse having made nothing at all.
 //!
+//! **And it holds the notices stream for the rest of the run**, drawing each
+//! notice the phones get as the platform's own notification while the window
+//! is not in front — Web Push being refused inside Electron, which ships
+//! without Google's push client. Reading the stream and the showing rule are
+//! [`notices.ts`](./notices.js)'s, which vitest runs; the `Notification` is
+//! here.
+//!
 //! **And a launch may be a login's rather than a human's.** The flag
 //! [`HIDDEN`](./startup.js) is what says so where the registration is a command
 //! line, and the platform itself is what says so on a Mac, whose login item
@@ -39,7 +46,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 
-import { app, BrowserWindow, dialog, ipcMain } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Notification } from "electron";
 
 import { artwork } from "./artwork.js";
 import { AUTOSCROLLING } from "./autoscroll.js";
@@ -53,6 +60,7 @@ import { keyIn } from "./key.js";
 import { takeOver as takeOverAgent } from "./launchd.js";
 import { heard, keep, say } from "./log.js";
 import { shortcuts } from "./menu.js";
+import { hold, type Notice, showing } from "./notices.js";
 import { dataDir, logDir } from "./platform.js";
 import { takeOver as takeOverValue } from "./runkey.js";
 import { changed, FILE as DESKTOP, set, type Settings, settings } from "./settings.js";
@@ -71,7 +79,7 @@ import { opening } from "./opening.js";
 import { logs, lower, raise, type Trayed } from "./tray.js";
 import { APPDIR, stripped, unmounted } from "./unmounted.js";
 import { forward, open } from "./window.js";
-import { ADDRESS, HEALTH, HOST, LISTEN, ORIGIN, PORT } from "./workbench.js";
+import { ADDRESS, HEALTH, HOST, LISTEN, NOTICES, ORIGIN, PORT } from "./workbench.js";
 
 /// What the human is told when the CLI is not where the app looked.
 ///
@@ -302,6 +310,63 @@ function wearing(window: BrowserWindow | null, platform: NodeJS.Platform, pushed
 
   say(`the page's head is ${head.paper} with ${head.ink} marks, ${head.band}px tall`);
   window.setTitleBarOverlay(overlay(head));
+}
+
+/// The notifications on the screen, held until each is clicked or closed.
+///
+/// **Held because a notification nobody references is collected**, and its
+/// click handler with it: Electron's `Notification` is a JavaScript object over
+/// the platform's, and one that has gone out of scope by the time it is clicked
+/// is a click that does nothing.
+const onDesk = new Set<Notification>();
+
+/// Draw a notice as the platform's own notification, unless the window is in
+/// front — which already draws the news — and bring the window forward when it
+/// is clicked, the three steps the tray's Open takes.
+///
+/// The sentence is the title and the repo the body, with the platform's own
+/// sound. Every notice is logged whichever way it went, so that a notification
+/// somebody did not see is a line saying why.
+function noticed(window: BrowserWindow, arrived: Notice): void {
+  const verdict = showing(
+    {
+      visible: window.isVisible(),
+      minimized: window.isMinimized(),
+      focused: window.isFocused(),
+    },
+    true,
+  );
+
+  if (!verdict.show) {
+    say(`a notice is withheld, because ${verdict.why} — ${arrived.title}`);
+    return;
+  }
+
+  if (!Notification.isSupported()) {
+    say(`a notice cannot be shown, because this desktop has no notifications — ${arrived.title}`);
+    return;
+  }
+
+  const shown = new Notification({
+    title: arrived.title,
+    body: arrived.project ?? "",
+    silent: false,
+  });
+
+  shown.on("click", () => {
+    onDesk.delete(shown);
+    say(`a notification was clicked, so the window is brought forward — ${arrived.title}`);
+    forward(window);
+  });
+  shown.on("close", () => onDesk.delete(shown));
+  shown.on("failed", (_event, error) => {
+    onDesk.delete(shown);
+    say(`a notification failed — ${error}`);
+  });
+
+  onDesk.add(shown);
+  shown.show();
+  say(`a notice is shown — ${arrived.title}`);
 }
 
 async function run(): Promise<void> {
@@ -709,6 +774,24 @@ async function run(): Promise<void> {
   } else {
     say("the desktop settings say no tray icon, so there is none — and closing the window quits");
   }
+
+  // **And the notices stream, held for the rest of the run** — the phones' push
+  // brought to this desk, which Web Push inside Electron cannot do (ADR-0020,
+  // *Amended: notifications are the app's own*). Opened only now, once the
+  // server has answered and there is a window for a click to bring forward, and
+  // logged in with the key read afresh at every opening, as the window's link
+  // is. Let go as the app quits, so that a drop at the end is not news.
+  const listening = new AbortController();
+  app.on("will-quit", () => listening.abort());
+  void hold(
+    {
+      url: NOTICES,
+      secret: () => (data === undefined ? undefined : keyIn(data)),
+      heard: (arrived) => noticed(window, arrived),
+      say,
+    },
+    listening.signal,
+  );
 
   // And the launch that asked for the window while there was not one yet, which
   // is a press of the icon over a Verkstead still coming up.

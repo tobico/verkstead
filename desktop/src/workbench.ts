@@ -46,3 +46,8 @@ export const ORIGIN = `http://${ADDRESS}`;
 /// once the server is up. Everything else needs a login the app has not made
 /// yet at the moment it is waiting.
 export const HEALTH = `${ORIGIN}/api/v1/health`;
+
+/// The notices stream: every notice the server pushes to its phones, for the app
+/// to show as the platform's own notifications — see [`hold`](./notices.js).
+/// Behind the gate, so it is held with the key.
+export const NOTICES = `${ORIGIN}/api/ui/push/notices`;
