@@ -123,8 +123,10 @@
    is here. Said as a child rather than as a descendant because the sharing
    switch below carries a label of its own that is laid out by
    `Switch.module.css` — a block rule reaching into it would put the switch
-   under its own words. */
-.form section > label {
+   under its own words. And the labels inside an ignore rule's row, which are
+   the same labels over the same fields one element further down. */
+.form section > label,
+.form .rule > label {
   display: block;
   margin-bottom: 0.35rem;
   font-size: 0.9rem;
