@@ -138,7 +138,10 @@
   margin-bottom: 0.6rem;
 }
 
-.form input {
+/* Every typed field — and not the sharing tick, which is a `Check` and drawn by
+   `Check.module.css`: caught by a bare `input`, it was stretched to the width of
+   the form and pushed its words off the far edge. */
+.form input:not([type="checkbox"]) {
   display: block;
   width: 100%;
   margin-bottom: 0.85rem;
@@ -270,7 +273,7 @@
 
 /* The field being typed in, which is no pointer's doing: the border says which
    of them the token or the author is going into. */
-.form input:focus-visible {
+.form input:not([type="checkbox"]):focus-visible {
   border-color: var(--accent);
 }
 
@@ -279,7 +282,7 @@
    are in — the clear's red here, and the keep's darkening border out of
    `.secondary` in `styles/base.css`. */
 @media (hover: hover) {
-  .form input:hover,
+  .form input:not([type="checkbox"]):hover,
   .form select:hover {
     border-color: var(--ink-soft);
   }
