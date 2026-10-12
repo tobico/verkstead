@@ -90,6 +90,14 @@
   font-size: 0.85rem;
 }
 
+/* And what stands there instead where the account is logged in already: the
+   fact, quiet, at the size of the press it replaces. */
+.profile .loggedIn {
+  align-self: flex-start;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
 /* And the same fact said in the pane, over the form: which machine the account is
    on, and that a save or a removal here is put to it. A line of prose rather than
    the card's mark and name, because what it is saying is where the press goes

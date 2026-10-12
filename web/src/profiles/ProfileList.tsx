@@ -271,7 +271,6 @@ const ACCOUNT_FIELDS: Record<AgentType, AccountField[]> = {
   ],
 };
 
-
 /// An account of each type with nothing typed into it: what picking that type
 /// leaves in the form.
 ///
@@ -505,17 +504,26 @@ function ProfileCard(props: {
             is at home on. A press of its own inside the card, so it stands out
             of the card's press and the card's keys alike. */}
         <Show when={loggable(props.profile)}>
-          <button
-            type="button"
-            class={`${styles.logIn!} secondary`}
-            onClick={(event) => {
-              event.stopPropagation();
-              setLoggingIn(true);
-            }}
-            onKeyDown={(event) => event.stopPropagation()}
+          <Show
+            when={!loggedIn(props.profile)}
+            fallback={
+              // The fact the press would only have made true again: an account
+              // logged in here already is not one to offer a login to.
+              <span class={styles.loggedIn}>Logged in</span>
+            }
           >
-            Log in
-          </button>
+            <button
+              type="button"
+              class={`${styles.logIn!} secondary`}
+              onClick={(event) => {
+                event.stopPropagation();
+                setLoggingIn(true);
+              }}
+              onKeyDown={(event) => event.stopPropagation()}
+            >
+              Log in
+            </button>
+          </Show>
         </Show>
       </CardButton>
       {/* Beside the card rather than inside it, so that nothing pressed in the
@@ -535,6 +543,13 @@ function ProfileCard(props: {
 /// see ADR-0022 for why no other.
 function loggable(profile: ProfileEntry): boolean {
   return profile.account.agent_type === "Claude" && profile.device === null;
+}
+
+/// Whether the account is logged in here: it holds a login file, and the server
+/// did not find it signed out — a login file left behind by a signed-out account
+/// is the one case where having one is not being logged in.
+function loggedIn(profile: ProfileEntry): boolean {
+  return profile.login && profile.broken !== "SignedOut";
 }
 
 /// And the form that adds or rewrites one, which is the details pane a card —
@@ -756,7 +771,8 @@ export function ProfileForm(props: {
 
   /// The fields this profile's type is asked for, which is what the form draws
   /// between the models and the buttons.
-  const fields = (): AccountField[] => ACCOUNT_FIELDS[form().account.agent_type];
+  const fields = (): AccountField[] =>
+    ACCOUNT_FIELDS[form().account.agent_type];
 
   const save = useMutation(() => ({
     mutationFn: (profile: ProfileEdit) => props.save(profile),
@@ -923,9 +939,7 @@ export function ProfileForm(props: {
                   <input
                     type="checkbox"
                     checked={form().models.includes(model)}
-                    onChange={(ev) =>
-                      pick(model, ev.currentTarget.checked)
-                    }
+                    onChange={(ev) => pick(model, ev.currentTarget.checked)}
                   />
                   {prettify(model)}
                   {/* And whose it is, where it is not this account's:
@@ -936,8 +950,8 @@ export function ProfileForm(props: {
                   <Show when={elsewhere(model)}>
                     {(agent) => (
                       <span class={styles.elsewhere}>
-                        {AGENT_NAME[agent()]}'s model, which this account
-                        cannot launch
+                        {AGENT_NAME[agent()]}'s model, which this account cannot
+                        launch
                       </span>
                     )}
                   </Show>
@@ -981,11 +995,7 @@ export function ProfileForm(props: {
               }
             }}
           />
-          <button
-            type="button"
-            disabled={typing().trim() === ""}
-            onClick={add}
-          >
+          <button type="button" disabled={typing().trim() === ""} onClick={add}>
             Add
           </button>
         </div>
