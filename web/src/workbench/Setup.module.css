@@ -176,11 +176,14 @@
    scroll to read the last Process was hiding a choice behind a gesture. Capped
    by the room the window has on the side the rows hang instead — `--room`,
    which the measure in `picking.tsx` writes onto the box — so a short window
-   still scrolls them rather than losing the end of them off its edge. */
+   still scrolls them rather than losing the end of them off its edge.
+   `--grows` is what tells that measure the list is capped by the room rather
+   than by its sheet, so it reads the whole of the rows' height. */
 .processPick > [data-drop] {
   min-width: min(24rem, calc(100vw - 2.5rem));
   max-width: min(26rem, calc(100vw - 2.5rem));
   max-height: var(--room, none);
+  --grows: 1;
 }
 
 /* The Repo control before there is a repo, which is a listbox where the picked
