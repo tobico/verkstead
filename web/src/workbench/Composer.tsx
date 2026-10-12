@@ -49,8 +49,9 @@
 //! the compose page alike (see [`Attaching`](../Attaching.tsx)), with only what
 //! becomes of a chosen file different between them.
 //!
-//! **And the paperclip is a menu**, here and on the compose page alike, an
-//! answer sheet's being the one that stays a plain button: *Attach file* first,
+//! **And the paperclip is a menu**, drawn as a plus, here and on the compose
+//! page alike, an answer sheet's being the one that stays a plain paperclip
+//! button: *Attach file* first,
 //! and under it the MCP servers declared on the settings page. Picking one puts
 //! it on the Conversation and draws a chip for it in that same row, and the
 //! chip's × takes it off again and puts it back in the menu. With none declared

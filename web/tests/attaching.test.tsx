@@ -15,7 +15,8 @@
 //! Conversation in `conversation.json` carries two attached files, so what these
 //! read is the row the app builds from the endpoint's own answer.
 
-import { fireEvent, screen, waitFor } from "@solidjs/testing-library";
+import { faPaperclip, faPlus } from "@fortawesome/free-solid-svg-icons";
+import { fireEvent, screen, waitFor, within } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type {
@@ -187,6 +188,19 @@ describe("the files on a draft", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Attach file" }));
 
     expect(opened).toHaveBeenCalled();
+  });
+
+  /// A plus rather than a paperclip, because what it opens is a list of things
+  /// to put on the Conversation and a file is only the first of them.
+  it("draws a plus on the menu's trigger", async () => {
+    theWorkbench();
+
+    const pane = await openComposer();
+    const trigger = within(pane).getByRole("button", { name: "Attach" });
+
+    expect(trigger.querySelector("path")!.getAttribute("d")).toBe(
+      faPlus.icon[4],
+    );
   });
 
   /// At the near edge of the row the start press is at the far edge of, which
@@ -871,6 +885,12 @@ describe("the files on an answer", () => {
         clip.getAttribute("aria-haspopup"),
         `${label}'s is the plain button`,
       ).toBeNull();
+
+      // And still the paperclip: it attaches a file and nothing else, which
+      // is what the menu's plus stopped being a picture of.
+      expect(clip.querySelector("path")!.getAttribute("d")).toBe(
+        faPaperclip.icon[4],
+      );
     }
 
     expect(
