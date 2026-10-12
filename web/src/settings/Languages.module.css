@@ -52,15 +52,23 @@
   margin: 0.5rem 0 0;
 }
 
-/* The checkbox at one end and the link to its panel at the other, on one line:
-   the row is what somebody scanning the pane reads, and everything else is
-   behind the link. */
+/* The checkbox and the link to its panel, on one line: the row is what
+   somebody scanning the pane reads, and everything else is behind the link.
+
+   In two columns rather than at the two ends of the line. The links read as
+   one column beside the ticks, starting at one edge just past the longest of
+   the language names — at the far end of a wide pane, each was a reading too
+   far from the language it was about to be read as that language's. The first
+   column is a width rather than the label's own, so every row's link starts at
+   the same place; a name longer than it wraps rather than pushing its link out
+   of line. */
 .row {
+  --names: 7rem;
   position: relative;
-  display: flex;
+  display: grid;
+  grid-template-columns: var(--names) minmax(0, 1fr);
   align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
+  column-gap: 0.75rem;
   min-width: 0;
 }
 
@@ -101,15 +109,19 @@
 }
 
 /* The panel the link drops, hung off the row rather than off the link: the
-   link's anchor gives up its positioning, so the card's far edge is the row's
-   and it can be no wider than the row is — a pane narrower than the card would
-   otherwise have it spread off the window's near edge. */
+   link's anchor gives up its positioning, so the card is measured against the
+   row — from the link's column, under the link, and no wider than the rest of
+   the row is, so a pane narrower than the card does not have it spread off the
+   window's edge. */
 .row > .cache {
   position: static;
+  justify-self: start;
 }
 
 .cache > [role="group"] {
-  width: min(22rem, 100%);
+  right: auto;
+  left: calc(var(--names) + 0.75rem);
+  width: min(22rem, calc(100% - var(--names) - 0.75rem));
 }
 
 .cache > [role="group"] > * + * {
