@@ -82,6 +82,11 @@ export interface DesktopSettings {
   /// Whether there is an icon in the tray — and so whether the app can be
   /// reached at all once its window is off the screen.
   trayIcon: boolean;
+
+  /// Whether the app shows a notice from its sidecar as the platform's own
+  /// notification — on by default. Inside the app this is what the switch on
+  /// the Settings head moves, rather than a browser's push subscription.
+  notifications: boolean;
 }
 
 /// How **Launch on Startup** stands on this machine — `Registration` in
@@ -169,6 +174,11 @@ export interface Bridge {
   /// on this page.
   register(on: boolean): Promise<Registration>;
 
+  /// Whether this desktop can show a notification at all — `NOTIFIABLE` in
+  /// `desktop/src/bridge.ts`. A Linux desktop with no notification daemon is
+  /// the one that says no, and the switch says so under it.
+  notifiable(): Promise<boolean>;
+
   /// Say what the head is drawn in and how tall its band stands, so that the
   /// window's controls overlay is the same strip of paper the head beneath it is.
   ///
@@ -218,6 +228,7 @@ function shaped(held: unknown): held is Bridge {
     typeof reached.logs === "function" &&
     typeof reached.startup === "function" &&
     typeof reached.register === "function" &&
+    typeof reached.notifiable === "function" &&
     typeof reached.head === "function" &&
     typeof reached.opening === "function"
   );

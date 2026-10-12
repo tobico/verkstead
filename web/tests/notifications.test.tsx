@@ -1,4 +1,6 @@
-//! The switch that turns notifications on for the device in front of you.
+//! The switch that turns notifications on for the device in front of you: a
+//! browser's push subscription, or — inside the desktop app — the app's own
+//! setting, reached over the bridge.
 //!
 //! Driven through a stand-in browser (see `pushing`) rather than a mock of the
 //! control's own functions: what this is really about is the four round trips
@@ -9,8 +11,9 @@
 import { render, screen, waitFor } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { Notifications } from "../src/push/Notifications";
+import { Notifications, UNNOTIFIABLE } from "../src/push/Notifications";
 import styles from "../src/push/Notifications.module.css";
+import { type Bridge, type DesktopSettings, NAME } from "../src/settings/bridge";
 import { AUTH, ENDPOINT, KEY, P256DH, nothing, pushing, subscription } from "./pushing";
 import { json, serving } from "./serving";
 
@@ -275,5 +278,113 @@ describe("the notifications switch", () => {
     await waitFor(() => expect(state()).toContain("the server still has it"));
     // The browser's half did come off, so this device is off and says so.
     expect(flip.checked).toBe(false);
+  });
+});
+
+/// The app's own window, stood in for as the preload puts it on the window —
+/// with the app's `enact` behind its set: a boolean is taken and anything else
+/// answers with the settings as they stand.
+function inTheApp(held: Partial<DesktopSettings> = {}, notifiable = true) {
+  let stands: DesktopSettings = {
+    whenClosed: "tray",
+    trayIcon: true,
+    notifications: true,
+    ...held,
+  };
+
+  const set = vi.fn((changed: Partial<DesktopSettings>) => {
+    if (typeof changed.notifications === "boolean") {
+      stands = { ...stands, ...changed };
+    }
+    return Promise.resolve(stands);
+  });
+
+  vi.stubGlobal(NAME, {
+    platform: "linux",
+    settings: () => Promise.resolve(stands),
+    set,
+    logs: () => Promise.resolve(),
+    startup: () => Promise.resolve({ possible: false, on: false }),
+    register: () => Promise.resolve({ possible: false, on: false }),
+    notifiable: () => Promise.resolve(notifiable),
+    head: () => {},
+    opening: () => () => {},
+  } satisfies Bridge);
+
+  return { set, stands: () => stands };
+}
+
+describe("the notifications switch inside the app", () => {
+  it("reads the app's own setting, on by default, and touches no browser push", async () => {
+    // Push stood in for in full, so a switch that reached for it would be seen
+    // to — and denied, so a switch reading the browser would read off.
+    const { notification, manager } = pushing({ permission: "denied" });
+    const fetching = serving();
+    inTheApp();
+
+    const { flip, state } = await control();
+
+    expect(flip.checked).toBe(true);
+    expect(state()).toBe("");
+    expect(notification.requestPermission).not.toHaveBeenCalled();
+    expect(manager.subscribe).not.toHaveBeenCalled();
+    expect(fetching).not.toHaveBeenCalled();
+  });
+
+  it("sets the app's setting off and on again over the bridge", async () => {
+    const { manager } = pushing({ permission: "granted" });
+    const fetching = serving();
+    const { set, stands } = inTheApp();
+
+    const { flip } = await control();
+
+    flip.click();
+    await waitFor(() => expect(flip.checked).toBe(false));
+    await waitFor(() => expect(flip.disabled).toBe(false));
+    expect(set).toHaveBeenLastCalledWith({ notifications: false });
+    expect(stands().notifications).toBe(false);
+
+    flip.click();
+    await waitFor(() => expect(flip.checked).toBe(true));
+    expect(set).toHaveBeenLastCalledWith({ notifications: true });
+    expect(stands().notifications).toBe(true);
+
+    expect(manager.subscribe).not.toHaveBeenCalled();
+    expect(fetching).not.toHaveBeenCalled();
+  });
+
+  it("goes back where it was when the app refuses the set", async () => {
+    serving();
+    const { set } = inTheApp();
+    // The app answering with the settings as they stand, which is what a set it
+    // would not take comes back as.
+    set.mockImplementation(() =>
+      Promise.resolve({ whenClosed: "tray", trayIcon: true, notifications: true }),
+    );
+
+    const { flip } = await control();
+    flip.click();
+
+    await waitFor(() => expect(set).toHaveBeenCalled());
+    await waitFor(() => expect(flip.disabled).toBe(false));
+    expect(flip.checked).toBe(true);
+  });
+
+  it("reads off where the app was told off", async () => {
+    serving();
+    inTheApp({ notifications: false });
+
+    const { flip } = await control();
+
+    expect(flip.checked).toBe(false);
+  });
+
+  it("says so where this desktop cannot show a notification", async () => {
+    serving();
+    inTheApp({}, false);
+
+    const { state } = await control();
+
+    await waitFor(() => expect(state()).toBe(UNNOTIFIABLE));
   });
 });

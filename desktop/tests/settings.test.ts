@@ -45,7 +45,7 @@ afterEach(() => vi.restoreAllMocks());
 
 describe("what is set comes back", () => {
   it("reads back what was set", () => {
-    const chosen: Settings = { whenClosed: "ask", trayIcon: false };
+    const chosen: Settings = { whenClosed: "ask", trayIcon: false, notifications: false };
 
     set(file, chosen);
 
@@ -54,7 +54,7 @@ describe("what is set comes back", () => {
 
   it("reads back every position", () => {
     for (const whenClosed of POSITIONS) {
-      set(file, { whenClosed, trayIcon: true });
+      set(file, { whenClosed, trayIcon: true, notifications: true });
 
       expect(settings(file).whenClosed, whenClosed).toBe(whenClosed);
     }
@@ -65,30 +65,44 @@ describe("what is set comes back", () => {
   it("makes the directory it keeps the file in", () => {
     const deeper = join(dir, "not", "made", "yet", FILE);
 
-    set(deeper, { whenClosed: "quit", trayIcon: false });
+    set(deeper, { whenClosed: "quit", trayIcon: false, notifications: false });
 
-    expect(settings(deeper)).toEqual({ whenClosed: "quit", trayIcon: false });
+    expect(settings(deeper)).toEqual({
+      whenClosed: "quit",
+      trayIcon: false,
+      notifications: false,
+    });
   });
 
   /// Written to be read by a human as well as by this: the file is the one a
   /// machine's settings are hand-edited in when somebody is working out what
   /// the app is doing.
   it("writes the file as readable JSON", () => {
-    set(file, { whenClosed: "ask", trayIcon: false });
+    set(file, { whenClosed: "ask", trayIcon: false, notifications: true });
 
     const written = readFileSync(file, "utf8");
 
     expect(written).toContain("\n");
     expect(written.endsWith("\n")).toBe(true);
-    expect(JSON.parse(written)).toEqual({ whenClosed: "ask", trayIcon: false });
+    expect(JSON.parse(written)).toEqual({
+      whenClosed: "ask",
+      trayIcon: false,
+      notifications: true,
+    });
   });
 });
 
 describe("a machine that has not been told", () => {
-  /// The ordinary first run: keep running in the tray, and there is a tray to
-  /// keep running in.
-  it("keeps running in the tray with an icon shown", () => {
-    expect(DEFAULTS).toEqual({ whenClosed: "tray", trayIcon: true });
+  /// The ordinary first run: keep running in the tray, there is a tray to keep
+  /// running in, and a Set waiting is told with nothing pressed.
+  it("keeps running in the tray with an icon shown, and notifies", () => {
+    expect(DEFAULTS).toEqual({ whenClosed: "tray", trayIcon: true, notifications: true });
+  });
+
+  /// A machine that has never written the file notifies: the settings answer
+  /// the page reads carries the switch on.
+  it("notifies where there is no file", () => {
+    expect(settings(file).notifications).toBe(true);
   });
 
   it("reads the defaults where there is no file", () => {
@@ -120,12 +134,15 @@ describe("a file that is not what this wrote", () => {
   /// One setting at a time: the good half of a hand-edited file still carries.
   it("keeps the settings it can read and defaults the rest", () => {
     for (const [written, expected] of [
-      ['{"whenClosed": "quit"}', { whenClosed: "quit", trayIcon: true }],
-      ['{"trayIcon": false}', { whenClosed: "tray", trayIcon: false }],
-      ['{"whenClosed": "minimise", "trayIcon": false}', { whenClosed: "tray", trayIcon: false }],
-      ['{"whenClosed": "ask", "trayIcon": "yes"}', { whenClosed: "ask", trayIcon: true }],
-      ['{"whenClosed": null, "trayIcon": 1}', DEFAULTS],
+      ['{"whenClosed": "quit"}', { ...DEFAULTS, whenClosed: "quit" }],
+      ['{"trayIcon": false}', { ...DEFAULTS, trayIcon: false }],
+      ['{"notifications": false}', { ...DEFAULTS, notifications: false }],
+      ['{"whenClosed": "minimise", "trayIcon": false}', { ...DEFAULTS, trayIcon: false }],
+      ['{"whenClosed": "ask", "trayIcon": "yes"}', { ...DEFAULTS, whenClosed: "ask" }],
+      ['{"trayIcon": false, "notifications": "off"}', { ...DEFAULTS, trayIcon: false }],
+      ['{"whenClosed": null, "trayIcon": 1, "notifications": 0}', DEFAULTS],
       ['{"whenClosed": "ask", "trayIcon": false, "colour": "green"}', {
+        ...DEFAULTS,
         whenClosed: "ask",
         trayIcon: false,
       }],
@@ -168,9 +185,11 @@ describe("the positions", () => {
 });
 
 describe("a set that arrived over the bridge", () => {
-  it("takes one setting, or both, and says what is to change", () => {
+  it("takes one setting, or several, and says what is to change", () => {
     expect(changed({ whenClosed: "quit" })).toEqual({ whenClosed: "quit" });
     expect(changed({ trayIcon: false })).toEqual({ trayIcon: false });
+    expect(changed({ notifications: false })).toEqual({ notifications: false });
+    expect(changed({ notifications: true })).toEqual({ notifications: true });
     expect(changed({ whenClosed: "ask", trayIcon: true })).toEqual({
       whenClosed: "ask",
       trayIcon: true,
@@ -195,6 +214,10 @@ describe("a set that arrived over the bridge", () => {
       { trayIcon: "yes" },
       { trayIcon: 1 },
       { trayIcon: null },
+      { notifications: "off" },
+      { notifications: 0 },
+      { notifications: null },
+      { notifications: undefined },
     ]) {
       expect(changed(sent), JSON.stringify(sent)).toBeUndefined();
     }
@@ -206,9 +229,10 @@ describe("a set that arrived over the bridge", () => {
   it("refuses the whole set where one half of it is wrong", () => {
     expect(changed({ whenClosed: "ask", trayIcon: "yes" })).toBeUndefined();
     expect(changed({ whenClosed: "minimise", trayIcon: false })).toBeUndefined();
+    expect(changed({ trayIcon: false, notifications: "yes" })).toBeUndefined();
   });
 
-  /// The app has two settings, and a set naming a third is not a set of this
+  /// The app has three settings, and a set naming a fourth is not a set of this
   /// app's settings — no more than a position it has never heard of is.
   it("refuses a key this app has no setting for", () => {
     expect(changed({ colour: "green" })).toBeUndefined();

@@ -231,7 +231,7 @@ function drags(element: Element): boolean {
 /// its head's colours and height *to*, so the list that comes back is the record
 /// of the telling.
 function theApp(platform: string): Head[] {
-  const settings = { whenClosed: "tray", trayIcon: true } as const;
+  const settings = { whenClosed: "tray", trayIcon: true, notifications: true } as const;
   const registered = { possible: true, on: false };
 
   // Every head the page has pushed, in the order it pushed them — which is the
@@ -245,6 +245,7 @@ function theApp(platform: string): Head[] {
     logs: () => Promise.resolve(),
     startup: () => Promise.resolve(registered),
     register: () => Promise.resolve(registered),
+    notifiable: () => Promise.resolve(true),
     head: (worn: Head) => {
       pushed.push(worn);
     },

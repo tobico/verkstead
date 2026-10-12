@@ -13,7 +13,7 @@
 //! nothing here is a page with no Desktop section, and that is the whole
 //! mechanism.
 //!
-//! **What is in this file is what crosses**: the name, the seven channels, and
+//! **What is in this file is what crosses**: the name, the eight channels, and
 //! the shape. It holds no behaviour and touches no disk on purpose — the
 //! preload imports it, so everything it imports is loaded inside the window,
 //! and what the app *does* about each of them is `main.ts`'s while what they
@@ -21,7 +21,7 @@
 //! registration is [`startup.ts`](./startup.js)'s, and the head's colours and
 //! height are [`decorations.ts`](./decorations.js)'s.
 //!
-//! **And five of the seven go one way while the last two go others.** Everything
+//! **And six of the eight go one way while the last two go others.** Everything
 //! the page *asks* is an `invoke` and comes back answered; the head is something
 //! the page *says* — the app cannot know what the viewer resolved its tokens to,
 //! and there is nothing to answer once it has been told. See [`HEAD`]. And a
@@ -98,6 +98,15 @@ export const REGISTER = "verkstead:register";
 /// is [`Head`](./decorations.js).
 export const HEAD = "verkstead:head";
 
+/// The channel **whether this desktop shows notifications at all** is asked on.
+///
+/// Electron's own `Notification.isSupported()`, which only the main process can
+/// answer: a Linux desktop with no notification daemon on its session bus is
+/// the case it says no for. The page says so under the notifications switch,
+/// and says nothing where the answer is yes — a refusal in the OS's own
+/// settings is the OS's to lift, and nothing this app can read.
+export const NOTIFIABLE = "verkstead:notifiable";
+
 /// And the channel a **clicked notification's path** is told to the page on —
 /// the first on this bridge that goes from the app to the page and is acted on
 /// there (ADR-0020, *Amended: notifications are the app's own*).
@@ -118,9 +127,10 @@ export const OPEN = "verkstead:open";
 
 /// What `window.verkstead` is, where there is one.
 ///
-/// Seven acts and one value, which is the whole of what the page needs: what
+/// Eight acts and one value, which is the whole of what the page needs: what
 /// machine this is, the settings read and written, the log file opened, the
-/// startup registration read and written, the head's colours and height said,
+/// startup registration read and written, whether notifications can be shown,
+/// the head's colours and height said,
 /// and a clicked notification's path heard. Everything the page *asks* is
 /// asynchronous, because everything but the platform is a question for the
 /// process on the other side of the bridge; the one thing it *says* answers
@@ -161,6 +171,9 @@ export interface Bridge {
   /// reason beside it, so the box goes back where it was and the human is told
   /// why — see [`Registration`](./startup.js).
   register(on: boolean): Promise<Registration>;
+
+  /// Whether this desktop can show a notification at all — see [`NOTIFIABLE`].
+  notifiable(): Promise<boolean>;
 
   /// Say what the head is drawn in, how tall its band stands and where the row
   /// inside it is, so that the controls overlay is the same strip of paper the

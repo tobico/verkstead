@@ -1329,7 +1329,9 @@ _Avoid_: autostart setting, startup preference, run at login option
 What the desktop app keeps about the machine it is running on, and the
 **Desktop** section at the top of the settings page that draws them: **When the
 window is closed** — keep running in the tray, ask before quitting, or quit,
-keeping running being the default — and **Show tray icon**. A JSON file of
+keeping running being the default — **Show tray icon**, and **notifications**,
+on by default so that a fresh install is told about a Set with nothing pressed.
+A JSON file of
 Electron's own under its user data, beside the one the window's place is
 remembered in, rather than anything the server was ever told (ADR-0020):
 whether this machine's Verkstead keeps running when its window is closed is a
@@ -1357,6 +1359,17 @@ only window is a Verkstead nobody can reach. **And the app is what validates
 one**: a value that is not one of the three positions, or not a boolean, changes
 nothing and answers with the settings as they stand, so the control it came from
 goes back where it was.
+**The third is not drawn in the section at all: it is the switch on the
+Settings head**, which inside the app means the app's own `notifications`
+(ADR-0020, *Amended: notifications are the app's own*). Electron has no push
+service, so the app shows each notice its sidecar streams to it as the
+platform's own notification, and the head's switch is read and written over the
+bridge with no browser permission and no push subscription anywhere in it —
+off withholds the next notice that moment, on shows the one after, and the
+stream is held either way. The line under it speaks only where this desktop
+cannot show a notification at all; a refusal in the OS's own settings is the
+OS's to lift. The same switch in a browser on this machine, or on a phone, is
+the Web Push switch it always was.
 **Two things stand on that section without being settings of it.** **Launch on
 Startup** is the **Startup Registration** itself, read from the platform through
 the bridge and written to it, never copied into the file; and **View Logs** is

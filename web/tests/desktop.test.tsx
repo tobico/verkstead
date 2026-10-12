@@ -77,7 +77,7 @@ const HIDING_ARCHIVED: ShowingArchived = { showing: false, any: false };
 /// The app every first run gets, which is what `DEFAULTS` in
 /// `desktop/src/settings.ts` holds: it keeps running in the tray, and there is a
 /// tray to keep running in.
-const DEFAULTS: DesktopSettings = { whenClosed: "tray", trayIcon: true };
+const DEFAULTS: DesktopSettings = { whenClosed: "tray", trayIcon: true, notifications: true };
 
 /// And the registration a packed app on a machine with somewhere to keep one
 /// reads as — which is what `startup` in `desktop/src/startup.ts` answers there:
@@ -156,6 +156,7 @@ function standingIn(
     logs: () => asked.logs() as Promise<void>,
     startup: () => asked.startup() as Promise<Registration>,
     register: (on) => asked.register(on) as Promise<Registration>,
+    notifiable: () => Promise.resolve(true),
     head: (worn) => {
       asked.head(worn);
     },
@@ -233,7 +234,7 @@ describe("the card", () => {
       ["ask", "Closing the window asks before quitting."],
       ["quit", "Closing the window quits Verkstead."],
     ] as const) {
-      standingIn({ whenClosed, trayIcon: true });
+      standingIn({ ...DEFAULTS, whenClosed, trayIcon: true });
       const { unmount } = mountCard();
 
       await screen.findByText(said);
@@ -246,7 +247,7 @@ describe("the card", () => {
   /// reading `closing` makes in `desktop/src/closing.ts`. The card says what
   /// closing the window *does*, so it says that rather than the position.
   it("says the close quits where there is no icon to come back from", async () => {
-    standingIn({ whenClosed: "tray", trayIcon: false });
+    standingIn({ ...DEFAULTS, whenClosed: "tray", trayIcon: false });
     mountCard();
 
     await screen.findByText("Closing the window quits Verkstead.");
@@ -284,7 +285,7 @@ describe("the card", () => {
 
 describe("the close policy", () => {
   it("draws the three positions, with the chosen one showing", async () => {
-    standingIn({ whenClosed: "ask", trayIcon: true });
+    standingIn({ ...DEFAULTS, whenClosed: "ask", trayIcon: true });
     const { container } = mountPane();
 
     await waitFor(() => expect(positions(container)).toHaveLength(3));
@@ -320,7 +321,7 @@ describe("the close policy", () => {
   /// The refusal the browser makes of a disabled radio, which a row answering
   /// for itself would otherwise be the way round.
   it("sends nothing for a press on the position the tray has taken away", async () => {
-    const asked = standingIn({ whenClosed: "quit", trayIcon: false });
+    const asked = standingIn({ ...DEFAULTS, whenClosed: "quit", trayIcon: false });
     const { container } = mountPane();
 
     await waitFor(() => expect(positions(container)).toHaveLength(3));
@@ -332,7 +333,7 @@ describe("the close policy", () => {
   /// And a press on the position already saved asks for nothing, which is what a
   /// `change` the browser never fired said for itself.
   it("sends nothing for a press on the position already chosen", async () => {
-    const asked = standingIn({ whenClosed: "quit", trayIcon: true });
+    const asked = standingIn({ ...DEFAULTS, whenClosed: "quit", trayIcon: true });
     const { container } = mountPane();
 
     await waitFor(() => expect(positions(container)).toHaveLength(3));
@@ -359,7 +360,7 @@ describe("the close policy", () => {
   /// disabling — which takes it out of the tab order too — rather than taken
   /// away: a position that vanished would say the setting had.
   it("greys the keep-running position with the tray off, and says why", async () => {
-    standingIn({ whenClosed: "quit", trayIcon: false });
+    standingIn({ ...DEFAULTS, whenClosed: "quit", trayIcon: false });
     const { container } = mountPane();
 
     await waitFor(() => expect(positions(container)).toHaveLength(3));
@@ -581,7 +582,7 @@ describe("Launch on Startup", () => {
   /// Startup that needs the tray, the login start showing its window where there
   /// is no icon to reach it by.
   it("is drawn with the tray off", async () => {
-    standingIn({ whenClosed: "quit", trayIcon: false });
+    standingIn({ ...DEFAULTS, whenClosed: "quit", trayIcon: false });
     mountPane();
 
     const box = await screen.findByLabelText<HTMLInputElement>("Launch on Startup");
@@ -606,7 +607,7 @@ describe("View Logs", () => {
   /// most likely to have the tray off is the one the tray misbehaved on — which
   /// is the machine whose log is worth reading.
   it("is drawn and pressed with the tray off", async () => {
-    const asked = standingIn({ whenClosed: "quit", trayIcon: false });
+    const asked = standingIn({ ...DEFAULTS, whenClosed: "quit", trayIcon: false });
     mountPane();
 
     fireEvent.click(await screen.findByText("View Logs"));

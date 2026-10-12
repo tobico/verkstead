@@ -44,11 +44,12 @@ function standingIn(): Telling {
 
   vi.stubGlobal(NAME, {
     platform: "linux",
-    settings: () => Promise.resolve({ whenClosed: "tray", trayIcon: true }),
-    set: () => Promise.resolve({ whenClosed: "tray", trayIcon: true }),
+    settings: () => Promise.resolve({ whenClosed: "tray", trayIcon: true, notifications: true }),
+    set: () => Promise.resolve({ whenClosed: "tray", trayIcon: true, notifications: true }),
     logs: () => Promise.resolve(),
     startup: () => Promise.resolve({ possible: false, on: false }),
     register: () => Promise.resolve({ possible: false, on: false }),
+    notifiable: () => Promise.resolve(true),
     head: () => {},
     opening: (listener) => {
       heard = listener;

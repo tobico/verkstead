@@ -8,10 +8,10 @@
 //! itself are `app` and the process's own environment — see the wall in
 //! `eslint.config.js`, and `window.ts`, which is the other file on it.
 //!
-//! **And it is what answers the page**, over the six channels
+//! **And it is what answers the page**, over the channels
 //! [`bridge.ts`](./bridge.js) names: the settings read, a set enacted in the
 //! run it arrives in, the log file opened, the startup registration read and
-//! written, and the window dressed to whatever head the page turned out to have
+//! written, whether this desktop shows notifications at all, and the window dressed to whatever head the page turned out to have
 //! drawn — its controls overlay recoloured, or a Mac's traffic lights moved into
 //! the row that head stands in. Each of them is something only this process can do — a file
 //! under Electron's user data, an icon on somebody's panel, a file handed to
@@ -51,7 +51,7 @@ import { app, BrowserWindow, dialog, ipcMain, Notification } from "electron";
 import { artwork } from "./artwork.js";
 import { AUTOSCROLLING } from "./autoscroll.js";
 import { FILE } from "./bounds.js";
-import { ASKED, HEAD, LOGS, PRELOAD, REGISTER, SET, STARTUP } from "./bridge.js";
+import { ASKED, HEAD, LOGS, NOTIFIABLE, PRELOAD, REGISTER, SET, STARTUP } from "./bridge.js";
 import { cli, type Install, OVERRIDE } from "./cli.js";
 import { closing } from "./closing.js";
 import { buttoned, lights, overlaid, overlay, worn } from "./decorations.js";
@@ -184,8 +184,8 @@ function give(code: number): void {
 /// **In this run rather than at the next launch**, which is what makes the
 /// Desktop page a control rather than a form: the icon goes or comes back as
 /// the switch is moved, and what a close means changes with it — the policy is
-/// read out of the file at the moment of the press, so there is nothing to
-/// re-read it here.
+/// read out of the file at the moment of the press, and the notifications
+/// switch at the moment of each notice, so there is nothing to re-read here.
 ///
 /// **What is refused writes nothing.** [`changed`](./settings.js) is what says
 /// so, and what comes back then is the settings as they stand — which is a
@@ -331,14 +331,14 @@ const onDesk = new Set<Notification>();
 /// The sentence is the title and the repo the body, with the platform's own
 /// sound. Every notice is logged whichever way it went, so that a notification
 /// somebody did not see is a line saying why.
-function noticed({ window, visit }: Opened, arrived: Notice): void {
+function noticed({ window, visit }: Opened, arrived: Notice, on: boolean): void {
   const verdict = showing(
     {
       visible: window.isVisible(),
       minimized: window.isMinimized(),
       focused: window.isFocused(),
     },
-    true,
+    on,
   );
 
   if (!verdict.show) {
@@ -680,10 +680,11 @@ async function run(): Promise<void> {
   // asked to be started on is left exactly as it is.
   starts.refresh();
 
-  // The bridge's six acts, enacted here because here is the process that can
+  // The bridge's seven acts, enacted here because here is the process that can
   // — the file is read and written, the icon is raised and lowered, the log
   // file is handed to whatever the desktop reads text with, the platform is
-  // asked about its startup registration, and the window is dressed to the
+  // asked about its startup registration and whether it shows notifications at
+  // all, and the window is dressed to the
   // page's own head. Registered before the window is opened, because the page is
   // loaded the moment there is one and a page that asked before this would be
   // asking nobody.
@@ -692,6 +693,7 @@ async function run(): Promise<void> {
   ipcMain.handle(LOGS, () => logs(kept, by));
   ipcMain.handle(STARTUP, () => starts.standing());
   ipcMain.handle(REGISTER, (_event, asked: unknown) => ticked(starts, asked));
+  ipcMain.handle(NOTIFIABLE, () => Notification.isSupported());
 
   // And the one that is a statement rather than a question, so `on` rather than
   // `handle`. The window is the one the push came *from* rather than `onscreen`:
@@ -793,7 +795,10 @@ async function run(): Promise<void> {
     {
       url: NOTICES,
       secret: () => (data === undefined ? undefined : keyIn(data)),
-      heard: (arrived) => noticed(opened, arrived),
+      // The switch read at every notice, as the close policy is read at every
+      // press: a set is enacted in the run it is made in, and the stream is held
+      // either way so that turning it back on needs nothing reopened.
+      heard: (arrived) => noticed(opened, arrived, settings(desk).notifications),
       say,
     },
     listening.signal,
