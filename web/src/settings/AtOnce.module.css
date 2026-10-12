@@ -39,6 +39,17 @@
   margin-top: 0.85rem;
 }
 
+/* The Concurrency part of the Scheduling pane, headed as a part of a pane is
+   on the Git and Sandbox panes. */
+.part {
+  margin-top: 0.85rem;
+}
+
+.part h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
 .atOnce label {
   display: block;
   margin: 1.25rem 0 0.35rem;

@@ -294,6 +294,34 @@ describe("the card", () => {
   });
 });
 
+describe("the names it goes by", () => {
+  /// The section is Scheduling — what this machine runs and when — and the
+  /// limits it holds today are its Concurrency part, under a heading of their
+  /// own so the next thing about scheduling has somewhere to stand.
+  it("is Scheduling on the card and the pane, with the limits under Concurrency", async () => {
+    theSettings(TOLD);
+    const { container, unmount } = mountCard();
+
+    await waitFor(() =>
+      expect(container.querySelector("h2")?.textContent).toBe("Scheduling"),
+    );
+    unmount();
+
+    theSettings(TOLD);
+    mountPane();
+
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(
+        "Scheduling",
+      ),
+    );
+    const part = await waitFor(() =>
+      screen.getByRole("heading", { level: 3, name: "Concurrency" }),
+    );
+    expect(part.closest("section")!.contains(await theField())).toBe(true);
+  });
+});
+
 describe("the limit as the pane draws it", () => {
   /// A number nobody configured is the default drawn as a placeholder rather than
   /// as text somebody typed — the field says what will happen without claiming

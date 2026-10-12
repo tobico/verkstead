@@ -53,7 +53,13 @@
 //! refused and the line says what a number here can be.
 
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
-import { Match, Show, Switch as Choose, createSignal, type JSX } from "solid-js";
+import {
+  Match,
+  Show,
+  Switch as Choose,
+  createSignal,
+  type JSX,
+} from "solid-js";
 
 import { PaneSticky } from "../Panes";
 import { loadSettings, saveSettings } from "../api/client";
@@ -76,7 +82,7 @@ import styles from "./AtOnce.module.css";
 import { SettingsCard } from "./SettingsCard";
 
 /// What the section is called, in the one place both panes read it from.
-const TITLE = "How much runs at once";
+const TITLE = "Scheduling";
 
 /// The settings as they stand, read once for the two panes that draw them — the
 /// same read, by the same key, that every other section of this page makes.
@@ -285,93 +291,99 @@ export function AtOncePane(props: {
         </Match>
         <Match when={atOnce()}>
           {(set) => (
-            <form class={styles.atOnce} onSubmit={commit}>
-              {/* The one thing about these numbers a human cannot work out from
+            // The limits are the Concurrency part of Scheduling: under a
+            // heading of their own, so what else is said about when work runs
+            // has a part of its own to stand in beside them.
+            <section class={styles.part}>
+              <h3>Concurrency</h3>
+              <form class={styles.atOnce} onSubmit={commit}>
+                {/* The one thing about these numbers a human cannot work out from
                   them: which work is counted. A stage nobody is waiting on and a
                   stage waiting on an answer take a place alike, so a roadmap — or
                   a whole server — can be holding all of them without anything
                   running. */}
-              <Note>
-                Every stage that is under way holds a place, including one
-                waiting on an answer from you, and so does every conversation
-                with a session running or a run being driven. A change takes
-                effect at the next start and stops nothing already running.
-              </Note>
+                <Note>
+                  Every stage that is under way holds a place, including one
+                  waiting on an answer from you, and so does every conversation
+                  with a session running or a run being driven. A change takes
+                  effect at the next start and stops nothing already running.
+                </Note>
 
-              <label for="at-once-roadmap-stages">
-                Stages of one roadmap at once
-              </label>
-              <div class={styles.field}>
-                <input
-                  id="at-once-roadmap-stages"
-                  type="text"
-                  inputmode="numeric"
-                  autocapitalize="off"
-                  autocorrect="off"
-                  spellcheck={false}
-                  // The default, so an empty box reads as the number nobody has
-                  // chosen rather than as no number at all.
-                  placeholder={String(set().roadmap_stages)}
-                  value={stages()}
-                  disabled={save.isPending}
-                  onInput={(ev) => setStagesTyped(ev.currentTarget.value)}
-                />
-                <button type="submit" disabled={save.isPending}>
-                  Save
-                </button>
-              </div>
+                <label for="at-once-roadmap-stages">
+                  Stages of one roadmap at once
+                </label>
+                <div class={styles.field}>
+                  <input
+                    id="at-once-roadmap-stages"
+                    type="text"
+                    inputmode="numeric"
+                    autocapitalize="off"
+                    autocorrect="off"
+                    spellcheck={false}
+                    // The default, so an empty box reads as the number nobody has
+                    // chosen rather than as no number at all.
+                    placeholder={String(set().roadmap_stages)}
+                    value={stages()}
+                    disabled={save.isPending}
+                    onInput={(ev) => setStagesTyped(ev.currentTarget.value)}
+                  />
+                  <button type="submit" disabled={save.isPending}>
+                    Save
+                  </button>
+                </div>
 
-              <Show when={stagesTrouble()}>
-                {(why) => (
-                  <ErrorLine class={styles.failure}>{why()}</ErrorLine>
-                )}
-              </Show>
+                <Show when={stagesTrouble()}>
+                  {(why) => (
+                    <ErrorLine class={styles.failure}>{why()}</ErrorLine>
+                  )}
+                </Show>
 
-              <label for="at-once-conversations">
-                Conversations across the whole server
-              </label>
-              <div class={styles.field}>
-                <input
-                  id="at-once-conversations"
-                  type="text"
-                  inputmode="numeric"
-                  autocapitalize="off"
-                  autocorrect="off"
-                  spellcheck={false}
-                  placeholder={String(set().conversations)}
-                  value={conversations()}
-                  disabled={save.isPending}
-                  onInput={(ev) => setServerTyped(ev.currentTarget.value)}
-                />
-                <button type="submit" disabled={save.isPending}>
-                  Save
-                </button>
-              </div>
+                <label for="at-once-conversations">
+                  Conversations across the whole server
+                </label>
+                <div class={styles.field}>
+                  <input
+                    id="at-once-conversations"
+                    type="text"
+                    inputmode="numeric"
+                    autocapitalize="off"
+                    autocorrect="off"
+                    spellcheck={false}
+                    placeholder={String(set().conversations)}
+                    value={conversations()}
+                    disabled={save.isPending}
+                    onInput={(ev) => setServerTyped(ev.currentTarget.value)}
+                  />
+                  <button type="submit" disabled={save.isPending}>
+                    Save
+                  </button>
+                </div>
 
-              <Show when={serverTrouble()}>
-                {(why) => (
-                  <ErrorLine class={styles.failure}>{why()}</ErrorLine>
-                )}
-              </Show>
+                <Show when={serverTrouble()}>
+                  {(why) => (
+                    <ErrorLine class={styles.failure}>{why()}</ErrorLine>
+                  )}
+                </Show>
 
-              {/* What the limit above is measured against, beside it: a server
+                {/* What the limit above is measured against, beside it: a server
                   holding every place starts nothing more until one comes free,
                   and this is what says so rather than leaving it to look like a
                   stall. As of the read this pane was drawn from — it can stand
                   above the limit, a press going ahead over it. */}
-              <p class={styles.taken}>
-                <span class={styles.places}>
-                  {set().places_taken} of {set().conversations}
-                </span>{" "}
-                taken when this was read.
-              </p>
+                <p class={styles.taken}>
+                  <span class={styles.places}>
+                    {set().places_taken} of {set().conversations}
+                  </span>{" "}
+                  taken when this was read.
+                </p>
 
-              <Show when={save.isError}>
-                <ErrorLine class={styles.failure}>
-                  The settings could not be saved: {save.error?.message}
-                </ErrorLine>
-              </Show>
-            </form>
+                <Show when={save.isError}>
+                  <ErrorLine class={styles.failure}>
+                    The settings could not be saved: {save.error?.message}
+                  </ErrorLine>
+                </Show>
+              </form>
+            </section>
           )}
         </Match>
       </Choose>
