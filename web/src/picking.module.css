@@ -226,6 +226,29 @@ dialog .backdrop {
   font-weight: 600;
 }
 
+/* A row's words with a sentence under them — the Process control's, saying what
+   kind of work each one is. Stacked in one column beside the mark, so the
+   sentence starts under the word rather than under the mark. */
+.described {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+/* The sentence itself, quieter and a size down, the way `.says` is under a row
+   of the actions menu in `workbench/Actions.module.css`. And at normal weight on
+   the chosen row too: the weight says which *word* is the choice, and a whole
+   sentence in bold would shout what is only an explanation. */
+.says {
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+.row[aria-selected="true"] .says {
+  font-weight: normal;
+}
+
 /* The control being picked from, which is no pointer's doing either: the border
    says which of the fields the choice is going into, and it stays said for as
    long as the rows are down.

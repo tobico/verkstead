@@ -13,6 +13,7 @@ import { describe, expect, it } from "vitest";
 import type { Process } from "../src/api/types";
 import {
   away,
+  DESCRIPTION,
   label,
   narrowed,
   NARROWED,
@@ -298,5 +299,31 @@ describe("the processes whose wrap-up is narrowed", () => {
       expect(TARGETED).toContain(process);
       expect(OFFERED).toContain(process);
     }
+  });
+});
+
+describe("what each process is said to be", () => {
+  /// A sentence for every Process the wire carries, for the reason `PROCESS`
+  /// has a word for each: the picker draws one under every row, and a row with
+  /// none would be the one the human had to guess at.
+  it("has a sentence for each of the five", () => {
+    expect(Object.keys(DESCRIPTION).sort()).toEqual([...EVERY].sort());
+
+    for (const process of EVERY) {
+      expect(DESCRIPTION[process]).not.toBe("");
+    }
+  });
+
+  /// In the human's own words, *PR* and all.
+  it("says them the way the human wrote them", () => {
+    expect(DESCRIPTION).toEqual({
+      Develop:
+        "Work on something complex, starting with a grilling session and proceeding through a step-by-step development process",
+      Tinker: "Make a series of simple one-off changes with minimal fuss",
+      Investigate:
+        "Ask questions about a code base without committing any code",
+      Review: "Review an existing PR or branch, and fix any issues found",
+      FixMergeIssues: "Fix up a PR which is unable to merge",
+    });
   });
 });

@@ -148,12 +148,14 @@
   max-width: min(40rem, calc(100vw - 2.5rem));
 }
 
-/* And the Process control, whose rows are one word apiece: it asks for the
-   readable width the repo names do rather than the pairings' double one, which
-   is a width measured for "Claude Code Fable 5 — Work". */
+/* And the Process control, whose rows are a word with a sentence under it —
+   what kind of work each one is. Wider than the repo names' readable width, so
+   the longest sentence wraps to three lines rather than six, and still well
+   short of the pairings' double one. Capped against the window as every other
+   list here is, which is where a phone's rows come to be as wide as they can. */
 .processPick > [data-drop] {
-  min-width: 12rem;
-  max-width: min(20rem, calc(100vw - 2.5rem));
+  min-width: 18rem;
+  max-width: min(22rem, calc(100vw - 2.5rem));
 }
 
 /* The Repo control before there is a repo, which is a listbox where the picked
