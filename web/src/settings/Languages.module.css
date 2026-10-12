@@ -193,3 +193,11 @@
     border-color: var(--ink-soft);
   }
 }
+
+/* The part's heading inside the Sandbox pane — see `Sandbox.tsx` — drawn as the
+   Git pane's are: a heading over the rows, the pane's own title being the
+   section's. */
+.heading {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+}

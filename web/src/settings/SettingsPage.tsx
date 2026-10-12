@@ -9,7 +9,7 @@
 //! folded together they are sections of one pane, read down in the order a
 //! fresh install needs them: everything git is told first, because without the
 //! token and the author nothing a session does with a Repo can be pushed, then
-//! the languages a session gets build support for, then the one text every
+//! what a session's sandbox holds, then the one text every
 //! session is given, then the MCP servers a Conversation may attach, then how
 //! much of the machine Verkstead helps itself to, then what becomes of a
 //! Conversation once it is archived, then whether this machine can be reached
@@ -66,10 +66,9 @@ import { CleanupCard, CleanupPane } from "./Cleanup";
 import { DesktopCard, DesktopPane } from "./Desktop";
 import { GitCard, GitPane } from "./Git";
 import { InstructionsCard, InstructionsPane } from "./Instructions";
-import { LanguagesCard, LanguagesPane } from "./Languages";
 import { McpServersCard, McpServersPane } from "./McpServers";
 import { RemoteCard, RemotePane } from "./Remote";
-import { SandboxBindsCard, SandboxBindsPane } from "./SandboxBinds";
+import { SandboxCard, SandboxPane } from "./Sandbox";
 import { bridge } from "./bridge";
 import {
   SETTINGS,
@@ -264,21 +263,20 @@ function Settings(props: {
           open={props.opening === "git"}
           press={() => props.select("git")}
         />
-        {/* Under the git section and above the lists: which languages a
-            session gets build support for is the other thing Verkstead itself
-            was told rather than anything a Conversation is settled against. One
-            of the two sections about what a session runs inside, and the one
-            that is on without anybody having been here — which is why it reads
-            beside the git section rather than down with the Sandbox binds, where
-            everything is somebody's own typing. */}
-        <LanguagesCard
-          open={props.opening === "languages"}
-          press={() => props.select("languages")}
+        {/* Under the git section and above the lists: what a session runs
+            inside beyond its own worktree — the build caches it is handed and the
+            paths bound into its sandbox (see `Sandbox.tsx`). The other thing
+            Verkstead itself was told rather than anything a Conversation is
+            settled against, and the part of it that is on without anybody having
+            been here. */}
+        <SandboxCard
+          open={props.opening === "sandbox"}
+          press={() => props.select("sandbox")}
         />
         {/* And under it, the other thing a session is handed before it has done
             anything: the one text every session is given, whatever agent its
-            Profile runs. It reads beside the languages for the same reason they
-            read beside the git section — both are about what a session starts
+            Profile runs. It reads beside the sandbox for the reason the sandbox
+            reads beside the git section — both are about what a session starts
             with rather than about what any Conversation is settled against —
             and above the Cleanup, because it is a setting somebody comes back
             to rather than one they read once. */}
@@ -343,15 +341,6 @@ function Settings(props: {
           open={props.opening === "repos"}
           press={() => props.select("repos")}
         />
-        {/* Last of the lot, under the Repos: it holds the extra directories a
-            session is given beyond its own worktree, which is the one thing
-            here nobody has to say anything about at all. It sat above the lists
-            while a Watched Path was what a Repo was registered from; with the
-            binds alone in it, that reason is gone and nothing replaces it. */}
-        <SandboxBindsCard
-          open={props.opening === "sandbox-binds"}
-          press={() => props.select("sandbox-binds")}
-        />
       </div>
     </>
   );
@@ -391,17 +380,14 @@ function Details(props: {
       <Match when={props.opening === "git"}>
         <GitPane back={props.back} />
       </Match>
-      <Match when={props.opening === "languages"}>
-        <LanguagesPane back={props.back} />
+      <Match when={props.opening === "sandbox"}>
+        <SandboxPane back={props.back} />
       </Match>
       <Match when={props.opening === "instructions"}>
         <InstructionsPane back={props.back} />
       </Match>
       <Match when={props.opening === "mcp-servers"}>
         <McpServersPane back={props.back} />
-      </Match>
-      <Match when={props.opening === "sandbox-binds"}>
-        <SandboxBindsPane back={props.back} />
       </Match>
       <Match when={props.opening === "at-once"}>
         <AtOncePane back={props.back} />

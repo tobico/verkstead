@@ -1,12 +1,14 @@
-//! The sandbox binds on the settings page: what the card says of them, what the
-//! pane draws of each row, and what adding or taking one away puts on the wire.
+//! The sandbox binds on the settings page: what the Sandbox binds part of the
+//! Sandbox pane draws of each row, and what adding or taking one away puts on
+//! the wire.
 //!
-//! Two things mounted apart, because that is what they are: a card in the
-//! middle pane saying how the list stands and whether anything is wrong with it,
-//! and the rows that rewrite it in the details pane it opens. Both read the one
-//! settings query and both save through the one endpoint, which is what the
-//! groups below keep returning to: a press on one row must not cost what the
-//! rest of the page is drawn from.
+//! The part mounted on its own, as `SandboxBinds`, because that is what it is:
+//! one of the two parts the Sandbox pane draws under its head. What the Sandbox
+//! card says of the binds — how many there are, and how many the server cannot
+//! see — is `sandbox.test.tsx`'s. Every part of the page reads the one settings
+//! query and saves through the one endpoint, which is what the groups below
+//! keep returning to: a press on one row must not cost what the rest of the page
+//! is drawn from.
 //!
 //! Three things are worth a test rather than a reading of the source, and they
 //! are what most of this file is:
@@ -43,14 +45,9 @@ import type {
   SettingsSaved,
   SettingsView,
 } from "../src/api/types";
-import card from "../src/CardButton.module.css";
-import {
-  SandboxBindsCard,
-  SandboxBindsPane,
-} from "../src/settings/SandboxBinds";
+import { SandboxBinds } from "../src/settings/SandboxBinds";
 import rowStyles from "../src/settings/PathEditor.module.css";
 import styles from "../src/settings/SandboxBinds.module.css";
-import line from "../src/settings/SettingsCard.module.css";
 import { browse, held, listingAt, rows as offered, tap } from "./fields";
 import { json, serving, whenever, type Answer } from "./serving";
 import told from "./fixtures/settings.json" with { type: "json" };
@@ -166,19 +163,9 @@ function mounting(what: () => JSX.Element) {
   ));
 }
 
-/// The card in the middle pane, and what pressing it asked for.
-function mountCard(open = false) {
-  const press = vi.fn();
-  return {
-    ...mounting(() => <SandboxBindsCard open={open} press={press} />),
-    press,
-  };
-}
-
-/// The binds in the details pane, and what its way back asked for.
+/// The binds in the Sandbox binds part of the Sandbox pane.
 function mountPane() {
-  const back = vi.fn();
-  return { ...mounting(() => <SandboxBindsPane back={back} />), back };
+  return mounting(() => <SandboxBinds />);
 }
 
 /// The settings, which is the one read this pane makes.
@@ -207,23 +194,6 @@ function sent(fetching: ReturnType<typeof serving>): unknown {
   return JSON.parse(String(written![1]?.body));
 }
 
-/// The card itself, once it is drawn — waited for, because it stands on a read.
-async function theCard(container: ParentNode): Promise<HTMLElement> {
-  return await waitFor(() => {
-    const face = container.querySelector<HTMLElement>(`.${styles.bindsCard}`);
-    expect(face, "expected the card to be drawn").not.toBeNull();
-    return face!;
-  });
-}
-
-/// The status on a drawn card: the one line at its far end saying how the
-/// section stands.
-function statusOf(face: ParentNode): HTMLElement {
-  const status = face.querySelector<HTMLElement>(`.${line.status}`);
-  expect(status, "expected the card to carry a status").not.toBeNull();
-  return status!;
-}
-
 /// The pane once the read it stands on has landed.
 ///
 /// Waited for on the field that adds a path rather than on a row: the list is
@@ -244,106 +214,19 @@ function path(row: ParentNode): string {
   return row.querySelector(`.${rowStyles.path}`)!.textContent ?? "";
 }
 
-describe("the card", () => {
-  /// What somebody scanning the page is after: what the section is, and how
-  /// much of the list stands — the title at one end, the count at the other.
-  it("says how many paths stand", async () => {
-    theSettings(seen(TOLD));
-    const { container } = mountCard();
-
-    const face = await theCard(container);
-
-    expect(face.querySelector("h2")!.textContent).toBe("Sandbox binds");
-    expect(statusOf(face).textContent).toBe("2 paths");
-  });
-
-  /// A machine nobody has added one to is the ordinary state rather than one
-  /// half set up, so the card counts and says nothing else, in the quiet
-  /// colour.
-  it("says nothing is wrong where nothing is configured at all", async () => {
-    theSettings(UNSET);
-    const { container } = mountCard();
-
-    const face = await theCard(container);
-
-    expect(statusOf(face).textContent).toBe("0 paths");
-    expect(statusOf(face).classList).not.toContain(line.warn);
-  });
-
-  /// And the other thing the browser can see and the human cannot: an entry that
-  /// is saved, is in the file, and does nothing. Counted after the paths, on the
-  /// same line.
-  it("counts every entry the server cannot see", async () => {
-    theSettings(TOLD);
-    const { container } = mountCard();
-
-    const face = await theCard(container);
-
-    expect(statusOf(face).textContent).toBe("2 paths · 2 unseen");
-  });
-
-  /// And that line is in the warning colour, which is what sends the human
-  /// here to read why: the card no longer says so in words, and this section's
-  /// pane is where every row anybody can do anything about stands.
-  it("draws the line as a warning while an entry is unseen", async () => {
-    theSettings(TOLD);
-    const { container } = mountCard();
-
-    const face = await theCard(container);
-
-    expect(statusOf(face).classList).toContain(line.warn);
-  });
-
-  it("says nothing of the kind where every entry resolves", async () => {
-    theSettings(seen(TOLD));
-    const { container } = mountCard();
-
-    const face = await theCard(container);
-
-    expect(statusOf(face).textContent).not.toMatch(/unseen/);
-    expect(statusOf(face).classList).not.toContain(line.warn);
-  });
-
-  it("opens the pane when it is pressed", async () => {
-    theSettings(TOLD);
-    const { container, press } = mountCard();
-
-    fireEvent.click(await theCard(container));
-
-    expect(press).toHaveBeenCalled();
-  });
-
-  it("reads as open while its pane is", async () => {
-    theSettings(TOLD);
-    const { container } = mountCard(true);
-
-    const face = await theCard(container);
-    expect(face.classList).toContain(card.open);
-    expect(face.getAttribute("aria-pressed")).toBe("true");
-  });
-
-  it("says so when the server could not be read at all", async () => {
-    serving(() =>
-      Promise.resolve(
-        new Response("nope", { status: 500, statusText: "Server Error" }),
-      ),
-    );
-    mountCard();
-
-    await waitFor(() => screen.getByText(/Could not read the settings/));
-  });
-});
-
 describe("the pane", () => {
-  /// The pane's own title says what these are, so the one subsection heading
-  /// inside it was saying it twice and is gone.
-  it("draws no heading of its own inside the pane", async () => {
+  /// The pane's head is the Sandbox's, and the build caches stand beside these
+  /// under theirs, so the part says what these are under one heading of its
+  /// own — and only the one: the head of the pane is not this part's to draw.
+  it("heads the part Sandbox binds, and draws no pane head of its own", async () => {
     theSettings(TOLD);
     const { container } = mountPane();
 
     const binds = await list(container);
 
-    expect(binds.querySelector("h1")!.textContent).toBe("Sandbox binds");
+    expect(binds.querySelector("h3")!.textContent).toBe("Sandbox binds");
+    expect(binds.querySelectorAll("h3")).toHaveLength(1);
+    expect(binds.querySelector("h1")).toBeNull();
     expect(binds.querySelector("h2")).toBeNull();
   });
 

@@ -164,7 +164,6 @@ import {
 import { Check } from "../Check";
 import { Icon } from "../Icon";
 import { Menu } from "../Menu";
-import { PaneSticky } from "../Panes";
 import { clearLanguage, loadSettings, saveSettings } from "../api/client";
 import type {
   DiskUse,
@@ -179,7 +178,6 @@ import type {
 import { useReading } from "../freshness";
 import { settledAge, utcStamp } from "../set/when";
 import { Empty, ErrorLine } from "../notices";
-import { PaneHead } from "../workbench/PaneHead";
 import {
   heldAtOnce,
   heldCleanup,
@@ -188,11 +186,10 @@ import {
   heldPaths,
 } from "./held";
 import styles from "./Languages.module.css";
-import { SettingsCard } from "./SettingsCard";
 
 /// What the section is called, wherever it names itself: the card's heading and
 /// the pane's head.
-const TITLE = "Language support";
+const TITLE = "Build caches";
 
 /// The settings as they stand, read once for the two panes that draw them.
 ///
@@ -579,69 +576,30 @@ function standing(told: SettingsView | undefined): string[] {
     .map((language) => language.label);
 }
 
-/// What the card says, in a line: what is waiting on the human first — an entry
-/// `config.yaml` holds that could not be read, and compiles nothing caches —
-/// and otherwise which languages are on.
-function summary(told: SettingsView): string {
-  const waiting = [
+/// What the Sandbox card says about the build caches where something is waiting
+/// on the human — an entry `config.yaml` holds that could not be read, and
+/// compiles nothing caches — or nothing at all where nothing is. See
+/// `Sandbox.tsx`, which is the card.
+export function cacheWarnings(told: SettingsView): string[] {
+  return [
     unread(told).length > 0 ? "Unreadable config entry" : null,
     warnedAny(told) ? "No sccache" : null,
   ].filter((said): said is string => said !== null);
-
-  if (waiting.length > 0) return waiting.join(" · ");
-
-  const on = standing(told);
-  return on.length > 0 ? on.join(", ") : "None on";
 }
 
-/// What has build support, as the card that opens it.
-///
-/// What is on the card is what somebody scanning the page is after: which
-/// languages a session builds with help, and the one thing about that which
-/// wants doing somewhere else. The controls are in the pane.
-export function LanguagesCard(props: {
-  /// Whether the pane beside this is the one that is open.
-  open: boolean;
-  /// What pressing it does, which is opening that pane.
-  press: () => void;
-}): JSX.Element {
-  const settings = useSettings();
-
-  return (
-    <Choose>
-      <Match when={settings.isPending}>
-        <Empty>Loading…</Empty>
-      </Match>
-      <Match when={settings.isError}>
-        <ErrorLine>
-          Could not read the settings: {settings.error?.message}
-        </ErrorLine>
-      </Match>
-      <Match when={settings.data}>
-        {(told) => (
-          <SettingsCard
-            class={styles.languagesCard}
-            title={TITLE}
-            open={props.open}
-            press={props.press}
-            warn={warnedAny(told()) || unread(told()).length > 0}
-            status={summary(told())}
-          />
-        )}
-      </Match>
-    </Choose>
-  );
+/// And how many languages have their build cache on, which is what it says
+/// otherwise.
+export function cachesOn(told: SettingsView): number {
+  return standing(told).length;
 }
 
-/// And the controls that change them, which is the details pane the card opens.
+/// And the controls that change them: the Build caches part of the Sandbox
+/// pane, under its own heading — see `Sandbox.tsx`, which is the pane.
 ///
 /// There is no Save over the whole of it and no Cancel: a checkbox is its own
 /// press, a size saves when the typing is done, and a details pane is left by
 /// opening something else or by the way back a narrow window draws.
-export function LanguagesPane(props: {
-  /// The way back to the settings, which is the pane this one was entered from.
-  back: () => void;
-}): JSX.Element {
+export function BuildCaches(): JSX.Element {
   const queries = useQueryClient();
   const settings = useSettings();
 
@@ -989,10 +947,8 @@ export function LanguagesPane(props: {
   };
 
   return (
-    <>
-      <PaneSticky>
-        <PaneHead back={{ to: "Settings", go: props.back }} title={TITLE} />
-      </PaneSticky>
+    <section>
+      <h3 class={styles.heading}>{TITLE}</h3>
 
       <Choose>
         <Match when={settings.isPending}>
@@ -1078,6 +1034,6 @@ export function LanguagesPane(props: {
           )}
         </Match>
       </Choose>
-    </>
+    </section>
   );
 }

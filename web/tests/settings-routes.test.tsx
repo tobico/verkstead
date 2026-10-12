@@ -84,14 +84,23 @@ describe("the settings page's own paths", () => {
   });
 
   /// A slug a section used to stand at goes the same way. The build cache pane
-  /// became Language support and moved to `/settings/languages`; GitHub and git
-  /// author became Git at `/settings/git` and took the Conflicts pane in, so
-  /// both of the words those stood at are gone too; and Paths became Sandbox
-  /// binds at `/settings/sandbox-binds`. Each is no such page rather than a
-  /// redirect, the way `/profiles` and `/repos` were retired when those
-  /// pages folded into this one. A link somebody kept is a record of what was
-  /// picked rather than a promise that it is still there.
-  for (const word of ["build-cache", "github", "conflicts", "paths"]) {
+  /// became Language support at `/settings/languages`; GitHub and git author
+  /// became Git at `/settings/git` and took the Conflicts pane in, so both of
+  /// the words those stood at are gone too; Paths became Sandbox binds at
+  /// `/settings/sandbox-binds`; and Language support, renamed Build caches, and
+  /// the Sandbox binds became the two parts of one Sandbox pane at
+  /// `/settings/sandbox`, so both of their words are gone as well. Each is no
+  /// such page rather than a redirect, the way `/profiles` and `/repos` were
+  /// retired when those pages folded into this one. A link somebody kept is a
+  /// record of what was picked rather than a promise that it is still there.
+  for (const word of [
+    "build-cache",
+    "github",
+    "conflicts",
+    "paths",
+    "languages",
+    "sandbox-binds",
+  ]) {
     it(`refuses /${word}, which a section has moved off`, () => {
       expect(at(`${SETTINGS}/${word}`)).toBe(MISSED);
     });

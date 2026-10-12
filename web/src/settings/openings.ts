@@ -9,12 +9,12 @@
 //! Two shapes under the settings, because there are two kinds of thing the
 //! pane draws:
 //!
-//! - `desktop`, `git`, `languages`, `instructions`, `mcp-servers`, `at-once`,
-//!   `sandbox-binds`, `cleanup`, `remote` and `repos` — what the desktop app
-//!   does about its own window, everything git is told, the languages a session
-//!   gets build support for, the text every session is given, the MCP servers a
-//!   Conversation may attach, how much Verkstead runs at once, the extra paths
-//!   every sandbox gets, what becomes of an archived Conversation, whether this
+//! - `desktop`, `git`, `sandbox`, `instructions`, `mcp-servers`, `at-once`,
+//!   `cleanup`, `remote` and `repos` — what the desktop app does about its own
+//!   window, everything git is told, what a session's sandbox holds (the build
+//!   caches and the extra paths), the text every session is given, the MCP
+//!   servers a Conversation may attach, how much Verkstead runs at once, what
+//!   becomes of an archived Conversation, whether this
 //!   machine can be reached from a phone, and the Repos that are registered,
 //!   each named by a word. There is one of each of them, and a word says so.
 //! - `profiles/:id` — an Agent Profile, which arrives with an id of its own,
@@ -47,10 +47,9 @@
 //! picked rather than a promise that it is still there.
 
 /// The openings named by a word rather than by an id: what the desktop app does
-/// about its own window, everything git is told, the languages a session gets
-/// build support for, the text every session is given, the MCP servers a
-/// Conversation may attach, how much Verkstead runs at once, the extra paths
-/// every sandbox gets, what becomes of an archived Conversation, how this
+/// about its own window, everything git is told, what a session's sandbox holds,
+/// the text every session is given, the MCP servers a Conversation may attach,
+/// how much Verkstead runs at once, what becomes of an archived Conversation, how this
 /// machine is reached from a phone and which Repos are registered — the things
 /// there is exactly one of on this page.
 ///
@@ -68,11 +67,10 @@
 export const WORDS = [
   "desktop",
   "git",
-  "languages",
+  "sandbox",
   "instructions",
   "mcp-servers",
   "at-once",
-  "sandbox-binds",
   "cleanup",
   "remote",
   "repos",

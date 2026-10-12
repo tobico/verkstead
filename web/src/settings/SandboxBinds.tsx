@@ -48,22 +48,18 @@
 
 import { Match, Show, Switch as Choose, type JSX } from "solid-js";
 
-import { PaneSticky } from "../Panes";
 import type { BindEntry, PathsView } from "../api/types";
 import { Empty, ErrorLine, Note } from "../notices";
-import { PaneHead } from "../workbench/PaneHead";
 import {
   Adding,
   Rows,
   type Row,
   rowed,
   unresolved,
-  useSettings,
   useWritingPaths,
   without,
 } from "./PathEditor";
 import styles from "./SandboxBinds.module.css";
-import { SettingsCard } from "./SettingsCard";
 
 /// The binds, as the rows this pane draws — every one of them, whichever of the
 /// two sources said it.
@@ -77,79 +73,23 @@ function drawn(paths: PathsView | undefined): Row<BindEntry>[] {
 /// How many entries the list holds that name something the server cannot
 /// currently see — whoever said them, because the installation's own go stale
 /// the same way a settings row does.
-function unseen(paths: PathsView | undefined): number {
+export function unseen(paths: PathsView | undefined): number {
   return (paths?.binds ?? []).filter((entry) => unresolved(entry.resolution))
     .length;
 }
 
-/// A count with the word it counts, so that a line reads as English rather than
-/// as `1 paths`.
-function counted(many: number, one: string, more: string): string {
-  return `${many} ${many === 1 ? one : more}`;
-}
-
-/// The binds as they stand, as the card that opens them.
-///
-/// What is on the card is what somebody scanning the page is after: how much of
-/// the list stands, and whether anything about it wants doing — which is an
-/// entry that is saved and does nothing.
-export function SandboxBindsCard(props: {
-  /// Whether the pane beside this is the one that is open.
-  open: boolean;
-  /// What pressing it does, which is opening that pane.
-  press: () => void;
-}): JSX.Element {
-  const settings = useSettings();
-
-  return (
-    <Choose>
-      <Match when={settings.isPending}>
-        <Empty>Loading…</Empty>
-      </Match>
-      <Match when={settings.isError}>
-        <ErrorLine>
-          Could not read the settings: {settings.error?.message}
-        </ErrorLine>
-      </Match>
-      <Match when={settings.data?.paths}>
-        {(paths) => (
-          <SettingsCard
-            class={styles.bindsCard}
-            title="Sandbox binds"
-            open={props.open}
-            press={props.press}
-            warn={unseen(paths()) > 0}
-            status={
-              unseen(paths()) > 0
-                ? `${counted(paths().binds.length, "path", "paths")} · ${unseen(paths())} unseen`
-                : counted(paths().binds.length, "path", "paths")
-            }
-          />
-        )}
-      </Match>
-    </Choose>
-  );
-}
-
-/// And the list itself, which is the details pane the card opens.
+/// And the list itself: the Sandbox binds part of the Sandbox pane, under its own
+/// heading — see `Sandbox.tsx`, which is the pane.
 ///
 /// There is no Save over the whole of it and no Cancel: each row is its own
 /// press, and a details pane is left by opening something else or by the way
 /// back a narrow window draws.
-export function SandboxBindsPane(props: {
-  /// The way back to the settings, which is the pane this one was entered from.
-  back: () => void;
-}): JSX.Element {
+export function SandboxBinds(): JSX.Element {
   const { settings, told, held, save, writeBinds } = useWritingPaths();
 
   return (
-    <>
-      <PaneSticky>
-        <PaneHead
-          back={{ to: "Settings", go: props.back }}
-          title="Sandbox binds"
-        />
-      </PaneSticky>
+    <section>
+      <h3 class={styles.heading}>Sandbox binds</h3>
 
       <Choose>
         <Match when={settings.isPending}>
@@ -164,9 +104,8 @@ export function SandboxBindsPane(props: {
           {(paths) => (
             <div>
               {/* What the section is for, in the one line a pane on this page
-                  says its own in. No heading over it: the pane's title has said
-                  what these are, and the one subsection this pane held was
-                  saying it a second time. */}
+                  says its own in, under the heading that names these in the
+                  Sandbox pane. */}
               <Note>
                 Configures additional paths which are accessible from within the
                 sandbox.
@@ -196,6 +135,6 @@ export function SandboxBindsPane(props: {
           )}
         </Match>
       </Choose>
-    </>
+    </section>
   );
 }
