@@ -67,23 +67,6 @@
   font-size: 0.9rem;
 }
 
-/* The author as a line rather than as two fields, written the way git writes
-   one — which is the form it is going to be used in. */
-.authorStanding {
-  margin: 0;
-  font-size: 0.9rem;
-  color: var(--ink-soft);
-}
-
-.authorName,
-.authorEmail {
-  color: var(--ink);
-}
-
-.authorEmail {
-  font-family: ui-monospace, SFMono-Regular, monospace;
-}
-
 /* The form itself, which is the details pane: the three sections under one Save,
    with nothing around them but the pane's own head. */
 .form section {

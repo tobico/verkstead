@@ -14,16 +14,6 @@
   min-width: 0;
 }
 
-/* How things stand, in a line: the same quiet the sections above say what is
-   configured in. Drawn on the card and at the head of the pane, because it is
-   the same sentence in both. */
-.standing {
-  margin: 0;
-  font-size: 0.9rem;
-  color: var(--ink-soft);
-  line-height: 1.5;
-}
-
 /* A tailnet name or a `ts.net` address, picked out of the prose around it: it
    is something to read character by character and to type into a phone, so it
    is set the way every other exact string on this page is. */

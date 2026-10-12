@@ -15,14 +15,6 @@
   min-width: 0;
 }
 
-/* How it stands, in a line: the same quiet the sections above it say what is
-   configured in. */
-.standing {
-  margin: 0;
-  font-size: 0.9rem;
-  color: var(--ink-soft);
-}
-
 /* And the details pane: the line saying what the text is for, the box, and the
    press. */
 .instructions {

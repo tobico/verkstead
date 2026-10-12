@@ -8,21 +8,6 @@
    while its pane is open, and what it does under the pointer. What is here is
    only what stands on it. */
 
-.languagesCard {
-  /* The look is `SettingsCard.module.css`'s; this names the card. */
-  min-width: 0;
-}
-
-/* The languages that are on, in a line: the same quiet the credentials say what
-   is configured in. Nothing at all where none are — there is no line saying a
-   machine builds nothing, because the heading has already said what the card is
-   about. */
-.standing {
-  margin: 0;
-  font-size: 0.9rem;
-  color: var(--ink-soft);
-}
-
 /* Something the human would have to leave the browser to fix. Drawn as a notice
    rather than as an error — nothing has failed, and what it says is what will be
    slower until somebody acts on it. The stopped red rather than the accent, the

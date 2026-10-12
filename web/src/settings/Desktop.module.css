@@ -13,18 +13,6 @@
   min-width: 0;
 }
 
-/* How the window and the tray stand, a line apiece: the same quiet the Cleanup
-   above says how it stands in. */
-.standing {
-  margin: 0 0 0.35rem;
-  font-size: 0.9rem;
-  color: var(--ink-soft);
-}
-
-.standing:last-of-type {
-  margin-bottom: 0;
-}
-
 /* And the details pane: the close policy, the tray, and the way to the log
    file. */
 .desktop {

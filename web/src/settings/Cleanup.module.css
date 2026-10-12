@@ -14,23 +14,6 @@
   min-width: 0;
 }
 
-/* What happens and when, a line apiece: the same quiet the build cache says
-   how it stands in. */
-.standing {
-  margin: 0 0 0.35rem;
-  font-size: 0.9rem;
-  color: var(--ink-soft);
-}
-
-.standing:last-of-type {
-  margin-bottom: 0;
-}
-
-.standing .days {
-  font-family: ui-monospace, SFMono-Regular, monospace;
-  color: var(--ink);
-}
-
 /* The two durations read as a delete that lands first. Not an error and not a
    refusal — the clocks are independent and this is what those numbers mean — so
    it is drawn as a notice: the stopped red down the edge, the way the build
