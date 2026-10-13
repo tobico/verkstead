@@ -118,7 +118,6 @@ import type {
   CommitEvent,
   CompanionRefusal,
   ConversationView,
-  DeviceIdentity,
   GrillingStarted,
   HandoffEvent,
   Lifecycle,
@@ -146,7 +145,7 @@ import { IconButton } from "../IconButton";
 import { PaneSticky } from "../Panes";
 import { Truncated } from "../Truncated";
 import { troubleReading } from "../broken";
-import { deviceShown, osIcon, useDevices } from "../devices";
+import { deviceShown, osIcon, sameMark, useDevices } from "../devices";
 import { useReading } from "../freshness";
 import { HarnessMark } from "../HarnessMark";
 import { Empty } from "../notices";
@@ -407,23 +406,43 @@ function PaneName(props: {
   const device = useDevice();
   const devices = useDevices(() => !props.readOnly);
 
-  const machine = (): DeviceIdentity | null =>
-    deviceShown(devices.data, device());
+  // Another device's alone, and its mark only where that is not this device's
+  // own — see `sameMark`, which is the server's rule for the sidebar's rows.
+  const machine = (): { name: string; os: string | null } | null => {
+    const id = device();
+    if (id === null || !devices.data) return null;
+
+    const on = deviceShown(devices.data, id);
+    if (!on) return null;
+
+    return {
+      name: on.name,
+      os: sameMark(on.os, devices.data.this.os) ? null : on.os,
+    };
+  };
 
   return (
     <>
       <Truncated class={styles.paneTitle} text={titled(props.conversation)} />{" "}
-      {/* The device, where there is a cluster to name one — the same rule the
-          sidebar's rows are drawn under and for the same reason: a machine's
-          own name on the header of a Verkstead linked to nothing would be a
-          word that never changes. The mark is the one that device wears
-          wherever it is drawn, and it is labelled here rather than hidden
-          because this heading is read out of its own contents — unlike the
-          sidebar's card, which has the whole sentence written for it. */}
+      {/* The device, where it is another one — the rule the sidebar's rows
+          are drawn under, and for the same reason: what is the same as the
+          machine the browser opened is not worth saying. So a Conversation of
+          this device's own names no device, and another device's names
+          itself, with its mark only where that mark is not this device's.
+          The mark is the one that device wears wherever it is drawn, and it is
+          labelled here rather than hidden because this heading is read out of
+          its own contents — unlike the sidebar's card, which has the whole
+          sentence written for it. */}
       <Show when={machine()} keyed>
         {(on) => (
           <span class={styles.paneDevice}>
-            <Icon of={osIcon(on.os)} label={on.os} class={styles.paneOs} />{" "}
+            <Show when={on.os} keyed>
+              {(os) => (
+                <>
+                  <Icon of={osIcon(os)} label={os} class={styles.paneOs} />{" "}
+                </>
+              )}
+            </Show>
             {on.name}
           </span>
         )}

@@ -171,6 +171,30 @@ pub fn os_word(platform: Platform, kernel_release: Option<&str>) -> String {
     }
 }
 
+/// Which mark a device's OS word is drawn with: the platform it starts with, or
+/// `None` for a word this build has no mark for — the viewer's generic desktop.
+///
+/// **The viewer's `osIcon` (`web/src/devices.ts`) stated a second time**, and
+/// the two must agree: the hub decides off this whether a sidebar row carries
+/// its device's OS at all (see [`same_mark`]), and the page draws whatever mark
+/// `osIcon` picks for the word it is handed. Matched on what the word *starts*
+/// with for the reason that one is — *Linux (WSL)* wears the Linux mark, and
+/// *macOS 15.1* the Apple one.
+pub fn os_mark(word: &str) -> Option<Platform> {
+    [Platform::MacOs, Platform::Windows, Platform::Linux]
+        .into_iter()
+        .find(|platform| word.starts_with(platform.word()))
+}
+
+/// Whether two OS words are drawn with the same mark, which is what *the same
+/// OS* means on a sidebar row: a mark beside a row that is the mark of the
+/// machine the browser opened says nothing, so the hub leaves it off.
+///
+/// Two words this build has no mark for are the same: both are the desktop.
+pub fn same_mark(one: &str, other: &str) -> bool {
+    os_mark(one) == os_mark(other)
+}
+
 /// What the kernel on this machine calls itself, where it is a machine that
 /// says: the release string, which under WSL has Microsoft's own name in it.
 ///
@@ -576,6 +600,26 @@ mod tests {
     fn only_a_linux_can_be_a_wsl() {
         assert_eq!(os_word(Platform::Windows, Some(WSL2)), "Windows");
         assert_eq!(os_word(Platform::MacOs, Some(WSL2)), "macOS");
+    }
+
+    /// The mark is the word's prefix, exactly as the viewer's `osIcon` picks
+    /// one: a WSL and a Linux are one mark, two macOS versions are one mark,
+    /// and two words nobody has a mark for are the one desktop.
+    #[test]
+    fn a_mark_is_what_the_word_starts_with() {
+        assert_eq!(os_mark("Linux"), Some(Platform::Linux));
+        assert_eq!(os_mark("Linux (WSL)"), Some(Platform::Linux));
+        assert_eq!(os_mark("macOS 15.1"), Some(Platform::MacOs));
+        assert_eq!(os_mark("Windows"), Some(Platform::Windows));
+        assert_eq!(os_mark("FreeBSD"), None);
+        assert_eq!(os_mark(""), None);
+
+        assert!(same_mark("Linux (WSL)", "Linux"));
+        assert!(same_mark("macOS 14", "macOS 15.1"));
+        assert!(same_mark("FreeBSD", "Haiku"));
+        assert!(!same_mark("macOS 15.1", "Linux"));
+        assert!(!same_mark("Windows", "Linux (WSL)"));
+        assert!(!same_mark("FreeBSD", "Linux"));
     }
 
     /// An environment holding `home` and nothing else, which is what a Unix

@@ -31,12 +31,12 @@
 //! Verkstead invented, and a draft still carrying one reads *Draft* rather than
 //! a name that says nothing — see `naming.ts`.
 //!
-//! And under the name, which machine the work is on and then the Repo it is in:
-//! the mark for that device's OS, its name, and the Repo after them. On every
-//! row there is a device on, this device's own included, because that is what
-//! makes this one list rather than this device's list with visitors on it —
-//! and on no row at all where there is no cluster, a lone Verkstead drawing
-//! the Repo alone the way it always has. A row whose device has stopped
+//! And under the name, which machine the work is on and then the Repo it is in
+//! — saying only what differs from the machine the browser opened. Another
+//! device's row draws its name, with the mark for its OS before it where that
+//! mark is not this device's own; this device's own rows draw the Repo alone,
+//! the way a lone Verkstead's always have. What is the same as the machine you
+//! are looking from is not worth saying. A row whose device has stopped
 //! answering is dimmed, which is the fade a finished Conversation wears, and
 //! says *unreachable* where it is read aloud, which is where the two are told
 //! apart.
@@ -734,10 +734,12 @@ const UNREACHABLE = "unreachable";
 /// the row says it at all, the ring that marks the quiet being nothing to
 /// anybody reading by ear.
 ///
-/// And the device the work is on, where the row draws one: the card says which
-/// machine in a mark and a name beside the Repo, and of those the mark is
-/// nothing to anybody reading by ear — so the device belongs in this sentence
-/// for the reason everything else in it does, in the place the row draws it.
+/// And the device the work is on, where the row draws one — which is another
+/// device's row and never this device's own: the card says which machine in a
+/// name beside the Repo, and the mark beside it is nothing to anybody reading
+/// by ear — so the name belongs in this sentence for the reason everything else
+/// in it does, in the place the row draws it. A row that draws no device says
+/// none here either.
 ///
 /// And *unreachable* beside it where that machine has stopped answering, which
 /// is the other half of what the row says in a fade: the dimming is the same
@@ -884,23 +886,26 @@ function ConversationRow(props: {
               the card above already says the whole sentence. */}
           <Truncated class={styles.title} text={titled(props.entry)} />
           <span class={styles.meta}>
-            {/* Which machine the work is on, ahead of the Repo it is in and
-                drawn on every row there is one on — this device's own
-                included, which is what makes this one list rather than this
-                device's list with visitors on it. Nothing at all where there
-                is no cluster: the row carries no device then, and a Verkstead
-                linked to nothing draws the line it always drew.
+            {/* Which machine the work is on, ahead of the Repo it is in — and
+                only what differs from the machine the browser opened, which is
+                the server's call (see `RowDevice`). A row carries a device only
+                when it is another device's, so this device's own draw the Repo
+                alone, cluster or no cluster. And the mark only where it is not
+                this device's own: the server leaves `os` off a member wearing
+                the same one.
 
                 The mark is the one a device wears wherever it is drawn — see
                 `devices.ts` — so a WSL wears the Linux mark here exactly as it
-                does on the Devices section, and a word this build has no mark
-                for still draws a row. Unlabelled, like the mark at the right
-                edge: the label on the card above has already said the whole
-                sentence. */}
+                does on the Devices section, and is left off beside a Linux for
+                that reason; a word this build has no mark for still draws one.
+                Unlabelled, like the mark at the right edge: the label on the
+                card above has already said the whole sentence. */}
             <Show when={props.entry.device}>
               {(device) => (
                 <span class={styles.device}>
-                  <Icon of={osIcon(device().os)} class={styles.os} />
+                  <Show when={device().os}>
+                    {(os) => <Icon of={osIcon(os())} class={styles.os} />}
+                  </Show>
                   {device().name}
                 </span>
               )}

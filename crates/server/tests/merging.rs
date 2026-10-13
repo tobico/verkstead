@@ -790,21 +790,23 @@ fn branches(rows: &[ConversationEntry]) -> Vec<&str> {
 }
 
 /// And whose each row is, by the Device Id it names — `None` being this device's
-/// own.
+/// own, which carries no device at all.
 fn whose(rows: &[ConversationEntry]) -> Vec<Option<&str>> {
     rows.iter()
         .map(|row| {
-            row.device
-                .as_ref()
-                .expect("every row of a merged list says whose it is")
-                .id
-                .as_deref()
+            row.device.as_ref().map(|whose| {
+                whose
+                    .id
+                    .as_deref()
+                    .expect("a member's row names its device")
+            })
         })
         .collect()
 }
 
 /// A Conversation created on B is on A's sidebar within a Nudge, in rank order
-/// among A's own rows — and the row says it is B's, by B's own name and OS word.
+/// among A's own rows — and the row says it is B's, by B's own name, with B's OS
+/// word beside it only where B's mark is not A's.
 #[tokio::test]
 async fn a_conversation_started_on_a_member_arrives_on_the_merged_list() {
     let (a, b) = linked_up().await;
@@ -815,23 +817,14 @@ async fn a_conversation_started_on_a_member_arrives_on_the_merged_list() {
 
     a.starts(here, "the-merged-list").await;
 
-    // Nothing of B's yet, so A's list is A's own work — and every row of it says
-    // whose it is all the same, there being somebody else in the cluster to be
-    // distinguished from.
+    // Nothing of B's yet, so A's list is A's own work — and its rows say nothing
+    // about whose they are, cluster or no cluster: what is the same as the
+    // machine the browser opened is not worth saying.
     let alone = a
         .sidebar_saying(|rows| branches(rows) == ["the-merged-list"])
         .await;
 
-    let (machine, os) = this_machine();
-    let mine = alone[0].device.as_ref().expect("A is in a cluster");
-
-    assert_eq!(mine.id, None, "A's own rows name no device");
-    assert_eq!(mine.name, machine, "and say A's own machine");
-    assert_eq!(mine.os, os);
-    assert!(
-        mine.reachable,
-        "a device answering its own browser is there"
-    );
+    assert_eq!(alone[0].device, None, "A's own rows carry no device");
 
     // And then one on B, which arrives on A's list without A being asked to read
     // anything: B announces, A's stream carries it, A reads B's list back.
@@ -847,7 +840,7 @@ async fn a_conversation_started_on_a_member_arrives_on_the_merged_list() {
         ["the-cross-device-drag", "the-merged-list"],
     );
 
-    let theirs = merged[0].device.as_ref().expect("A is in a cluster");
+    let theirs = merged[0].device.as_ref().expect("B's row says it is B's");
 
     assert_eq!(
         theirs.id.as_deref(),
@@ -855,8 +848,53 @@ async fn a_conversation_started_on_a_member_arrives_on_the_merged_list() {
         "a member's row names its device",
     );
     assert_eq!(theirs.name, B_MACHINE, "and the member's own machine");
-    assert_eq!(theirs.os, B_OS, "and the member's own OS word");
+
+    // A's OS is the one this suite states for every device it runs, so whether
+    // B's mark is A's is that comparison rather than whatever the runner is.
+    let (_, os) = this_machine();
+    assert_eq!(
+        theirs.os.as_deref(),
+        (!platform::same_mark(B_OS, &os)).then_some(B_OS),
+        "and the member's own OS word, where its mark is not A's",
+    );
     assert!(theirs.reachable);
+    assert_eq!(merged[1].device, None);
+}
+
+/// A member whose mark is the hub's own — a WSL seen from a Linux, one macOS
+/// seen from another — is drawn by its name alone: the row carries no OS word.
+#[tokio::test]
+async fn a_member_on_the_hubs_own_mark_carries_no_os() {
+    let (_, os) = this_machine();
+    let same = match platform::os_mark(&os) {
+        Some(Platform::Linux) => "Linux (WSL)".to_owned(),
+        Some(Platform::MacOs) => "macOS 14".to_owned(),
+        _ => os.clone(),
+    };
+
+    let a = Verkstead::answering(A).await;
+    let b = Verkstead::answering(B).await;
+
+    a.linked_to(&b.device, B_MACHINE, &same, vec![b.at()]).await;
+    b.linked_to(&a.device, &this_machine().0, &os, vec![a.at()])
+        .await;
+
+    let _holding = a.holding();
+
+    let there = b.holding_a_repo().await;
+    b.starts(there, "the-same-mark").await;
+
+    let merged = a
+        .sidebar_saying(|rows| branches(rows) == ["the-same-mark"])
+        .await;
+
+    let theirs = merged[0].device.as_ref().expect("B's row says it is B's");
+
+    assert_eq!(theirs.name, B_MACHINE, "the member is named");
+    assert_eq!(
+        theirs.os, None,
+        "and its OS left unsaid, {same:?} wearing {os:?}'s own mark",
+    );
 }
 
 /// And the page is told again once B's list has actually landed, which is the

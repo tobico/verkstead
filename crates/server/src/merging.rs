@@ -54,11 +54,12 @@
 //! same from every device in the cluster (ADR-0020, *Ranks*). The rank rides
 //! out on the row for exactly this: see [`ConversationEntry::rank`].
 //!
-//! **This device's own rows carry a device too**, so that the list reads as one
-//! list rather than as this device's work with somebody else's mixed in — and
-//! no row carries one where there is no cluster, a lone device having nothing
-//! to say about whose work it is drawing. Which of the two it is is the
-//! membership's to decide and so the server's, rather than the page's.
+//! **Only a member's rows carry a device**, and only what differs from this
+//! one: the hostname always, and the OS word only where its mark is not this
+//! device's own (see [`crate::platform::same_mark`]). This device's own rows
+//! carry none, cluster or no cluster — what is the same as the machine the
+//! browser opened is not worth saying. That is the membership's to decide and
+//! so the server's, rather than the page's.
 //!
 //! **And the work is drawn once, however many machines hold a copy of it.** A
 //! Conversation that has been transferred has a row in the database it came from
@@ -99,7 +100,7 @@ use verkstead_schema::Nudge;
 use verkstead_store::Member;
 
 use crate::relaying::read_of;
-use crate::{AppState, store};
+use crate::{AppState, platform, store};
 
 /// The path a member's own sidebar list is read at, which is the path this
 /// device serves its own at: the namespace is one router mounted twice, so the
@@ -581,32 +582,26 @@ pub(crate) async fn merged(
         return own;
     }
 
-    // This device's own, which says whose they are now that there is somebody
-    // else's beside them.
-    let this = RowDevice {
-        id: None,
-        name: devices.name(),
-        os: devices.os(),
-        reachable: true,
-    };
-
-    let mut rows: Vec<ConversationEntry> = own
-        .into_iter()
-        .map(|row| ConversationEntry {
-            device: Some(this.clone()),
-            ..row
-        })
-        .collect();
+    // This device's own go out carrying no device, exactly as they do with no
+    // cluster: what is the same as the machine the browser opened is not worth
+    // saying, and a missing device is *this device* to everything that routes a
+    // row by it (ADR-0020, *Ranks*).
+    let mut rows = own;
+    let here = devices.os();
 
     for (member, Held { rows: held, .. }) in state.merged.held_of(&members) {
         // The name, the OS word and whether the last dial got through are this
         // device's own readings of that machine rather than anything the list
         // said: a member answers its own Conversations and has no idea who is
         // asking, so what a row over there carried was no device at all.
+        //
+        // The OS word only where its mark is not this device's own: a mark the
+        // row shares with the machine it is seen from says nothing — see
+        // [`platform::same_mark`].
         let whose = RowDevice {
             id: Some(member.device.clone()),
             name: member.name.clone(),
-            os: member.os.clone(),
+            os: (!platform::same_mark(&member.os, &here)).then(|| member.os.clone()),
             reachable: member.reachable,
         };
 

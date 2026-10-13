@@ -268,10 +268,17 @@ A migration ranks every existing row in its present order,
 unplaced ones on top newest first, and the *unplaced float to the top* rule
 goes: a new Conversation is simply ranked above everything.
 
-Once anything is linked, every row's second line reads OS icon, device, then
-the repo — this device's own rows too, so the list reads as one — and the pane
-header carries the device as a mark beside the branch, and the row read aloud
-says it.
+Once anything is linked, a row's second line says only what differs from the
+device the browser opened, because what is the same as the machine you are
+looking from is not worth saying. A member's row reads its hostname, then the
+repo, with the OS icon before the hostname only where that device's mark is not
+the hub's own — the mark being picked off what the OS word starts with, so a
+*Linux (WSL)* member seen from a Linux hub is a name and no mark. This device's
+own rows read the repo alone, as they do with nothing linked. The hub decides
+it and the row carries the answer: no device on its own rows, and no OS word on
+a member wearing its mark. The pane header over an open Conversation follows
+the same rule, and the row read aloud names the device only where the row draws
+one.
 
 ## Drafting on a device
 

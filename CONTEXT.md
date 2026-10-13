@@ -2233,26 +2233,25 @@ carries the **Device Id** of the device that issued it, so the keys are distinct
 cluster-wide and the merged order is total with no tiebreaker — which is why the
 rank rides out on the row rather than staying in the `ORDER BY`: a list that had
 been ordered and then had its keys taken off could not be merged with another.
-**Every row says whose it is**, its own device's rows included, so the list reads
-as one list rather than as this device's work with somebody else's mixed in. What
-a row carries is the Device Id — nothing at all for this device's own, which is
-the shape the viewer keys and composes paths by — with the name and the OS word
-of that machine beside it, so the viewer draws a row without joining it against
-the **Devices** section. Whether a row says anything at all is the server's call
-and the membership decides it: a device linked to nothing draws the sidebar it
-always drew.
+**A row says whose it is only where that is another device**, and only what
+differs from the device the browser opened: what is the same as the machine you
+are looking from is not worth saying. A member's row carries the Device Id with
+the name of that machine beside it, and its OS word only where that word's mark
+is not the hub's own — so the viewer draws a row without joining it against the
+**Devices** section. This device's own rows carry nothing, cluster or no
+cluster. Whether a row says anything at all is the server's call: the hub
+decides, off the membership and its own OS word.
 **And it is said in the three places a Conversation is named**: under the
 branch on the sidebar row, beside the branch on the header of the pane that row
-opens, and in the sentence the row is read aloud by. The row's second line is
-the mark for that machine's OS, its name, and then the Repo — on every row
-there is a device on, this device's own included, which is what makes it one
-list rather than this device's list with visitors on it. The mark is the one a
-device wears wherever it is drawn, off the OS word the row carries, so a WSL
-wears the Linux mark here as it does on the Devices section. Where there is no
-cluster none of the three says anything at all, which is the sidebar nearly
-every Verkstead draws. The header looks its device up rather than being handed
-one — the URL says which machine and the **Devices** reading says its name — and
-the spoken row names it because the mark is nothing to a screen reader.
+opens, and in the sentence the row is read aloud by. A member's row's second
+line is its name and then the Repo, with the mark for its OS before the name
+where that mark differs from this device's; this device's own rows read the
+Repo alone. The mark is picked off what the OS word starts with, so a WSL wears
+the Linux mark as it does on the Devices section — and seen from a Linux, a WSL
+member is a name and no mark. The header looks its device up rather than being
+handed one — the URL says which machine and the **Devices** reading says its
+name — and applies the same rule, and the spoken row names the device only
+where the row draws one, because the mark is nothing to a screen reader.
 **A member that stops answering keeps its rows**, from the last list held and
 drawn dimmed, the row's own flag saying the device is not there — while a member
 never reached holds nothing and contributes nothing. The dimming is the one a

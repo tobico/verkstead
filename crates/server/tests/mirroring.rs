@@ -661,7 +661,11 @@ async fn a_members_profiles_are_listed_here_beside_this_devices_own() {
 
     assert_eq!(device.id.as_deref(), Some(A));
     assert_eq!(device.name, A_MACHINE, "A's own name, off B's membership");
-    assert_eq!(device.os, A_OS, "and the word its mark is drawn from");
+    assert_eq!(
+        device.os.as_deref(),
+        Some(A_OS),
+        "and the word its mark is drawn from"
+    );
     assert!(device.reachable, "and A is answering");
 
     assert_eq!(
