@@ -1407,14 +1407,13 @@ unseen: boolean,
  */
 rank: string, 
 /**
- * The device this row belongs to, or `null` where there is no cluster and
- * nothing to say — a lone device draws no device on any row.
+ * The device this row belongs to, or `null` where it is this device's own
+ * — which is every row where there is no cluster.
  *
  * **The server's call rather than the page's**, the membership being what
- * decides it: a Verkstead linked to nothing draws the sidebar it has
- * always drawn, and one that is linked says whose every row is — its own
- * included, so that the list reads as one list rather than as this
- * device's work with somebody else's mixed in.
+ * decides it: a member's row says whose it is, and this device's own rows
+ * say nothing, because what is the same as the machine the browser opened
+ * is not worth saying (ADR-0020, *Ranks*).
  */
 device: RowDevice | null, 
 /**
@@ -5008,16 +5007,19 @@ export type RoleChoice = { pairing: ProfileChoice | null, };
  * **The name and the OS word are the hub's own**, answered on every row
  * rather than left to be joined against another reading: the hub holds them
  * for each member and reads its own machine for itself, so nothing in the
- * viewer needs the Devices section in hand to draw a row.
+ * viewer needs the Devices section in hand to draw a row — including whether
+ * the OS is worth drawing at all (see [`RowDevice::os`]).
+ *
+ * The sidebar's rows carry one only for another device's work. A Profile
+ * card's mirror carries one too, for the device its account lives on, and
+ * always in full — see [`crate::ProfileEntry`].
  */
 export type RowDevice = { 
 /**
- * The **Device Id**, or `null` for this device's own rows.
- *
- * Which is the shape the viewer already keys its queries and composes its
- * paths by — `null` is *this device*, and a local URL keeps the shape it
- * has always had. A row naming this device by its id would be a second
- * spelling of every local call.
+ * The **Device Id**. Never `null` on what a server answers today — this
+ * device's own rows carry no `RowDevice` at all — but the viewer reads
+ * `null` as *this device*, the shape it keys its queries and composes its
+ * paths by, so a local URL keeps the shape it has always had.
  */
 id: string | null, 
 /**
@@ -5027,17 +5029,22 @@ id: string | null,
 name: string, 
 /**
  * And the word for its operating system, which is what draws the mark
- * beside the name. *Linux (WSL)* is the one that is not a bare platform
- * name, and it is the whole reason the word is carried rather than a
- * flag.
+ * beside the name — or `null` where there is no mark worth drawing.
+ *
+ * **`null` on a sidebar row whose device wears the same mark as the
+ * machine the browser opened**, the mark being picked off what the word
+ * starts with: *Linux (WSL)* seen from *Linux*, or one macOS seen from
+ * another, is a name and no mark. A mark that matches the one the reader
+ * is already on says nothing. The hub decides it, by the server's
+ * `platform::same_mark` — the viewer's `osIcon` rule said a second time.
+ *
+ * **Never `null` on a Profile card's mirror**, which draws the device's
+ * full badge whatever the hub is.
  */
-os: string, 
+os: string | null, 
 /**
  * And whether the device is answering. `false` is the row drawn dimmed,
  * from the last list this device held of that member.
- *
- * Always `true` on this device's own rows: a device that could not reach
- * itself would not be answering this call.
  */
 reachable: boolean, };
 

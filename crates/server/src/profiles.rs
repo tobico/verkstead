@@ -280,14 +280,14 @@ fn whose(homes: &HashMap<String, store::Member>, device: &str) -> RowDevice {
         Some(member) => RowDevice {
             id: Some(member.device.clone()),
             name: member.name.clone(),
-            os: member.os.clone(),
+            os: Some(member.os.clone()),
             reachable: member.reachable,
         },
 
         None => RowDevice {
             id: Some(device.to_owned()),
             name: device.to_owned(),
-            os: String::new(),
+            os: Some(String::new()),
             reachable: false,
         },
     }
