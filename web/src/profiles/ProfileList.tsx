@@ -484,7 +484,7 @@ function ProfileCard(props: {
             <Show when={props.profile.device}>
               {(device) => (
                 <span class={styles.device}>
-                  <Icon of={osIcon(device().os)} class={styles.os} />
+                  <Icon of={osIcon(device().os ?? "")} class={styles.os} />
                   {device().name}
                 </span>
               )}

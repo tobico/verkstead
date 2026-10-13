@@ -8,7 +8,8 @@
 //!
 //! And under it the reading that mark is drawn off, for the same reason one
 //! page along: the sidebar's rows carry their own device, and the header of
-//! the pane one of them opens has to look one up.
+//! the pane one of them opens has to look one up — and leave the mark off
+//! where it is this device's own (see [`sameMark`]).
 
 import {
   faApple,
@@ -42,6 +43,19 @@ export function osIcon(os: string): IconDefinition {
   if (os.startsWith("Linux")) return faLinux;
 
   return faDesktop;
+}
+
+/// Whether two OS words are drawn with the same mark, which is what *the same
+/// OS* means beside a device's name: a mark that is the mark of the machine the
+/// browser opened says nothing, so it is left off. *Linux (WSL)* seen from
+/// *Linux* is the same, and so are two words this build has no mark for.
+///
+/// **The server's `platform::same_mark` stated a second time**, and the two
+/// must agree: the hub decides off that one whether a sidebar row carries its
+/// device's OS at all (see `RowDevice`), and the pane header decides off this
+/// one, so a row and the header it opens say the one device the one way.
+export function sameMark(one: string, other: string): boolean {
+  return osIcon(one) === osIcon(other);
 }
 
 /// The **Devices** reading: what this Verkstead *is* — the device this

@@ -1120,7 +1120,7 @@ describe("the device the compose page is drafting onto", () => {
       [...theirs.querySelectorAll("svg path")].map((drawn) =>
         drawn.getAttribute("d"),
       ),
-    ).toContain(mark(SHARED_MACHINE.os));
+    ).toContain(mark(SHARED_MACHINE.os!));
   });
 
   /// And a member's account that cannot be run from here stays on the picker

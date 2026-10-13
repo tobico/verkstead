@@ -344,9 +344,9 @@ describe("a press on a conversation that lives on another device", () => {
 /// number alone would act on whichever of the two the page found first, on the
 /// very list the press was not about.
 describe("the merged sidebar", () => {
-  /// Both devices' rows, as the hub answers them: this device's own carrying a
-  /// device block with no id, and the member's carrying its id, name and OS
-  /// word.
+  /// Both devices' rows, as the hub answers them: this device's own carrying
+  /// no device at all, and the member's carrying its id, its name and — its
+  /// mark not being this device's — its OS word.
   const MERGED: ConversationEntry[] = [
     {
       ...SIDEBAR[0]!,
@@ -360,10 +360,7 @@ describe("the merged sidebar", () => {
         reachable: true,
       },
     },
-    ...SIDEBAR.map((row) => ({
-      ...row,
-      device: { id: null, name: "the-desk", os: "Linux", reachable: true },
-    })),
+    ...SIDEBAR.map((row) => ({ ...row, device: null })),
   ];
 
   /// And the two devices as the membership says them, which is the other
@@ -594,10 +591,10 @@ describe("the merged sidebar", () => {
   /// merged sidebar whose rows did not say whose they were would be this
   /// device's work with somebody else's mixed into it.
   ///
-  /// The second line, under the branch: the mark for that device's OS, its
-  /// name, and the Repo after them. On every row there is a device on, which
-  /// in a cluster is every row — this device's own the same as a member's.
-  it("says the device and the repo under the name, on every row", async () => {
+  /// The second line, under the branch: the device's name and the Repo after
+  /// it — on a member's row. This device's own rows draw the Repo alone, the
+  /// machine the browser opened being nothing worth saying.
+  it("says another device and the repo under the name", async () => {
     theCluster();
     const { container } = mount("/");
 
@@ -607,13 +604,15 @@ describe("the merged sidebar", () => {
       drawnRows.map(
         (row) => row.querySelector(`.${sidebar.meta}`)?.textContent ?? "",
       ),
-    ).toEqual(MERGED.map((row) => `${row.device!.name}${row.repo}`));
+    ).toEqual(
+      MERGED.map((row) => `${row.device ? row.device.name : ""}${row.repo}`),
+    );
   });
 
   /// And the mark beside the name is the one that device wears wherever it is
-  /// drawn — so the member's macOS row draws the Apple mark and this device's
-  /// Linux row the Linux one, off the OS word the row itself carries.
-  it("draws each device's own mark beside its name", async () => {
+  /// drawn — so the member's macOS row draws the Apple mark, off the OS word
+  /// the row itself carries, and this device's own rows draw no device at all.
+  it("draws another device's mark beside its name", async () => {
     theCluster();
     const { container } = mount("/");
 
@@ -623,7 +622,14 @@ describe("the merged sidebar", () => {
       drawnRows.map((row) =>
         row.querySelector(`.${sidebar.device} svg path`)?.getAttribute("d"),
       ),
-    ).toEqual(MERGED.map((row) => [osIcon(row.device!.os).icon[4]].flat()[0]));
+    ).toEqual(
+      MERGED.map((row) =>
+        row.device ? [osIcon(row.device.os!).icon[4]].flat()[0] : undefined,
+      ),
+    );
+    expect(
+      drawnRows.slice(1).map((row) => row.querySelector(`.${sidebar.device}`)),
+    ).toEqual(MERGED.slice(1).map(() => null));
   });
 
   /// A mark is nothing to a screen reader, so what the card says in one is in
@@ -634,13 +640,15 @@ describe("the merged sidebar", () => {
     const { container } = mount("/");
 
     const drawnRows = await rows(container);
-    const label = drawnRows[0]!
-      .querySelector(`.${sidebar.open}`)!
-      .getAttribute("aria-label");
+    const label = (row: HTMLElement) =>
+      row.querySelector(`.${sidebar.open}`)!.getAttribute("aria-label");
 
-    expect(label).toBe(
+    expect(label(drawnRows[0]!)).toBe(
       "over-on-the-member, the-laptop, verkstead, Implementing",
     );
+
+    // And this device's own row names none, drawing none.
+    expect(label(drawnRows[1]!)).not.toContain("the-desk");
   });
 
   /// A member that has stopped answering keeps its rows, from the last list
@@ -651,7 +659,7 @@ describe("the merged sidebar", () => {
   describe("a member that has stopped answering", () => {
     const AWAY: ConversationEntry[] = MERGED.map((row) => ({
       ...row,
-      device: { ...row.device!, reachable: row.device!.id === null },
+      device: row.device && { ...row.device, reachable: false },
     }));
 
     function unreached() {
@@ -672,7 +680,7 @@ describe("the merged sidebar", () => {
 
       expect(
         drawnRows.map((row) => row.classList.contains(sidebar.unreachable!)),
-      ).toEqual(AWAY.map((row) => !row.device!.reachable));
+      ).toEqual(AWAY.map((row) => row.device?.reachable === false));
     });
 
     it("says unreachable beside the device it names", async () => {
@@ -714,20 +722,72 @@ describe("the merged sidebar", () => {
     );
   });
 
-  /// And this device's own Conversation says this device, which is the same
-  /// rule the rows are drawn under: in a cluster the header names the machine
-  /// whatever machine it is, so that one header does not read differently from
-  /// the next.
-  it("carries this device on this device's own header", async () => {
+  /// And this device's own Conversation names no device, which is the same
+  /// rule the rows are drawn under: the machine the browser opened is not
+  /// worth saying, on the row or on the header it opens.
+  it("names no device on this device's own header", async () => {
     theCluster();
     const { container } = mount(`/conversations/${SIDEBAR[0]!.id}`);
 
-    const named = await drawn(
-      container,
-      `.${shell.middlePane} .${paneHead.head} h1 .${timeline.paneDevice}`,
-    );
+    const head = await drawn(container, `.${shell.middlePane} .${paneHead.head} h1`);
+    await waitFor(() => expect(head.textContent).toContain(HERE.repo.name));
 
-    expect(named.textContent?.trim()).toBe("the-desk");
+    expect(head.querySelector(`.${timeline.paneDevice}`)).toBeNull();
+  });
+
+  /// A member wearing this device's own mark — a WSL seen from a Linux — is
+  /// named and left unmarked: the row by the server leaving its OS off, and the
+  /// header by the same rule said in `sameMark`.
+  describe("a member on this device's own mark", () => {
+    const SAME: ConversationEntry[] = MERGED.map((row) => ({
+      ...row,
+      device: row.device && { ...row.device, name: "the-wsl", os: null },
+    }));
+
+    const WSL: DevicesView = {
+      ...LINKED,
+      members: LINKED.members.map((member) => ({
+        ...member,
+        identity: { ...member.identity, name: "the-wsl", os: "Linux (WSL)" },
+      })),
+    };
+
+    function onTheSameMark() {
+      return serving(
+        whenever("/api/ui/conversations", json(SAME)),
+        whenever("/api/ui/devices", json(WSL)),
+        whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
+        whenever("/api/ui/onboarding", json(SET_UP)),
+        whenever("/api/ui/repos", json(REPOS)),
+        whenever("/api/ui/profiles", json(PROFILES)),
+        whenever(at(`/conversations/${SHARED.id}`), json(SHARED)),
+        json({ error: "nothing serves that" }, 404),
+      );
+    }
+
+    it("draws its name on the row and no mark", async () => {
+      onTheSameMark();
+      const { container } = mount("/");
+
+      const drawnRows = await rows(container);
+      const device = drawnRows[0]!.querySelector(`.${sidebar.device}`)!;
+
+      expect(device.textContent).toBe("the-wsl");
+      expect(device.querySelector("svg")).toBeNull();
+    });
+
+    it("draws its name on the header and no mark", async () => {
+      onTheSameMark();
+      const { container } = mount(on(`/conversations/${SHARED.id}`));
+
+      const named = await drawn(
+        container,
+        `.${shell.middlePane} .${paneHead.head} h1 .${timeline.paneDevice}`,
+      );
+
+      expect(named.textContent?.trim()).toBe("the-wsl");
+      expect(named.querySelector("svg")).toBeNull();
+    });
   });
 });
 

@@ -1641,7 +1641,7 @@ export function RolePicker(props: {
       // member's account is scanned for by the shape its operating system wears
       // exactly as a sidebar row of that machine's work is. Nothing at all for
       // this device's own, which is every row where there is no cluster.
-      on: row.profile.device ? osIcon(row.profile.device.os) : undefined,
+      on: row.profile.device ? osIcon(row.profile.device.os ?? "") : undefined,
     })),
   ];
 
