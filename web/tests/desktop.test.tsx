@@ -36,7 +36,7 @@ import { MemoryRouter, Route, createMemoryHistory } from "@solidjs/router";
 import { fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
 import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
 import type { JSX } from "solid-js";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { type Mock, afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
   ConversationEntry,
@@ -55,6 +55,7 @@ import {
   POSITIONS,
   type Bridge,
   type DesktopSettings,
+  type Head,
   type Registration,
 } from "../src/settings/bridge";
 import {
@@ -97,12 +98,12 @@ afterEach(() => {
 /// the shape is the shape, and a stub short of it is not the bridge the preload
 /// exposes.
 type Asked = {
-  settings: ReturnType<typeof vi.fn>;
-  set: ReturnType<typeof vi.fn>;
-  logs: ReturnType<typeof vi.fn>;
-  startup: ReturnType<typeof vi.fn>;
-  register: ReturnType<typeof vi.fn>;
-  head: ReturnType<typeof vi.fn>;
+  settings: Mock<() => Promise<DesktopSettings>>;
+  set: Mock<(changed: Partial<DesktopSettings>) => Promise<DesktopSettings>>;
+  logs: Mock<() => Promise<void>>;
+  startup: Mock<() => Promise<Registration>>;
+  register: Mock<(on: boolean) => Promise<Registration>>;
+  head: Mock<(worn: Head) => void>;
 };
 
 /// The app's own window, stood in for.
