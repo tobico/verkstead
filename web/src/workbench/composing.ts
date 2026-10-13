@@ -565,7 +565,7 @@ export async function create(
     // independently and the server takes the target off either, and which
     // Processes *wait* on one is decided over there.
     if (state.target !== "") {
-      const outcome = await nameTarget(id, state.target);
+      const outcome = await nameTarget(to, id, state.target);
       said(
         outcome === "Recorded",
         `The target could not be named: ${TARGET_REFUSAL[outcome]}`,
@@ -590,7 +590,7 @@ export async function create(
   // does, and the server's own reading of a Conversation with no row of its own
   // is what stands.
   if (state.process !== null) {
-    const outcome = await pickProcess(id, state.process);
+    const outcome = await pickProcess(to, id, state.process);
     said(
       outcome === "Picked",
       `The process could not be picked: ${PROCESS_REFUSAL[outcome]}`,
@@ -950,6 +950,27 @@ export async function moveTo(
     said(
       outcome === "Recorded",
       `The base branch could not be recorded: ${BASE_REFUSAL[outcome]}`,
+    );
+  }
+
+  // And the target and the Process, which are the human's words rather than
+  // ids — a URL, a `#number` or a branch, and one of a fixed list — so they mean
+  // the same over there. Develop is what the new Conversation already arrived
+  // under, and no target is what it already has, so either left alone sends
+  // nothing, as the compose page's do.
+  if (draft.target !== null && draft.target !== "") {
+    const outcome = await nameTarget(to.reaching, id, draft.target);
+    said(
+      outcome === "Recorded",
+      `The target could not be named: ${TARGET_REFUSAL[outcome]}`,
+    );
+  }
+
+  if (draft.process !== "Develop") {
+    const outcome = await pickProcess(to.reaching, id, draft.process);
+    said(
+      outcome === "Picked",
+      `The process could not be picked: ${PROCESS_REFUSAL[outcome]}`,
     );
   }
 

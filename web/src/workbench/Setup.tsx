@@ -1130,24 +1130,29 @@ export function RepoChoice(props: {
 /// take-up made it rather than anything a dropdown here chose.
 function ProcessOption(props: { conversation: ConversationView }): JSX.Element {
   const queries = useQueryClient();
+  const device = useDevice();
 
   const [refused, setRefused] = createSignal<ProcessPicked | null>(null);
 
   const say = useMutation(() => ({
     mutationFn: (picked: Process) =>
-      pickProcess(props.conversation.id, picked),
+      pickProcess(device(), props.conversation.id, picked),
     onSuccess: (outcome: ProcessPicked) => {
       if (outcome !== "Picked") {
         setRefused(outcome);
         // Refused about the Conversation the pick was about: reading it again
         // is both the correction — the control goes back to the Process the
         // record says — and the explanation.
-        void queries.invalidateQueries({ queryKey: ["conversation"] });
+        void queries.invalidateQueries({
+          queryKey: keyOf(device(), "conversation"),
+        });
         return;
       }
 
       setRefused(null);
-      void queries.invalidateQueries({ queryKey: ["conversation"] });
+      void queries.invalidateQueries({
+        queryKey: keyOf(device(), "conversation"),
+      });
     },
   }));
 
@@ -1858,6 +1863,7 @@ export const TARGET = "Pull request or branch";
 /// the composer and it is the one that starts the work.
 function TargetName(props: { conversation: ConversationView }): JSX.Element {
   const queries = useQueryClient();
+  const device = useDevice();
 
   // What has been typed, or nothing if nothing has been on this device: the
   // field follows the record until the first keystroke and follows itself
@@ -1881,7 +1887,8 @@ function TargetName(props: { conversation: ConversationView }): JSX.Element {
   const settled = () => refused() !== null;
 
   const name = useMutation(() => ({
-    mutationFn: (target: string) => nameTarget(props.conversation.id, target),
+    mutationFn: (target: string) =>
+      nameTarget(device(), props.conversation.id, target),
     onSuccess: (outcome: TargetRecorded) => {
       if (outcome !== "Recorded") {
         setRefused(outcome);
@@ -1891,7 +1898,9 @@ function TargetName(props: { conversation: ConversationView }): JSX.Element {
       setRefused(null);
       // The readiness verdict under the box waits on this field, and so does
       // the base picker beside it: both are read again every time it moves.
-      void queries.invalidateQueries({ queryKey: ["conversation"] });
+      void queries.invalidateQueries({
+        queryKey: keyOf(device(), "conversation"),
+      });
     },
     onSettled: () => keeper.done(),
   }));

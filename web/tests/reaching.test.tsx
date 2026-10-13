@@ -44,6 +44,7 @@ import {
   retrying,
 } from "../src/api/client";
 import { osIcon } from "../src/devices";
+import { PROCESS } from "../src/workbench/processes";
 import { Reaching, rowKey } from "../src/reaching";
 import sheet from "../src/set/Sheet.module.css";
 import { Asked } from "../src/workbench/Asked";
@@ -66,7 +67,7 @@ import {
   drawn,
   mount,
 } from "./bench";
-import { offered, press } from "./pickers";
+import { offered, pick, picker, press } from "./pickers";
 import {
   askedFor,
   json,
@@ -332,6 +333,77 @@ describe("a press on a conversation that lives on another device", () => {
       ).toHaveLength(1),
     );
     expect(askedFor(fetching, "/api/ui/repos")).toBe(0);
+  });
+});
+
+/// The two setup controls that once went to this device whatever page they
+/// stood on: the Process picker and the Target field. A draft's id is the
+/// member's, so a pick sent here landed on whichever draft of this device's
+/// shared the number — or on none, and said the conversation was gone.
+describe("the process and the target of a draft on another device", () => {
+  /// Every write the page made to this device's own Conversations, which a
+  /// member's pane has no business making.
+  const localWrites = (fetching: ReturnType<typeof serving>) =>
+    fetching.mock.calls
+      .filter(
+        ([asked, init]) =>
+          String(asked).startsWith("/api/ui/conversations") &&
+          init?.method === "POST",
+      )
+      .map(([asked]) => String(asked));
+
+  const written = (fetching: ReturnType<typeof serving>, path: string) =>
+    fetching.mock.calls
+      .filter(([asked, init]) => String(asked) === path && init?.method === "POST")
+      .map(([, init]) => JSON.parse(String(init?.body)) as unknown);
+
+  it("picks the process on the member", async () => {
+    const fetching = theMember(
+      whenever(at(`/conversations/${OPEN.id}/process`), json("Picked"), "POST"),
+      whenever(at(`/conversations/${OPEN.id}/seen`), json({}), "POST"),
+    );
+    mount(on(`/conversations/${OPEN.id}`));
+
+    await waitFor(() => picker("Process"));
+    pick("Process", PROCESS.Tinker);
+
+    await waitFor(() =>
+      expect(written(fetching, at(`/conversations/${OPEN.id}/process`))).toEqual(
+        [{ process: "Tinker" }],
+      ),
+    );
+    expect(localWrites(fetching)).toEqual([]);
+  });
+
+  it("names the target on the member", async () => {
+    const fetching = theMember(
+      whenever(
+        at(`/conversations/${OPEN.id}`),
+        json({ ...OPEN, process: "Review", target: null }),
+      ),
+      whenever(at(`/conversations/${OPEN.id}/target`), json("Recorded"), "POST"),
+      whenever(at(`/conversations/${OPEN.id}/seen`), json({}), "POST"),
+      ...OPEN.companions.map((companion) =>
+        whenever(at(`/repos/${companion.repo.id}/branches`), json(BRANCHES)),
+      ),
+    );
+    const { container } = mount(on(`/conversations/${OPEN.id}`));
+
+    fireEvent.click(
+      await drawn<HTMLButtonElement>(container, `.${setup.repoOption} > button`),
+    );
+    const field = (await waitFor(() =>
+      screen.getByLabelText("Target"),
+    )) as HTMLInputElement;
+    fireEvent.input(field, { target: { value: "#41" } });
+    fireEvent.blur(field);
+
+    await waitFor(() =>
+      expect(written(fetching, at(`/conversations/${OPEN.id}/target`))).toEqual(
+        [{ target: "#41" }],
+      ),
+    );
+    expect(localWrites(fetching)).toEqual([]);
   });
 });
 
