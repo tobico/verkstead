@@ -3104,7 +3104,10 @@ impl Sessions {
                     nudges,
                     printing,
                     &mut reading,
-                    &format!("Verkstead could not start this session: {error}"),
+                    &format!(
+                        "Verkstead could not start this session: {}",
+                        command.not_started(&error, Some(&sandbox::machine_path(Platform::HERE))),
+                    ),
                 )
                 .await;
 
