@@ -3106,7 +3106,7 @@ impl Sessions {
                     &mut reading,
                     &format!(
                         "Verkstead could not start this session: {}",
-                        command.not_started(&error, std::env::var_os("PATH").as_deref()),
+                        command.not_started(&error, Some(&sandbox::machine_path(Platform::HERE))),
                     ),
                 )
                 .await;

@@ -193,8 +193,9 @@ impl Rendering {
 
     /// What a start of this that failed with `error` is said as: the program,
     /// the directory it was to start in where it names one, and the `PATH` a
-    /// bare name was looked for on — `path`, the server's own, since the
-    /// rendering clears the one the process is handed.
+    /// bare name was looked for on — `path`, the machine's as
+    /// [`super::machine_path`] composes it, since that is what the conversion
+    /// to a command resolves a bare name on.
     ///
     /// **Because the error alone says none of it.** `No such file or directory`
     /// is the same words for a wrapper missing from the `PATH` and for a
@@ -252,11 +253,11 @@ impl TryFrom<&Rendering> for Command {
             )));
         }
 
-        // The file rather than the name, found on the server's own `PATH`
-        // before the one the process is handed is cleared — see [`resolved`].
+        // The file rather than the name, found on the machine's `PATH` before
+        // the one the process is handed is cleared — see [`resolved`].
         let mut command = Command::new(resolved(
             rendering.program(),
-            std::env::var_os("PATH").as_deref(),
+            Some(&super::machine_path(Platform::HERE)),
         ));
 
         command.args(rendering.argv()).unseen();
@@ -277,7 +278,7 @@ impl TryFrom<&Rendering> for Command {
     }
 }
 
-/// `program` as the file the server's `path` finds for it on the two Unixes,
+/// `program` as the file the machine's `path` finds for it on the two Unixes,
 /// and as it was written where it names a path already, where nothing on the
 /// `PATH` answers to it, or on Windows.
 ///
@@ -289,7 +290,15 @@ impl TryFrom<&Rendering> for Command {
 /// whose `bwrap` is in `/run/current-system/sw/bin` — started no session at
 /// all, saying only `No such file or directory`. Found here, every build
 /// starts the program the onboarding wizard found when it said `bwrap` was
-/// there, since that is the `PATH` it looked on.
+/// there.
+///
+/// **On [`super::machine_path`] rather than the server's own `PATH`**, because
+/// that is the one the wizard's sandbox row looks on: the server's entries with
+/// the platform's floor under them, `/run/current-system/sw/bin` among it. A
+/// server started with a `PATH` of a couple of entries would otherwise have a
+/// row saying `bwrap` was there and every session failing to find it. A name
+/// that composing finds nowhere is started as written, so a glibc build still
+/// looks on the server's own as it always did.
 ///
 /// Windows is left alone: the rendering that runs a program there has already
 /// resolved it by that platform's own rules — see [`super::open::found`].
@@ -309,8 +318,8 @@ fn resolved(program: &OsStr, path: Option<&OsStr>) -> OsString {
 mod tests {
     use super::*;
 
-    /// A bare name is looked for on the `PATH` the server was handed, and
-    /// what is started is the file found there. The environment the process
+    /// A bare name is looked for on the `PATH` it is handed — the machine's,
+    /// in the conversion — and what is started is the file found there. The environment the process
     /// is handed is cleared, and a static musl build looks for a bare name
     /// on *that* rather than the server's: on NixOS, where `bwrap` is in
     /// `/run/current-system/sw/bin` and nowhere musl looks without a `PATH`,
