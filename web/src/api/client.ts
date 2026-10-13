@@ -1286,12 +1286,13 @@ export function switchRepo(
 /// keep — a picker offering only the landed ones is a courtesy, and this route
 /// is reachable without one — so a refusal is another outcome to read here too.
 export function pickProcess(
+  device: Device,
   id: number,
   process: Process,
 ): Promise<ProcessPicked> {
-  return post<ProcessPicked>(`/api/ui/conversations/${id}/process`, {
-    process,
-  });
+  return post<ProcessPicked>(
+    on(device, `/api/ui/conversations/${id}/process`), { process },
+  );
 }
 
 /// Name the branch the work will be done on. Whether git would take the name is
@@ -1314,12 +1315,13 @@ export function renameBranch(
 /// request URL is not. Which of the three this holds is decided at Start, so
 /// nothing here refuses it for its shape.
 export function nameTarget(
+  device: Device,
   id: number,
   target: string,
 ): Promise<TargetRecorded> {
-  return post<TargetRecorded>(`/api/ui/conversations/${id}/target`, {
-    target,
-  });
+  return post<TargetRecorded>(
+    on(device, `/api/ui/conversations/${id}/target`), { target },
+  );
 }
 
 /// Choose the branch the work comes off, or pass `null` to put the Conversation

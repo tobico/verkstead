@@ -20,7 +20,7 @@ import {
   waitFor,
   within,
 } from "@solidjs/testing-library";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type {
   AbandonedRepo,
@@ -31,6 +31,7 @@ import type {
   DevicesView,
   DirectoryListing,
   Process,
+  ProcessPicked,
   ProfileEntry,
   RepoEntry,
   RepoPairingsView,
@@ -148,6 +149,23 @@ function writes(fetching: ReturnType<typeof serving>, path: string): number {
   return fetching.mock.calls.filter(
     ([asked, init]) => String(asked) === path && init?.method === "POST",
   ).length;
+}
+
+/// Every write the page made to this device's own Conversations, which a page
+/// working on a member should never make: the member's ids name nothing here.
+///
+/// Less the read receipt, which is a page of this device's being looked at
+/// rather than anything a start wrote — a test that opens one here afterwards
+/// sends it, and so can the page of the test before, landing late.
+function localWrites(fetching: ReturnType<typeof serving>): string[] {
+  return fetching.mock.calls
+    .filter(
+      ([asked, init]) =>
+        String(asked).startsWith("/api/ui/conversations") &&
+        !String(asked).endsWith("/seen") &&
+        init?.method === "POST",
+    )
+    .map(([asked]) => String(asked));
 }
 
 /// Where among everything the page put on the wire its first POST to `path`
@@ -351,7 +369,7 @@ function creating(...answers: Parameters<typeof serving>) {
 /// along: the press carries a grilling, and the roles it needs answered are
 /// prefilled from the memory the *picked* device holds.
 function creatingOnTheMember(...answers: Parameters<typeof serving>) {
-  return theCluster(
+  return (startingThere = theCluster(
     ...THEIRS.map((repo) =>
       whenever(
         at(`/repos/${repo.id}/pairings`),
@@ -368,8 +386,13 @@ function creatingOnTheMember(...answers: Parameters<typeof serving>) {
     // member's Conversation.
     whenever(at(`/conversations/${OPEN.id}`), json(OPEN)),
     ...answers,
-  );
+  ));
 }
+
+/// What the test running now started on the member through, which is what is
+/// held to having written nothing here once it is over — see the `afterEach` in
+/// "starting the work on the picked device".
+let startingThere: ReturnType<typeof serving> | null = null;
 
 /// Where one file goes up on the member, which is [`upload`] one machine along.
 const uploadedThere = (name: string) =>
@@ -2596,6 +2619,19 @@ describe("starting the work on the picked device", () => {
     leaveRefusals(null, 0, [], null);
   });
 
+  // And nothing of a start on the member on this device, whichever fields a
+  // test fills. Field by field is how two of them once slipped through to this
+  // device, the member's id landing on whatever Conversation here happened to
+  // share the number — so every start made through [`creatingOnTheMember`] is
+  // held to it, and the next field is caught by whichever test is written for it.
+  afterEach(() => {
+    const fetching = startingThere;
+    startingThere = null;
+    if (fetching !== null) {
+      expect(localWrites(fetching)).toEqual([]);
+    }
+  });
+
   /// Every row of the sidebar as it reads aloud, which is where the device a
   /// Conversation is on is said: the merged list carries the name on the row.
   const listed = (container: ParentNode): string[] =>
@@ -2691,6 +2727,78 @@ describe("starting the work on the picked device", () => {
       }),
     );
     expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/branch`)).toBe(0);
+  });
+
+  /// The Process and the target go the same way, which is the fault the first
+  /// press on a member once hit: both were posted here, under the member's id,
+  /// and this device answered for a Conversation it does not have.
+  it("picks the process on the member, and kicks off on the first press", async () => {
+    const fetching = creatingOnTheMember(
+      whenever(at(`/conversations/${OPEN.id}/process`), json("Picked"), "POST"),
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/process`,
+        json("NoSuchConversation" satisfies ProcessPicked),
+        "POST",
+      ),
+    );
+    const { container } = mount("/compose");
+
+    await draftingOnTheMember(container);
+    fireEvent.input(await composing(container), {
+      target: { value: "Make the widget" },
+    });
+    await pickRepoThere(container, THEIRS[1]!.id);
+    pick("Process", PROCESS.Tinker);
+    await rolesAnswered();
+
+    fireEvent.click(screen.getByRole("button", { name: "Start work" }));
+
+    await waitFor(() =>
+      expect(sent(fetching, at(`/conversations/${OPEN.id}/process`))).toEqual({
+        process: "Tinker",
+      }),
+    );
+    // The first press is the one that starts it: nothing refused, so nothing
+    // stops the kickoff.
+    await waitFor(() =>
+      expect(writes(fetching, at(`/conversations/${OPEN.id}/grill`))).toBe(1),
+    );
+    expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/process`)).toBe(0);
+    expect(screen.queryByText(/The process could not be picked/)).toBeNull();
+  });
+
+  it("names the target on the member", async () => {
+    const fetching = creatingOnTheMember(
+      whenever(at(`/conversations/${OPEN.id}/process`), json("Picked"), "POST"),
+      whenever(at(`/conversations/${OPEN.id}/target`), json("Recorded"), "POST"),
+      whenever(
+        at(`/conversations/${OPEN.id}/take-up`),
+        json("TakenUp" satisfies TakenUp),
+        "POST",
+      ),
+    );
+    const { container } = mount("/compose");
+
+    await draftingOnTheMember(container);
+    fireEvent.input(await composing(container), {
+      target: { value: "Wrap the limiter up." },
+    });
+    await pickRepoThere(container, THEIRS[1]!.id);
+    pick("Process", PROCESS.Review);
+    await openRepo(container);
+    fireEvent.input(
+      await waitFor(() => screen.getByLabelText("Target")),
+      { target: { value: "#41" } },
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Save as draft" }));
+
+    await waitFor(() =>
+      expect(sent(fetching, at(`/conversations/${OPEN.id}/target`))).toEqual({
+        target: "#41",
+      }),
+    );
+    expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/target`)).toBe(0);
   });
 
   /// A `File` is a handle this page is holding rather than anything a machine has
@@ -3112,6 +3220,55 @@ describe("moving a saved draft to another device", () => {
         writes(fetching, at(`/conversations/${MOVED}/attachments/${attachment.name}`)),
       ).toBe(1);
     }
+  });
+
+  /// And its Process and its target, which are the human's words rather than
+  /// one machine's ids: a draft that arrived as a Develop pointed at nothing
+  /// would be a different piece of work from the one that was moved.
+  it("carries the process and the target", async () => {
+    const fetching = moving(
+      whenever(
+        `/api/ui/conversations/${OPEN.id}`,
+        json({ ...OPEN, process: "Review", target: "#41" }),
+      ),
+      whenever(at(`/conversations/${MOVED}/process`), json("Picked"), "POST"),
+      whenever(at(`/conversations/${MOVED}/target`), json("Recorded"), "POST"),
+    );
+    const { container } = await draft();
+
+    await moveTo(container);
+    await move(THEIRS[1]!);
+
+    await waitFor(() =>
+      expect(sent(fetching, at(`/conversations/${MOVED}/process`))).toEqual({
+        process: "Review",
+      }),
+    );
+    expect(sent(fetching, at(`/conversations/${MOVED}/target`))).toEqual({
+      target: "#41",
+    });
+
+    // Neither of them here, where the member's number names nothing of its.
+    expect(writes(fetching, `/api/ui/conversations/${MOVED}/process`)).toBe(0);
+    expect(writes(fetching, `/api/ui/conversations/${MOVED}/target`)).toBe(0);
+
+    // And, nothing refused, the draft it came off is closed.
+    await waitFor(() => expect(writes(fetching, moved)).toBe(1));
+  });
+
+  /// A Develop pointed at nothing is what the new Conversation already arrived
+  /// as, so there is nothing of either to send — as a compose page left on
+  /// Develop sends nothing.
+  it("sends no process and no target for a develop draft pointed at nothing", async () => {
+    const fetching = moving();
+    const { container } = await draft();
+
+    await moveTo(container);
+    await move(THEIRS[1]!);
+
+    await waitFor(() => expect(writes(fetching, moved)).toBe(1));
+    expect(writes(fetching, at(`/conversations/${MOVED}/process`))).toBe(0);
+    expect(writes(fetching, at(`/conversations/${MOVED}/target`))).toBe(0);
   });
 
   /// And its MCP servers, by name: a name means the declaration of that name
