@@ -20,7 +20,7 @@ import {
   waitFor,
   within,
 } from "@solidjs/testing-library";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type {
   AbandonedRepo,
@@ -153,11 +153,16 @@ function writes(fetching: ReturnType<typeof serving>, path: string): number {
 
 /// Every write the page made to this device's own Conversations, which a page
 /// working on a member should never make: the member's ids name nothing here.
+///
+/// Less the read receipt, which is a page of this device's being looked at
+/// rather than anything a start wrote — a test that opens one here afterwards
+/// sends it, and so can the page of the test before, landing late.
 function localWrites(fetching: ReturnType<typeof serving>): string[] {
   return fetching.mock.calls
     .filter(
       ([asked, init]) =>
         String(asked).startsWith("/api/ui/conversations") &&
+        !String(asked).endsWith("/seen") &&
         init?.method === "POST",
     )
     .map(([asked]) => String(asked));
@@ -364,7 +369,7 @@ function creating(...answers: Parameters<typeof serving>) {
 /// along: the press carries a grilling, and the roles it needs answered are
 /// prefilled from the memory the *picked* device holds.
 function creatingOnTheMember(...answers: Parameters<typeof serving>) {
-  return theCluster(
+  return (startingThere = theCluster(
     ...THEIRS.map((repo) =>
       whenever(
         at(`/repos/${repo.id}/pairings`),
@@ -381,8 +386,13 @@ function creatingOnTheMember(...answers: Parameters<typeof serving>) {
     // member's Conversation.
     whenever(at(`/conversations/${OPEN.id}`), json(OPEN)),
     ...answers,
-  );
+  ));
 }
+
+/// What the test running now started on the member through, which is what is
+/// held to having written nothing here once it is over — see the `afterEach` in
+/// "starting the work on the picked device".
+let startingThere: ReturnType<typeof serving> | null = null;
 
 /// Where one file goes up on the member, which is [`upload`] one machine along.
 const uploadedThere = (name: string) =>
@@ -2609,6 +2619,19 @@ describe("starting the work on the picked device", () => {
     leaveRefusals(null, 0, [], null);
   });
 
+  // And nothing of a start on the member on this device, whichever fields a
+  // test fills. Field by field is how two of them once slipped through to this
+  // device, the member's id landing on whatever Conversation here happened to
+  // share the number — so every start made through [`creatingOnTheMember`] is
+  // held to it, and the next field is caught by whichever test is written for it.
+  afterEach(() => {
+    const fetching = startingThere;
+    startingThere = null;
+    if (fetching !== null) {
+      expect(localWrites(fetching)).toEqual([]);
+    }
+  });
+
   /// Every row of the sidebar as it reads aloud, which is where the device a
   /// Conversation is on is said: the merged list carries the name on the row.
   const listed = (container: ParentNode): string[] =>
@@ -2659,11 +2682,6 @@ describe("starting the work on the picked device", () => {
           .startsWith(`/devices/${MEMBER.device}/conversations/${OPEN.id}`),
       ).toBe(true),
     );
-
-    // Nor anything else of it. Field by field is how two of them once slipped
-    // through to this device, the member's id landing on whatever Conversation
-    // here happened to share the number — so the next field is caught here too.
-    expect(localWrites(fetching)).toEqual([]);
 
     // What was being composed is on that machine by now, so this browser holds
     // none of it — and goes on drafting onto the member, the pick outliving the
@@ -2746,7 +2764,6 @@ describe("starting the work on the picked device", () => {
       expect(writes(fetching, at(`/conversations/${OPEN.id}/grill`))).toBe(1),
     );
     expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/process`)).toBe(0);
-    expect(localWrites(fetching)).toEqual([]);
     expect(screen.queryByText(/The process could not be picked/)).toBeNull();
   });
 
@@ -2782,7 +2799,6 @@ describe("starting the work on the picked device", () => {
       }),
     );
     expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/target`)).toBe(0);
-    expect(localWrites(fetching)).toEqual([]);
   });
 
   /// A `File` is a handle this page is holding rather than anything a machine has
