@@ -754,16 +754,17 @@ impl Devices {
     /// And what the machine it is on is called, read at the moment of asking —
     /// see [`reading::Reading::name`].
     ///
-    /// Beside the id because a sidebar row says both: the merged list carries
-    /// the name and the OS word of every device it has rows from, this one
-    /// included, so that nothing in the viewer has to join a row against the
-    /// Devices section to draw it (ADR-0020, *The opened device relays*).
+    /// Beside the id because a transfer names this device by both, the way a
+    /// member's sidebar row says its device by name and OS word (ADR-0020,
+    /// *The opened device relays*).
     pub(crate) fn name(&self) -> String {
         self.reading.name()
     }
 
-    /// And the word for its operating system, which is what draws the mark
-    /// beside that name — see [`reading::Reading::os`].
+    /// And the word for its operating system — see [`reading::Reading::os`].
+    /// The merged list compares a member's against it, leaving the member's
+    /// mark off a row where the two are the same (see
+    /// [`crate::platform::same_mark`]).
     pub(crate) fn os(&self) -> String {
         self.reading.os()
     }
