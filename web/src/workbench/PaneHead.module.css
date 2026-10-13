@@ -55,13 +55,20 @@
    The six above are the chrome's — see `Panes.module.css` — so the head gives
    up the rem it hangs into above everywhere else, and keeps only its six below.
 
+   Top and bottom, and never the shorthand: the sides of a head are the frame's,
+   which pads the head at an edge of the window clear of the window's controls
+   (`.paneHead` in `Panes.module.css`). This selector outranks that one, so a
+   `padding` here wrote nought over both insets and put every head's controls —
+   the details pane's Transcript and Screen switch first — under the window's.
+
    Nothing of it reaches a browser or a phone: `data-app` is on the root only
    where the app's bridge is (see `mark` in `head.ts`), and the head they are
    served is the one they have always had. */
 :root[data-app] .head {
   gap: 0.5rem 0.8rem;
   margin: 0;
-  padding: 0 0 0.375rem;
+  padding-top: 0;
+  padding-bottom: 0.375rem;
   --icon-pad: 0.5rem;
   --icon-size: 1rem;
 }
