@@ -680,6 +680,20 @@ describe("which head the frame keeps clear", () => {
     );
   });
 
+  /// And nothing in the head's own sheet that outranks that rule may say a word
+  /// about the head's sides. The app's header bar is written as
+  /// `:root[data-app] .head`, which is three selectors against the frame's two,
+  /// so a `padding` shorthand there wins over the inset whatever order the sheets
+  /// load in — and every head in the app stood under the window's controls, the
+  /// details pane's Transcript and Screen switch first of all.
+  it("leaves the head's sides to the frame inside the app", () => {
+    const opened = heads.indexOf(":root[data-app] .head {");
+    const rule = heads.slice(opened, heads.indexOf("}", opened));
+
+    expect(opened).not.toBe(-1);
+    expect(rule).not.toMatch(/\bpadding(-left|-right|-inline[\w-]*)?\s*:/);
+  });
+
   /// The narrow window first, as everything in that sheet is: one pane is the
   /// whole window, so the head in it stands at both edges and both insets are
   /// every head's.

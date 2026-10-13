@@ -31905,6 +31905,29 @@ async fn picked_through_to_the_task(fixture: &Grilling) -> (i64, i64) {
     assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
     fixture.asked_nothing();
 
+    // And take the Response the way the grilling's own wait would have. The ask
+    // above is a blocking one with no CLI behind it, so left undelivered it is a
+    // wait the server takes for killed: a minute on, the nudge types its "I've
+    // answered" line at whatever session the Conversation has by then — the
+    // task session every caller is watching, on a runner slow enough to still
+    // be in it.
+    let (status, body) = fetch(
+        &fixture.app,
+        Request::builder()
+            .uri(format!(
+                "/conversations/{}/api/v1/sets/{set}/response?hold=0",
+                fixture.id
+            ))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "the proposal's Response is taken: {body}"
+    );
+
     let task = the_task_session(fixture, grilled).await;
 
     (grilled, task)
