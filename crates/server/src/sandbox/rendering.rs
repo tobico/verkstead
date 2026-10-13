@@ -43,6 +43,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use super::account::Logon;
+use crate::platform::Platform;
 use crate::unseen::Unseen;
 
 /// One process, as a rendering left it.
@@ -251,7 +252,12 @@ impl TryFrom<&Rendering> for Command {
             )));
         }
 
-        let mut command = Command::new(rendering.program());
+        // The file rather than the name, found on the server's own `PATH`
+        // before the one the process is handed is cleared — see [`resolved`].
+        let mut command = Command::new(resolved(
+            rendering.program(),
+            std::env::var_os("PATH").as_deref(),
+        ));
 
         command.args(rendering.argv()).unseen();
 
@@ -271,9 +277,102 @@ impl TryFrom<&Rendering> for Command {
     }
 }
 
+/// `program` as the file the server's `path` finds for it on the two Unixes,
+/// and as it was written where it names a path already, where nothing on the
+/// `PATH` answers to it, or on Windows.
+///
+/// **Because which `PATH` a bare name is looked for on is the C library's to
+/// decide**, once the environment the process is handed has been cleared. A
+/// glibc build looks on the server's own and finds `bwrap` wherever the human
+/// installed it; the static musl build the packed app carries looks on the
+/// cleared one, falls back to `/usr/local/bin:/bin:/usr/bin`, and on NixOS —
+/// whose `bwrap` is in `/run/current-system/sw/bin` — started no session at
+/// all, saying only `No such file or directory`. Found here, every build
+/// starts the program the onboarding wizard found when it said `bwrap` was
+/// there, since that is the `PATH` it looked on.
+///
+/// Windows is left alone: the rendering that runs a program there has already
+/// resolved it by that platform's own rules — see [`super::open::found`].
+fn resolved(program: &OsStr, path: Option<&OsStr>) -> OsString {
+    let bare = Path::new(program).components().count() == 1;
+
+    match (Platform::HERE, program.to_str()) {
+        (Platform::Linux | Platform::MacOs, Some(name)) if bare => {
+            super::on_the_path(Platform::HERE, name, path, None)
+                .map_or_else(|| program.to_owned(), PathBuf::into_os_string)
+        }
+        _ => program.to_owned(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A bare name is looked for on the `PATH` the server was handed, and
+    /// what is started is the file found there. The environment the process
+    /// is handed is cleared, and a static musl build looks for a bare name
+    /// on *that* rather than the server's: on NixOS, where `bwrap` is in
+    /// `/run/current-system/sw/bin` and nowhere musl looks without a `PATH`,
+    /// every session the packed app started failed with `No such file or
+    /// directory`, while a glibc dev build of the same code found it.
+    #[cfg(unix)]
+    #[test]
+    fn a_bare_name_is_started_as_the_file_the_servers_path_finds() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().expect("a temporary directory");
+        let program = dir.path().join("a-wrapper");
+        std::fs::write(&program, "#!/bin/sh\n").expect("the program written");
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755))
+            .expect("the program made runnable");
+
+        let mut path = OsString::from("/no/such/directory:");
+        path.push(dir.path());
+
+        assert_eq!(
+            resolved(OsStr::new("a-wrapper"), Some(&path)),
+            program.as_os_str(),
+        );
+    }
+
+    /// And what nothing on that `PATH` answers to, or what is named by its
+    /// path already, is started as it was written: a spawn that then fails
+    /// says which program, which is what [`Rendering::not_started`] is for.
+    #[cfg(unix)]
+    #[test]
+    fn a_name_nothing_finds_or_a_path_is_started_as_written() {
+        let dir = tempfile::tempdir().expect("a temporary directory");
+
+        assert_eq!(
+            resolved(OsStr::new("not-anywhere"), Some(dir.path().as_os_str())),
+            "not-anywhere",
+        );
+        assert_eq!(resolved(OsStr::new("not-anywhere"), None), "not-anywhere");
+        assert_eq!(
+            resolved(
+                OsStr::new("/usr/bin/sandbox-exec"),
+                Some(dir.path().as_os_str())
+            ),
+            "/usr/bin/sandbox-exec",
+        );
+    }
+
+    /// And the conversion itself does it, which is the one way every process
+    /// on the two Unixes is started — a session, a terminal's shell and the
+    /// compile server alike.
+    #[cfg(unix)]
+    #[test]
+    fn a_command_starts_the_file_rather_than_the_name() {
+        let command = Command::try_from(&Rendering::running("sh")).expect("a command");
+
+        assert!(
+            Path::new(command.get_program()).is_absolute(),
+            "sh is on the PATH the suite runs with, so the command should start the file \
+             found there, and it starts {:?}",
+            command.get_program(),
+        );
+    }
 
     /// What a spawn that failed is said as names what was started and where,
     /// because the error alone does not: `No such file or directory` is the
@@ -316,12 +415,12 @@ mod tests {
     /// a wrapper to hide behind.
     #[test]
     fn a_rendering_as_nobody_in_particular_is_the_command_it_describes() {
-        let mut rendering = Rendering::running("echo");
+        let mut rendering = Rendering::running("/bin/echo");
         rendering.arg("hello").set("HOME", "/nowhere");
 
         let command = Command::try_from(&rendering).expect("a rendering naming no account");
 
-        assert_eq!(command.get_program(), "echo");
+        assert_eq!(command.get_program(), "/bin/echo");
         assert_eq!(command.get_args().collect::<Vec<_>>(), ["hello"]);
     }
 
