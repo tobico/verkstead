@@ -922,7 +922,8 @@ pub(crate) async fn open(state: &AppState, conversation_id: i64) -> anyhow::Resu
             tracing::error!(
                 error = ?error,
                 conversation_id,
-                "a terminal's shell could not be started"
+                "a terminal's shell could not be started: {}",
+                command.not_started(&error, std::env::var_os("PATH").as_deref()),
             );
             return Ok(TerminalOpened::Refused);
         }

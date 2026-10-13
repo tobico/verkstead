@@ -189,6 +189,33 @@ impl Rendering {
     pub fn launcher(&self) -> Option<&Path> {
         self.launched_by.as_deref()
     }
+
+    /// What a start of this that failed with `error` is said as: the program,
+    /// the directory it was to start in where it names one, and the `PATH` a
+    /// bare name was looked for on — `path`, the server's own, since the
+    /// rendering clears the one the process is handed.
+    ///
+    /// **Because the error alone says none of it.** `No such file or directory`
+    /// is the same words for a wrapper missing from the `PATH` and for a
+    /// directory to start in that is not there, and a Notice that says only
+    /// that is one nobody can act on.
+    pub fn not_started(&self, error: &std::io::Error, path: Option<&OsStr>) -> String {
+        let program = Path::new(&self.program);
+        let mut said = format!("could not start {}", program.display());
+
+        if let Some(chdir) = &self.chdir {
+            said.push_str(&format!(" in {}", chdir.display()));
+        }
+
+        if program.components().count() == 1 {
+            let path = path.map_or_else(|| "nothing".into(), OsStr::to_string_lossy);
+            said.push_str(&format!(", looked for on a PATH of {path}"));
+        }
+
+        said.push_str(&format!(": {error}"));
+
+        said
+    }
 }
 
 /// And the same thing as the standard library starts one, for everything that
@@ -247,6 +274,43 @@ impl TryFrom<&Rendering> for Command {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// What a spawn that failed is said as names what was started and where,
+    /// because the error alone does not: `No such file or directory` is the
+    /// same words for a wrapper missing from the `PATH` and for a directory to
+    /// start in that is not there.
+    #[test]
+    fn a_failed_start_names_the_program_and_the_path_it_was_looked_for_on() {
+        let rendering = Rendering::running("no-such-program-anywhere");
+        let error = std::io::Error::from(std::io::ErrorKind::NotFound);
+
+        let said = rendering.not_started(&error, Some(OsStr::new("/one:/two")));
+
+        assert!(
+            said.contains("no-such-program-anywhere") && said.contains("/one:/two"),
+            "the failure should name the program and the PATH, and it said: {said}"
+        );
+    }
+
+    /// And the directory it was to start in, where there is one, which is the
+    /// other thing a missing file can be.
+    #[test]
+    fn a_failed_start_names_the_directory_it_was_to_start_in() {
+        let mut rendering = Rendering::running("/usr/bin/sandbox-exec");
+        rendering.starting_in("/no/such/worktree");
+        let error = std::io::Error::from(std::io::ErrorKind::NotFound);
+
+        let said = rendering.not_started(&error, None);
+
+        assert!(
+            said.contains("/usr/bin/sandbox-exec") && said.contains("/no/such/worktree"),
+            "the failure should name the program and the directory, and it said: {said}"
+        );
+        assert!(
+            !said.contains("PATH"),
+            "a program named by its path is not looked for on one, and it said: {said}"
+        );
+    }
 
     /// A rendering naming none, which is every rendering on the platforms with
     /// a wrapper to hide behind.
