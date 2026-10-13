@@ -91,7 +91,7 @@ stdenvNoCC.mkDerivation (finalAttrs: {
     # older fetchers around for a release or two and moving between them is a
     # hash that has to be regenerated, so the number is here where the hash is.
     fetcherVersion = 4;
-    hash = "sha256-WP4JqdrsjCwlrZTsRJGDLl/i3AG+JMUOravJVm3F4fc=";
+    hash = "sha256-ChE5jWE0LlfU6oT583AuYn+3cTgzs8TCYVnsRv4kZO8=";
   };
 
   sourceRoot = "${finalAttrs.src.name}/web";
