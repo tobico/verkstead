@@ -1,6 +1,6 @@
 {
   "name": "verkstead-desktop",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "private": true,
   "description": "The workbench, in the system tray",
   "author": {
