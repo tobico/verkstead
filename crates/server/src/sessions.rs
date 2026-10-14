@@ -2586,6 +2586,10 @@ impl Sessions {
     /// session under a Profile with no account is one that comes up logged out
     /// with nothing saying why. See [`crate::mirroring::account`].
     ///
+    /// **And `retiring` is whether the session may retire a Memo**, which is
+    /// whether its prompt says how — see [`skills::left`]. The caller's to say,
+    /// because what the session is sent for is the caller's to know.
+    ///
     /// **And `held` is the one thing a launch settles that is not about the
     /// launch**: the Question Sets the caller left open rather than locking,
     /// because a conversation was standing to be carried on here and a resume
@@ -2601,6 +2605,7 @@ impl Sessions {
         conversation: &store::Conversation,
         pairing: &store::Pairing,
         prompt: &str,
+        retiring: bool,
         held: Held<'_>,
     ) -> Result<Option<Session>> {
         let Some(agents) = self.agents.clone() else {
@@ -2642,8 +2647,14 @@ impl Sessions {
         // for the companions' reason, and read off the record at every launch.
         // A carried conversation is primed with its note instead of this
         // prompt, so it is told none of it: it was launched after they were
-        // left, and has read them. See [`skills::left`].
-        let prompt = skills::left(prompt, &store::standing_memos(pool, conversation.id).await?);
+        // left, and has read them. `retiring` is whether the session is one that
+        // may retire a Memo, which the caller knows by what it was sent for.
+        // See [`skills::left`].
+        let prompt = skills::left(
+            prompt,
+            &store::standing_memos(pool, conversation.id).await?,
+            retiring,
+        );
 
         // And the companion repos this Conversation was configured with, listed
         // under whatever prompt the caller built. Here rather than in each

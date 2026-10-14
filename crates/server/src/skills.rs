@@ -854,13 +854,19 @@ pub(crate) fn folded(prompt: &str, answers: &str) -> String {
 /// reads documents, then what earlier sessions left, then the facts of the
 /// machine.
 ///
-/// Each Memo says who left it and how it is retired, then its markdown as it
-/// was written. Nothing is marked delivered: the list is read off the record at
-/// every launch, and a Memo is not spent by being read.
+/// Each Memo says who left it, then its markdown as it was written. Nothing is
+/// marked delivered: the list is read off the record at every launch, and a
+/// Memo is not spent by being read.
+///
+/// **And how it is retired, where `retiring` says the session may** — a
+/// building one, the kinds [`crate::memos::Building`] lists. Every other
+/// session is refused `verkstead memo --retire`, so a prompt that handed it the
+/// command would be sending it to a refusal, which is the rule the skills are
+/// held to as well.
 ///
 /// A Conversation with none standing is the prompt unchanged — no heading over
 /// an empty list.
-pub(crate) fn left(prompt: &str, memos: &[store::StandingMemo]) -> String {
+pub(crate) fn left(prompt: &str, memos: &[store::StandingMemo], retiring: bool) -> String {
     if memos.is_empty() {
         return prompt.to_owned();
     }
@@ -868,9 +874,17 @@ pub(crate) fn left(prompt: &str, memos: &[store::StandingMemo]) -> String {
     let listed: Vec<String> = memos
         .iter()
         .map(|memo| {
+            let retire = if retiring {
+                format!(
+                    "\nRetire it with `verkstead memo --retire {}` once it no longer holds.",
+                    memo.id
+                )
+            } else {
+                String::new()
+            };
+
             format!(
-                "**Memo {id}**, left by {left_by}.\nRetire it with \
-                 `verkstead memo --retire {id}` once it no longer holds.\n\n{}",
+                "**Memo {id}**, left by {left_by}.{retire}\n\n{}",
                 memo.markdown.trim_end(),
                 id = memo.id,
                 left_by = memo.left_by,
@@ -4679,6 +4693,7 @@ mod tests {
                 ),
                 memo(57, "the finish session", "Run clippy before pushing.\n"),
             ],
+            true,
         );
 
         assert!(
@@ -4705,7 +4720,32 @@ mod tests {
     fn no_standing_memos_leave_the_prompt_unchanged() {
         let prompt = next_task(&mounted(), "# Rate limiting\n\nThe API has none.\n", None);
 
-        assert_eq!(left(&prompt, &[]), prompt);
+        assert_eq!(left(&prompt, &[], true), prompt);
+    }
+
+    /// A session that may not retire a Memo is told the Memos without the
+    /// command that would retire them: it would be refused it.
+    #[test]
+    fn a_session_that_may_not_retire_is_not_told_how() {
+        let prompt = left(
+            "Read the grilling skill.\n",
+            &[store::StandingMemo {
+                id: 42,
+                left_by: "the session that worked task 03".to_owned(),
+                markdown: "The limiter's test flakes under load.\n".to_owned(),
+            }],
+            false,
+        );
+
+        assert!(
+            prompt.contains(
+                "# What earlier sessions left for you\n\n\
+                 **Memo 42**, left by the session that worked task 03.\n\n\
+                 The limiter's test flakes under load.\n"
+            ),
+            "{prompt:?}"
+        );
+        assert!(!prompt.contains("verkstead memo"), "{prompt:?}");
     }
 
     /// What a session is told about the companions: where each one is, what it

@@ -1866,6 +1866,8 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
                 &conversation,
                 &pairing,
                 &prompt,
+                // A grilling may not retire a Memo, so it is not told how.
+                false,
                 // Nothing held: this is a Conversation's first session, so there
                 // is nothing anybody left open for it.
                 crate::sessions::Held::nothing(&state.settlements),

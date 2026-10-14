@@ -489,7 +489,8 @@ why on stderr, and nothing is left.
 
 Every later session of the Conversation is shown every memo still standing, in
 its prompt, oldest first — under this heading and in this shape, so a session
-recognises what it is reading:
+recognises what it is reading. The line saying how to retire it is there only
+for a session that may:
 
 ```
 # What earlier sessions left for you

@@ -4049,6 +4049,27 @@ impl Prompt {
             _ => store::Role::Implementation,
         }
     }
+
+    /// Whether the session is one that may retire a Memo, and so is told how:
+    /// the building kinds [`crate::memos::Building`] lists — a task and the
+    /// finish, a stage's planning, an inline run and a steered instruction.
+    /// Every other session is refused the command, so its prompt lists the
+    /// Memos without it.
+    fn retires_memos(&self) -> bool {
+        match self {
+            Self::NextTask { .. }
+            | Self::PlanningStage(_)
+            | Self::Implementing
+            | Self::Instruction(_) => true,
+            Self::Staging
+            | Self::Submitting { .. }
+            | Self::Addressing(_)
+            | Self::Reviewing { .. }
+            | Self::Responding(_)
+            | Self::Investigating(_)
+            | Self::FollowingUp(_) => false,
+        }
+    }
 }
 
 /// Wait for the Conversation's Worktree, and then [`launch`] into it.
@@ -4284,6 +4305,7 @@ async fn launch(state: &AppState, conversation_id: i64, inside: Prompt) -> Optio
             &conversation,
             &pairing,
             &prompt,
+            inside.retires_memos(),
             // Nothing held: a run's relaunch locks no Question Set, so there is
             // nothing for the launch to make good either way — see
             // [`crate::sessions::Held`].

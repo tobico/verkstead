@@ -39248,6 +39248,7 @@ async fn the_memos_left_are_in_the_prompt_of_every_later_session() {
 /// A grilling relaunched by a steer and a steered instruction are told the
 /// Memos too, being launched where every session is — and a Conversation with
 /// none, or with only retired ones, launches a session told nothing of them.
+/// Only the instruction is told how to retire one: the grilling is refused it.
 #[tokio::test]
 async fn a_steered_session_is_told_the_memos_and_a_session_with_none_is_not() {
     let fixture = grilling(
@@ -39299,6 +39300,10 @@ async fn a_steered_session_is_told_the_memos_and_a_session_with_none_is_not() {
         !relaunched.contains("A retired one."),
         "and nothing of the one retired: {relaunched:?}",
     );
+    assert!(
+        !relaunched.contains("verkstead memo --retire"),
+        "and is not told how to retire one, being refused it: {relaunched:?}",
+    );
 
     let before = outputs(&fixture.view().await).len();
 
@@ -39316,6 +39321,10 @@ async fn a_steered_session_is_told_the_memos_and_a_session_with_none_is_not() {
         instructed.contains("/verkstead/skills/instruction/SKILL.md")
             && instructed.contains(&format!("**Memo {standing}**")),
         "and so is a steered instruction: {instructed:?}",
+    );
+    assert!(
+        instructed.contains(&format!("verkstead memo --retire {standing}")),
+        "which may retire it, and is told how: {instructed:?}",
     );
 }
 

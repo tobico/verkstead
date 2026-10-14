@@ -3274,13 +3274,13 @@ register the **Done signal** is checked against.
 
 **Read by every later session of the Conversation**, under *What earlier
 sessions left for you* in its prompt, oldest first, each stamped with the
-session that left it — *the session that worked task 03* — and carrying the
-line that retires it. Grilling relaunches and steered sessions included, and a
-memo is not spent by being read: shown in every prompt until retired, and
-outliving the round, a steer into Grilling leaving them standing. A **Stage**
-is a Conversation of its own and reads its own. A **Carried Conversation**'s
-note says nothing of them, that session having been launched after they were
-left.
+session that left it — *the session that worked task 03* — and, for a session
+that may retire it, carrying the line that does. Grilling relaunches and
+steered sessions included, and a memo is not spent by being read: shown in
+every prompt until retired, and outliving the round, a steer into Grilling
+leaving them standing. A **Stage** is a Conversation of its own and reads its
+own. A **Carried Conversation**'s note says nothing of them, that session
+having been launched after they were left.
 
 **An Event**, one per memo, numbered by its Event id the way a Question Set is
 by its Set id: a Handoff-shaped card headed by the number and the session that
