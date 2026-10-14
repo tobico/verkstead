@@ -38,12 +38,13 @@ fn memo_with(args: &[&str], server: &str, markdown: &str) -> Output {
         .spawn()
         .expect("the verkstead binary should be built for its own tests");
 
-    child
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(markdown.as_bytes())
-        .unwrap();
+    // A command refused on its arguments exits before it reads anything, so
+    // the pipe may be closed under the write: that is the refusal, which the
+    // output says, rather than a failure of the test's.
+    match child.stdin.take().unwrap().write_all(markdown.as_bytes()) {
+        Err(error) if error.kind() == std::io::ErrorKind::BrokenPipe => {}
+        written => written.unwrap(),
+    }
 
     finished(child)
 }
