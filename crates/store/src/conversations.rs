@@ -981,7 +981,21 @@ impl Event {
             "resolve-conflicts" => Self::ResolveConflicts,
             TASK_LIST => Self::TaskList,
             STAGE_LIST => Self::StageList,
-            other => bail!("a Timeline holds an Event of the unknown kind {other:?}"),
+            // A kind this build does not know: one a newer build wrote and the
+            // record was carried here from it. Refused, it would take the whole
+            // Conversation's Timeline with it — which is what a memo did to
+            // every build from before it, carried there by a cluster — so it
+            // reads as what it is, Verkstead saying after the fact that there
+            // is something here it cannot draw. A Notice already has a card,
+            // boards no Share and is read by every build there is. Nothing is
+            // written: the row keeps its kind for the build that knows it.
+            //
+            // Here for the kind after the memo, which is why the memo's own
+            // read stays above rather than falling through to this.
+            other => Self::Notice(format!(
+                "This Conversation holds an Event of the kind `{other}`, which this \
+                 build of Verkstead does not know. A newer build will draw it.\n"
+            )),
         })
     }
 }

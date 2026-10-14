@@ -2682,3 +2682,72 @@ async fn the_roadmaps_being_driven_come_back_oldest_first() {
         "a roadmap adopted stage by stage is as old as the stage that adopted it",
     );
 }
+
+/// An Event of a kind this build does not know reads as a Notice saying so,
+/// rather than taking the whole Timeline with it — the kind a newer build wrote
+/// and carried here. The rest reads as before, and the row keeps its kind.
+#[tokio::test]
+async fn an_event_of_an_unknown_kind_reads_as_a_notice_naming_it() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = drafted(&pool).await;
+
+    let before: Vec<_> = timeline(&pool, id)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|event| (event.id, event.event))
+        .collect();
+
+    let (unknown,): (i64,) = sqlx::query_as(
+        "INSERT INTO timeline_events (conversation_id, at, kind, body)
+         VALUES (?, '2026-10-14T04:00:00.000Z', 'whatever', 'what a newer build wrote')
+         RETURNING id",
+    )
+    .bind(id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    stop(
+        &pool,
+        id,
+        Decision::Verkstead,
+        "**The work** stopped.\n",
+        None,
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    let after: Vec<_> = timeline(&pool, id)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|event| (event.id, event.event))
+        .collect();
+
+    assert_eq!(
+        after[..before.len()],
+        before[..],
+        "what was there before reads exactly as it did"
+    );
+
+    let (at, event) = &after[before.len()];
+    assert_eq!(*at, unknown, "the unknown row keeps its place in the order");
+    let Event::Notice(said) = event else {
+        panic!("an unknown kind reads as a Notice: {event:?}");
+    };
+    assert!(said.contains("`whatever`"), "and names the kind: {said}");
+
+    assert!(
+        matches!(&after[before.len() + 1].1, Event::Notice(said) if said.contains("stopped")),
+        "and what came after it reads as before: {after:?}"
+    );
+
+    let (kind,): (String,) = sqlx::query_as("SELECT kind FROM timeline_events WHERE id = ?")
+        .bind(unknown)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(kind, "whatever", "nothing is written over the row");
+}

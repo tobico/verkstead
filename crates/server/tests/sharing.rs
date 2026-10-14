@@ -433,6 +433,56 @@ async fn a_share_carries_what_was_asked_answered_and_built() {
     }
 }
 
+/// An Event of a kind this build does not know — one a newer build wrote and a
+/// cluster carried here — is drawn as a Notice naming it, and a share is still
+/// built and leaves it out as it leaves out every Notice.
+#[tokio::test]
+async fn an_unknown_kind_is_drawn_as_a_notice_and_left_out_of_a_share() {
+    let (_dir, pool, app) = app().await;
+    let id = everything(&pool).await;
+
+    let before: verkstead_render::ConversationView =
+        get(&app, &format!("/api/ui/conversations/{id}")).await;
+    let shared_before = share(&app, id).await.conversation.timeline;
+
+    let (unknown,): (i64,) = sqlx::query_as(
+        "INSERT INTO timeline_events (conversation_id, at, kind, body)
+         VALUES (?, '2026-10-14T04:00:00.000Z', 'whatever', 'what a newer build wrote')
+         RETURNING id",
+    )
+    .bind(id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let after: verkstead_render::ConversationView =
+        get(&app, &format!("/api/ui/conversations/{id}")).await;
+
+    let (drawn, rest): (Vec<_>, Vec<_>) = after
+        .timeline
+        .into_iter()
+        .partition(|event| matches!(event, TimelineEvent::Notice(notice) if notice.id == unknown));
+
+    let [TimelineEvent::Notice(notice)] = drawn.as_slice() else {
+        panic!("the unknown kind is drawn as one Notice: {drawn:?}");
+    };
+    assert!(
+        notice.html.contains("<code>whatever</code>"),
+        "naming the kind: {}",
+        notice.html
+    );
+    assert_eq!(
+        rest, before.timeline,
+        "and the rest draws as before, in order"
+    );
+
+    assert_eq!(
+        share(&app, id).await.conversation.timeline,
+        shared_before,
+        "a share is built as before, without the Notice"
+    );
+}
+
 /// A trimmed Conversation shares exactly as it did before the trim.
 ///
 /// The two halves of one rule, asked from the other side: what a trim takes is
