@@ -624,11 +624,12 @@ export function Conversations(props: {
 
       {/* The order was not saved, which is worth saying because what is on the
           screen is the server's order rather than the one they just made. The
-          server's own sentence already says it wasn't saved, so the line here
-          says only what the human is now looking at. */}
+          server's sentence says why, which is not always that the order was
+          lost, so the line here says that itself. */}
       <Show when={place.isError}>
         <ErrorLine>
-          The list is back in the server's order. {place.error?.message}
+          Your order wasn't saved. The list is back in the server's order.{" "}
+          {place.error?.message}
         </ErrorLine>
       </Show>
 

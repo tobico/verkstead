@@ -1948,8 +1948,7 @@ describe("the order the human puts the sidebar in", () => {
         RANK,
         json(
           {
-            error:
-              "The order couldn't be saved: the server isn't taking orders.",
+            error: "The gap couldn't be opened: the database is locked.",
           },
           503,
         ),
@@ -1963,8 +1962,8 @@ describe("the order the human puts the sidebar in", () => {
 
     await waitFor(() =>
       screen.getByText(
-        "The list is back in the server's order. The order couldn't be saved: " +
-          "the server isn't taking orders.",
+        "Your order wasn't saved. The list is back in the server's order. " +
+          "The gap couldn't be opened: the database is locked.",
       ),
     );
     expect(await order(container)).toEqual(["first", "second", "third"]);
