@@ -345,7 +345,7 @@ describe("the checkbox screen", () => {
     const git = row(container, "Git");
 
     expect(git.dataset.state).toBe("Present");
-    expect(git.querySelector('[aria-label="done"]')).not.toBeNull();
+    expect(git.querySelector('[aria-label="Done"]')).not.toBeNull();
     expect(box(container, "Git")).toBeNull();
 
     // And one that is missing carries a box in the same place.
@@ -1179,7 +1179,7 @@ describe("what each machine is told to run", () => {
       for (const instruction of Object.values(GUIDES[distro].rows)) {
         for (const note of [instruction.note, instruction.alternative?.note]) {
           expect(note ?? "").not.toContain("isn't on the PATH a session gets");
-          expect(note ?? "").not.toContain("which is not on the PATH");
+          expect(note ?? "").not.toContain("which isn't on the PATH");
         }
       }
     }

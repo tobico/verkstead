@@ -686,7 +686,7 @@ describe("a member's account that cannot be run from here", () => {
 
     await waitFor(() => screen.getByText(reads(FABLE)));
 
-    expect(document.body.textContent).not.toContain("No login file");
+    expect(document.body.textContent).not.toContain("has no login file");
   });
 });
 

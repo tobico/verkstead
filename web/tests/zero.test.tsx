@@ -137,7 +137,7 @@ describe("a Verkstead with nothing to list", () => {
 
     // And not the pane's own title, there being no pane beside this one for it
     // to be one of.
-    expect(screen.queryByText("New conversation")).toBeNull();
+    expect(screen.queryByText("New Conversation")).toBeNull();
   });
 
   /// The gear goes where it goes everywhere else, which is the whole of why it
