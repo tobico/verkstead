@@ -7605,7 +7605,7 @@ describe("starting the work", () => {
       },
       /the-workstation is unreachable/,
     ],
-    ["WorktreeRefused", /Git would not make the worktree/],
+    ["WorktreeRefused", /Git wouldn't make the worktree/],
     ["NotDrafting", /already been started/],
   ] satisfies Array<[GrillingStarted, RegExp]>)(
     "says in words what %s means",
@@ -7646,7 +7646,7 @@ describe("starting the work", () => {
 
     await waitFor(() =>
       screen.getByText(
-        "askance: A branch named roadmaps stands in the way of the branch it would be given there, and Verkstead did not make it.",
+        "askance: A branch named roadmaps stands in the way of the branch it would be given there, and Verkstead didn't make it.",
       ),
     );
   });
@@ -10649,7 +10649,7 @@ describe("a second round", () => {
       container,
       `.${timeline.steeredWith} > .${timeline.steered}`,
     );
-    expect(boundary.textContent).toBe("You steered this into Grilling");
+    expect(boundary.textContent).toBe("You steered this into Grilling.");
 
     // And it is drawn between the two briefs, which is where the rounds part.
     const briefs = [...container.querySelectorAll(`.${timeline.brief}`)];
@@ -11126,7 +11126,7 @@ describe("the share pane", () => {
 
     expect(container.querySelector(`.${sharePane.published}`)).toBeNull();
     expect(
-      screen.getByText(/This conversation has not been published\./),
+      screen.getByText(/This conversation hasn't been published\./),
     ).toBeTruthy();
   });
 });
@@ -11225,7 +11225,7 @@ describe("publishing a share", () => {
     fireEvent.click(await drawn(container, `.${sharePane.publish}`));
 
     const said = await waitFor(() =>
-      screen.getByText("The saved GitHub token may not write gists.", {
+      screen.getByText("The saved GitHub token can't write gists.", {
         exact: false,
       }),
     );
@@ -11338,7 +11338,7 @@ describe("sharing a conversation to its pull requests", () => {
 
     await waitFor(() =>
       screen.getByText(
-        "Commented on #41. Nothing could be said on #7 in verkstead-site: " +
+        "Commented on #41. The comment on #7 in verkstead-site couldn't be posted: " +
           "`gh` said: Not Found (HTTP 404)",
       ),
     );
@@ -11364,7 +11364,7 @@ describe("sharing a conversation to its pull requests", () => {
     fireEvent.click(await drawn(container, `.${sharePane.comment}`));
 
     const said = await waitFor(() =>
-      screen.getByText("The saved GitHub token may not write gists.", {
+      screen.getByText("The saved GitHub token can't write gists.", {
         exact: false,
       }),
     );
@@ -13203,7 +13203,7 @@ describe("steering a conversation", () => {
       `.${timeline.steeredWith} > .${timeline.steered}`,
     );
 
-    expect(steered.textContent).toBe("You steered this into Done");
+    expect(steered.textContent).toBe("You steered this into Done.");
 
     const moved = [
       ...container.querySelectorAll(`.${timeline.timelineEvent} > .${timeline.moved}`),
@@ -13236,7 +13236,7 @@ describe("steering a conversation", () => {
       `.${timeline.timelineEvent} > .${timeline.pressed}`,
     );
 
-    expect(pressed.textContent).toBe("You asked for the conflict to be resolved");
+    expect(pressed.textContent).toBe("You asked for the conflict to be resolved.");
 
     expect(
       container.querySelector(
@@ -13803,7 +13803,7 @@ describe("a question set the build cannot read", () => {
     const row = container.querySelector(`.${timeline.questionSet}.${timeline.unreadable}`)!;
 
     expect(row.querySelector(`.${illegible.unreadableBadge}`)!.textContent).toBe(
-      "cannot be read",
+      "can't be read",
     );
     // Serde's own sentence, which names the field that has left the schema.
     expect(row.querySelector(`.${illegible.unreadableWhy}`)!.textContent).toContain(
@@ -15211,7 +15211,7 @@ describe("the task list opened", () => {
     );
 
     expect(missing.textContent).toBe(
-      "The list names a task document that is not there to read.",
+      "The list names a task document that isn't there.",
     );
     expect(missing.closest(`.${documents.section}`)!.id).toBe("task-04");
   });
@@ -15268,7 +15268,7 @@ describe("the task list opened", () => {
 
     const head = await drawn(container, `.${shell.detailsPane} .${paneHead.head}`);
 
-    expect(head.querySelector("h1")!.textContent).toBe("Task list");
+    expect(head.querySelector("h1")!.textContent).toBe("Task List");
     expect(head.textContent).not.toContain("Close");
     expect(
       (await drawn(container, `.${shell.detailsPane} .${documents.feature}`)).textContent,
@@ -16789,7 +16789,7 @@ describe("the stage list opened", () => {
     );
 
     expect(missing.textContent).toBe(
-      "The roadmap names a brief that is not there to read.",
+      "The roadmap names a brief that isn't there.",
     );
     expect(missing.closest(`.${documents.section}`)!.id).toBe("stage-04");
   });
@@ -17889,7 +17889,7 @@ describe("the pinned pull request", () => {
     );
 
     expect(checks.querySelector(`.${notices.empty}`)!.textContent).toBe(
-      "Nothing is running against it.",
+      "No checks are running against it.",
     );
   });
 
@@ -20453,7 +20453,7 @@ describe("the way into the code pane", () => {
 
     expect(icon.disabled).toBe(true);
     expect(icon.getAttribute("aria-label")).toBe(
-      "Code — there is no worktree yet",
+      "Code. There's no worktree yet.",
     );
   });
 
@@ -23408,7 +23408,7 @@ describe("what a right-click on a row of the code pane's tree offers", () => {
       fireEvent.keyDown(field(container)!, { key: "Enter" });
 
       await waitFor(() =>
-        expect(refused(container)).toBe("That is a path rather than a name."),
+        expect(refused(container)).toBe("That's a path, not a name."),
       );
     }
 
@@ -23782,7 +23782,7 @@ describe("what a right-click on a row of the code pane's tree offers", () => {
     // nothing has been asked of the server yet: the press is still ahead of it.
     const asking = await carded();
     expect(asking.textContent).toContain("Delete this folder?");
-    expect(asking.textContent).toContain("everything in it goes with it");
+    expect(asking.textContent).toContain("and everything in it are deleted from the disk");
     expect(asked(fetching, DELETING)).toHaveLength(0);
 
     held = {
@@ -23825,7 +23825,7 @@ describe("what a right-click on a row of the code pane's tree offers", () => {
     expect(asking.textContent).toContain("Delete this file?");
     expect(asking.textContent).not.toContain("everything in it");
 
-    fireEvent.click(confirms(asking, "Keep it"));
+    fireEvent.click(confirms(asking, "Cancel"));
 
     await waitFor(() => expect(card()).toBeNull());
     expect(asked(fetching, DELETING)).toHaveLength(0);
@@ -24058,7 +24058,7 @@ describe("a file opened out of the code pane's tree", () => {
     // The line is drawn, and the file is open under it.
     await waitFor(() =>
       expect(said(container)).toContain(
-        "Could not read this conversation's terminals",
+        "This conversation's terminals couldn't be read",
       ),
     );
 
@@ -24154,7 +24154,7 @@ describe("a file opened out of the code pane's tree", () => {
       Object.keys(FILE_REFUSAL).length,
     );
 
-    expect(FILE_REFUSAL.Binary).toContain("not text");
+    expect(FILE_REFUSAL.Binary).toContain("isn't text");
     expect(FILE_REFUSAL.TooLarge).toContain("2 MB");
     expect(FILE_REFUSAL.Missing).toContain("no longer");
     expect(FILE_REFUSAL.NotAFile).toContain("folder");

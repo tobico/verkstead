@@ -76,7 +76,7 @@ export function published(outcome: SharePublished): JSX.Element {
     return (
       <>
         Verkstead has no GitHub token to publish as.{" "}
-        <A href="/settings/git">Put one in on the settings page.</A>
+        <A href="/settings/git">Add one in Settings.</A>
       </>
     );
   }
@@ -84,16 +84,16 @@ export function published(outcome: SharePublished): JSX.Element {
   if (outcome === "NoGistScope") {
     return (
       <>
-        The saved GitHub token may not write gists.{" "}
+        The saved GitHub token can't write gists.{" "}
         <A href="/settings/git">
-          Re-issue it with the gist scope and save it again.
+          Reissue it with the gist scope and save it again.
         </A>
       </>
     );
   }
 
   if ("Refused" in outcome) {
-    return <>GitHub would not take it: {outcome.Refused.why}</>;
+    return <>GitHub refused it: {outcome.Refused.why}</>;
   }
 
   // Through the share viewer, which is what the server composed it as — see
@@ -121,7 +121,7 @@ export function published(outcome: SharePublished): JSX.Element {
 /// request it never reached can paste the link there themselves.
 export function commented(outcome: ShareCommented): JSX.Element {
   if (outcome === "NoPullRequest") {
-    return <>This conversation is on no pull request.</>;
+    return <>This conversation has no pull request.</>;
   }
 
   if ("NotPublished" in outcome) {
@@ -139,7 +139,7 @@ export function commented(outcome: ShareCommented): JSX.Element {
   }
 
   for (const miss of missed) {
-    said.push(`Nothing could be said on ${named(miss)}: ${miss.why}`);
+    said.push(`The comment on ${named(miss)} couldn't be posted: ${miss.why}`);
   }
 
   return <>{said.join(" ")}</>;
@@ -216,14 +216,14 @@ export function Share(props: {
         when={props.conversation.shared}
         fallback={
           <Note>
-            This conversation has not been published. Publishing puts a copy of
-            the record where a link reaches it.
+            This conversation hasn't been published. Publishing puts a copy of the
+            record where a link reaches it.
           </Note>
         }
       >
         {(shared) => (
           <div class={styles.published}>
-            <p class={styles.heading}>Published share</p>
+            <p class={styles.heading}>Published Share</p>
 
             <p class={styles.link}>
               <a href={shared().url} target="_blank" rel="noreferrer">
@@ -306,8 +306,8 @@ export function Share(props: {
       </div>
 
       <Note>
-        Publishing takes a fresh snapshot every time. What was already sent goes
-        on standing where it was.
+        Publishing takes a fresh snapshot every time. What was already sent stays
+        where it is.
       </Note>
     </>
   );

@@ -64,7 +64,7 @@ export function Screen(props: {
     <Switch>
       <Match when={screen.isError}>
         <ErrorLine>
-          Could not read this screen: {screen.error?.message}
+          This screen couldn't be read: {screen.error?.message}
         </ErrorLine>
       </Match>
       <Match when={live()}>
@@ -73,7 +73,7 @@ export function Screen(props: {
           say={{
             waiting: "Waiting for this session's screen…",
             watching:
-              "Watching. Type to work in this session — press Stop first if the run must not advance under you.",
+              "Watching. Type to work in this session, and press Stop first if the run mustn't advance under you.",
             lost: "The connection to this session's screen was lost.",
           }}
         />
@@ -82,12 +82,12 @@ export function Screen(props: {
         {(painted) => (
           <Standing
             painted={painted()}
-            say="Read-only: this is what the session's terminal is showing."
+            say="Read-only. This is what the session's terminal is showing."
           />
         )}
       </Match>
       <Match when={true}>
-        <Empty>Loading…</Empty>
+        <Empty>Reading this session's screen…</Empty>
       </Match>
     </Switch>
   );

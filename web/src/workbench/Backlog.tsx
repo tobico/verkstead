@@ -80,7 +80,7 @@ export function Backlog(props: {
       // gone. What it is instead is the list naming a file nobody wrote, which
       // is the human's to fix — the same thing the runner refuses to put a
       // session at.
-      missing: "The list names a task document that is not there to read.",
+      missing: "The list names a task document that isn't there.",
       // The done state on the heading rather than in the box, because a done
       // task still has its document — the roadmap pane beside this one has said
       // it this way all along. The word travels with the section rather than
@@ -108,7 +108,7 @@ export function Backlog(props: {
   return (
     <>
       <PaneSticky>
-        <PaneHead back={{ to: "Timeline", go: props.back }} title="Task list" />
+        <PaneHead back={{ to: "Timeline", go: props.back }} title="Task List" />
       </PaneSticky>
 
       {/* What the backlog is called, where the list wrote itself a heading —
@@ -126,11 +126,11 @@ export function Backlog(props: {
 
       <Switch>
         <Match when={opened.isPending}>
-          <Empty>Loading…</Empty>
+          <Empty>Reading the task list…</Empty>
         </Match>
         <Match when={opened.isError}>
           <ErrorLine>
-            Could not read this backlog: {opened.error?.message}
+            The task list couldn't be read: {opened.error?.message}
           </ErrorLine>
         </Match>
         <Match when={opened.data}>

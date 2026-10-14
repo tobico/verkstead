@@ -113,7 +113,7 @@ export function Roadmap(props: {
       // What it is instead is the roadmap pointing at a file nobody wrote,
       // which is the human's to fix — the same thing `/next-stage` refuses to
       // guess past.
-      missing: "The roadmap names a brief that is not there to read.",
+      missing: "The roadmap names a brief that isn't there.",
       // Where the stage is, on the heading rather than in a box, because a
       // stage that is over still has its brief — see `Backlog.tsx`, which says
       // its own two words the same way for the same reason. The server's
@@ -165,11 +165,11 @@ export function Roadmap(props: {
 
       <Switch>
         <Match when={opened.isPending}>
-          <Empty>Loading…</Empty>
+          <Empty>Reading the roadmap…</Empty>
         </Match>
         <Match when={opened.isError}>
           <ErrorLine>
-            Could not read this roadmap: {opened.error?.message}
+            The roadmap couldn't be read: {opened.error?.message}
           </ErrorLine>
         </Match>
         <Match when={opened.data}>

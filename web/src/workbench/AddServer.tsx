@@ -207,9 +207,8 @@ function AddServer(props: {
 
       <form class={styles.form} onSubmit={commit}>
         <Note class={styles.note}>
-          Declared for the whole installation, as it would be in Settings, and
-          attached to this work. A header value is kept the way the GitHub token
-          is: it is never shown again.
+          Declared for the whole installation, as in Settings, and attached to
+          this work. A header value is stored, and never shown again.
         </Note>
 
         <label for={`${id}-name`}>Name</label>
@@ -255,7 +254,7 @@ function AddServer(props: {
         <Show when={unreached()}>
           {(why) => (
             <ErrorLine class={styles.failure}>
-              It is declared, but it was not reached when it was saved. {why()}
+              It's declared, but it couldn't be reached when it was saved. {why()}
             </ErrorLine>
           )}
         </Show>
@@ -375,18 +374,18 @@ function AddServer(props: {
         <Show when={elsewhere()}>
           {(why) => (
             <ErrorLine class={styles.failure}>
-              The settings could not be saved as they stand: {why()}
+              The settings couldn't be saved as they stand: {why()}
             </ErrorLine>
           )}
         </Show>
         <Show when={settings.isError}>
           <ErrorLine class={styles.failure}>
-            Could not read the settings: {settings.error?.message}
+            The settings couldn't be read: {settings.error?.message}
           </ErrorLine>
         </Show>
         <Show when={save.isError}>
           <ErrorLine class={styles.failure}>
-            The server could not be added: {save.error?.message}
+            The server couldn't be added: {save.error?.message}
           </ErrorLine>
         </Show>
       </form>
