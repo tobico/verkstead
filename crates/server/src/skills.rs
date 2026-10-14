@@ -2027,6 +2027,34 @@ mod tests {
         }
     }
 
+    /// The three skills whose sessions have a next one teach the memo, both
+    /// invocations of it, and no other skill names the command: their sessions
+    /// are refused it, and a skill that mentioned it would be sending them to a
+    /// refusal. See ADR-0023.
+    #[test]
+    fn only_the_skills_with_a_next_session_teach_the_memo() {
+        let teaching = [NEXT_TASK, IMPLEMENTING, NEXT_STAGE];
+
+        for name in NAMED {
+            let skill = flowed(name);
+
+            if teaching.contains(&name) {
+                assert!(
+                    skill.contains("## Leaving a memo for the sessions after you")
+                        && skill.contains("verkstead memo <<'MD'")
+                        && skill.contains("verkstead memo --retire 42")
+                        && skill.contains("*What earlier sessions left for you*"),
+                    "{name} has to teach leaving a memo and retiring one: {skill}"
+                );
+            } else {
+                assert!(
+                    !skill.contains("verkstead memo"),
+                    "{name}'s session is refused a memo, so it should not mention one: {skill}"
+                );
+            }
+        }
+    }
+
     /// The sessions a run ends on are refused while their branch has no pull
     /// request open, so their skills say so, and put the push and the pull
     /// request before the signal rather than after it. See ADR-0018.

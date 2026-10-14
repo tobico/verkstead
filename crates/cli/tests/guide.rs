@@ -196,6 +196,7 @@ fn the_guide_covers_every_core_area() {
         "## Running the ask",
         "## Reading the Response",
         "## Waiting in the background",
+        "## Leaving a memo for the sessions after you",
         "## Ending the session",
         "## Moving the work to another device",
     ] {
@@ -576,6 +577,63 @@ fn the_guides_quoted_cli_contract_is_the_real_one() {
     );
 }
 
+/// `verkstead memo --help` is quoted beside the ask's, and held to the binary
+/// the same way: an agent reads the contract in the Guide and nowhere else.
+#[test]
+fn the_guides_quoted_memo_contract_is_the_real_one() {
+    let guide = stdout(&run(&["guide"]));
+    let contract = section(&guide, "## The CLI contract");
+    let quoted = fenced_blocks(contract)
+        .into_iter()
+        .find(|block| block.contains("Usage: verkstead memo"))
+        .expect("the CLI contract should quote `verkstead memo --help`");
+    let real = stdout(&run(&["memo", "--help"]));
+
+    assert_eq!(
+        lines(&quoted),
+        lines(&real),
+        "the Guide quotes `verkstead memo --help` verbatim — copy the current \
+         output into the CLI contract section of crates/cli/guide/core.md"
+    );
+}
+
+/// A memo is written during the work and the signal ends it, so its section
+/// comes before *Ending the session*, and says what a memo is for in the
+/// glossary's words, who may leave one, both invocations, what comes back,
+/// the bound, and the shape a later session reads it in.
+#[test]
+fn the_guide_says_how_to_leave_a_memo() {
+    for agent_type in ["claude", "codex", "grok", "opencode"] {
+        let guide = stdout(&run_as(agent_type, &["guide"]));
+        let memo = section(&guide, "## Leaving a memo for the sessions after you");
+        let flowed = memo.split_whitespace().collect::<Vec<_>>().join(" ");
+
+        assert!(
+            guide.find("## Leaving a memo").unwrap() < guide.find("## Ending the session").unwrap(),
+            "the memo section should come before ending the session"
+        );
+        for phrase in [
+            "working knowledge",
+            "not a running account of the work**, which the commits are",
+            "not the design**, which the Brief and the Handoff are",
+            "Only the sessions that build leave one",
+            "refused by name",
+            "verkstead memo <<'MD'",
+            "verkstead memo --retire 42",
+            "id: 42",
+            "8 KiB",
+            "# What earlier sessions left for you",
+            "**Memo 42**, left by the session that worked task 03.",
+            "Retire it with `verkstead memo --retire 42` once it no longer holds.",
+        ] {
+            assert!(
+                flowed.contains(phrase),
+                "{agent_type}'s memo section should say {phrase:?}, got:\n{memo}"
+            );
+        }
+    }
+}
+
 /// A review's Set is a plain Question Set like every other, so the Guide teaches
 /// one grammar and only one. The block a review used to carry has left the
 /// schema, and a Guide that still described it would be teaching an agent to
@@ -739,6 +797,7 @@ fn only_the_two_asking_sections_differ_between_the_backends() {
         "## Authoring the Set",
         "## Reading the Response",
         "## Waiting in the background",
+        "## Leaving a memo for the sessions after you",
         "## Ending the session",
         "## Moving the work to another device",
     ] {
