@@ -38,6 +38,7 @@ import type {
   ProfileEntry,
 } from "../src/api/types";
 import { AGENT_NAME, DEFAULT_PROFILE } from "../src/agents";
+import { NOT_USABLE_AWAY } from "../src/broken";
 import { KNOWN_MODELS, prettify } from "../src/models";
 // The four files a backend's brand mark is drawn out of, read as lobehub
 // published them — so that naming a mark here and drawing it in `HarnessMark`
@@ -186,6 +187,15 @@ function ticked(): string[] {
 /// One profile's card, by the name on it.
 function theCard(name: string): HTMLElement {
   return screen.getByText(name).closest(`.${styles.profile}`)!;
+}
+
+/// The marks a card wears after its name, each read aloud as the sentence it
+/// stands for — the sentence itself being the pane's.
+function marks(card: HTMLElement): Array<{ label: string; red: boolean }> {
+  return [...card.querySelectorAll('svg[role="img"]')].map((mark) => ({
+    label: mark.getAttribute("aria-label")!,
+    red: mark.classList.contains(styles.trouble!),
+  }));
 }
 
 /// What a card is read by: the backend's own name, and the profile's name after
@@ -505,7 +515,7 @@ describe("a member's accounts", () => {
     await waitFor(() => screen.getByText(reads(MIRROR)));
 
     expect(MIRROR.broken).toBe(null);
-    expect(theCard(reads(MIRROR)).querySelector(`.${styles.broken}`)).toBeNull();
+    expect(marks(theCard(reads(MIRROR)))).toEqual([]);
   });
 
   /// And the pane over one of them is the same form, which saves: every device's
@@ -602,11 +612,11 @@ describe("a member's account that cannot be run from here", () => {
 
     // The word the sidebar wears for the same finding: one dial worked down
     // that machine's addresses and reached none of them.
-    expect(
-      theCard(reads(MIRROR)).querySelector(`.${styles.broken}`)!.textContent,
-    ).toBe(
-      `Its account can't be fetched, because ${MACHINE.name} is unreachable. No session here can run under it.`,
-    );
+    const said = `Its account can't be fetched, because ${MACHINE.name} is unreachable. No session here can run under it.`;
+    const card = theCard(reads(MIRROR));
+
+    expect(marks(card)).toEqual([{ label: said, red: true }]);
+    expect(card.textContent).not.toContain(said);
   });
 
   /// A login kept in the macOS Keychain leaves no file for another device to
@@ -623,11 +633,11 @@ describe("a member's account that cannot be run from here", () => {
 
     await waitFor(() => screen.getByText(reads(MIRROR)));
 
-    expect(
-      theCard(reads(MIRROR)).querySelector(`.${styles.broken}`)!.textContent,
-    ).toBe(
-      `Its account on ${MACHINE.name} has no login file, so there's nothing to mirror here. Log in on that machine.`,
-    );
+    const said = `Its account on ${MACHINE.name} has no login file, so there's nothing to mirror here. Log in on that machine.`;
+    const card = theCard(reads(MIRROR));
+
+    expect(marks(card)).toEqual([{ label: said, red: true }]);
+    expect(card.textContent).not.toContain(said);
   });
 
   /// And a harness that is not on this machine reads in the onboarding probe's
@@ -639,9 +649,11 @@ describe("a member's account that cannot be run from here", () => {
 
     await waitFor(() => screen.getByText(reads(MIRROR)));
 
-    expect(
-      theCard(reads(MIRROR)).querySelector(`.${styles.broken}`)!.textContent,
-    ).toBe(`${AGENT_NAME[MIRROR.account.agent_type]} isn't on this machine.`);
+    const said = `${AGENT_NAME[MIRROR.account.agent_type]} isn't on this machine.`;
+    const card = theCard(reads(MIRROR));
+
+    expect(marks(card)).toEqual([{ label: said, red: true }]);
+    expect(card.textContent).not.toContain(said);
   });
 
   /// And none of them takes the row off the list: two rows in, two rows drawn.
@@ -671,10 +683,34 @@ describe("a member's account that cannot be run from here", () => {
 
     const card = theCard(reads(CLUSTER[0]!));
 
-    expect(card.querySelector(`.${styles.broken}`)).toBeNull();
-    expect(card.textContent).toContain(
-      "This account has no login file, so it can't be used from another device.",
+    // A grey mark rather than a red one, being information rather than a
+    // refusal — and the card is not dimmed for it, the account running here.
+    expect(marks(card)).toEqual([{ label: NOT_USABLE_AWAY, red: false }]);
+    expect(card.textContent).not.toContain("has no login file");
+    expect(card.classList).not.toContain(styles.dimmed);
+  });
+
+  /// And a home account with no login file that a press also found signed out
+  /// wears the one mark, the red one: a refusal says more than a note, and the
+  /// pane is where both are said.
+  it("wears one mark, the red one, where both are true", async () => {
+    serving(
+      whenever(
+        "/api/ui/profiles",
+        json([{ ...FABLE, login: false, broken: "SignedOut" }]),
+      ),
     );
+    mountCards();
+
+    await waitFor(() => screen.getByText(reads(FABLE)));
+
+    expect(marks(theCard(reads(FABLE)))).toEqual([
+      {
+        label:
+          "Its Claude Code account is signed out. Log in to run a session under it.",
+        red: true,
+      },
+    ]);
   });
 
   /// And nothing at all where there is a login, which is every ordinary
@@ -698,6 +734,10 @@ describe("logging an account in", () => {
   /// the account a card offers a login to — one logged in already says so
   /// instead.
   const SIGNED_OUT = [{ ...FABLE, login: false }, ...SAVED.slice(1)];
+
+  /// What the server's finding of a sign-out reads as.
+  const SIGNED_OUT_SAID =
+    "Its Claude Code account is signed out. Log in to run a session under it.";
 
   /// What a POST to `path` was sent with, the last time it was made.
   const sentTo = (fetching: ReturnType<typeof serving>, path: string) => {
@@ -768,10 +808,28 @@ describe("logging an account in", () => {
 
     const card = theCard(reads(FABLE));
 
-    expect(card.querySelector(`.${styles.broken}`)!.textContent).toBe(
-      "Its Claude Code account is signed out. Log in to run a session under it.",
-    );
+    expect(marks(card)).toEqual([{ label: SIGNED_OUT_SAID, red: true }]);
     expect(card.querySelector("button")?.textContent).toBe("Log in");
+  });
+
+  /// And the pane says it in full, with the same Log in beside it, opening the
+  /// same login the card's does.
+  it("says the sign-out in the pane, with a login beside it", async () => {
+    serving(
+      whenever("/api/ui/profiles", json([{ ...FABLE, broken: "SignedOut" }])),
+      whenever(LOGIN, json({ state: "Starting" }), "POST"),
+      whenever(LOGIN, json({ state: "Waiting", url: ADDRESS, refused: null })),
+    );
+    mountPane(FABLE.id);
+
+    const said = await waitFor(() => screen.getByText(SIGNED_OUT_SAID));
+    expect(said.querySelector(`svg.${styles.trouble}`)).not.toBeNull();
+
+    const press = said.parentElement!.querySelector("button")!;
+    expect(press.textContent).toBe("Log in");
+
+    fireEvent.click(press);
+    await waitFor(() => screen.getByText(ADDRESS));
   });
 
   /// A mirror's account is a copy: its login is made on the machine it is at
@@ -976,6 +1034,109 @@ describe("the plus that adds one", () => {
 });
 
 describe("the pane a card opens", () => {
+  /// What the card only marks is said in full at the top of the pane, each
+  /// sentence led by the mark the card wears for it.
+  describe("says what the card marks", () => {
+    /// The sentence the pane holds, and the colour of the mark leading it.
+    const findings = (): Array<{ said: string; red: boolean }> =>
+      [...document.querySelectorAll(`.${styles.finding} > p`)].map((line) => ({
+        said: line.textContent!,
+        red: line.querySelector(`svg.${styles.trouble}`) !== null,
+      }));
+
+    it("says why a mirror cannot be run, at the top", async () => {
+      serving(
+        whenever(
+          "/api/ui/profiles",
+          json([{ ...MIRROR, broken: "HarnessMissing" }]),
+        ),
+      );
+      mountPane(MIRROR.id);
+
+      await waitFor(() => screen.getByLabelText("Name"));
+
+      expect(findings()).toEqual([
+        {
+          said: `${AGENT_NAME[MIRROR.account.agent_type]} isn't on this machine.`,
+          red: true,
+        },
+      ]);
+      // Over the form, and over where the account is.
+      const finding = document.querySelector(`.${styles.finding}`)!;
+      expect(
+        finding.compareDocumentPosition(screen.getByLabelText("Name")) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+      expect(
+        finding.compareDocumentPosition(
+          document.querySelector(`.${styles.athome}`)!,
+        ) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+      // A mirror's login is made where it is at home: nothing to press here.
+      expect(finding.querySelector("button")).toBeNull();
+    });
+
+    it("says an account at home with no login cannot be used away", async () => {
+      const login = `/api/ui/profiles/${CLUSTER[0]!.id}/login`;
+      const address = "https://claude.com/cai/oauth/authorize?code=true&state=1";
+      serving(
+        whenever("/api/ui/profiles", json([{ ...CLUSTER[0]!, login: false }])),
+        whenever(login, json({ state: "Starting" }), "POST"),
+        whenever(login, json({ state: "Waiting", url: address, refused: null })),
+      );
+      mountPane(CLUSTER[0]!.id);
+
+      await waitFor(() => screen.getByLabelText("Name"));
+
+      expect(findings()).toEqual([{ said: NOT_USABLE_AWAY, red: false }]);
+      expect(
+        document.querySelector(`.${styles.finding} svg.${styles.aside}`),
+      ).not.toBeNull();
+
+      // And the Log in the note ends by asking for, beside it: a Claude
+      // account at home with nothing to log in with, opening the same login
+      // the card's does.
+      const press = document.querySelector(`.${styles.finding} button`)!;
+      expect(press.textContent).toBe("Log in");
+
+      fireEvent.click(press);
+      await waitFor(() => screen.getByText(address));
+    });
+
+    it("says both where both are true, the refusal first", async () => {
+      serving(
+        whenever(
+          "/api/ui/profiles",
+          json([{ ...FABLE, login: false, broken: "SignedOut" }]),
+        ),
+      );
+      mountPane(FABLE.id);
+
+      await waitFor(() => screen.getByLabelText(/^Name/));
+
+      expect(findings()).toEqual([
+        {
+          said: "Its Claude Code account is signed out. Log in to run a session under it.",
+          red: true,
+        },
+        { said: NOT_USABLE_AWAY, red: false },
+      ]);
+      // One Log in, beside the sentence it is the fix for.
+      expect(
+        screen.getAllByRole("button", { name: "Log in" }),
+      ).toHaveLength(1);
+    });
+
+    it("says nothing over a profile with nothing wrong with it", async () => {
+      theProfiles();
+      mountPane(FABLE.id);
+
+      await waitFor(() => screen.getByLabelText(/^Name/));
+
+      expect(findings()).toEqual([]);
+    });
+  });
+
   /// Editing one is filling the same form in with what it already says: a
   /// profile is a name, a list of models and an account, with nothing built from
   /// them yet.
@@ -1514,8 +1675,9 @@ describe("a profile whose account has gone", () => {
     await waitFor(() => screen.getByText(reads(FABLE)));
 
     const face = theCard(reads(FABLE));
-    expect(face.classList).toContain(styles.broken);
-    expect(face.querySelector(`.${styles.broken}`)!.textContent).toBe(said);
+    expect(face.classList).toContain(styles.dimmed);
+    expect(marks(face)).toEqual([{ label: said, red: true }]);
+    expect(face.textContent).not.toContain(said);
   });
 
   it("says nothing about a profile whose pair is where it was left", async () => {
@@ -1526,8 +1688,8 @@ describe("a profile whose account has gone", () => {
 
     const face = theCard(reads(FABLE));
     expect(FABLE.broken).toBeNull();
-    expect(face.classList).not.toContain(styles.broken);
-    expect(face.querySelector(`.${styles.broken}`)).toBeNull();
+    expect(face.classList).not.toContain(styles.dimmed);
+    expect(marks(face)).toEqual([]);
   });
 });
 

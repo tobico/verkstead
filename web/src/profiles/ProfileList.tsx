@@ -44,8 +44,8 @@
 //!
 //! What is on the card is what a list is scanned for: one line reading as the
 //! harness's mark, the harness, and the profile's own name after an em dash —
-//! "Claude Code — Personal" — with the warning under it where the account has
-//! gone. The mounted paths come off it and into the pane, which has room for
+//! "Claude Code — Personal" — with a red mark after the name where the account
+//! has gone. The mounted paths come off it and into the pane, which has room for
 //! them, and so do the models: a profile carries every model its account can
 //! launch, and a card that listed them put a line of ids under every row. The
 //! agent type stays on the card as the mark it is drawn by rather than as a
@@ -55,9 +55,18 @@
 //! on: every device of a cluster lists every member's accounts here beside its
 //! own, so which machine a row's account sits on is a fact on the row rather
 //! than a section it is filed under. Nothing at all on this device's own, which
-//! is every row where there is no cluster — and what the warning under it says
-//! for one of those rows is where to go and look rather than a path to put
-//! right, nothing here having fetched the account.
+//! is every row where there is no cluster — and what the warning says for one
+//! of those rows is where to go and look rather than a path to put right,
+//! nothing here having fetched the account.
+//!
+//! The warning itself is the pane's. A card holding a broken profile is dimmed
+//! and carries a red `circle-exclamation` after its name, read aloud as the
+//! whole sentence; the sentence drawn out under the line was a red line through
+//! a list somebody was only scanning. The one note a card had that is not a
+//! refusal — an account with no login file cannot be lent out — is a grey
+//! `circle-info` in the same place, being information rather than an error.
+//! Both are said in full at the top of the pane the card opens, which is one
+//! press away and has the room.
 //!
 //! Removing is in that pane too, under the form. It was a second control on
 //! every row, which put a destructive press beside a list somebody was only
@@ -107,7 +116,11 @@
 //! a session may be run under is settled once and then left alone, which is the
 //! same kind of thing as everything else on it.
 
-import { faPlus } from "@fortawesome/free-solid-svg-icons";
+import {
+  faCircleExclamation,
+  faCircleInfo,
+  faPlus,
+} from "@fortawesome/free-solid-svg-icons";
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { For, Match, Show, Switch, createSignal, type JSX } from "solid-js";
 
@@ -462,7 +475,7 @@ function ProfileCard(props: {
         as="article"
         class={[
           styles.profile,
-          props.profile.broken !== null ? styles.broken : undefined,
+          props.profile.broken !== null ? styles.dimmed : undefined,
         ]
           .filter(Boolean)
           .join(" ")}
@@ -480,6 +493,28 @@ function ProfileCard(props: {
           <span class={styles.title}>
             <HarnessMark of={props.profile.account.agent_type} />
             <span class={styles.reading}>{summary(props.profile)}</span>
+            {/* And what is wrong with it, or the one thing to know about it, as
+                a mark after the name rather than a sentence under it: the
+                sentence is the pane's, and the mark reads it aloud. The red one
+                only where both are true — a refusal says more than a note. */}
+            <Switch>
+              <Match when={brokenReading(props.profile)}>
+                {(why) => (
+                  <Icon
+                    of={faCircleExclamation}
+                    label={why()}
+                    class={styles.trouble}
+                  />
+                )}
+              </Match>
+              <Match when={notLendable(props.profile)}>
+                <Icon
+                  of={faCircleInfo}
+                  label={NOT_USABLE_AWAY}
+                  class={styles.aside}
+                />
+              </Match>
+            </Switch>
           </span>
           <span class={styles.end}>
             {/* And which machine the account is on, where it is not this one: every
@@ -526,20 +561,6 @@ function ProfileCard(props: {
             </Show>
           </span>
         </div>
-        {/* Said here rather than left to be found out when a session will not
-            start: the profile was checked when it was saved, and what has become
-            of its pair since is the server's to report on every read. */}
-        <Show when={brokenReading(props.profile)}>
-          {(why) => <ErrorLine class={styles.broken}>{why()}</ErrorLine>}
-        </Show>
-        {/* And the one thing a row says that is not a refusal: an account with
-            no login file is perfectly runnable here and cannot be lent to
-            another device, there being nothing to mirror. Said on every
-            device's row — a mirror with none is broken and says so above, and
-            this is the same account read where it lives. */}
-        <Show when={!props.profile.login && props.profile.device === null}>
-          <Note>{NOT_USABLE_AWAY}</Note>
-        </Show>
       </CardButton>
       {/* Beside the card rather than inside it, so that nothing pressed in the
           modal is a press on the card. */}
@@ -552,6 +573,14 @@ function ProfileCard(props: {
       </Show>
     </li>
   );
+}
+
+/// Whether the account is one with no login file at home here: perfectly
+/// runnable, and not one that can be lent to another device, there being
+/// nothing to mirror. Not a refusal — a mirror with none is broken and says so
+/// in its own words, and this is the same account read where it lives.
+function notLendable(profile: ProfileEntry): boolean {
+  return !profile.login && profile.device === null;
 }
 
 /// Whether a card offers a login: a Claude Profile at home on this device —
@@ -595,6 +624,8 @@ export function ProfilePane(props: {
   /// Profile that is gone.
   const saved = (): ProfileEntry | undefined =>
     profiles.data?.find((profile) => profile.id === props.profile);
+
+  const [loggingIn, setLoggingIn] = createSignal(false);
 
   const [refusedRemoval, setRefusedRemoval] =
     createSignal<ProfileDeleted | null>(null);
@@ -642,6 +673,71 @@ export function ProfilePane(props: {
           title={adding() ? "Add a Profile" : "Edit Profile"}
         />
       </PaneSticky>
+
+      {/* What the card marks, said in full: said here rather than left to be
+          found out when a session will not start — the profile was checked when
+          it was saved, and what has become of its pair since is the server's to
+          report on every read. Each sentence led by the mark the card wears for
+          it, so the two read as one fact; the refusal first, and the note after
+          it where both are true. */}
+      <Show when={saved()}>
+        {(profile) => {
+          // The card's own Log in, offered on the same accounts and beside the
+          // sentence it is the fix for: the sign-out where a press found one,
+          // and otherwise the note, which ends by saying to log in here.
+          const offered = (): boolean =>
+            loggable(profile()) && !loggedIn(profile());
+          const logIn = (): JSX.Element => (
+            <button
+              type="button"
+              class={`${styles.logIn!} secondary`}
+              onClick={() => setLoggingIn(true)}
+            >
+              Log in
+            </button>
+          );
+
+          return (
+            <>
+              <Show when={brokenReading(profile())}>
+                {(why) => (
+                  <div class={styles.finding}>
+                    <ErrorLine>
+                      <Icon of={faCircleExclamation} class={styles.trouble} />
+                      {why()}
+                    </ErrorLine>
+                    <Show
+                      when={offered() && profile().broken === "SignedOut"}
+                    >
+                      {logIn()}
+                    </Show>
+                  </div>
+                )}
+              </Show>
+              <Show when={notLendable(profile())}>
+                <div class={styles.finding}>
+                  <Note>
+                    <Icon of={faCircleInfo} class={styles.aside} />
+                    {NOT_USABLE_AWAY}
+                  </Note>
+                  <Show when={offered() && profile().broken !== "SignedOut"}>
+                    {logIn()}
+                  </Show>
+                </div>
+              </Show>
+              {/* Beside the sentences rather than inside them, as the card puts
+                  its own beside the card. */}
+              <Show when={loggingIn()}>
+                <LoggingIn
+                  profile={profile().id}
+                  called={summary(profile())}
+                  close={() => setLoggingIn(false)}
+                />
+              </Show>
+            </>
+          );
+        }}
+      </Show>
 
       {/* And where a save over this Profile goes, on the rows whose account is
           on another machine. Every device's Profiles section lists every

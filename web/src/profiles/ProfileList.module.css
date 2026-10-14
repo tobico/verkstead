@@ -42,8 +42,8 @@
   gap: 0.25rem;
 }
 
-/* What stands on the card — the one line reading it, and the warning where the
-   pair has gone. A column, because a card is read down. */
+/* What stands on the card, which is the one line reading it. A column still,
+   because a card is read down and the line is only what it holds today. */
 .profile {
   display: flex;
   flex-direction: column;
@@ -110,10 +110,11 @@
   width: 1em;
 }
 
-/* The Log in press, small and at the card's start edge under what the card
-   says: it is a thing to do about the account rather than what the account
-   is. */
-.profile .logIn {
+/* The Log in press, small: it is a thing to do about the account rather than
+   what the account is. The same press stands beside the sentence it fixes in the
+   pane. */
+.profile .logIn,
+.finding .logIn {
   padding: 0.2rem 0.7rem;
   font-size: 0.85rem;
 }
@@ -135,19 +136,48 @@
   color: var(--ink-soft);
 }
 
-/* A profile whose pair has gone. Said in the card's edge as well as in the words
-   under it, because a list is scanned before it is read — and those words are
-   the same class one level down, which is what tells the two rules apart.
-
-   The edge is the one the card reserves and never draws, so nothing moves when
-   this colours it in. */
-.profile.broken {
-  border-color: var(--removed);
+/* A profile that cannot be run under as things stand, dimmed whole — the mark
+   after its name with it — the way the Remote access pane dims a device that
+   has stopped answering: the row is still there to be opened and put right, and
+   what it is read as at a glance is out of reach. Only a broken one; a card
+   carrying the grey note is perfectly runnable. */
+.profile.dimmed {
+  opacity: 0.55;
 }
 
-.profile .broken {
-  margin: 0.25rem 0 0;
-  font-size: 0.85rem;
+/* The marks after the name: the red of a refusal, the one the card's edge was
+   drawn in before the sentence moved to the pane, and the quiet grey of a note.
+   The same two lead those sentences in the pane. */
+.trouble {
+  flex: none;
+  color: var(--removed);
+}
+
+.aside {
+  flex: none;
+  color: var(--ink-soft);
+}
+
+/* And those sentences in the pane, at the top beside where the account is: the
+   mark leading the words, and a Log in beside them where it is the fix. Set in
+   `.athome`'s size and room, being the same block of facts over the form. */
+.finding {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0 0 0.85rem;
+  font-size: 0.9rem;
+}
+
+.finding > p {
+  flex: 1 1 0;
+  min-width: 0;
+  margin: 0;
+  font-size: inherit;
+}
+
+.finding svg {
+  margin-inline-end: 0.4em;
 }
 
 /* One form for both saving and rewriting — a profile is a handful of fields with
