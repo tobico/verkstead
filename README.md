@@ -15,7 +15,8 @@ separate, maintained product; Verkstead diverges freely from it.
 
 **Released, and early.** Each version is published on
 [GitHub Releases](https://github.com/tobico/verkstead/releases), and the latest
-is what any of the four ways in below fetches. It is a single-user workbench,
+is what any of the four ways in below fetches, and what the website,
+<https://tobico.github.io/verkstead/>, links to. It is a single-user workbench,
 and still young enough to change a good deal from one release to the next.
 
 There are four ways in, and they are four different things rather than four
