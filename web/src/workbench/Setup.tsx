@@ -149,8 +149,8 @@ export const BRANCH_REFUSAL: Record<BranchRenamed, string> = {
   Renamed: "",
   NoSuchConversation: "This conversation is gone.",
   NotDrafting:
-    "The branch exists by now, so its name is not a text field any more.",
-  NotABranchName: "Git will not take that as a branch name.",
+    "The branch exists now, so its name can't be changed.",
+  NotABranchName: "Git won't take that as a branch name.",
 };
 
 /// And moving the work onto another repo.
@@ -158,10 +158,10 @@ export const REPO_SWITCH_REFUSAL: Record<RepoSwitched, string> = {
   Switched: "",
   NoSuchConversation: "This conversation is gone.",
   NotDrafting:
-    "The branch exists by now, so which repo the work is in is settled.",
+    "The branch exists now, so the repo is settled.",
   Adopting:
-    "The stage being continued is in this repo, so the work cannot be moved off it.",
-  NoSuchRepo: "That repo is not registered any more.",
+    "The stage being continued is in this repo, so the work can't move off it.",
+  NoSuchRepo: "That repo isn't registered any more.",
 };
 
 /// And saying what kind of work it is.
@@ -175,8 +175,8 @@ export const PROCESS_REFUSAL: Record<ProcessPicked, string> = {
   Picked: "",
   NoSuchConversation: "This conversation is gone.",
   NotDrafting:
-    "The branch exists by now, so what kind of work this is has been settled.",
-  NotLanded: "Verkstead cannot run that process yet.",
+    "The branch exists now, so the process is settled.",
+  NotLanded: "Verkstead can't run that process yet.",
 };
 
 /// And naming what the work is pointed at.
@@ -189,7 +189,7 @@ export const TARGET_REFUSAL: Record<TargetRecorded, string> = {
   Recorded: "",
   NoSuchConversation: "This conversation is gone.",
   NotDrafting:
-    "The work has started, so what it is pointed at was read when it did.",
+    "The work has started, so its target is settled.",
 };
 
 /// And a base branch.
@@ -206,8 +206,8 @@ export const COMPANION_REFUSAL: Record<CompanionAdded, string> = {
   NoSuchConversation: "This conversation is gone.",
   NotDrafting:
     "The grilling has started, so what this conversation works alongside is settled.",
-  NoSuchRepo: "That repo is not registered any more.",
-  OwnRepo: "That is this conversation's own repo — the work is in it already.",
+  NoSuchRepo: "That repo isn't registered any more.",
+  OwnRepo: "That's this conversation's own repo. The work is in it already.",
   AlreadyAdded: "That repo is on this conversation already.",
 };
 
@@ -226,7 +226,7 @@ export const COMPANION_MODE_REFUSAL: Record<CompanionModeChosen, string> = {
   NoSuchConversation: "This conversation is gone.",
   NotDrafting:
     "The grilling has started, so what this conversation works alongside is settled.",
-  NoSuchCompanion: "That repo is not on this conversation any more.",
+  NoSuchCompanion: "That repo isn't on this conversation any more.",
 };
 
 /// And the branch its checkout comes off.
@@ -234,7 +234,7 @@ export const COMPANION_BASE_REFUSAL: Record<CompanionBaseRecorded, string> = {
   Recorded: "",
   NoSuchConversation: "This conversation is gone.",
   NotDrafting: "The base commit was captured when grilling started.",
-  NoSuchCompanion: "That repo is not on this conversation any more.",
+  NoSuchCompanion: "That repo isn't on this conversation any more.",
   NoSuchBranch: "That repo has no branch by that name any more.",
 };
 
@@ -243,9 +243,9 @@ export const COMPANION_BRANCH_REFUSAL: Record<CompanionBranchRenamed, string> = 
   Renamed: "",
   NoSuchConversation: "This conversation is gone.",
   NotDrafting:
-    "The branch exists by now, so its name is not a text field any more.",
-  NoSuchCompanion: "That repo is not on this conversation any more.",
-  NotABranchName: "Git will not take that as a branch name.",
+    "The branch exists now, so its name can't be changed.",
+  NoSuchCompanion: "That repo isn't on this conversation any more.",
+  NotABranchName: "Git won't take that as a branch name.",
 };
 
 /// And a pairing choice.
@@ -311,10 +311,8 @@ export function SetupNotes(props: {
           asked for all the same is worth a line. */}
       <Show when={props.conversation.adopting}>
         <Note class={styles.aside}>
-          All three pairings are fixed before the stage starts: the
-          implementation one is what the work runs under, the review one is what
-          looks at it, and the grilling one is carried, because the stages after
-          this one inherit all of them from it.
+          All three pairings are fixed before the stage starts, because the
+          stages after this one inherit them.
         </Note>
       </Show>
 
@@ -727,12 +725,12 @@ function MayBeTransferredTo(props: { ticks: Ticks }): JSX.Element {
                   <>
                     <Icon of={osIcon(device.os)} class={styles.tickMark!} />{" "}
                     {device.name}
-                    <span class={styles.tickNote}> — drafted here, always</span>
+                    <span class={styles.tickNote}> (drafted here)</span>
                   </>
                 }
                 on
                 disabled
-                title="Where this work was drafted is always somewhere it may go back to."
+                title="Work can always go back to where it was drafted."
                 flip={() => undefined}
               />
             }
@@ -801,7 +799,7 @@ export function useConversationTicks(
     },
 
     onError: (error: Error) =>
-      setRefused(`The tick could not be saved: ${error.message}`),
+      setRefused(`The tick couldn't be saved: ${error.message}`),
   }));
 
   return {
@@ -824,7 +822,7 @@ export function useConversationTicks(
 /// What a refused tick says, in the words the ticks are drawn beside.
 export const TICK_REFUSAL: Record<Permitting, string> = {
   Recorded: "",
-  NotAMember: "That device is not linked to this one any more.",
+  NotAMember: "That device isn't linked to this one any more.",
   DraftedThere: "Where the work was drafted is always permitted.",
   WorkIsHere: "The work is on that device already.",
   Elsewhere: "This work has moved to another device, where its ticks are kept.",
@@ -890,7 +888,7 @@ export function RepoSelect(props: {
           offering none of them is worth more than an empty list. */}
       <Show when={repos.isError}>
         <ErrorLine class={styles.failure}>
-          Could not read the repos: {repos.error?.message}
+          The repos couldn't be read: {repos.error?.message}
         </ErrorLine>
       </Show>
 
@@ -1022,7 +1020,7 @@ function RepoPicker(props: {
       </Show>
       <Show when={move.isError}>
         <ErrorLine class={styles.failure}>
-          The repo could not be switched: {move.error?.message}
+          The repo couldn't be switched: {move.error?.message}
         </ErrorLine>
       </Show>
     </RepoChoice>
@@ -1088,7 +1086,7 @@ export function RepoChoice(props: {
       <Switch>
         <Match when={repos.isError}>
           <ErrorLine class={styles.failure}>
-            Could not read the repos: {repos.error?.message}
+            The repos couldn't be read: {repos.error?.message}
           </ErrorLine>
         </Match>
         <Match when={true}>
@@ -1176,7 +1174,7 @@ function ProcessOption(props: { conversation: ConversationView }): JSX.Element {
       </Show>
       <Show when={say.isError}>
         <ErrorLine class={styles.failure}>
-          The process could not be picked: {say.error?.message}
+          The process couldn't be picked: {say.error?.message}
         </ErrorLine>
       </Show>
     </ProcessPicker>
@@ -1258,9 +1256,9 @@ function UncachedCompiles(props: {
   return (
     <Show when={props.conversation.compiles_uncached}>
       <p class={styles.uncached}>
-        No sccache is installed where the server can see it, so what this
-        repository compiles will not be cached, and every session compiles it
-        again from scratch. Install sccache on the server to cache it.
+        <code>sccache</code> isn't installed where the server can see it, so
+        every session compiles this repo from scratch. Install it on the server
+        to cache builds.
       </p>
     </Show>
   );
@@ -1470,15 +1468,15 @@ export function ProfileChoices(props: {
     <Switch>
       <Match when={profiles.isError}>
         <ErrorLine class={styles.failure}>
-          Could not read the agent profiles: {profiles.error?.message}
+          The agent profiles couldn't be read: {profiles.error?.message}
         </ErrorLine>
       </Match>
       <Match when={profiles.data?.length === 0}>
         {/* Nothing to choose, so the only thing to offer is the page that
             fixes that. */}
         <Empty class={styles.nothing}>
-          No agent profiles are saved yet — <A href="/settings">add one</A> to
-          run a session under.
+          No agent profiles are saved yet. <A href="/settings">Add one</A> in the
+          settings.
         </Empty>
       </Match>
       <Match when={profiles.data}>{props.children}</Match>
@@ -1563,8 +1561,8 @@ function PairingPicker(props: {
           bare placeholder, because the conversation does have a profile. */}
       <Show when={props.pairing && !props.pairing.model}>
         <Note class={styles.unpaired}>
-          {props.pairing?.profile.name ?? DEFAULT_PROFILE} was chosen before
-          models were picked beside them. Pick one to pair.
+          {props.pairing?.profile.name ?? DEFAULT_PROFILE} was chosen without a
+          model. Pick one to pair with it.
         </Note>
       </Show>
 
@@ -1579,7 +1577,7 @@ function PairingPicker(props: {
       </Show>
       <Show when={choose.isError}>
         <ErrorLine class={styles.failure}>
-          The profile could not be chosen: {choose.error?.message}
+          The profile couldn't be chosen: {choose.error?.message}
         </ErrorLine>
       </Show>
     </RolePicker>
@@ -1827,7 +1825,7 @@ function BranchName(props: { conversation: ConversationView }): JSX.Element {
       </Show>
       <Show when={rename.isError}>
         <ErrorLine class={styles.failure}>
-          The branch could not be named: {rename.error?.message}
+          The branch couldn't be named: {rename.error?.message}
         </ErrorLine>
       </Show>
     </BranchField>
@@ -1937,7 +1935,7 @@ function TargetName(props: { conversation: ConversationView }): JSX.Element {
       </Show>
       <Show when={name.isError}>
         <ErrorLine class={styles.failure}>
-          The target could not be named: {name.error?.message}
+          The target couldn't be named: {name.error?.message}
         </ErrorLine>
       </Show>
     </BranchField>
@@ -2091,7 +2089,7 @@ export function BasePicker(props: {
           said rather than drawn as a repository with one branch. */}
       <Show when={branches.isError}>
         <ErrorLine class={styles.failure}>
-          Could not read the repo's branches: {branches.error?.message}
+          The repo's branches couldn't be read: {branches.error?.message}
         </ErrorLine>
       </Show>
       {props.children}
@@ -2148,7 +2146,7 @@ function BaseBranch(props: { conversation: ConversationView }): JSX.Element {
       </Show>
       <Show when={record.isError}>
         <ErrorLine class={styles.failure}>
-          The base branch could not be recorded: {record.error?.message}
+          The base branch couldn't be recorded: {record.error?.message}
         </ErrorLine>
       </Show>
     </BasePicker>
@@ -2229,7 +2227,7 @@ function AddCompanion(props: { conversation: ConversationView }): JSX.Element {
       </Show>
       <Show when={add.isError}>
         <ErrorLine class={styles.failure}>
-          The companion repo could not be added: {add.error?.message}
+          The companion repo couldn't be added: {add.error?.message}
         </ErrorLine>
       </Show>
     </CompanionChoice>
@@ -2277,7 +2275,7 @@ export function CompanionChoice(props: {
       <Switch>
         <Match when={repos.isError}>
           <ErrorLine class={styles.failure}>
-            Could not read the repos: {repos.error?.message}
+            The repos couldn't be read: {repos.error?.message}
           </ErrorLine>
         </Match>
         <Match when={repos.data?.length === 0}>
@@ -2289,8 +2287,8 @@ export function CompanionChoice(props: {
               path that drops a dropdown — the words name the control, which is
               on the same page as this one. */}
           <Empty class={styles.nothing}>
-            No repos are registered yet — <strong>Open repo</strong> on the
-            Repo dropdown takes one on to work alongside.
+            No repos are registered yet. Open one from the <strong>Repo</strong>{" "}
+            dropdown.
           </Empty>
         </Match>
         <Match when={repos.data}>
@@ -2398,7 +2396,7 @@ function Companion(props: {
       </Show>
       <Show when={forget.isError}>
         <ErrorLine class={styles.failure}>
-          The companion repo could not be removed: {forget.error?.message}
+          The companion repo couldn't be removed: {forget.error?.message}
         </ErrorLine>
       </Show>
 
@@ -2508,7 +2506,7 @@ function CompanionBase(props: {
       </Show>
       <Show when={record.isError}>
         <ErrorLine class={styles.failure}>
-          The base branch could not be recorded: {record.error?.message}
+          The base branch couldn't be recorded: {record.error?.message}
         </ErrorLine>
       </Show>
     </BasePicker>
@@ -2569,7 +2567,7 @@ function CompanionAccess(props: {
       </Show>
       <Show when={choose.isError}>
         <ErrorLine class={styles.failure}>
-          The companion repo's mode could not be set: {choose.error?.message}
+          The companion repo's mode couldn't be set: {choose.error?.message}
         </ErrorLine>
       </Show>
     </div>
@@ -2701,7 +2699,7 @@ function CompanionBranch(props: {
       </Show>
       <Show when={rename.isError}>
         <ErrorLine class={styles.failure}>
-          The branch could not be named: {rename.error?.message}
+          The branch couldn't be named: {rename.error?.message}
         </ErrorLine>
       </Show>
     </BranchField>

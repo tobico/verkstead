@@ -180,9 +180,9 @@ export const STOP_REFUSAL: Record<ConversationStopped, string> = {
   Stopped: "",
   Stopping: "",
   AlreadyStopped:
-    "This conversation has already stopped. Resume is what gets it going again.",
+    "This conversation has already stopped. Resume starts it again.",
   NotDriven:
-    "Nothing is supposed to be driving this conversation, so there is nothing to stop.",
+    "This conversation isn't being driven, so there's nothing to stop.",
   NoSuchConversation: "This conversation is gone.",
 };
 
@@ -206,7 +206,7 @@ export const CLOSE_REFUSAL: Record<ConversationClosed, string> = {
 export const ARCHIVE_REFUSAL: Record<ConversationArchived, string> = {
   Archived: "",
   AlreadyArchived: "",
-  NotClosed: "This conversation is not closed, so there is nothing to put away.",
+  NotClosed: "This conversation isn't closed, so it can't be archived.",
   NoSuchConversation: "This conversation is gone.",
 };
 
@@ -230,17 +230,17 @@ export const RESUME_REFUSAL: Record<Resumed, string> = {
   Resumed: "",
   NoSuchConversation: "This conversation is gone.",
   NotDriven:
-    "Nothing is supposed to be driving this conversation, so there is nothing to start again.",
+    "This conversation isn't being driven, so there's nothing to start again.",
   AlreadyDriven:
-    "Something is already driving this conversation. Have a look at what it is doing.",
+    "Something is already driving this conversation. Check what it's doing.",
   NowhereToWork:
-    "This conversation has no worktree to work in, so there is nowhere to start.",
+    "This conversation has no worktree, so there's nowhere to start.",
   WorktreeRefused:
-    "This conversation's worktree is broken and git would not make it again from the branch. The server log says why.",
+    "This conversation's worktree is broken, and git wouldn't make it again from the branch. The server log says why.",
   NoDirection:
-    "Nothing on the record says how this work is being built, so there is no run to pick up.",
+    "Nothing on the record says how this work is being built, so there's no run to pick up.",
   NothingToWork:
-    "There is no backlog left to work and nothing was ever written on this branch, so there is nothing built here to carry anywhere. Set the next thing going by hand.",
+    "No backlog is left and nothing was ever written on this branch, so there's nothing to carry on. Start the next step by hand.",
   // Steer rather than the brief, which is where the drafting presses send
   // somebody: a conversation's pairings are fixed when its work starts, so the
   // pickers on the brief are past changing by the time Resume is a row at all.
@@ -368,7 +368,7 @@ export function Refusal(props: {
       <p class={styles.refusedWhy}>{props.said}</p>
       <div class={styles.refusedOut}>
         <button type="button" onClick={() => props.close()}>
-          OK
+          Dismiss
         </button>
       </div>
     </Modal>
@@ -446,10 +446,7 @@ function Confirm(props: {
       <p id={id} class={styles.confirmingTitle}>
         Close while the agent is running?
       </p>
-      <p class={styles.confirmingWhy}>
-        The agent is still working on this conversation. Closing now will end the
-        run.
-      </p>
+      <p class={styles.confirmingWhy}>Closing now ends the agent's run.</p>
       <div class={styles.confirmingOut}>
         {/* Both classes, as the Set sheet's own confirm pair carry them: the
             global one is the paint, and the module's is what the row above
@@ -459,7 +456,7 @@ function Confirm(props: {
           class={`${styles.secondary!} secondary`}
           onClick={() => props.keep()}
         >
-          Keep it running
+          Cancel
         </button>
         <button type="button" onClick={() => props.close()}>
           {props.asked}
@@ -674,7 +671,7 @@ function actions(): {
       void reread();
     },
     onError: (error: Error) =>
-      refuse(`The conversation could not be resumed: ${error.message}`),
+      refuse(`The conversation couldn't be resumed: ${error.message}`),
   }));
 
   /// Both stops answer the same way, so both are pressed the same way: a
@@ -694,7 +691,7 @@ function actions(): {
       void reread();
     },
     onError: (error: Error) =>
-      refuse(`The conversation could not be stopped: ${error.message}`),
+      refuse(`The conversation couldn't be stopped: ${error.message}`),
   });
 
   const stop = useMutation(() => pressing(stopConversation));
@@ -749,7 +746,7 @@ function actions(): {
     },
     onError: (error: Error) =>
       refuse(
-        `The conversation could not be stopped to steer it: ${error.message}`,
+        `The conversation couldn't be stopped to steer it: ${error.message}`,
       ),
   }));
 
@@ -784,7 +781,7 @@ function actions(): {
       post: () => ending(device(), conversation.id),
       refusal: (outcome: ConversationClosed) => CLOSE_REFUSAL[outcome],
       fell: (error: Error) =>
-        `The conversation could not be closed: ${error.message}`,
+        `The conversation couldn't be closed: ${error.message}`,
       reread,
     });
   };
@@ -856,7 +853,7 @@ function actions(): {
       post: () => archiveConversation(device(), conversation.id),
       refusal: (outcome: ConversationArchived) => ARCHIVE_REFUSAL[outcome],
       fell: (error: Error) =>
-        `The conversation could not be archived: ${error.message}`,
+        `The conversation couldn't be archived: ${error.message}`,
       reread,
     });
   };
@@ -879,7 +876,7 @@ function actions(): {
       post: () => unarchiveConversation(device(), conversation.id),
       refusal: (outcome: ConversationUnarchived) => UNARCHIVE_REFUSAL[outcome],
       fell: (error: Error) =>
-        `The conversation could not be unarchived: ${error.message}`,
+        `The conversation couldn't be unarchived: ${error.message}`,
       reread,
     });
   };
@@ -989,7 +986,7 @@ function actions(): {
             <Action
               class={styles.transfer}
               label="Transfer to…"
-              says="Move this conversation, its branch and its working changes to another device."
+              says="Move this conversation, its branch, and its working changes to another device."
               press={() => transfers(conversation())}
             />
           </Show>
@@ -1020,7 +1017,7 @@ function actions(): {
                 <Action
                   class={styles.unarchive}
                   label="Unarchive"
-                  says="Put it back on the conversations list, where it stays."
+                  says="Put it back on the conversations list."
                   press={() => unarchiving(conversation())}
                 />
               </Show>
@@ -1203,7 +1200,7 @@ export function CardActions(props: {
         close={props.close}
       >
         {() => (
-          <Switch fallback={<Empty>Loading…</Empty>}>
+          <Switch fallback={<Empty>Reading the conversation…</Empty>}>
             {/* What was read, ahead of a read that failed: a refetch that fell
                 over behind rows already in hand is no reason to take the rows
                 away. */}
@@ -1212,7 +1209,7 @@ export function CardActions(props: {
             </Match>
             <Match when={conversation.isError}>
               <ErrorLine class={styles.failure}>
-                The conversation could not be read:{" "}
+                The conversation couldn't be read:{" "}
                 {conversation.error?.message}
               </ErrorLine>
             </Match>

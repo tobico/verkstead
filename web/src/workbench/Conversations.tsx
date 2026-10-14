@@ -584,15 +584,17 @@ export function Conversations(props: {
 
       <Switch>
         <Match when={conversations.isPending}>
-          <Empty>Loading…</Empty>
+          <Empty>Reading the conversations…</Empty>
         </Match>
         <Match when={conversations.isError}>
           <ErrorLine>
-            Could not read the conversations: {conversations.error?.message}
+            The conversations couldn't be read: {conversations.error?.message}
           </ErrorLine>
         </Match>
         <Match when={conversations.data?.length === 0}>
-          <Empty>Nothing is being worked on yet.</Empty>
+          <Empty>
+            No conversations yet. Start one with <strong>New conversation</strong>.
+          </Empty>
         </Match>
         <Match when={conversations.data}>
           <ul class={styles.conversationList} ref={list}>

@@ -44,25 +44,25 @@ export const TAKE_UP_REFUSAL: Record<Extract<TakenUp, string>, string> = {
   NoSuchConversation: "This conversation is gone.",
   NotDrafting: "This conversation has already been started.",
   NotHoldingOne:
-    "This conversation is not a review, so there is nothing for it to wrap up.",
+    "This conversation isn't a review, so there's nothing for it to wrap up.",
   NoTarget:
-    "Nothing is named in the Target field — put a pull request in it, by its link or as #number, or the branch to wrap up.",
+    "The Target field is empty. Name a pull request in it, by link or as #number, or the branch to wrap up.",
   Fork:
     "That pull request's branch is in a fork, so nothing fixed here could be pushed to it.",
   NoImplementationProfile:
-    "Choose an implementation profile and model first, on the brief.",
-  NoReviewProfile: "Choose a review profile and model first, on the brief.",
+    "Choose an implementation profile and model on the brief first.",
+  NoReviewProfile: "Choose a review profile and model on the brief first.",
   FetchFailed:
-    "Git could not fetch from the repo's remote, so nothing was started. The server log says why.",
+    "Git couldn't fetch from the repo's remote, so nothing was started. The server log says why.",
   NoHeadBranch:
-    "Origin has no branch by that name, so there is nowhere for a review to happen. Push it, or name another.",
+    "Origin has no branch by that name, so there's nowhere for a review to happen. Push it, or name another.",
   BranchAhead:
-    "The local branch of that name holds commits origin does not. Push them, or take them off, and try again.",
+    "The local branch of that name holds commits origin doesn't. Push them or take them off, and try again.",
   BranchDiverged:
     "The local branch of that name and origin's have gone different ways. Reconcile them and try again.",
   FastForwardFailed:
-    "Git would not move the local branch on to origin's. The server log says why.",
-  WorktreeRefused: "Git would not make the worktree. The server log says why.",
+    "Git wouldn't move the local branch on to origin's. The server log says why.",
+  WorktreeRefused: "Git wouldn't make the worktree. The server log says why.",
 };
 
 /// What to say about a take-up that was refused.
@@ -83,23 +83,23 @@ export function takeUpRefusal(outcome: TakenUp): string {
     }
 
     if ("AnotherRepository" in outcome) {
-      return `That link is a pull request of ${outcome.AnotherRepository.named}, which is not the repo this conversation is on.`;
+      return `That link is a pull request of ${outcome.AnotherRepository.named}, which isn't the repo this conversation is on.`;
     }
 
     if ("NoSuchPullRequest" in outcome) {
-      return `This repo has nothing open under #${outcome.NoSuchPullRequest.number} — it may have been merged, closed, or never opened.`;
+      return `This repo has nothing open under #${outcome.NoSuchPullRequest.number}. It may have been merged, closed, or never opened.`;
     }
 
     if ("GitHubRefused" in outcome) {
-      return `GitHub could not be asked about that pull request: ${outcome.GitHubRefused.why}.`;
+      return `GitHub couldn't be asked about that pull request: ${outcome.GitHubRefused.why}.`;
     }
 
     if ("AlreadyHeld" in outcome) {
-      return "Another conversation is still at work on that pull request, so the way on is that conversation rather than a second one over the same branch.";
+      return "Another conversation is still at work on that pull request. Carry on there rather than starting a second one on the same branch.";
     }
 
     if ("WouldDiscard" in outcome) {
-      return `${held(outcome.WouldDiscard.uncommitted)} ${closingThem(outcome.WouldDiscard.uncommitted.length)}`;
+      return `${held(outcome.WouldDiscard.uncommitted)} ${closingThem(outcome.WouldDiscard.uncommitted.length)} Press Start anyway to go ahead.`;
     }
 
     if ("ProfileBroken" in outcome) {
@@ -125,8 +125,8 @@ export function takeUpRefusal(outcome: TakenUp): string {
 /// would have read.
 function closingThem(count: number): string {
   return count === 1
-    ? "would be closed to make way, and the uncommitted changes in its worktree would go with it. Press start again to go ahead."
-    : "would each be closed to make way, and the uncommitted changes in their worktrees would go with them. Press start again to go ahead.";
+    ? "would be closed to make way, and the uncommitted changes in its worktree would go with it."
+    : "would each be closed to make way, and the uncommitted changes in their worktrees would go with them.";
 }
 
 /// Who is holding something, as the plain sentence names them: by branch, in the
@@ -202,8 +202,8 @@ export function TakeUpRefusal(props: { outcome: TakenUp }): JSX.Element {
           {(conversation) => (
             <>
               <A href={pathOf(conversation())}>Another conversation</A> is still
-              at work on that pull request, so the way on is that conversation
-              rather than a second one over the same branch.
+              at work on that pull request. Carry on there rather than starting
+              a second one on the same branch.
             </>
           )}
         </Show>
@@ -222,7 +222,8 @@ export function TakeUpRefusal(props: { outcome: TakenUp }): JSX.Element {
               </>
             )}
           </For>{" "}
-          {closingThem(uncommitted().length)}
+          {closingThem(uncommitted().length)} Press <strong>Start anyway</strong>{" "}
+          to go ahead.
         </>
       )}
     </Show>

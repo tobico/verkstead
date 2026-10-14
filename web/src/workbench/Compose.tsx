@@ -264,7 +264,7 @@ export function ComposePage(): JSX.Element {
 /// The one thing a create cannot be done without, and the one control on this
 /// page that has not been answered — so the button says it where the press is
 /// refused rather than the page saying it above the row.
-const NO_REPO = "No repo selected";
+const NO_REPO = "Select a repo first.";
 
 /// The composer itself, over the compose state.
 function Compose(props: {
@@ -714,7 +714,7 @@ function Compose(props: {
       <PaneSticky>
         <Show
           when={props.zero}
-          fallback={<PaneHead back={props.back} title="New conversation" />}
+          fallback={<PaneHead back={props.back} title="New Conversation" />}
         >
           <Wordmark />
         </Show>
@@ -1117,12 +1117,12 @@ function Compose(props: {
 
             <Show when={gone()}>
               <ErrorLine class={styles.failure}>
-                That repo is not registered any more, so nothing was created.
+                That repo isn't registered any more, so nothing was created.
               </ErrorLine>
             </Show>
             <Show when={make.isError}>
               <ErrorLine class={styles.failure}>
-                The conversation could not be created: {make.error?.message}
+                The conversation couldn't be created: {make.error?.message}
               </ErrorLine>
             </Show>
           </div>
@@ -1208,12 +1208,12 @@ function Loaded(props: {
       </Show>
 
       <Note>
-        The stage's own brief becomes this conversation's brief when the stage is
-        adopted, and the work is done on the branch the stage is named for.
+        The stage's brief becomes this conversation's brief, and the work is done
+        on the stage's own branch.
         <Show when={props.roadmap.beside?.length}>
           {" "}
           Each stage beside it starts as a conversation of its own, off the same
-          base and with the same profiles and repos alongside.
+          base and with the same profiles and repos.
         </Show>
       </Note>
     </div>

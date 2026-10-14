@@ -880,7 +880,7 @@ describe("the workbench", () => {
     );
     mountSidebar("/");
 
-    await waitFor(() => screen.getByText("Nothing is being worked on yet."));
+    await waitFor(() => screen.getByText(/No conversations yet\./));
   });
 
   /// The sidebar is where the rest of Verkstead is reached from, now that the
@@ -2196,7 +2196,7 @@ describe("what a right-click on a card offers", () => {
     // again there is no read to count at all: it threw where the id should have
     // been, and the error line stood in the Timeline's place.
     await waitFor(() => {
-      expect(screen.queryByText(/Could not read this conversation/)).toBeNull();
+      expect(screen.queryByText(/This conversation couldn't be read/)).toBeNull();
       expect(askedFor(fetching, reading)).toBeGreaterThan(read);
     });
 
@@ -2729,7 +2729,7 @@ describe("the adoption page", () => {
       expect(
         container.querySelector(`.${adoption.adoption} .${notices.error}`)!.textContent,
       ).toBe(
-        "A branch named roadmaps stands in the way of the stage's own branch, and Verkstead did not make it.",
+        "A branch named roadmaps stands in the way of the stage's own branch, and Verkstead didn't make it.",
       ),
     );
   });
@@ -2763,7 +2763,7 @@ describe("the adoption page", () => {
       expect(
         container.querySelector(`.${adoption.adoption} .${notices.error}`)!.textContent,
       ).toBe(
-        "That roadmap declares badly, so nothing of it can start: stage 04 of the mvp roadmap says `after 09`, and no stage of it is labelled 09.",
+        "That roadmap declares badly, so none of it can start: stage 04 of the mvp roadmap says `after 09`, and no stage of it is labelled 09.",
       ),
     );
   });
@@ -3297,7 +3297,7 @@ describe("the escape hatch on a conversation that will not load", () => {
       theWorkbench(whenever(READING, hangs()));
       const { container } = mount(`/conversations/${OPEN.id}`);
 
-      await waitFor(() => screen.getByText("Loading…"));
+      await waitFor(() => screen.getByText("Reading the conversation…"));
       expect(timeout).toHaveBeenCalledWith(DEADLINE);
 
       expire();
@@ -3344,7 +3344,7 @@ describe("the escape hatch on a conversation that will not load", () => {
       window.history.pushState({}, "", `/conversations/${OPEN.id}`);
       const { container } = render(() => <App />);
 
-      await waitFor(() => screen.getByText("Loading…"));
+      await waitFor(() => screen.getByText("Reading the conversation…"));
 
       expire();
 
@@ -3425,7 +3425,7 @@ describe("the escape hatch on a conversation that will not load", () => {
     await openActions(container);
     fireEvent.click(await drawn(container, `.${actions.closeAndArchive}`));
 
-    const said = await waitFor(() => screen.getByText(/could not be closed/));
+    const said = await waitFor(() => screen.getByText(/couldn't be closed/));
 
     expect(said.closest(`.${toasts.toast}`)).toBeTruthy();
     expect(said.textContent).toContain("the server is not answering");
@@ -4154,7 +4154,7 @@ describe("a conversation's setup", () => {
     const pane = await drawn(container, `.${composer.composer}`);
     const warning = await drawn(pane, `.${setup.uncached}`);
 
-    expect(warning.textContent).toMatch(/No sccache is installed/);
+    expect(warning.textContent).toMatch(/isn't installed where the server can see it/);
     expect(
       warning.textContent,
       "a CMake project is warned too, and it has no crates to download",
@@ -4388,7 +4388,7 @@ describe("a conversation's setup", () => {
     });
     fireEvent.blur(screen.getByLabelText("Branch"));
 
-    await waitFor(() => screen.getByText(/will not take that as a branch name/i));
+    await waitFor(() => screen.getByText(/won't take that as a branch name/i));
 
     // The next keystroke fixes it, and the save after that clears the refusal:
     // a name refused is not a field that has stopped trying.
@@ -4404,7 +4404,7 @@ describe("a conversation's setup", () => {
       ).toBe(2),
     );
     await waitFor(() =>
-      expect(screen.queryByText(/will not take that as a branch name/i)).toBeNull(),
+      expect(screen.queryByText(/won't take that as a branch name/i)).toBeNull(),
     );
   });
 
@@ -5186,7 +5186,7 @@ describe("a conversation's companion repos", () => {
       screen.getByText(/No repos are registered yet/),
     );
 
-    expect(said.textContent).toContain("Open repo");
+    expect(said.textContent).toContain("Open one from the Repo dropdown");
     // No link at all: there is no path that drops a dropdown, and one to the
     // settings would be the pointer this replaced.
     expect(said.querySelector("a")).toBeNull();
@@ -5965,7 +5965,7 @@ describe("a conversation's pairings", () => {
 
     await waitFor(() => picker("Grilling"));
     expect(showing("Grilling")).toBe("Not chosen");
-    await waitFor(() => screen.getByText(/was chosen before models were/));
+    await waitFor(() => screen.getByText(/was chosen without a model/));
   });
 
   /// Both pairings are fixed when grilling starts, and the refusal is the
@@ -6067,7 +6067,7 @@ describe("a conversation's pairings", () => {
     mount(`/conversations/${OPEN.id}`);
 
     await waitFor(() => screen.getByText(/No agent profiles are saved yet/));
-    expect(screen.getByText("add one").getAttribute("href")).toBe("/settings");
+    expect(screen.getByText("Add one").getAttribute("href")).toBe("/settings");
   });
 });
 
@@ -7395,7 +7395,7 @@ describe("starting the work", () => {
   /// into another repository, a number GitHub has nothing open under, a fork, and
   /// a `gh` that would not answer are six different things to go and do.
   it.each([
-    ["NoTarget", /Nothing is named in the Target field/],
+    ["NoTarget", /The Target field is empty/],
     ["NoHeadBranch", /Origin has no branch by that name/],
     ["Fork", /in a fork/],
     [
@@ -9616,7 +9616,7 @@ describe("closing a conversation", () => {
     fireEvent.click(await drawn(container, `.${actions.conversationActions} .${actions.close}`));
 
     const said = await waitFor(() =>
-      screen.getByText(/could not be closed/),
+      screen.getByText(/couldn't be closed/),
     );
     expect(said.closest(`.${toasts.toast}`)).toBeTruthy();
     expect(said.textContent).toContain("the server is not answering");
@@ -9878,7 +9878,7 @@ describe("a close pressed over a run in flight", () => {
     );
 
     const card = await asked();
-    expect(ways(card)[0]!.textContent).toBe("Keep it running");
+    expect(ways(card)[0]!.textContent).toBe("Cancel");
     fireEvent.click(ways(card)[0]!);
 
     await waitFor(() => expect(asking()).toBeNull());
@@ -9998,12 +9998,12 @@ describe("a close pressed over a run in flight", () => {
       "Close while the agent is running?",
     );
     expect(card.querySelector(`.${actions.confirmingWhy}`)!.textContent).toBe(
-      "The agent is still working on this conversation. Closing now will end the run.",
+      "Closing now ends the agent's run.",
     );
 
     // Two of them, and no third: Stop is a row of the menu this press came from.
     expect(ways(card).map((way) => way.textContent)).toEqual([
-      "Keep it running",
+      "Cancel",
       "Close conversation",
     ]);
   });
@@ -10484,7 +10484,7 @@ describe("a press whose outcome is drawn before the server has answered", () => 
     // over, which is what the sidebar is saying, and the conversation's own
     // landed saying Grilling — which is what this server has said about it
     // throughout, and what the page would be drawing if it had let go.
-    await waitFor(() => screen.getByText(/Could not read the conversations/));
+    await waitFor(() => screen.getByText(/The conversations couldn't be read/));
     await waitFor(() =>
       expect(
         askedFor(fetching, `/api/ui/conversations/${GRILLING.id}`),
@@ -11612,7 +11612,7 @@ describe("steering a conversation", () => {
       "Investigating",
       "Done",
     ]);
-    expect(screen.getByText(/Finished with. Nothing runs/)).toBeTruthy();
+    expect(screen.getByText(/Finished. Nothing runs/)).toBeTruthy();
     unmount();
 
     theGrillingSteering(
@@ -11630,7 +11630,7 @@ describe("steering a conversation", () => {
       "Investigating",
       "Done",
     ]);
-    expect(screen.getByText(/The branch looked at again/)).toBeTruthy();
+    expect(screen.getByText(/The checks are watched, the review is run/)).toBeTruthy();
   });
 
   /// And what wrapping up *means* is the Process's, which is the one target that
@@ -11653,7 +11653,7 @@ describe("steering a conversation", () => {
     const pane = await openSteer(container);
 
     expect(targets(pane)).toContain("Wrapping");
-    expect(screen.getByText(/The pull request looked at again/)).toBeTruthy();
+    expect(screen.getByText(/Only what GitHub refuses a merge for is fixed/)).toBeTruthy();
     expect(
       screen.queryByText(/the review run, the comments answered/),
     ).toBeNull();
@@ -11699,7 +11699,7 @@ describe("steering a conversation", () => {
       "Investigating",
       "Done",
     ]);
-    expect(screen.getByText(/The pull request followed up on/)).toBeTruthy();
+    expect(screen.getByText(/The agent answers what you ask about the pull request/)).toBeTruthy();
   });
 
   /// And the brief a follow-up is opened on is required whatever the record
@@ -11805,7 +11805,7 @@ describe("steering a conversation", () => {
     // neither is a state anything goes back to.
     expect(
       screen.getByText(
-        /goes back to the state you steered it from, or to Done where there is nowhere to go back to/,
+        /returns to the state you steered it from/,
       ),
     ).toBeTruthy();
 
@@ -11886,8 +11886,7 @@ describe("steering a conversation", () => {
 
     await waitFor(() => expect(held.disabled).toBe(true));
     expect(
-      (bare.querySelector("#steer-instruction") as HTMLTextAreaElement)
-        .placeholder,
+      bare.querySelector("#steer-instruction")!.parentElement!.textContent,
     ).toContain("nothing on this branch to carry on");
 
     fireEvent.input(await drawn(bare, "#steer-instruction"), {
@@ -11918,8 +11917,7 @@ describe("steering a conversation", () => {
 
     await waitFor(() => expect(press.disabled).toBe(false));
     expect(
-      (pane.querySelector("#steer-instruction") as HTMLTextAreaElement)
-        .placeholder,
+      pane.querySelector("#steer-instruction")!.parentElement!.textContent,
     ).toContain("carry on with what the branch already holds");
   });
 
@@ -11957,7 +11955,7 @@ describe("steering a conversation", () => {
 
     await waitFor(() => expect(held.disabled).toBe(true));
     expect(
-      (bare.querySelector("#steer-brief") as HTMLTextAreaElement).placeholder,
+      bare.querySelector("#steer-brief")!.parentElement!.textContent,
     ).toContain("Nothing is written down yet");
 
     fireEvent.input(await drawn(bare, "#steer-brief"), {
@@ -11986,8 +11984,8 @@ describe("steering a conversation", () => {
 
     await waitFor(() => expect(press.disabled).toBe(false));
     expect(
-      (pane.querySelector("#steer-brief") as HTMLTextAreaElement).placeholder,
-    ).toContain("brief that is already there");
+      pane.querySelector("#steer-brief")!.parentElement!.textContent,
+    ).toContain("brief that's already there");
   });
 
   /// And the instruction is drawn under implementing alone: what a hand-written
@@ -18985,7 +18983,7 @@ describe("the resume row", () => {
     const said = await drawn(document.body, `.${actions.refused} .${actions.refusedWhy}`);
 
     expect(said.textContent).toBe(RESUME_REFUSAL.NothingToWork);
-    expect(said.textContent).toContain("no backlog left");
+    expect(said.textContent).toContain("No backlog is left");
   });
 
   /// And a second press on a conversation the first one got going is refused as
@@ -19130,7 +19128,7 @@ describe("what a refused press says", () => {
 
     const said = await drawn(document.body, `.${actions.refused} .${actions.refusedWhy}`);
 
-    expect(said.textContent).toContain("could not be resumed");
+    expect(said.textContent).toContain("couldn't be resumed");
     expect(said.textContent).toContain("the server is not answering");
   });
 

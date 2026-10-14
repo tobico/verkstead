@@ -155,7 +155,7 @@ export function Hatch(props: {
       post: () => closeAndArchiveConversation(device(), id()),
       refusal: (outcome: ConversationClosed) => CLOSE_REFUSAL[outcome],
       fell: (error: Error) =>
-        `The conversation could not be closed: ${error.message}`,
+        `The conversation couldn't be closed: ${error.message}`,
     });
 
   const archive = () =>
@@ -164,7 +164,7 @@ export function Hatch(props: {
       post: () => archiveConversation(device(), id()),
       refusal: (outcome: ConversationArchived) => ARCHIVE_REFUSAL[outcome],
       fell: (error: Error) =>
-        `The conversation could not be archived: ${error.message}`,
+        `The conversation couldn't be archived: ${error.message}`,
     });
 
   return (

@@ -106,7 +106,7 @@ export function RemoteBanner(props: {
           class={styles.done}
           onClick={() => press.mutate()}
         >
-          Got it
+          Dismiss
         </button>
       </aside>
     </Show>

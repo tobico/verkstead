@@ -214,7 +214,7 @@ function MoveSheet(props: {
       </p>
 
       <p class={styles.why}>
-        The brief, the branch name, the base and the files go with it, and this
+        The brief, the branch name, the base, and the files go with it, and this
         draft is closed once they have. The repos this one works alongside are
         left behind, and the pairings arrive as that machine remembers them.
       </p>
@@ -238,13 +238,13 @@ function MoveSheet(props: {
 
       <Show when={gone()}>
         <ErrorLine class={styles.failure}>
-          That repo is not registered on {props.to.identity.name} any more, so
+          That repo isn't registered on {props.to.identity.name} any more, so
           nothing was moved.
         </ErrorLine>
       </Show>
       <Show when={move.isError}>
         <ErrorLine class={styles.failure}>
-          The draft could not be moved: {move.error?.message}
+          The draft couldn't be moved: {move.error?.message}
         </ErrorLine>
       </Show>
 
@@ -258,7 +258,7 @@ function MoveSheet(props: {
           disabled={move.isPending}
           onClick={() => props.close()}
         >
-          Keep it here
+          Cancel
         </button>
         <button
           type="button"

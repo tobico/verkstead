@@ -184,7 +184,7 @@ describe("a Verkstead with nothing to list", () => {
 
     await drawn(container, `.${shell.conversationsPane}`);
     await waitFor(() =>
-      screen.getByText("Nothing is being worked on yet."),
+      screen.getByText(/No conversations yet\./),
     );
   });
 });

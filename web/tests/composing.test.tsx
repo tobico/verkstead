@@ -672,7 +672,7 @@ describe("the compose page", () => {
 
       // And why, on the press itself: one thing is missing, and it is the first
       // control in the row above.
-      expect(press.getAttribute("title")).toBe("No repo selected");
+      expect(press.getAttribute("title")).toBe("Select a repo first.");
     }
 
     // Pressed, either of them does nothing at all — which is what the press
@@ -686,7 +686,7 @@ describe("the compose page", () => {
     await waitFor(() => expect(draft.getAttribute("aria-disabled")).toBe("false"));
     expect(draft.classList.contains(composer.inert!)).toBe(false);
     expect(draft.getAttribute("title")).toBeNull();
-    expect(start.getAttribute("title")).not.toBe("No repo selected");
+    expect(start.getAttribute("title")).not.toBe("Select a repo first.");
   });
 
   /// And the two presses part company there. Creating is the whole of what the
@@ -893,7 +893,7 @@ describe("the compose page", () => {
     await waitFor(() =>
       expect(
         screen.getByText(
-          "That repo is not registered any more, so nothing was created.",
+          "That repo isn't registered any more, so nothing was created.",
         ),
       ).toBeTruthy(),
     );
@@ -3167,7 +3167,7 @@ describe("moving a saved draft to another device", () => {
     await waitFor(() => expect(offered("Repo")).toHaveLength(THEIRS.length));
     pick("Repo", THEIRS[0]!.name);
 
-    fireEvent.click(screen.getByRole("button", { name: "Keep it here" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
     await waitFor(() =>
       expect(screen.queryByText(`Move this draft to ${MEMBER.name}?`)).toBeNull(),
@@ -3504,7 +3504,7 @@ describe("moving a saved draft to another device", () => {
     await move(THEIRS[0]!);
 
     await screen.findByText(
-      new RegExp(`not registered on ${MEMBER.name} any more`),
+      new RegExp(`isn't registered on ${MEMBER.name} any more`),
     );
 
     expect(writes(fetching, moved)).toBe(0);

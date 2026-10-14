@@ -124,14 +124,14 @@ describe("the Attach menu on a draft's composer", () => {
   /// The servers are a section of the menu of their own, under a heading, with
   /// the way to declare another at its foot: *Attach file* is a different kind
   /// of thing to put on the work, and the section says which rows are which.
-  it("groups the servers under MCP Servers, with Add a server last", async () => {
+  it("groups the servers under MCP servers, with Add a server last", async () => {
     theWorkbench();
 
     const menu = await openMenu(await openComposer());
-    const section = within(menu).getByRole("group", { name: "MCP Servers" });
+    const section = within(menu).getByRole("group", { name: "MCP servers" });
 
     expect(rows(section)).toEqual(["tickets", "Add a server…"]);
-    expect(section.textContent).toContain("MCP Servers");
+    expect(section.textContent).toContain("MCP servers");
     expect(
       within(section).queryByRole("menuitem", { name: "Attach file" }),
     ).toBeNull();
@@ -160,7 +160,7 @@ describe("the Attach menu on a draft's composer", () => {
 
     expect(rows(menu)).toEqual(["Attach file", "Add a server…"]);
     expect(
-      within(menu).getByRole("group", { name: "MCP Servers" }),
+      within(menu).getByRole("group", { name: "MCP servers" }),
     ).toBeTruthy();
   });
 
