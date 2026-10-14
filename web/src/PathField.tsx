@@ -144,9 +144,9 @@ function refusal(listing: DirectoryListing): string | null {
     case "NotAbsolute":
       return "A path to browse starts with /.";
     case "Missing":
-      return "There is nothing at that path.";
+      return "There's nothing at that path.";
     case "NotADirectory":
-      return "That is not a directory.";
+      return "That isn't a directory.";
   }
 }
 
@@ -531,13 +531,13 @@ export function PathField(props: {
               </ErrorLine>
             </Match>
             <Match when={listing.data === undefined}>
-              <Empty class={styles.line}>Loading…</Empty>
+              <Empty class={styles.line}>Reading the directory…</Empty>
             </Match>
             <Match when={said()}>
               {(why) => <Empty class={styles.line}>{why()}</Empty>}
             </Match>
             <Match when={rows().length === 0}>
-              <Empty class={styles.line}>Nothing here.</Empty>
+              <Empty class={styles.line}>This directory is empty.</Empty>
             </Match>
           </Choose>
         </div>

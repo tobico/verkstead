@@ -259,11 +259,11 @@ describe("the sheet a waiting Set is answered on", () => {
     // different fields — to a screen reader above all, which has nothing else
     // to tell them apart by.
     for (const [label, named] of [
-      ["Q1", "Q1 — Your thoughts"],
-      ["Q2", "Q2 — Your thoughts"],
-      ["Q2a", "Q2a — Your thoughts"],
-      ["Q2b", "Q2b — Your answer"],
-      ["Q3", "Q3 — Your answer"],
+      ["Q1", "Q1 · Your thoughts"],
+      ["Q2", "Q2 · Your thoughts"],
+      ["Q2a", "Q2a · Your thoughts"],
+      ["Q2b", "Q2b · Your answer"],
+      ["Q3", "Q3 · Your answer"],
     ]) {
       const field = words(page, label!);
       expect(field.placeholder).toBe(named);
@@ -713,7 +713,7 @@ describe("submitting a Response", () => {
       "Q2b and Q3 offered nothing, so skipping them is not warned about",
     ).toEqual(["Q2", "Q2a"]);
 
-    press(page, "Keep answering");
+    press(page, "Cancel");
     expect(page.querySelector(`.${sheet.confirm}`)).toBeNull();
     expect(posts(fetching), "nothing was sent").toHaveLength(0);
   });
@@ -771,7 +771,7 @@ describe("a submit that did not land", () => {
     const page = await refused("AlreadyAnswered");
 
     expect(page.querySelector(`.${submitting.submit} .${notices.error}`)!.textContent).toContain(
-      "The first Response stands",
+      "The first response stands",
     );
   });
 
@@ -787,7 +787,7 @@ describe("a submit that did not land", () => {
     const page = await refused("NoSuchSet");
 
     expect(page.querySelector(`.${submitting.submit} .${notices.error}`)!.textContent).toBe(
-      "This Set is no longer here.",
+      "This question set is no longer here.",
     );
   });
 

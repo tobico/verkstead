@@ -43,9 +43,9 @@ export const BADGE: Record<Liveness, string> = {
 /// stop saying — that this cannot be taken back — can be held to. Locking is
 /// the only irreversible act in the whole UI.
 export const LOCK_WARNING =
-  "It stops waiting on you for good and stands on its Conversation's timeline " +
-  "with no Response. An agent still waiting on it is told the Set was " +
-  "locked. This cannot be undone.";
+  "It stops waiting on you and stays on the conversation's timeline with no " +
+  "response. An agent still waiting on it is told it was locked. This cannot " +
+  "be undone.";
 
 /// The badge, and the one thing to do about a Set nobody is coming back for,
 /// folded behind it as a menu. Drawn on the provenance line, which the
@@ -104,7 +104,7 @@ export function Standing(props: {
     <>
       <Menu
         class={styles.standing!}
-        name="How this Set stands"
+        name="How this question set stands"
         disabled={lock.isPending}
         closer={(close) => (shut = close)}
         trigger={
@@ -151,7 +151,7 @@ export function Standing(props: {
         labelledBy="lock-title"
       >
         <p id="lock-title" class={page.confirmTitle}>
-          Lock this Set unanswered?
+          Lock this question set unanswered?
         </p>
         <Note class={page.caveat}>{LOCK_WARNING}</Note>
         <div class={page.confirmActions}>
@@ -160,7 +160,7 @@ export function Standing(props: {
             class={`${page.secondary} secondary`}
             onClick={() => setConfirming(false)}
           >
-            Keep it pending
+            Cancel
           </button>
           <button type="button" onClick={close}>
             Lock unanswered
@@ -179,7 +179,7 @@ function unlocked(
   error: Error | null,
 ): string | null {
   if (error !== null) {
-    return `The Set was not locked: ${error.message}`;
+    return `The question set wasn't locked: ${error.message}`;
   }
 
   switch (outcome) {
@@ -187,11 +187,11 @@ function unlocked(
     case "Closed":
       return null;
     case "AlreadyAnswered":
-      return "This Set was answered while this page was open, so it was not locked: it stands as the decision that was made.";
+      return "This question set was answered while this page was open, so it wasn't locked. The answer stands.";
     case "AlreadyLocked":
-      return "This Set has already been locked.";
+      return "This question set is already locked.";
     case "NoSuchSet":
-      return "This Set is no longer here.";
+      return "This question set is no longer here.";
   }
 }
 

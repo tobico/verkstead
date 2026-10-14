@@ -1930,7 +1930,7 @@ describe("the routes the fold retired", () => {
 
       render(() => <App />);
 
-      await waitFor(() => screen.getByText("No such page."));
+      await waitFor(() => screen.getByText("There's no page at this address."));
     });
   }
 });

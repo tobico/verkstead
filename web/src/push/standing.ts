@@ -108,8 +108,8 @@ export function refusal(said: string): string {
   }
 
   return (
-    `${said} — a browser that de-Googles, Brave among them, refuses this ` +
-    'until "Use Google services for push messaging" is turned on in its ' +
-    "privacy settings and it has been restarted."
+    `${said} A browser that de-Googles, like Brave, refuses this until Use ` +
+    "Google services for push messaging is on in its privacy settings and " +
+    "it has been restarted."
   );
 }

@@ -189,7 +189,7 @@ function theCard(name: string): HTMLElement {
 }
 
 /// What a card is read by: the backend's own name, and the profile's name after
-/// an em dash where it has one — "Claude Code — fable".
+/// an em dash where it has one — "Claude Code · fable".
 ///
 /// Composed here rather than imported from the page, so that naming the reading
 /// and drawing it are two statements about the same words. A profile nobody
@@ -199,7 +199,7 @@ function theCard(name: string): HTMLElement {
 function reads(profile: ProfileEntry): string {
   const harness = AGENT_NAME[profile.account.agent_type];
 
-  return profile.name ? `${harness} — ${profile.name}` : harness;
+  return profile.name ? `${harness} · ${profile.name}` : harness;
 }
 
 /// Fill the form in, whichever profile it is about.
@@ -605,7 +605,7 @@ describe("a member's account that cannot be run from here", () => {
     expect(
       theCard(reads(MIRROR)).querySelector(`.${styles.broken}`)!.textContent,
     ).toBe(
-      `${MACHINE.name} is unreachable, so its account cannot be fetched and no session here can be built out of it.`,
+      `Its account can't be fetched, because ${MACHINE.name} is unreachable. No session here can run under it.`,
     );
   });
 
@@ -626,7 +626,7 @@ describe("a member's account that cannot be run from here", () => {
     expect(
       theCard(reads(MIRROR)).querySelector(`.${styles.broken}`)!.textContent,
     ).toBe(
-      `Its account on ${MACHINE.name} holds no login file, so there is nothing to mirror here. Log in on that machine.`,
+      `Its account on ${MACHINE.name} has no login file, so there's nothing to mirror here. Log in on that machine.`,
     );
   });
 
@@ -641,7 +641,7 @@ describe("a member's account that cannot be run from here", () => {
 
     expect(
       theCard(reads(MIRROR)).querySelector(`.${styles.broken}`)!.textContent,
-    ).toBe(`${AGENT_NAME[MIRROR.account.agent_type]} is not on this machine.`);
+    ).toBe(`${AGENT_NAME[MIRROR.account.agent_type]} isn't on this machine.`);
   });
 
   /// And none of them takes the row off the list: two rows in, two rows drawn.
@@ -673,7 +673,7 @@ describe("a member's account that cannot be run from here", () => {
 
     expect(card.querySelector(`.${styles.broken}`)).toBeNull();
     expect(card.textContent).toContain(
-      "No login file in this account, so it cannot be used from another device.",
+      "This account has no login file, so it can't be used from another device.",
     );
   });
 

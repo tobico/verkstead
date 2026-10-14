@@ -42,7 +42,7 @@ describe("the reading of who runs a session", () => {
   it("says the backend, the model and the account", () => {
     expect(
       reading({ agent: "Claude", model: "claude-fable-5", profile: "Work" }, TWO),
-    ).toBe("Claude Code Fable 5 — Work");
+    ).toBe("Claude Code Fable 5 · Work");
   });
 
   /// The backend goes where the model's own name has already said it: "Grok 4.6"
@@ -82,7 +82,7 @@ describe("the reading of who runs a session", () => {
   it("says the backend and the account where there is no model", () => {
     expect(reading({ agent: "Claude", model: null, profile: "Work" }, [
       profile("Work", "Claude"),
-    ])).toBe("Claude Code — Work");
+    ])).toBe("Claude Code · Work");
   });
 
   /// An id this build has never heard of keeps the backend beside it, rather
@@ -92,7 +92,7 @@ describe("the reading of who runs a session", () => {
   it("says the backend and the raw id of a model it does not know", () => {
     expect(
       reading({ agent: "Claude", model: "claude-opus-9", profile: "Work" }, TWO),
-    ).toBe("Claude Code claude-opus-9 — Work");
+    ).toBe("Claude Code claude-opus-9 · Work");
   });
 
   /// The account's name is dropped where its backend has one account saved:
@@ -124,7 +124,7 @@ describe("the reading of who runs a session", () => {
       reading({ agent: "Claude", model: "claude-fable-5", profile: "Gone" }, [
         profile("Work", "Claude"),
       ]),
-    ).toBe("Claude Code Fable 5 — Gone");
+    ).toBe("Claude Code Fable 5 · Gone");
   });
 
   /// And so does a reading made before the list has been read at all. Saying the
@@ -135,7 +135,7 @@ describe("the reading of who runs a session", () => {
         { agent: "Claude", model: "claude-fable-5", profile: "Work" },
         undefined,
       ),
-    ).toBe("Claude Code Fable 5 — Work");
+    ).toBe("Claude Code Fable 5 · Work");
   });
 
   /// A record from before the backend was written down reads as the model and
@@ -144,7 +144,7 @@ describe("the reading of who runs a session", () => {
   it("leaves out a backend that was never recorded", () => {
     expect(
       reading({ agent: null, model: "claude-fable-5", profile: "Work" }, TWO),
-    ).toBe("Fable 5 — Work");
+    ).toBe("Fable 5 · Work");
     expect(reading({ agent: null, model: null, profile: "Work" }, TWO)).toBe(
       "Work",
     );
@@ -170,10 +170,10 @@ describe("the reading of who runs a session", () => {
 
     expect(
       reading({ agent: "Claude", model: "claude-fable-5", profile: null }, both),
-    ).toBe("Claude Code Fable 5 — Default");
+    ).toBe("Claude Code Fable 5 · Default");
     expect(
       briefly({ agent: "Claude", model: "claude-fable-5", profile: null }, both),
-    ).toBe("Fable 5 — Default");
+    ).toBe("Fable 5 · Default");
   });
 
   /// A *record* with no name in it is not an account to point at — a run from
@@ -196,7 +196,7 @@ describe("the reading with the backend left off", () => {
   it("says the model and the account", () => {
     expect(
       briefly({ agent: "Claude", model: "claude-fable-5", profile: "Work" }, TWO),
-    ).toBe("Fable 5 — Work");
+    ).toBe("Fable 5 · Work");
   });
 
   /// The same question about the account's name, asked the same way: a backend
@@ -214,7 +214,7 @@ describe("the reading with the backend left off", () => {
   /// be read by.
   it("falls back to the backend where the pairing has no model", () => {
     expect(briefly({ agent: "Claude", model: null, profile: "Work" }, TWO)).toBe(
-      "Claude Code — Work",
+      "Claude Code · Work",
     );
   });
 
@@ -223,6 +223,6 @@ describe("the reading with the backend left off", () => {
   it("keeps the raw id of a model it does not know", () => {
     expect(
       briefly({ agent: "Claude", model: "claude-opus-9", profile: "Work" }, TWO),
-    ).toBe("claude-opus-9 — Work");
+    ).toBe("claude-opus-9 · Work");
   });
 });

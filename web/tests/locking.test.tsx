@@ -146,11 +146,11 @@ describe("the offer to close a Set unanswered", () => {
       "cannot be undone",
     );
     expect(asking.querySelector(`.${notices.note}`)!.textContent).toContain(
-      "Conversation's timeline",
+      "conversation's timeline",
     );
     expect(posts(fetching), "nothing has been sent").toHaveLength(0);
 
-    press(page, "Keep it pending");
+    press(page, "Cancel");
     expect(page.querySelector(`.${sheet.confirm}`)).toBeNull();
     expect(posts(fetching), "and still nothing was sent").toHaveLength(0);
   });
@@ -207,9 +207,9 @@ describe("closing a Set unanswered", () => {
 
   it("says why it was not locked, when it was not", async () => {
     for (const [outcome, said] of [
-      ["AlreadyAnswered", "it stands as the decision that was made"],
-      ["AlreadyLocked", "This Set has already been locked."],
-      ["NoSuchSet", "This Set is no longer here."],
+      ["AlreadyAnswered", "The answer stands."],
+      ["AlreadyLocked", "This question set is already locked."],
+      ["NoSuchSet", "This question set is no longer here."],
     ] as Array<[Locked, string]>) {
       const { page, fetching } = await answering(WAITING, locked(outcome));
 

@@ -170,7 +170,7 @@ describe("the accounts that were found", () => {
     expect(tick(container, "Codex").checked).toBe(false);
     expect(tick(container, "Codex").disabled).toBe(true);
     expect(row(container, "Codex").textContent).toContain(
-      `${AGENT_NAME.Codex} is not on this machine.`,
+      `${AGENT_NAME.Codex} isn't on this machine.`,
     );
   });
 });
@@ -261,7 +261,7 @@ describe("the press onwards", () => {
     expect(tick(container, "Claude").checked).toBe(false);
     expect(onwards(container).disabled).toBe(true);
     expect(container.textContent).toContain(
-      "Verkstead runs nothing without an Agent Profile.",
+      "Verkstead runs nothing without an agent profile.",
     );
   });
 
@@ -337,7 +337,7 @@ describe("the link the form stands behind", () => {
     expect(naming(container)).toBeUndefined();
     expect(
       [...container.querySelectorAll("h3")].map((head) => head.textContent),
-    ).toContain("Or name an account yourself");
+    ).toContain("Or Name an Account Yourself");
   });
 });
 

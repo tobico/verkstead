@@ -114,7 +114,7 @@ function field(container: ParentNode, id: string): HTMLInputElement {
 /// And what is said under it about where its value came from.
 function source(container: ParentNode, id: string): string | undefined {
   return (
-    field(container, id).parentElement?.querySelector("p")?.textContent ??
+    field(container, id).parentElement?.querySelector("p[data-source]")?.textContent ??
     undefined
   );
 }
@@ -485,6 +485,6 @@ describe("the last Next", () => {
     // The workbench, at the page the wizard hands over to.
     await waitFor(() => screen.getByText("Save as draft"));
     expect(window.location.pathname).toBe("/compose");
-    expect(screen.queryByText("Set Verkstead up")).toBeNull();
+    expect(screen.queryByText("Set Up Verkstead")).toBeNull();
   });
 });

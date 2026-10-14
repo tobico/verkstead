@@ -5625,10 +5625,10 @@ const pairing = (profile: ProfileEntry, model: string) =>
 /// profile's after an em dash — said here because the fixture holds three Claude
 /// Code accounts, so which of them a row is cannot be read off the model alone.
 const READINGS = [
-  "Claude Code Fable 5 — fable",
-  "Claude Code Opus 5 — opus",
-  "Claude Code Haiku 4.5 — opus",
-  "Claude Code Sonnet 5 — sonnet",
+  "Claude Code Fable 5 · fable",
+  "Claude Code Opus 5 · opus",
+  "Claude Code Haiku 4.5 · opus",
+  "Claude Code Sonnet 5 · sonnet",
 ];
 
 /// And what the *closed* trigger in the setup row reads, which is every one of
@@ -7777,7 +7777,7 @@ describe("a session's output on the timeline", () => {
 
     await waitFor(() =>
       expect(output.querySelector(`.${timeline.ranAs}`)!.textContent).toBe(
-        "Claude Code Fable 5 — Work",
+        "Claude Code Fable 5 · Work",
       ),
     );
   });
@@ -7797,7 +7797,7 @@ describe("a session's output on the timeline", () => {
 
     await waitFor(() =>
       expect(output.querySelector(`.${timeline.ranAs}`)!.textContent).toBe(
-        "Fable 5 — Work",
+        "Fable 5 · Work",
       ),
     );
   });
@@ -7835,7 +7835,7 @@ describe("a session's output on the timeline", () => {
     const head = await drawn(container, `.${shell.detailsPane} .${paneHead.head} h1`);
 
     await waitFor(() =>
-      expect(head.textContent).toBe("Claude Code Fable 5 — Work"),
+      expect(head.textContent).toBe("Claude Code Fable 5 · Work"),
     );
   });
 
@@ -8850,7 +8850,7 @@ describe("the mark of the harness a session ran under", () => {
     );
 
     await waitFor(() => expect(marked(head)).toBe(art(opencodeMarkFile)));
-    expect(head.textContent).toBe("OpenCode Minimax M2.1 — Work");
+    expect(head.textContent).toBe("OpenCode Minimax M2.1 · Work");
   });
 
   /// And the Brief's three pairing facts, which say what each role *will* run
@@ -8903,7 +8903,7 @@ describe("the mark of the harness a session ran under", () => {
       `.${timeline.timelineEvent} .${timeline.agentOutput} .${timeline.ranAs}`,
     );
 
-    await waitFor(() => expect(head.textContent).toBe("Fable 5 — Work"));
+    await waitFor(() => expect(head.textContent).toBe("Fable 5 · Work"));
     expect(head.querySelector(`.${harnessMark.mark}`)).toBeNull();
   });
 
@@ -9013,7 +9013,7 @@ describe("the foot of the timeline pane", () => {
 
     await waitFor(() =>
       expect(card.querySelector(`.${timeline.ranAs}`)!.textContent).toBe(
-        "Claude Code Fable 5 — Work",
+        "Claude Code Fable 5 · Work",
       ),
     );
   });
@@ -13397,7 +13397,7 @@ describe("steering a conversation", () => {
     );
 
     expect(pane.textContent).toContain("Run it under");
-    expect(pane.textContent).toContain("Claude Code Fable 5 — fable");
+    expect(pane.textContent).toContain("Claude Code Fable 5 · fable");
 
     const put = await drawn(pane, `ul[aria-label="Repos it put in"]`);
 
@@ -17026,7 +17026,7 @@ describe("a run stopped because its account signed out", () => {
 
     // The same modal the Profile's card opens, named the way the card reads.
     await waitFor(() =>
-      screen.getByText("Log in to Claude for Claude Code — opus"),
+      screen.getByText("Log in to Claude for Claude Code · opus"),
     );
     await waitFor(() =>
       expect(
@@ -18226,7 +18226,7 @@ describe("the pinned carousel", () => {
     );
     await waitFor(() =>
       expect(card.querySelector(`.${timeline.ranAs}`)!.textContent).toBe(
-        "Claude Code Fable 5 — Work",
+        "Claude Code Fable 5 · Work",
       ),
     );
 
@@ -18244,7 +18244,7 @@ describe("the pinned carousel", () => {
     // And the pane behind it is that session's, titled by the same reading.
     const head = await drawn(container, `.${shell.detailsPane} .${paneHead.head} h1`);
     await waitFor(() =>
-      expect(head.textContent).toBe("Claude Code Fable 5 — Work"),
+      expect(head.textContent).toBe("Claude Code Fable 5 · Work"),
     );
   });
 
@@ -19462,9 +19462,9 @@ describe("the configuration on the brief's pane", () => {
       // The shared reading, which is what every picker of a pairing says too:
       // the backend, the model, and the account's name after an em dash — said
       // here because all three of the fixture's accounts are Claude Code ones.
-      Grilling: "Claude Code Fable 5 — fable",
-      Implementation: "Claude Code Opus 5 — opus",
-      Review: "Claude Code Sonnet 5 — sonnet",
+      Grilling: "Claude Code Fable 5 · fable",
+      Implementation: "Claude Code Opus 5 · opus",
+      Review: "Claude Code Sonnet 5 · sonnet",
     });
   });
 
@@ -19479,7 +19479,7 @@ describe("the configuration on the brief's pane", () => {
     expect(
       configuration().Implementation,
       "and the roles beside it read as they always did",
-    ).toBe("Claude Code Opus 5 — opus");
+    ).toBe("Claude Code Opus 5 · opus");
   });
 
   /// The grilling role has no such row — *No grilling* is retired — so a record
@@ -19492,7 +19492,7 @@ describe("the configuration on the brief's pane", () => {
     expect(
       configuration().Review,
       "and the roles beside it read as they always did",
-    ).toBe("Claude Code Sonnet 5 — sonnet");
+    ).toBe("Claude Code Sonnet 5 · sonnet");
   });
 
   /// And a Conversation that reads Review says Review: the word is the record's,
@@ -19518,9 +19518,9 @@ describe("the configuration on the brief's pane", () => {
     await openBrief(GRILLING);
 
     await waitFor(() =>
-      expect(configuration().Implementation).toBe("Claude Code Opus 5 — opus"),
+      expect(configuration().Implementation).toBe("Claude Code Opus 5 · opus"),
     );
-    expect(configuration().Review).toBe("Claude Code Sonnet 5 — sonnet");
+    expect(configuration().Review).toBe("Claude Code Sonnet 5 · sonnet");
 
     expect(uses("Review", "grilling")).toBe(false);
     expect(Object.keys(configuration())).not.toContain("Grilling");
@@ -19552,7 +19552,7 @@ describe("the configuration on the brief's pane", () => {
     });
     await openBrief(GRILLING);
 
-    expect(configuration().Implementation).toBe("Claude Code — opus");
+    expect(configuration().Implementation).toBe("Claude Code · opus");
   });
 
   /// And the account's name is dropped where its backend has one account saved:
@@ -19571,7 +19571,7 @@ describe("the configuration on the brief's pane", () => {
     await waitFor(() =>
       expect(configuration().Implementation).toBe("Claude Code Opus 5"),
     );
-    expect(configuration().Grilling).toBe("Claude Code Fable 5 — fable");
+    expect(configuration().Grilling).toBe("Claude Code Fable 5 · fable");
   });
 
   it("lists each companion with its mode, its branch and its directory", async () => {

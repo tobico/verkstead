@@ -102,7 +102,7 @@ describe("the option on a follow-up's Set", () => {
 
     const said = page.querySelector(`.${sheet.ending} .${sheet.semantics}`)!
       .textContent!;
-    expect(said).toContain("nothing more you want from this follow-up");
+    expect(said).toContain("nothing more from this follow-up");
     expect(
       said,
       "and that what they wrote still goes back, which is what makes it safe to tick",
@@ -141,7 +141,7 @@ describe("the option on an investigation's Set", () => {
 
     const said = page.querySelector(`.${sheet.ending} .${sheet.semantics}`)!
       .textContent!;
-    expect(said).toContain("nothing more you want found out");
+    expect(said).toContain("nothing more found out");
     expect(said).toContain("still goes back");
     expect(said).toContain("nothing it wrote is committed");
     expect(

@@ -381,7 +381,7 @@ describe("what the server said instead of rows", () => {
     browse(WHERE);
 
     await waitFor(() =>
-      screen.getByText("There is nothing at that path."),
+      screen.getByText("There's nothing at that path."),
     );
     expect(offered(WHERE)).toEqual([]);
   });

@@ -272,8 +272,8 @@ export function Git(): JSX.Element {
     <div class={styles.step}>
       <p class={styles.standing}>
         Every commit a session makes is by this author, and every pull request
-        it opens is by this token. git needs both halves of the author; GitHub
-        is a choice, and the token can be left empty.
+        it opens is by this token. git needs the whole author. The token can be
+        left empty.
       </p>
 
       {/* Fields in a plain block rather than in a `form`: the press is a
@@ -282,7 +282,7 @@ export function Git(): JSX.Element {
           them saving and closing the wizard from a stray Enter. */}
       <div class={styles.form}>
         <section>
-          <h3>Git author</h3>
+          <h3>Git Author</h3>
 
           <Field
             id="setup-author-name"
@@ -309,11 +309,11 @@ export function Git(): JSX.Element {
         </section>
 
         <section>
-          <h3>GitHub token</h3>
+          <h3>GitHub Token</h3>
 
           <Note>
             Every session is handed it, and Verkstead reads pull requests and
-            reviews with it. Leave it empty if GitHub is not in use here.
+            reviews with it. Leave it empty if GitHub isn't in use here.
           </Note>
 
           {/* And what it has to be able to do, in the words the settings page
@@ -338,7 +338,8 @@ export function Git(): JSX.Element {
 
           <Field
             id="setup-github-token"
-            label="Token, pasted — it is stored and never shown again"
+            label="Token"
+            note="Stored, and never shown again."
             type="password"
             placeholder="ghp_…"
             value={authorToken()}
@@ -352,26 +353,25 @@ export function Git(): JSX.Element {
           <Show when={login()}>
             {(who) => (
               <p class={styles.verified}>
-                GitHub says it is <span class={styles.login}>{who()}</span>.
+                GitHub says it's <span class={styles.login}>{who()}</span>.
               </p>
             )}
           </Show>
 
           <Show when={missing().length > 0}>
             <p class={styles.unscoped}>
-              It cannot publish a share: GitHub has not given it the{" "}
+              It can't publish a share without the{" "}
               <code class={styles.scope}>{missing().join(", ")}</code> scope.
-              That is the settings page's to put right later; it holds nothing
-              up here.
+              That can be put right later in the settings.
             </p>
           </Show>
 
           <Show when={refused()}>
             {(why) => (
               <ErrorLine class={styles.unverified}>
-                It is saved, but GitHub would not say whose it is: {why()}.
-                Correct it above, or press Next again to go on without it
-                working.
+                It's saved, but GitHub wouldn't say whose it is: {why()}.
+                Correct it above, or press <strong>Next</strong> again to go on
+                without it.
               </ErrorLine>
             )}
           </Show>
@@ -389,7 +389,7 @@ export function Git(): JSX.Element {
 
           <Show when={!authored()}>
             <Note>
-              git refuses a commit with no author. Both halves are needed.
+              git refuses a commit with no author. Fill in both fields.
             </Note>
           </Show>
 
@@ -400,7 +400,7 @@ export function Git(): JSX.Element {
           </Show>
           <Show when={finish.isError}>
             <ErrorLine class={styles.failure}>
-              It is saved, but the wizard could not be closed:{" "}
+              It's saved, but the wizard couldn't be closed:{" "}
               {finish.error?.message}
             </ErrorLine>
           </Show>
@@ -415,6 +415,7 @@ export function Git(): JSX.Element {
 function Field(props: {
   id: string;
   label: string;
+  note?: string;
   type?: string;
   placeholder: string;
   value: string;
@@ -424,6 +425,7 @@ function Field(props: {
   return (
     <div class={styles.field}>
       <label for={props.id}>{props.label}</label>
+      <Show when={props.note}>{(note) => <Note>{note()}</Note>}</Show>
       <input
         id={props.id}
         type={props.type ?? "text"}

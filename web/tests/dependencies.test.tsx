@@ -694,7 +694,7 @@ describe("the hint screen", () => {
     expect(before.textContent).toContain(
       "https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh",
     );
-    expect(before.textContent).toContain("The brew commands below are Homebrew's");
+    expect(before.textContent).toContain("The brew commands below need Homebrew");
     expect(before.textContent).not.toContain("Every command below");
   });
 
@@ -861,7 +861,7 @@ describe("where each program was found", () => {
 
     expect(codex.dataset.state).toBe("Absent");
     expect(note.textContent).toContain("/opt/foo/bin/codex");
-    expect(note.textContent).toContain("not on the PATH a session gets");
+    expect(note.textContent).toContain("isn't on the PATH a session gets");
   });
 
   /// A link into an install nothing binds, and one with nothing at the end of
@@ -889,7 +889,7 @@ describe("where each program was found", () => {
 
     expect(leading.textContent).toContain("/home/you/.local/bin/codex");
     expect(leading.textContent).toContain("/opt/codex/codex");
-    expect(leading.textContent).toContain("a session cannot reach");
+    expect(leading.textContent).toContain("a session can't reach");
 
     const dangling = row(container, "Grok").querySelector(
       '[data-seen="Dangling"]',
@@ -919,7 +919,7 @@ describe("where each program was found", () => {
     expect(claude.dataset.state).toBe("Absent");
     expect(note.textContent).toContain("AnthropicClaude");
     expect(note.textContent).toContain(
-      "desktop app rather than the command-line tool",
+      "desktop app, not the command-line tool",
     );
     expect(note.textContent).toContain("installed separately");
 
@@ -1093,7 +1093,7 @@ describe("what each machine is told to run", () => {
       // And says the one thing the command cannot: which PATH has to name
       // where it landed, and that Verkstead reads that PATH once.
       expect(claude.note).toContain("PATH of the shell Verkstead is started");
-      expect(claude.note).toContain("started again");
+      expect(claude.note).toContain("Start Verkstead again");
 
       // With this machine's own package kept under it rather than instead of
       // it: a line to paste, with a note of its own.
@@ -1119,7 +1119,7 @@ describe("what each machine is told to run", () => {
       expect(claude.note).toContain("~/.local/bin");
       expect(claude.note).toContain("every Mac session's PATH");
       expect(claude.note).not.toContain("PATH of the shell");
-      expect(claude.note).not.toContain("started again");
+      expect(claude.note).not.toContain("Start Verkstead again");
     }
   });
 
@@ -1178,7 +1178,7 @@ describe("what each machine is told to run", () => {
     for (const distro of DISTROS) {
       for (const instruction of Object.values(GUIDES[distro].rows)) {
         for (const note of [instruction.note, instruction.alternative?.note]) {
-          expect(note ?? "").not.toContain("not on the PATH a session gets");
+          expect(note ?? "").not.toContain("isn't on the PATH a session gets");
           expect(note ?? "").not.toContain("which is not on the PATH");
         }
       }
@@ -1193,7 +1193,7 @@ describe("what each machine is told to run", () => {
       "verkstead session-account create",
     );
     expect(GUIDES.Windows.rows.Sandbox.note).toContain(
-      "Ticking this row makes it for you",
+      "Ticking this row makes it",
     );
     expect(GUIDES.Windows.rows.Sandbox.note).toContain(
       "Run as administrator",

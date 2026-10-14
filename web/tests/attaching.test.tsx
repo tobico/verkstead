@@ -185,7 +185,7 @@ describe("the files on a draft", () => {
     // Two presses rather than one: the paperclip on this pane opens a menu, and
     // the press that reaches the picker is that menu's first row.
     fireEvent.click(screen.getByRole("button", { name: "Attach" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Attach file" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Attach file…" }));
 
     expect(opened).toHaveBeenCalled();
   });
@@ -1116,7 +1116,7 @@ describe("the files on an answer", () => {
 
     press(page, "Submit");
 
-    const warning = await screen.findByText("Going back unanswered:");
+    const warning = await screen.findByText("Send with these unanswered?");
     const open = [
       ...warning.parentElement!.querySelectorAll("li"),
     ].map((one) => one.textContent);

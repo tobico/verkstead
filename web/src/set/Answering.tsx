@@ -375,7 +375,7 @@ export function Answering(props: {
         labelledBy="confirm-title"
       >
         <p id="confirm-title" class={page.confirmTitle}>
-          Going back unanswered:
+          Send with these unanswered?
         </p>
         <ul class={page.unanswered}>
           <For each={confirming() ?? []}>{(name) => <li>{name}</li>}</For>
@@ -389,7 +389,7 @@ export function Answering(props: {
             class={`${page.secondary} secondary`}
             onClick={() => setConfirming(null)}
           >
-            Keep answering
+            Cancel
           </button>
           <button type="button" onClick={sendAnyway}>
             Send anyway
@@ -480,7 +480,7 @@ function Choosing(props: {
                     />
                     <span class={page.directionName}>{DIRECTION[offered]}</span>
                     <Show when={recommended()}>
-                      <span class={page.star} title="the agent's Recommendation">
+                      <span class={page.star} title="The agent's recommendation">
                         ★
                       </span>
                     </Show>
@@ -492,9 +492,8 @@ function Choosing(props: {
           </For>
         </ul>
         <p class={page.semantics}>
-          Picking a direction accepts the proposal and lets the agent get on
-          with it. Anything else — an answer of your own, questions left open,
-          nothing picked here — sends it back for another round.
+          Picking a direction accepts the proposal and the agent gets on with
+          it. Anything else sends it back for another round.
         </p>
       </div>
     </section>
@@ -553,13 +552,13 @@ function NothingElse(props: {
 /// offering a review of work nobody did.
 const ENDING: Record<Ending, string> = {
   FollowUp:
-    "Tick this when there is nothing more you want from this follow-up. " +
-    "Everything you have written here still goes back, and the agent finishes " +
-    "the round; the follow-up then ends and the Conversation wraps up.",
+    "Tick this when you want nothing more from this follow-up. Everything " +
+    "you've written still goes back, the agent finishes the round, and the " +
+    "conversation wraps up.",
   Investigation:
-    "Tick this when there is nothing more you want found out. Everything you " +
-    "have written here still goes back, and the agent finishes the round; the " +
-    "investigation then ends, and nothing it wrote is committed.",
+    "Tick this when you want nothing more found out. Everything you've written " +
+    "still goes back, the agent finishes the round, and nothing it wrote is " +
+    "committed.",
 };
 
 /// A Question or a Sub-question — both are asked the same way: the name it
@@ -605,7 +604,7 @@ function Asking(props: {
   // all, and which is worth a reminder of where you are even when you can see
   // the whole page.
   const prompt = () =>
-    `${props.ask.name} — ${
+    `${props.ask.name} · ${
       options().length === 0 ? "Your answer" : "Your thoughts"
     }`;
 
@@ -747,7 +746,7 @@ function Offered(props: {
           innerHTML={props.option.text_html}
         />
         <Show when={props.option.recommended}>
-          <span class={page.star} title="the agent's Recommendation">
+          <span class={page.star} title="The agent's recommendation">
             ★
           </span>
         </Show>
@@ -841,7 +840,7 @@ function Row(props: {
       <Show when={props.starred}>
         <td class={page.starCell}>
           <Show when={props.option.recommended}>
-            <span class={page.star} title="the agent's Recommendation">
+            <span class={page.star} title="The agent's recommendation">
               ★
             </span>
           </Show>
@@ -873,14 +872,14 @@ export const ANSWER_ATTACH_REFUSAL: Record<
   Exclude<AnswerAttached, { Attached: unknown }>,
   string
 > = {
-  NoSuchSet: "This set is gone.",
-  Answered: "This set has been answered, so its files are settled.",
-  Locked: "This set was locked unanswered, so its files are settled.",
+  NoSuchSet: "This question set is no longer here.",
+  Answered: "This question set has been answered, so its files are settled.",
+  Locked: "This question set was locked unanswered, so its files are settled.",
   Closed: "This conversation is closed.",
-  NoSuchLabel: "This set does not ask that question.",
+  NoSuchLabel: "This question set doesn't ask that question.",
   TooLarge: "That file is larger than 32 MB.",
   NotAName:
-    "That name cannot be a file here: no folders, and nothing starting with a dot.",
+    "That name can't be a file here. Use no folders, and nothing starting with a dot.",
 };
 
 /// And taking one off again, which is refused by the same four.
@@ -889,9 +888,9 @@ export const ANSWER_ATTACHMENT_REMOVAL_REFUSAL: Record<
   string
 > = {
   Removed: "",
-  NoSuchSet: "This set is gone.",
-  Answered: "This set has been answered, so its files are settled.",
-  Locked: "This set was locked unanswered, so its files are settled.",
+  NoSuchSet: "This question set is no longer here.",
+  Answered: "This question set has been answered, so its files are settled.",
+  Locked: "This question set was locked unanswered, so its files are settled.",
   Closed: "This conversation is closed.",
 };
 
@@ -994,7 +993,7 @@ function putting(what: {
             ...said,
             {
               label,
-              said: `${file.name} could not be attached: ${
+              said: `${file.name} couldn't be attached: ${
                 error instanceof Error ? error.message : String(error)
               }`,
             },
@@ -1030,7 +1029,7 @@ function putting(what: {
           ...said.filter((one) => one.label !== label),
           {
             label,
-            said: `${attachment.name} could not be removed: ${
+            said: `${attachment.name} couldn't be removed: ${
               error instanceof Error ? error.message : String(error)
             }`,
           },
@@ -1105,7 +1104,7 @@ function refused(outcome: Submitted | undefined, error: Error | null): string | 
   if (error !== null) {
     // The server's own wording where there is one, which is what the human has
     // to be shown — see `ApiError`.
-    return `The Response did not get through: ${error.message}`;
+    return `The response didn't get through: ${error.message}`;
   }
 
   if (outcome === undefined || outcome === "Accepted") {
@@ -1113,14 +1112,14 @@ function refused(outcome: Submitted | undefined, error: Error | null): string | 
   }
 
   if (outcome === "AlreadyAnswered") {
-    return "This Set had already been answered. The first Response stands, so yours was not stored.";
+    return "This question set was already answered. The first response stands, so yours wasn't stored.";
   }
   if (outcome === "NoSuchSet") {
-    return "This Set is no longer here.";
+    return "This question set is no longer here.";
   }
   if (outcome === "Locked") {
-    return "This Set was locked unanswered, which closed it for good, so your Response was not stored.";
+    return "This question set was locked unanswered, so your response wasn't stored.";
   }
 
-  return `This Response does not resolve the Set: ${outcome.Rejected.join("; ")}`;
+  return `This response doesn't resolve the question set: ${outcome.Rejected.join("; ")}`;
 }

@@ -193,9 +193,9 @@ export function Accounts(props: {
   return (
     <div class={styles.step}>
       <p class={styles.standing}>
-        A session runs under an Agent Profile: an account on this machine, and
-        the models it can be launched on. What was found in this server's home
-        is offered below.
+        A session runs under an agent profile: an account on this machine and
+        the models it can be launched on. The accounts found in this server's
+        home are below.
       </p>
 
       <Show
@@ -230,7 +230,7 @@ export function Accounts(props: {
 
         <Show when={!ready()}>
           <Note>
-            Verkstead runs nothing without an Agent Profile. Tick an account
+            Verkstead runs nothing without an agent profile. Tick an account
             above, or save one from the form below.
           </Note>
         </Show>
@@ -244,7 +244,7 @@ export function Accounts(props: {
         </Show>
         <Show when={save.isError}>
           <ErrorLine class={styles.failure}>
-            The profile could not be saved: {save.error?.message}
+            The profile couldn't be saved: {save.error?.message}
           </ErrorLine>
         </Show>
       </div>
@@ -274,11 +274,11 @@ export function Accounts(props: {
           {/* Reachable by the focus without standing in the tab order: it is
               what the press that opened the section left behind. */}
           <h3 ref={named} tabindex="-1">
-            Or name an account yourself
+            Or Name an Account Yourself
           </h3>
           <p class={styles.standing}>
-            An account kept somewhere other than this server's own home is named
-            here, the way the settings page names one.
+            Name an account kept outside this server's home here, the way the
+            settings page does.
           </p>
 
           <ProfileForm
@@ -363,8 +363,8 @@ function Nothing(props: { reading: OnboardingView }): JSX.Element {
   return (
     <div class={styles.nothing}>
       <p class={styles.standing}>
-        No agent account was found in this server's home. Log one in and it is
-        offered here — this page reads the machine again every ten seconds.
+        No agent account was found in this server's home. Log one in and it
+        appears here. This page reads the machine again every ten seconds.
       </p>
 
       <ul class={styles.logins}>

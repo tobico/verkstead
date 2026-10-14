@@ -118,7 +118,7 @@ describe("the Attach menu on a draft's composer", () => {
     // `docs` and `archive` are on the Conversation already, so what is left to
     // offer is the one declaration it has not been given — and, last, the way
     // to declare another.
-    expect(rows(menu)).toEqual(["Attach file", "tickets", "Add a server…"]);
+    expect(rows(menu)).toEqual(["Attach file…", "tickets", "Add a server…"]);
   });
 
   /// The servers are a section of the menu of their own, under a heading, with
@@ -133,7 +133,7 @@ describe("the Attach menu on a draft's composer", () => {
     expect(rows(section)).toEqual(["tickets", "Add a server…"]);
     expect(section.textContent).toContain("MCP servers");
     expect(
-      within(section).queryByRole("menuitem", { name: "Attach file" }),
+      within(section).queryByRole("menuitem", { name: "Attach file…" }),
     ).toBeNull();
   });
 
@@ -158,7 +158,7 @@ describe("the Attach menu on a draft's composer", () => {
 
     const menu = await openMenu(await openComposer());
 
-    expect(rows(menu)).toEqual(["Attach file", "Add a server…"]);
+    expect(rows(menu)).toEqual(["Attach file…", "Add a server…"]);
     expect(
       within(menu).getByRole("group", { name: "MCP servers" }),
     ).toBeTruthy();

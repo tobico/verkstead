@@ -439,7 +439,7 @@ export function ProfileList(props: {
 function summary(profile: ProfileEntry): string {
   const harness = AGENT_NAME[profile.account.agent_type];
 
-  return profile.name ? `${harness} — ${profile.name}` : harness;
+  return profile.name ? `${harness} · ${profile.name}` : harness;
 }
 
 /// One saved profile: what it runs, and what it is called.
