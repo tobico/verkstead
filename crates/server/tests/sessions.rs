@@ -39056,3 +39056,119 @@ async fn closing_a_conversation_ends_its_terminals_before_the_worktree_goes() {
          nothing of its own left standing in it",
     );
 }
+
+/// Post `markdown` as a Memo from the session running in `fixture`, the way
+/// `verkstead memo` does, and hand back what the server answered.
+async fn leave_a_memo(fixture: &Grilling, markdown: &str) -> (StatusCode, String) {
+    fetch(
+        &fixture.app,
+        Request::builder()
+            .method("POST")
+            .uri(format!("/conversations/{}/api/v1/memos", fixture.id))
+            .body(Body::from(markdown.to_owned()))
+            .unwrap(),
+    )
+    .await
+}
+
+/// Every Memo on the Conversation's Timeline.
+async fn memos(fixture: &Grilling) -> Vec<verkstead_render::MemoEvent> {
+    fixture
+        .view()
+        .await
+        .timeline
+        .into_iter()
+        .filter_map(|event| match event {
+            TimelineEvent::Memo(memo) => Some(memo),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A task session's memo lands on the Timeline stamped with the task it was
+/// sent to work, and the route answers with the memo's Event id.
+#[tokio::test]
+async fn a_task_session_leaves_a_memo_stamped_with_its_task() {
+    let fixture = grilling(&a_backlog_that_says_so(
+        ": > /tmp/verkstead/memo-now\n        \
+         while [ ! -f /tmp/verkstead/memo-left ]; do sleep 0.05; done",
+        "",
+    ))
+    .await;
+
+    let (_, task) = picked_through_to_the_task(&fixture).await;
+
+    let directory = handoff_directory(&fixture);
+    let deadline = Instant::now() + *PATIENCE;
+    while !directory.join("memo-now").exists() {
+        assert!(
+            Instant::now() < deadline,
+            "the task session never got as far as its memo"
+        );
+        pause(Duration::from_millis(25)).await;
+    }
+
+    let (status, body) = leave_a_memo(&fixture, "The limiter's test flakes under load.\n").await;
+    std::fs::write(directory.join("memo-left"), "").unwrap();
+
+    assert_eq!(status, StatusCode::OK, "the memo is taken: {body}");
+    let id = body
+        .trim()
+        .strip_prefix("id: ")
+        .and_then(|id| id.parse::<i64>().ok())
+        .unwrap_or_else(|| panic!("the reply is the memo's id and nothing else: {body:?}"));
+
+    let memos = memos(&fixture).await;
+
+    assert_eq!(memos.len(), 1, "one memo on the Timeline: {memos:?}");
+    assert_eq!(memos[0].id, id, "the one the route answered with");
+    assert_eq!(memos[0].left_by, "the session that worked task 01");
+    assert!(
+        memos[0].html.contains("flakes under load"),
+        "{:?}",
+        memos[0].html
+    );
+    assert_eq!(memos[0].retired, None);
+    assert!(id > task, "a new Event after the session's own output");
+}
+
+/// A wrap-up's review may not leave a memo: it is refused naming the kinds that
+/// may, and nothing lands.
+#[tokio::test]
+async fn a_wrap_up_session_is_refused_a_memo_naming_the_kinds_that_may() {
+    let spill = tempfile::tempdir().unwrap();
+    let opened = spill.path().join("opened-when-asked");
+    let told_to = spill.path().join("submit-prompts");
+
+    let fixture = reviewing_a_branch(
+        spill,
+        &a_submit_that_opens_against_what_it_was_told(&opened, &told_to),
+        &gh_opened_by_hand(&opened),
+        None,
+        None,
+        None,
+        Process::Review,
+    )
+    .await;
+
+    let deadline = Instant::now() + *PATIENCE;
+    while sessions_on(&fixture, "reviewing/SKILL.md").await == 0 {
+        assert!(
+            Instant::now() < deadline,
+            "the wrap-up never read the branch",
+        );
+        pause(Duration::from_millis(50)).await;
+    }
+
+    let (status, body) = leave_a_memo(&fixture, "Nothing worth raising.\n").await;
+
+    assert_eq!(status, StatusCode::CONFLICT, "refused: {body}");
+    // Unfolded, because the YAML reply wraps a long line wherever it likes.
+    let said = body.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(
+        said.contains("only a building session may leave a memo")
+            && said.contains("a backlog task, the finish, a stage's planning"),
+        "naming the kinds that may: {body}",
+    );
+    assert!(memos(&fixture).await.is_empty(), "and nothing lands");
+}

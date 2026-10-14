@@ -40,6 +40,7 @@ use tokio::sync::watch;
 use verkstead_schema::ApiError;
 
 use crate::AppState;
+use crate::memos::Building;
 use crate::reply::yaml;
 use crate::runner::Landing;
 use crate::store::{self, Lifecycle};
@@ -66,6 +67,11 @@ struct Expected {
     event_id: i64,
     evidence: Evidence,
     ends: Ends,
+
+    /// What it was sent for, where that is building and so may leave a Memo —
+    /// see [`crate::memos`].
+    building: Option<Building>,
+
     given: watch::Sender<bool>,
 }
 
@@ -211,6 +217,7 @@ impl Signals {
         event_id: i64,
         evidence: Evidence,
         ends: Ends,
+        building: Option<Building>,
     ) -> Expecting {
         let token = self.issued.fetch_add(1, Ordering::Relaxed);
         let (given, receiver) = watch::channel(false);
@@ -222,6 +229,7 @@ impl Signals {
                 event_id,
                 evidence,
                 ends,
+                building,
                 given,
             },
         );
@@ -330,7 +338,8 @@ async fn verdict(state: &AppState, conversation_id: i64) -> Verdict {
         );
     };
 
-    let Some((token, evidence, ends)) = registered(state, conversation_id, event_id).await else {
+    let Some((token, evidence, ends, _)) = registered(state, conversation_id, event_id).await
+    else {
         return Verdict::Refused(unexpected(state, conversation_id).await);
     };
 
@@ -430,7 +439,7 @@ async fn registered(
     state: &AppState,
     conversation_id: i64,
     event_id: i64,
-) -> Option<(u64, Evidence, Ends)> {
+) -> Option<(u64, Evidence, Ends, Option<Building>)> {
     let deadline = Instant::now() + REGISTERING;
 
     loop {
@@ -439,7 +448,14 @@ async fn registered(
             .register()
             .get(&conversation_id)
             .filter(|expected| expected.event_id == event_id)
-            .map(|expected| (expected.token, expected.evidence.clone(), expected.ends));
+            .map(|expected| {
+                (
+                    expected.token,
+                    expected.evidence.clone(),
+                    expected.ends,
+                    expected.building,
+                )
+            });
 
         // Given up on once the session is no longer the one running, too: a
         // session that has ended is not one anything will start waiting on.
@@ -452,6 +468,21 @@ async fn registered(
 
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
+}
+
+/// What the session printing into `event_id` was sent for, where it may leave a
+/// Memo — read off the same entry, waited for the same way, as a Done signal.
+///
+/// `None` for a session nothing has written down, and for one written down as
+/// sent for anything but building.
+pub(crate) async fn building(
+    state: &AppState,
+    conversation_id: i64,
+    event_id: i64,
+) -> Option<Building> {
+    registered(state, conversation_id, event_id)
+        .await
+        .and_then(|(_, _, _, building)| building)
 }
 
 /// What `evidence` is still missing, in words an agent can act on, or `None`
@@ -789,6 +820,7 @@ mod tests {
                 landing: Landing::Ticked(1),
             },
             Ends::WithItsWork,
+            Some(Building::Task(1)),
         )
     }
 

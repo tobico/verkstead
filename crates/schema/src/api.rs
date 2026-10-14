@@ -68,6 +68,40 @@ pub struct ResponseAccepted {
     pub submitted_at: String,
 }
 
+/// The most a Memo may hold, in bytes of its markdown (ADR-0023).
+///
+/// Here rather than on either end, because both ends hold it: the CLI refuses
+/// a longer one before sending anything, as a courtesy, and the server refuses
+/// one sent by hand, as the rule.
+pub const MAX_MEMO_BYTES: usize = 8 * 1024;
+
+/// Why a Memo's markdown is refused before it goes anywhere, or `None` where
+/// it may be left: nothing in it, or more than [`MAX_MEMO_BYTES`].
+pub fn memo_refused(markdown: &str) -> Option<String> {
+    if markdown.trim().is_empty() {
+        return Some(
+            "the memo is empty: write what the sessions after this one should know".to_owned(),
+        );
+    }
+
+    (markdown.len() > MAX_MEMO_BYTES).then(|| {
+        format!(
+            "the memo is {} bytes, over the maximum of {} (8 KiB): keep it to what the next \
+             session will walk into, and leave a second memo for a second thing",
+            markdown.len(),
+            MAX_MEMO_BYTES
+        )
+    })
+}
+
+/// What `POST …/api/v1/memos` returns once a Memo is on the Timeline: the
+/// Event it is, which is the number it goes by. The CLI prints this and nothing
+/// else on stdout, so an agent can read it back.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemoLeft {
+    pub id: i64,
+}
+
 /// What the API returns when it refuses a request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]

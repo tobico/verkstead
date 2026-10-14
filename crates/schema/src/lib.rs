@@ -14,7 +14,7 @@ mod response;
 mod set;
 mod validate;
 
-pub use api::{ApiError, ResponseAccepted, SetCreated};
+pub use api::{ApiError, MAX_MEMO_BYTES, MemoLeft, ResponseAccepted, SetCreated, memo_refused};
 pub use liveness::Liveness;
 pub use nudge::{Nudge, Nudged};
 pub use response::{Answer, Response};

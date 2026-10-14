@@ -29,6 +29,7 @@ mod guide;
 /// started as somebody else. Windows' own, and hidden.
 #[cfg(windows)]
 mod launcher;
+mod memo;
 /// The named pipe a Windows session asks through, from the end that dials it:
 /// the `pipe://` spelling `--server` takes, and the ureq transport that opens
 /// one. Read on every platform, so that a pipe named where there are none is
@@ -143,6 +144,24 @@ enum Command {
         server: String,
     },
 
+    /// Leave a memo for the sessions after this one on the same Conversation:
+    /// working knowledge no commit holds, such as a flaky test, a build trap,
+    /// or a decision taken mid-task and why.
+    ///
+    /// Markdown on stdin, of at most 8 KiB. Only a building session may leave
+    /// one: a backlog task, the finish, a stage's planning, an inline run or a
+    /// steered instruction. Accepted, it prints the memo's id as YAML — `id: 42`
+    /// — on stdout and exits 0, and every later session of the Conversation is
+    /// shown it in its prompt; refused, it exits non-zero and says why on
+    /// stderr, and nothing is left.
+    Memo {
+        /// Where the Verkstead server is: its base URL, or `pipe://<name>` for
+        /// a named pipe, which is Windows' own and what a session in a
+        /// container asks through.
+        #[arg(long, env = "VERKSTEAD_SERVER", default_value = DEFAULT_SERVER)]
+        server: String,
+    },
+
     /// Say this session is about to end its turn with work of its own still
     /// running in the background — a build, a test run — so it is not taken as
     /// stopped.
@@ -246,6 +265,7 @@ impl Cli {
             }) => ask::ask(file.as_deref(), deferred, &server),
             Some(Command::Answers { id, server }) => answers::answers(id, &server),
             Some(Command::Done { server }) => done::done(&server),
+            Some(Command::Memo { server }) => memo::memo(&server),
             Some(Command::Waiting { length, server }) => {
                 waiting::waiting(length.as_deref(), &server)
             }
