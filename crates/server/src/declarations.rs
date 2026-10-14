@@ -296,7 +296,7 @@ pub(crate) fn judge(roadmap: &str, list: &str) -> Judgement {
         return Judgement::Refused(format!(
             "the {roadmap} roadmap declares what some of its stages stand on and not others: \
              stage {} declares nothing after its link. Every line of a declaring roadmap carries \
-             a declaration, `no dependencies` where the stage stands on nothing, because a bare \
+             a declaration, no dependencies where the stage stands on nothing, because a bare \
              line can't be told from a forgotten one",
             entry.label,
         ));
@@ -311,15 +311,15 @@ pub(crate) fn judge(roadmap: &str, list: &str) -> Judgement {
 
         if stages.is_empty() {
             return Judgement::Refused(format!(
-                "stage {} of the {roadmap} roadmap says `after` and names no stage. A stage that \
-                 stands on nothing says `no dependencies`",
+                "stage {} of the {roadmap} roadmap says after and names no stage. A stage that \
+                 stands on nothing says no dependencies",
                 entry.label,
             ));
         }
 
         if let Some(named) = stages.iter().find(|named| !labels.contains(named)) {
             return Judgement::Refused(format!(
-                "stage {} of the {roadmap} roadmap says `after {named}`, and no stage of it is \
+                "stage {} of the {roadmap} roadmap says after {named}, and no stage of it is \
                  labelled {named}. A stage may only name stages of its own roadmap, by their \
                  labels as the roadmap writes them, zero-padding and all",
                 entry.label,
@@ -332,12 +332,12 @@ pub(crate) fn judge(roadmap: &str, list: &str) -> Judgement {
             && matching(word).is_none()
         {
             return Judgement::Refused(format!(
-                "stage {} of the {roadmap} roadmap says `on {word}`, which isn't a platform. A \
+                "stage {} of the {roadmap} roadmap says on {word}, which isn't a platform. A \
                  platform is one of {}",
                 entry.label,
                 PLATFORMS
                     .iter()
-                    .map(|(word, _)| format!("`{word}`"))
+                    .map(|(word, _)| *word)
                     .collect::<Vec<_>>()
                     .join(", "),
             ));
@@ -744,7 +744,7 @@ mod tests {
 
         assert!(why.contains("stage 02"), "{why}");
         assert!(why.contains("on freebsd"), "{why}");
-        assert!(why.contains("`linux`"), "{why}");
+        assert!(why.contains("one of linux, "), "{why}");
 
         // The three of them, in whatever case they were typed: the keyword and
         // the value are read the same way round as everywhere else.

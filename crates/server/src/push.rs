@@ -282,10 +282,10 @@ impl News {
             // The step rather than how it went wrong: which part of the run
             // stopped is what decides whether the human gets up, and the
             // evidence underneath it is one tap away.
-            News::Stopped { stopped } => format!("{stopped} stopped on {branch}."),
+            News::Stopped { stopped } => format!("{} stopped on {branch}.", bare(stopped)),
             // The same step, and the word that says nothing stopped: the session
             // is sitting there, and the human is the one to move it.
-            News::Escalated { idle } => format!("{idle} has gone idle on {branch}."),
+            News::Escalated { idle } => format!("{} has gone idle on {branch}.", bare(idle)),
             // The account and when it comes back, because those are the two
             // things that decide whether the human does anything about it: an
             // account back in twenty minutes is one to leave alone.
@@ -633,6 +633,14 @@ const A_NAME: usize = 40;
 /// its own word for itself; a member's news leads with the name that member said
 /// at its last exchange. Either way what stops it from being the whole of a lock
 /// screen is this rather than anything the far end did.
+/// A step's name as the lock screen can show it.
+///
+/// The step is the Timeline's words, where a repository is set as `code`; a
+/// notification is plain text, so the backticks would be drawn as backticks.
+fn bare(step: &str) -> String {
+    step.replace('`', "")
+}
+
 fn fitting(name: &str) -> String {
     cut_to(name, A_NAME)
 }
@@ -1061,6 +1069,21 @@ mod tests {
                 "a title a lock screen would cut off mid-sentence: {title:?}",
             );
         }
+    }
+
+    /// A stop names its step in the Timeline's words, which set a repository as
+    /// `code`, and a lock screen draws plain text: so the title carries the
+    /// name bare rather than wrapped in backticks.
+    #[test]
+    fn a_stopped_step_is_named_without_its_backticks() {
+        let stopped = News::Stopped {
+            stopped: "Getting the checks green on pull request #7 of `askance`".to_owned(),
+        };
+
+        assert_eq!(
+            stopped.title("pwa-and-push"),
+            "Getting the checks green on pull request #7 of askance stopped on pwa-and-push.",
+        );
     }
 
     /// A notification about the machine names the device asking, which is the

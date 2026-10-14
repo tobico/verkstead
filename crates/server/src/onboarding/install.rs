@@ -274,8 +274,8 @@ const XCODE_TOOLS: &str = "Git comes with Apple's command line tools. Run \
 /// is what the other Mac's does; a Mac with no Homebrew and no node has
 /// neither, and the binary on its releases page is what is left.
 const CODEX_ON_INTEL: &str = "Codex has no installer script, and the package the other tabs use \
-                              wants an `npm` this Mac has no package manager to install. Its \
-                              binary is on its releases page, and it goes in `~/.local/bin`, \
+                              wants an npm this Mac has no package manager to install. Its \
+                              binary is on its releases page, and it goes in ~/.local/bin, \
                               which every Mac session looks in.";
 
 /// And GitHub's own release, which is what a ticked `gh` row runs on the Mac

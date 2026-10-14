@@ -161,12 +161,12 @@ export const PROFILE_REFUSAL: Record<ProfileSaved, string> = {
     "Give the claude directory's absolute path, starting with a slash.",
   DirMissing: "There's nothing at the claude directory's path.",
   NotADirectory:
-    "That isn't a directory. A session's `~/.claude` is built from one.",
+    "That isn't a directory. A session's ~/.claude is built from one.",
   ConfigNotAbsolute:
     "Give the config file's absolute path, starting with a slash.",
   ConfigMissing: "There's nothing at the config file's path.",
   NotAFile:
-    "That isn't a file. A session's `~/.claude.json` is copied from one.",
+    "That isn't a file. A session's ~/.claude.json is copied from one.",
   HomeNotAbsolute: "Give the home's absolute path, starting with a slash.",
   HomeMissing: "There's nothing at the home's path.",
   HomeNotADirectory:
