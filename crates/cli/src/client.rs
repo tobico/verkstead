@@ -11,7 +11,7 @@
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
-use verkstead_schema::{ApiError, QuestionSet, Response, SetCreated};
+use verkstead_schema::{ApiError, MemoLeft, QuestionSet, Response, SetCreated};
 
 /// How long the server is asked to hold each wait open. Its own ceiling is a
 /// minute; well under that leaves room for a reply to make it back before any
@@ -220,6 +220,65 @@ impl Client {
             200 => Ok(text.trim().to_owned()),
             404 => bail!(
                 "the server at {} has no transfer to take — it may be older than this command",
+                self.said
+            ),
+            _ => bail!("the server refused: {}", refusal(&text)),
+        }
+    }
+
+    /// Leave `markdown` as a Memo for the sessions after this one, and hand back
+    /// the Event it became.
+    ///
+    /// No retry, for [`Client::done`]'s reason: a refusal is a session that may
+    /// not leave one or a memo to put right, and a retry that landed twice would
+    /// put the same memo in every later prompt twice.
+    pub fn memo(&self, markdown: &str) -> Result<MemoLeft> {
+        let mut reply = self
+            .agent
+            .post(format!("{}/api/v1/memos", self.base))
+            .send(markdown)
+            .with_context(|| format!("leaving a memo with {}", self.said))?;
+
+        let status = reply.status().as_u16();
+        let text = reply
+            .body_mut()
+            .read_to_string()
+            .context("reading the server's reply")?;
+
+        match status {
+            200 => serde_saphyr::from_str(&text)
+                .with_context(|| format!("reading the server's reply: {}", text.trim())),
+            404 => bail!(
+                "the server at {} has no memos to take — it is older than this command",
+                self.said
+            ),
+            _ => bail!("the server refused: {}", refusal(&text)),
+        }
+    }
+
+    /// Take Memo `id` back, with `reason` where one was given, so no later
+    /// session is shown it.
+    ///
+    /// No retry, for [`Client::memo`]'s reason: a retry of one that landed would
+    /// be refused as already retired, which is the wrong thing to tell an agent
+    /// whose retirement worked.
+    pub fn retire_memo(&self, id: i64, reason: &str) -> Result<()> {
+        let mut reply = self
+            .agent
+            .post(format!("{}/api/v1/memos/{id}/retire", self.base))
+            .send(reason)
+            .with_context(|| format!("retiring memo {id} with {}", self.said))?;
+
+        let status = reply.status().as_u16();
+        let text = reply
+            .body_mut()
+            .read_to_string()
+            .context("reading the server's reply")?;
+
+        match status {
+            200 | 204 => Ok(()),
+            404 => bail!(
+                "the server at {} has no memos to retire — it is older than this command",
                 self.said
             ),
             _ => bail!("the server refused: {}", refusal(&text)),

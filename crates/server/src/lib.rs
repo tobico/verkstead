@@ -165,6 +165,9 @@ pub mod matching;
 /// ever spoken to from here — see ADR-0021, where an unreachable server never
 /// holds a launch.
 mod mcp;
+/// Leaving a Memo for the sessions after this one, from a building session
+/// alone (ADR-0023).
+mod memos;
 /// Watching a pull request go on merging after the work on it is Done — see
 /// [`checks`] for the watcher that covers a wrap-up, which this takes over from.
 mod merges;
@@ -1683,6 +1686,16 @@ fn serving(state: AppState, gate: &key::Gate) -> Router {
         .route(
             &format!("{ASKING_FROM}/{{conversation}}/api/v1/transfer"),
             post(transfers::call),
+        )
+        // And leaving what it learned for the sessions after it (ADR-0023).
+        .route(
+            &format!("{ASKING_FROM}/{{conversation}}/api/v1/memos"),
+            post(memos::leave),
+        )
+        // And taking one back that no longer holds.
+        .route(
+            &format!("{ASKING_FROM}/{{conversation}}/api/v1/memos/{{id}}/retire"),
+            post(memos::retire),
         )
         // And saying it is waiting on work of its own, which keeps it at work.
         .route(

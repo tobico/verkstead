@@ -3,7 +3,7 @@
   "archived": false,
   "attachments": [],
   "base_commit": "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
-  "blocked_on": 24,
+  "blocked_on": 27,
   "branch": "task-runner",
   "branch_named": true,
   "companions": [],
@@ -129,14 +129,14 @@
         "at": "2026-08-03T09:07:11.000Z",
         "frozen": true,
         "html": "<h1>One session per task</h1>\n<p>The backlog is worked one task at a time, each in a session of its\nown.</p>\n",
-        "id": 19,
+        "id": 22,
         "markdown": "# One session per task\n\nThe backlog is worked one task at a time, each in a session of its\nown.\n"
       }
     },
     {
       "Moved": {
         "at": "2026-08-03T09:07:11.000Z",
-        "id": 20,
+        "id": 23,
         "state": "Grilling"
       }
     },
@@ -145,7 +145,7 @@
         "at": "2026-08-03T09:07:11.000Z",
         "deletions": 0,
         "files": 5,
-        "id": 21,
+        "id": 24,
         "insertions": 132,
         "merge": false,
         "repo": null,
@@ -156,7 +156,7 @@
     {
       "TaskList": {
         "at": "2026-08-03T09:07:11.000Z",
-        "id": 22,
+        "id": 25,
         "list": {
           "feature": "Task runner",
           "tasks": [
@@ -187,7 +187,7 @@
     {
       "Moved": {
         "at": "2026-08-03T09:07:11.000Z",
-        "id": 23,
+        "id": 26,
         "state": "Implementing"
       }
     },
@@ -195,7 +195,7 @@
       "Notice": {
         "at": "2026-08-03T09:07:11.000Z",
         "html": "<p><strong>The task in .tasks/03-commit-events.md</strong> stopped.</p>\n<p>The session exited with status 1.</p>\n<h3>The worktree</h3>\n<div class=\"wide\">\n<pre><code>## task-runner\n M crates/store/src/commits.rs\n?? crates/store/src/sweep.rs\n</code></pre>\n</div>\n<h3>What the last session said</h3>\n<div class=\"wide\">\n<pre><code>error[E0432]: unresolved import `crate::sweep`\n  --&gt; crates/store/src/commits.rs:9:5\nerror: could not compile `verkstead-store` (lib) due to 1 previous error\n</code></pre>\n</div>",
-        "id": 24,
+        "id": 27,
         "log_in": null
       }
     }

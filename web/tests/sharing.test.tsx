@@ -120,7 +120,7 @@ describe("a shared conversation", () => {
     expect(held).toContain("QuestionSet");
     expect(held).toContain("Commit");
 
-    for (const left of ["AgentOutput", "Handoff", "Notice", "PullRequest"]) {
+    for (const left of ["AgentOutput", "Handoff", "Memo", "Notice", "PullRequest"]) {
       expect(held).not.toContain(left);
     }
 

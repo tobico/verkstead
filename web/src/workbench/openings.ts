@@ -258,6 +258,7 @@ export function openingOf(event: TimelineEvent): Opening | null {
   if ("QuestionSet" in event) return event.QuestionSet.id;
   if ("UnreadableSet" in event) return event.UnreadableSet.id;
   if ("Handoff" in event) return event.Handoff.id;
+  if ("Memo" in event) return event.Memo.id;
   if ("Commit" in event) return event.Commit.id;
   if ("Notice" in event) return event.Notice.id;
   if ("PullRequest" in event) return event.PullRequest.id;

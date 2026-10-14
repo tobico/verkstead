@@ -140,6 +140,29 @@ it to the pull request exactly as above. A session that ended here saying there
 was nothing for it to do would leave the branch where the one before it did,
 which is the one ending this run cannot recover from by itself.
 
+## Leaving a memo for the sessions after you
+
+The sessions after this one — the wrap-up, and any follow-up on this
+Conversation — start with none of this session's context, and a memo is what
+carries the working knowledge no commit holds. So leave one when you learn something the next session would otherwise find again
+or miss — a flaky suite, a trap in the build, a shape you settled that the
+task did not ask about — markdown on stdin:
+
+    verkstead memo <<'MD'
+    The transfer suite's locked-Set test fails on main too; run it alone first.
+    MD
+
+Leave none for what the commit message already says or what the backlog is
+about to say. Every later session of this Conversation is shown the memos
+still standing, under *What earlier sessions left for you* in its prompt, each
+with its number; retire one you find no longer holds, the rest of the line
+being the reason:
+
+    verkstead memo --retire 42 fixed in 8f3c2a1
+
+The Guide's *Leaving a memo for the sessions after you* section has the
+details.
+
 ## Saying you are done
 
 The last thing this session does, once the work is committed, pushed and on a

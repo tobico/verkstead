@@ -2532,6 +2532,46 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             .unwrap();
     }
 
+    // And the session that worked a task on it, with the Memos it left for the
+    // sessions after it: one still standing, and one a later session has taken
+    // back. The second is retired straight in rather than through
+    // `retire_memo`, so its moment is a fixed one and the fixture does not move
+    // with the clock.
+    let session = store::start_capture(&pool, directing, Some("task-02"), None)
+        .await
+        .unwrap();
+    store::leave_memo(
+        &pool,
+        directing,
+        "The sessions suite flakes under parallelism: run it with\n\
+         `--test-threads=4` before blaming the change.\n",
+        "the session that worked task 02",
+        session,
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let retired = store::leave_memo(
+        &pool,
+        directing,
+        "The limit reader lives in `crates/server/src/limits.rs`, not in the\n\
+         relay the task file names.\n",
+        "the session that worked task 02",
+        session,
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    stamp(
+        &pool,
+        "UPDATE memos SET retired_at = ?, retired_by = 'the session that worked task 03',
+                          reason = 'moved back into the relay'
+         WHERE event_id = ?",
+        "2026-08-03T09:07:11.000Z",
+        retired,
+    )
+    .await;
+
     // And a fifth, whose direction was a task list: the breaking-down session
     // has written `.tasks/` into its worktree, and Verkstead reads it back as
     // the pinned Event.

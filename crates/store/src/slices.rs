@@ -461,6 +461,17 @@ const CARRIED: &[Carried] = &[
             ("profile_id", Holds::Profile),
         ],
     },
+    // And who left each Memo, and out of which session — both of them Events of
+    // this Timeline's, renumbered with the rest.
+    Carried {
+        table: "memos",
+        found: Found::ByConversation,
+        ids: &[
+            ("event_id", Holds::Event),
+            ("conversation_id", Holds::Conversation),
+            ("left_in", Holds::Event),
+        ],
+    },
     // What GitHub last said about the work, and what the wrap-up got through.
     Carried {
         table: "pull_request_checks",

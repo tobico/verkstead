@@ -39060,3 +39060,402 @@ async fn closing_a_conversation_ends_its_terminals_before_the_worktree_goes() {
          nothing of its own left standing in it",
     );
 }
+
+/// Post `markdown` as a Memo from the session running in `fixture`, the way
+/// `verkstead memo` does, and hand back what the server answered.
+async fn leave_a_memo(fixture: &Grilling, markdown: &str) -> (StatusCode, String) {
+    fetch(
+        &fixture.app,
+        Request::builder()
+            .method("POST")
+            .uri(format!("/conversations/{}/api/v1/memos", fixture.id))
+            .body(Body::from(markdown.to_owned()))
+            .unwrap(),
+    )
+    .await
+}
+
+/// Every Memo on the Conversation's Timeline.
+async fn memos(fixture: &Grilling) -> Vec<verkstead_render::MemoEvent> {
+    fixture
+        .view()
+        .await
+        .timeline
+        .into_iter()
+        .filter_map(|event| match event {
+            TimelineEvent::Memo(memo) => Some(memo),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A task session's memo lands on the Timeline stamped with the task it was
+/// sent to work, and the route answers with the memo's Event id.
+#[tokio::test]
+async fn a_task_session_leaves_a_memo_stamped_with_its_task() {
+    let fixture = grilling(&a_backlog_that_says_so(
+        ": > /tmp/verkstead/memo-now\n        \
+         while [ ! -f /tmp/verkstead/memo-left ]; do sleep 0.05; done",
+        "",
+    ))
+    .await;
+
+    let (_, task) = picked_through_to_the_task(&fixture).await;
+
+    let directory = handoff_directory(&fixture);
+    let deadline = Instant::now() + *PATIENCE;
+    while !directory.join("memo-now").exists() {
+        assert!(
+            Instant::now() < deadline,
+            "the task session never got as far as its memo"
+        );
+        pause(Duration::from_millis(25)).await;
+    }
+
+    let (status, body) = leave_a_memo(&fixture, "The limiter's test flakes under load.\n").await;
+    std::fs::write(directory.join("memo-left"), "").unwrap();
+
+    assert_eq!(status, StatusCode::OK, "the memo is taken: {body}");
+    let id = body
+        .trim()
+        .strip_prefix("id: ")
+        .and_then(|id| id.parse::<i64>().ok())
+        .unwrap_or_else(|| panic!("the reply is the memo's id and nothing else: {body:?}"));
+
+    let memos = memos(&fixture).await;
+
+    assert_eq!(memos.len(), 1, "one memo on the Timeline: {memos:?}");
+    assert_eq!(memos[0].id, id, "the one the route answered with");
+    assert_eq!(memos[0].left_by, "the session that worked task 01");
+    assert!(
+        memos[0].html.contains("flakes under load"),
+        "{:?}",
+        memos[0].html
+    );
+    assert_eq!(memos[0].retired, None);
+    assert!(id > task, "a new Event after the session's own output");
+}
+
+/// A wrap-up's review may not leave a memo: it is refused naming the kinds that
+/// may, and nothing lands.
+#[tokio::test]
+async fn a_wrap_up_session_is_refused_a_memo_naming_the_kinds_that_may() {
+    let spill = tempfile::tempdir().unwrap();
+    let opened = spill.path().join("opened-when-asked");
+    let told_to = spill.path().join("submit-prompts");
+
+    let fixture = reviewing_a_branch(
+        spill,
+        &a_submit_that_opens_against_what_it_was_told(&opened, &told_to),
+        &gh_opened_by_hand(&opened),
+        None,
+        None,
+        None,
+        Process::Review,
+    )
+    .await;
+
+    let deadline = Instant::now() + *PATIENCE;
+    while sessions_on(&fixture, "reviewing/SKILL.md").await == 0 {
+        assert!(
+            Instant::now() < deadline,
+            "the wrap-up never read the branch",
+        );
+        pause(Duration::from_millis(50)).await;
+    }
+
+    let (status, body) = leave_a_memo(&fixture, "Nothing worth raising.\n").await;
+
+    assert_eq!(status, StatusCode::CONFLICT, "refused: {body}");
+    // Unfolded, because the YAML reply wraps a long line wherever it likes.
+    let said = body.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(
+        said.contains("only a building session may leave a memo")
+            && said.contains("a backlog task, the finish, a stage's planning"),
+        "naming the kinds that may: {body}",
+    );
+    assert!(memos(&fixture).await.is_empty(), "and nothing lands");
+}
+
+/// Put a Memo on the Conversation straight through the store, left in `session`
+/// — for the tests about what a launch is told rather than about who may leave
+/// one.
+async fn a_memo_on_the_record(fixture: &Grilling, session: i64, markdown: &str) -> i64 {
+    let pool = open_database(&fixture.database).await.unwrap();
+
+    verkstead_store::leave_memo(
+        &pool,
+        fixture.id,
+        markdown,
+        "the session that worked task 01",
+        session,
+    )
+    .await
+    .unwrap()
+    .unwrap()
+}
+
+/// The Memos left before a session starts are in its prompt, oldest first, and
+/// in the prompt of every session after it: nothing is spent by being read.
+#[tokio::test]
+async fn the_memos_left_are_in_the_prompt_of_every_later_session() {
+    let spill = tempfile::tempdir().unwrap();
+    let written = spill.path().join("task-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_of_two_writing_prompts(&written),
+        PULL_REQUEST,
+    )
+    .await;
+
+    let grilling = fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let first = a_memo_on_the_record(&fixture, grilling, "The limiter's test flakes.\n").await;
+    let second = a_memo_on_the_record(&fixture, grilling, "Run clippy first.\n").await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
+
+    fixture
+        .until(|view| {
+            commits(view)
+                .iter()
+                .any(|commit| commit.subject.starts_with("chore: finish"))
+                .then_some(())
+        })
+        .await;
+
+    let started = prompts_by_step(&written);
+    assert_eq!(started.len(), 3, "a session per step: {started:?}");
+
+    let block = format!(
+        "# What earlier sessions left for you\n\n\
+         **Memo {first}**, left by the session that worked task 01.\n\
+         Retire it with `verkstead memo --retire {first}` once it no longer holds.\n\n\
+         The limiter's test flakes.\n\n\
+         **Memo {second}**, left by the session that worked task 01.\n\
+         Retire it with `verkstead memo --retire {second}` once it no longer holds.\n\n\
+         Run clippy first.\n"
+    );
+
+    for (step, prompt) in &started {
+        assert!(
+            prompt.contains(&block),
+            "{step} is told both memos, oldest first: {prompt:?}",
+        );
+    }
+}
+
+/// A grilling relaunched by a steer and a steered instruction are told the
+/// Memos too, being launched where every session is — and a Conversation with
+/// none, or with only retired ones, launches a session told nothing of them.
+/// Only the instruction is told how to retire one: the grilling is refused it.
+#[tokio::test]
+async fn a_steered_session_is_told_the_memos_and_a_session_with_none_is_not() {
+    let fixture = grilling(
+        r#"
+        printf 'prompt was: %s\n' "$2"
+        sleep 300
+        "#,
+    )
+    .await;
+
+    let grilled = fixture.printed_after(0).await;
+
+    assert!(
+        !grilled.contains("What earlier sessions left"),
+        "no memos, no heading: {grilled:?}",
+    );
+
+    let grilling = output(&fixture.view().await).unwrap().id;
+    let standing = a_memo_on_the_record(&fixture, grilling, "The limiter's test flakes.\n").await;
+    let retired = a_memo_on_the_record(&fixture, grilling, "A retired one.\n").await;
+
+    let pool = open_database(&fixture.database).await.unwrap();
+    sqlx::query(
+        "UPDATE memos SET retired_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), retired_by = 'you' \
+         WHERE event_id = ?",
+    )
+    .bind(retired)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let before = outputs(&fixture.view().await).len();
+
+    assert_eq!(fixture.steer().await, SteerOpened::Opened);
+    assert_eq!(
+        fixture.steer_grilling(None, false).await,
+        ConversationSteered::Steered,
+    );
+
+    let relaunched = fixture.printed_after(before).await;
+
+    assert!(
+        relaunched.contains("/verkstead/skills/grilling/SKILL.md")
+            && relaunched.contains(&format!("**Memo {standing}**"))
+            && relaunched.contains("The limiter's test flakes."),
+        "a relaunched grilling is told the memo standing: {relaunched:?}",
+    );
+    assert!(
+        !relaunched.contains("A retired one."),
+        "and nothing of the one retired: {relaunched:?}",
+    );
+    assert!(
+        !relaunched.contains("verkstead memo --retire"),
+        "and is not told how to retire one, being refused it: {relaunched:?}",
+    );
+
+    let before = outputs(&fixture.view().await).len();
+
+    assert_eq!(fixture.steer().await, SteerOpened::Opened);
+    assert_eq!(
+        fixture
+            .steer_instructed("Note the window the count is against.\n")
+            .await,
+        ConversationSteered::Steered,
+    );
+
+    let instructed = fixture.printed_after(before).await;
+
+    assert!(
+        instructed.contains("/verkstead/skills/instruction/SKILL.md")
+            && instructed.contains(&format!("**Memo {standing}**")),
+        "and so is a steered instruction: {instructed:?}",
+    );
+    assert!(
+        instructed.contains(&format!("verkstead memo --retire {standing}")),
+        "which may retire it, and is told how: {instructed:?}",
+    );
+}
+
+/// Retire Memo `memo` from the session running in `fixture`, the way `verkstead
+/// memo --retire` does, with `reason` as the body.
+async fn retire_a_memo(fixture: &Grilling, memo: i64, reason: &str) -> (StatusCode, String) {
+    fetch(
+        &fixture.app,
+        Request::builder()
+            .method("POST")
+            .uri(format!(
+                "/conversations/{}/api/v1/memos/{memo}/retire",
+                fixture.id
+            ))
+            .body(Body::from(reason.to_owned()))
+            .unwrap(),
+    )
+    .await
+}
+
+/// A task session retiring a Memo marks it retired with its own stamp and the
+/// reason it gave, and every session after it is told the rest and not that
+/// one — while a retirement of one already retired, or of a number that is no
+/// memo of this Conversation's, is refused by name.
+#[tokio::test]
+async fn a_memo_a_task_session_retires_leaves_every_later_prompt() {
+    let spill = tempfile::tempdir().unwrap();
+    let written = spill.path().join("task-prompts");
+
+    // The two-task backlog, with the first task held open until the test has
+    // retired its memo, so the retirement comes from a running task session.
+    let stub = a_backlog_of_two_writing_prompts(&written).replacen(
+        "    if [ -n \"$next\" ]; then\n",
+        "    if [ \"$number\" = 01 ]; then\n        \
+         : > /tmp/verkstead/retire-now\n        \
+         while [ ! -f /tmp/verkstead/retired ]; do sleep 0.05; done\n    \
+         fi\n    \
+         if [ -n \"$next\" ]; then\n",
+        1,
+    );
+
+    let fixture = grilling_spilling(spill, &stub, PULL_REQUEST).await;
+
+    let grilling = fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let flaky = a_memo_on_the_record(&fixture, grilling, "The limiter's test flakes.\n").await;
+    let clippy = a_memo_on_the_record(&fixture, grilling, "Run clippy first.\n").await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
+
+    let directory = handoff_directory(&fixture);
+    let deadline = Instant::now() + *PATIENCE;
+    while !directory.join("retire-now").exists() {
+        assert!(
+            Instant::now() < deadline,
+            "the first task session never got as far as retiring"
+        );
+        pause(Duration::from_millis(25)).await;
+    }
+
+    let (status, body) = retire_a_memo(&fixture, flaky, "fixed in 8f3c2a1\n").await;
+    assert_eq!(
+        status,
+        StatusCode::NO_CONTENT,
+        "the retirement is taken: {body}"
+    );
+
+    let (status, body) = retire_a_memo(&fixture, flaky, "").await;
+    let said = body.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert!(
+        said.contains(&format!(
+            "memo {flaky} is already retired, by the session that worked task 01"
+        )),
+        "a second retirement is refused naming the first: {body}",
+    );
+
+    let (status, body) = retire_a_memo(&fixture, grilling, "").await;
+    let said = body.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert!(
+        said.contains(&format!(
+            "memo {grilling} is not one of this Conversation's"
+        )),
+        "an id that is no memo here is refused by name: {body}",
+    );
+
+    std::fs::write(directory.join("retired"), "").unwrap();
+
+    fixture
+        .until(|view| {
+            commits(view)
+                .iter()
+                .any(|commit| commit.subject.starts_with("chore: finish"))
+                .then_some(())
+        })
+        .await;
+
+    let retired = memos(&fixture)
+        .await
+        .into_iter()
+        .find(|memo| memo.id == flaky)
+        .and_then(|memo| memo.retired)
+        .expect("the memo reads back retired");
+    assert_eq!(retired.by, "the session that worked task 01");
+    assert_eq!(retired.reason.as_deref(), Some("fixed in 8f3c2a1"));
+
+    let started = prompts_by_step(&written);
+    assert_eq!(started.len(), 3, "a session per step: {started:?}");
+
+    let (first, _) = &started[0];
+    assert!(
+        started[0].1.contains(&format!("**Memo {flaky}**")),
+        "{first} was started before the retirement, and told it",
+    );
+
+    for (step, prompt) in &started[1..] {
+        assert!(
+            !prompt.contains(&format!("**Memo {flaky}**")) && !prompt.contains("flakes"),
+            "{step} is not told the retired memo: {prompt:?}",
+        );
+        assert!(
+            prompt.contains(&format!("**Memo {clippy}**")) && prompt.contains("Run clippy first."),
+            "{step} is told the rest: {prompt:?}",
+        );
+    }
+}

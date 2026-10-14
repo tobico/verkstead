@@ -23,10 +23,11 @@ use std::path::PathBuf;
 use sqlx::SqlitePool;
 use verkstead_schema::Response;
 use verkstead_store::{
-    Account, Arrival, ArrivingPicked, Ask, Birth, Lifecycle, ProfileFacts, Renaming, STAYS_BEHIND,
-    Settlements, Submission, arrive, ask, capture, carried_tables, create_profile, deleted_tables,
-    land, load_conversation, load_response, queue_to_join, register_repo, session_id,
-    sets_as_they_landed, slice, start_conversation, submit_response, timeline, transcript,
+    Account, Arrival, ArrivingPicked, Ask, Birth, Event, Lifecycle, Memo, ProfileFacts, Renaming,
+    STAYS_BEHIND, Settlements, Submission, arrive, ask, capture, carried_tables, create_profile,
+    deleted_tables, land, load_conversation, load_response, queue_to_join, register_repo,
+    session_id, sets_as_they_landed, slice, start_conversation, submit_response, timeline,
+    transcript,
 };
 
 mod owning;
@@ -185,6 +186,35 @@ async fn the_record_lands_on_the_far_end_reading_as_it_read_here() {
     assert!(
         landed(&moved.there.pool).await.contains(&notice),
         "and its Notice names an Event of this database's own",
+    );
+}
+
+/// A Memo crosses with its stamp, and the session it names is the one that
+/// landed over there rather than whichever Event happens to hold that number.
+#[tokio::test]
+async fn a_memo_crosses_stamped_and_naming_the_session_that_left_it() {
+    let moved = moved("rate-limiting").await;
+
+    let (here, left_here) = memo(&moved.here.pool, moved.worked.id).await;
+    let (there, left_there) = memo(&moved.there.pool, moved.to).await;
+
+    assert_eq!(there, here, "the markdown crossed as it was written");
+    assert_eq!(
+        left_there.left_by, left_here.left_by,
+        "and its stamp with it"
+    );
+    assert_eq!(left_there.retired, None);
+
+    // Where the session that left it sits on each Timeline, counted from the
+    // top: the ids are each database's own, and the position is the record.
+    let at = |events: &[i64], id: i64| events.iter().position(|event| *event == id);
+    let was = at(&moved.events, left_here.left_in);
+
+    assert!(was.is_some(), "the Memo names an Event of its own Timeline");
+    assert_eq!(
+        at(&landed(&moved.there.pool).await, left_there.left_in),
+        was,
+        "and it names the session that landed over there",
     );
 }
 
@@ -639,6 +669,19 @@ async fn arrived(pool: &SqlitePool, repo_id: i64) -> i64 {
     .await
     .unwrap()
     .expect("the Repo is registered")
+}
+
+/// The first Memo on a Timeline, with what was written down beside it.
+async fn memo(pool: &SqlitePool, id: i64) -> (String, Memo) {
+    timeline(pool, id)
+        .await
+        .unwrap()
+        .into_iter()
+        .find_map(|event| match event.event {
+            Event::Memo(markdown, memo) => Some((markdown, memo)),
+            _ => None,
+        })
+        .expect("the fixture left a Memo")
 }
 
 /// One database's Timeline Events, in the order they were written.

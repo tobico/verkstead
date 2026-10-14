@@ -362,6 +362,24 @@ pub(crate) enum Landing {
 }
 
 impl Step {
+    /// What the step's session is sent for, where that is building and so may
+    /// leave a Memo: a task, the finish, and a stage's own planning. A
+    /// breakdown, a handoff and a roadmap are the grilling carrying on after a
+    /// pick, which has the handoff or the stage briefs to say what it settled.
+    /// See [`crate::memos`].
+    fn building(&self) -> Option<crate::memos::Building> {
+        match self {
+            Step::Task { number, .. } => Some(crate::memos::Building::Task(*number)),
+            Step::Finish => Some(crate::memos::Building::Finish),
+            Step::PlanningStage => Some(crate::memos::Building::Stage),
+            Step::Planning
+            | Step::Handoff(_)
+            | Step::Staging(_)
+            | Step::Broken { .. }
+            | Step::Nothing => None,
+        }
+    }
+
     /// What would say this step is over, or `None` where it is not a step to
     /// run.
     fn landing(&self) -> Option<Landing> {
@@ -1383,6 +1401,7 @@ async fn submitted(state: &AppState, conversation_id: i64, against: Option<&str>
         event_id,
         crate::done::Evidence::Nothing,
         crate::done::Ends::OnAPullRequest,
+        None,
     );
     let signal = expecting.signal();
 
@@ -1573,6 +1592,7 @@ async fn follow_inline(
         event_id,
         crate::done::Evidence::Committed { already },
         crate::done::Ends::OnAPullRequest,
+        Some(crate::memos::Building::Inline),
     );
     let signal = expecting.signal();
 
@@ -1781,6 +1801,7 @@ pub(crate) async fn instructed(
         event_id,
         crate::done::Evidence::Committed { already },
         crate::done::Ends::WithItsWork,
+        Some(crate::memos::Building::Instruction),
     );
     let signal = expecting.signal();
 
@@ -2067,6 +2088,7 @@ pub(crate) async fn following_up(
         event_id,
         crate::done::Evidence::NothingElse,
         crate::done::Ends::WithItsWork,
+        None,
     );
     let signal = expecting.signal();
 
@@ -2525,6 +2547,7 @@ pub(crate) async fn investigating(
         event_id,
         crate::done::Evidence::Investigated,
         crate::done::Ends::WithItsWork,
+        None,
     );
     let signal = expecting.signal();
 
@@ -3084,6 +3107,7 @@ pub(crate) async fn address(state: &AppState, conversation_id: i64, feedback: &s
         event_id,
         crate::done::Evidence::Nothing,
         crate::done::Ends::WithItsWork,
+        None,
     );
     let signal = expecting.signal();
 
@@ -3242,6 +3266,7 @@ async fn proposing(
         event_id,
         crate::done::Evidence::Nothing,
         crate::done::Ends::WithItsWork,
+        None,
     );
     let signal = expecting.signal();
 
@@ -3424,6 +3449,7 @@ async fn see_out(
             landing: landing.clone(),
         },
         step.ends(),
+        step.building(),
     );
     let signal = expecting.signal();
     let what = step.what();
@@ -4023,6 +4049,27 @@ impl Prompt {
             _ => store::Role::Implementation,
         }
     }
+
+    /// Whether the session is one that may retire a Memo, and so is told how:
+    /// the building kinds [`crate::memos::Building`] lists — a task and the
+    /// finish, a stage's planning, an inline run and a steered instruction.
+    /// Every other session is refused the command, so its prompt lists the
+    /// Memos without it.
+    fn retires_memos(&self) -> bool {
+        match self {
+            Self::NextTask { .. }
+            | Self::PlanningStage(_)
+            | Self::Implementing
+            | Self::Instruction(_) => true,
+            Self::Staging
+            | Self::Submitting { .. }
+            | Self::Addressing(_)
+            | Self::Reviewing { .. }
+            | Self::Responding(_)
+            | Self::Investigating(_)
+            | Self::FollowingUp(_) => false,
+        }
+    }
 }
 
 /// Wait for the Conversation's Worktree, and then [`launch`] into it.
@@ -4258,6 +4305,7 @@ async fn launch(state: &AppState, conversation_id: i64, inside: Prompt) -> Optio
             &conversation,
             &pairing,
             &prompt,
+            inside.retires_memos(),
             // Nothing held: a run's relaunch locks no Question Set, so there is
             // nothing for the launch to make good either way — see
             // [`crate::sessions::Held`].

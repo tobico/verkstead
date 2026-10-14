@@ -108,9 +108,10 @@ import {
   type JSX,
 } from "solid-js";
 import { Dynamic } from "solid-js/web";
+import { useMutation, useQueryClient } from "@tanstack/solid-query";
 
 import { ran, reading } from "../agents";
-import { listProfiles } from "../api/client";
+import { listProfiles, restoreMemo, retireMemo } from "../api/client";
 import type {
   AgentOutputEvent,
   BriefEvent,
@@ -122,6 +123,8 @@ import type {
   HandoffEvent,
   Lifecycle,
   ManualTaskEvent,
+  MemoEvent,
+  MemoPressed,
   MovedEvent,
   NoticeEvent,
   PendingSteerView,
@@ -143,12 +146,13 @@ import { CardButton } from "../CardButton";
 import { Icon } from "../Icon";
 import { IconButton } from "../IconButton";
 import { PaneSticky } from "../Panes";
+import { QuietButton } from "../QuietButton";
 import { Truncated } from "../Truncated";
 import { troubleReading } from "../broken";
 import { deviceShown, osIcon, sameMark, useDevices } from "../devices";
 import { useReading } from "../freshness";
 import { HarnessMark } from "../HarnessMark";
-import { Empty } from "../notices";
+import { Empty, ErrorLine } from "../notices";
 import { keyOf, useDevice } from "../reaching";
 import { followBottom } from "../scrolling";
 // The badge and the sentence a Set this build cannot read is drawn with, taken
@@ -338,7 +342,7 @@ function Clamped(props: {
 /// list whose whole self is in the details pane, the Brief while it is being
 /// drafted included — what a press on that one opens is the composer.
 function Openable(props: {
-  /// The module's name for which of the three documents this card is. The card
+  /// The module's name for which of the documents this card is. The card
   /// is told rather than asking, because what a Brief is and what a Handoff is
   /// is the caller's to know.
   kind: string;
@@ -733,6 +737,19 @@ export function Timeline(props: {
                       selected={props.selected === handoff().id}
                       open={() => {
                         props.select(handoff().id);
+                        props.details();
+                      }}
+                    />
+                  )}
+                </Match>
+                <Match when={"Memo" in event && event.Memo}>
+                  {(memo) => (
+                    <Memo
+                      conversation={props.conversation.id}
+                      memo={memo()}
+                      selected={props.selected === memo().id}
+                      open={() => {
+                        props.select(memo().id);
                         props.details();
                       }}
                     />
@@ -1806,6 +1823,107 @@ function Handoff(props: {
         <h2>Handoff</h2>
       </div>
       <Clamped class={styles.handoffBody!} html={props.handoff.html} />
+    </Openable>
+  );
+}
+
+/// A Memo a building session left for the sessions after it.
+///
+/// The handoff's card, and for the handoff's reason: it is a document one agent
+/// wrote for the next, clamped here and whole in the details pane. The head
+/// numbers it by its Event id — which is what a session retires it by — with
+/// the words saying which session left it beside.
+///
+/// A retired one stays, dimmed, with who took it back and why under the head:
+/// it has left every later prompt, and the record says it was there.
+///
+/// And the one act on it, at the far end of the head: Retire on one that
+/// stands, Restore on one that does not. One press either way, asking nothing
+/// first because the other undoes it, and the card redraws from what the
+/// server answered rather than from what the press hoped — a Retire on one a
+/// session got to first comes back with that session's stamp on it.
+function Memo(props: {
+  conversation: number;
+  memo: MemoEvent;
+  selected: boolean;
+  open: () => void;
+}): JSX.Element {
+  const queries = useQueryClient();
+  const device = useDevice();
+
+  const press = useMutation(() => ({
+    mutationFn: (retiring: boolean) =>
+      (retiring ? retireMemo : restoreMemo)(
+        device(),
+        props.conversation,
+        props.memo.id,
+      ),
+    onSuccess: (pressed: MemoPressed) => {
+      if (pressed === "NoSuchMemo") return;
+
+      // The card it answered with, put straight into the Conversation the
+      // pane is drawing — under the key the pane reads it by — so the card
+      // turns over without waiting on the Nudge's re-read.
+      queries.setQueryData<ConversationView>(
+        keyOf(device(), "conversation", String(props.conversation)),
+        (view) =>
+          view && {
+            ...view,
+            timeline: view.timeline.map((event) =>
+              "Memo" in event && event.Memo.id === pressed.Memo.id
+                ? { Memo: pressed.Memo }
+                : event,
+            ),
+          },
+      );
+    },
+  }));
+
+  return (
+    <Openable
+      kind={`${styles.memo!}${props.memo.retired ? ` ${styles.retired!}` : ""}`}
+      selected={props.selected}
+      open={props.open}
+    >
+      <div class={styles.eventHead}>
+        <h2>Memo {props.memo.id}</h2>
+        <span class={styles.leftBy}>{props.memo.left_by}</span>
+        {/* The press is the button's rather than the card's: stopped here on
+            its way up, as a stage's row is, so it does not open the pane as
+            well. */}
+        <span
+          class={styles.memoPress}
+          onClick={(event) => event.stopPropagation()}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.stopPropagation();
+            }
+          }}
+        >
+          <QuietButton
+            onClick={() => {
+              if (!press.isPending) press.mutate(props.memo.retired === null);
+            }}
+          >
+            {props.memo.retired ? "Restore" : "Retire"}
+          </QuietButton>
+        </span>
+      </div>
+      <Show when={props.memo.retired}>
+        {(retired) => (
+          <p class={styles.retiredBy}>
+            Retired by {retired().by}
+            <Show when={retired().reason}>{(reason) => <>: {reason()}</>}</Show>
+          </p>
+        )}
+      </Show>
+      <Show when={press.isError}>
+        <ErrorLine>
+          The memo could not be {props.memo.retired ? "restored" : "retired"}:{" "}
+          {press.error?.message}
+        </ErrorLine>
+      </Show>
+      <Clamped class={styles.memoBody!} html={props.memo.html} />
     </Openable>
   );
 }

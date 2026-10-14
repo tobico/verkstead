@@ -20,8 +20,8 @@ use serde::de::DeserializeOwned;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_render::{
-    ConversationView, Locked, PushKey, QuestionSetEvent, RemoteBanner, SetReading, SetView,
-    Standing, Submitted, Subscribed, Subscription, TimelineEvent,
+    ConversationView, Locked, MemoPressed, PushKey, QuestionSetEvent, RemoteBanner, SetReading,
+    SetView, Standing, Submitted, Subscribed, Subscription, TimelineEvent,
 };
 use verkstead_schema::{Answer, ApiError, Liveness, QuestionSet, Response, SetCreated};
 use verkstead_server::{open_database, router, store};
@@ -996,4 +996,132 @@ async fn dismissing_it_twice_says_the_same_thing() {
 
     assert_eq!(dismiss_banner(&app).await, RemoteBanner { dismissed: true });
     assert!(banner_dismissed(&app).await);
+}
+
+/// Retire on a Memo's card takes it out of every later prompt stamped *you*,
+/// with nothing asked first and no reason, and answers with the card it
+/// changed; Restore puts it back. Neither touches the Event: the Timeline keeps
+/// one card for it throughout.
+#[tokio::test]
+async fn retire_on_a_memos_card_takes_it_out_of_the_prompt_and_restore_puts_it_back() {
+    let (_dir, pool, app) = fresh_app().await;
+
+    let session = store::start_capture(&pool, ASKING_FROM, Some("task-02"), None)
+        .await
+        .unwrap();
+    let memo = store::leave_memo(
+        &pool,
+        ASKING_FROM,
+        "The limiter's test flakes under load.\n",
+        "the session that worked task 02",
+        session,
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    let retired: MemoPressed = post(
+        &app,
+        &format!("/api/ui/conversations/{ASKING_FROM}/memos/{memo}/retire"),
+        serde_json::json!({}),
+    )
+    .await;
+
+    let MemoPressed::Memo(card) = retired else {
+        panic!("the card comes back: {retired:?}");
+    };
+    assert_eq!(card.id, memo);
+    let retirement = card.retired.expect("retired");
+    assert_eq!(retirement.by, "you");
+    assert_eq!(retirement.reason, None);
+    assert!(
+        store::standing_memos(&pool, ASKING_FROM)
+            .await
+            .unwrap()
+            .is_empty(),
+        "out of every later prompt",
+    );
+
+    let restored: MemoPressed = post(
+        &app,
+        &format!("/api/ui/conversations/{ASKING_FROM}/memos/{memo}/restore"),
+        serde_json::json!({}),
+    )
+    .await;
+
+    let MemoPressed::Memo(card) = restored else {
+        panic!("the card comes back: {restored:?}");
+    };
+    assert_eq!(card.retired, None);
+    assert_eq!(
+        store::standing_memos(&pool, ASKING_FROM)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|memo| memo.id)
+            .collect::<Vec<_>>(),
+        vec![memo],
+        "back in the prompt",
+    );
+
+    let view: ConversationView = get(&app, &format!("/api/ui/conversations/{ASKING_FROM}")).await;
+    let cards = view
+        .timeline
+        .iter()
+        .filter(|event| matches!(event, TimelineEvent::Memo(_)))
+        .count();
+    assert_eq!(cards, 1, "one card per memo throughout");
+}
+
+/// A Retire on one a session already retired leaves the session's stamp and
+/// reason standing, and a press on what is no memo of this Conversation's says
+/// so.
+#[tokio::test]
+async fn a_press_on_a_retired_memo_keeps_its_stamp_and_one_that_is_no_memo_says_so() {
+    let (_dir, pool, app) = fresh_app().await;
+
+    let session = store::start_capture(&pool, ASKING_FROM, Some("task-02"), None)
+        .await
+        .unwrap();
+    let memo = store::leave_memo(
+        &pool,
+        ASKING_FROM,
+        "Run clippy first.\n",
+        "the session that worked task 02",
+        session,
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    store::retire_memo(
+        &pool,
+        ASKING_FROM,
+        memo,
+        "the session that worked task 03",
+        Some("fixed in 8f3c2a1"),
+    )
+    .await
+    .unwrap();
+
+    let pressed: MemoPressed = post(
+        &app,
+        &format!("/api/ui/conversations/{ASKING_FROM}/memos/{memo}/retire"),
+        serde_json::json!({}),
+    )
+    .await;
+    let MemoPressed::Memo(card) = pressed else {
+        panic!("the card comes back: {pressed:?}");
+    };
+    let retirement = card.retired.expect("still retired");
+    assert_eq!(retirement.by, "the session that worked task 03");
+    assert_eq!(retirement.reason.as_deref(), Some("fixed in 8f3c2a1"));
+
+    for path in [
+        format!("/api/ui/conversations/{ASKING_FROM}/memos/{session}/retire"),
+        format!("/api/ui/conversations/{ASKING_FROM}/memos/nonsense/restore"),
+        format!("/api/ui/conversations/9999/memos/{memo}/restore"),
+    ] {
+        let pressed: MemoPressed = post(&app, &path, serde_json::json!({})).await;
+        assert_eq!(pressed, MemoPressed::NoSuchMemo, "{path}");
+    }
 }

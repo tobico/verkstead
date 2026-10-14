@@ -164,6 +164,36 @@ subquestions[].{letter, text, columns, options}}`.
 Response shape — `answers[].{label, selected, free_text, unanswered,
 attachments}` plus a set-level `comment`.
 
+And `verkstead memo`, which leaves a memo for the sessions after this one —
+**Leaving a memo for the sessions after you** below — verbatim too:
+
+```
+Leave a memo for the sessions after this one on the same Conversation: working knowledge no commit holds, such as a flaky test, a build trap, or a decision taken mid-task and why.
+
+Markdown on stdin, of at most 8 KiB. Only a building session may leave one: a backlog task, the finish, a stage's planning, an inline run or a steered instruction. Accepted, it prints the memo's id as YAML — `id: 42` — on stdout and exits 0, and every later session of the Conversation is shown it in its prompt; refused, it exits non-zero and says why on stderr, and nothing is left.
+
+`--retire <id> [reason]` takes one back instead, by the number the prompt names it by, once it no longer holds: nothing is read from stdin, the rest of the line is the reason, and no later session is shown it. Accepted, it prints nothing on stdout.
+
+Usage: verkstead memo [OPTIONS] [REASON]...
+
+Arguments:
+  [REASON]...
+          Why it is retired, with `--retire`: the rest of the line
+
+Options:
+      --retire <ID>
+          Retire the memo with this id rather than leave a new one
+
+      --server <SERVER>
+          Where the Verkstead server is: its base URL, or `pipe://<name>` for a named pipe, which is Windows' own and what a session in a container asks through
+          
+          [env: VERKSTEAD_SERVER=]
+          [default: http://127.0.0.1:8422]
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
 ## Authoring the Set
 
 One Set is one round, budgeted as above. Because the round trip is expensive,
@@ -425,6 +455,63 @@ verkstead waiting 45m
 
 **An ask needs none.** A Question Set waiting on the human already keeps the
 session from being taken as stopped.
+
+## Leaving a memo for the sessions after you
+
+A session of a Conversation starts with none of the context of the ones before
+it. A **memo** is how one session's working knowledge reaches the next: what
+no artifact holds — a flaky test, a build trap, a decision taken mid-task and
+why, a thing the next task will walk into. Short, specific, written when
+learned. It is **not a running account of the work**, which the commits are,
+and **not the design**, which the Brief and the Handoff are.
+
+**Only the sessions that build leave one** — a backlog task, the finish, a
+stage's planning, an inline run, a steered instruction. Every other kind is
+refused by name, the refusal saying which may.
+
+Markdown on stdin, a quoted heredoc the way an ask is written:
+
+```
+verkstead memo <<'MD'
+The sessions suite fails `transfer_round_trip` one run in five on main too —
+re-run it alone before blaming the change.
+MD
+```
+
+Accepted, it prints the memo's id on stdout and exits 0:
+
+```yaml
+id: 42
+```
+
+A memo is refused empty and **over 8 KiB**; refused, it exits non-zero, says
+why on stderr, and nothing is left.
+
+Every later session of the Conversation is shown every memo still standing, in
+its prompt, oldest first — under this heading and in this shape, so a session
+recognises what it is reading. The line saying how to retire it is there only
+for a session that may:
+
+```
+# What earlier sessions left for you
+
+**Memo 42**, left by the session that worked task 03.
+Retire it with `verkstead memo --retire 42` once it no longer holds.
+
+<the memo's markdown, as written>
+```
+
+A memo is not spent by being read: it is in every prompt until it is retired.
+So **retire one you find no longer holds**, by the number the prompt names it
+by, the rest of the line being the reason:
+
+```
+verkstead memo --retire 42 fixed in 8f3c2a1
+```
+
+Accepted, that prints nothing on stdout. A memo of another Conversation, or one
+already retired, is refused by name. The human can retire one from the
+Timeline too, and restore it.
 
 ## Ending the session
 

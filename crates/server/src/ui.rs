@@ -360,6 +360,16 @@ pub(crate) fn routes() -> axum::Router<AppState> {
             get(pull_request),
         )
         .route("/api/ui/conversations/{id}/brief", post(save_brief))
+        // A Memo's card taken back out of every later prompt, and put back —
+        // see [`retire_memo`].
+        .route(
+            "/api/ui/conversations/{id}/memos/{memo}/retire",
+            post(retire_memo),
+        )
+        .route(
+            "/api/ui/conversations/{id}/memos/{memo}/restore",
+            post(restore_memo),
+        )
         // And the files the human handed the work, which are the Brief's
         // companions in every sense: attached and taken off while the round
         // drafts, and frozen with it.
@@ -2372,6 +2382,11 @@ pub(crate) async fn conversation_view(
                     store::Event::Handoff(markdown) => {
                         verkstead_render::handoff_event(event.id, event.at, &markdown)
                     }
+                    // Rendered the way the handoff is, with who left it and
+                    // whether it has been taken back since.
+                    store::Event::Memo(markdown, memo) => {
+                        TimelineEvent::Memo(memo_card(event.id, event.at, &markdown, memo))
+                    }
                     // The subject and the counts, and neither the summary nor
                     // the diff: what the commit said about itself is drawn whole
                     // in the pane the card opens, and the diff is in the
@@ -4104,6 +4119,94 @@ async fn save_brief(
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "saving a Brief failed");
             unavailable("The brief couldn't be saved.")
+        }
+    }
+}
+
+/// A Memo as its card on the page, with who left it and whether it has been
+/// taken back since.
+fn memo_card(
+    id: i64,
+    at: String,
+    markdown: &str,
+    memo: store::Memo,
+) -> verkstead_render::MemoEvent {
+    verkstead_render::memo_card(
+        id,
+        at,
+        markdown,
+        memo.left_by,
+        memo.retired
+            .map(|retired| verkstead_render::MemoRetirement {
+                by: retired.by,
+                reason: retired.reason,
+                at: retired.at,
+            }),
+    )
+}
+
+/// `POST /api/ui/conversations/{id}/memos/{memo}/retire` — the human takes a
+/// Memo back out of every later prompt, from its card (ADR-0023).
+///
+/// Stamped *you*, with no reason: the press is one press, and asks nothing
+/// first because Restore undoes it. One retired already — by a session, or from
+/// another device — is left as it stands, retirement and all, which is what was
+/// asked for. Answered with the card either way, for the page to redraw from.
+async fn retire_memo(
+    State(state): State<AppState>,
+    Path((id, memo)): Path<(String, String)>,
+) -> HttpResponse {
+    pressed_memo(&state, &id, &memo, true).await
+}
+
+/// `POST /api/ui/conversations/{id}/memos/{memo}/restore` — and puts it back,
+/// clearing who retired it and why.
+async fn restore_memo(
+    State(state): State<AppState>,
+    Path((id, memo)): Path<(String, String)>,
+) -> HttpResponse {
+    pressed_memo(&state, &id, &memo, false).await
+}
+
+/// Either press, which differ only in which way the row is written.
+async fn pressed_memo(state: &AppState, id: &str, memo: &str, retiring: bool) -> HttpResponse {
+    let (Ok(id), Ok(memo)) = (id.parse::<i64>(), memo.parse::<i64>()) else {
+        return Json(verkstead_render::MemoPressed::NoSuchMemo).into_response();
+    };
+
+    let written = if retiring {
+        store::retire_memo(&state.pool, id, memo, "you", None)
+            .await
+            .map(|retiring| retiring == store::Retiring::Retired)
+    } else {
+        store::restore_memo(&state.pool, id, memo).await
+    };
+
+    let read = match written {
+        Ok(changed) => {
+            if changed {
+                state
+                    .nudges
+                    .announce(Nudge::Conversation { conversation: id });
+            }
+            store::memo_of(&state.pool, id, memo).await
+        }
+        Err(error) => Err(error),
+    };
+
+    match read {
+        Ok(Some((at, markdown, row))) => Json(verkstead_render::MemoPressed::Memo(memo_card(
+            memo, at, &markdown, row,
+        )))
+        .into_response(),
+        Ok(None) => Json(verkstead_render::MemoPressed::NoSuchMemo).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, memo, retiring, "pressing a memo's card failed");
+            unavailable(if retiring {
+                "the memo could not be retired"
+            } else {
+                "the memo could not be restored"
+            })
         }
     }
 }

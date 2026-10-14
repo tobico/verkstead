@@ -65,6 +65,7 @@ import type {
   RemoteBanner,
   RepoSwitched,
   RepoView,
+  MemoPressed,
   Resolved,
   Resumed,
   RoadmapPane,
@@ -13957,6 +13958,125 @@ describe("a grilling that has handed over", () => {
   });
 });
 
+/// The Memos the building session left, one standing and one a later session
+/// took back — the fixture's own pair.
+const MEMOS = BUILDING.timeline.flatMap((entry) => ("Memo" in entry ? [entry.Memo] : []));
+
+describe("a memo a session left", () => {
+  /// The details pane, and what it has drawn.
+  const details = () => screen.getByLabelText("Details");
+
+  const cards = async (container: HTMLElement) => {
+    await drawn(container, `.${timeline.timelineEvent} > .${timeline.memo}`);
+    return [...container.querySelectorAll(`.${timeline.timelineEvent} > .${timeline.memo}`)];
+  };
+
+  /// The card's own button with these words on it, which is a real button
+  /// standing on a card that is itself only an article in a button's role.
+  const saying = (card: Element, words: string) =>
+    [...card.querySelectorAll("button")].find((button) => button.textContent === words);
+
+  it("draws as a card numbered by its event, stamped with the session that left it", async () => {
+    expect(MEMOS.map((memo) => memo.retired === null)).toEqual([true, false]);
+
+    theBuilding();
+    const { container } = mount(`/conversations/${BUILDING.id}`);
+
+    const [standing] = await cards(container);
+
+    expect(standing!.querySelector("h2")?.textContent).toBe(`Memo ${MEMOS[0]!.id}`);
+    expect(standing!.querySelector(`.${timeline.leftBy}`)?.textContent).toBe(
+      "the session that worked task 02",
+    );
+    expect(standing!.querySelector(`.${timeline.clamp}.${timeline.memoBody}`)).toBeTruthy();
+    expect(standing!.classList.contains(timeline.retired!)).toBe(false);
+    expect(standing!.querySelector(`.${timeline.retiredBy}`)).toBeNull();
+  });
+
+  it("opens the whole memo in the details pane", async () => {
+    theBuilding();
+    const { container } = mount(`/conversations/${BUILDING.id}`);
+
+    const [standing] = await cards(container);
+
+    fireEvent.click(standing!);
+
+    // The page opened on the record's last Memo, which is the same pane: the
+    // heading changing is what says the press landed.
+    await waitFor(() =>
+      expect(details().querySelector("h1")!.textContent).toBe(`Memo ${MEMOS[0]!.id}`),
+    );
+
+    const opened = await drawn(details(), `.${documentPane.document}`);
+    expect(opened.innerHTML).toBe(MEMOS[0]!.html);
+    expect(details().querySelector(`.${timeline.clamp}`)).toBeNull();
+  });
+
+  it("draws a retired one as retired, with who took it back and why", async () => {
+    theBuilding();
+    const { container } = mount(`/conversations/${BUILDING.id}`);
+
+    const [, retired] = await cards(container);
+
+    expect(retired!.classList.contains(timeline.retired!)).toBe(true);
+    expect(retired!.querySelector(`.${timeline.retiredBy}`)?.textContent).toBe(
+      "Retired by the session that worked task 03: moved back into the relay",
+    );
+  });
+
+  /// Retire is one press with nothing asked first — Restore is what undoes it —
+  /// and the card turns over from what the server answered: retired by *you*,
+  /// with Restore where Retire was.
+  it("retires a standing one in one press, redrawing from the server's answer", async () => {
+    const memo = MEMOS[0]!;
+    const route = `/api/ui/conversations/${BUILDING.id}/memos/${memo.id}/retire`;
+    const answered: MemoPressed = {
+      Memo: {
+        ...memo,
+        retired: { by: "you", reason: null, at: "2026-10-14T09:00:00.000Z" },
+      },
+    };
+    const fetching = theBuilding({}, whenever(route, json(answered), "POST"));
+    const { container } = mount(`/conversations/${BUILDING.id}`);
+
+    const [standing] = await cards(container);
+    fireEvent.click(saying(standing!, "Retire")!);
+
+    await waitFor(() => expect(sent(fetching, route)).toEqual({}));
+
+    const [retired] = await waitFor(async () => {
+      const [card] = await cards(container);
+      expect(card!.classList.contains(timeline.retired!)).toBe(true);
+      return [card];
+    });
+    expect(retired!.querySelector(`.${timeline.retiredBy}`)?.textContent).toBe("Retired by you");
+    expect(saying(retired!, "Restore")).toBeTruthy();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  /// And Restore on a retired one puts it back, by its own route.
+  it("restores a retired one in one press", async () => {
+    const memo = MEMOS[1]!;
+    const route = `/api/ui/conversations/${BUILDING.id}/memos/${memo.id}/restore`;
+    const answered: MemoPressed = { Memo: { ...memo, retired: null } };
+    const fetching = theBuilding({}, whenever(route, json(answered), "POST"));
+    const { container } = mount(`/conversations/${BUILDING.id}`);
+
+    const [, retired] = await cards(container);
+
+    fireEvent.click(saying(retired!, "Restore")!);
+
+    await waitFor(() => expect(sent(fetching, route)).toEqual({}));
+
+    await waitFor(async () => {
+      const [, card] = await cards(container);
+      expect(card!.classList.contains(timeline.retired!)).toBe(false);
+      expect(card!.querySelector(`.${timeline.retiredBy}`)).toBeNull();
+      expect(saying(card!, "Retire")).toBeTruthy();
+    });
+  });
+});
+
 describe("disagreeing with a proposal", () => {
   it("draws no chooser while the grilling is still running", async () => {
     // What a refused proposal leaves behind: the set is on the timeline and
@@ -19233,9 +19353,12 @@ describe("the documents on a timeline", () => {
 
     fireEvent.click(handoff);
 
+    // The record ends on a Memo, which is the same pane and what the page
+    // opened on — so what says the press landed is the heading changing.
+    await waitFor(() => expect(details().querySelector("h1")!.textContent).toBe("Handoff"));
+
     const opened = await drawn(details(), `.${documentPane.document}`);
 
-    expect(details().querySelector("h1")!.textContent).toBe("Handoff");
     expect(opened.innerHTML).toBe(HANDOFF.html);
     expect(details().querySelector(`.${timeline.clamp}`)).toBeNull();
   });

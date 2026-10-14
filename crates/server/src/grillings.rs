@@ -233,6 +233,8 @@ async fn relaunching(
             &conversation,
             &pairing,
             &prompt,
+            // A grilling may not retire a Memo, so it is not told how.
+            false,
             sessions::Held {
                 sets: held,
                 settlements: &state.settlements,

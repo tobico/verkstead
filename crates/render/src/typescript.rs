@@ -27,17 +27,18 @@ use crate::{
     FileDeleted, FileDeleting, FileListsView, FileMade, FileMaking, FileReading, FileRenamed,
     FileRenaming, FileRootsView, FileStatusView, FileWrite, FileWritten, FolderListing,
     ForwardsView, GrillingStarted, InstallPress, LanguageCleared, LinkedDevice, Locked,
-    LoginClosed, LoginCode, LoginOpened, LoginState, NewAdoption, NewCompanion, NewConversation,
-    NewJoin, NewRank, OnboardingView, PendingJoin, Permitting, PortsView, PrefillView, Preflight,
-    ProcessChoice, ProcessPicked, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit,
-    ProfileEntry, ProfileSaved, PullRequestDetails, PushKey, Registered, Registration,
-    RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoPairingsView, RepoRemoved, RepoSwitched,
-    RepoView, Resolved, Resumed, RoadmapPane, RoleChoice, Screen, ServeEdit, ServePress,
-    ServerAttached, ServerRemoved, SetReading, SettingsEdit, SettingsSaved, SettingsView,
-    ShareCommented, SharePublished, SharedConversation, ShowArchived, ShowingArchived, Shown,
-    Started, SteerCancelled, SteerForm, SteerOpened, SteerSaved, SteerSubmission, Submitted,
-    Subscribed, Subscription, TakenUp, TargetNamed, TargetRecorded, TerminalClosed, TerminalOpened,
-    TerminalsView, TranscriptView, Transferring, Unsubscribe, UpdateNotice, Watching,
+    LoginClosed, LoginCode, LoginOpened, LoginState, MemoPressed, NewAdoption, NewCompanion,
+    NewConversation, NewJoin, NewRank, OnboardingView, PendingJoin, Permitting, PortsView,
+    PrefillView, Preflight, ProcessChoice, ProcessPicked, ProfileChoice, ProfileChosen,
+    ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails, PushKey,
+    Registered, Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoPairingsView,
+    RepoRemoved, RepoSwitched, RepoView, Resolved, Resumed, RoadmapPane, RoleChoice, Screen,
+    ServeEdit, ServePress, ServerAttached, ServerRemoved, SetReading, SettingsEdit, SettingsSaved,
+    SettingsView, ShareCommented, SharePublished, SharedConversation, ShowArchived,
+    ShowingArchived, Shown, Started, SteerCancelled, SteerForm, SteerOpened, SteerSaved,
+    SteerSubmission, Submitted, Subscribed, Subscription, TakenUp, TargetNamed, TargetRecorded,
+    TerminalClosed, TerminalOpened, TerminalsView, TranscriptView, Transferring, Unsubscribe,
+    UpdateNotice, Watching,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -126,6 +127,9 @@ fn the_viewers_types_are_written_from_these() {
     Started::export_all(&config).unwrap();
     BriefEdit::export_all(&config).unwrap();
     BriefSaved::export_all(&config).unwrap();
+
+    // A Memo's card retired and restored, answered with the card it changed.
+    MemoPressed::export_all(&config).unwrap();
     BranchRename::export_all(&config).unwrap();
     BranchRenamed::export_all(&config).unwrap();
 

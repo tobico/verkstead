@@ -3258,6 +3258,45 @@ idle, or on the **Done signal**. A statement rather than a command: it returns
 at once, where `verkstead ask` blocks.
 _Avoid_: wait (reads as a command that blocks), pause, hold, busy, sleep
 
+**Memo**:
+Working knowledge a building session leaves for the sessions after it, by
+running `verkstead memo` with markdown on stdin: a flaky test, a build trap, a
+decision taken mid-task and why, a thing the next task will walk into. Short,
+specific, written when learned — not a running account of the work, which the
+commits are, and not the design, which the **Brief** and the **Handoff** are.
+The one thing that carries an agent's own words from one session of a
+Conversation to the next: the **Handoff** is the grilling's and written once,
+a **Deferred Ask**'s Answers are the human's and folded once, and the harness's
+memory is the account's and the Repo's rather than the Conversation's.
+
+**Left by the sessions that build** — a task, the finish, an inline run, a
+steered instruction, a stage's planning — and refused from every other kind by
+name, saying which may. A grilling has the Handoff and a wrap-up has the pull
+request. The server reads what the running session was sent for off the same
+register the **Done signal** is checked against.
+
+**Read by every later session of the Conversation**, under *What earlier
+sessions left for you* in its prompt, oldest first, each stamped with the
+session that left it — *the session that worked task 03* — and, for a session
+that may retire it, carrying the line that does. Grilling relaunches and
+steered sessions included, and a memo is not spent by being read: shown in
+every prompt until retired, and outliving the round, a steer into Grilling
+leaving them standing. A **Stage** is a Conversation of its own and reads its
+own. A **Carried Conversation**'s note says nothing of them, that session
+having been launched after they were left.
+
+**An Event**, one per memo, numbered by its Event id the way a Question Set is
+by its Set id: a Handoff-shaped card headed by the number and the session that
+left it, the whole memo in the details pane, and no place on a **Share**, being
+one agent talking to the next. **Retired** by a later session with
+`verkstead memo --retire <id>` and an optional reason, or by the human's press
+on the card — undone by Restore, so it asks nothing first. A retired memo
+leaves the prompt and stays on the Timeline marked retired, with who and why.
+The human cannot leave one from the Timeline; a **Steer** carries their words.
+Refused empty, and over 8 KiB. See ADR-0023.
+_Avoid_: note (that is the carried Conversation's), notes, comment, annotation,
+hint, reminder
+
 **Agent Profile**:
 A coding-agent account Verkstead can run a session under: an agent type, the
 account itself, the models that account can run, and a name where there is

@@ -191,6 +191,29 @@ refusal exits non-zero and says on stderr what is missing — `TODO.md` not
 committed, say — and the session carries on: put that right and run
 `verkstead done` again.
 
+## Leaving a memo for the sessions after you
+
+The sessions that work this stage's tasks start with none of the context this
+planning gathered, and a memo is what carries the working knowledge the task
+files do not hold. So leave one when you learn something the next session would otherwise find again
+or miss — a flaky suite, a trap in the build, a shape you settled that the
+task did not ask about — markdown on stdin:
+
+    verkstead memo <<'MD'
+    The transfer suite's locked-Set test fails on main too; run it alone first.
+    MD
+
+Leave none for what the commit message already says or what the backlog is
+about to say. Every later session of this Conversation is shown the memos
+still standing, under *What earlier sessions left for you* in its prompt, each
+with its number; retire one you find no longer holds, the rest of the line
+being the reason:
+
+    verkstead memo --retire 42 fixed in 8f3c2a1
+
+The Guide's *Leaving a memo for the sessions after you* section has the
+details.
+
 ## How the questions reach them
 
 Every question goes as a Question Set through the `verkstead` CLI, and nothing

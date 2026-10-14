@@ -214,6 +214,7 @@ fn kind(event: &TimelineEvent) -> &'static str {
         TimelineEvent::QuestionSet(_) => "QuestionSet",
         TimelineEvent::UnreadableSet(_) => "UnreadableSet",
         TimelineEvent::Handoff(_) => "Handoff",
+        TimelineEvent::Memo(_) => "Memo",
         TimelineEvent::Commit(_) => "Commit",
         TimelineEvent::Notice(_) => "Notice",
         TimelineEvent::ManualTask(_) => "ManualTask",
@@ -246,9 +247,22 @@ async fn everything(pool: &SqlitePool) -> i64 {
 
     // A session's output, which is the biggest thing on a Timeline and the
     // first thing a share leaves behind.
-    store::start_capture(pool, id, Some("session-1"), None)
+    let session = store::start_capture(pool, id, Some("session-1"), None)
         .await
         .unwrap();
+
+    // And what that session left for the ones after it, which is one agent
+    // talking to the next and no more a share's than the output beside it.
+    store::leave_memo(
+        pool,
+        id,
+        "The counter test flakes under parallelism.\n",
+        "the session that worked task 01",
+        session,
+    )
+    .await
+    .unwrap()
+    .unwrap();
 
     store::ask(
         pool,
@@ -372,6 +386,7 @@ async fn a_share_carries_what_was_asked_answered_and_built() {
         "AgentOutput",
         "QuestionSet",
         "Handoff",
+        "Memo",
         "Commit",
         "Notice",
         "PullRequest",
@@ -406,6 +421,7 @@ async fn a_share_carries_what_was_asked_answered_and_built() {
     for left in [
         "AgentOutput",
         "Handoff",
+        "Memo",
         "Notice",
         "PullRequest",
         "TaskList",
@@ -415,6 +431,56 @@ async fn a_share_carries_what_was_asked_answered_and_built() {
             "a share carried {left}: {boarded:?}"
         );
     }
+}
+
+/// An Event of a kind this build does not know — one a newer build wrote and a
+/// cluster carried here — is drawn as a Notice naming it, and a share is still
+/// built and leaves it out as it leaves out every Notice.
+#[tokio::test]
+async fn an_unknown_kind_is_drawn_as_a_notice_and_left_out_of_a_share() {
+    let (_dir, pool, app) = app().await;
+    let id = everything(&pool).await;
+
+    let before: verkstead_render::ConversationView =
+        get(&app, &format!("/api/ui/conversations/{id}")).await;
+    let shared_before = share(&app, id).await.conversation.timeline;
+
+    let (unknown,): (i64,) = sqlx::query_as(
+        "INSERT INTO timeline_events (conversation_id, at, kind, body)
+         VALUES (?, '2026-10-14T04:00:00.000Z', 'whatever', 'what a newer build wrote')
+         RETURNING id",
+    )
+    .bind(id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let after: verkstead_render::ConversationView =
+        get(&app, &format!("/api/ui/conversations/{id}")).await;
+
+    let (drawn, rest): (Vec<_>, Vec<_>) = after
+        .timeline
+        .into_iter()
+        .partition(|event| matches!(event, TimelineEvent::Notice(notice) if notice.id == unknown));
+
+    let [TimelineEvent::Notice(notice)] = drawn.as_slice() else {
+        panic!("the unknown kind is drawn as one Notice: {drawn:?}");
+    };
+    assert!(
+        notice.html.contains("<code>whatever</code>"),
+        "naming the kind: {}",
+        notice.html
+    );
+    assert_eq!(
+        rest, before.timeline,
+        "and the rest draws as before, in order"
+    );
+
+    assert_eq!(
+        share(&app, id).await.conversation.timeline,
+        shared_before,
+        "a share is built as before, without the Notice"
+    );
 }
 
 /// A trimmed Conversation shares exactly as it did before the trim.
