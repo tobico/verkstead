@@ -400,18 +400,18 @@ export function RemoteCard(props: {
   return (
     <Choose>
       <Match when={remote.isPending}>
-        <Empty>Loading…</Empty>
+        <Empty>Reading this machine's Tailscale…</Empty>
       </Match>
       <Match when={remote.isError}>
         <ErrorLine>
-          Could not read this machine's Tailscale: {remote.error?.message}
+          This machine's Tailscale couldn't be read: {remote.error?.message}
         </ErrorLine>
       </Match>
       <Match when={remote.data}>
         {(told) => (
           <SettingsCard
             class={styles.remoteCard}
-            title="Remote access"
+            title="Remote Access"
             open={props.open}
             press={props.press}
             status={
@@ -462,17 +462,17 @@ export function RemotePane(props: {
       <PaneSticky>
         <PaneHead
           back={{ to: "Settings", go: props.back }}
-          title="Remote access"
+          title="Remote Access"
         />
       </PaneSticky>
 
       <Choose>
         <Match when={remote.isPending}>
-          <Empty>Loading…</Empty>
+          <Empty>Reading this machine's Tailscale…</Empty>
         </Match>
         <Match when={remote.isError}>
           <ErrorLine>
-            Could not read this machine's Tailscale: {remote.error?.message}
+            This machine's Tailscale couldn't be read: {remote.error?.message}
           </ErrorLine>
         </Match>
         <Match when={remote.data}>
@@ -505,7 +505,7 @@ export function RemotePane(props: {
                     <>
                       <Note>
                         Run <code>tailscale up</code> on this machine to join it
-                        to a tailnet. This is what it said when it was asked:
+                        to a tailnet. Tailscale said:
                       </Note>
                       <p class={styles.trouble}>{stopped.trouble}</p>
                     </>
@@ -516,9 +516,8 @@ export function RemotePane(props: {
                   {(strange) => (
                     <>
                       <Note>
-                        Tailscale is whatever this machine has, and this build
-                        does not know the shape it answered in. This is what it
-                        said:
+                        This build doesn't recognise how this machine's
+                        Tailscale answered. It said:
                       </Note>
                       <p class={styles.trouble}>{strange.trouble}</p>
                     </>
@@ -536,9 +535,9 @@ export function RemotePane(props: {
                           {(strange) => (
                             <>
                               <Note>
-                                What Tailscale is serving to the tailnet could
-                                not be read, so nothing here offers to change
-                                it. This is what it said:
+                                What Tailscale serves to the tailnet couldn't
+                                be read, so it can't be changed here. Tailscale
+                                said:
                               </Note>
                               <p class={styles.trouble}>{strange.trouble}</p>
                             </>
@@ -569,7 +568,7 @@ export function RemotePane(props: {
 
                       <Show when={press.isError}>
                         <ErrorLine class={styles.failure}>
-                          The serve could not be changed: {press.error?.message}
+                          The serve couldn't be changed: {press.error?.message}
                         </ErrorLine>
                       </Show>
 
@@ -675,13 +674,13 @@ function TheKey(): JSX.Element {
       </button>
 
       <Note>
-        Resets the secret token used to access the UI. This will disconnect all
-        other devices.
+        Replaces the workbench key this page is opened with. Every other device
+        is disconnected.
       </Note>
 
       <Show when={reset.isError}>
         <ErrorLine class={styles.failure}>
-          The key could not be reset: {reset.error?.message}
+          The key couldn't be reset: {reset.error?.message}
         </ErrorLine>
       </Show>
     </section>
@@ -753,11 +752,11 @@ function Devices(): JSX.Element {
     <section class={styles.devices}>
       <Choose>
         <Match when={devices.isPending}>
-          <Empty>Loading…</Empty>
+          <Empty>Reading the devices…</Empty>
         </Match>
         <Match when={devices.isError}>
           <ErrorLine class={styles.failure}>
-            Could not read this device: {devices.error?.message}
+            The devices couldn't be read: {devices.error?.message}
           </ErrorLine>
         </Match>
         <Match when={devices.data}>
@@ -769,7 +768,7 @@ function Devices(): JSX.Element {
 
       <Show when={drop.isError}>
         <ErrorLine class={styles.failure}>
-          The device could not be unlinked: {drop.error?.message}
+          The device couldn't be unlinked: {drop.error?.message}
         </ErrorLine>
       </Show>
 
@@ -827,9 +826,8 @@ function Confirm(props: {
         Unlink {props.asked?.name}?
       </p>
       <p class={styles.confirmingWhy}>
-        It leaves the cluster for every device in it, not just this one, and it
-        is told to forget the rest. Linking it again means somebody allowing it
-        on one of them.
+        It leaves the cluster for every device and is told to forget the rest,
+        so linking it again needs somebody to allow it.
       </p>
       <div class={styles.confirmingOut}>
         {/* Both classes, as every confirm pair in the app carries them: the
@@ -840,7 +838,7 @@ function Confirm(props: {
           class={`${styles.secondary!} secondary`}
           onClick={() => props.keep()}
         >
-          Keep it
+          Cancel
         </button>
         <button type="button" onClick={() => props.unlink()}>
           Unlink
@@ -1045,7 +1043,8 @@ function Discovered(): JSX.Element {
       <Choose>
         <Match when={found.isError}>
           <ErrorLine class={styles.failure}>
-            Could not read what this device has heard: {found.error?.message}
+            What this device has heard couldn't be read:{" "}
+            {found.error?.message}
           </ErrorLine>
         </Match>
 
@@ -1065,16 +1064,15 @@ function Discovered(): JSX.Element {
 
         <Match when={true}>
           <Note>
-            Devices on this network and on this tailnet appear here as they are
-            found, with nothing to type. A machine that never appears is linked by
-            its address below.
+            Devices on this network and tailnet appear here as they're found.
+            Link one that doesn't by its address below.
           </Note>
         </Match>
       </Choose>
 
       <Show when={ask.isError}>
         <ErrorLine class={styles.failure}>
-          The device could not be asked: {ask.error?.message}
+          The device couldn't be asked: {ask.error?.message}
         </ErrorLine>
       </Show>
     </div>
@@ -1229,7 +1227,7 @@ function Waiting(props: { on: PendingJoin; fingerprint: string }): JSX.Element {
 
         <Show when={take.isError}>
           <ErrorLine class={styles.failure}>
-            The request could not be taken back: {take.error?.message}
+            The request couldn't be cancelled: {take.error?.message}
           </ErrorLine>
         </Show>
       </div>
@@ -1325,14 +1323,13 @@ function Add(): JSX.Element {
           </div>
 
           <Note>
-            Asks that device to link with this one. Somebody has to allow it
-            there, and the fingerprint shown here is what they will be comparing
-            against.
+            Asks that device to link with this one. Somebody allows it there by
+            comparing the fingerprint shown here.
           </Note>
 
           <Show when={ask.isError}>
             <ErrorLine class={styles.failure}>
-              The device could not be asked: {ask.error?.message}
+              The device couldn't be asked: {ask.error?.message}
             </ErrorLine>
           </Show>
         </form>
@@ -1357,8 +1354,8 @@ function refused(pressed: ServePress | undefined): JSX.Element {
         {(denied) => (
           <>
             <Note>
-              Tailscale will not set up a serve for the user this server runs
-              as. Run this on the machine, then press the box again:
+              Tailscale won't set up a serve for the user this server runs as.
+              Run this on the machine, then press the box again:
             </Note>
             <p class={styles.command}>{denied.grant}</p>
             <p class={styles.trouble}>{denied.trouble}</p>
@@ -1369,7 +1366,7 @@ function refused(pressed: ServePress | undefined): JSX.Element {
         {(bad) => (
           <>
             <Note>
-              The serve could not be changed. This is what Tailscale said:
+              The serve couldn't be changed. Tailscale said:
             </Note>
             <p class={styles.trouble}>{bad.trouble}</p>
           </>

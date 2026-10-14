@@ -4852,7 +4852,7 @@ describe("switching a draft's repo", () => {
     press("Repo", "Create repo");
 
     fireEvent.input(
-      await waitFor(() => screen.getByLabelText("Where it goes")),
+      await waitFor(() => screen.getByLabelText("Parent directory")),
       { target: { value: "/home/ada/src" } },
     );
 
@@ -4863,7 +4863,7 @@ describe("switching a draft's repo", () => {
         screen.getByLabelText("Create it on GitHub too, privately"),
       ).toBeTruthy(),
     );
-    fireEvent.input(screen.getByLabelText("What it is called"), {
+    fireEvent.input(screen.getByLabelText("Name"), {
       target: { value: "widgets" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
@@ -4904,10 +4904,10 @@ describe("switching a draft's repo", () => {
     press("Repo", "Create repo");
 
     fireEvent.input(
-      await waitFor(() => screen.getByLabelText("Where it goes")),
+      await waitFor(() => screen.getByLabelText("Parent directory")),
       { target: { value: "/home/ada/src" } },
     );
-    fireEvent.input(screen.getByLabelText("What it is called"), {
+    fireEvent.input(screen.getByLabelText("Name"), {
       target: { value: "widgets" },
     });
     await waitFor(() =>
@@ -4920,7 +4920,7 @@ describe("switching a draft's repo", () => {
     // The card is what happened rather than a form now, and the one press out
     // of it is what lands the Repo.
     fireEvent.click(
-      await waitFor(() => screen.getByRole("button", { name: "Done" })),
+      await waitFor(() => screen.getByRole("button", { name: "Close" })),
     );
 
     await waitFor(() =>

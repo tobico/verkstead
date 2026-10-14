@@ -87,14 +87,14 @@ import type {
   SettingsView,
 } from "../api/types";
 import { useReading } from "../freshness";
-import { Empty, ErrorLine, Note } from "../notices";
+import { Empty, ErrorLine, More, Note } from "../notices";
 import { PaneHead } from "../workbench/PaneHead";
 import { heldConfig } from "./held";
 import styles from "./McpServers.module.css";
 import { SettingsCard } from "./SettingsCard";
 
 /// What the section is called, in the one place both panes read it from.
-const TITLE = "MCP servers";
+const TITLE = "MCP Servers";
 
 /// One row of the pane as it is being edited: a declaration, and whether it is
 /// one the server already holds.
@@ -238,11 +238,11 @@ export function McpServersCard(props: {
   return (
     <Choose>
       <Match when={settings.isPending}>
-        <Empty>Loading…</Empty>
+        <Empty>Reading the settings…</Empty>
       </Match>
       <Match when={settings.isError}>
         <ErrorLine>
-          Could not read the settings: {settings.error?.message}
+          The settings couldn't be read: {settings.error?.message}
         </ErrorLine>
       </Match>
       <Match when={settings.data}>
@@ -526,30 +526,42 @@ export function McpServersPane(props: {
 
       <Choose>
         <Match when={settings.isPending}>
-          <Empty>Loading…</Empty>
+          <Empty>Reading the settings…</Empty>
         </Match>
         <Match when={settings.isError}>
           <ErrorLine>
-            Could not read the settings: {settings.error?.message}
+            The settings couldn't be read: {settings.error?.message}
           </ErrorLine>
         </Match>
         <Match when={told()}>
           <form class={styles.servers} onSubmit={commit}>
             {/* What the section is for, in the one line a pane on this page says
                 its own in. Both halves of it: what a declaration is, and what
-                has to happen before a session sees one. */}
+                has to happen before a session sees one. The rules a name and a
+                header value follow are folded under it. */}
             <Note>
-              Declared here for the whole installation, over HTTP, and given to a
-              session only where its conversation has attached one. A name is
-              lowercase letters, digits and hyphens, and cannot be changed
-              afterwards. A header value is kept the way the GitHub token is: it
-              is never shown again, and a value box left blank keeps what is
-              there.
+              Declared for the whole installation, over HTTP, and given to a
+              session only where its conversation attaches one.
             </Note>
+            <More summary="Names and header values">
+              <p>
+                A name is lowercase letters, digits, and hyphens, and can't be
+                changed afterwards.
+              </p>
+              <p>
+                A header value is stored, and never shown again. A value box
+                left blank keeps what's there.
+              </p>
+            </More>
 
             <Show
               when={drawn().length > 0}
-              fallback={<Empty>No servers are declared.</Empty>}
+              fallback={
+                <Empty>
+                  No servers are declared. Add one with{" "}
+                  <strong>Add a server</strong>.
+                </Empty>
+              }
             >
               <ul class={styles.rows}>
                 <Index each={drawn()}>
@@ -631,8 +643,8 @@ export function McpServersPane(props: {
                       <Show when={unreached(at)}>
                         {(why) => (
                           <ErrorLine class={styles.unreached}>
-                            It is declared, but it was not reached when it was
-                            saved. {why()}
+                            It's declared, but it couldn't be reached when it
+                            was saved. {why()}
                           </ErrorLine>
                         )}
                       </Show>
@@ -648,7 +660,7 @@ export function McpServersPane(props: {
                         when={row().headers.length > 0}
                         fallback={
                           <p class={styles.none}>
-                            None, so requests to it carry nothing.
+                            None. Requests to it carry no headers.
                           </p>
                         }
                       >
@@ -687,7 +699,7 @@ export function McpServersPane(props: {
                                   placeholder={
                                     kept(header())
                                       ? "Kept as it is"
-                                      : "Nothing is sent in it"
+                                      : "Bearer …"
                                   }
                                   value={header().value}
                                   onInput={(ev) =>
@@ -720,8 +732,7 @@ export function McpServersPane(props: {
                                         </>
                                       }
                                     >
-                                      Its value will be taken away when this is
-                                      saved.
+                                      Its value is removed when this is saved.
                                     </Show>
                                   </p>
 
@@ -784,7 +795,7 @@ export function McpServersPane(props: {
                 here that is an error rather than an answer. */}
             <Show when={save.isError}>
               <ErrorLine class={styles.failure}>
-                The settings could not be saved: {save.error?.message}
+                The settings couldn't be saved: {save.error?.message}
               </ErrorLine>
             </Show>
           </form>

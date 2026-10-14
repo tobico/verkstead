@@ -126,9 +126,9 @@ export type RepoRefused = Extract<Registered, string>;
 /// What each way of being refused says, once, wherever it is met.
 export const REFUSAL: Record<RepoRefused, string> = {
   NotAbsolute: "Give the repo's absolute path, starting with a slash.",
-  Missing: "There is nothing at that path.",
+  Missing: "There's nothing at that path.",
   NotARepository:
-    "That is not a git repository — name the repository's own directory.",
+    "That isn't a git repository. Name the repository's own directory.",
   NoDefaultBranch:
     "That repository has no branch to call its default. Check one out first.",
 };
@@ -144,11 +144,11 @@ export type CreateRefused = Extract<Created, string>;
 
 /// And what each of those says.
 export const CREATE_REFUSAL: Record<CreateRefused, string> = {
-  ParentMissing: "There is no directory at that path to make it in.",
+  ParentMissing: "There's no directory at that path to make it in.",
   AlreadyThere: "Something of that name is in that directory already.",
-  BadName: "That is not a name a directory can have.",
+  BadName: "That isn't a name a directory can have.",
   NoAuthor:
-    "Nobody is configured to commit as. Settings has a Git author, and the first commit needs one.",
+    "No git author is configured, and the first commit needs one. Set one in Settings.",
 };
 
 /// And what each way of being refused a removal says.
@@ -159,7 +159,7 @@ export const REPO_REMOVAL_REFUSAL: Record<RepoRemoved, string> = {
   Removed: "",
   NoSuchRepo: "That repo is off the registry already.",
   InUse:
-    "A conversation that is still going is on it. Finish or close that conversation first.",
+    "A conversation that's still going is on it. Finish or close that conversation first.",
 };
 
 /// The Repos as they stand, read once for the card and the pane that draw them.
@@ -197,11 +197,11 @@ export function ReposCard(props: {
   return (
     <Switch>
       <Match when={repos.isPending}>
-        <Empty>Loading…</Empty>
+        <Empty>Reading the repos…</Empty>
       </Match>
       <Match when={repos.isError}>
         <ErrorLine>
-          Could not read the registered Repos: {repos.error?.message}
+          The registered repos couldn't be read: {repos.error?.message}
         </ErrorLine>
       </Match>
       <Match when={repos.data}>
@@ -282,7 +282,7 @@ export function ReposPane(props: {
     onError: (error: Error, repo: RepoEntry) =>
       setRefused({
         repo: repo.id,
-        said: `The repo could not be removed: ${error.message}`,
+        said: `The repo couldn't be removed: ${error.message}`,
       }),
   }));
 
@@ -310,15 +310,18 @@ export function ReposPane(props: {
 
       <Switch>
         <Match when={repos.isPending}>
-          <Empty>Loading…</Empty>
+          <Empty>Reading the repos…</Empty>
         </Match>
         <Match when={repos.isError}>
           <ErrorLine>
-            Could not read the registered Repos: {repos.error?.message}
+            The registered repos couldn't be read: {repos.error?.message}
           </ErrorLine>
         </Match>
         <Match when={repos.data?.length === 0}>
-          <Empty>No repos are registered yet.</Empty>
+          <Empty>
+            No repos are registered yet. Open one from the <strong>Repo</strong>{" "}
+            dropdown.
+          </Empty>
         </Match>
         <Match when={repos.data}>
           {(registered) => (
@@ -409,8 +412,8 @@ function Confirm(props: {
         Remove {props.asked?.name}?
       </p>
       <p class={styles.confirmingWhy}>
-        It comes off the registry. The directory is left where it is, and every
-        conversation worked in it goes on saying so.
+        It comes off the registry, and its directory and conversations stay
+        where they are.
       </p>
       <div class={styles.confirmingOut}>
         {/* Both classes, as every confirm pair in the app carries them: the
@@ -421,7 +424,7 @@ function Confirm(props: {
           class={`${styles.secondary!} secondary`}
           onClick={() => props.keep()}
         >
-          Keep it
+          Cancel
         </button>
         <button type="button" onClick={() => props.remove()}>
           Remove
@@ -557,7 +560,7 @@ export function RepoRegistration(props: {
           that is an error rather than an outcome. */}
       <Show when={register.isError}>
         <ErrorLine class={styles.failure}>
-          The repo could not be registered: {register.error?.message}
+          The repo couldn't be registered: {register.error?.message}
         </ErrorLine>
       </Show>
     </form>
@@ -588,7 +591,7 @@ export function OpenRepo(props: {
 
   return (
     <Modal class={styles.openRepo!} open close={props.close} labelledBy={id}>
-      <h3 id={id}>Open a repo</h3>
+      <h3 id={id}>Open a Repo</h3>
 
       <RepoRegistration submit="Open" landed={props.landed}>
         {/* Drawn as well as the ways out the modal already has: Escape and a
@@ -842,7 +845,7 @@ export function CreateRepo(props: {
 
   return (
     <Modal class={styles.createRepo!} open close={leave} labelledBy={id}>
-      <h3 id={id}>Create a repo</h3>
+      <h3 id={id}>Create a Repo</h3>
 
       {/* Once there is a repository the card is no longer a form: what is left
           to do about it is read what GitHub said and get on, and a Create press
@@ -852,15 +855,15 @@ export function CreateRepo(props: {
           <div class={styles.made}>
             <Note>
               {repo().name} is made here and registered, and the draft goes on
-              it. It has no remote yet — add one, or make it on GitHub yourself,
-              before the work on it is finished.
+              it. It has no remote yet, so add one or make it on GitHub before
+              the work on it is finished.
             </Note>
 
             <ErrorLine class={styles.failure}>{refused()}</ErrorLine>
 
             <div class={styles.buttons}>
               <button type="button" onClick={leave}>
-                Done
+                Close
               </button>
             </div>
           </div>
@@ -869,7 +872,7 @@ export function CreateRepo(props: {
 
       <Show when={unpushed() === null}>
         <form class={styles.form} onSubmit={make}>
-          <label for="repo-parent">Where it goes</label>
+          <label for="repo-parent">Parent directory</label>
           <PathField
             id="repo-parent"
             opened={remembered !== ""}
@@ -882,7 +885,7 @@ export function CreateRepo(props: {
           />
 
           <label class={styles.second} for="repo-name">
-            What it is called
+            Name
           </label>
           <input
             id="repo-name"
@@ -924,8 +927,8 @@ export function CreateRepo(props: {
           <Show when={tokened() === false}>
             <Note class={styles.remote}>
               No GitHub token is saved, so this repo is made here only. It needs
-              a remote before the work on it can be finished — Settings has the
-              token.
+              a remote, or a token saved in Settings, before the work on it can
+              be finished.
             </Note>
           </Show>
 
@@ -965,7 +968,7 @@ export function CreateRepo(props: {
             that is an error rather than an outcome. */}
           <Show when={create.isError}>
             <ErrorLine class={styles.failure}>
-              The repo could not be made: {create.error?.message}
+              The repo couldn't be made: {create.error?.message}
             </ErrorLine>
           </Show>
         </form>

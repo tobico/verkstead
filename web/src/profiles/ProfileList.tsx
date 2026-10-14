@@ -153,24 +153,24 @@ export const PROFILE_REFUSAL: Record<ProfileSaved, string> = {
   Saved: "",
   NoSuchProfile: "That profile is gone.",
   Modelless:
-    "Give the profile at least one model — a session has to know what it runs on.",
+    "Give the profile at least one model. A session has to know what it runs on.",
   NameTaken: "Another profile is called that already.",
   DefaultTaken:
-    "That agent already has a profile with no name. Name this one — a name is what tells two accounts of one agent apart.",
+    "That agent already has a profile with no name. Name this one, so the two accounts can be told apart.",
   DirNotAbsolute:
     "Give the claude directory's absolute path, starting with a slash.",
-  DirMissing: "There is nothing at the claude directory's path.",
+  DirMissing: "There's nothing at the claude directory's path.",
   NotADirectory:
-    "That is not a directory — a session's `~/.claude` is built from one.",
+    "That isn't a directory. A session's `~/.claude` is built from one.",
   ConfigNotAbsolute:
     "Give the config file's absolute path, starting with a slash.",
-  ConfigMissing: "There is nothing at the config file's path.",
+  ConfigMissing: "There's nothing at the config file's path.",
   NotAFile:
-    "That is not a file — a session's `~/.claude.json` is copied from one.",
+    "That isn't a file. A session's `~/.claude.json` is copied from one.",
   HomeNotAbsolute: "Give the home's absolute path, starting with a slash.",
-  HomeMissing: "There is nothing at the home's path.",
+  HomeMissing: "There's nothing at the home's path.",
   HomeNotADirectory:
-    "That is not a directory — an account's home is mounted from one.",
+    "That isn't a directory. An account's home is mounted from one.",
 };
 
 /// And what each way of being refused a removal says.
@@ -184,8 +184,8 @@ export const PROFILE_REMOVAL_REFUSAL: Record<ProfileDeleted, string> = {
 };
 
 /// One path an account of some agent type is: the key it is held under, what the
-/// label over it says, an example to type into it, and whether the path it names
-/// is a file.
+/// label over it says, what becomes of the path in a session, an example to type
+/// into it, and whether the path it names is a file.
 ///
 /// That last one is the field's browse rather than anything the form does with
 /// what is typed: a field naming a file offers the files beside the directories
@@ -194,7 +194,8 @@ export const PROFILE_REMOVAL_REFUSAL: Record<ProfileDeleted, string> = {
 /// and `NotADirectory` are two of its refusals above.
 type AccountField = {
   key: string;
-  label: JSX.Element;
+  label: string;
+  note: JSX.Element;
   placeholder: string;
   file?: boolean;
 };
@@ -215,19 +216,20 @@ const ACCOUNT_FIELDS: Record<AgentType, AccountField[]> = {
   Claude: [
     {
       key: "claude_dir",
-      label: (
+      label: "Claude directory",
+      note: (
         <>
-          Claude directory, which a session's <code>~/.claude</code> is built
-          from
+          A session's <code>~/.claude</code> is built from it.
         </>
       ),
       placeholder: "/home/you/accounts/work/.claude",
     },
     {
       key: "config_file",
-      label: (
+      label: "Config file",
+      note: (
         <>
-          Config file, copied to a session's <code>~/.claude.json</code>
+          Copied to a session's <code>~/.claude.json</code>.
         </>
       ),
       placeholder: "/home/you/accounts/work/.claude.json",
@@ -237,9 +239,10 @@ const ACCOUNT_FIELDS: Record<AgentType, AccountField[]> = {
   Codex: [
     {
       key: "home",
-      label: (
+      label: "Home directory",
+      note: (
         <>
-          Home directory, mounted at <code>~/.codex</code>
+          Mounted at <code>~/.codex</code>.
         </>
       ),
       placeholder: "/home/you/accounts/work/.codex",
@@ -248,9 +251,10 @@ const ACCOUNT_FIELDS: Record<AgentType, AccountField[]> = {
   Grok: [
     {
       key: "home",
-      label: (
+      label: "Home directory",
+      note: (
         <>
-          Home directory, mounted at <code>~/.grok</code>
+          Mounted at <code>~/.grok</code>.
         </>
       ),
       placeholder: "/home/you/accounts/work/.grok",
@@ -259,11 +263,12 @@ const ACCOUNT_FIELDS: Record<AgentType, AccountField[]> = {
   OpenCode: [
     {
       key: "home",
-      label: (
+      label: "Home directory",
+      note: (
         <>
-          Home directory, whose <code>.config/opencode</code> and{" "}
+          Its <code>.config/opencode</code> and{" "}
           <code>.local/share/opencode</code> are mounted where opencode looks
-          for them
+          for them.
         </>
       ),
       placeholder: "/home/you/accounts/work/opencode",
@@ -374,7 +379,7 @@ export function ProfileList(props: {
           mark with no words of its own is beside the heading rather than under
           it, and this section says nothing about it. */}
       <div class={app.sectionHead}>
-        <h2>Agent profiles</h2>
+        <h2>Agent Profiles</h2>
         <IconButton
           of={faPlus}
           label="Add a profile"
@@ -385,15 +390,18 @@ export function ProfileList(props: {
 
       <Switch>
         <Match when={profiles.isPending}>
-          <Empty>Loading…</Empty>
+          <Empty>Reading the agent profiles…</Empty>
         </Match>
         <Match when={profiles.isError}>
           <ErrorLine>
-            Could not read the agent profiles: {profiles.error?.message}
+            The agent profiles couldn't be read: {profiles.error?.message}
           </ErrorLine>
         </Match>
         <Match when={profiles.data?.length === 0}>
-          <Empty>No agent profiles are saved yet.</Empty>
+          <Empty>
+            No agent profiles are saved yet. Add one with the <strong>+</strong>{" "}
+            above.
+          </Empty>
         </Match>
         <Match when={profiles.data}>
           {(saved) => (
@@ -631,7 +639,7 @@ export function ProfilePane(props: {
       <PaneSticky>
         <PaneHead
           back={{ to: "Settings", go: props.back }}
-          title={adding() ? "Add a profile" : "Edit profile"}
+          title={adding() ? "Add a Profile" : "Edit Profile"}
         />
       </PaneSticky>
 
@@ -646,8 +654,8 @@ export function ProfilePane(props: {
       <Show when={saved()?.device}>
         {(device) => (
           <p class={styles.athome}>
-            This account is on {device().name}. Saving or removing it here is
-            put to that machine.
+            This account is on {device().name}. Saving or removing it here
+            changes it there.
           </p>
         )}
       </Show>
@@ -699,6 +707,9 @@ export function ProfilePane(props: {
                     Remove
                   </button>
                 </div>
+                <Note>
+                  Removes the profile from Verkstead. The account's files stay.
+                </Note>
 
                 {/* The one thing a removal can be refused for — a profile
                     another tab took away first — said here because here is
@@ -712,7 +723,7 @@ export function ProfilePane(props: {
                 </Show>
                 <Show when={remove.isError}>
                   <ErrorLine class={styles.failure}>
-                    The profile could not be removed: {remove.error?.message}
+                    The profile couldn't be removed: {remove.error?.message}
                   </ErrorLine>
                 </Show>
               </section>
@@ -721,11 +732,11 @@ export function ProfilePane(props: {
         </Match>
 
         <Match when={profiles.isPending}>
-          <Empty>Loading…</Empty>
+          <Empty>Reading the agent profiles…</Empty>
         </Match>
         <Match when={profiles.isError}>
           <ErrorLine>
-            Could not read the agent profiles: {profiles.error?.message}
+            The agent profiles couldn't be read: {profiles.error?.message}
           </ErrorLine>
         </Match>
       </Switch>
@@ -908,9 +919,10 @@ export function ProfileForm(props: {
           ordinary case: one account per agent, read by the agent's own
           mark and the model beside it. An agent takes one such profile,
           and the second of them is refused until it is named. */}
-      <label for="profile-name">
-        Name, where two accounts of one agent need telling apart
-      </label>
+      <label for="profile-name">Name</label>
+      <Note class={styles.fieldNote}>
+        Only needed to tell two accounts of one agent apart.
+      </Note>
       <input
         id="profile-name"
         type="text"
@@ -957,7 +969,7 @@ export function ProfileForm(props: {
                   <Show when={elsewhere(model)}>
                     {(agent) => (
                       <span class={styles.elsewhere}>
-                        {AGENT_NAME[agent()]}'s model, which this account cannot
+                        {AGENT_NAME[agent()]}'s model, which this account can't
                         launch
                       </span>
                     )}
@@ -1043,6 +1055,7 @@ export function ProfileForm(props: {
         {(field) => (
           <>
             <label for={`profile-${field.key}`}>{field.label}</label>
+            <Note class={styles.fieldNote}>{field.note}</Note>
             {/* Browsed or typed, which the form cannot tell apart and has
                 no reason to: what Save sends is whatever the box holds,
                 and the server's answer about it is unchanged. Anywhere
@@ -1093,7 +1106,7 @@ export function ProfileForm(props: {
           here that is an error rather than an outcome. */}
       <Show when={save.isError}>
         <ErrorLine class={styles.failure}>
-          The profile could not be saved: {save.error?.message}
+          The profile couldn't be saved: {save.error?.message}
         </ErrorLine>
       </Show>
     </form>

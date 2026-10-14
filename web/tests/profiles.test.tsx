@@ -428,7 +428,7 @@ describe("the cards", () => {
     serving(whenever("/api/ui/profiles", json([])));
     mountCards();
 
-    await waitFor(() => screen.getByText("No agent profiles are saved yet."));
+    await waitFor(() => screen.getByText(/No agent profiles are saved yet\./));
   });
 
   /// A profile may go unnamed — a name tells two accounts of one agent apart,
@@ -516,7 +516,7 @@ describe("a member's accounts", () => {
     serving(whenever("/api/ui/profiles", json(CLUSTER)));
     mountPane(MIRROR.id);
 
-    await waitFor(() => screen.getByLabelText(/^Name, where two accounts/));
+    await waitFor(() => screen.getByLabelText("Name"));
 
     expect(document.body.textContent).toContain(
       `This account is on ${MACHINE.name}.`,
@@ -529,7 +529,7 @@ describe("a member's accounts", () => {
     serving(whenever("/api/ui/profiles", json(CLUSTER)));
     mountPane(CLUSTER[0]!.id);
 
-    await waitFor(() => screen.getByLabelText(/^Name, where two accounts/));
+    await waitFor(() => screen.getByLabelText("Name"));
 
     expect(document.body.textContent).not.toContain("This account is on");
   });
@@ -545,9 +545,9 @@ describe("a member's accounts", () => {
     );
     const { done } = mountPane(MIRROR.id);
 
-    await waitFor(() => screen.getByLabelText(/^Name, where two accounts/));
+    await waitFor(() => screen.getByLabelText("Name"));
 
-    fireEvent.input(screen.getByLabelText(/^Name, where two accounts/), {
+    fireEvent.input(screen.getByLabelText("Name"), {
       target: { value: "weekend" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
@@ -1254,7 +1254,7 @@ describe("the pane a card opens", () => {
     serving(whenever("/api/ui/profiles", json({ error: "gone" }, 500)));
     mountPane(FABLE.id);
 
-    await waitFor(() => screen.getByText(/Could not read the agent profiles/));
+    await waitFor(() => screen.getByText(/The agent profiles couldn't be read/));
   });
 });
 
@@ -1377,8 +1377,8 @@ describe("the pane the plus opens", () => {
   it.each([
     ["DirMissing", /nothing at the claude directory/i],
     ["ConfigMissing", /nothing at the config file/i],
-    ["NotADirectory", /not a directory/i],
-    ["NotAFile", /not a file/i],
+    ["NotADirectory", /isn't a directory/i],
+    ["NotAFile", /isn't a file/i],
     ["DirNotAbsolute", /claude directory's absolute path/i],
     ["ConfigNotAbsolute", /config file's absolute path/i],
     ["Modelless", /at least one model/i],
@@ -1438,7 +1438,7 @@ describe("the pane the plus opens", () => {
     fillIn(NEW);
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
-    await waitFor(() => screen.getByText(/could not be saved/));
+    await waitFor(() => screen.getByText(/couldn't be saved/));
   });
 });
 
@@ -1487,7 +1487,7 @@ describe("removing a profile", () => {
       await waitFor(() => screen.getByRole("button", { name: "Remove" })),
     );
 
-    await waitFor(() => screen.getByText(/could not be removed/));
+    await waitFor(() => screen.getByText(/couldn't be removed/));
   });
 });
 
@@ -1628,13 +1628,13 @@ describe("the models a profile lists", () => {
 
     expect(
       screen.getByLabelText(/Fable 5/).closest("li")!.textContent,
-    ).toContain("Claude Code's model, which this account cannot launch");
+    ).toContain("Claude Code's model, which this account can't launch");
 
     // And nothing of the sort beside the backend's own, which is every
     // ordinary row on every ordinary form.
     expect(
       screen.getByLabelText("Grok 4.6").closest("li")!.textContent,
-    ).not.toContain("cannot launch");
+    ).not.toContain("can't launch");
   });
 
   /// An id the list has never heard of says nothing either: the free-text way in
@@ -1653,7 +1653,7 @@ describe("the models a profile lists", () => {
 
     expect(
       screen.getByLabelText("grok-5-preview").closest("li")!.textContent,
-    ).not.toContain("cannot launch");
+    ).not.toContain("can't launch");
   });
 
   /// The picks are what the profile says, ticked: a list saved before there were
@@ -1768,11 +1768,10 @@ describe("the models a profile lists", () => {
 
 
 describe("browsing for the account's paths", () => {
-  /// The labels the fields are found by, which are the ones the form has — each
-  /// of them saying what a session is given of the path it names.
-  const DIRECTORY =
-    "Claude directory, which a session's ~/.claude is built from";
-  const CONFIG = "Config file, copied to a session's ~/.claude.json";
+  /// The labels the fields are found by, which are the ones the form has — what
+  /// a session is given of each path is said in the note beside it.
+  const DIRECTORY = "Claude directory";
+  const CONFIG = "Config file";
 
   /// The server's home, and an account kept under it: a `.claude` beside a
   /// `.claude.json`, which is what these fields exist to point at.
@@ -1966,7 +1965,7 @@ describe("browsing for the account's paths", () => {
     pick("Agent", AGENT_NAME.Codex);
     await waitFor(() => screen.getByLabelText(/Home directory/));
 
-    const HOME = "Home directory, mounted at ~/.codex";
+    const HOME = "Home directory";
     await browsedToTheAccount(HOME);
 
     await waitFor(() =>

@@ -278,7 +278,7 @@ describe("the card", () => {
     serving(whenever("/api/ui/settings", json({ error: "gone" }, 500)));
     mountCard();
 
-    await waitFor(() => screen.getByText(/Could not read the settings/));
+    await waitFor(() => screen.getByText(/The settings couldn't be read/));
   });
 });
 
@@ -349,7 +349,7 @@ describe("what is not configured", () => {
     theSettings(UNSET);
     mountPane();
 
-    await waitFor(() => screen.getByLabelText(/Token, pasted/));
+    await waitFor(() => screen.getByLabelText("Token"));
     expect(screen.queryByRole("button", { name: "Replace" })).toBeNull();
   });
 
@@ -362,7 +362,7 @@ describe("what is not configured", () => {
     const status = await theLine(container);
     expect(status.textContent).toBe("No GitHub token or git author");
 
-    fireEvent.input(screen.getByLabelText(/Token, pasted/), {
+    fireEvent.input(screen.getByLabelText("Token"), {
       target: { value: TOKEN },
     });
     fireEvent.input(screen.getByLabelText("Name"), {
@@ -481,7 +481,7 @@ describe("the form", () => {
     fireEvent.click(screen.getByRole("button", { name: "Replace" }));
 
     expect(
-      (screen.getByLabelText(/Token, pasted/) as HTMLInputElement).value,
+      (screen.getByLabelText("Token") as HTMLInputElement).value,
     ).toBe("");
   });
 
@@ -503,7 +503,7 @@ describe("the form", () => {
     serving(whenever("/api/ui/settings", json({ error: "gone" }, 500)));
     mountPane();
 
-    await waitFor(() => screen.getByText(/Could not read the settings/));
+    await waitFor(() => screen.getByText(/The settings couldn't be read/));
   });
 });
 
@@ -601,9 +601,9 @@ describe("saving", () => {
   it("sends a token that was typed, whole", async () => {
     const fetching = theSettings(UNSET, json(SAVED));
     mountPane();
-    await waitFor(() => screen.getByLabelText(/Token, pasted/));
+    await waitFor(() => screen.getByLabelText("Token"));
 
-    fireEvent.input(screen.getByLabelText(/Token, pasted/), {
+    fireEvent.input(screen.getByLabelText("Token"), {
       target: { value: TOKEN },
     });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
@@ -620,14 +620,14 @@ describe("saving", () => {
   it("says which account GitHub verified the token as", async () => {
     theSettings(UNSET, json(SAVED));
     const { container } = mountPane();
-    await waitFor(() => screen.getByLabelText(/Token, pasted/));
+    await waitFor(() => screen.getByLabelText("Token"));
 
-    fireEvent.input(screen.getByLabelText(/Token, pasted/), {
+    fireEvent.input(screen.getByLabelText("Token"), {
       target: { value: TOKEN },
     });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
-    await waitFor(() => screen.getByText(/GitHub says it is/));
+    await waitFor(() => screen.getByText(/GitHub says it's/));
     expect(container.querySelector(`.${styles.login}`)!.textContent).toBe("ada");
   });
 
@@ -647,17 +647,17 @@ describe("saving", () => {
     };
     theSettings(UNSET, json(unscoped));
     const { container } = mountPane();
-    await waitFor(() => screen.getByLabelText(/Token, pasted/));
+    await waitFor(() => screen.getByLabelText("Token"));
 
-    fireEvent.input(screen.getByLabelText(/Token, pasted/), {
+    fireEvent.input(screen.getByLabelText("Token"), {
       target: { value: TOKEN },
     });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     // Whose it is, and what it may not do: two lines, because they are two
     // different things to do about it.
-    await waitFor(() => screen.getByText(/GitHub says it is/));
-    await waitFor(() => screen.getByText(/It cannot publish a share/));
+    await waitFor(() => screen.getByText(/GitHub says it's/));
+    await waitFor(() => screen.getByText(/It can't publish a share/));
     expect(container.querySelector(`.${styles.scope}`)!.textContent).toBe(
       "gist",
     );
@@ -668,15 +668,15 @@ describe("saving", () => {
   it("says nothing about scopes on a token that has them all", async () => {
     theSettings(UNSET, json(SAVED));
     mountPane();
-    await waitFor(() => screen.getByLabelText(/Token, pasted/));
+    await waitFor(() => screen.getByLabelText("Token"));
 
-    fireEvent.input(screen.getByLabelText(/Token, pasted/), {
+    fireEvent.input(screen.getByLabelText("Token"), {
       target: { value: TOKEN },
     });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
-    await waitFor(() => screen.getByText(/GitHub says it is/));
-    expect(screen.queryByText(/It cannot publish a share/)).toBeNull();
+    await waitFor(() => screen.getByText(/GitHub says it's/));
+    expect(screen.queryByText(/It can't publish a share/)).toBeNull();
   });
 
   /// A token GitHub would not vouch for is saved all the same — it is pasted
@@ -693,9 +693,9 @@ describe("saving", () => {
     };
     theSettings(UNSET, json(unverified));
     mountPane();
-    await waitFor(() => screen.getByLabelText(/Token, pasted/));
+    await waitFor(() => screen.getByLabelText("Token"));
 
-    fireEvent.input(screen.getByLabelText(/Token, pasted/), {
+    fireEvent.input(screen.getByLabelText("Token"), {
       target: { value: TOKEN },
     });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
@@ -714,7 +714,7 @@ describe("saving", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
-    await waitFor(() => screen.getByText(/could not be saved/));
+    await waitFor(() => screen.getByText(/couldn't be saved/));
     expect(screen.getByLabelText("Name")).toBeTruthy();
   });
 });
@@ -728,16 +728,16 @@ describe("replacing and clearing the token", () => {
     mountPane();
     await waitFor(() => screen.getByRole("button", { name: "Replace" }));
 
-    expect(screen.queryByLabelText(/Token, pasted/)).toBeNull();
+    expect(screen.queryByLabelText("Token")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Replace" }));
-    await waitFor(() => screen.getByLabelText(/Token, pasted/));
+    await waitFor(() => screen.getByLabelText("Token"));
 
     fireEvent.click(
       screen.getByRole("button", { name: "Keep the saved token" }),
     );
     await waitFor(() =>
-      expect(screen.queryByLabelText(/Token, pasted/)).toBeNull(),
+      expect(screen.queryByLabelText("Token")).toBeNull(),
     );
   });
 
@@ -750,7 +750,7 @@ describe("replacing and clearing the token", () => {
     await waitFor(() => screen.getByRole("button", { name: "Replace" }));
 
     fireEvent.click(screen.getByRole("button", { name: "Replace" }));
-    fireEvent.input(screen.getByLabelText(/Token, pasted/), {
+    fireEvent.input(screen.getByLabelText("Token"), {
       target: { value: TOKEN },
     });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
@@ -762,7 +762,7 @@ describe("replacing and clearing the token", () => {
     );
 
     await waitFor(() => screen.getByRole("button", { name: "Replace" }));
-    expect(screen.queryByLabelText(/Token, pasted/)).toBeNull();
+    expect(screen.queryByLabelText("Token")).toBeNull();
   });
 
   /// Clearing is its own press for the reason a blank field is a `Keep`: the two
@@ -850,8 +850,8 @@ describe("the ignore rules", () => {
   /// the section holds them.
   function boxes(which: number): [HTMLInputElement, HTMLInputElement] {
     return [
-      screen.getAllByLabelText(/^Author,/)[which] as HTMLInputElement,
-      screen.getAllByLabelText(/^Body,/)[which] as HTMLInputElement,
+      screen.getAllByLabelText(/^Author$/)[which] as HTMLInputElement,
+      screen.getAllByLabelText(/^Body$/)[which] as HTMLInputElement,
     ];
   }
 
@@ -881,10 +881,10 @@ describe("the ignore rules", () => {
   it("draws a row for each rule that is written down", async () => {
     theSettings(TOLD);
     mountPane();
-    await waitFor(() => screen.getAllByLabelText(/^Author,/));
+    await waitFor(() => screen.getAllByLabelText(/^Author$/));
 
     const [author, body] = boxes(0);
-    expect(screen.getAllByLabelText(/^Author,/)).toHaveLength(1);
+    expect(screen.getAllByLabelText(/^Author$/)).toHaveLength(1);
     expect(author.value).toBe(RULE.author);
     expect(body.value).toBe(RULE.body);
   });
@@ -895,8 +895,8 @@ describe("the ignore rules", () => {
     theSettings(UNSET);
     mountPane();
 
-    await waitFor(() => screen.getByText("No comments are ignored."));
-    expect(screen.queryAllByLabelText(/^Author,/)).toHaveLength(0);
+    await waitFor(() => screen.getByText(/No comments are ignored\./));
+    expect(screen.queryAllByLabelText(/^Author$/)).toHaveLength(0);
   });
 
   /// A row is added empty, for a rule to be written into. Nothing is sent by
@@ -904,12 +904,12 @@ describe("the ignore rules", () => {
   it("adds an empty row on the press", async () => {
     const fetching = theSettings(TOLD);
     mountPane();
-    await waitFor(() => screen.getAllByLabelText(/^Author,/));
+    await waitFor(() => screen.getAllByLabelText(/^Author$/));
 
     fireEvent.click(screen.getByRole("button", { name: "Add a rule" }));
 
     await waitFor(() =>
-      expect(screen.getAllByLabelText(/^Author,/)).toHaveLength(2),
+      expect(screen.getAllByLabelText(/^Author$/)).toHaveLength(2),
     );
     const [author, body] = boxes(1);
     expect(author.value).toBe("");
@@ -924,7 +924,7 @@ describe("the ignore rules", () => {
   it("sends the whole list once a row has been touched", async () => {
     const fetching = theSettings(TOLD, json(SAVED));
     mountPane();
-    await waitFor(() => screen.getAllByLabelText(/^Body,/));
+    await waitFor(() => screen.getAllByLabelText(/^Body$/));
 
     fireEvent.input(boxes(0)[1], { target: { value: "^nit:" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
@@ -939,7 +939,7 @@ describe("the ignore rules", () => {
   it("sends a rule that was added on the page", async () => {
     const fetching = theSettings(TOLD, json(SAVED));
     mountPane();
-    await waitFor(() => screen.getAllByLabelText(/^Author,/));
+    await waitFor(() => screen.getAllByLabelText(/^Author$/));
 
     fireEvent.click(screen.getByRole("button", { name: "Add a rule" }));
     await waitFor(() => expect(boxes(1)[0]).toBeTruthy());
@@ -968,7 +968,7 @@ describe("the ignore rules", () => {
     await waitFor(() => screen.getByRole("button", { name: "Remove" }));
 
     fireEvent.click(screen.getByRole("button", { name: "Remove" }));
-    await waitFor(() => screen.getByText("No comments are ignored."));
+    await waitFor(() => screen.getByText(/No comments are ignored\./));
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() =>
@@ -1005,7 +1005,7 @@ describe("the ignore rules", () => {
     const why = "regex parse error: unclosed character class";
     theSettings(TOLD, json(turnedDown({ rule: 0, field: "Author", why })));
     mountPane();
-    await waitFor(() => screen.getAllByLabelText(/^Author,/));
+    await waitFor(() => screen.getAllByLabelText(/^Author$/));
 
     fireEvent.input(boxes(0)[0], { target: { value: "[oh" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
@@ -1028,7 +1028,7 @@ describe("the ignore rules", () => {
       "needs an author, a body, or both";
     theSettings(TOLD, json(turnedDown({ rule: 0, field: null, why })));
     mountPane();
-    await waitFor(() => screen.getAllByLabelText(/^Author,/));
+    await waitFor(() => screen.getAllByLabelText(/^Author$/));
 
     fireEvent.input(boxes(0)[0], { target: { value: "dependabot" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
@@ -1036,7 +1036,7 @@ describe("the ignore rules", () => {
     await waitFor(() => screen.getByText(why));
     // The row it named is still there, refused rather than dropped, with what
     // was typed in it still in front of the human.
-    expect(screen.getAllByLabelText(/^Author,/)).toHaveLength(1);
+    expect(screen.getAllByLabelText(/^Author$/)).toHaveLength(1);
     expect(boxes(0)[0].value).toBe("dependabot");
   });
 
@@ -1047,7 +1047,7 @@ describe("the ignore rules", () => {
   it("does not send a row nobody wrote anything in", async () => {
     const fetching = theSettings(TOLD, json(SAVED));
     mountPane();
-    await waitFor(() => screen.getAllByLabelText(/^Author,/));
+    await waitFor(() => screen.getAllByLabelText(/^Author$/));
 
     fireEvent.click(screen.getByRole("button", { name: "Add a rule" }));
     await waitFor(() => expect(boxes(1)[0]).toBeTruthy());
@@ -1065,7 +1065,7 @@ describe("the ignore rules", () => {
     // And it comes off the page with the press, so what is drawn and what was
     // sent are one list.
     await waitFor(() =>
-      expect(screen.getAllByLabelText(/^Author,/)).toHaveLength(1),
+      expect(screen.getAllByLabelText(/^Author$/)).toHaveLength(1),
     );
   });
 
@@ -1074,7 +1074,7 @@ describe("the ignore rules", () => {
   it("sends the list without a rule whose boxes were cleared", async () => {
     const fetching = theSettings(TOLD, json(SAVED));
     mountPane();
-    await waitFor(() => screen.getAllByLabelText(/^Author,/));
+    await waitFor(() => screen.getAllByLabelText(/^Author$/));
 
     fireEvent.input(boxes(0)[0], { target: { value: "" } });
     fireEvent.input(boxes(0)[1], { target: { value: "  " } });
@@ -1093,7 +1093,7 @@ describe("the ignore rules", () => {
   it("keeps the rest of the form where a save was refused", async () => {
     theSettings(TOLD, json(turnedDown({ rule: 0, field: "Body", why: "no" })));
     mountPane();
-    await waitFor(() => screen.getAllByLabelText(/^Body,/));
+    await waitFor(() => screen.getAllByLabelText(/^Body$/));
 
     fireEvent.input(screen.getByLabelText("Email"), {
       target: { value: "ada@analytical.engine" },
@@ -1116,7 +1116,7 @@ describe("the ignore rules", () => {
       json(SAVED),
     );
     mountPane();
-    await waitFor(() => screen.getAllByLabelText(/^Author,/));
+    await waitFor(() => screen.getAllByLabelText(/^Author$/));
 
     fireEvent.input(boxes(0)[0], { target: { value: "[oh" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
@@ -1148,7 +1148,7 @@ describe("the ignore rules", () => {
     };
     theSettings(TOLD, json(written));
     mountPane();
-    await waitFor(() => screen.getAllByLabelText(/^Body,/));
+    await waitFor(() => screen.getAllByLabelText(/^Body$/));
 
     fireEvent.input(boxes(0)[1], { target: { value: "^nit:" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
@@ -1262,7 +1262,7 @@ describe("sharing on Done", () => {
     await waitFor(() => expect(theBox().checked).toBe(true));
     fireEvent.click(theBox());
 
-    await waitFor(() => screen.getByText(/could not be saved/));
+    await waitFor(() => screen.getByText(/couldn't be saved/));
   });
 });
 
@@ -1280,7 +1280,7 @@ describe("sharing on Done", () => {
 /// author or the token on the way would be a setting that cost the credentials.
 describe("how a conflict is resolved", () => {
   const thePicker = (): HTMLSelectElement =>
-    screen.getByLabelText("Conflict resolution") as HTMLSelectElement;
+    screen.getByLabelText("Conflict Resolution") as HTMLSelectElement;
 
   const resolving = (
     standing: SettingsView,
@@ -1386,7 +1386,7 @@ describe("how a conflict is resolved", () => {
     await waitFor(() => expect(thePicker().value).toBe("Rebase"));
     fireEvent.change(thePicker(), { target: { value: "Merge" } });
 
-    await waitFor(() => screen.getByText(/could not be saved/));
+    await waitFor(() => screen.getByText(/couldn't be saved/));
 
     expect(thePicker().value).toBe("Rebase");
   });

@@ -326,8 +326,8 @@ describe("the pane", () => {
     expect(screen.getByText("Reset key")).toBeTruthy();
     expect(
       screen.getByText(
-        "Resets the secret token used to access the UI. This will " +
-          "disconnect all other devices.",
+        "Replaces the workbench key this page is opened with. Every other " +
+          "device is disconnected.",
       ),
     ).toBeTruthy();
 
@@ -400,7 +400,7 @@ describe("the serve checkbox", () => {
     mountPane(UNREADABLE_SERVE);
 
     await waitFor(() =>
-      expect(screen.getByText(/could not be read/)).toBeTruthy(),
+      expect(screen.getByText(/couldn't be read/)).toBeTruthy(),
     );
 
     expect(
@@ -1037,7 +1037,7 @@ the shorter road",
     await waitFor(() => expect(screen.getByText("Discovered")).toBeTruthy());
 
     expect(
-      screen.getByText(/appear here as they are found/),
+      screen.getByText(/appear here as they're found/),
       "and the typed box below is what is left for the ones neither half reaches",
     ).toBeTruthy();
   });
@@ -1573,7 +1573,7 @@ describe("unlinking a device", () => {
     fireEvent.click(screen.getAllByText("Unlink")[0]!);
 
     const said = await waitFor(() =>
-      screen.getByText(/leaves the cluster for every device in it/),
+      screen.getByText(/leaves the cluster for every device/),
     );
 
     expect(said.textContent).toContain("told to forget the rest");
@@ -1611,7 +1611,7 @@ describe("unlinking a device", () => {
 
   /// And the way back leaves the cluster alone, which is the whole of what
   /// asking is for.
-  it("leaves the cluster alone on Keep it", async () => {
+  it("leaves the cluster alone on Cancel", async () => {
     const fetching = stubbing(
       whenever("/api/ui/remote", json(SERVING)),
       theDevice(LINKED),
@@ -1628,7 +1628,7 @@ describe("unlinking a device", () => {
       expect(screen.getByText("Unlink laptop?")).toBeTruthy(),
     );
 
-    fireEvent.click(screen.getByText("Keep it"));
+    fireEvent.click(screen.getByText("Cancel"));
 
     await waitFor(() =>
       expect(screen.queryByText("Unlink laptop?")).toBeNull(),
@@ -1703,7 +1703,7 @@ describe("unlinking a device", () => {
     );
 
     await waitFor(() =>
-      expect(screen.getByText(/The device could not be unlinked/)).toBeTruthy(),
+      expect(screen.getByText(/The device couldn't be unlinked/)).toBeTruthy(),
     );
 
     expect(screen.getByText("laptop"), "and the row stays drawn").toBeTruthy();

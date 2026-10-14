@@ -99,8 +99,8 @@ const WORDS_FOR: Record<WhenClosed, string> = {
 
 /// Why the keep-running position will not take a press while the tray is off.
 const FALLEN =
-  "With no icon in the tray there is no way back to a hidden window, so " +
-  "closing the window quits while the icon is off.";
+  "With no tray icon there's no way back to a hidden window, so closing the " +
+  "window quits.";
 
 /// The settings of the machine the app is running on, out of the bridge.
 ///
@@ -204,11 +204,11 @@ function Card(props: {
   return (
     <Choose>
       <Match when={desktop.isPending}>
-        <Empty>Loading…</Empty>
+        <Empty>Reading this machine's desktop settings…</Empty>
       </Match>
       <Match when={desktop.isError}>
         <ErrorLine>
-          Could not read this machine's desktop settings:{" "}
+          This machine's desktop settings couldn't be read:{" "}
           {desktop.error?.message}
         </ErrorLine>
       </Match>
@@ -311,11 +311,11 @@ function Pane(props: { reach: Bridge; back: () => void }): JSX.Element {
 
       <Choose>
         <Match when={desktop.isPending}>
-          <Empty>Loading…</Empty>
+          <Empty>Reading this machine's desktop settings…</Empty>
         </Match>
         <Match when={desktop.isError}>
           <ErrorLine>
-            Could not read this machine's desktop settings:{" "}
+            This machine's desktop settings couldn't be read:{" "}
             {desktop.error?.message}
           </ErrorLine>
         </Match>
@@ -403,7 +403,7 @@ function Pane(props: { reach: Bridge; back: () => void }): JSX.Element {
                 {(how) => (
                   <div class={styles.startup}>
                     <Check
-                      label="Launch on Startup"
+                      label="Launch on startup"
                       on={how().on}
                       disabled={registering.isPending || !how().possible}
                       title={how().why}
@@ -430,7 +430,7 @@ function Pane(props: { reach: Bridge; back: () => void }): JSX.Element {
 
               <Show when={starts.isError}>
                 <ErrorLine class={styles.failure}>
-                  Could not read whether Verkstead starts with this machine:{" "}
+                  Whether Verkstead starts with this machine couldn't be read:{" "}
                   {starts.error?.message}
                 </ErrorLine>
               </Show>
@@ -440,24 +440,24 @@ function Pane(props: { reach: Bridge; back: () => void }): JSX.Element {
                   is a log file nobody sends. */}
               <div class={styles.logs}>
                 <QuietButton onClick={() => viewing.mutate()}>
-                  View Logs
+                  View logs
                 </QuietButton>
               </div>
 
               <Show when={registering.isError}>
                 <ErrorLine class={styles.failure}>
-                  Launch on Startup could not be set:{" "}
+                  Launch on startup couldn't be set:{" "}
                   {registering.error?.message}
                 </ErrorLine>
               </Show>
               <Show when={save.isError}>
                 <ErrorLine class={styles.failure}>
-                  The setting could not be saved: {save.error?.message}
+                  The setting couldn't be saved: {save.error?.message}
                 </ErrorLine>
               </Show>
               <Show when={viewing.isError}>
                 <ErrorLine class={styles.failure}>
-                  The log file could not be opened: {viewing.error?.message}
+                  The log file couldn't be opened: {viewing.error?.message}
                 </ErrorLine>
               </Show>
             </div>

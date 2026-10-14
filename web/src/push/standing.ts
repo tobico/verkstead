@@ -61,12 +61,12 @@ export function said(standing: Standing): string | null {
     // tailnet the second is what `tailscale serve` is for.
     case "unavailable":
       return (
-        "Notifications are not available here — this browser has no push " +
-        "support, or the page is not being served over https."
+        "Notifications aren't available here. This browser has no push " +
+        "support, or the page isn't served over https."
       );
     case "blocked":
       return (
-        "Notifications are blocked for this device. This browser will not ask " +
+        "Notifications are blocked for this device. This browser won't ask " +
         "again, so allow them in its settings for this site."
       );
     // Still looking says nothing rather than saying so: the switch is disabled

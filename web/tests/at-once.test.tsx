@@ -290,7 +290,7 @@ describe("the card", () => {
     );
     mountCard();
 
-    await waitFor(() => screen.getByText(/Could not read the settings/));
+    await waitFor(() => screen.getByText(/The settings couldn't be read/));
   });
 });
 
@@ -355,7 +355,7 @@ describe("the limit as the pane draws it", () => {
     theSettings(TOLD);
     mountPane();
 
-    await waitFor(() => screen.getByText(/waiting on an answer from you/));
+    await waitFor(() => screen.getByText(/even one waiting on you/));
   });
 
   /// And what the server's limit is measured against, beside it: a server
@@ -387,7 +387,7 @@ describe("the limit as the pane draws it", () => {
     );
     mountPane();
 
-    await waitFor(() => screen.getByText(/Could not read the settings/));
+    await waitFor(() => screen.getByText(/The settings couldn't be read/));
   });
 });
 
@@ -486,7 +486,7 @@ describe("changing the limits", () => {
 
     fireEvent.input(await theField(), { target: { value: "0" } });
 
-    await waitFor(() => screen.getByText(/A whole number of stages/));
+    await waitFor(() => screen.getByText(/isn't a whole number of stages/));
 
     fireEvent.click(theSave());
 
@@ -502,7 +502,7 @@ describe("changing the limits", () => {
 
     fireEvent.input(await theServerField(), { target: { value: "0" } });
 
-    await waitFor(() => screen.getByText(/A whole number of conversations/));
+    await waitFor(() => screen.getByText(/isn't a whole number of conversations/));
 
     fireEvent.click(theServerSave());
 
@@ -518,7 +518,7 @@ describe("changing the limits", () => {
 
     fireEvent.input(await theServerField(), { target: { value: "0" } });
 
-    await waitFor(() => screen.getByText(/A whole number of conversations/));
+    await waitFor(() => screen.getByText(/isn't a whole number of conversations/));
 
     fireEvent.click(theSave());
 
@@ -537,7 +537,7 @@ describe("changing the limits", () => {
     for (const typed of ["lots", "2.5", "-1"]) {
       fireEvent.input(await theField(), { target: { value: typed } });
 
-      await waitFor(() => screen.getByText(/A whole number of stages/));
+      await waitFor(() => screen.getByText(/isn't a whole number of stages/));
 
       fireEvent.click(theSave());
 
@@ -558,7 +558,7 @@ describe("changing the limits", () => {
     fireEvent.input(await theField(), { target: { value: "2" } });
     fireEvent.click(theSave());
 
-    await waitFor(() => screen.getByText(/could not be saved/));
+    await waitFor(() => screen.getByText(/couldn't be saved/));
     expect(saved(fetching)).toBe(true);
   });
 });

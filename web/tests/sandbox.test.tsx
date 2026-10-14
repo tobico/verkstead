@@ -374,7 +374,7 @@ describe("the card", () => {
     );
     mountCard();
 
-    await waitFor(() => screen.getByText(/Could not read the settings/));
+    await waitFor(() => screen.getByText(/The settings couldn't be read/));
   });
 });
 
@@ -395,7 +395,7 @@ describe("the pane", () => {
     ).toEqual(["Sandbox"]);
     expect(
       [...container.querySelectorAll("h3")].map((part) => part.textContent),
-    ).toEqual(["Build caches", "Sandbox binds"]);
+    ).toEqual(["Build Caches", "Sandbox Binds"]);
   });
 
   /// The way back is to the settings, which is the pane this one was entered

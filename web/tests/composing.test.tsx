@@ -501,8 +501,8 @@ function offering(label: string, value: string): Promise<HTMLSelectElement> {
 
 /// What the Create repo card's two fields are labelled, which is how they are
 /// found — on this device and on a member both, it being the one card.
-const WHERE = "Where it goes";
-const CALLED = "What it is called";
+const WHERE = "Parent directory";
+const CALLED = "Name";
 
 /// And what the Open repo card's one field is labelled.
 const PATH = "Absolute path of a git repository";
@@ -4084,7 +4084,7 @@ describe("making a repo from the Repo dropdown", () => {
 
     // And the one press out lands it: the repository is registered whatever
     // GitHub said, so the draft goes on it the way a clean create's does.
-    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
 
     await waitFor(() => expect(stored().repo).toBe(MADE.id));
     await waitFor(() =>

@@ -218,13 +218,13 @@ describe("the pane", () => {
   /// The pane's head is the Sandbox's, and the build caches stand beside these
   /// under theirs, so the part says what these are under one heading of its
   /// own — and only the one: the head of the pane is not this part's to draw.
-  it("heads the part Sandbox binds, and draws no pane head of its own", async () => {
+  it("heads the part Sandbox Binds, and draws no pane head of its own", async () => {
     theSettings(TOLD);
     const { container } = mountPane();
 
     const binds = await list(container);
 
-    expect(binds.querySelector("h3")!.textContent).toBe("Sandbox binds");
+    expect(binds.querySelector("h3")!.textContent).toBe("Sandbox Binds");
     expect(binds.querySelectorAll("h3")).toHaveLength(1);
     expect(binds.querySelector("h1")).toBeNull();
     expect(binds.querySelector("h2")).toBeNull();
@@ -305,7 +305,7 @@ describe("the pane", () => {
 
     const binds = await list(container);
 
-    await waitFor(() => screen.getByText("No paths are configured yet."));
+    await waitFor(() => screen.getByText("No paths are bound yet. Add one below."));
     expect(rows(binds)).toHaveLength(0);
     expect(container.querySelector(`.${styles.warning}`)).toBeNull();
   });
@@ -319,7 +319,7 @@ describe("the pane", () => {
 
     await waitFor(() =>
       screen.getByText(
-        "Configures additional paths which are accessible from within the sandbox.",
+        "These paths are bound into every session's sandbox.",
       ),
     );
     expect(screen.queryByText(/Each entry widens what a session/)).toBeNull();
@@ -333,7 +333,7 @@ describe("the pane", () => {
     );
     mountPane();
 
-    await waitFor(() => screen.getByText(/Could not read the settings/));
+    await waitFor(() => screen.getByText(/The settings couldn't be read/));
   });
 });
 
@@ -434,7 +434,7 @@ describe("adding a row", () => {
     fireEvent.input(field, { target: { value: "/var/cache/npm" } });
     fireEvent.click(screen.getByRole("button", { name: "Add" }));
 
-    await waitFor(() => screen.getByText(/could not be saved/));
+    await waitFor(() => screen.getByText(/couldn't be saved/));
   });
 });
 

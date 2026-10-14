@@ -47,11 +47,12 @@
 //! off — see [`Nested`]. Greyed rather than taken away, because a field that
 //! vanished would say the setting had, and it has not.
 //!
-//! **Nothing here explains itself.** What the trim takes and what the delete
-//! takes are said in `CONTEXT.md`, under **Trimmed** and **Deleted**; what is on
-//! the pane is the two labels and the two durations. The line about the delete
-//! landing first stays, because it is a reading of the numbers in the boxes
-//! rather than an explanation of what a control is for.
+//! **Each box says what goes, and no more.** What the trim takes and what the
+//! delete takes are said in full in `CONTEXT.md`, under **Trimmed** and
+//! **Deleted**; what is on the pane is the two labels, a line under each naming
+//! what it removes and what it leaves, and the two durations. The line about the
+//! delete landing first stays, because it is a reading of the numbers in the
+//! boxes rather than an explanation of what a control is for.
 
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { Match, Show, Switch as Choose, createSignal, type JSX } from "solid-js";
@@ -67,7 +68,7 @@ import type {
   SettingsView,
 } from "../api/types";
 import { useReading } from "../freshness";
-import { Empty, ErrorLine } from "../notices";
+import { Empty, ErrorLine, Note } from "../notices";
 import { PaneHead } from "../workbench/PaneHead";
 import {
   heldAtOnce,
@@ -133,11 +134,11 @@ export function CleanupCard(props: {
   return (
     <Choose>
       <Match when={settings.isPending}>
-        <Empty>Loading…</Empty>
+        <Empty>Reading the settings…</Empty>
       </Match>
       <Match when={settings.isError}>
         <ErrorLine>
-          Could not read the settings: {settings.error?.message}
+          The settings couldn't be read: {settings.error?.message}
         </ErrorLine>
       </Match>
       <Match when={settings.data?.cleanup}>
@@ -287,11 +288,11 @@ export function CleanupPane(props: {
 
       <Choose>
         <Match when={settings.isPending}>
-          <Empty>Loading…</Empty>
+          <Empty>Reading the settings…</Empty>
         </Match>
         <Match when={settings.isError}>
           <ErrorLine>
-            Could not read the settings: {settings.error?.message}
+            The settings couldn't be read: {settings.error?.message}
           </ErrorLine>
         </Match>
         <Match when={cleanup()}>
@@ -304,6 +305,10 @@ export function CleanupPane(props: {
                   disabled={save.isPending}
                   flip={(enabled) => flip("trim", enabled)}
                 />
+                <Note>
+                  Their agent output and transcripts are removed. Their
+                  timelines stay.
+                </Note>
 
                 <Nested on={set().trim.enabled}>
                   <form class={styles.timing} onSubmit={commit}>
@@ -334,11 +339,15 @@ export function CleanupPane(props: {
 
               <section class={styles.step}>
                 <Check
-                  label="Delete archived conversations for good"
+                  label="Delete archived conversations"
                   on={set().delete.enabled}
                   disabled={save.isPending}
                   flip={(enabled) => flip("delete", enabled)}
                 />
+                <Note>
+                  Their timelines are removed from Verkstead for good. Their
+                  branches stay.
+                </Note>
 
                 <Nested on={set().delete.enabled}>
                   <form class={styles.timing} onSubmit={commit}>
@@ -369,7 +378,7 @@ export function CleanupPane(props: {
 
               <Show when={save.isError}>
                 <ErrorLine class={styles.failure}>
-                  The settings could not be saved: {save.error?.message}
+                  The settings couldn't be saved: {save.error?.message}
                 </ErrorLine>
               </Show>
             </div>

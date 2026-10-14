@@ -459,7 +459,7 @@ describe("the tray", () => {
   });
 });
 
-describe("Launch on Startup", () => {
+describe("Launch on startup", () => {
   /// Read from the platform's own registration rather than out of the app's
   /// settings file (Set 846 Q9a) — which is why there is a reading of its own
   /// behind this box at all.
@@ -467,7 +467,7 @@ describe("Launch on Startup", () => {
     const asked = standingIn(DEFAULTS, "linux", false, { possible: true, on: false });
     mountPane();
 
-    const box = await screen.findByLabelText<HTMLInputElement>("Launch on Startup");
+    const box = await screen.findByLabelText<HTMLInputElement>("Launch on startup");
     expect(asked.startup).toHaveBeenCalled();
     expect(box.checked).toBe(false);
 
@@ -483,7 +483,7 @@ describe("Launch on Startup", () => {
     standingIn(DEFAULTS, "linux", false, { possible: true, on: true });
     mountPane();
 
-    const box = await screen.findByLabelText<HTMLInputElement>("Launch on Startup");
+    const box = await screen.findByLabelText<HTMLInputElement>("Launch on startup");
     expect(box.checked).toBe(true);
   });
 
@@ -494,7 +494,7 @@ describe("Launch on Startup", () => {
     const asked = standingIn();
     mountPane();
 
-    fireEvent.click(await screen.findByLabelText("Launch on Startup"));
+    fireEvent.click(await screen.findByLabelText("Launch on startup"));
 
     await waitFor(() => expect(asked.register).toHaveBeenCalled());
     expect(asked.set).not.toHaveBeenCalled();
@@ -505,11 +505,11 @@ describe("Launch on Startup", () => {
   /// makes. A box that ticked and did nothing would be the worse answer: what it
   /// promises is a Verkstead that comes up at the next login.
   it("is greyed with its note where there is nowhere to keep one", async () => {
-    const why = "Launch on Startup needs an installed Verkstead.";
+    const why = "Launch on startup needs an installed Verkstead.";
     const asked = standingIn(DEFAULTS, "linux", false, { possible: false, on: false, why });
     const { container } = mountPane();
 
-    const box = await screen.findByLabelText<HTMLInputElement>("Launch on Startup");
+    const box = await screen.findByLabelText<HTMLInputElement>("Launch on startup");
     expect(box.disabled).toBe(true);
     screen.getByText(why);
 
@@ -525,7 +525,7 @@ describe("Launch on Startup", () => {
     standingIn();
     const { container } = mountPane();
 
-    await screen.findByLabelText("Launch on Startup");
+    await screen.findByLabelText("Launch on startup");
     expect(container.querySelector(`.${styles.why}`)).toBeNull();
   });
 
@@ -536,7 +536,7 @@ describe("Launch on Startup", () => {
     standingIn(DEFAULTS, "linux", true, { possible: true, on: false });
     mountPane();
 
-    const box = await screen.findByLabelText<HTMLInputElement>("Launch on Startup");
+    const box = await screen.findByLabelText<HTMLInputElement>("Launch on startup");
     fireEvent.click(box);
 
     await screen.findByText("the entry could not be written");
@@ -553,7 +553,7 @@ describe("Launch on Startup", () => {
     const queries = client();
 
     const first = mountPane(queries);
-    await screen.findByLabelText("Launch on Startup");
+    await screen.findByLabelText("Launch on startup");
     expect(asked.startup).toHaveBeenCalledTimes(1);
     first.unmount();
 
@@ -587,7 +587,7 @@ describe("Launch on Startup", () => {
       standingIn(DEFAULTS, platform);
       const { unmount } = mountPane();
 
-      await screen.findByLabelText("Launch on Startup");
+      await screen.findByLabelText("Launch on startup");
       unmount();
       vi.unstubAllGlobals();
     }
@@ -600,19 +600,19 @@ describe("Launch on Startup", () => {
     standingIn({ ...DEFAULTS, whenClosed: "quit", trayIcon: false });
     mountPane();
 
-    const box = await screen.findByLabelText<HTMLInputElement>("Launch on Startup");
+    const box = await screen.findByLabelText<HTMLInputElement>("Launch on startup");
     expect(box.disabled).toBe(false);
   });
 });
 
-describe("View Logs", () => {
+describe("View logs", () => {
   /// The tray item's own act, reached over the bridge: one action reached two
   /// ways rather than two that agree.
   it("asks the app to open this run's log file", async () => {
     const asked = standingIn();
     mountPane();
 
-    fireEvent.click(await screen.findByText("View Logs"));
+    fireEvent.click(await screen.findByText("View logs"));
 
     await waitFor(() => expect(asked.logs).toHaveBeenCalled());
   });
@@ -623,7 +623,7 @@ describe("View Logs", () => {
     standingIn();
     mountPane();
 
-    const press = await screen.findByText("View Logs");
+    const press = await screen.findByText("View logs");
 
     expect(press.parentElement!.querySelector("p")).toBeNull();
     expect(screen.queryByText(/log file/)).toBeNull();
@@ -637,7 +637,7 @@ describe("View Logs", () => {
     const asked = standingIn({ ...DEFAULTS, whenClosed: "quit", trayIcon: false });
     mountPane();
 
-    fireEvent.click(await screen.findByText("View Logs"));
+    fireEvent.click(await screen.findByText("View logs"));
 
     await waitFor(() => expect(asked.logs).toHaveBeenCalled());
   });
@@ -648,7 +648,7 @@ describe("View Logs", () => {
     const asked = standingIn(DEFAULTS, "darwin");
     mountPane();
 
-    fireEvent.click(await screen.findByText("View Logs"));
+    fireEvent.click(await screen.findByText("View logs"));
 
     await waitFor(() => expect(asked.logs).toHaveBeenCalled());
   });

@@ -220,7 +220,7 @@ async function opened(label = "Rust"): Promise<HTMLElement> {
 
 /// And the size field in an open panel, by the language it belongs to.
 function theSize(name = RUST): HTMLInputElement {
-  return screen.getByLabelText(/How large/, {
+  return screen.getByLabelText(/Store size limit/, {
     selector: `#language-size-${name}`,
   }) as HTMLInputElement;
 }
@@ -263,12 +263,12 @@ const GB = 2 ** 30;
 describe("the languages as the pane draws them", () => {
   /// The part says what it is under a heading of its own, because the pane's
   /// head is the Sandbox's and the binds stand beside it under theirs.
-  it("heads the part Build caches", async () => {
+  it("heads the part Build Caches", async () => {
     theSettings(TOLD);
     const { container } = mountPane();
 
     await waitFor(() => expect(theCheck().checked).toBe(true));
-    expect(container.querySelector("h3")?.textContent).toBe("Build caches");
+    expect(container.querySelector("h3")?.textContent).toBe("Build Caches");
     expect(container.querySelector("h1")).toBeNull();
   });
 
@@ -367,7 +367,7 @@ describe("the languages as the pane draws them", () => {
 
     await waitFor(() => expect(theCheck().checked).toBe(true));
 
-    expect(screen.queryByText(/No sccache is installed/)).toBeNull();
+    expect(screen.queryByText(/The server can't see an sccache/)).toBeNull();
   });
 });
 
@@ -468,7 +468,7 @@ describe("the link beside each language", () => {
     );
 
     const panel = await opened("C/C++");
-    expect(panel.textContent).toContain("Compiles through the Compile Server");
+    expect(panel.textContent).toContain("Compiles through the compile server");
     expect(panel.querySelector("input")).toBeNull();
     expect(screen.queryByRole("button", { name: "Clear" })).toBeNull();
   });
@@ -495,7 +495,7 @@ describe("the size in a language's panel", () => {
 
     const panel = await opened();
 
-    expect(panel.textContent).toMatch(/No sccache is installed/);
+    expect(panel.textContent).toMatch(/The server can't see an sccache/);
     expect(theSize().matches(":disabled")).toBe(false);
   });
 
@@ -718,7 +718,7 @@ describe("the rest of a language's panel", () => {
 
       const node = await opened("Node");
       expect(node.textContent).toContain(
-        "Not trimmed since the server started: trimming waits until no " +
+        "Not trimmed since the server started. Trimming waits until no " +
           "session or terminal is running.",
       );
     } finally {
@@ -733,11 +733,11 @@ describe("the rest of a language's panel", () => {
     mountPane();
 
     const rust = await opened();
-    expect(rust.textContent).toMatch(/No sccache is installed/);
+    expect(rust.textContent).toMatch(/The server can't see an sccache/);
     fireEvent.keyDown(document, { key: "Escape" });
 
     const cpp = await opened("C/C++");
-    expect(cpp.textContent).toMatch(/No sccache is installed/);
+    expect(cpp.textContent).toMatch(/The server can't see an sccache/);
     fireEvent.keyDown(document, { key: "Escape" });
 
     const go = await opened("Go");
@@ -750,7 +750,7 @@ describe("the rest of a language's panel", () => {
     mountPane();
 
     const cpp = await opened("C/C++");
-    expect(cpp.textContent).not.toMatch(/No sccache is installed/);
+    expect(cpp.textContent).not.toMatch(/The server can't see an sccache/);
   });
 
   it("says nothing about sccache where the server found one", async () => {
@@ -758,7 +758,7 @@ describe("the rest of a language's panel", () => {
     mountPane();
 
     const rust = await opened();
-    expect(rust.textContent).not.toMatch(/No sccache is installed/);
+    expect(rust.textContent).not.toMatch(/The server can't see an sccache/);
   });
 });
 
@@ -843,7 +843,7 @@ describe("clearing a store", () => {
     const panel = await opened("Go");
     expect(theClear(panel).disabled).toBe(true);
     expect(theClear(panel).parentElement!.textContent).toContain(
-      "Clear waits until no session or terminal is running: 2 sessions and " +
+      "Clear waits until no session or terminal is running. 2 sessions and " +
         "1 terminal are running.",
     );
   });
@@ -1185,6 +1185,6 @@ describe("changing the languages", () => {
     await waitFor(() => expect(theCheck().checked).toBe(true));
     fireEvent.click(theCheck());
 
-    await waitFor(() => screen.getByText(/could not be saved/));
+    await waitFor(() => screen.getByText(/couldn't be saved/));
   });
 });

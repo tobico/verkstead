@@ -124,7 +124,7 @@ describe("the notifications switch", () => {
     // manager, which is the browser this is about.
     serving();
 
-    const { flip } = await stalled("not available here");
+    const { flip } = await stalled("aren't available here");
 
     expect(flip.disabled).toBe(true);
     expect(flip.checked).toBe(false);
@@ -134,7 +134,7 @@ describe("the notifications switch", () => {
     pushing({ permission: "granted", secure: false });
     serving();
 
-    const { flip } = await stalled("not available here");
+    const { flip } = await stalled("aren't available here");
 
     expect(flip.disabled).toBe(true);
   });
@@ -215,7 +215,7 @@ describe("the notifications switch", () => {
     const { flip, state } = await control();
     flip.click();
 
-    await waitFor(() => expect(state()).toContain("The server did not take it"));
+    await waitFor(() => expect(state()).toContain("The server didn't take it"));
     expect(state()).toContain("the subscription could not be stored");
   });
 

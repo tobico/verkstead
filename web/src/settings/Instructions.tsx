@@ -80,11 +80,11 @@ export function InstructionsCard(props: {
   return (
     <Choose>
       <Match when={settings.isPending}>
-        <Empty>Loading…</Empty>
+        <Empty>Reading the settings…</Empty>
       </Match>
       <Match when={settings.isError}>
         <ErrorLine>
-          Could not read the settings: {settings.error?.message}
+          The settings couldn't be read: {settings.error?.message}
         </ErrorLine>
       </Match>
       <Match when={settings.data}>
@@ -190,11 +190,11 @@ export function InstructionsPane(props: {
 
       <Choose>
         <Match when={settings.isPending}>
-          <Empty>Loading…</Empty>
+          <Empty>Reading the settings…</Empty>
         </Match>
         <Match when={settings.isError}>
           <ErrorLine>
-            Could not read the settings: {settings.error?.message}
+            The settings couldn't be read: {settings.error?.message}
           </ErrorLine>
         </Match>
         <Match when={told()}>
@@ -202,8 +202,7 @@ export function InstructionsPane(props: {
             {/* What the section is for, in the one line a pane on this page
                 says its own in. */}
             <Note class={styles.lead}>
-              Additional instructions for the agent to include in every initial
-              prompt.
+              This text is added to the first prompt of every session.
             </Note>
 
             {/* A copy of what has been typed gives the field its height — see
@@ -227,7 +226,7 @@ export function InstructionsPane(props: {
 
             <Show when={save.isError}>
               <ErrorLine class={styles.failure}>
-                The settings could not be saved: {save.error?.message}
+                The settings couldn't be saved: {save.error?.message}
               </ErrorLine>
             </Show>
           </form>

@@ -305,8 +305,8 @@ describe("the pane", () => {
     theSettings(UNSET);
     mountPane();
 
-    await waitFor(() => screen.getByText("No servers are declared."));
-    expect(screen.queryByText(/Could not read the settings/)).toBeNull();
+    await waitFor(() => screen.getByText(/No servers are declared\./));
+    expect(screen.queryByText(/The settings couldn't be read/)).toBeNull();
   });
 
   /// What the section is for, said where somebody is about to type into it —
@@ -316,10 +316,13 @@ describe("the pane", () => {
     mountPane();
 
     const note = await waitFor(() =>
-      screen.getByText(/Declared here for the whole installation/),
+      screen.getByText(/Declared for the whole installation/),
     );
     expect(note.textContent).toContain("over HTTP");
-    expect(note.textContent).toContain("cannot be changed afterwards");
+
+    // And the rules a name follows, folded under it.
+    expect(screen.getByText("Names and header values").tagName).toBe("SUMMARY");
+    expect(screen.getByText(/can't be changed afterwards/)).toBeTruthy();
   });
 
   /// Adding one is the only moment a name is chosen, so it is the one row with a
@@ -328,7 +331,7 @@ describe("the pane", () => {
     theSettings(UNSET);
     mountPane();
 
-    await waitFor(() => screen.getByText("No servers are declared."));
+    await waitFor(() => screen.getByText(/No servers are declared\./));
     fireEvent.click(screen.getByRole("button", { name: "Add a server" }));
 
     await waitFor(() => expect(nameBox(0)).not.toBeNull());
@@ -345,7 +348,7 @@ describe("the pane", () => {
     const fetching = theSettings(UNSET, json(holding(UNSET, [declared])));
     mountPane();
 
-    await waitFor(() => screen.getByText("No servers are declared."));
+    await waitFor(() => screen.getByText(/No servers are declared\./));
     fireEvent.click(screen.getByRole("button", { name: "Add a server" }));
     await waitFor(() => expect(nameBox(0)).not.toBeNull());
 
@@ -486,7 +489,7 @@ describe("the pane", () => {
     );
     mountPane();
 
-    await waitFor(() => screen.getByText("No servers are declared."));
+    await waitFor(() => screen.getByText(/No servers are declared\./));
     fireEvent.click(screen.getByRole("button", { name: "Add a server" }));
     await waitFor(() => expect(nameBox(0)).not.toBeNull());
 
@@ -519,7 +522,7 @@ describe("the pane", () => {
     );
     mountPane();
 
-    await waitFor(() => screen.getByText("No servers are declared."));
+    await waitFor(() => screen.getByText(/No servers are declared\./));
     fireEvent.click(screen.getByRole("button", { name: "Add a server" }));
     await waitFor(() => expect(nameBox(0)).not.toBeNull());
 
@@ -545,7 +548,7 @@ describe("the pane", () => {
     );
     mountPane();
 
-    await waitFor(() => screen.getByText("No servers are declared."));
+    await waitFor(() => screen.getByText(/No servers are declared\./));
     fireEvent.click(screen.getByRole("button", { name: "Add a server" }));
     await waitFor(() => expect(nameBox(0)).not.toBeNull());
 
@@ -576,7 +579,7 @@ describe("the pane", () => {
     const fetching = theSettings(UNSET, json(holding(UNSET, [declared])));
     mountPane();
 
-    await waitFor(() => screen.getByText("No servers are declared."));
+    await waitFor(() => screen.getByText(/No servers are declared\./));
     fireEvent.click(screen.getByRole("button", { name: "Add a server" }));
     await waitFor(() => expect(nameBox(0)).not.toBeNull());
 
@@ -601,7 +604,7 @@ describe("the pane", () => {
     fireEvent.input(urlBox(0), { target: { value: "https://moved.example" } });
     save();
 
-    await waitFor(() => screen.getByText(/The settings could not be saved/));
+    await waitFor(() => screen.getByText(/The settings couldn't be saved/));
     expect(urlBox(0).value).toBe("https://moved.example");
   });
 
@@ -622,10 +625,10 @@ describe("the pane", () => {
     // And the one beside it, which the declaration names with nothing kept to
     // send in it.
     expect(headerBox(0, 1).value).toBe(DECLARED.headers[1]!.name);
-    expect(valueBox(0, 1).placeholder).toContain("Nothing is sent");
+    expect(valueBox(0, 1).placeholder).toContain("Bearer");
 
     // A declaration with no headers says so rather than drawing nothing.
-    expect(screen.getByText(/None, so requests to it carry nothing/)).toBeTruthy();
+    expect(screen.getByText(/None\. Requests to it carry no headers\./)).toBeTruthy();
   });
 
   /// The three actions, in one save: a value typed is a `Set`, a box left alone
@@ -676,7 +679,7 @@ describe("the pane", () => {
 
     // And the row says what is about to happen to it, the press having no other
     // effect until the save goes out.
-    await waitFor(() => screen.getByText(/will be taken away when this is saved/));
+    await waitFor(() => screen.getByText(/is removed when this is saved/));
 
     save();
 
@@ -710,7 +713,7 @@ describe("the pane", () => {
     await waitFor(() => urlBox(0));
 
     fireEvent.click(screen.getByRole("button", { name: "Clear its value" }));
-    await waitFor(() => screen.getByText(/will be taken away/));
+    await waitFor(() => screen.getByText(/is removed when this is saved/));
 
     fireEvent.input(valueBox(0, 0), { target: { value: "Bearer sk-again" } });
     save();
@@ -772,7 +775,7 @@ describe("the pane", () => {
     fireEvent.input(headerBox(0, 0), { target: { value: "X-Api-Key" } });
 
     await waitFor(() =>
-      expect(valueBox(0, 0).placeholder).toContain("Nothing is sent"),
+      expect(valueBox(0, 0).placeholder).toContain("Bearer"),
     );
   });
 
@@ -782,12 +785,12 @@ describe("the pane", () => {
     theSettings(TOLD);
     mountPane();
 
-    const note = await waitFor(() =>
-      screen.getByText(/Declared here for the whole installation/),
+    const more = await waitFor(() =>
+      screen.getByText("Names and header values").closest("details")!,
     );
 
-    expect(note.textContent).toContain("never shown again");
-    expect(note.textContent).toContain("keeps what is there");
+    expect(more.textContent).toContain("never shown again");
+    expect(more.textContent).toContain("keeps what's there");
   });
 });
 
@@ -855,7 +858,7 @@ describe("what came of trying them", () => {
     save();
 
     const line = await waitFor(() =>
-      screen.getByText(/It is declared, but it was not reached/),
+      screen.getByText(/It's declared, but it couldn't be reached/),
     );
     expect(line.textContent).toContain("It did not answer within 5 seconds.");
 

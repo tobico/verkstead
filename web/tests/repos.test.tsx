@@ -318,7 +318,7 @@ describe("the pane it opens", () => {
     serving(whenever("/api/ui/repos", json([])));
     const { container } = mountPane();
 
-    await waitFor(() => screen.getByText("No repos are registered yet."));
+    await waitFor(() => screen.getByText(/No repos are registered yet\./));
     expect(container.querySelector(`.${styles.repo}`)).toBeNull();
   });
 
@@ -365,7 +365,7 @@ describe("removing a repo", () => {
       sheet.querySelector(`.${styles.confirmingTitle}`)!.textContent,
     ).toBe(`Remove ${FIRST.name}?`);
     expect(ways(sheet).map((way) => way.textContent)).toEqual([
-      "Keep it",
+      "Cancel",
       "Remove",
     ]);
 
@@ -454,7 +454,7 @@ describe("removing a repo", () => {
     await confirmed();
 
     await waitFor(() =>
-      screen.getByText(/A conversation that is still going is on it/),
+      screen.getByText(/A conversation that's still going is on it/),
     );
     expect(theRow(FIRST.name).querySelector(`.${styles.failure}`)).toBeTruthy();
     // And said about that repo alone: no other row carries it.
@@ -487,7 +487,7 @@ describe("removing a repo", () => {
     removePressed(FIRST.name);
     await confirmed();
 
-    await waitFor(() => screen.getByText(/could not be removed/));
+    await waitFor(() => screen.getByText(/couldn't be removed/));
     expect(theRow(FIRST.name).querySelector(`.${styles.failure}`)).toBeTruthy();
   });
 });
@@ -504,7 +504,7 @@ describe("the registration the dropdown draws", () => {
   /// *onto* a repository, so that answer lands on the one somebody named, which
   /// is `composing.test.tsx`'s.
   it.each([
-    ["NotARepository", /not a git repository/i],
+    ["NotARepository", /isn't a git repository/i],
     ["Missing", /nothing at that path/i],
     ["NotAbsolute", /starting with a slash/i],
     ["NoDefaultBranch", /no branch to call its default/i],
@@ -532,13 +532,13 @@ describe("the registration the dropdown draws", () => {
     mountOpen();
 
     register("/elsewhere/notes");
-    await waitFor(() => screen.getByText(/not a git repository/i));
+    await waitFor(() => screen.getByText(/isn't a git repository/i));
 
     fireEvent.input(screen.getByLabelText(/absolute path/i), {
       target: { value: "/srv/repos/verkstead" },
     });
 
-    expect(screen.queryByText(/not a git repository/i)).toBeNull();
+    expect(screen.queryByText(/isn't a git repository/i)).toBeNull();
   });
 
   /// A server that could not answer at all, which is the one thing here that is
@@ -675,7 +675,7 @@ describe("browsing for one", () => {
     await browsedToTheRepo();
     fireEvent.click(screen.getByRole("button", { name: "Open" }));
 
-    await waitFor(() => screen.getByText(/not a git repository/i));
+    await waitFor(() => screen.getByText(/isn't a git repository/i));
     expect(held(FIELD)).toBe("/home/ada/src/verkstead");
   });
 });

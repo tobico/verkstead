@@ -161,6 +161,12 @@
   color: var(--ink-soft);
 }
 
+/* What a field's path becomes in a session, said between its label and the
+   field: the label names the field and no more. */
+.form .fieldNote {
+  margin: -0.15rem 0 0.4rem;
+}
+
 .form label code {
   font-size: 0.9em;
 }
