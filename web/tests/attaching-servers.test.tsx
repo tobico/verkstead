@@ -237,7 +237,7 @@ describe("adding a server from the Attach menu", () => {
     const menu = await openMenu(pane);
     fireEvent.click(within(menu).getByRole("menuitem", { name: "Add a server…" }));
 
-    return waitFor(() => screen.getByRole("dialog", { name: "Add an MCP server" }));
+    return waitFor(() => screen.getByRole("dialog", { name: "Add an MCP Server" }));
   }
 
   /// The press is a save of the whole list — every declaration as it stands,
@@ -316,7 +316,7 @@ describe("adding a server from the Attach menu", () => {
 
     await waitFor(() =>
       expect(
-        screen.queryByRole("dialog", { name: "Add an MCP server" }),
+        screen.queryByRole("dialog", { name: "Add an MCP Server" }),
       ).toBeNull(),
     );
   });
@@ -421,7 +421,7 @@ describe("adding a server from the Attach menu", () => {
     );
     await waitFor(() =>
       expect(
-        screen.queryByRole("dialog", { name: "Add an MCP server" }),
+        screen.queryByRole("dialog", { name: "Add an MCP Server" }),
       ).toBeNull(),
     );
   });
@@ -507,7 +507,7 @@ describe("adding a server from the Attach menu", () => {
 
     await waitFor(() =>
       expect(
-        screen.queryByRole("dialog", { name: "Add an MCP server" }),
+        screen.queryByRole("dialog", { name: "Add an MCP Server" }),
       ).toBeNull(),
     );
     expect(writes(fetching, "/api/ui/settings")).toHaveLength(0);

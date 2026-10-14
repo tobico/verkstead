@@ -5294,7 +5294,7 @@ describe("the MCP servers a compose page holds", () => {
     );
 
     const dialog = await waitFor(() =>
-      screen.getByRole("dialog", { name: "Add an MCP server" }),
+      screen.getByRole("dialog", { name: "Add an MCP Server" }),
     );
     fireEvent.input(within(dialog).getByLabelText("Name"), {
       target: { value: "wiki" },

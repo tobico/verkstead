@@ -14900,7 +14900,7 @@ describe("the pinned task list", () => {
 
     const head = await drawn(container, `.${timeline.pinned} .${timeline.taskList} .${timeline.eventHead}`);
 
-    expect(head.textContent).toContain("Task list");
+    expect(head.textContent).toContain("Task List");
     expect(head.querySelector(`.${timeline.feature}`)!.textContent).toBe(BACKLOG.feature);
     expect(head.querySelector(`.${timeline.progress}`)!.textContent).toBe("2 of 4 done");
   });
@@ -17573,7 +17573,7 @@ describe("the pinned pull request", () => {
 
     const opened = await drawn(container, `.${timeline.pinned} .${timeline.pullRequest}`);
 
-    expect(opened.textContent).toContain("Pull request");
+    expect(opened.textContent).toContain("Pull Request");
     expect(opened.querySelector(`.${timeline.number}`)!.textContent).toBe(
       `#${OPENED.number}`,
     );

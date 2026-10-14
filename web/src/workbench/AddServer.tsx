@@ -207,7 +207,7 @@ function AddServer(props: {
 
   return (
     <Modal class={styles.adding!} open close={props.close} labelledBy={id}>
-      <h3 id={id}>Add an MCP server</h3>
+      <h3 id={id}>Add an MCP Server</h3>
 
       <form class={styles.form} onSubmit={commit}>
         <Note class={styles.note}>

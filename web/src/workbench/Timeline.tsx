@@ -1393,7 +1393,7 @@ function PullRequest(props: {
       open={props.open}
     >
       <div class={styles.eventHead}>
-        <h2>Pull request</h2>
+        <h2>Pull Request</h2>
         <span class={styles.number}>#{props.opened.number}</span>
         <Show when={props.opened.repo}>
           {(repo) => <span class={styles.repo}>{repo()}</span>}
@@ -1574,7 +1574,7 @@ function TaskList(props: {
       open={props.open}
     >
       <div class={styles.eventHead}>
-        <h2>Task list</h2>
+        <h2>Task List</h2>
         <Show when={props.tasks.feature !== ""}>
           <span class={styles.feature}>{props.tasks.feature}</span>
         </Show>
