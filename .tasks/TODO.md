@@ -11,7 +11,7 @@ committed beside this plan.
 
 ## Tasks
 
-- [ ] 01: A memo on the record — [details](01-a-memo-on-the-record.md)
+- [x] 01: A memo on the record — [details](01-a-memo-on-the-record.md)
 - [ ] 02: `verkstead memo` leaves one — [details](02-verkstead-memo-leaves-one.md)
 - [ ] 03: Shown to every later session — [details](03-shown-to-every-later-session.md)
 - [ ] 04: Retiring — [details](04-retiring.md)

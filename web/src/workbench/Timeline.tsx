@@ -122,6 +122,7 @@ import type {
   HandoffEvent,
   Lifecycle,
   ManualTaskEvent,
+  MemoEvent,
   MovedEvent,
   NoticeEvent,
   PendingSteerView,
@@ -338,7 +339,7 @@ function Clamped(props: {
 /// list whose whole self is in the details pane, the Brief while it is being
 /// drafted included — what a press on that one opens is the composer.
 function Openable(props: {
-  /// The module's name for which of the three documents this card is. The card
+  /// The module's name for which of the documents this card is. The card
   /// is told rather than asking, because what a Brief is and what a Handoff is
   /// is the caller's to know.
   kind: string;
@@ -733,6 +734,18 @@ export function Timeline(props: {
                       selected={props.selected === handoff().id}
                       open={() => {
                         props.select(handoff().id);
+                        props.details();
+                      }}
+                    />
+                  )}
+                </Match>
+                <Match when={"Memo" in event && event.Memo}>
+                  {(memo) => (
+                    <Memo
+                      memo={memo()}
+                      selected={props.selected === memo().id}
+                      open={() => {
+                        props.select(memo().id);
                         props.details();
                       }}
                     />
@@ -1806,6 +1819,43 @@ function Handoff(props: {
         <h2>Handoff</h2>
       </div>
       <Clamped class={styles.handoffBody!} html={props.handoff.html} />
+    </Openable>
+  );
+}
+
+/// A Memo a building session left for the sessions after it.
+///
+/// The handoff's card, and for the handoff's reason: it is a document one agent
+/// wrote for the next, clamped here and whole in the details pane. The head
+/// numbers it by its Event id — which is what a session retires it by — with
+/// the words saying which session left it beside.
+///
+/// A retired one stays, dimmed, with who took it back and why under the head:
+/// it has left every later prompt, and the record says it was there.
+function Memo(props: {
+  memo: MemoEvent;
+  selected: boolean;
+  open: () => void;
+}): JSX.Element {
+  return (
+    <Openable
+      kind={`${styles.memo!}${props.memo.retired ? ` ${styles.retired!}` : ""}`}
+      selected={props.selected}
+      open={props.open}
+    >
+      <div class={styles.eventHead}>
+        <h2>Memo {props.memo.id}</h2>
+        <span class={styles.leftBy}>{props.memo.left_by}</span>
+      </div>
+      <Show when={props.memo.retired}>
+        {(retired) => (
+          <p class={styles.retiredBy}>
+            Retired by {retired().by}
+            <Show when={retired().reason}>{(reason) => <>: {reason()}</>}</Show>
+          </p>
+        )}
+      </Show>
+      <Clamped class={styles.memoBody!} html={props.memo.html} />
     </Openable>
   );
 }

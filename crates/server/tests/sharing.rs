@@ -214,6 +214,7 @@ fn kind(event: &TimelineEvent) -> &'static str {
         TimelineEvent::QuestionSet(_) => "QuestionSet",
         TimelineEvent::UnreadableSet(_) => "UnreadableSet",
         TimelineEvent::Handoff(_) => "Handoff",
+        TimelineEvent::Memo(_) => "Memo",
         TimelineEvent::Commit(_) => "Commit",
         TimelineEvent::Notice(_) => "Notice",
         TimelineEvent::ManualTask(_) => "ManualTask",
@@ -246,9 +247,22 @@ async fn everything(pool: &SqlitePool) -> i64 {
 
     // A session's output, which is the biggest thing on a Timeline and the
     // first thing a share leaves behind.
-    store::start_capture(pool, id, Some("session-1"), None)
+    let session = store::start_capture(pool, id, Some("session-1"), None)
         .await
         .unwrap();
+
+    // And what that session left for the ones after it, which is one agent
+    // talking to the next and no more a share's than the output beside it.
+    store::leave_memo(
+        pool,
+        id,
+        "The counter test flakes under parallelism.\n",
+        "the session that worked task 01",
+        session,
+    )
+    .await
+    .unwrap()
+    .unwrap();
 
     store::ask(
         pool,
@@ -372,6 +386,7 @@ async fn a_share_carries_what_was_asked_answered_and_built() {
         "AgentOutput",
         "QuestionSet",
         "Handoff",
+        "Memo",
         "Commit",
         "Notice",
         "PullRequest",
@@ -406,6 +421,7 @@ async fn a_share_carries_what_was_asked_answered_and_built() {
     for left in [
         "AgentOutput",
         "Handoff",
+        "Memo",
         "Notice",
         "PullRequest",
         "TaskList",

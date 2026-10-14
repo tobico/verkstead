@@ -239,6 +239,42 @@
         "sha": "e2b7c4d90a15f836b4e0c7a2d9f31846b5c0e7a4",
         "subject": "Merge branch 'main' into usage-limit-pause"
       }
+    },
+    {
+      "AgentOutput": {
+        "agent_type": null,
+        "at": "2026-08-03T09:07:11.000Z",
+        "id": 19,
+        "idle": false,
+        "latest": "",
+        "lines": 0,
+        "model": null,
+        "profile": null,
+        "running": false,
+        "turns": null
+      }
+    },
+    {
+      "Memo": {
+        "at": "2026-08-03T09:07:11.000Z",
+        "html": "<p>The sessions suite flakes under parallelism: run it with\n<code>--test-threads=4</code> before blaming the change.</p>\n",
+        "id": 20,
+        "left_by": "the session that worked task 02",
+        "retired": null
+      }
+    },
+    {
+      "Memo": {
+        "at": "2026-08-03T09:07:11.000Z",
+        "html": "<p>The limit reader lives in <code>crates/server/src/limits.rs</code>, not in the\nrelay the task file names.</p>\n",
+        "id": 21,
+        "left_by": "the session that worked task 02",
+        "retired": {
+          "at": "2026-08-03T09:07:11.000Z",
+          "by": "the session that worked task 03",
+          "reason": "moved back into the relay"
+        }
+      }
     }
   ],
   "transferred": null,

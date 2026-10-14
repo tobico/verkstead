@@ -13951,6 +13951,68 @@ describe("a grilling that has handed over", () => {
   });
 });
 
+/// The Memos the building session left, one standing and one a later session
+/// took back — the fixture's own pair.
+const MEMOS = BUILDING.timeline.flatMap((entry) => ("Memo" in entry ? [entry.Memo] : []));
+
+describe("a memo a session left", () => {
+  /// The details pane, and what it has drawn.
+  const details = () => screen.getByLabelText("Details");
+
+  const cards = async (container: HTMLElement) => {
+    await drawn(container, `.${timeline.timelineEvent} > .${timeline.memo}`);
+    return [...container.querySelectorAll(`.${timeline.timelineEvent} > .${timeline.memo}`)];
+  };
+
+  it("draws as a card numbered by its event, stamped with the session that left it", async () => {
+    expect(MEMOS.map((memo) => memo.retired === null)).toEqual([true, false]);
+
+    theBuilding();
+    const { container } = mount(`/conversations/${BUILDING.id}`);
+
+    const [standing] = await cards(container);
+
+    expect(standing!.querySelector("h2")?.textContent).toBe(`Memo ${MEMOS[0]!.id}`);
+    expect(standing!.querySelector(`.${timeline.leftBy}`)?.textContent).toBe(
+      "the session that worked task 02",
+    );
+    expect(standing!.querySelector(`.${timeline.clamp}.${timeline.memoBody}`)).toBeTruthy();
+    expect(standing!.classList.contains(timeline.retired!)).toBe(false);
+    expect(standing!.querySelector(`.${timeline.retiredBy}`)).toBeNull();
+  });
+
+  it("opens the whole memo in the details pane", async () => {
+    theBuilding();
+    const { container } = mount(`/conversations/${BUILDING.id}`);
+
+    const [standing] = await cards(container);
+
+    fireEvent.click(standing!);
+
+    // The page opened on the record's last Memo, which is the same pane: the
+    // heading changing is what says the press landed.
+    await waitFor(() =>
+      expect(details().querySelector("h1")!.textContent).toBe(`Memo ${MEMOS[0]!.id}`),
+    );
+
+    const opened = await drawn(details(), `.${documentPane.document}`);
+    expect(opened.innerHTML).toBe(MEMOS[0]!.html);
+    expect(details().querySelector(`.${timeline.clamp}`)).toBeNull();
+  });
+
+  it("draws a retired one as retired, with who took it back and why", async () => {
+    theBuilding();
+    const { container } = mount(`/conversations/${BUILDING.id}`);
+
+    const [, retired] = await cards(container);
+
+    expect(retired!.classList.contains(timeline.retired!)).toBe(true);
+    expect(retired!.querySelector(`.${timeline.retiredBy}`)?.textContent).toBe(
+      "Retired by the session that worked task 03: moved back into the relay",
+    );
+  });
+});
+
 describe("disagreeing with a proposal", () => {
   it("draws no chooser while the grilling is still running", async () => {
     // What a refused proposal leaves behind: the set is on the timeline and
@@ -19227,9 +19289,12 @@ describe("the documents on a timeline", () => {
 
     fireEvent.click(handoff);
 
+    // The record ends on a Memo, which is the same pane and what the page
+    // opened on — so what says the press landed is the heading changing.
+    await waitFor(() => expect(details().querySelector("h1")!.textContent).toBe("Handoff"));
+
     const opened = await drawn(details(), `.${documentPane.document}`);
 
-    expect(details().querySelector("h1")!.textContent).toBe("Handoff");
     expect(opened.innerHTML).toBe(HANDOFF.html);
     expect(details().querySelector(`.${timeline.clamp}`)).toBeNull();
   });

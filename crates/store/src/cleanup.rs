@@ -162,6 +162,8 @@ const CONVERSATION_KEYED: &[&str] = &[
     // And what each steer settled beside its Event, whose companion rows went
     // with the event-keyed ones above.
     "steers",
+    // And who left each Memo, and whether it has been taken back.
+    "memos",
     // What GitHub last said about the work.
     "pull_request_checks",
     "pull_request_merges",

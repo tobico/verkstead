@@ -114,6 +114,7 @@ import type {
   CommitEvent,
   ConversationView,
   HandoffEvent,
+  MemoEvent,
   NoticeEvent,
   SteerEvent,
   PullRequestEvent,
@@ -174,6 +175,7 @@ type Opened =
   | { opened: PullRequestEvent }
   | { brief: BriefEvent }
   | { handoff: HandoffEvent }
+  | { memo: MemoEvent }
   | { steer: SteerEvent }
   | { notice: NoticeEvent };
 
@@ -189,6 +191,7 @@ function which(
   | PullRequestEvent
   | BriefEvent
   | HandoffEvent
+  | MemoEvent
   | SteerEvent
   | NoticeEvent {
   if ("output" in open) {
@@ -205,6 +208,9 @@ function which(
   }
   if ("handoff" in open) {
     return open.handoff;
+  }
+  if ("memo" in open) {
+    return open.memo;
   }
   if ("steer" in open) {
     return open.steer;
@@ -236,6 +242,10 @@ function briefIn(open: Opened): BriefEvent | undefined {
 
 function handoffIn(open: Opened): HandoffEvent | undefined {
   return "handoff" in open ? open.handoff : undefined;
+}
+
+function memoIn(open: Opened): MemoEvent | undefined {
+  return "memo" in open ? open.memo : undefined;
 }
 
 function steerIn(open: Opened): SteerEvent | undefined {
@@ -923,13 +933,13 @@ function DetailsPane(props: {
   /// self to show. An id whose Event has gone leaves the pane empty, which is
   /// what it is when nothing is open at all.
   ///
-  /// Seven kinds have one: a session's output, whose full self is its
+  /// Eight kinds have one: a session's output, whose full self is its
   /// Capture; a Question Set, whose full self is the document it was asked
   /// as; a commit, whose full self is its diff; the pull request, whose full
   /// self is what is on it at GitHub right now; a steer, whose full self is the
-  /// form the human filled to make it; and the two documents — the Brief and
-  /// the handoff — whose full self is the markdown their card shows three lines
-  /// of. The kind travels with it, because it is what decides which pane is
+  /// form the human filled to make it; and the three documents — the Brief,
+  /// the handoff and a Memo — whose full self is the markdown their card shows
+  /// three lines of. The kind travels with it, because it is what decides which pane is
   /// drawn.
   ///
   /// A Brief still being drafted is here too, and nothing ever selects it: the
@@ -973,6 +983,9 @@ function DetailsPane(props: {
         }
         if ("Handoff" in entry) {
           return { handoff: entry.Handoff };
+        }
+        if ("Memo" in entry) {
+          return { memo: entry.Memo };
         }
         // Every one of them, whatever it carried: what a steer's pane draws is
         // the form the human filled rather than the document they wrote in it,
@@ -1139,6 +1152,18 @@ function DetailsPane(props: {
                       heading="Handoff"
                       html={handoff().html}
                       empty="The grilling wrote nothing down."
+                      back={props.back.go}
+                    />
+                  )}
+                </Match>
+                {/* A Memo is the handoff's pane, under the head its card
+                    carries. */}
+                <Match when={memoIn(open())}>
+                  {(memo) => (
+                    <Document
+                      heading={`Memo ${memo().id}`}
+                      html={memo().html}
+                      empty="The session wrote nothing down."
                       back={props.back.go}
                     />
                   )}

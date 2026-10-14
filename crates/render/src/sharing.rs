@@ -313,7 +313,7 @@ pub fn shared(
 /// The rule is a list rather than a judgement: what a share is for is showing
 /// what was asked, answered and built, and the kinds left out are the ones that
 /// are either nobody else's to read — a session's own output, the handoff
-/// between two of them — or Verkstead talking to itself.
+/// or a Memo between two of them — or Verkstead talking to itself.
 fn boards(event: &TimelineEvent) -> bool {
     match event {
         TimelineEvent::Brief(_)
@@ -327,6 +327,7 @@ fn boards(event: &TimelineEvent) -> bool {
         TimelineEvent::AgentOutput(_)
         | TimelineEvent::UnreadableSet(_)
         | TimelineEvent::Handoff(_)
+        | TimelineEvent::Memo(_)
         | TimelineEvent::Notice(_)
         | TimelineEvent::PullRequest(_)
         | TimelineEvent::TaskList(_)

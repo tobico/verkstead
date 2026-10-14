@@ -2372,6 +2372,20 @@ pub(crate) async fn conversation_view(
                     store::Event::Handoff(markdown) => {
                         verkstead_render::handoff_event(event.id, event.at, &markdown)
                     }
+                    // Rendered the way the handoff is, with who left it and
+                    // whether it has been taken back since.
+                    store::Event::Memo(markdown, memo) => verkstead_render::memo_event(
+                        event.id,
+                        event.at,
+                        &markdown,
+                        memo.left_by,
+                        memo.retired
+                            .map(|retired| verkstead_render::MemoRetirement {
+                                by: retired.by,
+                                reason: retired.reason,
+                                at: retired.at,
+                            }),
+                    ),
                     // The subject and the counts, and neither the summary nor
                     // the diff: what the commit said about itself is drawn whole
                     // in the pane the card opens, and the diff is in the

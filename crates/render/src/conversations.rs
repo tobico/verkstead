@@ -1417,6 +1417,11 @@ pub enum TimelineEvent {
     /// nothing of it a details pane would show that the Timeline does not.
     Handoff(HandoffEvent),
 
+    /// A Memo a building session left for the sessions after it, drawn as the
+    /// handoff is — clamped on the Timeline, whole in the details pane — and
+    /// for the handoff's reason: it is one agent's document for another.
+    Memo(MemoEvent),
+
     /// A commit a session landed on the Conversation's branch, summarised as
     /// what it changed. Its diff is fetched separately, by the details pane —
     /// the same arrangement a Capture and a Question Set have, and for the
@@ -2287,6 +2292,44 @@ pub struct HandoffEvent {
     /// Rendered and sanitized by the server on the way out, as every piece of
     /// agent markdown on this wire is.
     pub html: String,
+}
+
+/// A Memo as the page receives it: what the session wrote, who it was, and
+/// whether it has been taken back since.
+///
+/// HTML alone, like the handoff and for its reason: nobody edits it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct MemoEvent {
+    pub id: i64,
+
+    /// When it was left, RFC 3339.
+    pub at: String,
+
+    /// Rendered and sanitized by the server on the way out, as every piece of
+    /// agent markdown on this wire is.
+    pub html: String,
+
+    /// The words the card is stamped with — *the session that worked task 03*.
+    pub left_by: String,
+
+    /// `None` while it still stands, and is still in every later prompt.
+    pub retired: Option<MemoRetirement>,
+}
+
+/// A Memo taken back: by whom, why, and when.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct MemoRetirement {
+    /// Words on the pattern of [`MemoEvent::left_by`], or *you* for the human.
+    pub by: String,
+
+    /// Why, where whoever retired it said. Text rather than HTML: it is one
+    /// line, set under the card's head.
+    pub reason: Option<String>,
+
+    /// RFC 3339.
+    pub at: String,
 }
 
 /// A notice as the page receives it: what Verkstead did, and when.
@@ -3461,6 +3504,24 @@ pub fn handoff_event(id: i64, at: String, markdown: &str) -> TimelineEvent {
         id,
         at,
         html: crate::markdown::to_html(markdown),
+    })
+}
+
+/// A Memo as an Event, rendered the way the handoff is and for the handoff's
+/// reason.
+pub fn memo_event(
+    id: i64,
+    at: String,
+    markdown: &str,
+    left_by: String,
+    retired: Option<MemoRetirement>,
+) -> TimelineEvent {
+    TimelineEvent::Memo(MemoEvent {
+        id,
+        at,
+        html: crate::markdown::to_html(markdown),
+        left_by,
+        retired,
     })
 }
 

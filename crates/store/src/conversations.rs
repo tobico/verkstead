@@ -669,6 +669,15 @@ pub enum Event {
     /// here is the only one that lasts.
     Handoff(String),
 
+    /// A Memo a building session left for the sessions after it — see
+    /// [`super::memos`].
+    ///
+    /// Markdown in the `body` column like the Brief and the handoff, and for
+    /// their reason: it is a document one agent wrote for another to read.
+    /// Beside it, the row saying who left it, out of which session, and
+    /// whether it has been taken back since.
+    Memo(String, super::Memo),
+
     /// A commit a session landed on the Conversation's branch, summarised.
     ///
     /// Its body is not in the `body` column either, and for the Capture's
@@ -836,6 +845,7 @@ impl Event {
             Self::AgentOutput(..) => "agent-output",
             Self::QuestionSet(_) => QUESTION_SET,
             Self::Handoff(_) => "handoff",
+            Self::Memo(..) => super::memos::MEMO,
             Self::Commit(_) => "commit",
             Self::PullRequest(_) => PULL_REQUEST,
             Self::Pause(_) => super::pauses::PAUSE,
@@ -864,6 +874,7 @@ impl Event {
             // `question_sets` already.
             Self::QuestionSet(_) => Cow::Borrowed(""),
             Self::Handoff(markdown) => Cow::Borrowed(markdown),
+            Self::Memo(markdown, _) => Cow::Borrowed(markdown),
             // Nothing, for the Capture's reason: what a commit is, is a row
             // in `commits`.
             Self::Commit(_) => Cow::Borrowed(""),
@@ -914,6 +925,7 @@ impl Event {
         pull_request: Option<super::PullRequest>,
         pause: Option<super::Pause>,
         steer: Option<super::SteerRecord>,
+        memo: Option<super::Memo>,
     ) -> Result<Self> {
         Ok(match kind {
             "brief" => Self::Brief(body),
@@ -930,6 +942,10 @@ impl Event {
                 set.ok_or_else(|| anyhow!("a Question Set Event has no Set beside it"))?,
             )),
             "handoff" => Self::Handoff(body),
+            super::memos::MEMO => Self::Memo(
+                body,
+                memo.ok_or_else(|| anyhow!("a Memo Event has no record of who left it"))?,
+            ),
             "commit" => Self::Commit(
                 commit.ok_or_else(|| anyhow!("a Commit Event has no commit beside it"))?,
             ),
@@ -3419,6 +3435,11 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
     // steered before this was written down answers with nothing for that steer.
     let mut steers = super::steers::on_timeline(pool, conversation_id).await?;
 
+    // And who left each Memo and whether it has been taken back, for the
+    // arithmetic again: one read, and a Timeline nobody left a Memo on answers
+    // with nothing.
+    let mut memos = super::memos::on_timeline(pool, conversation_id).await?;
+
     // And how each of the Sets above was asked, for the arithmetic again — see
     // [`super::deferrals::stored_on_timeline`]. Cheaper than any of them: one
     // indexed column, and most Conversations have no stored ask at all, which
@@ -3520,6 +3541,7 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
                     pull_request,
                     pause,
                     steers.remove(&id),
+                    memos.remove(&id),
                 )?,
             })
         })

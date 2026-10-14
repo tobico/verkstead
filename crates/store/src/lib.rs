@@ -46,6 +46,7 @@ mod escalations;
 mod joins;
 mod mcp_servers;
 mod members;
+mod memos;
 mod migrations;
 mod pairings;
 mod pauses;
@@ -141,6 +142,7 @@ pub use members::{
     member_holding, member_unreachable, members, members_yet_to_acknowledge, owe_announcement,
     record_member, record_renewal, renewal_acknowledged,
 };
+pub use memos::{Memo, Retirement, leave_memo};
 pub use migrations::{rank_the_conversations, stamp_the_births};
 pub use pairings::{RepoPairings, last_started_pairings, remembered_pairings};
 pub use pauses::Pause;
@@ -831,6 +833,11 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // Conversations and the Repos for the pending steer's reason, and after the
     // Timelines, which is what its rows are keyed by.
     steers::apply_schema(pool).await?;
+
+    // And the Memos building sessions left for the sessions after them, which
+    // hang off their Events the way a steer's record does — and name a second
+    // Event beside it, the session's own output, so after the Timelines too.
+    memos::apply_schema(pool).await?;
 
     // And that driving has stopped, which is columns on the Conversation
     // itself: a stop is how things are rather than something that happened,

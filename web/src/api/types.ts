@@ -3513,6 +3513,49 @@ export type McpServerEdit = { name: string, url: string, headers: Array<McpHeade
 export type McpServersEdit = "Keep" | { "Set": { servers: Array<McpServerEdit>, } };
 
 /**
+ * A Memo as the page receives it: what the session wrote, who it was, and
+ * whether it has been taken back since.
+ *
+ * HTML alone, like the handoff and for its reason: nobody edits it.
+ */
+export type MemoEvent = { id: number, 
+/**
+ * When it was left, RFC 3339.
+ */
+at: string, 
+/**
+ * Rendered and sanitized by the server on the way out, as every piece of
+ * agent markdown on this wire is.
+ */
+html: string, 
+/**
+ * The words the card is stamped with — *the session that worked task 03*.
+ */
+left_by: string, 
+/**
+ * `None` while it still stands, and is still in every later prompt.
+ */
+retired: MemoRetirement | null, };
+
+/**
+ * A Memo taken back: by whom, why, and when.
+ */
+export type MemoRetirement = { 
+/**
+ * Words on the pattern of [`MemoEvent::left_by`], or *you* for the human.
+ */
+by: string, 
+/**
+ * Why, where whoever retired it said. Text rather than HTML: it is one
+ * line, set under the card's head.
+ */
+reason: string | null, 
+/**
+ * RFC 3339.
+ */
+at: string, };
+
+/**
  * One row of the merged sidebar, as a caller names one: the device it lives on
  * and the id that device numbered it.
  *
@@ -6891,7 +6934,7 @@ export type TerminalsView = { live: Array<TerminalView>, };
  * details pane draws is decided by which kind an Event is, and the stages after
  * this one add their kinds here.
  */
-export type TimelineEvent = { "Brief": BriefEvent } | { "Moved": MovedEvent } | { "AgentOutput": AgentOutputEvent } | { "QuestionSet": QuestionSetEvent } | { "UnreadableSet": UnreadableSetEvent } | { "Handoff": HandoffEvent } | { "Commit": CommitEvent } | { "Notice": NoticeEvent } | { "ManualTask": ManualTaskEvent } | { "Steer": SteerEvent } | { "ResolveConflicts": ResolveConflictsEvent } | { "PullRequest": PullRequestEvent } | { "TaskList": TaskListReached } | { "StageList": StageListReached };
+export type TimelineEvent = { "Brief": BriefEvent } | { "Moved": MovedEvent } | { "AgentOutput": AgentOutputEvent } | { "QuestionSet": QuestionSetEvent } | { "UnreadableSet": UnreadableSetEvent } | { "Handoff": HandoffEvent } | { "Memo": MemoEvent } | { "Commit": CommitEvent } | { "Notice": NoticeEvent } | { "ManualTask": ManualTaskEvent } | { "Steer": SteerEvent } | { "ResolveConflicts": ResolveConflictsEvent } | { "PullRequest": PullRequestEvent } | { "TaskList": TaskListReached } | { "StageList": StageListReached };
 
 /**
  * What is to become of the configured token.
