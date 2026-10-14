@@ -1077,8 +1077,12 @@ describe("the pane a card opens", () => {
     });
 
     it("says an account at home with no login cannot be used away", async () => {
+      const login = `/api/ui/profiles/${CLUSTER[0]!.id}/login`;
+      const address = "https://claude.com/cai/oauth/authorize?code=true&state=1";
       serving(
         whenever("/api/ui/profiles", json([{ ...CLUSTER[0]!, login: false }])),
+        whenever(login, json({ state: "Starting" }), "POST"),
+        whenever(login, json({ state: "Waiting", url: address, refused: null })),
       );
       mountPane(CLUSTER[0]!.id);
 
@@ -1088,6 +1092,15 @@ describe("the pane a card opens", () => {
       expect(
         document.querySelector(`.${styles.finding} svg.${styles.aside}`),
       ).not.toBeNull();
+
+      // And the Log in the note ends by asking for, beside it: a Claude
+      // account at home with nothing to log in with, opening the same login
+      // the card's does.
+      const press = document.querySelector(`.${styles.finding} button`)!;
+      expect(press.textContent).toBe("Log in");
+
+      fireEvent.click(press);
+      await waitFor(() => screen.getByText(address));
     });
 
     it("says both where both are true, the refusal first", async () => {
