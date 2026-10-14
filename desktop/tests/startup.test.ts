@@ -377,7 +377,7 @@ describe("the box", () => {
 
     expect(now.possible).toBe(true);
     expect(now.on).toBe(false);
-    expect(now.refused).toMatch(/could not/);
+    expect(now.refused).toMatch(/couldn't/);
   });
 });
 
@@ -572,7 +572,7 @@ describe("the login-item arm", () => {
     expect(now).toEqual({
       possible: true,
       on: false,
-      refused: expect.stringContaining("could not"),
+      refused: expect.stringContaining("couldn't"),
     });
   });
 });

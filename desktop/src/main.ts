@@ -89,11 +89,9 @@ import { ADDRESS, HEALTH, HOST, LISTEN, NOTICES, ORIGIN, PORT } from "./workbenc
 /// from an icon has no terminal for a line to land in.
 function missing(path: string): void {
   dialog.showErrorBox(
-    "Verkstead is not built",
-    `The desktop app starts the headless verkstead beside itself, and there ` +
-      `is nothing at:\n\n${path}\n\n` +
-      `Run \`cargo build\` in the checkout, or set ${OVERRIDE} to the binary ` +
-      `to run.`,
+    "Verkstead isn't built.",
+    `There's no verkstead binary at:\n\n${path}\n\n` +
+      `Run cargo build in the checkout, or set ${OVERRIDE} to the binary to run.`,
   );
 }
 
@@ -108,11 +106,11 @@ function missing(path: string): void {
 /// time these words can be reached.
 function foreign(address: string): void {
   dialog.showErrorBox(
-    "Verkstead cannot start",
-    `Something is already listening on ${address}, which is the one address ` +
-      `Verkstead serves on.\n\n` +
-      `That will be a Verkstead the machine starts for itself, or one started ` +
-      `in a terminal. Stop that one, then start Verkstead again.`,
+    "Verkstead can't start.",
+    `Something is already listening on ${address}, the one address Verkstead ` +
+      `serves on.\n\n` +
+      `That's likely a Verkstead the machine starts for itself, or one started ` +
+      `in a terminal. Stop it, then start Verkstead again.`,
   );
 }
 

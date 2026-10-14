@@ -166,7 +166,7 @@ export function logs(kept: Kept, by: Opening | undefined): void {
     void dialog.showMessageBox({
       type: "info",
       title: "Verkstead",
-      message: "There is no log file to open",
+      message: "There's no log file to open.",
       detail: act.note,
     });
     return;

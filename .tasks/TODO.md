@@ -21,5 +21,5 @@ assert on copy move with it.
 - [x] 04: Settings, profiles and repos — [details](04-settings-profiles-repos.md)
 - [x] 05: The wizard, the Set sheet, the share page and the shared pieces — [details](05-wizard-set-sheet-shared.md)
 - [x] 06: The server's strings the screen shows — [details](06-server-strings.md)
-- [ ] 07: The desktop app — [details](07-desktop-app.md)
+- [x] 07: The desktop app — [details](07-desktop-app.md)
 - [ ] 08: The README, and dropping adoption — [details](08-readme.md)
