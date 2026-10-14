@@ -204,7 +204,7 @@ pub fn bytes(size: &str) -> Result<u64, String> {
         .and_then(|number| number.checked_mul(multiplier))
         .ok_or_else(|| {
             format!(
-                "is not a size: a size is a whole number with K, M, G or T after it, such as \
+                "isn't a size: a size is a whole number with K, M, G or T after it, such as \
                  {DEFAULT_SIZE}"
             )
         })
@@ -628,7 +628,7 @@ impl Descriptor {
         let why = match Descriptor::parsed(&written) {
             Ok(descriptor) => match (descriptor.refuses(), descriptor.misplaced()) {
                 (Some(name), _) => {
-                    format!("sets {name}, which is a variable the Sandbox sets itself")
+                    format!("sets {name}, which is a variable the sandbox sets itself")
                 }
                 (None, Some(why)) => why,
                 (None, None) => return descriptor,
@@ -655,10 +655,10 @@ impl Descriptor {
         }
 
         let text =
-            serde_saphyr::to_string(written).map_err(|why| format!("could not be read: {why}"))?;
+            serde_saphyr::to_string(written).map_err(|why| format!("couldn't be read: {why}"))?;
 
         serde_saphyr::from_str::<Descriptor>(&text)
-            .map_err(|why| format!("could not be read: {why}"))
+            .map_err(|why| format!("couldn't be read: {why}"))
     }
 
     /// The first variable this entry names that the Sandbox sets itself, where
@@ -2306,7 +2306,7 @@ mod tests {
             let why = bytes(unread).expect_err(unread);
 
             assert!(
-                why.starts_with("is not a size"),
+                why.starts_with("isn't a size"),
                 "{unread:?} is refused with a reason: {why}",
             );
         }
@@ -2374,7 +2374,7 @@ mod tests {
             Some("lots"),
             "what was written is kept, so a save puts it back as it was",
         );
-        assert!(rust.size_unread().unwrap().starts_with("is not a size"));
+        assert!(rust.size_unread().unwrap().starts_with("isn't a size"));
         assert!(go.size_unread().is_some());
 
         assert!(
@@ -2718,7 +2718,7 @@ mod tests {
 
         assert_eq!(
             rust.unread(),
-            Some("sets RUSTUP_HOME, which is a variable the Sandbox sets itself"),
+            Some("sets RUSTUP_HOME, which is a variable the sandbox sets itself"),
             "the reason names the variable, because that is what there is to fix",
         );
         let given = loaded.given(&machine(true));
@@ -2760,7 +2760,7 @@ mod tests {
 
         assert_eq!(
             loaded.get(RUST).unwrap().unread(),
-            Some("sets Path, which is a variable the Sandbox sets itself"),
+            Some("sets Path, which is a variable the sandbox sets itself"),
         );
     }
 
@@ -2773,7 +2773,7 @@ mod tests {
 
         assert_eq!(
             loaded.get(RUST).unwrap().unread(),
-            Some("sets GIT_CONFIG_KEY_0, which is a variable the Sandbox sets itself"),
+            Some("sets GIT_CONFIG_KEY_0, which is a variable the sandbox sets itself"),
         );
     }
 
@@ -2788,7 +2788,7 @@ mod tests {
 
         assert_eq!(
             loaded.get(RUST).unwrap().unread(),
-            Some("sets HOME, which is a variable the Sandbox sets itself"),
+            Some("sets HOME, which is a variable the sandbox sets itself"),
         );
     }
 
@@ -2807,7 +2807,7 @@ mod tests {
             .expect("an entry that will not parse is one that was not used");
 
         assert!(
-            why.starts_with("could not be read:"),
+            why.starts_with("couldn't be read:"),
             "the reason is what the reader said: {why}",
         );
         assert_eq!(
@@ -2841,7 +2841,7 @@ mod tests {
             .expect("a key nothing here knows is an entry that was not used");
 
         assert!(
-            why.starts_with("could not be read:") && why.contains("detct"),
+            why.starts_with("couldn't be read:") && why.contains("detct"),
             "the reason names the key, because that is what there is to fix: {why}",
         );
         assert_eq!(
@@ -2898,7 +2898,7 @@ mod tests {
         );
         assert_eq!(
             gleam.unread(),
-            Some("sets PATH, which is a variable the Sandbox sets itself"),
+            Some("sets PATH, which is a variable the sandbox sets itself"),
         );
         assert!(
             loaded.given(&machine(true)).env() == built_in().given(&machine(true)).env(),

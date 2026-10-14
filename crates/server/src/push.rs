@@ -282,39 +282,39 @@ impl News {
             // The step rather than how it went wrong: which part of the run
             // stopped is what decides whether the human gets up, and the
             // evidence underneath it is one tap away.
-            News::Stopped { stopped } => format!("{stopped} stopped on {branch}"),
+            News::Stopped { stopped } => format!("{stopped} stopped on {branch}."),
             // The same step, and the word that says nothing stopped: the session
             // is sitting there, and the human is the one to move it.
-            News::Escalated { idle } => format!("{idle} has gone idle on {branch}"),
+            News::Escalated { idle } => format!("{idle} has gone idle on {branch}."),
             // The account and when it comes back, because those are the two
             // things that decide whether the human does anything about it: an
             // account back in twenty minutes is one to leave alone.
             News::OutOfWindow {
                 profile,
                 resets: Some(resets),
-            } => format!("{profile} is out of window until {resets}"),
+            } => format!("{profile} is out of window until {resets}."),
             News::OutOfWindow {
                 profile,
                 resets: None,
-            } => format!("{profile} is out of window"),
+            } => format!("{profile} is out of window."),
             // The account rather than the branch: one login unblocks every run
             // on it, so the account is what the human has to go and fix.
-            News::SignedOut { profile } => format!("{profile} has signed out"),
-            News::OnAPullRequest { number } => format!("{branch} is on pull request #{number}"),
+            News::SignedOut { profile } => format!("{profile} has signed out."),
+            News::OnAPullRequest { number } => format!("{branch} is on pull request #{number}."),
             // Read by the stage rather than by the branch: a stage is a
             // Conversation whose name in the human's head is its number in the
             // roadmap, and the branch is named after that anyway.
             News::StageStarted { label, roadmap } => {
-                format!("Stage {label} of the `{roadmap}` roadmap has started")
+                format!("Stage {label} of the {roadmap} roadmap has started.")
             }
             // What the human has to go and do rather than what stopped: the
             // stage is waiting on one field in Settings, and a title saying so
             // is one they can act on without opening anything.
             News::StageNeedsAuthor { label, roadmap } => {
-                format!("Stage {label} of the `{roadmap}` roadmap needs a git author")
+                format!("Stage {label} of the {roadmap} roadmap needs a git author.")
             }
-            News::RoadmapComplete { roadmap } => format!("The `{roadmap}` roadmap is complete"),
-            News::Done => format!("{branch} is done"),
+            News::RoadmapComplete { roadmap } => format!("The {roadmap} roadmap is complete."),
+            News::Done => format!("{branch} is done."),
         }
     }
 
@@ -516,7 +516,7 @@ impl Word {
             // about the titles this tree writes rather than about the ones a
             // phone shows.
             Word::ADeviceIsAsking { name } => {
-                format!("{} is asking to link with this device", fitting(name))
+                format!("{} is asking to link with this device.", fitting(name))
             }
         }
     }
@@ -611,7 +611,7 @@ pub(crate) fn heard_from(pool: &SqlitePool, device: &str, name: &str, news: Rela
 /// something enormous, or sent a sentence that was not one, is cut rather than
 /// allowed to be the whole of a lock screen.
 fn relayed(device: &str, said: &str) -> String {
-    format!("{} — {}", fitting(device), fitting_sentence(said))
+    format!("{} · {}", fitting(device), fitting_sentence(said))
 }
 
 /// How much of a name a title will carry.
@@ -1099,7 +1099,7 @@ mod tests {
             "a title a lock screen would cut off mid-sentence: {title:?}",
         );
         assert!(
-            title.ends_with("is asking to link with this device"),
+            title.ends_with("is asking to link with this device."),
             "the sentence has to survive the cutting: {title:?}",
         );
     }
@@ -1112,7 +1112,7 @@ mod tests {
                 name: "laptop".to_owned(),
             }
             .title(),
-            "laptop is asking to link with this device",
+            "laptop is asking to link with this device.",
         );
     }
 
@@ -1122,8 +1122,8 @@ mod tests {
     #[test]
     fn a_members_news_leads_with_the_device_it_came_from() {
         assert_eq!(
-            relayed("the-laptop", "pwa-and-push is done"),
-            "the-laptop — pwa-and-push is done",
+            relayed("the-laptop", "pwa-and-push is done."),
+            "the-laptop · pwa-and-push is done.",
         );
     }
 
@@ -1135,7 +1135,7 @@ mod tests {
     fn this_devices_own_news_has_no_device_in_front_of_it() {
         for title in all().iter().map(|news| news.title("pwa-and-push")) {
             assert!(
-                !title.contains(" — "),
+                !title.contains(" · "),
                 "a local title reading like a relayed one: {title:?}",
             );
         }
@@ -1147,14 +1147,14 @@ mod tests {
     /// another machine wrote.
     #[test]
     fn a_members_name_is_cut_to_fit_a_lock_screen() {
-        let title = relayed(&"l".repeat(400), "pwa-and-push is done");
+        let title = relayed(&"l".repeat(400), "pwa-and-push is done.");
 
         assert!(
             title.starts_with(&format!("{}…", "l".repeat(40))),
             "the name has to be cut rather than carried whole: {title:?}",
         );
         assert!(
-            title.ends_with("— pwa-and-push is done"),
+            title.ends_with("· pwa-and-push is done."),
             "the sentence has to survive the cutting: {title:?}",
         );
     }
@@ -1167,12 +1167,12 @@ mod tests {
         let title = relayed("the-laptop", &"s".repeat(4000));
 
         assert!(
-            title.chars().count() <= 40 + " — ".chars().count() + 80 + 1,
+            title.chars().count() <= 40 + " · ".chars().count() + 80 + 1,
             "a relayed title with no bound on the sentence in it: {}",
             title.chars().count(),
         );
         assert!(
-            title.starts_with("the-laptop — "),
+            title.starts_with("the-laptop · "),
             "the device still leads it: {title:?}",
         );
         assert!(

@@ -223,7 +223,7 @@ export function Adoption(props: {
         </Show>
         <Show when={adopt.isError}>
           <ErrorLine class={styles.failure}>
-            The stage couldn't be started: {adopt.error?.message}
+            The stage couldn't be started. {adopt.error?.message}
           </ErrorLine>
         </Show>
       </Show>

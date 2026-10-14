@@ -244,7 +244,7 @@ export function Accounts(props: {
         </Show>
         <Show when={save.isError}>
           <ErrorLine class={styles.failure}>
-            The profile couldn't be saved: {save.error?.message}
+            The profile couldn't be saved. {save.error?.message}
           </ErrorLine>
         </Show>
       </div>

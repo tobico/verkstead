@@ -444,7 +444,7 @@ async fn the_timeline_summarises_a_set_as_a_number_question_answer_table() {
             // …nothing, because a Heading was never asked…
             "",
             // …the Option and the words that qualified it…
-            "Five — five, then stop",
+            "Five · five, then stop",
             // …and a question the human left open.
             "",
         ],

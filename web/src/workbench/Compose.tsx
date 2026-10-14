@@ -1122,7 +1122,7 @@ function Compose(props: {
             </Show>
             <Show when={make.isError}>
               <ErrorLine class={styles.failure}>
-                The conversation couldn't be created: {make.error?.message}
+                The conversation couldn't be created. {make.error?.message}
               </ErrorLine>
             </Show>
           </div>

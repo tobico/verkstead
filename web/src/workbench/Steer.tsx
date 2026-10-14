@@ -679,7 +679,7 @@ function Companions(props: {
         when={!repos.isError}
         fallback={
           <ErrorLine class={styles.failure}>
-            The repos couldn't be read: {repos.error?.message}
+            The repos couldn't be read. {repos.error?.message}
           </ErrorLine>
         }
       >
@@ -1619,7 +1619,7 @@ export function Steer(props: {
               fallback={
                 <Note class={styles.fieldNote}>
                   {profiles.isError
-                    ? `The agent profiles couldn't be read: ${profiles.error?.message}`
+                    ? `The agent profiles couldn't be read. ${profiles.error?.message}`
                     : "Reading the agent profiles…"}
                 </Note>
               }
@@ -1753,19 +1753,19 @@ export function Steer(props: {
         </Show>
         <Show when={saving.isError}>
           <ErrorLine class={styles.failure}>
-            The form couldn't be saved: {saving.error?.message}
+            The form couldn't be saved. {saving.error?.message}
           </ErrorLine>
         </Show>
         {/* A server that could not answer at all, which is the one thing here
             that is an error rather than an outcome. */}
         <Show when={submit.isError}>
           <ErrorLine class={styles.failure}>
-            The conversation couldn't be steered: {submit.error?.message}
+            The conversation couldn't be steered. {submit.error?.message}
           </ErrorLine>
         </Show>
         <Show when={cancelling.isError}>
           <ErrorLine class={styles.failure}>
-            The steer couldn't be cancelled: {cancelling.error?.message}
+            The steer couldn't be cancelled. {cancelling.error?.message}
           </ErrorLine>
         </Show>
       </form>

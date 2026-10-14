@@ -202,7 +202,7 @@ export function GitCard(props: {
       </Match>
       <Match when={settings.isError}>
         <ErrorLine>
-          The settings couldn't be read: {settings.error?.message}
+          The settings couldn't be read. {settings.error?.message}
         </ErrorLine>
       </Match>
       <Match when={settings.data}>
@@ -529,7 +529,7 @@ export function GitPane(props: {
         </Match>
         <Match when={settings.isError}>
           <ErrorLine>
-            The settings couldn't be read: {settings.error?.message}
+            The settings couldn't be read. {settings.error?.message}
           </ErrorLine>
         </Match>
         <Match when={told()}>
@@ -575,7 +575,7 @@ export function GitPane(props: {
 
                 {(why) => (
                   <ErrorLine class={styles.unverified}>
-                    It's saved, but GitHub wouldn't say whose it is: {why()}
+                    It's saved, but GitHub wouldn't say whose it is. {why()}
                   </ErrorLine>
                 )}
               </Show>
@@ -683,7 +683,7 @@ export function GitPane(props: {
 
               <Show when={picking.isError}>
                 <ErrorLine class={styles.failure}>
-                  The settings couldn't be saved: {picking.error?.message}
+                  The settings couldn't be saved. {picking.error?.message}
                 </ErrorLine>
               </Show>
             </section>
@@ -705,7 +705,7 @@ export function GitPane(props: {
 
               <Show when={flipping.isError}>
                 <ErrorLine class={styles.failure}>
-                  The settings couldn't be saved: {flipping.error?.message}
+                  The settings couldn't be saved. {flipping.error?.message}
                 </ErrorLine>
               </Show>
             </section>
@@ -808,7 +808,7 @@ export function GitPane(props: {
                 credentials go missing. */}
             <Show when={save.isError}>
               <ErrorLine class={styles.failure}>
-                The settings couldn't be saved: {save.error?.message}
+                The settings couldn't be saved. {save.error?.message}
               </ErrorLine>
             </Show>
           </form>

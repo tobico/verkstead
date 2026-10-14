@@ -1366,8 +1366,8 @@ impl Ended {
     pub(crate) fn badly(&self) -> Option<String> {
         match self {
             Self::Stopped | Self::Well => None,
-            Self::Badly(status) => Some(format!("the session {status}")),
-            Self::Unknown => Some("the session ended and nothing could say how".to_owned()),
+            Self::Badly(status) => Some(format!("The session {status}.")),
+            Self::Unknown => Some("The session ended, and nothing could say how.".to_owned()),
         }
     }
 
@@ -4255,7 +4255,7 @@ async fn relay(
             // else killed.
             Ended::Badly(match status.code() {
                 Some(code) => format!("exited with status {code}"),
-                None => format!("was killed — {status}"),
+                None => format!("was killed ({status})"),
             })
         }
         Err(error) => {

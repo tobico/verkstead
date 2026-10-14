@@ -1946,7 +1946,13 @@ describe("the order the human puts the sidebar in", () => {
     three(
       whenever(
         RANK,
-        json({ error: "the server is not taking orders" }, 503),
+        json(
+          {
+            error:
+              "The order couldn't be saved: the server isn't taking orders.",
+          },
+          503,
+        ),
         "PUT",
       ),
     );
@@ -1956,7 +1962,10 @@ describe("the order the human puts the sidebar in", () => {
     fireEvent.keyDown(card(rows[2]!), { key: "ArrowUp" });
 
     await waitFor(() =>
-      screen.getByText(/The order could not be saved/, { exact: false }),
+      screen.getByText(
+        "The list is back in the server's order. The order couldn't be saved: " +
+          "the server isn't taking orders.",
+      ),
     );
     expect(await order(container)).toEqual(["first", "second", "third"]);
   });
@@ -3092,13 +3101,13 @@ describe("a conversation's timeline", () => {
       whenever("/api/ui/repos", json(REPOS)),
       whenever(
         `/api/ui/conversations/${OPEN.id}`,
-        json({ error: "the Conversation could not be read" }, 500),
+        json({ error: "The conversation couldn't be read." }, 500),
       ),
     );
     mount(`/conversations/${OPEN.id}`);
 
     await waitFor(() =>
-      screen.getByText(/the Conversation could not be read/),
+      screen.getByText(/The conversation couldn't be read/),
     );
   });
 });
@@ -3123,7 +3132,7 @@ describe("the escape hatch on a conversation that will not load", () => {
       whenever("/api/ui/abandoned-roadmaps", json([])),
       whenever(
         `/api/ui/conversations/${OPEN.id}`,
-        json({ error: "the Conversation could not be read" }, 500),
+        json({ error: "The conversation couldn't be read." }, 500),
       ),
       ...answers,
     );
@@ -3153,7 +3162,7 @@ describe("the escape hatch on a conversation that will not load", () => {
     expect(head.querySelector("h1")?.textContent).toBe(DRAFTING.branch);
 
     await drawn(container, `.${actions.conversationActions} > .${dropdown.trigger}`);
-    await waitFor(() => screen.getByText(/the Conversation could not be read/));
+    await waitFor(() => screen.getByText(/The conversation couldn't be read/));
   });
 
   /// And the way back out, which is the whole reason the hatch is on the pane
@@ -4890,7 +4899,7 @@ describe("switching a draft's repo", () => {
         json({
           MadeWithoutRemote: {
             repo: { ...(repoView as RepoView), id: 4343 },
-            why: "`gh` said: Name already exists on this account",
+            why: "The gh command said: Name already exists on this account.",
           },
         }),
         "POST",
@@ -7403,7 +7412,7 @@ describe("starting the work", () => {
       /tobico\/askance/,
     ],
     [{ NoSuchPullRequest: { number: 41 } }, /nothing open under #41/],
-    [{ GitHubRefused: { why: "nobody is logged in" } }, /nobody is logged in/],
+    [{ GitHubRefused: { why: "Nobody is logged in." } }, /Nobody is logged in\./],
   ] satisfies Array<[TakenUp, RegExp]>)(
     "says in words what a refused review means",
     async (outcome, said) => {
@@ -11272,7 +11281,7 @@ const ON_ITS_OWN = {
 const MISSED = {
   number: 7,
   repo: "verkstead-site",
-  why: "`gh` said: Not Found (HTTP 404)",
+  why: "The gh command said: Not Found (HTTP 404).",
 };
 
 describe("sharing a conversation to its pull requests", () => {
@@ -11339,7 +11348,7 @@ describe("sharing a conversation to its pull requests", () => {
     await waitFor(() =>
       screen.getByText(
         "Commented on #41. The comment on #7 in verkstead-site couldn't be posted: " +
-          "`gh` said: Not Found (HTTP 404)",
+          "The gh command said: Not Found (HTTP 404).",
       ),
     );
   });
@@ -14484,7 +14493,7 @@ describe("a commit on the timeline", () => {
         Promise.resolve(
           new Response(
             JSON.stringify({
-              error: "there is no such commit on that Conversation",
+              error: "This conversation has no such commit.",
             }),
             { status: 404, headers: { "content-type": "application/json" } },
           ),
@@ -14498,7 +14507,7 @@ describe("a commit on the timeline", () => {
     const error = await drawn(container, `.${shell.detailsPane} .${notices.error}`);
 
     expect(error.textContent).toContain(
-      "there is no such commit on that Conversation",
+      "This conversation has no such commit.",
     );
   });
 
@@ -15286,7 +15295,7 @@ describe("the task list opened", () => {
       {},
       whenever(
         THE_BACKLOG,
-        json({ error: "there is no backlog on that Conversation" }, 404),
+        json({ error: "This conversation has no backlog." }, 404),
       ),
     );
     const { container } = mount(`/conversations/${TASKED.id}`);
@@ -15297,7 +15306,7 @@ describe("the task list opened", () => {
 
     const line = await drawn(container, `.${shell.detailsPane} .${notices.error}`);
 
-    expect(line.textContent).toContain("there is no backlog on that Conversation");
+    expect(line.textContent).toContain("This conversation has no backlog.");
   });
 });
 
@@ -16871,7 +16880,7 @@ describe("the stage list opened", () => {
       {},
       whenever(
         THE_ROADMAP,
-        json({ error: "there is no roadmap of that name on that Conversation" }, 404),
+        json({ error: "This conversation has no roadmap of that name." }, 404),
       ),
     );
     const { container } = mount(`/conversations/${STAGED.id}`);
@@ -16883,7 +16892,7 @@ describe("the stage list opened", () => {
     const line = await drawn(container, `.${shell.detailsPane} .${notices.error}`);
 
     expect(line.textContent).toContain(
-      "there is no roadmap of that name on that Conversation",
+      "This conversation has no roadmap of that name.",
     );
   });
 });
@@ -16932,7 +16941,7 @@ describe("the notice of a stop", () => {
     expect(notice.textContent).toContain(
       "The task in .tasks/03-commit-events.md",
     );
-    expect(notice.textContent).toContain("the session exited with status 1");
+    expect(notice.textContent).toContain("The session exited with status 1.");
     expect(notice.textContent).toContain("crates/store/src/commits.rs");
     expect(notice.textContent).toContain("could not compile");
 
@@ -16982,7 +16991,7 @@ describe("the notice of a stop", () => {
       container.querySelector(`.${shell.detailsPane} .${paneHead.head} h1`)!
         .textContent,
     ).toBe("Notice");
-    expect(pane.textContent).toContain("the session exited with status 1");
+    expect(pane.textContent).toContain("The session exited with status 1.");
     expect(pane.querySelectorAll("pre").length).toBe(2);
   });
 });
@@ -18060,7 +18069,7 @@ describe("the pinned pull request", () => {
           new Response(
             JSON.stringify({
               error:
-                "this machine's `gh` is not logged in, so Verkstead cannot ask GitHub anything",
+                "This machine's gh isn't logged in, so Verkstead can't ask GitHub anything.",
             }),
             { status: 502, headers: { "content-type": "application/json" } },
           ),
@@ -18074,7 +18083,7 @@ describe("the pinned pull request", () => {
 
     const error = await drawn(container, `.${shell.detailsPane} .${notices.error}`);
 
-    expect(error.textContent).toContain("is not logged in");
+    expect(error.textContent).toContain("isn't logged in");
   });
 
   /// Nothing is fetched until somebody opens it: reading this is an API call

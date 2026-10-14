@@ -151,7 +151,7 @@
             "question": "Where should the request counter live?"
           },
           {
-            "answer": "A 429 plus RateLimit headers. — and document them in the changelog",
+            "answer": "A 429 plus RateLimit headers. · and document them in the changelog",
             "name": "Q2",
             "nested": false,
             "question": "How should a throttled client be told to back off?"

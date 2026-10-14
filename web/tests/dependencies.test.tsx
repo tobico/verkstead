@@ -440,7 +440,7 @@ describe("the press that starts the run", () => {
     serving(
       whenever(
         INSTALL,
-        json({ error: "an install is already running" }, 409),
+        json({ error: "An install is already running." }, 409),
         "POST",
       ),
       json(FRESH),
@@ -451,7 +451,7 @@ describe("the press that starts the run", () => {
     fireEvent.click(onwards(container));
 
     await waitFor(() =>
-      expect(container.textContent).toContain("an install is already running"),
+      expect(container.textContent).toContain("An install is already running."),
     );
     // And the screen is where it was: nothing was started, so there is nothing
     // to watch.
@@ -470,7 +470,7 @@ describe("the install screen", () => {
     expect(bar.max).toBe(3);
     expect(container.textContent).toContain("0/3");
     expect(container.querySelector("[data-status]")!.textContent).toBe(
-      "Waiting for the password dialog on ada-box",
+      "Waiting for the password dialog on ada-box…",
     );
   });
 
@@ -1316,7 +1316,7 @@ describe("the step over the page's own interval", () => {
     );
     expect(container.textContent).toContain("0/3");
     expect(container.querySelector("[data-status]")!.textContent).toBe(
-      "Waiting for the password dialog on ada-box",
+      "Waiting for the password dialog on ada-box…",
     );
 
     // And the run lands two seconds later, with nobody pressing anything.

@@ -955,7 +955,7 @@ export function BuildCaches(): JSX.Element {
         </Match>
         <Match when={settings.isError}>
           <ErrorLine>
-            The settings couldn't be read: {settings.error?.message}
+            The settings couldn't be read. {settings.error?.message}
           </ErrorLine>
         </Match>
         <Match when={told()}>
@@ -1020,13 +1020,13 @@ export function BuildCaches(): JSX.Element {
 
               <Show when={clearing.isError}>
                 <ErrorLine class={styles.failure}>
-                  The store couldn't be cleared: {clearing.error?.message}
+                  The store couldn't be cleared. {clearing.error?.message}
                 </ErrorLine>
               </Show>
 
               <Show when={save.isError}>
                 <ErrorLine class={styles.failure}>
-                  The settings couldn't be saved: {save.error?.message}
+                  The settings couldn't be saved. {save.error?.message}
                 </ErrorLine>
               </Show>
             </div>

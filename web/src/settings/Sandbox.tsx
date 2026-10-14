@@ -48,7 +48,7 @@ export function SandboxCard(props: {
       </Match>
       <Match when={settings.isError}>
         <ErrorLine>
-          The settings couldn't be read: {settings.error?.message}
+          The settings couldn't be read. {settings.error?.message}
         </ErrorLine>
       </Match>
       <Match when={settings.data}>

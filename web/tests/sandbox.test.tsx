@@ -101,7 +101,7 @@ function unread(standing: SettingsView, name: string): SettingsView {
             ...language,
             enabled: false,
             unread: {
-              why: "sets RUSTUP_HOME, which is a variable the Sandbox sets itself",
+              why: "sets RUSTUP_HOME, which is a variable the sandbox sets itself",
               running_on: "Nothing" as const,
             },
           }

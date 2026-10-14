@@ -244,7 +244,7 @@ function MoveSheet(props: {
       </Show>
       <Show when={move.isError}>
         <ErrorLine class={styles.failure}>
-          The draft couldn't be moved: {move.error?.message}
+          The draft couldn't be moved. {move.error?.message}
         </ErrorLine>
       </Show>
 

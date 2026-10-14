@@ -91,7 +91,7 @@ export function takeUpRefusal(outcome: TakenUp): string {
     }
 
     if ("GitHubRefused" in outcome) {
-      return `GitHub couldn't be asked about that pull request: ${outcome.GitHubRefused.why}.`;
+      return `GitHub couldn't be asked about that pull request. ${outcome.GitHubRefused.why}`;
     }
 
     if ("AlreadyHeld" in outcome) {

@@ -285,7 +285,7 @@ describe("the pane", () => {
     const binds = await list(container);
 
     expect(rows(binds)[0]!.querySelector(`.${rowStyles.unresolved}`)!.textContent)
-      .toBe("the server cannot see it: there is nothing at that path");
+      .toBe("The server can't see it. There's nothing at that path.");
   });
 
   it("says nothing on a row the server can see", async () => {

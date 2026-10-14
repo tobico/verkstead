@@ -465,7 +465,7 @@ function Written(props: {
       </Show>
       <Show when={save.isError}>
         <ErrorLine class={styles.failure}>
-          The brief couldn't be saved: {save.error?.message}
+          The brief couldn't be saved. {save.error?.message}
         </ErrorLine>
       </Show>
     </>
@@ -587,7 +587,7 @@ function Starting(props: {
       <Show when={props.failed}>
         {(failed) => (
           <ErrorLine class={styles.failure}>
-            The work couldn't be started: {failed()}
+            The work couldn't be started. {failed()}
           </ErrorLine>
         )}
       </Show>
@@ -825,7 +825,7 @@ function serversOn(what: {
       })
       .catch((error: unknown) =>
         setRefused(
-          `${name} ${said}: ${
+          `${name} ${said}. ${
             error instanceof Error ? error.message : String(error)
           }`,
         ),
@@ -1044,7 +1044,7 @@ function sendingOn(what: {
         .catch((error: unknown) => {
           setRefusals((said) => [
             ...said,
-            `${file.name} could not be attached: ${
+            `${file.name} couldn't be attached. ${
               error instanceof Error ? error.message : String(error)
             }`,
           ]);
@@ -1078,7 +1078,7 @@ function sendingOn(what: {
       })
       .catch((error: unknown) =>
         setRefusedRemoval(
-          `${attachment.name} could not be removed: ${
+          `${attachment.name} couldn't be removed. ${
             error instanceof Error ? error.message : String(error)
           }`,
         ),

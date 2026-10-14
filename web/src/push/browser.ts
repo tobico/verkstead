@@ -100,7 +100,7 @@ export async function disable(): Promise<Standing> {
   try {
     await unsubscribePush(endpoint);
   } catch (error) {
-    throw new Error(`This device stopped, but the server still has it: ${said(error)}`);
+    throw new Error(`This device stopped, but the server still has it. ${said(error)}`);
   }
 
   return standing(permission(), false);
@@ -155,7 +155,7 @@ async function subscribe(manager: PushManager): Promise<PushSubscription> {
   try {
     key = await pushKey();
   } catch (error) {
-    throw new Error(`The server's push key couldn't be read: ${said(error)}`);
+    throw new Error(`The server's push key couldn't be read. ${said(error)}`);
   }
 
   try {
@@ -178,7 +178,7 @@ async function handed(subscription: Subscription) {
   try {
     return await subscribePush(subscription);
   } catch (error) {
-    throw new Error(`The server didn't take it: ${said(error)}`);
+    throw new Error(`The server didn't take it. ${said(error)}`);
   }
 }
 

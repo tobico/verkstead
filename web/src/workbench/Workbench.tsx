@@ -859,7 +859,7 @@ function TimelinePane(props: {
             is the way out: see `Hatch.tsx`. */}
         <Hatch id={props.id} back={props.list} />
         <ErrorLine>
-          This conversation couldn't be read: {props.conversation.error?.message}
+          This conversation couldn't be read. {props.conversation.error?.message}
         </ErrorLine>
       </Match>
       <Match when={props.conversation.data}>

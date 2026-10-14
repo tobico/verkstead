@@ -169,7 +169,7 @@ export function Roadmap(props: {
         </Match>
         <Match when={opened.isError}>
           <ErrorLine>
-            The roadmap couldn't be read: {opened.error?.message}
+            The roadmap couldn't be read. {opened.error?.message}
           </ErrorLine>
         </Match>
         <Match when={opened.data}>

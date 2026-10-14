@@ -802,7 +802,7 @@ describe("a submit that did not land", () => {
   it("says so in the server's own wording when it did not get through", async () => {
     const { page, fetching } = await answering(
       WAITING,
-      json({ error: "the Response could not be taken" }, 503),
+      json({ error: "The response couldn't be taken." }, 503),
     );
     for (const label of ["Q1", "Q2", "Q2a"]) {
       fireEvent.click(option(page, label, 1));
@@ -812,7 +812,7 @@ describe("a submit that did not land", () => {
     await waitFor(() => expect(posts(fetching)).toHaveLength(1));
     await waitFor(() =>
       expect(page.querySelector(`.${submitting.submit} .${notices.error}`)!.textContent).toContain(
-        "the Response could not be taken",
+        "The response couldn't be taken.",
       ),
     );
   });

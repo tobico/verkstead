@@ -791,8 +791,8 @@ pub(crate) fn next_stage(
     let Some(list) = at(repo, read.commit, &index) else {
         return Next::Unstartable {
             why: format!(
-                "this Conversation is a stage of the {roadmap} roadmap, and there is no {index} \
-                 on `{}` — the branch its declarations are read off — to read what it has left",
+                "this conversation is a stage of the `{roadmap}` roadmap, and there's no `{index}` \
+                 on `{}`, the branch its declarations are read off, to read what it has left",
                 read.branch,
             ),
         };
@@ -805,7 +805,7 @@ pub(crate) fn next_stage(
         // loud rather than passing over.
         return Next::Unstartable {
             why: format!(
-                "this Conversation is a stage of the {roadmap} roadmap, and its {INDEX} on \
+                "this conversation is a stage of the `{roadmap}` roadmap, and its `{INDEX}` on \
                  `{}` has no stages in it",
                 read.branch,
             ),
@@ -865,8 +865,8 @@ pub(crate) fn next_stage(
             // have started a moment ago, in this very reading, and the record the
             // count came off was read before any of that.
             held.push(Held::Roadmap(format!(
-                "Stage {} of the `{roadmap}` roadmap — *{}* — is ready and waiting for a place: \
-                 this roadmap runs {} at a time, and its places are taken. It starts when one of \
+                "Stage {} of the `{roadmap}` roadmap, *{}*, is ready and waiting for a place. \
+                 This roadmap runs {} at a time, and its places are taken. It starts when one of \
                  them settles.",
                 entry.label,
                 entry.title,
@@ -892,9 +892,9 @@ pub(crate) fn next_stage(
             // this, and a Conversation may have finished since. What says the
             // number as of the moment it is asked is the settings pane.
             held.push(Held::Server(format!(
-                "Stage {} of the `{roadmap}` roadmap — *{}* — is ready and waiting for a place \
-                 on the server: the Conversations Verkstead is running have taken them all, \
-                 whatever roadmap or Process they belong to. It starts when one of them comes \
+                "Stage {} of the `{roadmap}` roadmap, *{}*, is ready and waiting for a place \
+                 on the server. The conversations Verkstead is running have taken them all, \
+                 whatever roadmap or process they belong to. It starts when one of them comes \
                  free.",
                 entry.label, entry.title,
             )));
@@ -907,7 +907,7 @@ pub(crate) fn next_stage(
         // the roadmap's own directory, and git would hand back a listing of it.
         if entry.link.is_empty() {
             held.push(Held::Halted(format!(
-                "Stage {} of the `{roadmap}` roadmap was ready and could not be started: its \
+                "Stage {} of the `{roadmap}` roadmap was ready and couldn't be started. Its \
                  line names no brief to start it from.",
                 entry.label,
             )));
@@ -919,8 +919,8 @@ pub(crate) fn next_stage(
 
         let Some(markdown) = at(repo, read.commit, &brief_path) else {
             held.push(Held::Halted(format!(
-                "Stage {} of the `{roadmap}` roadmap was ready and could not be started: it \
-                 names the brief `{brief_path}`, and there is nothing there to read on `{}`.",
+                "Stage {} of the `{roadmap}` roadmap was ready and couldn't be started. It \
+                 names the brief `{brief_path}`, and there's nothing there to read on `{}`.",
                 entry.label, read.branch,
             )));
 
@@ -4851,7 +4851,7 @@ Turns this askance clone into Verkstead.
                 "which stage, and which of the two limits it is waiting on: {said:?}",
             );
             assert!(
-                !said.contains("this roadmap runs"),
+                !said.contains("This roadmap runs"),
                 "and not its roadmap's, which has places to spare: {said:?}",
             );
         }
@@ -4912,7 +4912,7 @@ Turns this askance clone into Verkstead.
 
         assert_eq!(held.len(), 1, "and 04 is the one that waits: {held:?}");
         assert!(
-            held[0].contains("this roadmap runs") && !held[0].contains("on the server"),
+            held[0].contains("This roadmap runs") && !held[0].contains("on the server"),
             "told it is its roadmap's places that are taken: {held:?}",
         );
     }
@@ -4953,7 +4953,7 @@ Turns this askance clone into Verkstead.
 
         assert_eq!(held.len(), 2, "and 02 and 04 are both held: {held:?}");
         assert!(
-            held[0].contains("02") && held[0].contains("there is nothing there to read"),
+            held[0].contains("02") && held[0].contains("there's nothing there to read"),
             "02 for the brief nobody wrote: {held:?}",
         );
         assert!(
@@ -5042,7 +5042,7 @@ Turns this askance clone into Verkstead.
         assert_eq!(held.len(), 1, "and 04 is the one ready stage: {held:?}");
         assert!(
             matches!(&held[0], Held::Roadmap(said) if said.contains("04")
-                && said.contains("this roadmap runs")
+                && said.contains("This roadmap runs")
                 && !said.contains("on the server")),
             "waiting on its own roadmap rather than on the machine: {held:?}",
         );

@@ -685,7 +685,11 @@ describe("saving", () => {
   it("says in words why a token could not be verified, and shows it stored", async () => {
     const unverified: SettingsSaved = {
       settings: SAVED.settings,
-      verified: { Refused: { why: "gh: Bad credentials (HTTP 401)" } },
+      verified: {
+        Refused: {
+          why: "The gh command said: gh: Bad credentials (HTTP 401).",
+        },
+      },
       refused: [],
       refused_servers: [],
       refused_sizes: [],
@@ -1024,8 +1028,8 @@ describe("the ignore rules", () => {
   /// with one.
   it("draws a rule refused as a whole at its row", async () => {
     const why =
-      "a rule with neither field would ignore every comment there is, so it " +
-      "needs an author, a body, or both";
+      "A rule with neither field would ignore every comment. Give it an " +
+      "author, a body, or both.";
     theSettings(TOLD, json(turnedDown({ rule: 0, field: null, why })));
     mountPane();
     await waitFor(() => screen.getAllByLabelText(/^Author$/));

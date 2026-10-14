@@ -296,8 +296,8 @@ pub(crate) fn judge(roadmap: &str, list: &str) -> Judgement {
         return Judgement::Refused(format!(
             "the {roadmap} roadmap declares what some of its stages stand on and not others: \
              stage {} declares nothing after its link. Every line of a declaring roadmap carries \
-             a declaration — `no dependencies` where the stage stands on nothing — because a bare \
-             line cannot be told from a forgotten one",
+             a declaration, `no dependencies` where the stage stands on nothing, because a bare \
+             line can't be told from a forgotten one",
             entry.label,
         ));
     }
@@ -321,7 +321,7 @@ pub(crate) fn judge(roadmap: &str, list: &str) -> Judgement {
             return Judgement::Refused(format!(
                 "stage {} of the {roadmap} roadmap says `after {named}`, and no stage of it is \
                  labelled {named}. A stage may only name stages of its own roadmap, by their \
-                 labels as the roadmap writes them — zero-padding and all",
+                 labels as the roadmap writes them, zero-padding and all",
                 entry.label,
             ));
         }
@@ -332,8 +332,8 @@ pub(crate) fn judge(roadmap: &str, list: &str) -> Judgement {
             && matching(word).is_none()
         {
             return Judgement::Refused(format!(
-                "stage {} of the {roadmap} roadmap says `on {word}`, which is not a platform: it \
-                 is one of {}",
+                "stage {} of the {roadmap} roadmap says `on {word}`, which isn't a platform. A \
+                 platform is one of {}",
                 entry.label,
                 PLATFORMS
                     .iter()
@@ -347,11 +347,11 @@ pub(crate) fn judge(roadmap: &str, list: &str) -> Judgement {
     if let Some(cycle) = cycle(&lines) {
         return Judgement::Refused(match cycle.as_slice() {
             [only] => format!(
-                "stage {only} of the {roadmap} roadmap stands on itself, which is a cycle of one: \
-                 it could never start"
+                "stage {only} of the {roadmap} roadmap stands on itself, which is a cycle of one, \
+                 so it could never start"
             ),
             _ => format!(
-                "the {roadmap} roadmap has a cycle in what its stages stand on — {} — so none of \
+                "the {roadmap} roadmap has a cycle in what its stages stand on ({}), so none of \
                  them could ever start",
                 cycle
                     .iter()

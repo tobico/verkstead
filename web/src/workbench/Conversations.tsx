@@ -588,7 +588,7 @@ export function Conversations(props: {
         </Match>
         <Match when={conversations.isError}>
           <ErrorLine>
-            The conversations couldn't be read: {conversations.error?.message}
+            The conversations couldn't be read. {conversations.error?.message}
           </ErrorLine>
         </Match>
         <Match when={conversations.data?.length === 0}>
@@ -623,10 +623,12 @@ export function Conversations(props: {
       </Switch>
 
       {/* The order was not saved, which is worth saying because what is on the
-          screen is the server's order rather than the one they just made. */}
+          screen is the server's order rather than the one they just made. The
+          server's own sentence already says it wasn't saved, so the line here
+          says only what the human is now looking at. */}
       <Show when={place.isError}>
         <ErrorLine>
-          The order could not be saved: {place.error?.message}
+          The list is back in the server's order. {place.error?.message}
         </ErrorLine>
       </Show>
 

@@ -208,7 +208,7 @@ function Card(props: {
       </Match>
       <Match when={desktop.isError}>
         <ErrorLine>
-          This machine's desktop settings couldn't be read:{" "}
+          This machine's desktop settings couldn't be read.{" "}
           {desktop.error?.message}
         </ErrorLine>
       </Match>
@@ -315,7 +315,7 @@ function Pane(props: { reach: Bridge; back: () => void }): JSX.Element {
         </Match>
         <Match when={desktop.isError}>
           <ErrorLine>
-            This machine's desktop settings couldn't be read:{" "}
+            This machine's desktop settings couldn't be read.{" "}
             {desktop.error?.message}
           </ErrorLine>
         </Match>
@@ -430,7 +430,7 @@ function Pane(props: { reach: Bridge; back: () => void }): JSX.Element {
 
               <Show when={starts.isError}>
                 <ErrorLine class={styles.failure}>
-                  Whether Verkstead starts with this machine couldn't be read:{" "}
+                  Whether Verkstead starts with this machine couldn't be read.{" "}
                   {starts.error?.message}
                 </ErrorLine>
               </Show>
@@ -446,18 +446,18 @@ function Pane(props: { reach: Bridge; back: () => void }): JSX.Element {
 
               <Show when={registering.isError}>
                 <ErrorLine class={styles.failure}>
-                  Launch on startup couldn't be set:{" "}
+                  Launch on startup couldn't be set.{" "}
                   {registering.error?.message}
                 </ErrorLine>
               </Show>
               <Show when={save.isError}>
                 <ErrorLine class={styles.failure}>
-                  The setting couldn't be saved: {save.error?.message}
+                  The setting couldn't be saved. {save.error?.message}
                 </ErrorLine>
               </Show>
               <Show when={viewing.isError}>
                 <ErrorLine class={styles.failure}>
-                  The log file couldn't be opened: {viewing.error?.message}
+                  The log file couldn't be opened. {viewing.error?.message}
                 </ErrorLine>
               </Show>
             </div>

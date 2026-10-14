@@ -404,7 +404,7 @@ describe("the serve checkbox", () => {
     );
 
     expect(
-      screen.getByText("the serve configuration named no Web section"),
+      screen.getByText("The serve configuration named no Web section."),
     ).toBeTruthy();
     expect(screen.queryByRole("checkbox")).toBeNull();
   });
@@ -698,7 +698,7 @@ describe("the login link", () => {
           Promise.resolve(
             new Response(
               JSON.stringify({
-                error: "the workbench key could not be re-issued",
+                error: "The workbench key couldn't be re-issued.",
               }),
               { status: 500, headers: { "content-type": "application/json" } },
             ),
@@ -711,7 +711,7 @@ describe("the login link", () => {
     fireEvent.click(await waitFor(() => screen.getByText("Reset key")));
 
     await waitFor(() =>
-      expect(screen.getByText(/could not be re-issued/)).toBeTruthy(),
+      expect(screen.getByText(/couldn't be re-issued/)).toBeTruthy(),
     );
 
     // And nothing on the page moved: the key that was there is still the key,
@@ -1685,7 +1685,7 @@ describe("unlinking a device", () => {
       whenever(
         `/api/ui/devices/members/${LAPTOP}/unlink`,
         json(
-          { error: "this server holds no device identity to answer for" },
+          { error: "This server holds no device identity to answer for." },
           503,
         ),
         "POST",

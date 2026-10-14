@@ -394,7 +394,7 @@ export function ProfileList(props: {
         </Match>
         <Match when={profiles.isError}>
           <ErrorLine>
-            The agent profiles couldn't be read: {profiles.error?.message}
+            The agent profiles couldn't be read. {profiles.error?.message}
           </ErrorLine>
         </Match>
         <Match when={profiles.data?.length === 0}>
@@ -723,7 +723,7 @@ export function ProfilePane(props: {
                 </Show>
                 <Show when={remove.isError}>
                   <ErrorLine class={styles.failure}>
-                    The profile couldn't be removed: {remove.error?.message}
+                    The profile couldn't be removed. {remove.error?.message}
                   </ErrorLine>
                 </Show>
               </section>
@@ -736,7 +736,7 @@ export function ProfilePane(props: {
         </Match>
         <Match when={profiles.isError}>
           <ErrorLine>
-            The agent profiles couldn't be read: {profiles.error?.message}
+            The agent profiles couldn't be read. {profiles.error?.message}
           </ErrorLine>
         </Match>
       </Switch>
@@ -1106,7 +1106,7 @@ export function ProfileForm(props: {
           here that is an error rather than an outcome. */}
       <Show when={save.isError}>
         <ErrorLine class={styles.failure}>
-          The profile couldn't be saved: {save.error?.message}
+          The profile couldn't be saved. {save.error?.message}
         </ErrorLine>
       </Show>
     </form>

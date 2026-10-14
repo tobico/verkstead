@@ -483,7 +483,7 @@ describe("the pane", () => {
         turnedDown({
           server: 0,
           field: "Name",
-          why: "a name is lowercase letters, digits and hyphens",
+          why: "A name is lowercase letters, digits and hyphens.",
         }),
       ),
     );
@@ -499,7 +499,7 @@ describe("the pane", () => {
 
     await waitFor(() => expect(sent(fetching)).toBeTruthy());
     await waitFor(() =>
-      screen.getByText(/a name is lowercase letters, digits and hyphens/),
+      screen.getByText(/A name is lowercase letters, digits and hyphens/),
     );
 
     // Still on the page, and still a field: a refused row is one the human is
@@ -516,7 +516,7 @@ describe("the pane", () => {
         turnedDown({
           server: 0,
           field: "Url",
-          why: "a server is reached over HTTP, so it needs a URL",
+          why: "A server is reached over HTTP, so it needs a URL.",
         }),
       ),
     );
@@ -542,7 +542,7 @@ describe("the pane", () => {
         turnedDown({
           server: 0,
           field: "Name",
-          why: "a name is lowercase letters, digits and hyphens",
+          why: "A name is lowercase letters, digits and hyphens.",
         }),
       ),
     );
@@ -556,14 +556,14 @@ describe("the pane", () => {
     save();
 
     await waitFor(() =>
-      screen.getByText(/a name is lowercase letters, digits and hyphens/),
+      screen.getByText(/A name is lowercase letters, digits and hyphens/),
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Add a server" }));
 
     await waitFor(() =>
       expect(
-        screen.queryByText(/a name is lowercase letters, digits and hyphens/),
+        screen.queryByText(/A name is lowercase letters, digits and hyphens/),
       ).toBeNull(),
     );
   });
@@ -847,7 +847,7 @@ describe("what came of trying them", () => {
       TOLD,
       json(
         holding(TOLD, TOLD.mcp_servers, [
-          unreached(DECLARED.name, "It did not answer within 5 seconds."),
+          unreached(DECLARED.name, "It didn't answer within 5 seconds."),
         ]),
       ),
     );
@@ -860,7 +860,7 @@ describe("what came of trying them", () => {
     const line = await waitFor(() =>
       screen.getByText(/It's declared, but it couldn't be reached/),
     );
-    expect(line.textContent).toContain("It did not answer within 5 seconds.");
+    expect(line.textContent).toContain("It didn't answer within 5 seconds.");
 
     // And the row follows the server again, which is what says nothing was
     // turned down: what is drawn is what was written rather than what was typed.
@@ -875,7 +875,7 @@ describe("what came of trying them", () => {
       json(
         holding(TOLD, TOLD.mcp_servers, [
           reached(DECLARED.name, "Docs MCP"),
-          unreached(BESIDE.name, "It did not answer: connection refused."),
+          unreached(BESIDE.name, "It didn't answer: connection refused."),
         ]),
       ),
     );

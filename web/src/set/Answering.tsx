@@ -993,7 +993,7 @@ function putting(what: {
             ...said,
             {
               label,
-              said: `${file.name} couldn't be attached: ${
+              said: `${file.name} couldn't be attached. ${
                 error instanceof Error ? error.message : String(error)
               }`,
             },
@@ -1029,7 +1029,7 @@ function putting(what: {
           ...said.filter((one) => one.label !== label),
           {
             label,
-            said: `${attachment.name} couldn't be removed: ${
+            said: `${attachment.name} couldn't be removed. ${
               error instanceof Error ? error.message : String(error)
             }`,
           },
@@ -1104,7 +1104,7 @@ function refused(outcome: Submitted | undefined, error: Error | null): string | 
   if (error !== null) {
     // The server's own wording where there is one, which is what the human has
     // to be shown — see `ApiError`.
-    return `The response didn't get through: ${error.message}`;
+    return `The response didn't get through. ${error.message}`;
   }
 
   if (outcome === undefined || outcome === "Accepted") {

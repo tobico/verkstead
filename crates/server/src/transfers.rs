@@ -175,7 +175,7 @@ pub(crate) async fn transfer(
         Ok(None) => return Ok(Transferring::NoSuchConversation),
         Err(why) => {
             return Err(Refusal::ours(format!(
-                "the Conversation could not be read: {why:#}"
+                "The conversation couldn't be read: {why:#}."
             )));
         }
     };
@@ -201,7 +201,7 @@ pub(crate) async fn transfer(
 
     asked(state, conversation_id, device, store::AskedBy::Human)
         .await
-        .map_err(|why| Refusal::ours(format!("the transfer could not be written down: {why:#}")))?;
+        .map_err(|why| Refusal::ours(format!("The transfer couldn't be written down: {why:#}.")))?;
 
     tracing::info!(
         conversation_id,
@@ -957,13 +957,13 @@ async fn across(state: &AppState, conversation_id: i64, device: &str) -> Result<
         Ok(Some(conversation)) => conversation,
         Ok(None) => {
             return Err(Went {
-                saying: "the Conversation is no longer on this device".to_owned(),
+                saying: "The conversation is no longer on this device.".to_owned(),
                 landed: None,
             });
         }
         Err(why) => {
             return Err(Went {
-                saying: format!("this device could not read the Conversation: {why:#}"),
+                saying: format!("This device couldn't read the conversation: {why:#}."),
                 landed: None,
             });
         }
@@ -979,7 +979,7 @@ async fn across(state: &AppState, conversation_id: i64, device: &str) -> Result<
 
     let Some(devices) = state.devices.as_ref() else {
         return Err(Went {
-            saying: "this server holds no device identity to move work through".to_owned(),
+            saying: "This server holds no device identity to move work through.".to_owned(),
             landed: None,
         });
     };
@@ -995,7 +995,7 @@ async fn across(state: &AppState, conversation_id: i64, device: &str) -> Result<
         Ok(None) => {
             return Err(Went {
                 saying: format!(
-                    "no repository on {named} is {repo} any more",
+                    "No repo on {named} is {repo} any more.",
                     repo = conversation.repo.name,
                 ),
                 landed: None,
@@ -1012,8 +1012,8 @@ async fn across(state: &AppState, conversation_id: i64, device: &str) -> Result<
 
     let Some(born) = birth(state, conversation_id).await else {
         return Err(Went {
-            saying: "this Conversation has no birth key, so no device could tell its copy of \
-                     the work from another's"
+            saying: "This conversation has no birth key, so no device could tell its copy of \
+                     the work from another's."
                 .to_owned(),
             landed: None,
         });
@@ -1023,7 +1023,7 @@ async fn across(state: &AppState, conversation_id: i64, device: &str) -> Result<
         Ok(rank) => rank,
         Err(why) => {
             return Err(Went {
-                saying: format!("this device could not read the Conversation's rank: {why:#}"),
+                saying: format!("This device couldn't read the conversation's rank: {why:#}."),
                 landed: None,
             });
         }
@@ -1031,7 +1031,7 @@ async fn across(state: &AppState, conversation_id: i64, device: &str) -> Result<
 
     let Some(rank) = rank else {
         return Err(Went {
-            saying: "this Conversation has no rank, so no list could say where its copy sits"
+            saying: "This conversation has no rank, so no list could say where its copy sits."
                 .to_owned(),
             landed: None,
         });
@@ -1066,7 +1066,7 @@ async fn across(state: &AppState, conversation_id: i64, device: &str) -> Result<
     };
 
     let saying = serde_json::to_vec(&going).map_err(|why| Went {
-        saying: format!("the Conversation could not be written down to send: {why}"),
+        saying: format!("The conversation couldn't be written down to send: {why}."),
         landed: None,
     })?;
 
@@ -1138,7 +1138,7 @@ async fn across(state: &AppState, conversation_id: i64, device: &str) -> Result<
 
         Err(why) => {
             return Err(Went {
-                saying: format!("this device could not record where the work went: {why:#}"),
+                saying: format!("This device couldn't record where the work went: {why:#}."),
                 landed: Some(arrived.id),
             });
         }
@@ -1158,8 +1158,8 @@ async fn across(state: &AppState, conversation_id: i64, device: &str) -> Result<
         state,
         conversation_id,
         &format!(
-            "Transferred to **{named}** at {whose} request. What is left here is a copy: the \
-             live record is on that device, and every link to this one leads there.",
+            "Transferred to **{named}** at {whose} request. This is a copy, and every link to \
+             it leads to the live conversation on that device.",
             whose = asked.whose(),
         ),
     )
@@ -1205,9 +1205,8 @@ async fn across(state: &AppState, conversation_id: i64, device: &str) -> Result<
             state,
             conversation_id,
             &format!(
-                "Verkstead could not tell {named} that the move had finished — {}. The work is \
-                 there and nothing is driving it, so the fix is a press on Resume on that \
-                 device.",
+                "Verkstead couldn't tell **{named}** the move had finished. {} The work is \
+                 there with nothing driving it. Press **Resume** on that device.",
                 refusal.saying,
             ),
         )
@@ -1286,7 +1285,7 @@ async fn record(
 ) -> Result<(), String> {
     let slice = store::slice(&state.pool, conversation_id)
         .await
-        .map_err(|why| format!("{why:#}"))?;
+        .map_err(|why| format!("This device couldn't read the conversation's record: {why:#}."))?;
 
     let repos = matched(state, device, &slice).await?;
     let profiles = accounts(state, &slice).await?;
@@ -1298,7 +1297,7 @@ async fn record(
         profiles,
         files,
     })
-    .map_err(|why| format!("the Conversation's record could not be written down to send: {why}"))?;
+    .map_err(|why| format!("The conversation's record couldn't be written down to send: {why}."))?;
 
     relaying::put_to(
         state.devices.as_ref(),
@@ -1333,9 +1332,7 @@ async fn matched(
     }
 
     let Some(devices) = state.devices.as_ref() else {
-        return Err(
-            "this server holds no device identity to match repositories through".to_owned(),
-        );
+        return Err("This server holds no device identity to match repos through.".to_owned());
     };
 
     let mut ours = Vec::with_capacity(ids.len());
@@ -1345,8 +1342,8 @@ async fn matched(
             Ok(Some(repo)) => ours.push(repo),
             Ok(None) => {
                 return Err(format!(
-                    "the record names repository {id}, which is not registered on this device \
-                     any more",
+                    "The record names repo {id}, which isn't registered on this device any \
+                     more.",
                 ));
             }
             Err(why) => {
@@ -1395,7 +1392,7 @@ async fn accounts(
 
     let profiles = store::profiles(&state.pool)
         .await
-        .map_err(|why| format!("this device's Agent Profiles could not be read: {why:#}"))?;
+        .map_err(|why| format!("This device's agent profiles couldn't be read: {why:#}."))?;
 
     Ok(ids
         .into_iter()
@@ -1428,7 +1425,7 @@ async fn attached(
     let rows = store::attachments(&state.pool, conversation_id)
         .await
         .map_err(|why| {
-            format!("the files attached to this Conversation could not be read: {why:#}")
+            format!("The files attached to this conversation couldn't be read: {why:#}.")
         })?;
 
     if rows.is_empty() {
@@ -1458,7 +1455,7 @@ async fn attached(
                 }
                 Err(why) => {
                     return Err(format!(
-                        "the attached file {name} could not be read: {why}",
+                        "The attached file {name} couldn't be read: {why}.",
                         name = row.name,
                     ));
                 }
@@ -1468,8 +1465,8 @@ async fn attached(
 
             if held > store::MOST_A_SLICE_IS {
                 return Err(format!(
-                    "the record of Conversation {conversation_id} is larger than the {most} \
-                     bytes one may be to cross a link",
+                    "The record of conversation {conversation_id} is larger than the {most} \
+                     bytes one may be to cross a link.",
                     most = store::MOST_A_SLICE_IS,
                 ));
             }
@@ -1483,7 +1480,7 @@ async fn attached(
         Ok(files)
     })
     .await
-    .map_err(|why| format!("the attached files could not be read: {why}"))?
+    .map_err(|why| format!("The attached files couldn't be read: {why}."))?
 }
 
 /// A move that did not finish: sweep what reached the far end, take the request
@@ -1531,7 +1528,7 @@ async fn failed(
         conversation_id,
         crate::stopping::Decided::Verkstead,
         crate::stalls::driving(lifecycle),
-        &format!("moving it onto {named} failed: {saying}"),
+        &format!("Moving it onto {named} failed. {saying}"),
         crate::stalls::said_last(state, conversation_id).await,
     )
     .await;

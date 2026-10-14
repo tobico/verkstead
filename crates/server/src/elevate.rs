@@ -95,7 +95,7 @@ impl Elevate for Graphical {
             // Which is a machine with no `pkexec` on it, or no `osascript`, or
             // no `powershell`: the privilege was not taken, and this is why.
             Err(trouble) => Raised::Refused {
-                why: format!("{program} could not be run: {trouble}"),
+                why: format!("Verkstead couldn't run {program}: {trouble}."),
             },
         }
     }
@@ -117,7 +117,7 @@ fn ran(told: &Output) -> Raised {
         .map(str::trim)
         .find(|line| !line.is_empty())
         .map(str::to_owned)
-        .unwrap_or_else(|| format!("the asking exited with {}", told.status));
+        .unwrap_or_else(|| format!("It said nothing, and ended with {}.", told.status));
 
     Raised::Refused { why }
 }
@@ -343,7 +343,7 @@ mod tests {
             panic!("a non-zero exit is the privilege not taken");
         };
 
-        assert!(why.contains("exited"), "got: {why}");
+        assert!(why.contains("ended with"), "got: {why}");
     }
 
     /// What a run of the asking came to, as this module reads one.

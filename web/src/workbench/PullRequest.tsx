@@ -191,7 +191,7 @@ export function PullRequest(props: {
           </Show>
           <Show when={resolving.isError}>
             <ErrorLine class={styles.refused}>
-              The conflict couldn't be sent back to the wrap-up:{" "}
+              The conflict couldn't be sent back to the wrap-up.{" "}
               {resolving.error?.message}
             </ErrorLine>
           </Show>
@@ -207,7 +207,7 @@ export function PullRequest(props: {
             answer are three different afternoons. */}
         <Match when={carried.isError}>
           <ErrorLine>
-            This pull request couldn't be read: {carried.error?.message}
+            This pull request couldn't be read. {carried.error?.message}
           </ErrorLine>
         </Match>
         <Match when={carried.data}>

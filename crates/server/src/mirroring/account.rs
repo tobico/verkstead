@@ -183,14 +183,14 @@ pub async fn fetched(
 
         Ok(Err(why)) => {
             return Err(Refusal::ours(format!(
-                "the account could not be written into {}: {why:#}",
+                "The account couldn't be written into {}: {why:#}.",
                 under.display(),
             )));
         }
 
         Err(why) => {
             return Err(Refusal::ours(format!(
-                "the account could not be written down: {why:#}",
+                "The account couldn't be written down: {why:#}.",
             )));
         }
     }
@@ -331,9 +331,9 @@ impl Lending {
                 );
 
                 let line = format!(
-                    "Verkstead did not write this Profile's login back to the device its \
-                     account is on — {}. A session there may find the account signed out, \
-                     and the fix is a login on that device.",
+                    "Verkstead didn't write this profile's login back to the device its \
+                     account is on. {} Log in on that device, or a session there may find the \
+                     account signed out.",
                     why.saying,
                 );
 

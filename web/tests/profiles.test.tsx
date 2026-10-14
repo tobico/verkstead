@@ -836,7 +836,7 @@ describe("logging an account in", () => {
 
   it("says a refused code was not taken, over the fresh address", async () => {
     const FRESH = "https://claude.com/cai/oauth/authorize?code=true&state=fresh";
-    const REFUSED = "Claude did not accept that code.";
+    const REFUSED = "Claude didn't accept that code.";
     let refused = false;
 
     serving(

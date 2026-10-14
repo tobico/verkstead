@@ -138,7 +138,7 @@ export function CleanupCard(props: {
       </Match>
       <Match when={settings.isError}>
         <ErrorLine>
-          The settings couldn't be read: {settings.error?.message}
+          The settings couldn't be read. {settings.error?.message}
         </ErrorLine>
       </Match>
       <Match when={settings.data?.cleanup}>
@@ -292,7 +292,7 @@ export function CleanupPane(props: {
         </Match>
         <Match when={settings.isError}>
           <ErrorLine>
-            The settings couldn't be read: {settings.error?.message}
+            The settings couldn't be read. {settings.error?.message}
           </ErrorLine>
         </Match>
         <Match when={cleanup()}>
@@ -378,7 +378,7 @@ export function CleanupPane(props: {
 
               <Show when={save.isError}>
                 <ErrorLine class={styles.failure}>
-                  The settings couldn't be saved: {save.error?.message}
+                  The settings couldn't be saved. {save.error?.message}
                 </ErrorLine>
               </Show>
             </div>

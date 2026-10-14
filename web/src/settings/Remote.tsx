@@ -404,7 +404,7 @@ export function RemoteCard(props: {
       </Match>
       <Match when={remote.isError}>
         <ErrorLine>
-          This machine's Tailscale couldn't be read: {remote.error?.message}
+          This machine's Tailscale couldn't be read. {remote.error?.message}
         </ErrorLine>
       </Match>
       <Match when={remote.data}>
@@ -472,7 +472,7 @@ export function RemotePane(props: {
         </Match>
         <Match when={remote.isError}>
           <ErrorLine>
-            This machine's Tailscale couldn't be read: {remote.error?.message}
+            This machine's Tailscale couldn't be read. {remote.error?.message}
           </ErrorLine>
         </Match>
         <Match when={remote.data}>
@@ -568,7 +568,7 @@ export function RemotePane(props: {
 
                       <Show when={press.isError}>
                         <ErrorLine class={styles.failure}>
-                          The serve couldn't be changed: {press.error?.message}
+                          The serve couldn't be changed. {press.error?.message}
                         </ErrorLine>
                       </Show>
 
@@ -680,7 +680,7 @@ function TheKey(): JSX.Element {
 
       <Show when={reset.isError}>
         <ErrorLine class={styles.failure}>
-          The key couldn't be reset: {reset.error?.message}
+          The key couldn't be reset. {reset.error?.message}
         </ErrorLine>
       </Show>
     </section>
@@ -756,7 +756,7 @@ function Devices(): JSX.Element {
         </Match>
         <Match when={devices.isError}>
           <ErrorLine class={styles.failure}>
-            The devices couldn't be read: {devices.error?.message}
+            The devices couldn't be read. {devices.error?.message}
           </ErrorLine>
         </Match>
         <Match when={devices.data}>
@@ -768,7 +768,7 @@ function Devices(): JSX.Element {
 
       <Show when={drop.isError}>
         <ErrorLine class={styles.failure}>
-          The device couldn't be unlinked: {drop.error?.message}
+          The device couldn't be unlinked. {drop.error?.message}
         </ErrorLine>
       </Show>
 
@@ -1043,7 +1043,7 @@ function Discovered(): JSX.Element {
       <Choose>
         <Match when={found.isError}>
           <ErrorLine class={styles.failure}>
-            What this device has heard couldn't be read:{" "}
+            What this device has heard couldn't be read.{" "}
             {found.error?.message}
           </ErrorLine>
         </Match>
@@ -1072,7 +1072,7 @@ function Discovered(): JSX.Element {
 
       <Show when={ask.isError}>
         <ErrorLine class={styles.failure}>
-          The device couldn't be asked: {ask.error?.message}
+          The device couldn't be asked. {ask.error?.message}
         </ErrorLine>
       </Show>
     </div>
@@ -1227,7 +1227,7 @@ function Waiting(props: { on: PendingJoin; fingerprint: string }): JSX.Element {
 
         <Show when={take.isError}>
           <ErrorLine class={styles.failure}>
-            The request couldn't be cancelled: {take.error?.message}
+            The request couldn't be cancelled. {take.error?.message}
           </ErrorLine>
         </Show>
       </div>
@@ -1329,7 +1329,7 @@ function Add(): JSX.Element {
 
           <Show when={ask.isError}>
             <ErrorLine class={styles.failure}>
-              The device couldn't be asked: {ask.error?.message}
+              The device couldn't be asked. {ask.error?.message}
             </ErrorLine>
           </Show>
         </form>

@@ -271,7 +271,7 @@ function Picking(props: {
     },
 
     onError: (error: Error) =>
-      setRefused(`The conversation couldn't be moved: ${error.message}`),
+      setRefused(`The conversation couldn't be moved. ${error.message}`),
   }));
 
   return (
@@ -320,7 +320,7 @@ function Picking(props: {
             when={found()}
             fallback={
               <ErrorLine class={styles.failure}>
-                That device couldn't be checked: {reading.error?.message}
+                That device couldn't be checked. {reading.error?.message}
               </ErrorLine>
             }
           >

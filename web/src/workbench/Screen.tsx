@@ -64,7 +64,7 @@ export function Screen(props: {
     <Switch>
       <Match when={screen.isError}>
         <ErrorLine>
-          This screen couldn't be read: {screen.error?.message}
+          This screen couldn't be read. {screen.error?.message}
         </ErrorLine>
       </Match>
       <Match when={live()}>

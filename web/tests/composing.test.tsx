@@ -866,7 +866,7 @@ describe("the compose page", () => {
     await waitFor(() =>
       expect(
         screen.getByText(
-          `The branch could not be named: ${BRANCH_REFUSAL.NotABranchName}`,
+          `The branch couldn't be named. ${BRANCH_REFUSAL.NotABranchName}`,
         ),
       ).toBeTruthy(),
     );
@@ -1924,7 +1924,7 @@ describe("the target a compose page is pointed at", () => {
     await waitFor(() =>
       expect(
         screen.getByText(
-          `The target could not be named: ${TARGET_REFUSAL.NotDrafting}`,
+          `The target couldn't be named. ${TARGET_REFUSAL.NotDrafting}`,
         ),
       ).toBeTruthy(),
     );
@@ -1971,7 +1971,7 @@ describe("the target a compose page is pointed at", () => {
     await waitFor(() =>
       expect(
         screen.getByText(
-          /The pull request could not be taken up: Another conversation is still at work on that pull request/,
+          /The pull request couldn't be taken up\. Another conversation is still at work on that pull request/,
         ),
       ).toBeTruthy(),
     );
@@ -2906,7 +2906,7 @@ describe("starting the work on the picked device", () => {
   /// A refusal keyed by the number alone would be drawn on the composer of an
   /// unrelated draft the moment two devices are in play.
   it("says what the member refused on the draft it made, and not on the same number here", async () => {
-    const said = `The branch could not be named: ${BRANCH_REFUSAL.NotABranchName}`;
+    const said = `The branch couldn't be named. ${BRANCH_REFUSAL.NotABranchName}`;
 
     creatingOnTheMember(
       whenever(
@@ -3308,7 +3308,7 @@ describe("moving a saved draft to another device", () => {
     await move(THEIRS[0]!);
 
     await screen.findByText(
-      `docs could not be attached: ${SERVER_REFUSAL.NoSuchServer}`,
+      `docs couldn't be attached. ${SERVER_REFUSAL.NoSuchServer}`,
     );
 
     expect(writes(fetching, moved)).toBe(0);
@@ -3347,7 +3347,7 @@ describe("moving a saved draft to another device", () => {
     await move(THEIRS[0]!);
 
     await screen.findByText(
-      `The base branch could not be recorded: ${BASE_REFUSAL.NoSuchBranch}`,
+      `The base branch couldn't be recorded. ${BASE_REFUSAL.NoSuchBranch}`,
     );
 
     expect(writes(fetching, moved)).toBe(0);
@@ -3393,7 +3393,7 @@ describe("moving a saved draft to another device", () => {
     );
 
     await screen.findByText(
-      `The branch could not be named: ${BRANCH_REFUSAL.NotABranchName}`,
+      `The branch couldn't be named. ${BRANCH_REFUSAL.NotABranchName}`,
     );
 
     // And nothing closed the draft it came off.
@@ -3417,7 +3417,7 @@ describe("moving a saved draft to another device", () => {
     await move(THEIRS[0]!);
 
     await screen.findByText(
-      `${refused.name} could not be attached: ${ATTACH_REFUSAL.TooLarge}`,
+      `${refused.name} couldn't be attached. ${ATTACH_REFUSAL.TooLarge}`,
     );
 
     expect(writes(fetching, moved)).toBe(0);
@@ -3443,7 +3443,7 @@ describe("moving a saved draft to another device", () => {
       ),
     );
 
-    await screen.findByText(/the draft it came off could not be closed/i);
+    await screen.findByText(/the draft it came off couldn't be closed/i);
     expect(writes(fetching, moved)).toBe(1);
   });
 
@@ -4062,7 +4062,7 @@ describe("making a repo from the Repo dropdown", () => {
       json({
         MadeWithoutRemote: {
           repo: MADE,
-          why: "`gh` said: Name already exists on this account",
+          why: "The gh command said: Name already exists on this account.",
         },
       } satisfies Created),
       json(TOKENED),
@@ -4077,7 +4077,9 @@ describe("making a repo from the Repo dropdown", () => {
     // `gh`'s own words, the way git's are for a git that would not commit — and
     // the fields are gone, there being nothing left to fill in.
     await waitFor(() =>
-      screen.getByText("`gh` said: Name already exists on this account"),
+      screen.getByText(
+        "The gh command said: Name already exists on this account.",
+      ),
     );
     expect(screen.queryByLabelText(WHERE)).toBeNull();
     expect(stored().repo).toBeNull();
@@ -4915,7 +4917,7 @@ describe("continuing a roadmap from the compose page", () => {
     await waitFor(() =>
       expect(
         screen.getByText(
-          `The stage could not be started: ${ADOPT_REFUSAL.NoGrillingProfile}`,
+          `The stage couldn't be started. ${ADOPT_REFUSAL.NoGrillingProfile}`,
         ),
       ).toBeTruthy(),
     );
@@ -5182,7 +5184,7 @@ describe("the files a compose page holds", () => {
     await waitFor(() =>
       expect(
         screen.getByText(
-          `huge.bin could not be attached: ${ATTACH_REFUSAL.TooLarge}`,
+          `huge.bin couldn't be attached. ${ATTACH_REFUSAL.TooLarge}`,
         ),
       ).toBeTruthy(),
     );
@@ -5597,7 +5599,7 @@ describe("the MCP servers a compose page holds", () => {
     await waitFor(() =>
       expect(
         screen.getByText(
-          `docs could not be attached: ${SERVER_REFUSAL.NoSuchServer}`,
+          `docs couldn't be attached. ${SERVER_REFUSAL.NoSuchServer}`,
         ),
       ).toBeTruthy(),
     );

@@ -132,7 +132,7 @@ async fn initialize(client: &reqwest::Client, server: &AttachedServer) -> Tried 
         Err(header) => {
             return Tried::Refused {
                 why: format!(
-                    "It could not be spoken to: the {header} header is not one HTTP can carry."
+                    "It couldn't be spoken to. The {header} header isn't one HTTP can carry."
                 ),
             };
         }
@@ -176,14 +176,14 @@ async fn initialize(client: &reqwest::Client, server: &AttachedServer) -> Tried 
     if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
         return Tried::Refused {
             why: format!(
-                "It answered {status}, which means the headers it was sent were not accepted."
+                "It answered {status}, which means the headers it was sent weren't accepted."
             ),
         };
     }
 
     if !status.is_success() {
         return Tried::Refused {
-            why: format!("What answered is not an MCP server: it answered {status}."),
+            why: format!("What answered isn't an MCP server: it answered {status}."),
         };
     }
 
@@ -207,7 +207,7 @@ async fn initialize(client: &reqwest::Client, server: &AttachedServer) -> Tried 
         // thing that would tell them apart is the body — and the body is what
         // this is not allowed to quote.
         None => Tried::Refused {
-            why: "What answered is not an MCP server: it did not answer `initialize`.".to_owned(),
+            why: "What answered isn't an MCP server. It didn't answer initialize.".to_owned(),
         },
     }
 }
@@ -240,12 +240,12 @@ fn sending(server: &AttachedServer) -> Result<HeaderMap, String> {
 fn unanswered(error: &reqwest::Error) -> String {
     if error.is_timeout() {
         return format!(
-            "It did not answer within {} seconds.",
+            "It didn't answer within {} seconds.",
             ANSWERS_WITHIN.as_secs()
         );
     }
 
-    format!("It did not answer: {}.", underneath(error))
+    format!("It didn't answer: {}.", underneath(error))
 }
 
 /// The innermost thing that went wrong, which is the one worth reading: the

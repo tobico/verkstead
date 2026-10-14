@@ -159,7 +159,7 @@ pub(crate) fn routes() -> Router<AppState> {
 /// what it answered, or, where it is a socket, hold the two ends of it together.
 async fn relay(State(state): State<AppState>, request: Request) -> Response {
     let Some(devices) = state.devices.clone() else {
-        return unavailable("this server holds no device identity to relay through");
+        return unavailable("This server holds no device identity to relay through.");
     };
 
     // The route above cannot match a path this fails on. Said as a refusal
@@ -168,7 +168,7 @@ async fn relay(State(state): State<AppState>, request: Request) -> Response {
     let Some((device, onwards)) = addressed(request.uri()) else {
         return refused(
             StatusCode::NOT_FOUND,
-            ApiError::new("a relayed call stands under a Device Id and a path"),
+            ApiError::new("A relayed call needs a device id and a path."),
         );
     };
 
@@ -215,14 +215,14 @@ async fn relay(State(state): State<AppState>, request: Request) -> Response {
         Err(Unrelayed::ThisDevice) => refused(
             StatusCode::BAD_REQUEST,
             ApiError::new(format!(
-                "device {device} is this device, and a call to it is made at the path it \
-                 stands at rather than relayed",
+                "Device {device} is this device, so a call to it isn't relayed. Make it at \
+                 its own path.",
             )),
         ),
 
         Err(Unrelayed::NoSuchMember) => refused(
             StatusCode::NOT_FOUND,
-            ApiError::new(format!("this device knows no device {device}")),
+            ApiError::new(format!("This device knows no device {device}.")),
         ),
 
         Err(Unrelayed::Unreachable(why)) => {
@@ -230,7 +230,7 @@ async fn relay(State(state): State<AppState>, request: Request) -> Response {
         }
 
         Err(Unrelayed::Unreadable(why)) => unavailable(&format!(
-            "the devices this one is linked to could not be read: {why:#}",
+            "The devices this one is linked to couldn't be read: {why:#}.",
         )),
     }
 }
@@ -646,7 +646,7 @@ pub(crate) async fn put_to(
 ) -> Result<reqwest::Response, Refusal> {
     let Some(devices) = devices else {
         return Err(Refusal::ours(
-            "this server holds no device identity to relay through".to_owned(),
+            "This server holds no device identity to relay through.".to_owned(),
         ));
     };
 
@@ -656,24 +656,24 @@ pub(crate) async fn put_to(
         Ok(answered) if answered.status().is_success() => Ok(answered),
 
         Ok(answered) => Err(Refusal::theirs(format!(
-            "{named} refused it: {}",
+            "{named} refused it: {}.",
             answered.status(),
         ))),
 
         Err(Unrelayed::Unreachable(_)) => {
-            Err(Refusal::theirs(format!("{named} could not be reached")))
+            Err(Refusal::theirs(format!("{named} couldn't be reached.")))
         }
 
         Err(Unrelayed::NoSuchMember) => Err(Refusal::theirs(format!(
-            "{named} is no longer one of this device's members",
+            "{named} is no longer one of this device's members.",
         ))),
 
         Err(Unrelayed::ThisDevice) => Err(Refusal::ours(
-            "something of this device's own was addressed as a member's".to_owned(),
+            "Something of this device's own was addressed as a member's.".to_owned(),
         )),
 
         Err(Unrelayed::Unreadable(why)) => Err(Refusal::ours(format!(
-            "the devices this one is linked to could not be read: {why:#}",
+            "The devices this one is linked to couldn't be read: {why:#}.",
         ))),
     }
 }
@@ -718,7 +718,7 @@ pub(crate) async fn word_from<T: serde::de::DeserializeOwned>(
 /// sentence nobody usually sees is cheaper than a second one on every press.
 async fn unreadable(devices: Option<&Devices>, device: &str, why: String) -> Refusal {
     Refusal::theirs(format!(
-        "{} answered in a way this device cannot read: {why}",
+        "{} answered in a way this device can't read: {why}.",
         called(devices, device).await,
     ))
 }

@@ -201,7 +201,7 @@ export function ReposCard(props: {
       </Match>
       <Match when={repos.isError}>
         <ErrorLine>
-          The registered repos couldn't be read: {repos.error?.message}
+          The registered repos couldn't be read. {repos.error?.message}
         </ErrorLine>
       </Match>
       <Match when={repos.data}>
@@ -282,7 +282,7 @@ export function ReposPane(props: {
     onError: (error: Error, repo: RepoEntry) =>
       setRefused({
         repo: repo.id,
-        said: `The repo couldn't be removed: ${error.message}`,
+        said: `The repo couldn't be removed. ${error.message}`,
       }),
   }));
 
@@ -314,7 +314,7 @@ export function ReposPane(props: {
         </Match>
         <Match when={repos.isError}>
           <ErrorLine>
-            The registered repos couldn't be read: {repos.error?.message}
+            The registered repos couldn't be read. {repos.error?.message}
           </ErrorLine>
         </Match>
         <Match when={repos.data?.length === 0}>
@@ -560,7 +560,7 @@ export function RepoRegistration(props: {
           that is an error rather than an outcome. */}
       <Show when={register.isError}>
         <ErrorLine class={styles.failure}>
-          The repo couldn't be registered: {register.error?.message}
+          The repo couldn't be registered. {register.error?.message}
         </ErrorLine>
       </Show>
     </form>
@@ -968,7 +968,7 @@ export function CreateRepo(props: {
             that is an error rather than an outcome. */}
           <Show when={create.isError}>
             <ErrorLine class={styles.failure}>
-              The repo couldn't be made: {create.error?.message}
+              The repo couldn't be made. {create.error?.message}
             </ErrorLine>
           </Show>
         </form>

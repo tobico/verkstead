@@ -93,17 +93,15 @@ impl Instead {
     /// nothing, so there is no conversation to name and no harness to name it by.
     fn saying(&self) -> String {
         let Some(harness) = self.harness() else {
-            return "This Conversation arrived with no session on its record to carry on from, so \
-                    whatever is started for it here is Verkstead's own Resume: a session of its \
-                    own, primed from this Timeline rather than picking a conversation up mid-turn."
+            return "This conversation arrived with no session on its record to carry on from. \
+                    What starts here is Verkstead's own resume, primed from this timeline."
                 .to_owned();
         };
 
         format!(
-            "This Conversation arrived part way through a conversation with {harness}, and the \
-             session started here is Verkstead's own Resume rather than a resume of it — {because}. \
-             It starts the work again from this Timeline rather than picking the conversation up \
-             mid-turn.",
+            "This conversation arrived part way through a conversation with {harness}. The \
+             session here is Verkstead's own resume, started again from this timeline, because \
+             {because}.",
             harness = harness.word(),
             because = self.because(),
         )
@@ -113,35 +111,35 @@ impl Instead {
     /// sentence above, and the whole of what the log says.
     fn because(&self) -> String {
         match self {
-            Self::NoSession => "there is no session on the record to carry on from".to_owned(),
+            Self::NoSession => "there's no session on the record to carry on from".to_owned(),
 
             Self::AnotherHarness { ran, running } => format!(
-                "that conversation was had on {ran} and this session runs on {running}, and a \
-                 record one harness wrote is one no other can read",
+                "that conversation was on {ran} and this session runs on {running}, and one \
+                 harness can't read another's record",
                 ran = ran.word(),
                 running = running.word(),
             ),
 
             Self::NoResumeLine(harness) => format!(
-                "Verkstead does not carry a conversation on from a {harness} session",
+                "Verkstead doesn't carry a conversation on from a {harness} session",
                 harness = harness.word(),
             ),
 
             Self::MemoryOff(harness) => format!(
-                "this Agent Profile does not share its account's memory, so none of the record \
-                 {harness} keeps of that conversation travelled with the work",
+                "this agent profile doesn't share its account's memory, so {harness}'s record of \
+                 that conversation didn't travel with the work",
                 harness = harness.word(),
             ),
 
             Self::NoRecord(harness) => format!(
-                "the record {harness} keeps of that conversation is not on this device under this \
-                 device's own name for the Worktree — the memory sync carried none of it, or it \
-                 landed somewhere {harness} will not look",
+                "{harness}'s record of that conversation isn't on this device under this \
+                 worktree's path. The memory sync carried none of it, or it landed where \
+                 {harness} won't look",
                 harness = harness.word(),
             ),
 
             Self::Refused { harness, session } => format!(
-                "{harness} would not resume session `{session}`",
+                "{harness} wouldn't resume session `{session}`",
                 harness = harness.word(),
             ),
         }
@@ -221,10 +219,9 @@ pub(crate) async fn carried_on(
         nudges,
         conversation_id,
         &format!(
-            "This Conversation arrived part way through a conversation with {harness}, and the \
-             session started here carries it on: {harness} was told to resume session `{session}`, \
-             against the record the memory sync carried over. It picks up where the session on the \
-             other device left off rather than starting the work again from this Timeline.",
+            "This conversation arrived part way through a conversation with {harness}, and the \
+             session started here carries it on. Verkstead told {harness} to resume session \
+             `{session}` from the record the memory sync brought over.",
             harness = harness.word(),
         ),
     )
@@ -261,11 +258,11 @@ mod tests {
         let said = Instead::MemoryOff(AgentType::Claude).saying();
 
         assert!(
-            said.contains("does not share its account's memory"),
+            said.contains("doesn't share its account's memory"),
             "the memory switch is named: {said:?}",
         );
         assert!(
-            said.contains("Verkstead's own Resume"),
+            said.contains("Verkstead's own resume"),
             "and what was started instead: {said:?}",
         );
 
@@ -283,7 +280,7 @@ mod tests {
         let said = Instead::NoRecord(AgentType::Grok).saying();
 
         assert!(
-            said.contains("grok") && said.contains("not on this device"),
+            said.contains("grok") && said.contains("isn't on this device"),
             "the record that is not here is named by the harness that keeps it: {said:?}",
         );
 
@@ -294,7 +291,7 @@ mod tests {
         .saying();
 
         assert!(
-            said.contains("opencode would not resume session `ses_01`"),
+            said.contains("opencode wouldn't resume session `ses_01`"),
             "and a refusal names the session it was refused for: {said:?}",
         );
     }

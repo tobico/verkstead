@@ -642,10 +642,8 @@ fn ahead(
 async fn say(state: &AppState, conversation_id: i64, roadmap: &str, ahead: &[Ahead]) {
     let markdown = format!(
         "**Waiting to join.** Every task is done, and the finish is held until the `{roadmap}` \
-         roadmap's chain has settled below this stage: {which}. Nothing rebases onto a branch \
-         that is still moving, and this branch is rebased once, before it has a pull request \
-         anybody has started reading — so the joins are the one thing a roadmap does in single \
-         file, in the order the stages' tasks finished.",
+         roadmap's chain has settled below this stage: {which}. Stages join one at a time, in \
+         the order their tasks finished, so nothing rebases onto a branch that's still moving.",
         which = listed(&ahead.iter().map(why).collect::<Vec<_>>()),
     );
 
@@ -668,9 +666,9 @@ fn why(ahead: &Ahead) -> String {
     let stage = &ahead.stage;
 
     if ahead.joined {
-        format!("stage {stage} has joined the chain and has not settled")
+        format!("stage {stage} has joined the chain and hasn't settled")
     } else {
-        format!("stage {stage} finished its tasks before this one and has not joined yet")
+        format!("stage {stage} finished its tasks before this one and hasn't joined yet")
     }
 }
 
@@ -679,7 +677,9 @@ fn listed(labels: &[String]) -> String {
     match labels.split_last() {
         None => String::new(),
         Some((last, [])) => last.clone(),
-        Some((last, rest)) => format!("{} and {last}", rest.join(", ")),
+        Some((last, [one])) => format!("{one} and {last}"),
+        // The serial comma, which keeps the last two from reading as one.
+        Some((last, rest)) => format!("{}, and {last}", rest.join(", ")),
     }
 }
 
@@ -762,7 +762,7 @@ mod tests {
         assert_eq!(listed(&["02".to_owned(), "04".to_owned()]), "02 and 04");
         assert_eq!(
             listed(&["02".to_owned(), "03".to_owned(), "04".to_owned()]),
-            "02, 03 and 04",
+            "02, 03, and 04",
         );
     }
 
@@ -990,14 +990,14 @@ mod tests {
                 stage: "02".to_owned(),
                 joined: true,
             }),
-            "stage 02 has joined the chain and has not settled",
+            "stage 02 has joined the chain and hasn't settled",
         );
         assert_eq!(
             why(&Ahead {
                 stage: "02".to_owned(),
                 joined: false,
             }),
-            "stage 02 finished its tasks before this one and has not joined yet",
+            "stage 02 finished its tasks before this one and hasn't joined yet",
         );
     }
 

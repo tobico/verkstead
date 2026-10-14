@@ -799,7 +799,7 @@ export function useConversationTicks(
     },
 
     onError: (error: Error) =>
-      setRefused(`The tick couldn't be saved: ${error.message}`),
+      setRefused(`The tick couldn't be saved. ${error.message}`),
   }));
 
   return {
@@ -888,7 +888,7 @@ export function RepoSelect(props: {
           offering none of them is worth more than an empty list. */}
       <Show when={repos.isError}>
         <ErrorLine class={styles.failure}>
-          The repos couldn't be read: {repos.error?.message}
+          The repos couldn't be read. {repos.error?.message}
         </ErrorLine>
       </Show>
 
@@ -1020,7 +1020,7 @@ function RepoPicker(props: {
       </Show>
       <Show when={move.isError}>
         <ErrorLine class={styles.failure}>
-          The repo couldn't be switched: {move.error?.message}
+          The repo couldn't be switched. {move.error?.message}
         </ErrorLine>
       </Show>
     </RepoChoice>
@@ -1086,7 +1086,7 @@ export function RepoChoice(props: {
       <Switch>
         <Match when={repos.isError}>
           <ErrorLine class={styles.failure}>
-            The repos couldn't be read: {repos.error?.message}
+            The repos couldn't be read. {repos.error?.message}
           </ErrorLine>
         </Match>
         <Match when={true}>
@@ -1174,7 +1174,7 @@ function ProcessOption(props: { conversation: ConversationView }): JSX.Element {
       </Show>
       <Show when={say.isError}>
         <ErrorLine class={styles.failure}>
-          The process couldn't be picked: {say.error?.message}
+          The process couldn't be picked. {say.error?.message}
         </ErrorLine>
       </Show>
     </ProcessPicker>
@@ -1468,7 +1468,7 @@ export function ProfileChoices(props: {
     <Switch>
       <Match when={profiles.isError}>
         <ErrorLine class={styles.failure}>
-          The agent profiles couldn't be read: {profiles.error?.message}
+          The agent profiles couldn't be read. {profiles.error?.message}
         </ErrorLine>
       </Match>
       <Match when={profiles.data?.length === 0}>
@@ -1577,7 +1577,7 @@ function PairingPicker(props: {
       </Show>
       <Show when={choose.isError}>
         <ErrorLine class={styles.failure}>
-          The profile couldn't be chosen: {choose.error?.message}
+          The profile couldn't be chosen. {choose.error?.message}
         </ErrorLine>
       </Show>
     </RolePicker>
@@ -1825,7 +1825,7 @@ function BranchName(props: { conversation: ConversationView }): JSX.Element {
       </Show>
       <Show when={rename.isError}>
         <ErrorLine class={styles.failure}>
-          The branch couldn't be named: {rename.error?.message}
+          The branch couldn't be named. {rename.error?.message}
         </ErrorLine>
       </Show>
     </BranchField>
@@ -1935,7 +1935,7 @@ function TargetName(props: { conversation: ConversationView }): JSX.Element {
       </Show>
       <Show when={name.isError}>
         <ErrorLine class={styles.failure}>
-          The target couldn't be named: {name.error?.message}
+          The target couldn't be named. {name.error?.message}
         </ErrorLine>
       </Show>
     </BranchField>
@@ -2089,7 +2089,7 @@ export function BasePicker(props: {
           said rather than drawn as a repository with one branch. */}
       <Show when={branches.isError}>
         <ErrorLine class={styles.failure}>
-          The repo's branches couldn't be read: {branches.error?.message}
+          The repo's branches couldn't be read. {branches.error?.message}
         </ErrorLine>
       </Show>
       {props.children}
@@ -2146,7 +2146,7 @@ function BaseBranch(props: { conversation: ConversationView }): JSX.Element {
       </Show>
       <Show when={record.isError}>
         <ErrorLine class={styles.failure}>
-          The base branch couldn't be recorded: {record.error?.message}
+          The base branch couldn't be recorded. {record.error?.message}
         </ErrorLine>
       </Show>
     </BasePicker>
@@ -2227,7 +2227,7 @@ function AddCompanion(props: { conversation: ConversationView }): JSX.Element {
       </Show>
       <Show when={add.isError}>
         <ErrorLine class={styles.failure}>
-          The companion repo couldn't be added: {add.error?.message}
+          The companion repo couldn't be added. {add.error?.message}
         </ErrorLine>
       </Show>
     </CompanionChoice>
@@ -2275,7 +2275,7 @@ export function CompanionChoice(props: {
       <Switch>
         <Match when={repos.isError}>
           <ErrorLine class={styles.failure}>
-            The repos couldn't be read: {repos.error?.message}
+            The repos couldn't be read. {repos.error?.message}
           </ErrorLine>
         </Match>
         <Match when={repos.data?.length === 0}>
@@ -2396,7 +2396,7 @@ function Companion(props: {
       </Show>
       <Show when={forget.isError}>
         <ErrorLine class={styles.failure}>
-          The companion repo couldn't be removed: {forget.error?.message}
+          The companion repo couldn't be removed. {forget.error?.message}
         </ErrorLine>
       </Show>
 
@@ -2506,7 +2506,7 @@ function CompanionBase(props: {
       </Show>
       <Show when={record.isError}>
         <ErrorLine class={styles.failure}>
-          The base branch couldn't be recorded: {record.error?.message}
+          The base branch couldn't be recorded. {record.error?.message}
         </ErrorLine>
       </Show>
     </BasePicker>
@@ -2567,7 +2567,7 @@ function CompanionAccess(props: {
       </Show>
       <Show when={choose.isError}>
         <ErrorLine class={styles.failure}>
-          The companion repo's mode couldn't be set: {choose.error?.message}
+          The companion repo's mode couldn't be set. {choose.error?.message}
         </ErrorLine>
       </Show>
     </div>
@@ -2699,7 +2699,7 @@ function CompanionBranch(props: {
       </Show>
       <Show when={rename.isError}>
         <ErrorLine class={styles.failure}>
-          The branch couldn't be named: {rename.error?.message}
+          The branch couldn't be named. {rename.error?.message}
         </ErrorLine>
       </Show>
     </BranchField>

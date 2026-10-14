@@ -266,7 +266,7 @@ export function Quick(props: {
       >
         <Match when={files.isError}>
           <ErrorLine>
-            This conversation's files couldn't be read: {files.error?.message}
+            This conversation's files couldn't be read. {files.error?.message}
           </ErrorLine>
         </Match>
 

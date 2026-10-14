@@ -1648,7 +1648,7 @@ async fn no_repo_match_is_said_on_the_timeline_and_starts_the_session_anyway() {
     let said = b.notices(conversation).await.join("\n");
 
     assert!(
-        said.contains("no Repo that is this repository"),
+        said.contains("no repo for this repository"),
         "the Timeline says what was not pulled. It says: {said:?}",
     );
 

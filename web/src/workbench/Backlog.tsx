@@ -130,7 +130,7 @@ export function Backlog(props: {
         </Match>
         <Match when={opened.isError}>
           <ErrorLine>
-            The task list couldn't be read: {opened.error?.message}
+            The task list couldn't be read. {opened.error?.message}
           </ErrorLine>
         </Match>
         <Match when={opened.data}>

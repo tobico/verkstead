@@ -361,7 +361,7 @@ export function Output(props: {
           </Match>
           <Match when={transcript.isError}>
             <ErrorLine>
-              What this session said couldn't be read:{" "}
+              What this session said couldn't be read.{" "}
               {transcript.error?.message}
             </ErrorLine>
           </Match>
@@ -372,7 +372,7 @@ export function Output(props: {
               story for a session whose backend kept no log of itself. */}
           <Match when={capture.isError}>
             <ErrorLine>
-              This capture couldn't be read: {capture.error?.message}
+              This capture couldn't be read. {capture.error?.message}
             </ErrorLine>
           </Match>
           {/* Nothing to draw and a reason for it, which is the difference

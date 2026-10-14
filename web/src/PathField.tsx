@@ -527,7 +527,7 @@ export function PathField(props: {
                 failure. */}
             <Match when={listing.isError}>
               <ErrorLine class={styles.line}>
-                Could not read that directory: {listing.error?.message}
+                That directory couldn't be read. {listing.error?.message}
               </ErrorLine>
             </Match>
             <Match when={listing.data === undefined}>

@@ -9352,7 +9352,7 @@ async fn a_stage_that_cannot_start_beside_the_adopted_one_is_said_on_the_timelin
     assert!(
         said.contains("Stage 02")
             && said.contains("askance")
-            && said.contains("already a branch of that repository")
+            && said.contains("already a branch of that repo")
             && said.contains("nothing was left behind"),
         "which stage, which repository and what stopped it: {said:?}",
     );
@@ -11132,7 +11132,7 @@ async fn a_review_over_a_finished_conversations_pull_request_closes_it_and_takes
 
     assert!(
         said.contains(
-            "The Conversation on <code>rate-limiting</code> had finished with this pull request"
+            "The conversation on <code>rate-limiting</code> had finished with this pull request"
         ),
         "the Timeline names the Conversation this start closed: {said}",
     );
@@ -11224,7 +11224,7 @@ async fn a_review_over_the_branch_of_a_finished_conversations_pull_request_close
 
     assert!(
         said.contains(
-            "The Conversation on <code>rate-limiting</code> had finished with pull request #41 on \
+            "The conversation on <code>rate-limiting</code> had finished with pull request #41 on \
              that branch"
         ),
         "the Timeline names what was given up, by its number: {said}",
@@ -12799,7 +12799,7 @@ async fn a_fix_merge_issues_pointed_into_a_stack_records_the_whole_chain() {
     let said = notices(&view).join("\n");
 
     assert!(
-        said.contains("one of a stack of 3") && said.contains("from the bottom"),
+        said.contains("one of a stack of 3") && said.contains("From the bottom"),
         "the Timeline says what the stack is: {said}",
     );
     assert!(
@@ -12811,8 +12811,8 @@ async fn a_fix_merge_issues_pointed_into_a_stack_records_the_whole_chain() {
     // what it has always been: there is no Conversation here to close, and
     // nothing standing on the branch for a sync to be refused over.
     assert!(
-        said.contains("#40 belongs to no Conversation")
-            && said.contains("#42 belongs to no Conversation"),
+        said.contains("#40 belongs to no conversation")
+            && said.contains("#42 belongs to no conversation"),
         "a neighbour that is nobody's is noted rather than acted on: {said}",
     );
 }
@@ -12973,14 +12973,14 @@ async fn a_fix_merge_issues_over_a_stack_closes_the_conversations_on_its_neighbo
 
     assert!(
         said.contains(
-            "#40 belonged to the Conversation on <code>stage-01</code>, which had finished with \
+            "#40 belonged to the conversation on <code>stage-01</code>, which had finished with \
              it and was closed to make way"
         ),
         "the note names the Conversation that was closed off the link below: {said}",
     );
     assert!(
         said.contains(
-            "#42 belonged to the Conversation on <code>stage-03</code>, which had finished with \
+            "#42 belonged to the conversation on <code>stage-03</code>, which had finished with \
              it and was closed to make way"
         ),
         "and the one above it: {said}",
@@ -13233,7 +13233,7 @@ async fn a_chain_gh_would_not_list_is_said_on_the_timeline() {
     let said = notices(&opened(&app, id).await).join("\n");
 
     assert!(
-        said.contains("could not list") && said.contains("#41 alone"),
+        said.contains("couldn't list") && said.contains("#41 alone"),
         "the Timeline says the chain was not read and what the wrap-up is \
          therefore over: {said}",
     );
@@ -13291,11 +13291,11 @@ async fn a_neighbour_another_conversation_holds_is_recorded_without_being_claime
     let said = notices(&opened(&app, id).await).join("\n");
 
     assert!(
-        said.contains("#40 belongs to the Conversation on") && said.contains("stage-01"),
+        said.contains("#40 belongs to the conversation on") && said.contains("stage-01"),
         "and the note names the Conversation the neighbour is: {said}",
     );
     assert!(
-        said.contains("#42 belongs to no Conversation"),
+        said.contains("#42 belongs to no conversation"),
         "and says so where there is nobody to name: {said}",
     );
 
@@ -13399,7 +13399,7 @@ async fn a_steer_back_into_a_wrap_up_closes_the_conversation_that_took_the_pull_
 
     assert!(
         said.contains(
-            "The Conversation on <code>rate-limiting</code> had taken this pull request over"
+            "The conversation on <code>rate-limiting</code> had taken this pull request over"
         ),
         "the Timeline names the Conversation this steer closed: {said}",
     );

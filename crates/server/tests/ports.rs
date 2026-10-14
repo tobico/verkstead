@@ -1108,7 +1108,7 @@ async fn a_connection_is_refused_unless_the_reading_offers_it_to_the_caller() {
         .await
         .expect_err("a port nothing answers on should have been refused");
     assert_eq!(status, 502, "{said}");
-    assert!(said.contains("nothing answered"), "{said}");
+    assert!(said.contains("Nothing answered"), "{said}");
 
     // A port the terminal never opened.
     let never = free_port();
@@ -1116,7 +1116,7 @@ async fn a_connection_is_refused_unless_the_reading_offers_it_to_the_caller() {
         .await
         .expect_err("a port not in the reading should have been refused");
     assert_eq!(status, 404, "{said}");
-    assert!(said.contains("not listening"), "{said}");
+    assert!(said.contains("isn't listening"), "{said}");
 
     // A terminal A holds no attach on, for a port that is listening in another.
     let (status, said) = upgraded(at, &through(B, &port_path(unattached, elsewhere)))

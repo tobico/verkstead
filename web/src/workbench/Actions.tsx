@@ -671,7 +671,7 @@ function actions(): {
       void reread();
     },
     onError: (error: Error) =>
-      refuse(`The conversation couldn't be resumed: ${error.message}`),
+      refuse(`The conversation couldn't be resumed. ${error.message}`),
   }));
 
   /// Both stops answer the same way, so both are pressed the same way: a
@@ -691,7 +691,7 @@ function actions(): {
       void reread();
     },
     onError: (error: Error) =>
-      refuse(`The conversation couldn't be stopped: ${error.message}`),
+      refuse(`The conversation couldn't be stopped. ${error.message}`),
   });
 
   const stop = useMutation(() => pressing(stopConversation));
@@ -746,7 +746,7 @@ function actions(): {
     },
     onError: (error: Error) =>
       refuse(
-        `The conversation couldn't be stopped to steer it: ${error.message}`,
+        `The conversation couldn't be stopped to steer it. ${error.message}`,
       ),
   }));
 
@@ -781,7 +781,7 @@ function actions(): {
       post: () => ending(device(), conversation.id),
       refusal: (outcome: ConversationClosed) => CLOSE_REFUSAL[outcome],
       fell: (error: Error) =>
-        `The conversation couldn't be closed: ${error.message}`,
+        `The conversation couldn't be closed. ${error.message}`,
       reread,
     });
   };
@@ -853,7 +853,7 @@ function actions(): {
       post: () => archiveConversation(device(), conversation.id),
       refusal: (outcome: ConversationArchived) => ARCHIVE_REFUSAL[outcome],
       fell: (error: Error) =>
-        `The conversation couldn't be archived: ${error.message}`,
+        `The conversation couldn't be archived. ${error.message}`,
       reread,
     });
   };
@@ -876,7 +876,7 @@ function actions(): {
       post: () => unarchiveConversation(device(), conversation.id),
       refusal: (outcome: ConversationUnarchived) => UNARCHIVE_REFUSAL[outcome],
       fell: (error: Error) =>
-        `The conversation couldn't be unarchived: ${error.message}`,
+        `The conversation couldn't be unarchived. ${error.message}`,
       reread,
     });
   };
@@ -1209,7 +1209,7 @@ export function CardActions(props: {
             </Match>
             <Match when={conversation.isError}>
               <ErrorLine class={styles.failure}>
-                The conversation couldn't be read:{" "}
+                The conversation couldn't be read.{" "}
                 {conversation.error?.message}
               </ErrorLine>
             </Match>

@@ -242,7 +242,7 @@ export function McpServersCard(props: {
       </Match>
       <Match when={settings.isError}>
         <ErrorLine>
-          The settings couldn't be read: {settings.error?.message}
+          The settings couldn't be read. {settings.error?.message}
         </ErrorLine>
       </Match>
       <Match when={settings.data}>
@@ -530,7 +530,7 @@ export function McpServersPane(props: {
         </Match>
         <Match when={settings.isError}>
           <ErrorLine>
-            The settings couldn't be read: {settings.error?.message}
+            The settings couldn't be read. {settings.error?.message}
           </ErrorLine>
         </Match>
         <Match when={told()}>
@@ -795,7 +795,7 @@ export function McpServersPane(props: {
                 here that is an error rather than an answer. */}
             <Show when={save.isError}>
               <ErrorLine class={styles.failure}>
-                The settings couldn't be saved: {save.error?.message}
+                The settings couldn't be saved. {save.error?.message}
               </ErrorLine>
             </Show>
           </form>

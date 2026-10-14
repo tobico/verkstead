@@ -230,7 +230,7 @@ describe("closing a Set unanswered", () => {
   it("says so in the server's own wording when it did not get through", async () => {
     const { page, fetching } = await answering(
       WAITING,
-      json({ error: "the Question Set could not be locked" }, 503),
+      json({ error: "The question set couldn't be locked." }, 503),
     );
 
     reachForLock(page);
@@ -241,7 +241,7 @@ describe("closing a Set unanswered", () => {
     await waitFor(() => expect(posts(fetching)).toHaveLength(1));
     await waitFor(() =>
       expect(page.querySelector(`.${sheet.meta} .${notices.error}`)!.textContent).toContain(
-        "the Question Set could not be locked",
+        "The question set couldn't be locked.",
       ),
     );
   });

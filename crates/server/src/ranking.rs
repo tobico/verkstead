@@ -106,7 +106,7 @@ pub(crate) async fn dropped(state: &AppState, moved: DroppedRow) -> Result<(), R
 
     let rows = merging::ranks(state)
         .await
-        .map_err(|why| Refusal::ours(format!("the sidebar's order could not be read: {why:#}")))?;
+        .map_err(|why| Refusal::ours(format!("The sidebar's order couldn't be read: {why:#}.")))?;
 
     let moved = DroppedRow {
         row: here(state, moved.row),
@@ -169,7 +169,7 @@ async fn open_the_gap(
     let next = under_the_gap(rows, Some(under), moved);
 
     let opened = ranks::between(Some(under), next.as_deref(), owner(state, &lower.device))
-        .map_err(|why| Refusal::ours(format!("the gap could not be opened: {why:#}")))?;
+        .map_err(|why| Refusal::ours(format!("The gap couldn't be opened: {why:#}.")))?;
 
     write(
         state,
@@ -194,7 +194,7 @@ fn mint(
 ) -> Result<String, Refusal> {
     ranks::between(above, under, owner(state, &moved.device)).map_err(|why| {
         Refusal::ours(format!(
-            "the row's new place could not be worked out: {why:#}"
+            "The row's new place couldn't be worked out: {why:#}."
         ))
     })
 }
@@ -208,7 +208,7 @@ async fn write(state: &AppState, row: &MergedRow, rank: &str) -> Result<(), Refu
     match row.device.as_deref() {
         None => stated(state, row.id, rank)
             .await
-            .map_err(|why| Refusal::ours(format!("the order could not be saved: {why:#}"))),
+            .map_err(|why| Refusal::ours(format!("The order couldn't be saved: {why:#}."))),
 
         Some(device) => relayed(state, device, row.id, rank).await,
     }
@@ -242,7 +242,7 @@ async fn relayed(state: &AppState, device: &str, id: i64, rank: &str) -> Result<
     let saying = serde_json::to_vec(&NewRank {
         rank: rank.to_owned(),
     })
-    .map_err(|why| Refusal::ours(format!("the rank could not be written down: {why}")))?;
+    .map_err(|why| Refusal::ours(format!("The rank couldn't be written down: {why}.")))?;
 
     relaying::put_to(
         state.devices.as_ref(),

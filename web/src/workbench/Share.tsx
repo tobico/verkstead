@@ -93,7 +93,7 @@ export function published(outcome: SharePublished): JSX.Element {
   }
 
   if ("Refused" in outcome) {
-    return <>GitHub refused it: {outcome.Refused.why}</>;
+    return <>GitHub refused it: {ended(outcome.Refused.why)}</>;
   }
 
   // Through the share viewer, which is what the server composed it as — see
@@ -139,10 +139,18 @@ export function commented(outcome: ShareCommented): JSX.Element {
   }
 
   for (const miss of missed) {
-    said.push(`The comment on ${named(miss)} couldn't be posted: ${miss.why}`);
+    said.push(`The comment on ${named(miss)} couldn't be posted: ${ended(miss.why)}`);
   }
 
   return <>{said.join(" ")}</>;
+}
+
+/// GitHub's own words, ended as a sentence where they were not already: the
+/// words are left as they came, and only the full stop the screen wants is
+/// added.
+function ended(said: string): string {
+  const trimmed = said.trimEnd();
+  return /[.!?…]$/.test(trimmed) ? trimmed : `${trimmed}.`;
 }
 
 /// What one pull request is called in that sentence: its number, and the
@@ -180,8 +188,8 @@ export function Share(props: {
     },
     onError: (error: Error) => {
       // The transport rather than the answer: a request that never landed has
-      // no named outcome, so it is said in GitHub's place.
-      toast(() => published({ Refused: { why: error.message } }));
+      // no named outcome, so it is said as the server or the browser said it.
+      toast(() => <>The share couldn't be published. {error.message}</>);
     },
   }));
 
@@ -193,11 +201,8 @@ export function Share(props: {
     },
     onError: (error: Error) => {
       // The transport rather than the answer, exactly as the publish's is: a
-      // request that never landed has no named outcome, and the publish is what
-      // it would have failed at.
-      toast(() =>
-        commented({ NotPublished: { why: { Refused: { why: error.message } } } }),
-      );
+      // request that never landed has no named outcome.
+      toast(() => <>The share couldn't be posted. {error.message}</>);
     },
   }));
 

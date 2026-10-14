@@ -114,7 +114,7 @@ function unread(
   standing: SettingsView,
   name: string,
   running_on: "BuiltIn" | "Nothing",
-  why = "sets RUSTUP_HOME, which is a variable the Sandbox sets itself",
+  why = "sets RUSTUP_HOME, which is a variable the sandbox sets itself",
 ): SettingsView {
   return {
     ...standing,
@@ -327,7 +327,7 @@ describe("the languages as the pane draws them", () => {
         container.querySelector(`.${styles.warning}`)?.textContent,
       ).toContain(
         "Its entry in config.yaml sets RUSTUP_HOME, which is a variable the " +
-          "Sandbox sets itself. Verkstead is using the descriptor it ships",
+          "sandbox sets itself. Verkstead is using the descriptor it ships",
       ),
     );
 
@@ -397,7 +397,7 @@ describe("the link beside each language", () => {
               ...language,
               size: "lots",
               size_configured: true,
-              size_unread: "is not a size: write 10G",
+              size_unread: "isn't a size: write 10G",
             }
           : language,
       ),
@@ -618,7 +618,7 @@ describe("the size in a language's panel", () => {
               ...language,
               size: "lots",
               size_configured: true,
-              size_unread: "is not a size: write 10G",
+              size_unread: "isn't a size: write 10G",
             }
           : language,
       ),
@@ -629,7 +629,7 @@ describe("the size in a language's panel", () => {
 
     expect(theSize(GO).value).toBe("lots");
     expect(panel.querySelector(`.${styles.warning}`)?.textContent).toBe(
-      "Its size in config.yaml, lots, is not a size: write 10G, so its store " +
+      "Its size in config.yaml, lots, isn't a size: write 10G, so its store " +
         "is held to 10G.",
     );
   });
@@ -1136,7 +1136,7 @@ describe("changing the languages", () => {
       compiling(TOLD),
       json({
         ...answering(compiling(TOLD)),
-        refused_sizes: [{ language: GO, why: "is not a size: write 10G" }],
+        refused_sizes: [{ language: GO, why: "isn't a size: write 10G" }],
       }),
     );
     mountPane();
@@ -1145,15 +1145,15 @@ describe("changing the languages", () => {
     fireEvent.input(theSize(GO), { target: { value: "1.5G" } });
     fireEvent.submit(theSize(GO).form!);
 
-    await waitFor(() => screen.getByText(/is not a size: write 10G/));
+    await waitFor(() => screen.getByText(/isn't a size: write 10G/));
 
     expect(languagesSent(fetching)[1]).toEqual({
       name: GO,
       enabled: true,
       size: "1.5G",
     });
-    expect(screen.getByText(/is not a size/).textContent).toBe(
-      "1.5G is not a size: write 10G.",
+    expect(screen.getByText(/isn't a size/).textContent).toBe(
+      "1.5G isn't a size: write 10G.",
     );
     expect(theSize(GO).value, "what was typed is still there").toBe("1.5G");
     expect(panel.isConnected).toBe(true);
@@ -1166,7 +1166,7 @@ describe("changing the languages", () => {
     // And it is still there when the panel is opened again.
     fireEvent.keyDown(document, { key: "Escape" });
     await opened("Go");
-    expect(screen.getByText(/is not a size/)).toBeTruthy();
+    expect(screen.getByText(/isn't a size/)).toBeTruthy();
   });
 
   /// A save that would not land keeps the page honest about it: a settings page

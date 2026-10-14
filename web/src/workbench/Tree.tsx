@@ -1092,7 +1092,7 @@ export function Tree(props: {
       <Switch fallback={<Empty>Reading this conversation's worktrees…</Empty>}>
         <Match when={roots.isError}>
           <ErrorLine>
-            This conversation's worktrees couldn't be read: {roots.error?.message}
+            This conversation's worktrees couldn't be read. {roots.error?.message}
           </ErrorLine>
         </Match>
         <Match when={roots.data && roots.data.roots.length > 0}>

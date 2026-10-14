@@ -149,7 +149,7 @@ fn entries_of(real: &Path) -> DirectoryListing {
         Ok(reading) => reading,
         Err(error) => {
             return DirectoryListing::Unreadable {
-                why: format!("the server cannot read it: {error}"),
+                why: format!("The server can't read it: {error}."),
             };
         }
     };

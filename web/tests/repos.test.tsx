@@ -244,13 +244,13 @@ describe("the card", () => {
     serving(
       whenever(
         "/api/ui/repos",
-        json({ error: "the registered Repos could not be read" }, 500),
+        json({ error: "The registered repos couldn't be read." }, 500),
       ),
     );
     mountCard();
 
     await waitFor(() =>
-      screen.getByText(/the registered Repos could not be read/),
+      screen.getByText(/The registered repos couldn't be read/),
     );
   });
 });
@@ -326,13 +326,13 @@ describe("the pane it opens", () => {
     serving(
       whenever(
         "/api/ui/repos",
-        json({ error: "the registered Repos could not be read" }, 500),
+        json({ error: "The registered repos couldn't be read." }, 500),
       ),
     );
     mountPane();
 
     await waitFor(() =>
-      screen.getByText(/the registered Repos could not be read/),
+      screen.getByText(/The registered repos couldn't be read/),
     );
   });
 
@@ -479,7 +479,7 @@ describe("removing a repo", () => {
   /// same reason.
   it("says so when the server could not answer", async () => {
     theRepos(
-      removing(FIRST, json({ error: "the Repo could not be removed" }, 500)),
+      removing(FIRST, json({ error: "The repo couldn't be removed." }, 500)),
     );
     mountPane();
 
@@ -544,12 +544,12 @@ describe("the registration the dropdown draws", () => {
   /// A server that could not answer at all, which is the one thing here that is
   /// an error rather than an outcome.
   it("shows the server's own wording when it could not answer at all", async () => {
-    theRepos(json({ error: "the Repo could not be registered" }, 500));
+    theRepos(json({ error: "The repo couldn't be registered." }, 500));
     const { landed } = mountOpen();
 
     register("/srv/repos/verkstead");
 
-    await waitFor(() => screen.getByText(/the Repo could not be registered/));
+    await waitFor(() => screen.getByText(/The repo couldn't be registered\./));
     expect(landed).not.toHaveBeenCalled();
   });
 

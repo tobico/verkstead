@@ -288,16 +288,16 @@ describe("reading a Set", () => {
   /// there reads like any other read that did not land — the "No such Set."
   /// of its own went with the page it was the whole of.
   it("shows the server's own wording when the Set cannot be read", async () => {
-    serving(json({ error: "there is no Question Set 404" }, 404));
+    serving(json({ error: "There is no question set 404." }, 404));
     mount("404");
 
-    await waitFor(() => screen.getByText(/there is no Question Set 404/));
+    await waitFor(() => screen.getByText(/There is no question set 404/));
 
     cleanup();
-    serving(json({ error: "the Question Set could not be read" }, 500));
+    serving(json({ error: "The question set couldn't be read." }, 500));
     mount();
 
-    await waitFor(() => screen.getByText(/the Question Set could not be read/));
+    await waitFor(() => screen.getByText(/The question set couldn't be read/));
   });
 });
 

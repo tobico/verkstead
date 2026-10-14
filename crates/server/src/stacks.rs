@@ -127,7 +127,7 @@ pub(crate) async fn missing(state: &AppState, conversation_id: i64) -> Option<St
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, "asking gh whether it has the stack extension failed");
 
-            Some("Verkstead could not run `gh` to find out".to_owned())
+            Some("Verkstead couldn't run `gh` to find out.".to_owned())
         }
     }
 }
@@ -212,7 +212,7 @@ pub(crate) async fn walk(state: &AppState, repo: &store::Repo, own: i64) -> Walk
         Err(error) => {
             tracing::error!(error = ?error, repo = repo.name, "asking gh for the Repo's open pull requests failed");
 
-            return Walked::Unread("Verkstead could not run `gh` to find out".to_owned());
+            return Walked::Unread("Verkstead couldn't run `gh` to find out.".to_owned());
         }
         Ok(Ok(open)) => open,
     };
@@ -541,19 +541,19 @@ fn found(chain: &[Numbered], own: i64, said: &[(i64, Option<Whose>)]) -> String 
                 branch,
                 closed: true,
             }) => format!(
-                "#{number} belonged to the Conversation on `{branch}`, which had finished with it \
+                "#{number} belonged to the conversation on `{branch}`, which had finished with it \
                  and was closed to make way"
             ),
             Some(Whose { branch, .. }) => {
-                format!("#{number} belongs to the Conversation on `{branch}`")
+                format!("#{number} belongs to the conversation on `{branch}`")
             }
-            None => format!("#{number} belongs to no Conversation"),
+            None => format!("#{number} belongs to no conversation"),
         })
         .collect();
 
     format!(
-        "Pull request #{own} is one of a stack of {deep}, which this wrap-up waits on whole — \
-         from the bottom: {listed}. The rest of the chain is recorded here to be watched rather \
+        "Pull request #{own} is one of a stack of {deep}, which this wrap-up waits on whole. \
+         From the bottom: {listed}. The rest of the chain is recorded here to be watched rather \
          than taken up: {whose}.",
         deep = chain.len(),
         listed = listed.join(", "),
@@ -581,8 +581,8 @@ fn found(chain: &[Numbered], own: i64, said: &[(i64, Option<Whose>)]) -> String 
 /// is a token to renew or a network that was down for a second.
 fn unread(own: i64, why: &str) -> String {
     format!(
-        "Verkstead could not list this repository's open pull requests, so whether #{own} is \
-         one of a stack is not known: {why}. This wrap-up is over #{own} alone — if there is \
+        "Verkstead couldn't list this repo's open pull requests, so whether #{own} is \
+         one of a stack isn't known. {why} This wrap-up is over #{own} alone. If there's \
          a chain above or below it, nothing here is waiting on it."
     )
 }
@@ -711,10 +711,10 @@ mod tests {
 
         assert_eq!(
             found(&chain, 41, &said),
-            "Pull request #41 is one of a stack of 3, which this wrap-up waits on whole — from \
+            "Pull request #41 is one of a stack of 3, which this wrap-up waits on whole. From \
              the bottom: #40 (`stage-01`), #41 (`stage-02`), #42 (`stage-03`). The rest of the \
              chain is recorded here to be watched rather than taken up: #40 belongs to the \
-             Conversation on `stage-01`, #42 belongs to no Conversation.",
+             conversation on `stage-01`, #42 belongs to no conversation.",
         );
     }
 
@@ -751,11 +751,11 @@ mod tests {
 
         assert_eq!(
             found(&chain, 41, &said),
-            "Pull request #41 is one of a stack of 3, which this wrap-up waits on whole — from \
+            "Pull request #41 is one of a stack of 3, which this wrap-up waits on whole. From \
              the bottom: #40 (`stage-01`), #41 (`stage-02`), #42 (`stage-03`). The rest of the \
              chain is recorded here to be watched rather than taken up: #40 belonged to the \
-             Conversation on `stage-01`, which had finished with it and was closed to make way, \
-             #42 belonged to the Conversation on `stage-03`, which had finished with it and was \
+             conversation on `stage-01`, which had finished with it and was closed to make way, \
+             #42 belonged to the conversation on `stage-03`, which had finished with it and was \
              closed to make way.",
         );
     }
@@ -802,13 +802,14 @@ mod tests {
     /// pull request.
     #[test]
     fn a_chain_that_could_not_be_read_is_said_apart_from_a_lone_pull_request() {
-        let said = unread(41, "gh is not logged in");
+        let said = unread(41, "This machine's `gh` isn't logged in.");
 
         assert_eq!(
             said,
-            "Verkstead could not list this repository's open pull requests, so whether #41 \
-             is one of a stack is not known: gh is not logged in. This wrap-up is over #41 \
-             alone — if there is a chain above or below it, nothing here is waiting on it.",
+            "Verkstead couldn't list this repo's open pull requests, so whether #41 \
+             is one of a stack isn't known. This machine's `gh` isn't logged in. This wrap-up \
+             is over #41 alone. If there's a chain above or below it, nothing here is waiting \
+             on it.",
         );
     }
 }

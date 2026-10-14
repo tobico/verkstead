@@ -566,7 +566,6 @@ async fn settled(pool: &SqlitePool, nudges: &Nudges, conversation_id: i64, notic
 ///
 /// What happened, that nothing was stopped, and what the human can do about it
 /// — the three moves that are theirs, the session being still there to move.
-pub(crate) const ESCALATED: &str = "The session went idle without saying it is done, asking you \
-     anything or declaring a wait, and did not answer when it was spoken to three times. It is \
-     still running, with its worktree. You can type into its Screen, steer the Conversation, or \
-     press **Stop**.";
+pub(crate) const ESCALATED: &str = "The agent went idle without saying it's done, asking you \
+     anything, or declaring a wait, and didn't answer when spoken to three times. Its session is \
+     still running. Type into its screen, steer the conversation, or press **Stop**.";

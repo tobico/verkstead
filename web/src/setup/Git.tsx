@@ -369,7 +369,7 @@ export function Git(): JSX.Element {
           <Show when={refused()}>
             {(why) => (
               <ErrorLine class={styles.unverified}>
-                It's saved, but GitHub wouldn't say whose it is: {why()}.
+                It's saved, but GitHub wouldn't say whose it is. {why()}
                 Correct it above, or press <strong>Next</strong> again to go on
                 without it.
               </ErrorLine>
@@ -395,12 +395,12 @@ export function Git(): JSX.Element {
 
           <Show when={save.isError}>
             <ErrorLine class={styles.failure}>
-              Nothing was saved: {save.error?.message}
+              Nothing was saved. {save.error?.message}
             </ErrorLine>
           </Show>
           <Show when={finish.isError}>
             <ErrorLine class={styles.failure}>
-              It's saved, but the wizard couldn't be closed:{" "}
+              It's saved, but the wizard couldn't be closed.{" "}
               {finish.error?.message}
             </ErrorLine>
           </Show>

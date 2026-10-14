@@ -159,7 +159,11 @@ function AddServer(props: {
           .filter((one) => one.server !== at)
           .map((one) => one.why),
         ...saved.refused.map((one) => one.why),
-        ...saved.refused_sizes.map((one) => one.why),
+        // A size's reason is a clause following the size it was about, so it
+        // is said after the language's name rather than on its own.
+        ...saved.refused_sizes.map(
+          (one) => `The ${one.language} store size ${one.why}.`,
+        ),
       ];
 
       if (mine.length > 0 || other.length > 0) {
@@ -374,18 +378,18 @@ function AddServer(props: {
         <Show when={elsewhere()}>
           {(why) => (
             <ErrorLine class={styles.failure}>
-              The settings couldn't be saved as they stand: {why()}
+              The settings couldn't be saved as they stand. {why()}
             </ErrorLine>
           )}
         </Show>
         <Show when={settings.isError}>
           <ErrorLine class={styles.failure}>
-            The settings couldn't be read: {settings.error?.message}
+            The settings couldn't be read. {settings.error?.message}
           </ErrorLine>
         </Show>
         <Show when={save.isError}>
           <ErrorLine class={styles.failure}>
-            The server couldn't be added: {save.error?.message}
+            The server couldn't be added. {save.error?.message}
           </ErrorLine>
         </Show>
       </form>

@@ -815,7 +815,7 @@ async fn ticking_three_rows_raises_one_command_and_the_rows_go_present() {
     assert_eq!(run.done, 0);
     assert_eq!(
         run.status,
-        format!("Waiting for the password dialog on {HOSTNAME}"),
+        format!("Waiting for the password dialog on {HOSTNAME}…"),
         "the line names the machine the dialog is on",
     );
 
@@ -851,7 +851,7 @@ async fn ticking_three_rows_raises_one_command_and_the_rows_go_present() {
     let run = landed.run.clone().expect("the run it was started with");
 
     assert_eq!(run.done, 3);
-    assert_eq!(run.status, "Everything that was ticked is installed");
+    assert_eq!(run.status, "Everything that was ticked is installed.");
     assert_eq!(dialog.commands().len(), 1, "one press is one dialog");
 
     for ticked in TICKED {
@@ -909,7 +909,7 @@ async fn a_mac_installs_its_packages_with_homebrew_and_claude_with_anthropics() 
     let run = landed.run.clone().expect("the run it was started with");
 
     assert_eq!(run.done, 2);
-    assert_eq!(run.status, "Everything that was ticked is installed");
+    assert_eq!(run.status, "Everything that was ticked is installed.");
 
     assert!(
         dialog.commands().is_empty(),
@@ -975,7 +975,7 @@ async fn an_intel_mac_installs_with_the_vendors_own_and_raises_nothing() {
     let run = landed.run.clone().expect("the run it was started with");
 
     assert_eq!(run.done, 3);
-    assert_eq!(run.status, "1 of 3 could not be installed");
+    assert_eq!(run.status, "1 of 3 couldn't be installed.");
 
     assert!(
         dialog.commands().is_empty(),
@@ -1194,7 +1194,7 @@ async fn an_installer_that_failed_fails_its_own_row_and_no_other() {
 
     assert_eq!(
         landed.run.expect("the run").status,
-        "1 of 3 could not be installed",
+        "1 of 3 couldn't be installed.",
     );
 
     assert_eq!(
@@ -1242,7 +1242,7 @@ async fn a_refresh_that_could_not_reach_everything_installs_anyway() {
 
     assert_eq!(
         landed.run.expect("the run").status,
-        "Everything that was ticked is installed",
+        "Everything that was ticked is installed.",
     );
 }
 
@@ -1276,7 +1276,7 @@ async fn a_dismissed_dialog_fails_every_ticked_row() {
 
     assert_eq!(
         landed.run.expect("the run").status,
-        "3 of 3 could not be installed",
+        "3 of 3 couldn't be installed.",
     );
 }
 

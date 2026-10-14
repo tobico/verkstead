@@ -3048,7 +3048,7 @@ export function Code(props: {
               of. */}
           <Show when={terminals.isError}>
             <ErrorLine>
-              This conversation's terminals couldn't be read:{" "}
+              This conversation's terminals couldn't be read.{" "}
               {terminals.error?.message}
             </ErrorLine>
           </Show>

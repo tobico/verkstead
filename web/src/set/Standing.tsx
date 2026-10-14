@@ -179,7 +179,7 @@ function unlocked(
   error: Error | null,
 ): string | null {
   if (error !== null) {
-    return `The question set wasn't locked: ${error.message}`;
+    return `The question set wasn't locked. ${error.message}`;
   }
 
   switch (outcome) {

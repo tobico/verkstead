@@ -188,7 +188,7 @@ export function Commit(props: {
           </Match>
           <Match when={opened.isError}>
             <ErrorLine>
-              This commit couldn't be read: {opened.error?.message}
+              This commit couldn't be read. {opened.error?.message}
             </ErrorLine>
           </Match>
         </Switch>

@@ -66,7 +66,9 @@ const UNVERIFIED: SettingsSaved = { ...SAVED, verified: null };
 /// And one whose token GitHub would not answer for.
 const REFUSED: SettingsSaved = {
   ...SAVED,
-  verified: { Refused: { why: "gh said: HTTP 401: Bad credentials" } },
+  verified: {
+    Refused: { why: "The gh command said: HTTP 401: Bad credentials." },
+  },
 };
 
 /// A bare machine, which is the reading the wizard is a page under.
