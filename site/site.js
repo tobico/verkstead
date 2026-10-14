@@ -1,6 +1,7 @@
-// The page works without this file: the tabs are links to the sections and the
-// download button links to the table. What it adds is the pressed tab following
-// the reader, and the download button naming the reader's own platform.
+// The page works without this file: the tabs are links to the sections, the
+// download button links to the table, and every card's screenshot shows in
+// order. What it adds is the pressed tab following the reader, the download
+// button naming the reader's own platform, and the cards becoming carousels.
 
 const RELEASE = "https://github.com/tobico/verkstead/releases/latest/download/";
 
@@ -110,7 +111,27 @@ function trackSections() {
   follow();
 }
 
+// Each carousel shows the pressed card's panel and hides the rest. Which shape
+// it takes, a column beside the panel or an accordion, is the stylesheet's, so
+// the pressed card survives a resize across the breakpoint untouched.
+function carousels() {
+  for (const carousel of document.querySelectorAll(".carousel")) {
+    const cards = [...carousel.querySelectorAll(".card")];
+    const show = (pressed) => {
+      for (const card of cards) {
+        const on = card === pressed;
+        card.setAttribute("aria-pressed", String(on));
+        document.getElementById(card.getAttribute("aria-controls")).hidden = !on;
+      }
+    };
+    for (const card of cards) card.addEventListener("click", () => show(card));
+    show(cards[0]);
+  }
+}
+
 if (typeof document !== "undefined") {
+  document.documentElement.classList.add("js");
+  carousels();
   labelDownloads();
   trackSections();
 }
