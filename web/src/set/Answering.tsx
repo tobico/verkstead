@@ -493,7 +493,8 @@ function Choosing(props: {
         </ul>
         <p class={page.semantics}>
           Picking a direction accepts the proposal and the agent gets on with
-          it. Anything else sends it back for another round.
+          it. Anything else, your own answer included, sends it back for
+          another round.
         </p>
       </div>
     </section>

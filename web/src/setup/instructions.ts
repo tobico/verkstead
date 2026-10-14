@@ -413,9 +413,10 @@ export const GUIDES: Record<Distro, Guide> = {
         command: "verkstead session-account create",
         note:
           "Sessions here run as a local account of Verkstead's own, which is " +
-          "the sandbox on Windows. Ticking this row makes it, and Windows asks " +
-          "for an administrator. To do it by hand, run this line once from a " +
-          "terminal opened with Run as administrator.",
+          "the sandbox on Windows. Until it exists, a session is refused " +
+          "rather than run without one. Ticking this row makes it, and " +
+          "Windows asks for an administrator. To do it by hand, run this line " +
+          "once from a terminal opened with Run as administrator.",
       },
       Git: { command: "winget install --id Git.Git" },
       Claude: orElse(
