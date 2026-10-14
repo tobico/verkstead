@@ -13,6 +13,10 @@
   --removed: #b3382c;
   --removed-wash: #fbeceb;
   --hunk: #f2ede6;
+  --tok-keyword: #9b3f5e;
+  --tok-name: #2f6f8f;
+  --tok-string: #4a7a4f;
+  --tok-comment: #8d857a;
   --accent-deep: color-mix(in srgb, var(--accent) 88%, var(--ink));
   --lift: 0 0.75rem 2rem rgb(0 0 0 / 22%), 0 0.15rem 0.4rem rgb(0 0 0 / 14%);
   --mono: ui-monospace, SFMono-Regular, monospace;
@@ -34,6 +38,10 @@
     --removed: #e0857a;
     --removed-wash: #2d1f1d;
     --hunk: #26241f;
+    --tok-keyword: #e08aa6;
+    --tok-name: #86bcd8;
+    --tok-string: #9dc493;
+    --tok-comment: #8b8378;
     --lift: 0 0.75rem 2rem rgb(0 0 0 / 55%), 0 0.15rem 0.4rem rgb(0 0 0 / 40%);
   }
 }
@@ -292,7 +300,7 @@ h2 {
 @media (min-width: 60rem) {
   .js .carousel {
     display: grid;
-    grid-template-columns: 17rem 1fr;
+    grid-template-columns: 17rem minmax(0, 1fr);
     grid-template-rows: repeat(var(--cards), auto) 1fr;
     column-gap: 2.5rem;
     row-gap: 0.25rem;
@@ -743,6 +751,179 @@ h2 {
 .vk-dialog > p { margin-top: 0.4rem; color: var(--ink-soft); }
 .vk-dialog-actions { display: flex; justify-content: flex-end; gap: 0.6rem; margin-top: 1rem; white-space: nowrap; }
 
+/* The code pane: the file tree on its wash, and the editor beside it under
+   the pane's tabs, its tokens in the viewer's colours. */
+.vk-icon { width: 1rem; height: 1rem; align-self: center; fill: none; stroke: var(--ink-soft); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+
+.vk-code {
+  display: grid;
+  grid-template-columns: 12rem minmax(0, 1fr);
+  gap: 0.75rem;
+  flex: 1;
+  min-height: 0;
+}
+
+.vk-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.6rem;
+  font-size: 0.9rem;
+  background: var(--code-wash);
+  border-radius: 0.6rem;
+}
+
+.vk-tree b { padding: 0.2rem 0.4rem; font-weight: 600; }
+.vk-tree span { display: flex; gap: 0.4rem; padding: 0.2rem 0.4rem; border-radius: 0.4rem; white-space: nowrap; }
+.vk-tree i { width: 0.8rem; font-style: normal; color: var(--ink-soft); }
+.vk-tree .vk-leaf { padding-left: 1.6rem; }
+.vk-tree .vk-open { background: var(--paper); }
+.vk-tree em { margin-left: auto; font-style: normal; font-weight: 600; color: var(--accent); }
+
+.vk-editing { display: flex; flex-direction: column; min-width: 0; }
+.vk-editing .vk-tabs { margin-top: 0; }
+
+.vk-editor {
+  flex: 1;
+  padding-top: 0.5rem;
+  overflow: hidden;
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+}
+
+.vk-tok-keyword { color: var(--tok-keyword); }
+.vk-tok-name { color: var(--tok-name); }
+.vk-tok-string { color: var(--tok-string); }
+.vk-tok-comment { color: var(--tok-comment); font-style: italic; }
+
+/* A phone, standing in the screenshot's place: the Timeline at phone width. */
+.vk-stage {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 33rem;
+}
+
+.vk-phone {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  width: 18rem;
+  height: 31rem;
+  padding: 1.5rem 0.75rem 1rem;
+  overflow: hidden;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  text-align: left;
+  color: var(--ink);
+  background: var(--paper);
+  border: 0.5rem solid var(--card);
+  outline: 1px solid var(--edge);
+  border-radius: 2.25rem;
+  box-shadow: 0 0.5rem 1.5rem rgb(0 0 0 / 8%), 0 0.1rem 0.3rem rgb(0 0 0 / 6%);
+}
+
+@media (prefers-color-scheme: dark) {
+  .vk-phone { box-shadow: 0 0.5rem 1.5rem rgb(0 0 0 / 35%), 0 0.1rem 0.3rem rgb(0 0 0 / 25%); }
+}
+
+.vk-phone :where(p) { margin: 0; }
+.vk-phone > * { flex: none; }
+.vk-phone .vk-head { padding: 0; }
+.vk-phone .vk-status { margin: 0; white-space: nowrap; }
+.vk-phone .vk-pinned { padding: 0.75rem; }
+.vk-phone .vk-event-head b { font-size: 1rem; }
+.vk-phone .vk-subject { margin-bottom: 0.4rem; }
+.vk-back { color: var(--accent); }
+
+.vk-clamp {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
+  color: var(--ink-soft);
+}
+
+/* Settings' devices: an OS glyph, the name and its addresses, and the
+   Conversation's own way across to another of them. */
+.vk-glyphs { display: none; }
+
+.vk-glyph { flex: none; width: 1.25rem; height: 1.25rem; fill: currentColor; }
+
+.vk-devices {
+  margin-bottom: 1.25rem;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+}
+
+.vk-device { display: flex; align-items: center; gap: 0.85rem; padding: 0.75rem 1rem; }
+.vk-device + .vk-device { border-top: 1px solid var(--edge); }
+.vk-device > span:not([class]) { flex: 1; min-width: 0; }
+.vk-device b { font-weight: 600; }
+.vk-device small { margin-left: 0.5rem; font-size: 0.85rem; color: var(--ink-soft); }
+.vk-device code { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 0.85rem; color: var(--ink-soft); }
+
+.vk-small-button {
+  flex: none;
+  padding: 0.25rem 0.7rem;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+}
+
+.vk-transfer > b { font-weight: 600; }
+.vk-transfer > p { margin-bottom: 0.4rem; color: var(--ink-soft); }
+.vk-transfer .vk-choice { align-items: center; }
+
+/* The composer's Agent panel: a picker for each phase, each a mark and the
+   words naming the harness and model. */
+.vk-popover {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  max-width: 22rem;
+  margin: 0 0 0.6rem auto;
+  padding: 1.1rem;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+  box-shadow: var(--lift);
+}
+
+.vk-picker small { display: block; margin-bottom: 0.3rem; font-size: 0.8rem; color: var(--ink-soft); }
+
+.vk-pick {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.7rem;
+  white-space: nowrap;
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+}
+
+.vk-pick::after { content: "›"; margin-left: auto; color: var(--ink-soft); transform: rotate(90deg); }
+.vk-pick img { width: 1em; height: 1em; }
+
+.vk-harness {
+  flex: none;
+  width: 1em;
+  height: 1em;
+  background: currentColor;
+  mask: center / contain no-repeat;
+}
+
+.vk-codex { mask-image: url(marks/codex.svg); }
+.vk-opencode { mask-image: url(marks/opencode.svg); }
+
+.vk-away { margin-top: -0.4rem; font-size: 0.85rem; color: var(--ink-soft); }
+.vk-popover + .vk-composer .vk-brief { min-height: 0; -webkit-line-clamp: 2; line-clamp: 2; color: var(--ink); }
+.vk-setting.vk-open { background: var(--code-wash); border-radius: 0.4rem; }
+
 @media (max-width: 40rem) {
   .vk-frame { height: 36rem; padding: 0 0.85rem 0.85rem; font-size: 0.9rem; }
   .vk-notification { right: 0.5rem; width: calc(100% - 1rem); max-width: 20rem; }
@@ -754,6 +935,17 @@ h2 {
   .vk-modal { padding: 0.75rem 0.75rem 2.5rem; }
   .vk-dialog { padding: 1rem; }
   .vk-pinned ~ .vk-event { padding-block: 0.6rem; }
+  .vk-stage { height: 36rem; }
+  .vk-compose-actions { gap: 0.4rem; font-size: 0.85rem; }
+  .vk-compose-actions > * { padding: 0.45rem 0.7rem; }
+  .vk-setting { padding-inline: 0.35rem; font-size: 0.85rem; }
+  .vk-pick { overflow: hidden; font-size: 0.9rem; }
+  .vk-code { grid-template-columns: 6.75rem minmax(0, 1fr); gap: 0.5rem; }
+  .vk-editing .vk-tabs { max-width: 100%; }
+  .vk-editing .vk-tabs > span { padding-inline: 0.55rem; }
+  .vk-tree { padding: 0.4rem; font-size: 0.85rem; }
+  .vk-tree .vk-leaf { padding-left: 1rem; }
+  .vk-device { gap: 0.6rem; padding: 0.65rem 0.75rem; }
 }
 
 /* The downloads table */
