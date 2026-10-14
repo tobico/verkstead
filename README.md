@@ -64,6 +64,9 @@ Timeline, Question Set, Answer and the rest, defined once.
 running, and how a day's work goes through it from Brief to settled pull
 request.
 
+**[Copy](docs/copy.md)** — how Verkstead speaks to the human: the rules for
+every string on a screen, and the reasons behind them.
+
 **[Development](docs/development.md)** — the dev shell, building the viewer,
 and the loop for working on Verkstead itself.
 

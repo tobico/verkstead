@@ -15,7 +15,7 @@ assert on copy move with it.
 
 ## Tasks
 
-- [ ] 01: The copy guide and the CLAUDE.md — [details](01-the-copy-guide.md)
+- [x] 01: The copy guide and the CLAUDE.md — [details](01-the-copy-guide.md)
 - [ ] 02: The workbench's list, composer and actions — [details](02-workbench-list-composer-actions.md)
 - [ ] 03: The workbench's details panes — [details](03-workbench-details-panes.md)
 - [ ] 04: Settings, profiles and repos — [details](04-settings-profiles-repos.md)

@@ -6,7 +6,8 @@ way in yet — nothing has been released under this name, so a checkout is the
 only Verkstead there is.
 
 The vocabulary in bold is the project's, and is defined in
-[CONTEXT.md](../CONTEXT.md).
+[CONTEXT.md](../CONTEXT.md). How it is written on a screen — and every other
+rule for a string the human reads — is in [Copy](copy.md).
 
 ## Quickstart
 
