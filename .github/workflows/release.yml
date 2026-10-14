@@ -685,8 +685,8 @@ jobs:
       # after this one read the path out of the environment. The job ending is
       # what takes it down.
       #
-      # It is an assertion in its own right, and the one the adoption documents
-      # make to a downloader: this file mounts itself on a machine that has a
+      # It is an assertion in its own right, and a promise to a downloader:
+      # this file mounts itself on a machine that has a
       # `/dev/fuse` and a `fusermount3` and no libfuse2 at all, which is the
       # pinned runtime's doing — and nothing but a real mount says so.
       - name: The AppImage mounts
@@ -731,7 +731,7 @@ jobs:
       # number by having arrived from somewhere it should not have.
       #
       # Said as a number here rather than taken from whatever was measured,
-      # because it is the promise `docs/adoption.md` makes to a downloader and
+      # because it is a promise made to a downloader and
       # not a fact about a runner — the two are one number, and moving Electron
       # moves both. Anything over it is a file that packs, runs here, and
       # refuses to start on the machines that promise names, with
@@ -798,7 +798,7 @@ jobs:
       # `dbus-run-session` gives the run a bus of its own, so the line is said
       # after a StatusNotifierItem was really exported onto one. What it still
       # does not prove is a *panel*: nothing here owns the watcher name, which
-      # is the desktop-with-no-tray-host case the adoption documents describe
+      # is the desktop-with-no-tray-host case the README describes
       # and `desktop/tests` pins.
       #
       # **The log is where the answers are.** Neither the window coming up nor
@@ -1253,7 +1253,7 @@ jobs:
       # **And the two things the plist says about this app that nothing running
       # it can tell you**, read back off the mounted bundle the way the icon's
       # name is and for the reason the AppImage's glibc floor is: both are
-      # promises `docs/adoption.md` makes to a downloader rather than facts about
+      # promises made to a downloader rather than facts about
       # a runner, and `desktop/electron-builder.yml` says of each that it is read
       # off what was packed.
       #
@@ -1715,8 +1715,7 @@ jobs:
       # separately and only to exist, because somebody who installed this has to
       # be able to find it again and remove it. Which hive that entry landed in
       # is printed rather than asserted: it is a fact about this package that
-      # this leg is the first thing able to read, and `docs/adoption.md` carries
-      # a parked paragraph waiting on the answer.
+      # this leg is the first thing able to read.
       #
       # Three things therefore say it landed the way the package asked: the
       # files are in this user's profile, the product is registered to this
@@ -2167,8 +2166,8 @@ jobs:
 
       # **A package installed over another, which no leg has ever done.**
       # Windows is the only platform where the question arises — an AppImage and
-      # a dmg are files a downloader replaces — and it is what
-      # `docs/adoption.md` promises in as many words: a newer msi replaces the
+      # a dmg are files a downloader replaces — and it is a
+      # promise to a downloader in as many words: a newer msi replaces the
       # copy that is there rather than standing beside it.
       #
       # **Two halves, and they test different things.** The first installs this

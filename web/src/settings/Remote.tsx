@@ -1,8 +1,8 @@
 //! Remote access, on the settings page: whether this machine can be reached
 //! from a phone, and what stands between it and being.
 //!
-//! The Workbench Key is what makes this a section rather than a line in the
-//! adoption docs (ADR-0015). A phone cannot reach the workbench until it holds
+//! The Workbench Key is what makes this a section rather than a recipe somebody
+//! followed by hand (ADR-0015). A phone cannot reach the workbench until it holds
 //! the key, and the address it would hold one against only exists once
 //! `tailscale serve` is putting this machine's tailnet name in front of the
 //! port Verkstead is listening on — which was a command somebody ran by hand.

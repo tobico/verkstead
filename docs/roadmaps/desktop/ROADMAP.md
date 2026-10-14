@@ -19,7 +19,7 @@ AppImage, a dmg and an msi packing that app, and the last stage of
 app, its verb and its crate. What a machine that ran it still has is taken over
 rather than orphaned: the startup registration it wrote is read once by the
 packed app and removed. ADR-0012 stands as the superseded record of what was
-built here, and [adoption.md](../../adoption.md#getting-it-running) describes
+built here, and the [README](../../../README.md#status) describes
 the artifacts as they now are. The briefs below are left exactly as they were
 written: they are the record of what each stage set out to build, rather than a
 description of what stands today — so a `verkstead-desktop` in one of them is

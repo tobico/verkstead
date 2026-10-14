@@ -147,8 +147,7 @@
 # filesystem of its own is never swept, the rename being refused rather than
 # turned into a copy. **Clear**, on the settings page, empties every store of
 # one language the same way, whichever of the three it is, and is refused
-# while anything runs. What a reader's filesystem makes of *oldest* is in
-# `docs/adoption.md`.
+# while anything runs.
 #
 # **Write `/` between the placeholder and what is under it, on every platform.**
 # A descriptor is one file read on three, so the grammar has one separator: what
@@ -409,7 +408,7 @@ languages:
     # it installed, whichever of the two lost. So what sharing costs Classic is
     # an install that fails and is run again, and what it buys is the download
     # every other Conversation then does not make. A human sees it as a yarn
-    # error naming a file in the cache; the adoption doc says so.
+    # error naming a file in the cache.
     #
     # And none of them holds a secret of a session's own. A registry login is
     # `.npmrc`'s `_authToken` or Berry's `npmAuthToken`, both in a file nothing
@@ -429,7 +428,7 @@ languages:
     # program see one `localStorage`. `DENO_KV_DEFAULT_PATH` would move half of
     # it and is deliberately not set, for the reason `YARN_ENABLE_GLOBAL_CACHE`
     # is not: a descriptor moves stores, and deciding where a Repo's program
-    # keeps its data is not that. The adoption doc is where a stranger reads it.
+    # keeps its data is not that.
     #
     # **A Repo's own config does not win over these**, and it is worth knowing
     # which way round that is: the four tools with a config key for it put the
@@ -882,7 +881,7 @@ languages:
     # absolute paths — sccache 0.14.0 and later; see `build_cache.rs`. And the
     # server writes each object where the compile names it, so a build
     # directory outside the Worktree fails rather than missing. The whole of
-    # that, for an installer, is `docs/adoption.md`.
+    # that is the design doc's, under *Execution and sandboxing*.
     capabilities:
       sccache:
         env:

@@ -2,7 +2,7 @@
 //! read off the machine rather than remembered.
 //!
 //! The Workbench Key is what makes this a section of the settings rather than a
-//! recipe in the adoption docs (ADR-0015): a phone cannot reach the workbench
+//! recipe somebody followed by hand (ADR-0015): a phone cannot reach the workbench
 //! until it holds the key, and `tailscale serve --bg 8422` was a command
 //! somebody ran by hand. What this module answers is that section — whether
 //! there is a Tailscale here at all, whether it is up, what this node is

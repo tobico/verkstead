@@ -637,7 +637,7 @@ const STATED_DEVICE: &str = "00000000000000000000000000000000";
 
 /// The port Verkstead is served on when nobody has said otherwise, and so the
 /// port `tailscale serve` is put in front of — see the Remote access pane in
-/// [`remote`], which is what the adoption docs point at for it.
+/// [`remote`].
 ///
 /// Written once and read twice: it is the `--listen` default below, and what a
 /// router stood up without a listening socket reads a serve against.

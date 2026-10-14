@@ -531,9 +531,9 @@ made only where a loaded descriptor names it — at startup and
 again as each session is spawned, so a descriptor hand-edited in between the two
 is one the next session really starts with. A key the grammar does not have is
 refused like a refused variable, so a misspelled one falls back to the built-in
-with a reason rather than silently setting nothing. The grammar,
-with the built-ins as its worked examples, is
-[adoption.md](adoption.md#languages).
+with a reason rather than silently setting nothing. The grammar
+is [ADR-0021](adr/0021-language-descriptors.md)'s, and the built-ins in
+`crates/server/languages.yaml` are its worked examples.
 
 The sccache **server** is Verkstead's own, not the sessions'. It comes up as a
 child of the running server the first time a session starts while a language
@@ -557,7 +557,8 @@ It is started with `SCCACHE_BASEDIRS` naming every worktree, so a C/C++
 compile hashed with its absolute paths hits across Conversations; sccache reads
 that once, so a new worktree restarts it only while no session holds it. What
 C/C++ covers and what it does not — generators, `/Zi`, a build directory
-outside the worktree — is [adoption.md](adoption.md#cc-through-the-compile-server).
+outside the worktree — is the [design doc](design/verkstead.md)'s, beside
+ADR-0021.
 
 **Windows had neither half for a while**, and the reason has gone. A session
 there ran inside an AppContainer, which is refused every connection to the local

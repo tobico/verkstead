@@ -92,10 +92,8 @@ highest glibc anything inside the file names — and where that used to be the
 image the leg compiled in, it is now Electron's own, the musl CLI naming no
 glibc at any version. So the number is stated rather than inherited: the leg
 reads every versioned reference out of the mounted image with `objdump` and
-fails on anything above the 2.25
-[adoption.md](adoption.md#the-desktop-app-on-a-linux-machine) promises.
-Whichever way round it is written, the promise and the check are one number —
-move Electron and both move.
+fails on anything above 2.25, Electron's own floor. Whichever way round it is
+written, the floor and the check are one number — move Electron and both move.
 
 The macOS desktop leg compiles nothing either, and it is the one runner that
 packs for both Macs at once: `macos-15` is the Apple silicon image, and what it
@@ -112,8 +110,7 @@ checkout packs the same way. A universal merge refuses an extra resource that
 differs between the two halves, which a sidecar joined before either app is
 built cannot. Its floor is written into the bundle rather than inherited from a
 runner — `LSMinimumSystemVersion`, 12.0, which is Electron's own where the Rust
-bundle's was the Apple silicon half's 11.0 — and it is the number
-[adoption.md](adoption.md#the-desktop-app-on-a-mac) gives a downloader.
+bundle's was the Apple silicon half's 11.0.
 
 The Windows desktop leg compiles nothing either, and it is the one with an
 installer in it. It waits on the whole of the matrix above and downloads
@@ -151,8 +148,8 @@ starts, it serves a document with the viewer's bundle named in it, and its own
 log says an icon went up — and each of them is bounded, because the failures
 these apps draw are dialogs and a dialog nobody dismisses would hold a runner
 for six hours. The Linux leg mounts the file before it reads anything out of it,
-which is an assertion in its own right and the one the adoption documents make
-to a downloader: the runtime packed into it carries its own squashfuse, so it
+which is an assertion in its own right and a promise to a downloader: the
+runtime packed into it carries its own squashfuse, so it
 mounts on a machine with a `/dev/fuse` and no libfuse2 at all.
 
 Every leg then asserts a fourth, and it is the one the running app cannot be
@@ -187,8 +184,7 @@ icon being what a downloader drags into Applications rather than anything the
 process draws. That the bundle is still a Dock app and still promises the macOS
 the words do: `LSUIElement` read back for its *absence*, which is the whole of
 what closing the window to the Dock rests on, and `LSMinimumSystemVersion` read
-back against the floor [adoption.md](adoption.md#the-desktop-app-on-a-mac)
-gives — the same shape as the AppImage's glibc ceiling above, and moving
+back against the 12.0 floor — the same shape as the AppImage's glibc ceiling above, and moving
 Electron moves both numbers. And that the menu bar's artwork came along at both
 scales: the app hands Electron the one-times path and AppKit finds the `@2x`
 beside it, so a Retina Mac is the only place a missing second file shows, and a
@@ -264,8 +260,8 @@ newcomer actually follows.
    answered it.
 
    A desktop with no tray host shows no icon and is serving all the same, and a
-   machine with no `/dev/fuse` will not mount the file at all — both of them are
-   [what a downloader is told](adoption.md#the-desktop-app-on-a-linux-machine).
+   machine with no `/dev/fuse` will not mount the file at all — neither is a
+   failure of the release.
 
 4. **The dmg, downloaded in a browser and opened** on a Mac. In a browser
    deliberately: the `com.apple.quarantine` flag Gatekeeper reads is set by
@@ -275,11 +271,11 @@ newcomer actually follows.
 
    Drag Verkstead into Applications, double-click it, and walk the three steps
    through System Settings → Privacy & Security that
-   [a downloader is told](adoption.md#the-desktop-app-on-a-mac). The workbench
+   [a downloader is told](../README.md#status). The workbench
    comes up in a window of its own, with a tile in the Dock and an icon in the
    menu bar beside it.
 
-   Then tick **Launch on Startup** on the settings page's **Desktop** section,
+   Then tick **Launch on startup** on the settings page's **Desktop** section,
    log out and back in: Verkstead comes back with the icon in the menu bar and
    no window over what you were doing, and **Open** on that icon is the way to
    one. That is the one reading no runner can take — a job dies with its login
@@ -293,7 +289,7 @@ newcomer actually follows.
    the one part of this install no workflow can rehearse.
 
    Walk past it the way
-   [a downloader is told](adoption.md#the-desktop-app-on-windows). The install
+   [a downloader is told](../README.md#status). The install
    ends with Verkstead already running: the workbench in a window of its own,
    with a button on the taskbar and an icon in the notification area — inside
    the flyout the `^` opens, until it is dragged out onto the taskbar. Then, in
@@ -301,7 +297,7 @@ newcomer actually follows.
    `verkstead --version`: the `PATH` entry is the half of this download a human
    at a terminal uses, and a terminal that was already open never read it.
 
-   Then tick **Launch on Startup** on the settings page's **Desktop** section,
+   Then tick **Launch on startup** on the settings page's **Desktop** section,
    sign out and back in: Verkstead comes back with the icon in the notification
    area and no window over what you were doing, and **Open** on that icon is the
    way to one. That is the reading no runner can take: the value under the
