@@ -129,6 +129,148 @@ $ <span class="vk-cursor"> </span></pre>
 
   <section class="section" id="process" aria-labelledby="process-heading">
     <h2 id="process-heading">Process</h2>
+    <div class="carousel" style="--cards: 5">
+      <button class="card" type="button" id="draft-card" aria-controls="draft-panel" aria-pressed="true">
+        <span class="card-title" id="draft-title">Draft</span>
+        <span class="card-sub">Start with your idea, in plain words.</span>
+      </button>
+      <div class="panel" id="draft-panel" role="region" aria-labelledby="draft-title">
+        <div class="vk-frame" aria-hidden="true">
+          <div class="vk-head"><b>New conversation</b></div>
+          <div class="vk-centred">
+            <div class="vk-composer">
+              <p class="vk-brief">Add rate limiting to the public API. Last night one client sent 40k requests in a minute and took the service down. Limit per API key, with a sensible default that can be changed per key.</p>
+              <div class="vk-setup">
+                <span class="vk-setting"><small>Repo</small>tidewatch</span>
+                <span class="vk-setting"><small>Process</small>Develop</span>
+                <span class="vk-setting"><small>Agent</small><span><img src="marks/claude-color.svg" alt="" width="16" height="16">Opus 5</span></span>
+              </div>
+            </div>
+            <div class="vk-compose-actions">
+              <span class="vk-quiet-button">+</span>
+              <span class="vk-secondary">Save as draft</span>
+              <span class="vk-button">Start work</span>
+            </div>
+          </div>
+        </div>
+        <p>Verkstead starts with a clean text box. Write what you want in your own words, as rough as you like. There is no prompt engineering to do. The development process is built in through Verkstead's agent skills, so you are free to focus entirely on your problem.</p>
+      </div>
+
+      <button class="card" type="button" id="grill-card" aria-controls="grill-panel" aria-pressed="false">
+        <span class="card-title" id="grill-title">Grill</span>
+        <span class="card-sub">Settle every detail before any code is written.</span>
+      </button>
+      <div class="panel" id="grill-panel" role="region" aria-labelledby="grill-title">
+        <div class="vk-frame" aria-hidden="true">
+          <div class="vk-head"><b>Rate limiting for the public API</b></div>
+          <p class="vk-heading">Preface</p>
+          <div class="vk-box"><p><code>POST /v1/keys</code> has no limit today. A limiter can land this week; where the counter lives is the one call that is yours.</p></div>
+          <p class="vk-heading">Questions</p>
+          <div class="vk-question">
+            <p class="vk-ask"><b>Q1</b>Where should the counter live?</p>
+            <span class="vk-choice vk-chosen"><i class="vk-radio"></i><small>1</small>In-process counter<span class="vk-star">★</span></span>
+            <span class="vk-choice"><i class="vk-radio"></i><small>2</small>Shared Redis counter</span>
+            <span class="vk-thoughts">Q1 — Your thoughts</span>
+          </div>
+          <div class="vk-question">
+            <p class="vk-ask"><b>Q2</b>Default limit per key?</p>
+            <span class="vk-choice"><i class="vk-radio"></i><small>1</small>600 requests a minute<span class="vk-star">★</span></span>
+            <span class="vk-choice"><i class="vk-radio"></i><small>2</small>60 requests a minute</span>
+          </div>
+        </div>
+        <p>Grilling is the single biggest change that separates intentional development from vibe coding. Your agent reads the code you have, then asks you about every technical detail that matters, with a recommended answer for each, and goes on only once everything is settled. Related questions arrive together as one question set you consider and answer as a whole, from your phone if you like.</p>
+      </div>
+
+      <button class="card" type="button" id="build-card" aria-controls="build-panel" aria-pressed="false">
+        <span class="card-title" id="build-title">Build</span>
+        <span class="card-sub">Sized to the work, and run without you.</span>
+      </button>
+      <div class="panel" id="build-panel" role="region" aria-labelledby="build-title">
+        <div class="vk-frame" aria-hidden="true">
+          <p class="vk-status"><b>Running</b><span>Implementing</span></p>
+          <div class="vk-pinned">
+            <p class="vk-event-head"><b>Task list</b><span>rate-limiting</span><span class="vk-end">2 of 5 done</span></p>
+            <ol class="vk-tasks">
+              <li class="vk-ticked"><i>☑</i><span>Count requests per key in a sliding window</span><small>01</small></li>
+              <li class="vk-ticked"><i>☑</i><span>Refuse requests over the limit with 429 and Retry-After</span><small>02</small></li>
+              <li><i>☐</i><span>Make the limit configurable per key</span><small>03</small></li>
+              <li><i>☐</i><span>An admin endpoint to read a key's usage</span><small>04</small></li>
+              <li><i>☐</i><span>Document the limit</span><small>05</small></li>
+            </ol>
+          </div>
+          <div class="vk-event">
+            <p class="vk-event-head"><b>Commit</b><span class="vk-chip">tidewatch</span><span class="vk-sha">a19f3d7</span></p>
+            <p class="vk-subject">Count requests per key in a sliding window</p>
+            <p class="vk-changed"><span>4 files</span><span class="vk-added">+121</span><span class="vk-removed">−2</span></p>
+          </div>
+          <div class="vk-event">
+            <p class="vk-event-head"><b>Commit</b><span class="vk-chip">tidewatch</span><span class="vk-sha">b7e41c2</span></p>
+            <p class="vk-subject">Refuse requests over the limit with 429 and Retry-After</p>
+            <p class="vk-changed"><span>3 files</span><span class="vk-added">+58</span><span class="vk-removed">−4</span></p>
+          </div>
+          <div class="vk-event">
+            <p class="vk-event-head"><b>Agent run</b><span>14 turns</span><i class="vk-mark vk-working vk-end"></i></p>
+          </div>
+        </div>
+        <p>Your settled design becomes a handoff, a task list, or a staged roadmap, depending on its size, and each step runs in a fresh session with just the context it needs. Every commit arrives with a written summary and a diagram of what changed, so you can follow along without scanning every line.</p>
+      </div>
+
+      <button class="card" type="button" id="wrap-card" aria-controls="wrap-panel" aria-pressed="false">
+        <span class="card-title" id="wrap-title">Wrap</span>
+        <span class="card-sub">A pull request, green checks, and a review you direct.</span>
+      </button>
+      <div class="panel" id="wrap-panel" role="region" aria-labelledby="wrap-title">
+        <div class="vk-frame" aria-hidden="true">
+          <p class="vk-status"><b>Waiting on checks</b><span>Wrapping</span></p>
+          <div class="vk-pinned">
+            <p class="vk-event-head"><b>Pull request</b><span class="vk-sha">#128</span><span class="vk-chip">tidewatch</span><span class="vk-checks vk-end"><i class="vk-check">✓</i><i class="vk-mark vk-idle"></i></span></p>
+            <p>Rate limiting for the public API</p>
+          </div>
+          <div class="vk-event">
+            <p class="vk-event-head"><b>Question set</b><span>Review of rate-limiting</span><i class="vk-mark vk-waiting vk-end"></i></p>
+            <ol class="vk-asks">
+              <li><b>Q1</b><span>Retry-After rounds down to 0 on the window's last second</span><small>—</small></li>
+              <li><b>Q2</b><span>The admin endpoint is unauthenticated</span><small>—</small></li>
+              <li><b>Q3</b><span>Limit config is read on every request</span><small>—</small></li>
+            </ol>
+          </div>
+        </div>
+        <p>A job is rarely done just because every task is ticked. Verkstead opens the pull request, waits on CI, fixes what fails, resolves merge conflicts, and runs a fresh session to review the whole thing. Its findings come to you as one question set, so you choose what gets fixed and how.</p>
+      </div>
+
+      <button class="card" type="button" id="done-card" aria-controls="done-panel" aria-pressed="false">
+        <span class="card-title" id="done-title">Done</span>
+        <span class="card-sub">Share the thinking, or carry on.</span>
+      </button>
+      <div class="panel" id="done-panel" role="region" aria-labelledby="done-title">
+        <div class="vk-frame" aria-hidden="true">
+          <p class="vk-status"><b>Done</b></p>
+          <p class="vk-moved">Wrapping → Done</p>
+          <div class="vk-pinned">
+            <p class="vk-event-head"><b>Pull request</b><span class="vk-sha">#128</span><span class="vk-chip">tidewatch</span><span class="vk-checks vk-end"><i class="vk-check">✓</i><i class="vk-check">✓</i></span></p>
+            <p>Rate limiting for the public API</p>
+          </div>
+          <div class="vk-modal">
+            <div class="vk-dialog">
+              <b>Share this conversation</b>
+              <p>The brief, every question and answer, and every commit, as one file or a secret link.</p>
+              <div class="vk-dialog-actions"><span class="vk-secondary">Download file</span><span class="vk-button">Copy link</span></div>
+            </div>
+          </div>
+        </div>
+        <p>The record of every question and decision is yours to share with colleagues, as a single file or a link. And when there is more to do, steer the conversation into a follow-up and extend the same pull request.</p>
+      </div>
+    </div>
+
+    <div class="others">
+      <h3>Not everything is a feature.</h3>
+      <ul>
+        <li><b>Tinker</b><span>Make a series of simple one-off changes with minimal fuss</span></li>
+        <li><b>Investigate</b><span>Ask questions about a code base without committing any code</span></li>
+        <li><b>Review</b><span>Review an existing PR or branch, and fix any issues found</span></li>
+        <li><b>Fix merge issues</b><span>Fix up a PR which is unable to merge</span></li>
+      </ul>
+    </div>
   </section>
 
   <section class="section" id="platforms" aria-labelledby="platforms-heading">

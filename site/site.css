@@ -262,6 +262,31 @@ h2 {
 
 .js .carousel .panel[hidden] { display: none; }
 
+/* Under a carousel, the quieter rest of what it is one of. */
+.others {
+  margin-top: 3rem;
+  padding-top: 2rem;
+  border-top: 1px solid var(--edge);
+}
+
+.others h3 { margin: 0 0 1.25rem; font-size: 1.1rem; font-weight: 600; }
+
+.others ul {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.25rem 1.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+@media (min-width: 48rem) {
+  .others ul { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+.others b { display: block; font-weight: 600; }
+.others span { display: block; margin-top: 0.2rem; font-size: 0.9rem; color: var(--ink-soft); }
+
 /* On a desktop the cards are a column and every panel stands in the one cell
    beside them, so the carousel is as tall as its tallest and nothing jumps. */
 @media (min-width: 60rem) {
@@ -558,11 +583,177 @@ h2 {
 .vk-notification b { display: block; font-weight: 600; }
 .vk-notification small { display: block; font-size: 0.85rem; color: var(--ink-soft); }
 
+/* The compose page: the box the Brief is written in, its setup along the
+   inside of the bottom edge, and the presses under it, centred in the pane. */
+.vk-centred { margin-block: auto; }
+
+.vk-composer {
+  padding: 1rem 0.75rem 0.85rem;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.9rem;
+}
+
+.vk-brief { padding: 0 0.6rem; min-height: 4.5em; }
+
+.vk-setup { display: flex; margin-top: 1rem; }
+
+.vk-setting {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 0 0.6rem 0.15rem;
+  white-space: nowrap;
+}
+
+.vk-setting small { font-size: 0.75rem; color: var(--ink-soft); }
+.vk-setting > span { display: flex; align-items: center; gap: 0.4rem; }
+.vk-setting img { width: 1em; height: 1em; }
+.vk-setting::after { content: "›"; grid-row: 1 / 3; grid-column: 2; align-self: center; color: var(--ink-soft); transform: rotate(90deg); }
+
+.vk-compose-actions { display: flex; align-items: center; gap: 0.6rem; margin-top: 0.85rem; white-space: nowrap; }
+.vk-compose-actions > :first-child { margin-right: auto; }
+
+/* A question set's sheet: the question cards, their options and the box under
+   them a reply is written in. */
+.vk-question {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-bottom: 1rem;
+  padding: 1rem;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+}
+
+.vk-ask { margin-bottom: 0.35rem; }
+
+.vk-ask b, .vk-asks b {
+  margin-right: 0.5rem;
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.vk-choice {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+}
+
+.vk-choice small { font-family: var(--mono); font-size: 0.85rem; color: var(--ink-soft); }
+.vk-chosen { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.vk-star { margin-left: auto; padding-left: 0.5rem; color: var(--accent); }
+
+.vk-radio {
+  flex: none;
+  align-self: center;
+  width: 0.85rem;
+  height: 0.85rem;
+  border: 1.5px solid var(--ink-soft);
+  border-radius: 50%;
+}
+
+.vk-chosen .vk-radio { border-color: var(--accent); background: radial-gradient(var(--accent) 0 45%, transparent 50%); }
+
+.vk-thoughts {
+  margin-top: 0.35rem;
+  padding: 0.5rem 0.6rem;
+  min-height: 3.5em;
+  color: var(--ink-soft);
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+}
+
+/* The Timeline: the cards pinned over it, the task list and the pull request,
+   and the rows a question set's card lists. */
+.vk-status { margin-bottom: 0.75rem; }
+.vk-frame > .vk-status:first-child { margin-top: 1rem; }
+.vk-pinned ~ .vk-event { padding-block: 0.85rem; }
+
+.vk-pinned {
+  margin-bottom: 0;
+  padding: 1rem;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+}
+
+.vk-pinned .vk-event-head { margin-bottom: 0.4rem; }
+.vk-end { margin-left: auto; }
+
+.vk-tasks, .vk-asks {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.vk-tasks li, .vk-asks li { display: flex; align-items: baseline; gap: 0.6rem; font-size: 0.9rem; }
+.vk-asks li { font-size: 0.85rem; }
+.vk-asks b { margin: 0; }
+.vk-tasks span, .vk-asks span { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.vk-tasks i { font-style: normal; color: var(--ink-soft); }
+.vk-tasks small, .vk-asks small { flex: none; font-family: var(--mono); font-size: 0.85rem; color: var(--ink-soft); }
+.vk-ticked span { color: var(--ink-soft); text-decoration: line-through; }
+
+.vk-event .vk-event-head { margin-bottom: 0.3rem; }
+.vk-event .vk-changed { margin-top: 0.15rem; }
+.vk-event-head .vk-chip, .vk-event-head .vk-sha { font-size: 0.85rem; }
+.vk-event-head .vk-end, .vk-event-head .vk-mark { align-self: center; }
+
+.vk-checks { display: flex; align-items: center; gap: 0.5rem; }
+.vk-check { font-style: normal; font-size: 1.1rem; font-weight: 600; line-height: 1; color: var(--added); }
+
+.vk-moved { margin: 0.25rem 0 1rem; text-align: center; font-size: 0.9rem; color: var(--ink-soft); }
+
+/* A dialog over the pane, the pane dimmed behind it. */
+.vk-frame:has(.vk-modal) { position: relative; }
+
+.vk-modal {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 1.25rem 1.25rem 3rem;
+  background: rgb(0 0 0 / 22%);
+}
+
+.vk-dialog {
+  width: 100%;
+  max-width: 24rem;
+  padding: 1.25rem;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+  box-shadow: var(--lift);
+}
+
+.vk-dialog > b { display: block; font-weight: 600; font-size: 1.1rem; }
+.vk-dialog > p { margin-top: 0.4rem; color: var(--ink-soft); }
+.vk-dialog-actions { display: flex; justify-content: flex-end; gap: 0.6rem; margin-top: 1rem; white-space: nowrap; }
+
 @media (max-width: 40rem) {
   .vk-frame { height: 36rem; padding: 0 0.85rem 0.85rem; font-size: 0.9rem; }
   .vk-notification { right: 0.5rem; width: calc(100% - 1rem); max-width: 20rem; }
   .vk-lines i:first-child { display: none; }
   .vk-box { padding: 0.75rem; }
+  .vk-pinned .vk-event-head { flex-wrap: nowrap; }
+  .vk-pinned .vk-event-head > span { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .vk-pinned .vk-event-head > :is(b, .vk-sha, .vk-end) { flex: none; }
+  .vk-modal { padding: 0.75rem 0.75rem 2.5rem; }
+  .vk-dialog { padding: 1rem; }
+  .vk-pinned ~ .vk-event { padding-block: 0.6rem; }
 }
 
 /* The downloads table */
