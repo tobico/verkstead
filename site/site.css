@@ -237,7 +237,9 @@ h2 {
 
 /* The carousel every section is: cards down one side, the pressed card's
    screenshot and paragraph beside them. Without the script every panel shows
-   in order under its card; `.js` on the root is what makes it a carousel. */
+   in order under its card; `.js` on the root, set in the head before the
+   first paint, is what makes it a carousel, and the cards' own
+   `aria-pressed` is what shows one panel, so the first paint is already one. */
 .card {
   display: block;
   width: 100%;
@@ -267,7 +269,7 @@ h2 {
 
 .carousel .panel { margin: 0.5rem 0 2rem; }
 
-.js .carousel .panel[hidden] { display: none; }
+.js .carousel .card[aria-pressed="false"] + .panel { display: none; }
 
 /* Under a carousel, the quieter rest of what it is one of. */
 .others {
@@ -313,7 +315,7 @@ h2 {
     margin: 0;
   }
 
-  .js .carousel .panel[hidden] {
+  .js .carousel .card[aria-pressed="false"] + .panel {
     display: block;
     visibility: hidden;
     opacity: 0;

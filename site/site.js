@@ -111,18 +111,15 @@ function trackSections() {
   follow();
 }
 
-// Each carousel shows the pressed card's panel and hides the rest. Which shape
-// it takes, a column beside the panel or an accordion, is the stylesheet's, so
-// the pressed card survives a resize across the breakpoint untouched.
+// Each carousel presses one card, and the stylesheet shows that card's panel
+// and hides the rest. Which shape it takes, a column beside the panel or an
+// accordion, is the stylesheet's too, so the pressed card survives a resize
+// across the breakpoint untouched.
 function carousels() {
   for (const carousel of document.querySelectorAll(".carousel")) {
     const cards = [...carousel.querySelectorAll(".card")];
     const show = (pressed) => {
-      for (const card of cards) {
-        const on = card === pressed;
-        card.setAttribute("aria-pressed", String(on));
-        document.getElementById(card.getAttribute("aria-controls")).hidden = !on;
-      }
+      for (const card of cards) card.setAttribute("aria-pressed", String(card === pressed));
     };
     for (const card of cards) card.addEventListener("click", () => show(card));
     show(cards[0]);
@@ -130,7 +127,6 @@ function carousels() {
 }
 
 if (typeof document !== "undefined") {
-  document.documentElement.classList.add("js");
   carousels();
   labelDownloads();
   trackSections();
