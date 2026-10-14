@@ -544,7 +544,7 @@ export async function create(
       const outcome = await saveBrief(to, id, state.brief);
       said(
         outcome === "Saved",
-        `The brief could not be saved: ${BRIEF_REFUSAL[outcome]}`,
+        `The brief couldn't be saved. ${BRIEF_REFUSAL[outcome]}`,
       );
     }
   }
@@ -557,7 +557,7 @@ export async function create(
       const outcome = await renameBranch(to, id, state.branch);
       said(
         outcome === "Renamed",
-        `The branch could not be named: ${BRANCH_REFUSAL[outcome]}`,
+        `The branch couldn't be named. ${BRANCH_REFUSAL[outcome]}`,
       );
     }
 
@@ -568,7 +568,7 @@ export async function create(
       const outcome = await nameTarget(to, id, state.target);
       said(
         outcome === "Recorded",
-        `The target could not be named: ${TARGET_REFUSAL[outcome]}`,
+        `The target couldn't be named. ${TARGET_REFUSAL[outcome]}`,
       );
     }
 
@@ -576,7 +576,7 @@ export async function create(
       const outcome = await setBaseBranch(to, id, state.base);
       said(
         outcome === "Recorded",
-        `The base branch could not be recorded: ${BASE_REFUSAL[outcome]}`,
+        `The base branch couldn't be recorded. ${BASE_REFUSAL[outcome]}`,
       );
     }
   }
@@ -593,7 +593,7 @@ export async function create(
     const outcome = await pickProcess(to, id, state.process);
     said(
       outcome === "Picked",
-      `The process could not be picked: ${PROCESS_REFUSAL[outcome]}`,
+      `The process couldn't be picked. ${PROCESS_REFUSAL[outcome]}`,
     );
   }
 
@@ -605,7 +605,7 @@ export async function create(
     );
     said(
       outcome === "Chosen",
-      `The grilling profile could not be chosen: ${CHOICE_REFUSAL[outcome]}`,
+      `The grilling profile couldn't be chosen. ${CHOICE_REFUSAL[outcome]}`,
     );
   }
 
@@ -617,7 +617,7 @@ export async function create(
     );
     said(
       outcome === "Chosen",
-      `The implementation profile could not be chosen: ${CHOICE_REFUSAL[outcome]}`,
+      `The implementation profile couldn't be chosen. ${CHOICE_REFUSAL[outcome]}`,
     );
   }
 
@@ -629,7 +629,7 @@ export async function create(
     );
     said(
       outcome === "Chosen",
-      `The review profile could not be chosen: ${CHOICE_REFUSAL[outcome]}`,
+      `The review profile couldn't be chosen. ${CHOICE_REFUSAL[outcome]}`,
     );
   }
 
@@ -652,14 +652,14 @@ export async function create(
       const outcome = await attachServer(to, id, name);
       if (outcome !== "Attached") {
         refused.push(
-          `${name} could not be attached: ${SERVER_REFUSAL[outcome]}`,
+          `${name} couldn't be attached. ${SERVER_REFUSAL[outcome]}`,
         );
       }
     }
 
     for (const rejected of await files.flush(to, id)) {
       refused.push(
-        `${rejected.name} could not be attached: ${ATTACH_REFUSAL[rejected.refused]}`,
+        `${rejected.name} couldn't be attached. ${ATTACH_REFUSAL[rejected.refused]}`,
       );
     }
   }
@@ -674,7 +674,7 @@ export async function create(
       const outcome = await adoptRoadmap(to, id);
       said(
         outcome === "Adopted",
-        `The stage could not be started: ${adoptRefusal(outcome)}`,
+        `The stage couldn't be started. ${adoptRefusal(outcome)}`,
       );
     } else if (state.process !== null && targeted(state.process)) {
       // The third kickoff, and the one that starts no session: the take-up reads
@@ -699,14 +699,14 @@ export async function create(
       } else {
         said(
           outcome === "TakenUp",
-          `The pull request could not be taken up: ${takeUpRefusal(outcome)}`,
+          `The pull request couldn't be taken up. ${takeUpRefusal(outcome)}`,
         );
       }
     } else {
       const outcome = await startGrilling(to, id);
       said(
         outcome === "Started",
-        `The work could not be started: ${grillRefusal(outcome)}`,
+        `The work couldn't be started. ${grillRefusal(outcome)}`,
       );
     }
   }
@@ -760,7 +760,7 @@ async function permit(
       outcome !== "NotAMember"
     ) {
       refused.push(
-        `Where the work may be moved could not be saved: ${TICK_REFUSAL[outcome]}`,
+        `Where the work may be moved couldn't be saved. ${TICK_REFUSAL[outcome]}`,
       );
     }
   }
@@ -779,7 +779,7 @@ async function put(
   if (
     !said(
       added === "Added",
-      `A companion repo could not be added: ${COMPANION_REFUSAL[added]}`,
+      `A companion repo couldn't be added. ${COMPANION_REFUSAL[added]}`,
     )
   ) {
     return;
@@ -796,7 +796,7 @@ async function put(
     );
     said(
       outcome === "Chosen",
-      `A companion repo's mode could not be set: ${COMPANION_MODE_REFUSAL[outcome]}`,
+      `A companion repo's mode couldn't be set. ${COMPANION_MODE_REFUSAL[outcome]}`,
     );
   }
 
@@ -809,7 +809,7 @@ async function put(
     );
     said(
       outcome === "Recorded",
-      `A companion repo's base could not be recorded: ${COMPANION_BASE_REFUSAL[outcome]}`,
+      `A companion repo's base couldn't be recorded. ${COMPANION_BASE_REFUSAL[outcome]}`,
     );
   }
 
@@ -824,7 +824,7 @@ async function put(
     );
     said(
       outcome === "Renamed",
-      `A companion repo's branch could not be named: ${COMPANION_BRANCH_REFUSAL[outcome]}`,
+      `A companion repo's branch couldn't be named. ${COMPANION_BRANCH_REFUSAL[outcome]}`,
     );
   }
 }
@@ -924,7 +924,7 @@ export async function moveTo(
     const outcome = await saveBrief(to.reaching, id, brief);
     said(
       outcome === "Saved",
-      `The brief could not be saved: ${BRIEF_REFUSAL[outcome]}`,
+      `The brief couldn't be saved. ${BRIEF_REFUSAL[outcome]}`,
     );
   }
 
@@ -937,7 +937,7 @@ export async function moveTo(
     const outcome = await renameBranch(to.reaching, id, branch);
     said(
       outcome === "Renamed",
-      `The branch could not be named: ${BRANCH_REFUSAL[outcome]}`,
+      `The branch couldn't be named. ${BRANCH_REFUSAL[outcome]}`,
     );
   }
 
@@ -949,7 +949,7 @@ export async function moveTo(
     const outcome = await setBaseBranch(to.reaching, id, draft.base_commit);
     said(
       outcome === "Recorded",
-      `The base branch could not be recorded: ${BASE_REFUSAL[outcome]}`,
+      `The base branch couldn't be recorded. ${BASE_REFUSAL[outcome]}`,
     );
   }
 
@@ -962,7 +962,7 @@ export async function moveTo(
     const outcome = await nameTarget(to.reaching, id, draft.target);
     said(
       outcome === "Recorded",
-      `The target could not be named: ${TARGET_REFUSAL[outcome]}`,
+      `The target couldn't be named. ${TARGET_REFUSAL[outcome]}`,
     );
   }
 
@@ -970,7 +970,7 @@ export async function moveTo(
     const outcome = await pickProcess(to.reaching, id, draft.process);
     said(
       outcome === "Picked",
-      `The process could not be picked: ${PROCESS_REFUSAL[outcome]}`,
+      `The process couldn't be picked. ${PROCESS_REFUSAL[outcome]}`,
     );
   }
 
@@ -978,7 +978,7 @@ export async function moveTo(
     const outcome = await attachServer(to.reaching, id, server.name);
     if (outcome !== "Attached") {
       refused.push(
-        `${server.name} could not be attached: ${SERVER_REFUSAL[outcome]}`,
+        `${server.name} couldn't be attached. ${SERVER_REFUSAL[outcome]}`,
       );
     }
   }
@@ -1012,7 +1012,7 @@ export async function moveTo(
       });
     } catch (error: unknown) {
       refused.push(
-        `The work is here, but the draft it came off could not be closed: ${
+        `The work is here, but the draft it came off couldn't be closed. ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
@@ -1049,7 +1049,7 @@ async function carry(
     file = await readAttachment(from, draft, attachment.id, attachment.name);
   } catch (error: unknown) {
     refused.push(
-      `${attachment.name} could not be read off this conversation: ${
+      `${attachment.name} couldn't be read off this conversation. ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
@@ -1059,7 +1059,7 @@ async function carry(
   const outcome = await attachFile(to, conversation, file);
   if (typeof outcome === "string") {
     refused.push(
-      `${attachment.name} could not be attached: ${ATTACH_REFUSAL[outcome]}`,
+      `${attachment.name} couldn't be attached. ${ATTACH_REFUSAL[outcome]}`,
     );
   }
 }

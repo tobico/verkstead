@@ -159,7 +159,11 @@ function AddServer(props: {
           .filter((one) => one.server !== at)
           .map((one) => one.why),
         ...saved.refused.map((one) => one.why),
-        ...saved.refused_sizes.map((one) => one.why),
+        // A size's reason is a clause following the size it was about, so it
+        // is said after the language's name rather than on its own.
+        ...saved.refused_sizes.map(
+          (one) => `The ${one.language} store size ${one.why}.`,
+        ),
       ];
 
       if (mine.length > 0 || other.length > 0) {
@@ -203,13 +207,12 @@ function AddServer(props: {
 
   return (
     <Modal class={styles.adding!} open close={props.close} labelledBy={id}>
-      <h3 id={id}>Add an MCP server</h3>
+      <h3 id={id}>Add an MCP Server</h3>
 
       <form class={styles.form} onSubmit={commit}>
         <Note class={styles.note}>
-          Declared for the whole installation, as it would be in Settings, and
-          attached to this work. A header value is kept the way the GitHub token
-          is: it is never shown again.
+          Declared for the whole installation, as in Settings, and attached to
+          this work. A header value is stored, and never shown again.
         </Note>
 
         <label for={`${id}-name`}>Name</label>
@@ -255,7 +258,7 @@ function AddServer(props: {
         <Show when={unreached()}>
           {(why) => (
             <ErrorLine class={styles.failure}>
-              It is declared, but it was not reached when it was saved. {why()}
+              It's declared, but it couldn't be reached when it was saved. {why()}
             </ErrorLine>
           )}
         </Show>
@@ -375,18 +378,18 @@ function AddServer(props: {
         <Show when={elsewhere()}>
           {(why) => (
             <ErrorLine class={styles.failure}>
-              The settings could not be saved as they stand: {why()}
+              The settings couldn't be saved as they stand. {why()}
             </ErrorLine>
           )}
         </Show>
         <Show when={settings.isError}>
           <ErrorLine class={styles.failure}>
-            Could not read the settings: {settings.error?.message}
+            The settings couldn't be read. {settings.error?.message}
           </ErrorLine>
         </Show>
         <Show when={save.isError}>
           <ErrorLine class={styles.failure}>
-            The server could not be added: {save.error?.message}
+            The server couldn't be added. {save.error?.message}
           </ErrorLine>
         </Show>
       </form>

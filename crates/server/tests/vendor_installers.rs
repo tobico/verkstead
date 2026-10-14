@@ -171,7 +171,7 @@ async fn the_vendor_installers_run_as_the_user_and_what_they_land_is_on_the_path
     let run = landed.run.clone().expect("the run it was started with");
 
     assert_eq!(run.done, 4);
-    assert_eq!(run.status, "Everything that was ticked is installed");
+    assert_eq!(run.status, "Everything that was ticked is installed.");
 
     // The elevated half is the package manager and nothing else: an installer
     // that writes under this user's home has no business behind a password

@@ -174,8 +174,8 @@ let writing = STREAM;
 export function keep(dir: string | undefined): Kept {
   if (dir === undefined) {
     return nowhere(
-      "Verkstead has nowhere to keep a log file on this machine, so this run's log is going " +
-        "to the standard error of whatever started it.",
+      "Verkstead has nowhere to keep a log file on this machine. This run's log is going to " +
+        "the standard error of whatever started it.",
     );
   }
 
@@ -184,8 +184,8 @@ export function keep(dir: string | undefined): Kept {
     log = bounded(dir);
   } catch (trouble) {
     return nowhere(
-      `Verkstead could not open its log file in ${dir} (${String(trouble)}), so this run's ` +
-        `log is going to the standard error of whatever started it.`,
+      `Verkstead couldn't open its log file in ${dir} (${reason(trouble)}). This run's log ` +
+        `is going to the standard error of whatever started it.`,
     );
   }
 
@@ -201,6 +201,13 @@ export function keep(dir: string | undefined): Kept {
   STREAM(`${line}\n`);
 
   return { file: log.file };
+}
+
+/// What `trouble` says about itself, for a line a human reads: an error's own
+/// message rather than its `String`, which leads with an `Error:` the guide in
+/// `docs/copy.md` keeps off the screen.
+export function reason(trouble: unknown): string {
+  return trouble instanceof Error ? trouble.message : String(trouble);
 }
 
 /// The other ending: no file, the logging on standard error, and `why` said

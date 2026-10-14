@@ -244,13 +244,13 @@ describe("the card", () => {
     serving(
       whenever(
         "/api/ui/repos",
-        json({ error: "the registered Repos could not be read" }, 500),
+        json({ error: "The registered repos couldn't be read." }, 500),
       ),
     );
     mountCard();
 
     await waitFor(() =>
-      screen.getByText(/the registered Repos could not be read/),
+      screen.getByText(/The registered repos couldn't be read/),
     );
   });
 });
@@ -318,7 +318,7 @@ describe("the pane it opens", () => {
     serving(whenever("/api/ui/repos", json([])));
     const { container } = mountPane();
 
-    await waitFor(() => screen.getByText("No repos are registered yet."));
+    await waitFor(() => screen.getByText(/No repos are registered yet\./));
     expect(container.querySelector(`.${styles.repo}`)).toBeNull();
   });
 
@@ -326,13 +326,13 @@ describe("the pane it opens", () => {
     serving(
       whenever(
         "/api/ui/repos",
-        json({ error: "the registered Repos could not be read" }, 500),
+        json({ error: "The registered repos couldn't be read." }, 500),
       ),
     );
     mountPane();
 
     await waitFor(() =>
-      screen.getByText(/the registered Repos could not be read/),
+      screen.getByText(/The registered repos couldn't be read/),
     );
   });
 
@@ -365,7 +365,7 @@ describe("removing a repo", () => {
       sheet.querySelector(`.${styles.confirmingTitle}`)!.textContent,
     ).toBe(`Remove ${FIRST.name}?`);
     expect(ways(sheet).map((way) => way.textContent)).toEqual([
-      "Keep it",
+      "Cancel",
       "Remove",
     ]);
 
@@ -454,7 +454,7 @@ describe("removing a repo", () => {
     await confirmed();
 
     await waitFor(() =>
-      screen.getByText(/A conversation that is still going is on it/),
+      screen.getByText(/A conversation that's still going is on it/),
     );
     expect(theRow(FIRST.name).querySelector(`.${styles.failure}`)).toBeTruthy();
     // And said about that repo alone: no other row carries it.
@@ -479,7 +479,7 @@ describe("removing a repo", () => {
   /// same reason.
   it("says so when the server could not answer", async () => {
     theRepos(
-      removing(FIRST, json({ error: "the Repo could not be removed" }, 500)),
+      removing(FIRST, json({ error: "The repo couldn't be removed." }, 500)),
     );
     mountPane();
 
@@ -487,7 +487,7 @@ describe("removing a repo", () => {
     removePressed(FIRST.name);
     await confirmed();
 
-    await waitFor(() => screen.getByText(/could not be removed/));
+    await waitFor(() => screen.getByText(/couldn't be removed/));
     expect(theRow(FIRST.name).querySelector(`.${styles.failure}`)).toBeTruthy();
   });
 });
@@ -504,7 +504,7 @@ describe("the registration the dropdown draws", () => {
   /// *onto* a repository, so that answer lands on the one somebody named, which
   /// is `composing.test.tsx`'s.
   it.each([
-    ["NotARepository", /not a git repository/i],
+    ["NotARepository", /isn't a git repository/i],
     ["Missing", /nothing at that path/i],
     ["NotAbsolute", /starting with a slash/i],
     ["NoDefaultBranch", /no branch to call its default/i],
@@ -532,24 +532,24 @@ describe("the registration the dropdown draws", () => {
     mountOpen();
 
     register("/elsewhere/notes");
-    await waitFor(() => screen.getByText(/not a git repository/i));
+    await waitFor(() => screen.getByText(/isn't a git repository/i));
 
     fireEvent.input(screen.getByLabelText(/absolute path/i), {
       target: { value: "/srv/repos/verkstead" },
     });
 
-    expect(screen.queryByText(/not a git repository/i)).toBeNull();
+    expect(screen.queryByText(/isn't a git repository/i)).toBeNull();
   });
 
   /// A server that could not answer at all, which is the one thing here that is
   /// an error rather than an outcome.
   it("shows the server's own wording when it could not answer at all", async () => {
-    theRepos(json({ error: "the Repo could not be registered" }, 500));
+    theRepos(json({ error: "The repo couldn't be registered." }, 500));
     const { landed } = mountOpen();
 
     register("/srv/repos/verkstead");
 
-    await waitFor(() => screen.getByText(/the Repo could not be registered/));
+    await waitFor(() => screen.getByText(/The repo couldn't be registered\./));
     expect(landed).not.toHaveBeenCalled();
   });
 
@@ -675,7 +675,7 @@ describe("browsing for one", () => {
     await browsedToTheRepo();
     fireEvent.click(screen.getByRole("button", { name: "Open" }));
 
-    await waitFor(() => screen.getByText(/not a git repository/i));
+    await waitFor(() => screen.getByText(/isn't a git repository/i));
     expect(held(FIELD)).toBe("/home/ada/src/verkstead");
   });
 });

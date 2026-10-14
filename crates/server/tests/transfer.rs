@@ -2633,13 +2633,15 @@ async fn a_session_that_asks_for_a_ticked_device_by_name_is_moved_there_and_carr
         .expect("the mark the move wrote")
         .id;
 
-    let arrived = b.notice_saying(there, "at the session").await;
+    let arrived = b.notice_saying(there, "at the agent's request").await;
     assert!(
         arrived.starts_with("<p>Transferred to"),
         "B's Timeline says the work was transferred to it at the session's request: {arrived}",
     );
 
-    let left = a.notice_saying(conversation, "at the session").await;
+    let left = a
+        .notice_saying(conversation, "at the agent's request")
+        .await;
     assert!(
         left.contains(B_MACHINE),
         "and the copy left on A says the same, naming B: {left}",
@@ -2698,7 +2700,7 @@ async fn a_session_may_name_the_device_by_its_id() {
         .expect("the mark the move wrote")
         .id;
 
-    b.notice_saying(there, "at the session").await;
+    b.notice_saying(there, "at the agent's request").await;
 }
 
 /// **What the call refuses, each by name, and nothing written down for any of
@@ -2804,7 +2806,7 @@ async fn a_press_after_the_sessions_call_is_the_one_that_moves() {
 
     let arrived = b.notice_saying(there, "Transferred to").await;
     assert!(
-        arrived.contains("at the human"),
+        arrived.contains("at your request"),
         "the press came last, so the move is the human's: {arrived}",
     );
 }
@@ -2832,7 +2834,7 @@ async fn a_call_after_the_press_is_the_one_that_moves() {
 
     let arrived = b.notice_saying(there, "Transferred to").await;
     assert!(
-        arrived.contains("at the session"),
+        arrived.contains("at the agent's request"),
         "the call came last, so the move is the session's: {arrived}",
     );
 }
@@ -2878,7 +2880,7 @@ async fn a_session_idling_after_its_call_is_ended_moved_and_carried_on() {
 
     // On the Timeline the work carries on under: the session that crossed,
     // closing words and all, and after it the move.
-    let notice = b.notice_saying(there, "at the session").await;
+    let notice = b.notice_saying(there, "at the agent's request").await;
     let timeline = b.view(there).await.timeline;
 
     let spoke = timeline
@@ -4549,7 +4551,7 @@ async fn an_arrival_that_carried_the_conversation_on_says_so_on_the_timeline() {
         .await;
 
     assert!(
-        said.contains("claude was told to resume session"),
+        said.contains("told claude to resume session"),
         "the Notice names the harness that was told to resume: {said:?}",
     );
     assert!(
@@ -4564,7 +4566,7 @@ async fn an_arrival_that_carried_the_conversation_on_says_so_on_the_timeline() {
     assert!(
         !notices
             .iter()
-            .any(|notice| notice.contains("Verkstead") && notice.contains("own Resume")),
+            .any(|notice| notice.contains("Verkstead") && notice.contains("own resume")),
         "and nothing on the Timeline says it was Verkstead's own Resume: \
          {notices:#?}",
     );
@@ -4590,14 +4592,14 @@ async fn a_profile_that_shares_no_memory_says_why_the_conversation_was_not_carri
 
     let there = handed_on(&a, conversation, B).await;
 
-    let said = b.notice_saying(there, "travelled with the work").await;
+    let said = b.notice_saying(there, "didn't travel with the work").await;
 
     assert!(
         said.contains("memory"),
         "the Notice names the switch that is off: {said:?}",
     );
     assert!(
-        said.contains("Resume"),
+        said.contains("own resume"),
         "and says what was started instead: {said:?}",
     );
 
@@ -4630,7 +4632,7 @@ async fn a_record_that_did_not_land_says_so_where_the_work_arrives() {
     let there = handed_on(&a, conversation, B).await;
 
     let said = b
-        .notice_saying(there, "the memory sync carried none of it")
+        .notice_saying(there, "The memory sync carried none of it")
         .await;
 
     assert!(
@@ -4684,7 +4686,7 @@ async fn a_conversation_with_no_session_on_its_record_says_there_was_nothing_to_
         .await;
 
     assert!(
-        said.contains("Resume"),
+        said.contains("own resume"),
         "and the Notice says what was started instead: {said:?}",
     );
 
@@ -4753,7 +4755,7 @@ async fn a_pairing_on_another_harness_than_the_record_says_so_where_the_work_arr
     assert_eq!(pressed, "\"Resumed\"", "Resume started something");
 
     let said = b
-        .notice_saying(there, "a record one harness wrote is one no other can read")
+        .notice_saying(there, "one harness can't read another's record")
         .await;
 
     assert!(
@@ -4792,7 +4794,7 @@ async fn a_harness_that_will_not_resume_says_so_and_locks_what_was_held_for_it()
 
     let there = handed_on(&a, conversation, B).await;
 
-    let said = b.notice_saying(there, "would not resume session").await;
+    let said = b.notice_saying(there, "wouldn't resume session").await;
 
     assert!(
         said.contains("claude"),
@@ -4923,7 +4925,7 @@ async fn a_grilling_carried_on_between_two_devices_reads_back_on_both_ends() {
     let came = b.notice_saying(there, &this_machine().0).await;
 
     assert!(
-        came.contains("moved onto this device"),
+        came.contains("from <strong>"),
         "and, above it, which machine the work came from: {came:?}",
     );
 
@@ -5312,11 +5314,11 @@ async fn a_codex_rollout_that_named_no_session_falls_through_to_verksteads_resum
     // is a name no codex answers to — so what the record holds is a session id
     // that finds no rollout, and the reason is the rollout rather than the row.
     let said = b
-        .notice_saying(there_id, "the memory sync carried none of it")
+        .notice_saying(there_id, "The memory sync carried none of it")
         .await;
 
     assert!(
-        said.contains("codex") && said.contains("Resume"),
+        said.contains("codex") && said.contains("own resume"),
         "the Notice names the harness whose record could not be found, and what \
          was started instead: {said:?}",
     );

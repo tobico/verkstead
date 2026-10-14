@@ -60,7 +60,7 @@ pub async fn of(
 ) -> Result<Preflight, Refusal> {
     let Some(devices) = devices else {
         return Err(Refusal::ours(
-            "this server holds no device identity to ask a member through".to_owned(),
+            "This server holds no device identity to ask a member through.".to_owned(),
         ));
     };
 
@@ -72,7 +72,7 @@ pub async fn of(
         .await
         .map_err(|why| {
             Refusal::ours(format!(
-                "this Conversation's companions could not be read: {why:#}"
+                "This conversation's companions couldn't be read: {why:#}."
             ))
         })?;
 

@@ -206,7 +206,7 @@ pub(crate) async fn create(
         );
 
         return Ok(Created::Refused(
-            "the repository was made but could not be registered".to_owned(),
+            "The repository was made but couldn't be registered.".to_owned(),
         ));
     };
 
@@ -218,9 +218,7 @@ pub(crate) async fn create(
             Some(why) => Created::MadeWithoutRemote { repo, why },
             None => Created::Made(repo),
         },
-        None => {
-            Created::Refused("the repository was registered but could not be read back".to_owned())
-        }
+        None => Created::Refused("The repo was registered but couldn't be read back.".to_owned()),
     })
 }
 
@@ -282,7 +280,7 @@ fn make(parent: &Path, name: &str, author: &Author) -> Result<PathBuf, Unmade> {
             ErrorKind::AlreadyExists => Unmade::AlreadyThere,
             // The parent went between being resolved and being written in.
             ErrorKind::NotFound => Unmade::ParentMissing,
-            _ => Unmade::Refused(format!("the directory could not be made: {error}")),
+            _ => Unmade::Refused(format!("The directory couldn't be made: {error}.")),
         });
     }
 
@@ -318,7 +316,7 @@ fn filled(path: &Path, name: &str, author: &Author) -> Result<(), String> {
     // The name rather than a sentence about Verkstead: the human is about to
     // open this repository, and the first thing in it should be theirs.
     std::fs::write(path.join(README), format!("# {name}\n"))
-        .map_err(|error| format!("the README could not be written: {error}"))?;
+        .map_err(|error| format!("The README.md couldn't be written: {error}."))?;
 
     run(path, &["add", "--", README])?;
     run(
@@ -383,7 +381,7 @@ pub(crate) fn run(dir: &Path, args: &[&str]) -> Result<(), String> {
         .current_dir(dir)
         .stdin(Stdio::null())
         .output()
-        .map_err(|error| format!("git could not be run: {error}"))?;
+        .map_err(|error| format!("Git couldn't be run: {error}."))?;
 
     if output.status.success() {
         return Ok(());

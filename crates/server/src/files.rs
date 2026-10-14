@@ -194,7 +194,7 @@ pub(crate) fn folder(roots: &[FileRoot], path: &Path) -> FolderListing {
         Ok(reading) => reading,
         Err(error) => {
             return FolderListing::Unreadable {
-                why: format!("the server cannot read it: {error}"),
+                why: format!("The server can't read it: {error}."),
             };
         }
     };
@@ -497,7 +497,7 @@ pub(crate) fn make(roots: &[FileRoot], path: &Path, making: Making) -> FileMade 
         Err(_) if std::fs::symlink_metadata(&at).is_ok() => FileMade::Taken,
 
         Err(error) => FileMade::Unwritable {
-            why: format!("the server cannot make it: {error}"),
+            why: format!("The server can't make it: {error}."),
         },
     }
 }
@@ -615,7 +615,7 @@ pub(crate) fn rename(roots: &[FileRoot], path: &Path, name: &str) -> FileRenamed
             path: onto.display().to_string(),
         },
         Err(error) => FileRenamed::Unwritable {
-            why: format!("the server cannot rename it: {error}"),
+            why: format!("The server can't rename it: {error}."),
         },
     }
 }
@@ -677,7 +677,7 @@ pub(crate) fn delete(roots: &[FileRoot], path: &Path) -> FileDeleted {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return FileDeleted::Missing,
         Err(error) => {
             return FileDeleted::Unwritable {
-                why: format!("the server cannot read it: {error}"),
+                why: format!("The server can't read it: {error}."),
             };
         }
     };
@@ -695,7 +695,7 @@ pub(crate) fn delete(roots: &[FileRoot], path: &Path) -> FileDeleted {
         // asking for.
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => FileDeleted::Missing,
         Err(error) => FileDeleted::Unwritable {
-            why: format!("the server cannot delete it: {error}"),
+            why: format!("The server can't delete it: {error}."),
         },
     }
 }
@@ -1059,7 +1059,7 @@ fn versioned(real: &Path) -> std::io::Result<String> {
 /// What the filesystem said of a write, worded as the sentence the bar draws.
 fn unwritable(error: &std::io::Error) -> FileWritten {
     FileWritten::Unwritable {
-        why: format!("the server cannot write it: {error}"),
+        why: format!("The server can't write it: {error}."),
     }
 }
 
@@ -1148,7 +1148,7 @@ fn texted(bytes: Vec<u8>) -> Option<String> {
 /// What the filesystem said, worded as the sentence the tab draws.
 fn unreadable(error: &std::io::Error) -> FileReading {
     FileReading::Unreadable {
-        why: format!("the server cannot read it: {error}"),
+        why: format!("The server can't read it: {error}."),
     }
 }
 

@@ -2297,5 +2297,5 @@ async function refusal(response: Response): Promise<ApiError> {
     // Not JSON at all. Falls through to the status line below.
   }
 
-  return { error: `the server answered ${response.status}` };
+  return { error: `The server answered ${response.status}.` };
 }

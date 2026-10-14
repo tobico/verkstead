@@ -810,7 +810,7 @@ pub(crate) async fn set_reading(state: &AppState, id: i64) -> Result<SetReading,
         Ok(None) => return Err(no_such_set(&id.to_string())),
         Err(error) => {
             tracing::error!(error = ?error, set_id = id, "loading a Question Set failed");
-            return Err(unavailable("the Question Set could not be read"));
+            return Err(unavailable("The question set couldn't be read."));
         }
     };
 
@@ -818,7 +818,7 @@ pub(crate) async fn set_reading(state: &AppState, id: i64) -> Result<SetReading,
         Ok(settlement) => settlement,
         Err(error) => {
             tracing::error!(error = ?error, set_id = id, "reading how a Set stands failed");
-            return Err(unavailable("the Question Set could not be read"));
+            return Err(unavailable("The question set couldn't be read."));
         }
     };
 
@@ -830,11 +830,11 @@ pub(crate) async fn set_reading(state: &AppState, id: i64) -> Result<SetReading,
         Ok(Some(conversation)) => conversation,
         Ok(None) => {
             tracing::error!(set_id = id, "a stored Question Set is on no Timeline");
-            return Err(unavailable("the Question Set could not be read"));
+            return Err(unavailable("The question set couldn't be read."));
         }
         Err(error) => {
             tracing::error!(error = ?error, set_id = id, "reading which Conversation a Set was asked from failed");
-            return Err(unavailable("the Question Set could not be read"));
+            return Err(unavailable("The question set couldn't be read."));
         }
     };
 
@@ -900,7 +900,7 @@ pub(crate) async fn set_reading(state: &AppState, id: i64) -> Result<SetReading,
         Ok(attachments) => attachments,
         Err(error) => {
             tracing::error!(error = ?error, set_id = id, "reading the files put on a Set failed");
-            return Err(unavailable("the Question Set could not be read"));
+            return Err(unavailable("The question set couldn't be read."));
         }
     };
 
@@ -920,7 +920,7 @@ pub(crate) async fn set_reading(state: &AppState, id: i64) -> Result<SetReading,
         Ok(view) => view,
         Err(error) => {
             tracing::error!(error = ?error, set_id = id, "rendering a Question Set failed");
-            return Err(unavailable("the Question Set could not be read"));
+            return Err(unavailable("The question set couldn't be read."));
         }
     };
 
@@ -978,7 +978,7 @@ async fn submit_response(
             Ok(submission) => submission,
             Err(error) => {
                 tracing::error!(error = ?error, set_id = id, "taking a Response failed");
-                return unavailable("the Response could not be taken");
+                return unavailable("The response couldn't be taken.");
             }
         };
 
@@ -1013,7 +1013,7 @@ async fn lock_set(State(state): State<AppState>, Path(id): Path<String>) -> Http
         Ok(locking) => locking,
         Err(error) => {
             tracing::error!(error = ?error, set_id = id, "locking a Set failed");
-            return unavailable("the Question Set could not be locked");
+            return unavailable("The question set couldn't be locked.");
         }
     };
 
@@ -1032,7 +1032,7 @@ async fn repos(State(state): State<AppState>) -> HttpResponse {
         Ok(repos) => repos,
         Err(error) => {
             tracing::error!(error = ?error, "reading the registered Repos failed");
-            return unavailable("the registered Repos could not be read");
+            return unavailable("The registered repos couldn't be read.");
         }
     };
 
@@ -1058,7 +1058,7 @@ async fn branches(State(state): State<AppState>, Path(id): Path<String>) -> Http
         Ok(None) => no_such_repo(&id.to_string()),
         Err(error) => {
             tracing::error!(error = ?error, repo_id = id, "listing a Repo's branches failed");
-            unavailable("the Repo's branches could not be read")
+            unavailable("The repo's branches couldn't be read.")
         }
     }
 }
@@ -1092,12 +1092,12 @@ async fn pairings(State(state): State<AppState>, Path(id): Path<String>) -> Http
                     repo_id = id,
                     "reading what a Repo's pickers would be prefilled with failed",
                 );
-                unavailable("the repo's pairings could not be read")
+                unavailable("The repo's pairings couldn't be read.")
             }
         },
         Err(error) => {
             tracing::error!(error = ?error, repo_id = id, "reading a Repo failed");
-            unavailable("the repo's remembered pairings could not be read")
+            unavailable("The repo's remembered pairings couldn't be read.")
         }
     }
 }
@@ -1115,7 +1115,7 @@ async fn register_repo(
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, "registering a Repo failed");
-            unavailable("the Repo could not be registered")
+            unavailable("The repo couldn't be registered.")
         }
     }
 }
@@ -1157,7 +1157,7 @@ async fn create_repo(
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, "making a Repo failed");
-            unavailable("the Repo could not be made")
+            unavailable("The repo couldn't be made.")
         }
     }
 }
@@ -1179,7 +1179,7 @@ async fn remove_repo(State(state): State<AppState>, Path(id): Path<String>) -> H
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, repo_id = id, "removing a Repo failed");
-            unavailable("the Repo could not be removed")
+            unavailable("The repo couldn't be removed.")
         }
     }
 }
@@ -1200,7 +1200,7 @@ async fn abandoned_roadmaps(State(state): State<AppState>) -> HttpResponse {
         Ok(repos) => repos,
         Err(error) => {
             tracing::error!(error = ?error, "reading the registered Repos failed");
-            return unavailable("the registered Repos could not be read");
+            return unavailable("The registered repos couldn't be read.");
         }
     };
 
@@ -1258,7 +1258,7 @@ async fn conversations(
             Ok(showing) => showing,
             Err(error) => {
                 tracing::error!(error = ?error, "reading whether the archived Conversations are shown failed");
-                return unavailable("the Conversations could not be read");
+                return unavailable("The conversations couldn't be read.");
             }
         },
     };
@@ -1267,7 +1267,7 @@ async fn conversations(
         Ok(conversations) => conversations,
         Err(error) => {
             tracing::error!(error = ?error, "reading the Conversations failed");
-            return unavailable("the Conversations could not be read");
+            return unavailable("The conversations couldn't be read.");
         }
     };
 
@@ -1397,7 +1397,7 @@ async fn start_conversation(
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, "starting a Conversation failed");
-            unavailable("the Conversation could not be started")
+            unavailable("The conversation couldn't be started.")
         }
     }
 }
@@ -1468,7 +1468,7 @@ async fn rank_conversation(
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "ranking a Conversation failed");
-            unavailable("the order could not be saved")
+            unavailable("The order couldn't be saved.")
         }
     }
 }
@@ -1493,7 +1493,7 @@ async fn start_adoption(
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, "starting a Conversation to adopt a roadmap failed");
-            unavailable("the Conversation could not be started")
+            unavailable("The conversation couldn't be started.")
         }
     }
 }
@@ -1533,7 +1533,7 @@ pub(crate) async fn conversation_view(
         Ok(None) => return Err(no_such_conversation(&id.to_string())),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "loading a Conversation failed");
-            return Err(unavailable("the Conversation could not be read"));
+            return Err(unavailable("The conversation couldn't be read."));
         }
     };
 
@@ -1572,7 +1572,7 @@ pub(crate) async fn conversation_view(
         Ok(timeline) => timeline,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "reading a Timeline failed");
-            return Err(unavailable("the Conversation could not be read"));
+            return Err(unavailable("The conversation couldn't be read."));
         }
     };
 
@@ -1617,7 +1617,7 @@ pub(crate) async fn conversation_view(
         Ok(pairing) => pairing,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "reading a grilling Pairing failed");
-            return Err(unavailable("the Conversation could not be read"));
+            return Err(unavailable("The conversation couldn't be read."));
         }
     };
 
@@ -1630,7 +1630,7 @@ pub(crate) async fn conversation_view(
         Ok(pairing) => pairing,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "reading an implementation Pairing failed");
-            return Err(unavailable("the Conversation could not be read"));
+            return Err(unavailable("The conversation couldn't be read."));
         }
     };
 
@@ -1638,7 +1638,7 @@ pub(crate) async fn conversation_view(
         Ok(pairing) => pairing,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "reading a review Pairing failed");
-            return Err(unavailable("the Conversation could not be read"));
+            return Err(unavailable("The conversation couldn't be read."));
         }
     };
 
@@ -1822,7 +1822,7 @@ pub(crate) async fn conversation_view(
         Ok(worktree) => worktree,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "reading a worktree failed");
-            return Err(unavailable("the Conversation could not be read"));
+            return Err(unavailable("The conversation couldn't be read."));
         }
     };
 
@@ -1836,7 +1836,7 @@ pub(crate) async fn conversation_view(
             Ok(companion) => companions.push(companion),
             Err(error) => {
                 tracing::error!(error = ?error, conversation_id = id, "reading a companion worktree failed");
-                return Err(unavailable("the Conversation could not be read"));
+                return Err(unavailable("The conversation couldn't be read."));
             }
         }
     }
@@ -2660,7 +2660,7 @@ pub(crate) async fn commented(
         Ok(pulls) => pulls,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, "reading the pull requests to comment a share on failed");
-            return Err("the pull requests of this conversation could not be read".to_owned());
+            return Err("This conversation's pull requests couldn't be read.".to_owned());
         }
     };
 
@@ -2699,7 +2699,7 @@ pub(crate) async fn commented(
         Ok(landings) => landings,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, "commenting a published share on its pull requests failed");
-            return Err("the share was published but could not be commented anywhere".to_owned());
+            return Err("The share was published, but couldn't be commented anywhere.".to_owned());
         }
     };
 
@@ -2819,7 +2819,7 @@ async fn publishing(
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, "publishing a share failed");
             return Err(Unpublished::Broken(
-                "the share could not be published".to_owned(),
+                "The share couldn't be published.".to_owned(),
             ));
         }
     };
@@ -2854,7 +2854,7 @@ async fn publishing(
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, "recording where a share was published failed");
             return Err(Unpublished::Broken(
-                "the share was published but could not be written down".to_owned(),
+                "The share was published, but couldn't be written down.".to_owned(),
             ));
         }
     };
@@ -2915,13 +2915,13 @@ fn document(bundle: &SharedConversation) -> Result<(String, String), String> {
     // answer: the server runs, and what it cannot do it says.
     let Some(template) = crate::viewer::Shareable::get(crate::viewer::SHARE) else {
         return Err(
-            "the share build of the viewer was not built into this binary: run `pnpm build` in web/"
+            "The share build of the viewer isn't built into this binary. Run pnpm build in web/."
                 .to_owned(),
         );
     };
 
     let Ok(template) = std::str::from_utf8(&template.data) else {
-        return Err("the share build of the viewer could not be read".to_owned());
+        return Err("The share build of the viewer couldn't be read.".to_owned());
     };
 
     // And the diagram renderer, on the one kind of share that needs one. It is
@@ -2932,7 +2932,7 @@ fn document(bundle: &SharedConversation) -> Result<(String, String), String> {
         match crate::viewer::Shareable::get(crate::viewer::MERMAID) {
             Some(built) => match String::from_utf8(built.data.into_owned()) {
                 Ok(code) => Some(code),
-                Err(_) => return Err("the diagram renderer could not be read".to_owned()),
+                Err(_) => return Err("The diagram renderer couldn't be read.".to_owned()),
             },
             // Built by something that is not this build. A share drawn without
             // it is the record with its Diagrams left as the source the agent
@@ -2940,7 +2940,7 @@ fn document(bundle: &SharedConversation) -> Result<(String, String), String> {
             // page the human never saw, so it is refused instead.
             None => {
                 return Err(
-                    "the diagram renderer was not built into this binary: run `pnpm build` in web/"
+                    "The diagram renderer isn't built into this binary. Run pnpm build in web/."
                         .to_owned(),
                 );
             }
@@ -2950,7 +2950,7 @@ fn document(bundle: &SharedConversation) -> Result<(String, String), String> {
     };
 
     let Some(file) = crate::sharing::file(template, bundle, mermaid.as_deref()) else {
-        return Err("the share build of the viewer has nowhere to put a conversation".to_owned());
+        return Err("The share build of the viewer has nowhere to put a conversation.".to_owned());
     };
 
     let name = crate::sharing::filename(
@@ -3051,7 +3051,7 @@ async fn shared_commits(
             Ok(commit) => commit,
             Err(error) => {
                 tracing::error!(error = ?error, conversation_id = id, event_id = event, "reading a commit for a share failed");
-                return Err(unavailable("the conversation's commits could not be read"));
+                return Err(unavailable("The conversation's commits couldn't be read."));
             }
         };
 
@@ -3063,7 +3063,7 @@ async fn shared_commits(
             Ok(repo) => repo.map(|repo| repo.path),
             Err(error) => {
                 tracing::error!(error = ?error, conversation_id = id, event_id = event, "reading the repository of a commit for a share failed");
-                return Err(unavailable("the conversation's commits could not be read"));
+                return Err(unavailable("The conversation's commits couldn't be read."));
             }
         };
 
@@ -3086,7 +3086,7 @@ async fn shared_commits(
 
     rendered.map_err(|error| {
         tracing::error!(error = ?error, conversation_id = id, "rendering the commits of a share failed");
-        unavailable("the conversation's commits could not be read")
+        unavailable("The conversation's commits couldn't be read.")
     })
 }
 
@@ -3132,7 +3132,7 @@ async fn capture(
         Ok(None) => no_such_capture(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, event_id = event, "reading a Capture failed");
-            unavailable("the Capture could not be read")
+            unavailable("The capture couldn't be read.")
         }
     }
 }
@@ -3193,7 +3193,7 @@ async fn transcript(
             Ok(None) => {}
             Err(error) => {
                 tracing::error!(error = ?error, conversation_id = id, event_id = event, "reading the rest of a Transcript failed");
-                return unavailable("the Transcript could not be read");
+                return unavailable("The transcript couldn't be read.");
             }
         }
     }
@@ -3203,7 +3203,7 @@ async fn transcript(
         Ok(None) => no_such_transcript(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, event_id = event, "reading a Transcript failed");
-            unavailable("the Transcript could not be read")
+            unavailable("The transcript couldn't be read.")
         }
     }
 }
@@ -3250,7 +3250,7 @@ async fn screen(
         Ok(None) => no_such_screen(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, event_id = event, "reading a Screen failed");
-            unavailable("the Screen could not be read")
+            unavailable("The screen couldn't be read.")
         }
     }
 }
@@ -3284,7 +3284,7 @@ async fn commit_pane(
         Ok(None) => return no_such_commit(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, event_id = event, "reading a commit failed");
-            return unavailable("the commit could not be read");
+            return unavailable("The commit couldn't be read.");
         }
     };
 
@@ -3301,7 +3301,7 @@ async fn commit_pane(
         Ok(None) => return no_such_commit(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, event_id = event, "reading the repository of a commit failed");
-            return unavailable("the commit could not be read");
+            return unavailable("The commit couldn't be read.");
         }
     };
 
@@ -3320,7 +3320,7 @@ async fn commit_pane(
         Ok(rendered) => rendered,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, event_id = event, "reading a commit's diff failed");
-            return unavailable("the commit could not be read");
+            return unavailable("The commit couldn't be read.");
         }
     };
 
@@ -3375,7 +3375,7 @@ async fn open_terminal(State(state): State<AppState>, Path(id): Path<String>) ->
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "opening a terminal failed");
-            unavailable("the terminal could not be opened")
+            unavailable("The terminal couldn't be opened.")
         }
     }
 }
@@ -3404,7 +3404,7 @@ async fn file_roots(State(state): State<AppState>, Path(id): Path<String>) -> Ht
         Ok(None) => return Json(FileRootsView { roots: Vec::new() }).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "reading a Conversation's roots failed");
-            return unavailable("this conversation's worktrees could not be read");
+            return unavailable("This conversation's worktrees couldn't be read.");
         }
     };
 
@@ -3445,7 +3445,7 @@ async fn file_list(State(state): State<AppState>, Path(id): Path<String>) -> Htt
         Ok(None) => return Json(FileListsView { roots: Vec::new() }).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "reading a Conversation's roots failed");
-            return unavailable("this conversation's worktrees could not be read");
+            return unavailable("This conversation's worktrees couldn't be read.");
         }
     };
 
@@ -3459,7 +3459,7 @@ async fn file_list(State(state): State<AppState>, Path(id): Path<String>) -> Htt
         Ok(lists) => Json(lists).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "listing a Conversation's files failed");
-            unavailable("this conversation's files could not be listed")
+            unavailable("This conversation's files couldn't be listed.")
         }
     }
 }
@@ -3493,7 +3493,7 @@ async fn file_status(State(state): State<AppState>, Path(id): Path<String>) -> H
         Ok(None) => return Json(FileStatusView { roots: Vec::new() }).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "reading a Conversation's roots failed");
-            return unavailable("this conversation's worktrees could not be read");
+            return unavailable("This conversation's worktrees couldn't be read.");
         }
     };
 
@@ -3507,7 +3507,7 @@ async fn file_status(State(state): State<AppState>, Path(id): Path<String>) -> H
         Ok(status) => Json(status).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "reading a Conversation's file marks failed");
-            unavailable("this conversation's files could not be read")
+            unavailable("This conversation's files couldn't be read.")
         }
     }
 }
@@ -3554,7 +3554,7 @@ async fn folder(
         Ok(None) => return Json(FolderListing::Outside).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "reading a Conversation's roots failed");
-            return unavailable("this conversation's worktrees could not be read");
+            return unavailable("This conversation's worktrees couldn't be read.");
         }
     };
 
@@ -3572,7 +3572,7 @@ async fn folder(
         Ok(listing) => Json(listing).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "listing a folder of a Worktree failed");
-            unavailable("the folder could not be listed")
+            unavailable("The folder couldn't be listed.")
         }
     }
 }
@@ -3610,7 +3610,7 @@ async fn file(
         Ok(None) => return Json(FileReading::Outside).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "reading a Conversation's roots failed");
-            return unavailable("this conversation's worktrees could not be read");
+            return unavailable("This conversation's worktrees couldn't be read.");
         }
     };
 
@@ -3627,7 +3627,7 @@ async fn file(
         Ok(reading) => Json(reading).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "reading a file of a Worktree failed");
-            unavailable("the file could not be read")
+            unavailable("The file couldn't be read.")
         }
     }
 }
@@ -3668,7 +3668,7 @@ async fn write_file(
         Ok(None) => return Json(FileWritten::Outside).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "reading a Conversation's roots failed");
-            return unavailable("this conversation's worktrees could not be read");
+            return unavailable("This conversation's worktrees couldn't be read.");
         }
     };
 
@@ -3687,7 +3687,7 @@ async fn write_file(
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "writing a file of a Worktree failed");
-            unavailable("the file could not be written")
+            unavailable("The file couldn't be written.")
         }
     }
 }
@@ -3747,7 +3747,7 @@ async fn made(
         Ok(None) => return Json(FileMade::Outside).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "reading a Conversation's roots failed");
-            return unavailable("this conversation's worktrees could not be read");
+            return unavailable("This conversation's worktrees couldn't be read.");
         }
     };
 
@@ -3765,7 +3765,7 @@ async fn made(
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "making a file in a Worktree failed");
-            unavailable("it could not be made")
+            unavailable("It couldn't be made.")
         }
     }
 }
@@ -3803,7 +3803,7 @@ async fn rename_path(
         Ok(None) => return Json(FileRenamed::Outside).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "reading a Conversation's roots failed");
-            return unavailable("this conversation's worktrees could not be read");
+            return unavailable("This conversation's worktrees couldn't be read.");
         }
     };
 
@@ -3821,7 +3821,7 @@ async fn rename_path(
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "renaming a file of a Worktree failed");
-            unavailable("it could not be renamed")
+            unavailable("It couldn't be renamed.")
         }
     }
 }
@@ -3862,7 +3862,7 @@ async fn delete_path(
         Ok(None) => return Json(FileDeleted::Outside).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "reading a Conversation's roots failed");
-            return unavailable("this conversation's worktrees could not be read");
+            return unavailable("This conversation's worktrees couldn't be read.");
         }
     };
 
@@ -3880,7 +3880,7 @@ async fn delete_path(
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "deleting a file of a Worktree failed");
-            unavailable("it could not be deleted")
+            unavailable("It couldn't be deleted.")
         }
     }
 }
@@ -3913,7 +3913,7 @@ async fn backlog(State(state): State<AppState>, Path(id): Path<String>) -> HttpR
         Ok(None) => return no_such_backlog(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "loading a Conversation failed");
-            return unavailable("the backlog could not be read");
+            return unavailable("The backlog couldn't be read.");
         }
     };
 
@@ -3955,7 +3955,7 @@ async fn roadmap(
         Ok(None) => return no_such_roadmap(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "loading a Conversation failed");
-            return unavailable("the roadmap could not be read");
+            return unavailable("The roadmap couldn't be read.");
         }
     };
 
@@ -4031,7 +4031,7 @@ async fn pull_request(
         Ok(timeline) => timeline,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "reading a Timeline failed");
-            return unavailable("the pull request could not be read");
+            return unavailable("The pull request couldn't be read.");
         }
     };
 
@@ -4054,7 +4054,7 @@ async fn pull_request(
         Ok(None) => return no_such_pull_request(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, event_id = event, "reading the repository of a pull request failed");
-            return unavailable("the pull request could not be read");
+            return unavailable("The pull request couldn't be read.");
         }
     };
 
@@ -4099,7 +4099,7 @@ async fn pull_request(
         }
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, event_id = event, "asking gh about a pull request failed");
-            unavailable("the pull request could not be read")
+            unavailable("The pull request couldn't be read.")
         }
     }
 }
@@ -4118,7 +4118,7 @@ async fn save_brief(
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "saving a Brief failed");
-            unavailable("the Brief could not be saved")
+            unavailable("The brief couldn't be saved.")
         }
     }
 }
@@ -4233,7 +4233,7 @@ async fn attach(
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, name = %name, "attaching a file failed");
-            unavailable("the file could not be attached")
+            unavailable("The file couldn't be attached.")
         }
     }
 }
@@ -4275,7 +4275,7 @@ async fn read_attachment(
         Ok(found) => found,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, attachment, "reading an attached file failed");
-            return unavailable("the file could not be read");
+            return unavailable("The file couldn't be read.");
         }
     };
 
@@ -4288,7 +4288,7 @@ async fn read_attachment(
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return no_such_attachment(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, attachment, path = %path.display(), "opening an attached file failed");
-            return unavailable("the file could not be read");
+            return unavailable("The file couldn't be read.");
         }
     };
 
@@ -4363,7 +4363,7 @@ async fn draft_moved(
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "recording where a draft moved to failed");
-            unavailable("the move could not be recorded")
+            unavailable("The move couldn't be recorded.")
         }
     }
 }
@@ -4389,7 +4389,7 @@ async fn detach(
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, attachment, "removing an attached file failed");
-            unavailable("the file could not be removed")
+            unavailable("The file couldn't be removed.")
         }
     }
 }
@@ -4411,7 +4411,7 @@ async fn attach_server(
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, name = %name, "attaching an MCP server failed");
-            unavailable("the MCP server could not be attached")
+            unavailable("The MCP server couldn't be attached.")
         }
     }
 }
@@ -4430,7 +4430,7 @@ async fn detach_server(
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, name = %name, "removing an MCP server failed");
-            unavailable("the MCP server could not be removed")
+            unavailable("The MCP server couldn't be removed.")
         }
     }
 }
@@ -4453,7 +4453,7 @@ async fn attach_to_answer(
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, set_id = id, label = %label, name = %name, "putting a file on an Answer failed");
-            unavailable("the file could not be attached")
+            unavailable("The file couldn't be attached.")
         }
     }
 }
@@ -4480,7 +4480,7 @@ async fn detach_from_answer(
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, set_id = id, attachment, "removing a file from an Answer failed");
-            unavailable("the file could not be removed")
+            unavailable("The file couldn't be removed.")
         }
     }
 }
@@ -4500,7 +4500,7 @@ async fn switch_repo(
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "switching a conversation's repo failed");
-            unavailable("the repo could not be switched")
+            unavailable("The repo couldn't be switched.")
         }
     }
 }
@@ -4524,7 +4524,7 @@ async fn pick_process(
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "picking a conversation's Process failed");
-            unavailable("the process could not be picked")
+            unavailable("The process couldn't be picked.")
         }
     }
 }
@@ -4544,7 +4544,7 @@ async fn rename_branch(
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "renaming a branch failed");
-            unavailable("the branch could not be named")
+            unavailable("The branch couldn't be named.")
         }
     }
 }
@@ -4564,7 +4564,7 @@ async fn name_target(
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "naming a conversation's target failed");
-            unavailable("the target could not be named")
+            unavailable("The target couldn't be named.")
         }
     }
 }
@@ -4584,7 +4584,7 @@ async fn set_base_branch(
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "recording a base branch failed");
-            unavailable("the base branch could not be recorded")
+            unavailable("The base branch couldn't be recorded.")
         }
     }
 }
@@ -4604,7 +4604,7 @@ async fn add_companion(
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "adding a companion repo failed");
-            unavailable("the companion repo could not be added")
+            unavailable("The companion repo couldn't be added.")
         }
     }
 }
@@ -4626,7 +4626,7 @@ async fn remove_companion(
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "removing a companion repo failed");
-            unavailable("the companion repo could not be removed")
+            unavailable("The companion repo couldn't be removed.")
         }
     }
 }
@@ -4646,7 +4646,7 @@ async fn set_companion_mode(
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "setting a companion's mode failed");
-            unavailable("the companion repo's mode could not be set")
+            unavailable("The companion repo's mode couldn't be set.")
         }
     }
 }
@@ -4669,7 +4669,7 @@ async fn set_companion_base(
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "recording a companion's base branch failed");
-            unavailable("the companion repo's base branch could not be recorded")
+            unavailable("The companion repo's base branch couldn't be recorded.")
         }
     }
 }
@@ -4690,7 +4690,7 @@ async fn rename_companion_branch(
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "naming a companion's branch failed");
-            unavailable("the companion repo's branch could not be named")
+            unavailable("The companion repo's branch couldn't be named.")
         }
     }
 }
@@ -4711,7 +4711,7 @@ async fn start_grilling(State(state): State<AppState>, Path(id): Path<String>) -
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "starting a grilling failed");
-            unavailable("the grilling could not be started")
+            unavailable("The grilling couldn't be started.")
         }
     }
 }
@@ -4731,7 +4731,7 @@ async fn adopt(State(state): State<AppState>, Path(id): Path<String>) -> HttpRes
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "adopting a roadmap stage failed");
-            unavailable("the stage could not be started")
+            unavailable("The stage couldn't be started.")
         }
     }
 }
@@ -4763,7 +4763,7 @@ async fn take_up(
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "taking a pull request up failed");
-            unavailable("the pull request could not be taken up")
+            unavailable("The pull request couldn't be taken up.")
         }
     }
 }
@@ -4788,7 +4788,7 @@ async fn resume(State(state): State<AppState>, Path(id): Path<String>) -> HttpRe
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "starting to drive a Conversation again failed");
-            unavailable("the conversation could not be resumed")
+            unavailable("The conversation couldn't be resumed.")
         }
     }
 }
@@ -4814,7 +4814,7 @@ async fn resolve_conflicts(State(state): State<AppState>, Path(id): Path<String>
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "sending a Conversation back to its wrap-up to resolve a conflict failed");
-            unavailable("the conflict could not be sent back to the wrap-up")
+            unavailable("The conflict couldn't be sent back to the wrap-up.")
         }
     }
 }
@@ -4833,7 +4833,7 @@ async fn stop(State(state): State<AppState>, Path(id): Path<String>) -> HttpResp
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "stopping a Conversation failed");
-            unavailable("the conversation could not be stopped")
+            unavailable("The conversation couldn't be stopped.")
         }
     }
 }
@@ -4849,7 +4849,7 @@ async fn force_stop(State(state): State<AppState>, Path(id): Path<String>) -> Ht
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "stopping a Conversation where it stood failed");
-            unavailable("the conversation could not be stopped")
+            unavailable("The conversation couldn't be stopped.")
         }
     }
 }
@@ -4871,7 +4871,7 @@ async fn steer(State(state): State<AppState>, Path(id): Path<String>) -> HttpRes
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "stopping a Conversation to steer it failed");
-            unavailable("the conversation could not be stopped to steer it")
+            unavailable("The conversation couldn't be stopped to steer it.")
         }
     }
 }
@@ -4896,7 +4896,7 @@ async fn steer_save(
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "saving a pending steer failed");
-            unavailable("the steer could not be saved")
+            unavailable("The steer couldn't be saved.")
         }
     }
 }
@@ -4917,7 +4917,7 @@ async fn steer_cancel(State(state): State<AppState>, Path(id): Path<String>) -> 
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "cancelling a steer failed");
-            unavailable("the steer could not be cancelled")
+            unavailable("The steer couldn't be cancelled.")
         }
     }
 }
@@ -4942,7 +4942,7 @@ async fn steer_submit(
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "steering a Conversation failed");
-            unavailable("the conversation could not be steered")
+            unavailable("The conversation couldn't be steered.")
         }
     }
 }
@@ -4973,7 +4973,7 @@ async fn preflight(
         Ok(None) => return no_such_conversation(&id.to_string()),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "loading a Conversation to preflight a transfer failed");
-            return unavailable("the Conversation could not be read");
+            return unavailable("The conversation couldn't be read.");
         }
     };
 
@@ -5043,7 +5043,7 @@ async fn permitting(state: AppState, id: String, device: String, permit: bool) -
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, device = %device, permit, "changing where a Conversation may be moved to failed");
-            unavailable("the devices this work may move to could not be changed")
+            unavailable("The devices this work may move to couldn't be changed.")
         }
     }
 }
@@ -5063,7 +5063,7 @@ async fn close(State(state): State<AppState>, Path(id): Path<String>) -> HttpRes
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "closing a Conversation failed");
-            unavailable("the conversation could not be closed")
+            unavailable("The conversation couldn't be closed.")
         }
     }
 }
@@ -5091,7 +5091,7 @@ async fn close_and_archive(State(state): State<AppState>, Path(id): Path<String>
         Ok(outcome) => outcome,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "closing a Conversation failed");
-            return unavailable("the conversation could not be closed");
+            return unavailable("The conversation couldn't be closed.");
         }
     };
 
@@ -5110,7 +5110,7 @@ async fn close_and_archive(State(state): State<AppState>, Path(id): Path<String>
         }
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "putting a just-closed Conversation away failed");
-            unavailable("the conversation was closed, but could not be put away")
+            unavailable("The conversation was closed, but couldn't be put away.")
         }
     }
 }
@@ -5132,7 +5132,7 @@ async fn archive(State(state): State<AppState>, Path(id): Path<String>) -> HttpR
         }
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "archiving a Conversation failed");
-            unavailable("the conversation could not be archived")
+            unavailable("The conversation couldn't be archived.")
         }
     }
 }
@@ -5165,7 +5165,7 @@ async fn unarchive(State(state): State<AppState>, Path(id): Path<String>) -> Htt
         }
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "unarchiving a Conversation failed");
-            unavailable("the conversation could not be unarchived")
+            unavailable("The conversation couldn't be unarchived.")
         }
     }
 }
@@ -5204,7 +5204,7 @@ async fn seen(State(state): State<AppState>, Path(id): Path<String>) -> HttpResp
         }
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "clearing the unseen mark on a Conversation failed");
-            unavailable("the conversation could not be marked as seen")
+            unavailable("The conversation couldn't be marked as seen.")
         }
     }
 }
@@ -5241,7 +5241,7 @@ async fn showing_archived(
         Ok(showing) => showing,
         Err(error) => {
             tracing::error!(error = ?error, "reading whether the archived Conversations are shown failed");
-            return unavailable("the setting could not be read");
+            return unavailable("The setting couldn't be read.");
         }
     };
 
@@ -5249,7 +5249,7 @@ async fn showing_archived(
         Ok(any) => any,
         Err(error) => {
             tracing::error!(error = ?error, "reading whether anything is archived failed");
-            return unavailable("the setting could not be read");
+            return unavailable("The setting couldn't be read.");
         }
     };
 
@@ -5286,7 +5286,7 @@ async fn show_archived(
         }
         Err(error) => {
             tracing::error!(error = ?error, "saying whether the archived Conversations are shown failed");
-            unavailable("the setting could not be saved")
+            unavailable("The setting couldn't be saved.")
         }
     }
 }
@@ -5306,7 +5306,7 @@ async fn choose_grilling_pairing(
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "choosing a grilling Pairing failed");
-            unavailable("the grilling pairing could not be chosen")
+            unavailable("The grilling pairing couldn't be chosen.")
         }
     }
 }
@@ -5326,7 +5326,7 @@ async fn choose_implementation_pairing(
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "choosing an implementation Pairing failed");
-            unavailable("the implementation pairing could not be chosen")
+            unavailable("The implementation pairing couldn't be chosen.")
         }
     }
 }
@@ -5347,7 +5347,7 @@ async fn choose_review_pairing(
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "choosing a review Pairing failed");
-            unavailable("the review pairing could not be chosen")
+            unavailable("The review pairing couldn't be chosen.")
         }
     }
 }
@@ -5359,7 +5359,7 @@ async fn profiles(State(state): State<AppState>) -> HttpResponse {
         Ok(rows) => Json::<Vec<ProfileEntry>>(rows).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, "reading the Agent Profiles failed");
-            unavailable("the agent profiles could not be read")
+            unavailable("The agent profiles couldn't be read.")
         }
     }
 }
@@ -5380,7 +5380,7 @@ async fn create_profile(
         }
         Err(error) => {
             tracing::error!(error = ?error, "saving an Agent Profile failed");
-            unavailable("the agent profile could not be saved")
+            unavailable("The agent profile couldn't be saved.")
         }
     }
 }
@@ -5424,7 +5424,7 @@ async fn edit_profile(
                 profile_id = id,
                 "reading which device an Agent Profile is at home on failed",
             );
-            return unavailable("the agent profile could not be saved");
+            return unavailable("The agent profile couldn't be saved.");
         }
     }
 
@@ -5435,7 +5435,7 @@ async fn edit_profile(
         }
         Err(error) => {
             tracing::error!(error = ?error, profile_id = id, "rewriting an Agent Profile failed");
-            unavailable("the agent profile could not be saved")
+            unavailable("The agent profile couldn't be saved.")
         }
     }
 }
@@ -5466,26 +5466,26 @@ async fn login_opened(
         Ok(None) => return StatusCode::NOT_FOUND.into_response(),
         Err(error) => {
             tracing::error!(error = ?error, profile_id = id, "reading an Agent Profile failed");
-            return unavailable("the agent profile could not be read");
+            return unavailable("The agent profile couldn't be read.");
         }
     };
 
     if profile.agent_type() != store::AgentType::Claude {
         return refused(
             StatusCode::CONFLICT,
-            ApiError::new("only a Claude Profile can be logged in from here"),
+            ApiError::new("Only a Claude profile can be logged in from here."),
         );
     }
 
     if profile.mirror.is_some() {
         return refused(
             StatusCode::CONFLICT,
-            ApiError::new("log in on the device this Profile is at home on"),
+            ApiError::new("Log in on the device this profile is at home on."),
         );
     }
 
     let Some(agents) = state.sessions.agents() else {
-        return unavailable("this server runs no sessions, so it cannot log one in");
+        return unavailable("This server runs no sessions, so it can't log one in.");
     };
 
     Json(
@@ -5522,11 +5522,11 @@ async fn login_coded(
         }
         Err(crate::logins::Refusal::NotRunning) => refused(
             StatusCode::CONFLICT,
-            ApiError::new("this login is no longer running; open it again"),
+            ApiError::new("This login is no longer running. Open it again."),
         ),
         Err(crate::logins::Refusal::NotWaiting) => refused(
             StatusCode::CONFLICT,
-            ApiError::new("this login is not waiting for a code"),
+            ApiError::new("This login isn't waiting for a code."),
         ),
     }
 }
@@ -5570,7 +5570,7 @@ async fn delete_profile(State(state): State<AppState>, Path(id): Path<String>) -
                 profile_id = id,
                 "reading which device an Agent Profile is at home on failed",
             );
-            return unavailable("the agent profile could not be removed");
+            return unavailable("The agent profile couldn't be removed.");
         }
     }
 
@@ -5581,7 +5581,7 @@ async fn delete_profile(State(state): State<AppState>, Path(id): Path<String>) -
         }
         Err(error) => {
             tracing::error!(error = ?error, profile_id = id, "removing an Agent Profile failed");
-            unavailable("the agent profile could not be removed")
+            unavailable("The agent profile couldn't be removed.")
         }
     }
 }
@@ -5897,7 +5897,7 @@ async fn push_key(State(state): State<AppState>) -> HttpResponse {
         .into_response(),
         Err(error) => {
             tracing::error!(error = ?error, "reading the VAPID keypair failed");
-            unavailable("the push key could not be read")
+            unavailable("The push key couldn't be read.")
         }
     }
 }
@@ -5923,7 +5923,7 @@ async fn subscribe(
         Ok(store::Subscribing::Incomplete) => Json(Subscribed::Incomplete).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, "storing a push subscription failed");
-            unavailable("the subscription could not be stored")
+            unavailable("The subscription couldn't be stored.")
         }
     }
 }
@@ -5942,7 +5942,7 @@ async fn unsubscribe(
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(error) => {
             tracing::error!(error = ?error, "forgetting a push subscription failed");
-            unavailable("the subscription could not be forgotten")
+            unavailable("The subscription couldn't be forgotten.")
         }
     }
 }
@@ -6051,7 +6051,7 @@ async fn clear_language(State(state): State<AppState>, Path(name): Path<String>)
         }
         Err(error) => {
             tracing::error!(error = ?error, language = name, "clearing a language's stores failed");
-            unavailable("the language's stores could not be cleared")
+            unavailable("The language's stores couldn't be cleared.")
         }
     }
 }
@@ -6421,11 +6421,11 @@ async fn save_settings(
         // that quietly saved nothing is how credentials go missing.
         Ok(Err(error)) => {
             tracing::error!(error = ?error, "writing the settings files failed");
-            unavailable("the settings could not be saved")
+            unavailable("The settings couldn't be saved.")
         }
         Err(error) => {
             tracing::error!(error = ?error, "saving the settings failed");
-            unavailable("the settings could not be saved")
+            unavailable("The settings couldn't be saved.")
         }
     }
 }
@@ -6896,8 +6896,8 @@ fn refusals(rules: &[crate::settings::IgnoreRule]) -> Vec<RuleRefused> {
             let (field, why) = match rule.trouble()? {
                 RuleTrouble::Empty => (
                     None,
-                    "a rule with neither field would ignore every comment there is, so it \
-                     needs an author, a body, or both"
+                    "A rule with neither field would ignore every comment. Give it an \
+                     author, a body, or both."
                         .to_owned(),
                 ),
                 RuleTrouble::Author(why) => (Some(RuleField::Author), why),
@@ -6971,7 +6971,7 @@ async fn directories(Query(browsing): Query<Browsing>) -> HttpResponse {
         Ok(listing) => Json(listing).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, "listing a directory failed");
-            unavailable("the directory could not be listed")
+            unavailable("The directory couldn't be listed.")
         }
     }
 }
@@ -6993,7 +6993,7 @@ async fn onboarding(State(state): State<AppState>) -> HttpResponse {
         Ok(reading) => Json(reading).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, "reading the onboarding objective failed");
-            unavailable("what this machine is missing could not be read")
+            unavailable("What this machine is missing couldn't be read.")
         }
     }
 }
@@ -7016,7 +7016,7 @@ async fn onboarding_git(State(state): State<AppState>) -> HttpResponse {
         Ok(prefill) => Json(prefill).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, "reading what the git step could be prefilled with failed");
-            unavailable("this machine could not be asked what to fill the fields with")
+            unavailable("This machine couldn't be asked what to fill the fields with.")
         }
     }
 }
@@ -7048,11 +7048,11 @@ async fn onboarding_install(
         Ok(()) => onboarding(State(state)).await,
         Err(Refusal::Over) => refused(
             StatusCode::CONFLICT,
-            ApiError::new("the setup wizard is over, so there is nothing here to install"),
+            ApiError::new("The setup wizard is over, so there's nothing here to install."),
         ),
         Err(Refusal::Going) => refused(
             StatusCode::CONFLICT,
-            ApiError::new("an install is already running"),
+            ApiError::new("An install is already running."),
         ),
     }
 }
@@ -7157,7 +7157,7 @@ async fn press_serve(State(state): State<AppState>, Json(edit): Json<ServeEdit>)
 /// must never give. See [`crate::key`].
 async fn reset_key(State(state): State<AppState>) -> HttpResponse {
     let Some(key) = state.key.clone() else {
-        return unavailable("this server holds no workbench key to reset");
+        return unavailable("This server holds no workbench key to reset.");
     };
 
     // Off the runtime's own threads, the way every other write to the Data
@@ -7172,7 +7172,7 @@ async fn reset_key(State(state): State<AppState>) -> HttpResponse {
 
     if !matches!(written, Ok(Ok(()))) {
         tracing::error!(outcome = ?written, "re-issuing the workbench key failed");
-        return unavailable("the workbench key could not be re-issued");
+        return unavailable("The workbench key couldn't be re-issued.");
     }
 
     let view: RemoteView = state.remote.reading().await;
@@ -7197,7 +7197,7 @@ async fn remote_banner(State(state): State<AppState>) -> HttpResponse {
         Ok(dismissed) => Json(RemoteBanner { dismissed }).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, "reading whether the Remote access banner was dismissed failed");
-            unavailable("the banner's dismissal could not be read")
+            unavailable("The banner's dismissal couldn't be read.")
         }
     }
 }
@@ -7216,7 +7216,7 @@ async fn dismiss_remote_banner(State(state): State<AppState>) -> HttpResponse {
         Ok(()) => Json(RemoteBanner { dismissed: true }).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, "dismissing the Remote access banner failed");
-            unavailable("the banner could not be dismissed")
+            unavailable("The banner couldn't be dismissed.")
         }
     }
 }
@@ -7243,7 +7243,7 @@ async fn dismiss_remote_banner(State(state): State<AppState>) -> HttpResponse {
 /// a device that does not exist is the one answer this must not give.
 async fn devices(State(state): State<AppState>) -> HttpResponse {
     let Some(devices) = state.devices.clone() else {
-        return unavailable("this server holds no device identity to answer for");
+        return unavailable("This server holds no device identity to answer for.");
     };
 
     listed(&devices).await
@@ -7272,13 +7272,13 @@ async fn devices(State(state): State<AppState>) -> HttpResponse {
 /// cannot say which device it is cannot leave it out.
 async fn discovered(State(state): State<AppState>) -> HttpResponse {
     let Some(devices) = state.devices.clone() else {
-        return unavailable("this server holds no device identity to answer for");
+        return unavailable("This server holds no device identity to answer for.");
     };
 
     match devices.discovered().await {
         Ok(found) => Json(found).into_response(),
         Err(why) => unavailable(&format!(
-            "the devices this one has heard of could not be read: {why:#}"
+            "The devices this one has heard of couldn't be read: {why:#}."
         )),
     }
 }
@@ -7304,13 +7304,13 @@ async fn discovered(State(state): State<AppState>) -> HttpResponse {
 /// to draw under the box.
 async fn add_device(State(state): State<AppState>, Json(new): Json<NewJoin>) -> HttpResponse {
     let Some(devices) = state.devices.clone() else {
-        return unavailable("this server holds no device identity to link with");
+        return unavailable("This server holds no device identity to link with.");
     };
 
     if new.address.trim().is_empty() {
         return refused(
             StatusCode::BAD_REQUEST,
-            ApiError::new("an address to ask at is the one thing Add takes"),
+            ApiError::new("Type an address to ask at."),
         );
     }
 
@@ -7344,7 +7344,7 @@ async fn add_device(State(state): State<AppState>, Json(new): Json<NewJoin>) -> 
 /// dial put it in, naming the device the row drew.
 async fn add_found(State(state): State<AppState>, Path(device): Path<String>) -> HttpResponse {
     let Some(devices) = state.devices.clone() else {
-        return unavailable("this server holds no device identity to link with");
+        return unavailable("This server holds no device identity to link with.");
     };
 
     let pressed = devices.add_found(&device).await;
@@ -7371,11 +7371,11 @@ async fn add_found(State(state): State<AppState>, Path(device): Path<String>) ->
 /// the press above does.
 async fn cancel_join(State(state): State<AppState>, Path(request): Path<String>) -> HttpResponse {
     let Some(devices) = state.devices.clone() else {
-        return unavailable("this server holds no device identity to answer for");
+        return unavailable("This server holds no device identity to answer for.");
     };
 
     if let Err(why) = devices.take_back(&request).await {
-        return unavailable(&format!("the request could not be taken back: {why:#}"));
+        return unavailable(&format!("The request couldn't be taken back: {why:#}."));
     }
 
     moved(&state, &devices).await
@@ -7397,11 +7397,11 @@ async fn cancel_join(State(state): State<AppState>, Path(request): Path<String>)
 /// third machine made of it. See [`crate::device::Devices::unlink`].
 async fn unlink_device(State(state): State<AppState>, Path(device): Path<String>) -> HttpResponse {
     let Some(devices) = state.devices.clone() else {
-        return unavailable("this server holds no device identity to answer for");
+        return unavailable("This server holds no device identity to answer for.");
     };
 
     if let Err(why) = devices.unlink(&device).await {
-        return unavailable(&format!("the device could not be unlinked: {why:#}"));
+        return unavailable(&format!("The device couldn't be unlinked: {why:#}."));
     }
 
     moved(&state, &devices).await
@@ -7423,7 +7423,7 @@ async fn unlink_device(State(state): State<AppState>, Path(device): Path<String>
 /// [`crate::peer::joining::Joins::asking`].
 async fn asking(State(state): State<AppState>) -> HttpResponse {
     let Some(devices) = state.devices.clone() else {
-        return unavailable("this server holds no device identity to answer for");
+        return unavailable("This server holds no device identity to answer for.");
     };
 
     are_asking(&devices).await
@@ -7442,11 +7442,11 @@ async fn asking(State(state): State<AppState>) -> HttpResponse {
 /// press that failed.
 async fn allow_join(State(state): State<AppState>, Path(request): Path<String>) -> HttpResponse {
     let Some(devices) = state.devices.clone() else {
-        return unavailable("this server holds no device identity to link with");
+        return unavailable("This server holds no device identity to link with.");
     };
 
     if let Err(why) = devices.allow(&request).await {
-        return unavailable(&format!("the device could not be let in: {why:#}"));
+        return unavailable(&format!("The device couldn't be let in: {why:#}."));
     }
 
     settled(&state, &devices).await
@@ -7456,11 +7456,11 @@ async fn allow_join(State(state): State<AppState>, Path(request): Path<String>) 
 /// and record nothing.
 async fn deny_join(State(state): State<AppState>, Path(request): Path<String>) -> HttpResponse {
     let Some(devices) = state.devices.clone() else {
-        return unavailable("this server holds no device identity to answer for");
+        return unavailable("This server holds no device identity to answer for.");
     };
 
     if let Err(why) = devices.deny(&request).await {
-        return unavailable(&format!("the device could not be refused: {why:#}"));
+        return unavailable(&format!("The device couldn't be refused: {why:#}."));
     }
 
     settled(&state, &devices).await
@@ -7488,7 +7488,7 @@ async fn are_asking(devices: &crate::device::Devices) -> HttpResponse {
         Ok(asking) => asking,
         Err(why) => {
             return unavailable(&format!(
-                "the devices asking to link with this one could not be read: {why:#}"
+                "The devices asking to link with this one couldn't be read: {why:#}."
             ));
         }
     };
@@ -7527,7 +7527,7 @@ async fn listed(devices: &crate::device::Devices) -> HttpResponse {
         Ok(view) => view,
         Err(why) => {
             return unavailable(&format!(
-                "the devices this one is linked to could not be read: {why:#}"
+                "The devices this one is linked to couldn't be read: {why:#}."
             ));
         }
     };
@@ -7554,7 +7554,7 @@ async fn update(State(state): State<AppState>) -> HttpResponse {
 fn no_such_set(id: &str) -> HttpResponse {
     refused(
         StatusCode::NOT_FOUND,
-        ApiError::new(format!("there is no Question Set {id}")),
+        ApiError::new(format!("There is no question set {id}.")),
     )
 }
 
@@ -7563,7 +7563,7 @@ fn no_such_set(id: &str) -> HttpResponse {
 pub(crate) fn no_such_conversation(id: &str) -> HttpResponse {
     refused(
         StatusCode::NOT_FOUND,
-        ApiError::new(format!("there is no Conversation {id}")),
+        ApiError::new(format!("There is no conversation {id}.")),
     )
 }
 
@@ -7572,7 +7572,7 @@ pub(crate) fn no_such_conversation(id: &str) -> HttpResponse {
 fn no_such_repo(id: &str) -> HttpResponse {
     refused(
         StatusCode::NOT_FOUND,
-        ApiError::new(format!("there is no Repo {id}")),
+        ApiError::new(format!("There is no repo {id}.")),
     )
 }
 
@@ -7582,7 +7582,7 @@ fn no_such_repo(id: &str) -> HttpResponse {
 fn no_such_capture() -> HttpResponse {
     refused(
         StatusCode::NOT_FOUND,
-        ApiError::new("there is no such Capture on that Conversation"),
+        ApiError::new("This conversation has no such capture."),
     )
 }
 
@@ -7593,7 +7593,7 @@ fn no_such_capture() -> HttpResponse {
 fn no_such_transcript() -> HttpResponse {
     refused(
         StatusCode::NOT_FOUND,
-        ApiError::new("there is no such Transcript on that Conversation"),
+        ApiError::new("This conversation has no such transcript."),
     )
 }
 
@@ -7604,7 +7604,7 @@ fn no_such_transcript() -> HttpResponse {
 fn no_such_attachment() -> HttpResponse {
     refused(
         StatusCode::NOT_FOUND,
-        ApiError::new("there is no such file on that Conversation"),
+        ApiError::new("This conversation has no such file."),
     )
 }
 
@@ -7619,7 +7619,7 @@ fn no_such_attachment() -> HttpResponse {
 pub(crate) fn no_such_screen() -> HttpResponse {
     refused(
         StatusCode::NOT_FOUND,
-        ApiError::new("there is no such Screen on that Conversation"),
+        ApiError::new("This conversation has no such screen."),
     )
 }
 
@@ -7632,7 +7632,7 @@ pub(crate) fn no_such_screen() -> HttpResponse {
 pub(crate) fn no_such_terminal() -> HttpResponse {
     refused(
         StatusCode::NOT_FOUND,
-        ApiError::new("there is no such terminal on that Conversation"),
+        ApiError::new("This conversation has no such terminal."),
     )
 }
 
@@ -7644,7 +7644,7 @@ pub(crate) fn no_such_terminal() -> HttpResponse {
 fn no_such_commit() -> HttpResponse {
     refused(
         StatusCode::NOT_FOUND,
-        ApiError::new("there is no such commit on that Conversation"),
+        ApiError::new("This conversation has no such commit."),
     )
 }
 
@@ -7655,7 +7655,7 @@ fn no_such_commit() -> HttpResponse {
 fn no_such_backlog() -> HttpResponse {
     refused(
         StatusCode::NOT_FOUND,
-        ApiError::new("there is no backlog on that Conversation"),
+        ApiError::new("This conversation has no backlog."),
     )
 }
 
@@ -7665,7 +7665,7 @@ fn no_such_backlog() -> HttpResponse {
 fn no_such_roadmap() -> HttpResponse {
     refused(
         StatusCode::NOT_FOUND,
-        ApiError::new("there is no roadmap of that name on that Conversation"),
+        ApiError::new("This conversation has no roadmap of that name."),
     )
 }
 
@@ -7674,7 +7674,7 @@ fn no_such_roadmap() -> HttpResponse {
 fn no_such_pull_request() -> HttpResponse {
     refused(
         StatusCode::NOT_FOUND,
-        ApiError::new("there is no such pull request on that Conversation"),
+        ApiError::new("This conversation has no such pull request."),
     )
 }
 

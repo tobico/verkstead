@@ -185,7 +185,7 @@ pub async fn pulled(
         // A Verkstead linked to nothing has no mirror to launch under either, so
         // this is a shape rather than a case.
         None => Err(Refusal::ours(
-            "this server holds no device identity to relay through".to_owned(),
+            "This server holds no device identity to relay through.".to_owned(),
         )),
     };
 
@@ -195,10 +195,10 @@ pub async fn pulled(
                 noted(
                     pool,
                     conversation.id,
-                    "This Profile's account is on another device of the cluster, and that device \
-                     has no Repo that is this repository — so this session started without what \
-                     that account remembers of it. Open the repository there, and the next \
-                     session will have it.",
+                    "This profile's account is on another device that has no repo for this \
+                     repository, so this session started without what the account remembers of \
+                     it. Open the repository there with **Open repo**, and the next session will \
+                     have it.",
                 )
                 .await;
             }
@@ -211,8 +211,8 @@ pub async fn pulled(
                 pool,
                 conversation.id,
                 &format!(
-                    "Verkstead could not settle which of the other device's Repos is this \
-                     repository — {}. This session started without what that account remembers \
+                    "Verkstead couldn't settle which of the other device's repos is this \
+                     repository. {} This session started without what that account remembers \
                      of it.",
                     why.saying,
                 ),
@@ -264,8 +264,8 @@ pub async fn pulled(
                     pool,
                     conversation.id,
                     &format!(
-                        "Verkstead did not fetch what this Profile's account remembers of this \
-                         repository — {}. This session started on an empty memory store.",
+                        "Verkstead didn't fetch what this profile's account remembers of this \
+                         repository. {} This session started on an empty memory store.",
                         why.saying,
                     ),
                 )
@@ -291,8 +291,8 @@ pub async fn pulled(
                 pool,
                 conversation.id,
                 &format!(
-                    "Verkstead could not write what this Profile's account remembers of this \
-                     repository into its mirror here — {why:#}. This session started on an empty \
+                    "Verkstead couldn't write what this profile's account remembers of this \
+                     repository into its mirror here: {why:#}. This session started on an empty \
                      memory store.",
                 ),
             )
@@ -433,9 +433,9 @@ impl Syncing {
                     &pool,
                     conversation_id,
                     &format!(
-                        "Verkstead did not write this session's memory and transcript back to \
-                         the device this Profile's account is on — {}. They are still on this \
-                         device, and the next session there will not find them.",
+                        "Verkstead didn't write this session's memory and transcript back to \
+                         the device this profile's account is on. {} They're still on this \
+                         device, and the next session there won't find them.",
                         why.saying,
                     ),
                 )

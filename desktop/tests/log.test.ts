@@ -223,7 +223,7 @@ describe("where this run's logging goes", () => {
     say("the server answered after 412 ms");
 
     expect(kept).toEqual({ nowhere: expect.stringContaining(join(inTheWay, "verkstead")) });
-    expect(said(stderr)).toContain("could not open its log file");
+    expect(said(stderr)).toContain("couldn't open its log file");
     expect(said(stderr)).toContain("the server answered after 412 ms");
   });
 });

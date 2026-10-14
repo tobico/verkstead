@@ -45,26 +45,26 @@ export const ADOPT_REFUSAL: Record<Extract<Adopted, string>, string> = {
   NoSuchConversation: "This conversation is gone.",
   NotDrafting: "This conversation has already been started.",
   NotAdopting:
-    "This conversation has no roadmap, so there is no stage for it to take.",
-  NoGrillingProfile: "Choose a grilling profile and model first, on the brief.",
+    "This conversation has no roadmap, so there's no stage for it to take.",
+  NoGrillingProfile: "Choose a grilling profile and model on the brief first.",
   NoImplementationProfile:
-    "Choose an implementation profile and model first, on the brief.",
-  NoReviewProfile: "Choose a review profile and model first, on the brief.",
+    "Choose an implementation profile and model on the brief first.",
+  NoReviewProfile: "Choose a review profile and model on the brief first.",
   NoGitAuthor:
-    "No git author is configured, so Verkstead cannot commit on the branch. Set one in Settings before starting work.",
+    "No git author is configured, so Verkstead can't commit on the branch. Set one in Settings first.",
   FetchFailed:
-    "Git could not fetch from the repo's remote, so nothing was started. The server log says why.",
+    "Git couldn't fetch from the repo's remote, so nothing was started. The server log says why.",
   NoBaseCommit: "The repo has nothing to branch from any more.",
   NoRoadmap: "There is no roadmap by that name at the base commit.",
   RoadmapComplete:
-    "Every stage of that roadmap is done, so there is nothing left to start.",
+    "Every stage of that roadmap is done, so there's nothing left to start.",
   NoBrief:
-    "The next stage names a brief that is not there at the base commit, which is the roadmap's own to fix.",
+    "The next stage names a brief that isn't there at the base commit. The roadmap needs fixing.",
   StageInFlight:
-    "Somebody is already on the next stage: Verkstead's record says so, or it is marked in progress on a branch that still exists.",
+    "Somebody is already on the next stage. Verkstead's record says so, or a branch that still exists marks it in progress.",
   BranchExists:
-    "The stage's own branch already exists, and Verkstead did not make it.",
-  WorktreeRefused: "Git would not make the worktree. The server log says why.",
+    "The stage's own branch already exists, and Verkstead didn't make it.",
+  WorktreeRefused: "Git wouldn't make the worktree. The server log says why.",
 };
 
 /// What to say about an adoption that was refused.
@@ -98,10 +98,10 @@ export function adoptRefusal(outcome: Adopted): string {
     }
 
     if ("Misdeclared" in outcome) {
-      return `That roadmap declares badly, so nothing of it can start: ${outcome.Misdeclared.why}.`;
+      return `That roadmap declares badly, so none of it can start: ${outcome.Misdeclared.why}.`;
     }
 
-    return `A branch named ${outcome.BranchInTheWay.by} stands in the way of the stage's own branch, and Verkstead did not make it.`;
+    return `A branch named ${outcome.BranchInTheWay.by} stands in the way of the stage's own branch, and Verkstead didn't make it.`;
   }
 
   return ADOPT_REFUSAL[outcome];
@@ -137,7 +137,7 @@ export function Adoption(props: {
 
   return (
     <section class={styles.adoption} aria-label="Continuing a roadmap">
-      <h2>Continue a roadmap</h2>
+      <h2>Continue a Roadmap</h2>
 
       <p class={styles.roadmap}>
         <code>{props.adopting.roadmap}</code>
@@ -154,8 +154,8 @@ export function Adoption(props: {
           // the roadmap finished, the roadmap not there, somebody already on
           // the next stage — is what the press says by name.
           <Empty>
-            Nothing to continue at this base commit: no stage of{" "}
-            <code>{props.adopting.roadmap}</code> can be started from it.
+            No stage of <code>{props.adopting.roadmap}</code> can be started
+            from this base commit.
           </Empty>
         }
       >
@@ -180,7 +180,7 @@ export function Adoption(props: {
                 <For each={props.adopting.beside}>
                   {(beside) => (
                     <li>
-                      Stage {beside.label}: {beside.title} — on{" "}
+                      Stage {beside.label}: {beside.title}, on{" "}
                       <code>{beside.branch}</code>
                     </li>
                   )}
@@ -188,7 +188,7 @@ export function Adoption(props: {
               </ul>
               <Note>
                 Each of those starts as a conversation of its own, off the same
-                base commit and with the same profiles and repos alongside.
+                base commit and with the same profiles and repos.
               </Note>
             </Show>
           </>
@@ -205,9 +205,8 @@ export function Adoption(props: {
           {adopt.isPending ? "Continuing…" : "Continue"}
         </button>
         <Note>
-          This creates the branch and its worktree, takes the stage brief as
-          this conversation's brief, and starts the work on it. Both agent
-          profiles have to be chosen first.
+          This creates the branch and its worktree, takes the stage's brief,
+          and starts the work. Choose both agent profiles first.
           {/* And the companions, where any were configured while it drafted:
               the press checks them out beside the stage's own, so it is worth
               saying that it is this press that makes them. */}
@@ -224,7 +223,7 @@ export function Adoption(props: {
         </Show>
         <Show when={adopt.isError}>
           <ErrorLine class={styles.failure}>
-            The stage could not be started: {adopt.error?.message}
+            The stage couldn't be started. {adopt.error?.message}
           </ErrorLine>
         </Show>
       </Show>

@@ -21,7 +21,7 @@ use crate::highlight::{escaped, for_path};
 
 /// What the one section of a Diff git did not write is called — in the page and
 /// in the table of contents alike, since both name the same fold.
-const AS_IT_ARRIVED: &str = "The Diff, as it arrived";
+const AS_IT_ARRIVED: &str = "The diff as it arrived";
 
 /// Render a diff to HTML, or `None` when there is nothing in it to show.
 ///
@@ -276,7 +276,7 @@ fn files(diff: &str) -> Vec<FileDiff> {
         } else if line.starts_with("rename to") {
             file.status = Some("renamed");
         } else if line.starts_with("Binary files") {
-            file.note = Some("Binary file — contents omitted.");
+            file.note = Some("A binary file. Its contents aren't shown.");
         }
     }
 
@@ -870,7 +870,7 @@ mod tests {
 
         assert!(html.contains(">logo.png<"), "{html}");
         assert!(
-            html.contains("contents omitted"),
+            html.contains("Its contents aren't shown."),
             "expected the binary file accounted for:\n{html}"
         );
     }
@@ -1143,7 +1143,7 @@ mod tests {
         );
         assert_eq!(
             paths("who knows what this is\n"),
-            ["The Diff, as it arrived"],
+            ["The diff as it arrived"],
             "the one fold has no path to go by, so the nav calls it what the \
              fold calls itself",
         );

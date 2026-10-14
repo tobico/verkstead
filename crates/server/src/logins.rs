@@ -91,11 +91,11 @@ const CUT_SHORT: &str = "Invalid code";
 
 /// What the modal says when the harness asked again for a code cut short.
 const CUT_SHORT_SAID: &str =
-    "That is not the whole code. Copy all of it from the page and paste it again.";
+    "That isn't the whole code. Copy all of it from the page and paste it again.";
 
 /// What the modal says when the harness refused a code and a fresh login has
 /// taken its place.
-const REFUSED_SAID: &str = "Claude did not accept that code. Open the new address below, \
+const REFUSED_SAID: &str = "Claude didn't accept that code. Open the new address below, \
                             log in again, and paste the code it gives you.";
 
 /// The words of the harness's line a login runs.
@@ -511,7 +511,7 @@ impl Logins {
 
         let Some((rendering, closing)) = built else {
             return Ending::Failed(
-                "Verkstead could not build a sandbox to log in from. The server's log says why."
+                "Verkstead couldn't build a sandbox to log in from. The server's log says why."
                     .to_owned(),
             );
         };
@@ -525,7 +525,7 @@ impl Logins {
                     "a Profile's login could not be started"
                 );
                 closed(closing).await;
-                return Ending::Failed(format!("Claude could not be started: {error}"));
+                return Ending::Failed(format!("Claude couldn't be started: {error}."));
             }
         };
 
@@ -599,7 +599,7 @@ impl Logins {
                         Ending::Refused
                     }
                     Ok(status) => Ending::Failed(failure(status, &said)),
-                    Err(error) => Ending::Failed(format!("Claude could not be waited on: {error}")),
+                    Err(error) => Ending::Failed(format!("Claude couldn't be waited on: {error}.")),
                 },
 
                 Some(code) = coded.recv() => {
@@ -947,7 +947,10 @@ fn failure(status: std::process::ExitStatus, said: &Mutex<Vec<String>>) -> Strin
     let said = said.lock().expect("not poisoned");
 
     match said.last() {
-        Some(line) => format!("Claude stopped without logging in: {line}"),
+        Some(line) => format!(
+            "Claude stopped without logging in: {}",
+            crate::stopping::ended(line)
+        ),
         None => format!("Claude stopped without logging in ({status})."),
     }
 }

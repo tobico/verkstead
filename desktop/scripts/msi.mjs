@@ -27,7 +27,7 @@
 //! **And the install directory's name.** electron-builder derives it from
 //! `package.json`'s `name`, which would put the app under
 //! `%LOCALAPPDATA%\Programs\verkstead-desktop`; what the Rust msi used and what
-//! `docs/adoption.md` names is `…\Programs\Verkstead`. The target will use the
+//! a downloader is told is `…\Programs\Verkstead`. The target will use the
 //! product name instead, but only for an assisted or a per-machine package, and
 //! this one is neither.
 //!

@@ -283,7 +283,7 @@ describe("the card", () => {
     );
     mountCard();
 
-    await waitFor(() => screen.getByText(/Could not read the settings/));
+    await waitFor(() => screen.getByText(/The settings couldn't be read/));
   });
 });
 
@@ -571,7 +571,7 @@ describe("changing the cleanup", () => {
     await waitFor(() => expect(theTrim().checked).toBe(true));
     fireEvent.click(theTrim());
 
-    await waitFor(() => screen.getByText(/could not be saved/));
+    await waitFor(() => screen.getByText(/couldn't be saved/));
     expect(sent(fetching)).toBeTruthy();
   });
 });

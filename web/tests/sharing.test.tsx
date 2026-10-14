@@ -233,7 +233,7 @@ describe("a shared conversation", () => {
 
     const column = container.querySelector("main");
     expect(column).toBeTruthy();
-    expect(column!.textContent).toContain("not carrying a conversation");
+    expect(column!.textContent).toContain("isn't carrying a conversation");
   });
 
   /// There is no list to pick from and no way back to one: a share is one piece
@@ -340,7 +340,7 @@ describe("a shared conversation", () => {
     expect(details.textContent).toContain("You steered this into Implementing");
     expect(details.textContent).toContain("What to do first");
     expect(details.textContent).toContain("Count against the window.");
-    expect(details.textContent).toContain("Claude Code Fable 5 — work");
+    expect(details.textContent).toContain("Claude Code Fable 5 · work");
     expect(details.textContent).toContain("askance");
     expect(details.textContent).toContain("Interrupt current task");
 
@@ -527,7 +527,7 @@ describe("a shared conversation", () => {
   it("says so where it is carrying no conversation", () => {
     render(() => <Share shared={null} />);
 
-    expect(screen.getByText(/not carrying a conversation/)).toBeTruthy();
+    expect(screen.getByText(/isn't carrying a conversation/)).toBeTruthy();
   });
 });
 
@@ -699,7 +699,7 @@ describe("a question set in a share", () => {
     cleanup();
 
     const locked = await opened(showing(LOCKED));
-    expect(locked.textContent).toContain("This Set was locked unanswered");
+    expect(locked.textContent).toContain("This question set was locked unanswered");
     expect(locked.textContent).not.toContain("still open when this record");
   });
 });
@@ -838,7 +838,7 @@ describe("a commit in a share", () => {
 
     const details = await opened({ ...holding([event!]), commits: [] });
 
-    expect(details.textContent).toContain("not carrying the pane");
+    expect(details.textContent).toContain("isn't carrying this commit's pane");
   });
 
   /// A branch of any length is read by walking it, which is the thing a file

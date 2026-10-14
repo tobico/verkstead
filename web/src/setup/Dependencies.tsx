@@ -115,7 +115,7 @@ const NAMES: Record<Dependency, string> = {
 /// And what each is for, which is also which of them hold the step up.
 const WHY: Record<Dependency, string> = {
   Sandbox: "Every session runs inside one",
-  Git: "Every Conversation is a branch and a worktree",
+  Git: "Every conversation is a branch and a worktree",
   Claude: "One harness is enough",
   Codex: "One harness is enough",
   Grok: "One harness is enough",
@@ -139,9 +139,9 @@ const LOOKS = "Where a session looks for a program, in order:";
 /// ticked needs to know. Said once here rather than nine times over: it is a
 /// fact about Verkstead rather than about any one machine.
 const RESTART =
-  "Verkstead reads that PATH once, when it starts. A directory added to it " +
-  "since — the one a new install landed in — is one no session has until " +
-  "Verkstead is started again from a shell whose PATH names it.";
+  "Verkstead reads that PATH once, when it starts. A directory added since, " +
+  "like the one a new install landed in, reaches no session until Verkstead " +
+  "is started again from a shell whose PATH names it.";
 
 /// And the word over the one install a tab's own commands stand on — the
 /// Apple-silicon Mac's Homebrew, which is what the `brew` lines under it are
@@ -468,8 +468,8 @@ function Choosing(props: {
   return (
     <>
       <p class={styles.standing}>
-        A session runs inside a sandbox, works in a git worktree, and is one of
-        four agents. Tick what this machine is missing and Verkstead installs
+        A session runs inside a sandbox, works in a git worktree, and runs one
+        of four agents. Tick what this machine is missing and Verkstead installs
         it.
       </p>
 
@@ -497,9 +497,9 @@ function Choosing(props: {
 
         <Show when={!props.ready}>
           <Note>
-            A sandbox, git and one of the four agents are what a session cannot
-            start without. This page reads the machine again every ten seconds,
-            so an install that lands ticks its row here.
+            A session can't start without a sandbox, git, and one of the four
+            agents. This page reads the machine again every ten seconds, so an
+            install that lands ticks its row here.
           </Note>
         </Show>
 
@@ -530,8 +530,8 @@ function Installing(props: {
           says what is happening rather than how many dialogs to expect. The
           status line under it is what names the one that is up. */}
       <p class={styles.standing}>
-        Verkstead is installing what you ticked, on the machine it is running
-        on. Answer any password prompt that appears there.
+        Verkstead is installing what you ticked on the machine it runs on.
+        Answer any password prompt that appears there.
       </p>
 
       <div
@@ -603,8 +603,8 @@ function Hints(props: {
   return (
     <>
       <p class={styles.standing}>
-        The rest has to be installed by hand on the machine Verkstead is running
-        on. This page reads the machine again while you do it.
+        Install the rest by hand on the machine Verkstead runs on. This page
+        reads the machine again while you do.
       </p>
 
       <div
@@ -877,15 +877,15 @@ function Seen(props: { at: SeenSomewhere }): JSX.Element {
     <Note class={styles.seen}>
       <span data-seen={props.at.seen}>
         <Show when={props.at.seen === "Beyond"}>
-          Found at <code>{props.at.at}</code>, which is not on the PATH a session
-          gets — so a session cannot open it.
+          Found at <code>{props.at.at}</code>, which isn't on the{" "}
+          <code>PATH</code> a session gets, so a session can't open it.
         </Show>
 
         <Show when={props.at.seen === "Leading" ? props.at : null}>
           {(leading) => (
             <>
               <code>{leading().at}</code> is a link to{" "}
-              <code>{leading().target}</code>, which a session cannot reach.
+              <code>{leading().target}</code>, which a session can't reach.
             </>
           )}
         </Show>
@@ -895,9 +895,8 @@ function Seen(props: { at: SeenSomewhere }): JSX.Element {
         </Show>
 
         <Show when={props.at.seen === "Desktop"}>
-          <code>{props.at.at}</code> is the Claude Code desktop app rather than
-          the command-line tool. The desktop app includes Claude Code, and the
-          CLI is installed separately — below is how.
+          <code>{props.at.at}</code> is the Claude Code desktop app, not the
+          command-line tool. The CLI is installed separately, as below.
         </Show>
       </span>
     </Note>

@@ -193,7 +193,7 @@ export const BRIEF_REFUSAL: Record<BriefSaved, string> = {
   Saved: "",
   NoSuchConversation: "This conversation is gone.",
   NotDrafting:
-    "The brief was frozen when grilling started, so it cannot be edited.",
+    "The brief was frozen when grilling started, so it can't be edited.",
 };
 
 /// And each way of being refused a start, for the conversation's own repo.
@@ -205,19 +205,19 @@ const GRILL_REFUSAL: Record<Extract<GrillingStarted, string>, string> = {
   NoSuchConversation: "This conversation is gone.",
   NotDrafting: "This conversation has already been started.",
   NoGrillingProfile:
-    "Choose a grilling profile and model first, on the brief.",
+    "Choose a grilling profile and model on the brief first.",
   NoImplementationProfile:
-    "Choose an implementation profile and model first, on the brief.",
+    "Choose an implementation profile and model on the brief first.",
   NoReviewProfile:
-    "Pick a review profile and model — or No review — first, on the brief.",
-  EmptyBrief: "Write the brief first — it is what the work starts from.",
+    "Pick a review profile and model, or No review, on the brief first.",
+  EmptyBrief: "Write the brief first. The work starts from it.",
   NoGitAuthor:
-    "No git author is configured, so Verkstead cannot commit on the branch. Set one in Settings before starting work.",
+    "No git author is set, so Verkstead can't commit on the branch. Set one in Settings first.",
   FetchFailed:
-    "Git could not fetch from the repo's remote, so nothing was started. The server log says why.",
+    "Git couldn't fetch from the repo's remote, so nothing was started. The server log says why.",
   NoBaseCommit: "The repo has nothing to branch from any more.",
-  BranchExists: "That branch already exists, and Verkstead did not make it.",
-  WorktreeRefused: "Git would not make the worktree. The server log says why.",
+  BranchExists: "That branch already exists, and Verkstead didn't make it.",
+  WorktreeRefused: "Git wouldn't make the worktree. The server log says why.",
 };
 
 /// And the same failings over a companion repo, which say the same things about
@@ -232,11 +232,11 @@ export const COMPANION_REFUSAL: Record<
   string
 > = {
   FetchFailed:
-    "Git could not fetch from its remote, so nothing was started. The server log says why.",
+    "Git couldn't fetch from its remote, so nothing was started. The server log says why.",
   NoBaseCommit: "It has nothing to check out any more.",
   BranchExists:
-    "The branch already exists there, and Verkstead did not make it.",
-  WorktreeRefused: "Git would not make its worktree. The server log says why.",
+    "The branch already exists there, and Verkstead didn't make it.",
+  WorktreeRefused: "Git wouldn't make its worktree. The server log says why.",
 };
 
 /// What to say about one companion repo's failing, whatever press met it.
@@ -247,7 +247,7 @@ export const COMPANION_REFUSAL: Record<
 /// carries one, said of a repository that has to be named as well.
 export function companionRefusal(why: CompanionRefusal): string {
   if (typeof why === "object") {
-    return `A branch named ${why.BranchInTheWay.by} stands in the way of the branch it would be given there, and Verkstead did not make it.`;
+    return `A branch named ${why.BranchInTheWay.by} stands in the way of the branch it would be given there, and Verkstead didn't make it.`;
   }
 
   return COMPANION_REFUSAL[why];
@@ -277,7 +277,7 @@ export function grillRefusal(outcome: GrillingStarted): string {
 /// account of it — which is what makes a start refused over a member's machine
 /// name that machine. The words are [`troubleReading`](../broken.ts).
 export function profileRefusal(why: ProfileTrouble): string {
-  return `A chosen profile cannot be run: ${troubleReading(why)}`;
+  return `A chosen profile can't be run: ${troubleReading(why)}`;
 }
 
 /// The state a move came *from*: the state the move before it went to, and
@@ -635,7 +635,7 @@ export function Timeline(props: {
                 of={faCode}
                 label={
                   props.conversation.worktree === null
-                    ? "Code — there is no worktree yet"
+                    ? "Code. There's no worktree yet."
                     : "Code"
                 }
                 disabled={props.conversation.worktree === null}
@@ -1410,7 +1410,7 @@ function PullRequest(props: {
       open={props.open}
     >
       <div class={styles.eventHead}>
-        <h2>Pull request</h2>
+        <h2>Pull Request</h2>
         <span class={styles.number}>#{props.opened.number}</span>
         <Show when={props.opened.repo}>
           {(repo) => <span class={styles.repo}>{repo()}</span>}
@@ -1591,7 +1591,7 @@ function TaskList(props: {
       open={props.open}
     >
       <div class={styles.eventHead}>
-        <h2>Task list</h2>
+        <h2>Task List</h2>
         <Show when={props.tasks.feature !== ""}>
           <span class={styles.feature}>{props.tasks.feature}</span>
         </Show>
@@ -2062,7 +2062,7 @@ function Steered(props: {
         class={styles.steered}
         classList={{ [styles[props.steer.target.toLowerCase()]!]: true }}
       >
-        You steered this into {STATE[props.steer.target]}
+        You steered this into {STATE[props.steer.target]}.
       </p>
       <Show when={props.steer.html}>
         {(html) => <Clamped class={styles.steerBody!} html={html()} />}
@@ -2131,7 +2131,7 @@ function PendingSteer(props: {
 /// nothing about which branch: the cards above it are what a conflict is drawn
 /// on, and this is the moment somebody acted on one.
 function ConflictsResolved(): JSX.Element {
-  return <p class={styles.pressed}>You asked for the conflict to be resolved</p>;
+  return <p class={styles.pressed}>You asked for the conflict to be resolved.</p>;
 }
 
 /// What a session has printed: what it is, how much of it there is, and what it
@@ -2344,7 +2344,7 @@ function UnreadableSet(props: {
     >
       <span class={styles.eventHead}>
         <span class={styles.what}>Question set</span>
-        <span class={unreadable.unreadableBadge}>cannot be read</span>
+        <span class={unreadable.unreadableBadge}>can't be read</span>
       </span>
 
       <span class={unreadable.unreadableWhy}>{props.asked.why}</span>
@@ -2455,8 +2455,7 @@ function Brief(props: {
               when={props.conversation.adopting}
               fallback={<>Nothing was written.</>}
             >
-              Nothing written yet — starting the stage is what puts its brief
-              here.
+              Nothing written yet. Starting the stage writes its brief here.
             </Show>
           </Empty>
         }

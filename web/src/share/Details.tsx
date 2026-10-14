@@ -127,8 +127,8 @@ export function Details(props: {
               <Show
                 when={sheet(props.sets, asked().set_id)}
                 fallback={
-                  <Missing heading="Question set" back={props.back}>
-                    This share is not carrying the sheet this set was asked as.
+                  <Missing heading="Question Set" back={props.back}>
+                    This share isn't carrying this question set's sheet.
                   </Missing>
                 }
               >
@@ -147,7 +147,7 @@ export function Details(props: {
                 when={carried(props.commits, commit().id)}
                 fallback={
                   <Missing heading="Commit" back={props.back}>
-                    This share is not carrying the pane this commit opens.
+                    This share isn't carrying this commit's pane.
                   </Missing>
                 }
               >
@@ -162,7 +162,7 @@ export function Details(props: {
                       ) : (
                         <Empty>
                           The repository no longer had this commit when the
-                          share was taken, so its diff could not travel with it.
+                          share was taken, so its diff couldn't travel with it.
                         </Empty>
                       )
                     }

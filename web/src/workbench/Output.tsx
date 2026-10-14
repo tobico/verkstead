@@ -276,7 +276,7 @@ export function Output(props: {
                 of={props.output.agent_type}
                 class={styles.harness!}
               />
-              {reading(ran(props.output), profiles.data) || "Agent run"}
+              {reading(ran(props.output), profiles.data) || "Agent Run"}
             </>
           }
         >
@@ -357,11 +357,12 @@ export function Output(props: {
       >
         <Switch>
           <Match when={transcript.isPending}>
-            <Empty>Loading…</Empty>
+            <Empty>Reading what this session said…</Empty>
           </Match>
           <Match when={transcript.isError}>
             <ErrorLine>
-              Could not read what this session said: {transcript.error?.message}
+              What this session said couldn't be read.{" "}
+              {transcript.error?.message}
             </ErrorLine>
           </Match>
           <Match when={spoke() && transcript.data}>
@@ -371,7 +372,7 @@ export function Output(props: {
               story for a session whose backend kept no log of itself. */}
           <Match when={capture.isError}>
             <ErrorLine>
-              Could not read this capture: {capture.error?.message}
+              This capture couldn't be read. {capture.error?.message}
             </ErrorLine>
           </Match>
           {/* Nothing to draw and a reason for it, which is the difference
@@ -392,7 +393,7 @@ export function Output(props: {
             )}
           </Match>
           <Match when={true}>
-            <Empty>Loading…</Empty>
+            <Empty>Reading what this session printed…</Empty>
           </Match>
         </Switch>
       </Show>
@@ -415,9 +416,9 @@ export function Output(props: {
 function Trimmed(): JSX.Element {
   return (
     <Empty class={styles.trimmed}>
-      This session's record was trimmed. A cleanup takes what only this pane
-      showed, some days after the conversation is archived; the timeline keeps
-      the rest.
+      This session's record was trimmed. A cleanup removes what only this pane
+      showed some days after the conversation is archived, and the timeline
+      keeps the rest.
     </Empty>
   );
 }
@@ -622,7 +623,7 @@ function Said(props: {
         {(unread) => (
           <li class={`${styles.turn} ${styles.unread}`}>
             <details>
-              <summary>Something this version does not know</summary>
+              <summary>Something this version doesn't know</summary>
               <pre class={styles.raw}>{unread().line}</pre>
             </details>
           </li>

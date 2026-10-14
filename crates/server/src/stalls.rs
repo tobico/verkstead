@@ -213,7 +213,7 @@ async fn stalled(state: &AppState, conversation_id: i64, lifecycle: Lifecycle) {
         conversation_id,
         crate::stopping::Decided::Nobody,
         driving(lifecycle),
-        "nothing is driving it: no session is running, and nothing is left to start one",
+        "Nothing is driving it. No session is running, and nothing is left to start one.",
         said_last(state, conversation_id).await,
     )
     .await;
@@ -249,7 +249,7 @@ pub(crate) fn driving(lifecycle: Lifecycle) -> &'static str {
         Lifecycle::Wrapping => "wrapping the work up",
         Lifecycle::FollowUp => "following the work up",
         Lifecycle::Investigating => "finding out what was asked",
-        Lifecycle::Draft | Lifecycle::Done | Lifecycle::Closed => "driving the Conversation",
+        Lifecycle::Draft | Lifecycle::Done | Lifecycle::Closed => "driving the conversation",
     }
 }
 

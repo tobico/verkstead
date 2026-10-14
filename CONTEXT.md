@@ -9,6 +9,9 @@ Terms are grouped by what they belong to. The workbench vocabulary is
 Verkstead's own; the question-set vocabulary is inherited from askance and
 still holds word for word, because the asking half is unchanged.
 
+The capitals here mark a term as defined. On a screen the same words are
+lowercase, and how they are written there is [docs/copy.md](docs/copy.md)'s.
+
 ## The workbench
 
 **Repo**:

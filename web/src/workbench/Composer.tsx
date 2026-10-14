@@ -423,8 +423,7 @@ function Written(props: {
                   when={props.conversation.adopting}
                   fallback={<>Nothing was written.</>}
                 >
-                  Nothing written yet — starting the stage is what puts its
-                  brief here.
+                  Nothing written yet. Starting the stage puts its brief here.
                 </Show>
               </Empty>
             }
@@ -466,7 +465,7 @@ function Written(props: {
       </Show>
       <Show when={save.isError}>
         <ErrorLine class={styles.failure}>
-          The brief could not be saved: {save.error?.message}
+          The brief couldn't be saved. {save.error?.message}
         </ErrorLine>
       </Show>
     </>
@@ -588,7 +587,7 @@ function Starting(props: {
       <Show when={props.failed}>
         {(failed) => (
           <ErrorLine class={styles.failure}>
-            The work could not be started: {failed()}
+            The work couldn't be started. {failed()}
           </ErrorLine>
         )}
       </Show>
@@ -726,7 +725,7 @@ export const ATTACH_REFUSAL: Record<
   NotDrafting: "The work has started, so its files are settled.",
   TooLarge: "That file is larger than 32 MB.",
   NotAName:
-    "That name cannot be a file here: no folders, and nothing starting with a dot.",
+    "That name can't be a file here. A file name has no folders and doesn't start with a dot.",
 };
 
 /// And taking one off again.
@@ -826,7 +825,7 @@ function serversOn(what: {
       })
       .catch((error: unknown) =>
         setRefused(
-          `${name} ${said}: ${
+          `${name} ${said}. ${
             error instanceof Error ? error.message : String(error)
           }`,
         ),
@@ -839,7 +838,7 @@ function serversOn(what: {
     press(
       name,
       attachServer(device(), what.conversation().id, name),
-      "could not be attached",
+      "couldn't be attached",
     );
   };
 
@@ -847,7 +846,7 @@ function serversOn(what: {
     press(
       name,
       removeServer(device(), what.conversation().id, name),
-      "could not be removed",
+      "couldn't be removed",
     );
 
   const chips = (): Array<Chip> =>
@@ -915,7 +914,7 @@ export function ServerRows(props: {
   return (
     <div role="group" aria-labelledby={heading} class={styles.servers}>
       <div id={heading} role="presentation" class={styles.serversHead}>
-        MCP Servers
+        MCP servers
       </div>
 
       <Choose>
@@ -929,7 +928,7 @@ export function ServerRows(props: {
         </Match>
         <Match when={settings.isError}>
           <button type="button" role="menuitem" disabled>
-            The settings could not be read.
+            The settings couldn't be read.
           </button>
         </Match>
         <Match when={settings.data}>
@@ -1045,7 +1044,7 @@ function sendingOn(what: {
         .catch((error: unknown) => {
           setRefusals((said) => [
             ...said,
-            `${file.name} could not be attached: ${
+            `${file.name} couldn't be attached. ${
               error instanceof Error ? error.message : String(error)
             }`,
           ]);
@@ -1079,7 +1078,7 @@ function sendingOn(what: {
       })
       .catch((error: unknown) =>
         setRefusedRemoval(
-          `${attachment.name} could not be removed: ${
+          `${attachment.name} couldn't be removed. ${
             error instanceof Error ? error.message : String(error)
           }`,
         ),

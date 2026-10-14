@@ -41,7 +41,7 @@ export function harnessAbsent(agent: AgentType): string {
 /// two sentences for one fact — the only difference between them being which
 /// machine is being talked about, which is the argument.
 export function harnessAbsentOn(agent: AgentType, where: string): string {
-  return `${AGENT_NAME[agent]} is not on ${where}.`;
+  return `${AGENT_NAME[agent]} isn't on ${where}.`;
 }
 
 /// And what a machine that has stopped answering is called, which is the word
@@ -58,7 +58,7 @@ export const UNREACHABLE = "unreachable";
 /// nothing stronger, and the same account read as a mirror elsewhere is broken
 /// there — see `Broken.NoLoginAtHome`.
 export const NOT_USABLE_AWAY =
-  "No login file in this account, so it cannot be used from another device. A login here is what gives it one.";
+  "This account has no login file, so it can't be used from another device. Log in here to give it one.";
 
 /// What is wrong with one profile, said in full.
 ///
@@ -78,7 +78,7 @@ export function brokenReading(profile: ProfileEntry): string | null {
 /// three facts a row holds: the finding, the harness, and the machine the
 /// account is at home on.
 export function troubleReading(said: ProfileTrouble): string {
-  const where = said.device ?? "the device it is at home on";
+  const where = said.device ?? "the device it's at home on";
 
   switch (said.broken) {
     case "DirMissing":
@@ -88,9 +88,9 @@ export function troubleReading(said: ProfileTrouble): string {
     case "HomeMissing":
       return "The home it kept its account under is gone.";
     case "HomeUnreachable":
-      return `${where} is ${UNREACHABLE}, so its account cannot be fetched and no session here can be built out of it.`;
+      return `Its account can't be fetched, because ${where} is ${UNREACHABLE}. No session here can run under it.`;
     case "NoLoginAtHome":
-      return `Its account on ${where} holds no login file, so there is nothing to mirror here. Log in on that machine.`;
+      return `Its account on ${where} has no login file, so there's nothing to mirror here. Log in on that machine.`;
     case "HarnessMissing":
       return harnessAbsent(said.agent_type);
     case "SignedOut":

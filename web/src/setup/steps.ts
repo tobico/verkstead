@@ -49,9 +49,9 @@ export type Step = (typeof STEPS)[number];
 
 /// What each is called where the human reads it.
 export const TITLES: Record<Step, string> = {
-  dependencies: "What a session needs",
+  dependencies: "What a Session Needs",
   accounts: "Agent Profiles",
-  git: "Who the work is committed as",
+  git: "Who the Work Is Committed As",
 };
 
 /// Whether a step stands met, as the server last said.

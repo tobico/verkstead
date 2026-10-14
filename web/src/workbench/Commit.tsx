@@ -184,11 +184,11 @@ export function Commit(props: {
       instead={
         <Switch fallback={<Empty>This commit changed no files.</Empty>}>
           <Match when={opened.isPending}>
-            <Empty>Loading…</Empty>
+            <Empty>Reading this commit…</Empty>
           </Match>
           <Match when={opened.isError}>
             <ErrorLine>
-              Could not read this commit: {opened.error?.message}
+              This commit couldn't be read. {opened.error?.message}
             </ErrorLine>
           </Match>
         </Switch>

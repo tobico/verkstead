@@ -2,7 +2,7 @@
 //! read off the machine rather than remembered.
 //!
 //! The Workbench Key is what makes this a section of the settings rather than a
-//! recipe in the adoption docs (ADR-0015): a phone cannot reach the workbench
+//! recipe somebody followed by hand (ADR-0015): a phone cannot reach the workbench
 //! until it holds the key, and `tailscale serve --bg 8422` was a command
 //! somebody ran by hand. What this module answers is that section — whether
 //! there is a Tailscale here at all, whether it is up, what this node is
@@ -296,7 +296,7 @@ impl Tailscale {
             Ok(status) => status,
             Err(trouble) => {
                 return RemoteView::Unreadable {
-                    trouble: format!("`tailscale status --json` could not be read: {trouble}"),
+                    trouble: format!("tailscale status --json couldn't be read: {trouble}."),
                 };
             }
         };
@@ -306,13 +306,13 @@ impl Tailscale {
         // said about them, and only one of them is the human's to fix.
         let Some(state) = status.backend_state else {
             return RemoteView::Unreadable {
-                trouble: "`tailscale status --json` named no BackendState".to_owned(),
+                trouble: "tailscale status --json named no BackendState.".to_owned(),
             };
         };
 
         if state != RUNNING {
             return RemoteView::Down {
-                trouble: format!("the Tailscale daemon reports {state}"),
+                trouble: format!("The Tailscale daemon reports {state}."),
             };
         }
 
@@ -327,7 +327,7 @@ impl Tailscale {
 
         match node {
             None => RemoteView::Unreadable {
-                trouble: "`tailscale status --json` named no node for this machine".to_owned(),
+                trouble: "tailscale status --json named no node for this machine.".to_owned(),
             },
             Some(node) => {
                 let serve = self.serving().await;
@@ -656,7 +656,7 @@ impl Tailscale {
             Ok(told) => told,
             Err(_) => Err(std::io::Error::new(
                 std::io::ErrorKind::TimedOut,
-                format!("`tailscale` did not answer within {within:?}"),
+                format!("tailscale didn't answer within {within:?}"),
             )),
         }
     }
@@ -737,9 +737,7 @@ fn proxied(stdout: &[u8], port: u16) -> ServeView {
             Ok(told) => told,
             Err(trouble) => {
                 return ServeView::Unreadable {
-                    trouble: format!(
-                        "`tailscale serve status --json` could not be read: {trouble}"
-                    ),
+                    trouble: format!("tailscale serve status --json couldn't be read: {trouble}."),
                 };
             }
         };
@@ -754,7 +752,7 @@ fn proxied(stdout: &[u8], port: u16) -> ServeView {
     // machine serving nothing.
     let Some(web) = told.get("Web") else {
         return ServeView::Unreadable {
-            trouble: "the serve configuration named no Web section".to_owned(),
+            trouble: "The serve configuration named no Web section.".to_owned(),
         };
     };
 
@@ -763,7 +761,7 @@ fn proxied(stdout: &[u8], port: u16) -> ServeView {
         Err(trouble) => {
             return ServeView::Unreadable {
                 trouble: format!(
-                    "the serve configuration's Web section could not be read: {trouble}"
+                    "The serve configuration's Web section couldn't be read: {trouble}."
                 ),
             };
         }
@@ -822,7 +820,7 @@ fn complaint(told: &Output) -> String {
         .map(str::trim)
         .find(|line| !line.is_empty())
         .map(str::to_owned)
-        .unwrap_or_else(|| format!("tailscale exited with {}", told.status))
+        .unwrap_or_else(|| format!("tailscale said nothing, and ended with {}.", told.status))
 }
 
 /// Whether what `tailscale` printed is it refusing to take the change from this

@@ -146,11 +146,11 @@ describe("the offer to close a Set unanswered", () => {
       "cannot be undone",
     );
     expect(asking.querySelector(`.${notices.note}`)!.textContent).toContain(
-      "Conversation's timeline",
+      "conversation's timeline",
     );
     expect(posts(fetching), "nothing has been sent").toHaveLength(0);
 
-    press(page, "Keep it pending");
+    press(page, "Cancel");
     expect(page.querySelector(`.${sheet.confirm}`)).toBeNull();
     expect(posts(fetching), "and still nothing was sent").toHaveLength(0);
   });
@@ -207,9 +207,9 @@ describe("closing a Set unanswered", () => {
 
   it("says why it was not locked, when it was not", async () => {
     for (const [outcome, said] of [
-      ["AlreadyAnswered", "it stands as the decision that was made"],
-      ["AlreadyLocked", "This Set has already been locked."],
-      ["NoSuchSet", "This Set is no longer here."],
+      ["AlreadyAnswered", "The answer stands."],
+      ["AlreadyLocked", "This question set is already locked."],
+      ["NoSuchSet", "This question set is no longer here."],
     ] as Array<[Locked, string]>) {
       const { page, fetching } = await answering(WAITING, locked(outcome));
 
@@ -230,7 +230,7 @@ describe("closing a Set unanswered", () => {
   it("says so in the server's own wording when it did not get through", async () => {
     const { page, fetching } = await answering(
       WAITING,
-      json({ error: "the Question Set could not be locked" }, 503),
+      json({ error: "The question set couldn't be locked." }, 503),
     );
 
     reachForLock(page);
@@ -241,7 +241,7 @@ describe("closing a Set unanswered", () => {
     await waitFor(() => expect(posts(fetching)).toHaveLength(1));
     await waitFor(() =>
       expect(page.querySelector(`.${sheet.meta} .${notices.error}`)!.textContent).toContain(
-        "the Question Set could not be locked",
+        "The question set couldn't be locked.",
       ),
     );
   });

@@ -859,7 +859,7 @@ function TimelinePane(props: {
         <Empty>Pick a conversation, or start one.</Empty>
       </Match>
       <Match when={props.conversation.isPending}>
-        <Empty>Loading…</Empty>
+        <Empty>Reading the conversation…</Empty>
       </Match>
       <Match when={props.conversation.isError}>
         {/* The reading failed, so there is no header to draw and no menu to
@@ -869,7 +869,7 @@ function TimelinePane(props: {
             is the way out: see `Hatch.tsx`. */}
         <Hatch id={props.id} back={props.list} />
         <ErrorLine>
-          Could not read this conversation: {props.conversation.error?.message}
+          This conversation couldn't be read. {props.conversation.error?.message}
         </ErrorLine>
       </Match>
       <Match when={props.conversation.data}>

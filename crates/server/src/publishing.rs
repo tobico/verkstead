@@ -148,13 +148,13 @@ fn written(
     // The directory outlives the borrow below and is removed when it goes: a
     // publish leaves nothing on the disk it was made on either.
     let scratch =
-        tempfile::tempdir().map_err(|error| format!("git had nowhere to work: {error}"))?;
+        tempfile::tempdir().map_err(|error| format!("Git had nowhere to work: {error}."))?;
     let clone = scratch.path();
 
     git(clone, token, &["clone", "--quiet", &gist.push, "."])?;
 
     std::fs::write(clone.join(name), document)
-        .map_err(|error| format!("the share could not be written for git: {error}"))?;
+        .map_err(|error| format!("The share couldn't be written for git: {error}."))?;
 
     git(clone, token, &["add", "--", name])?;
     git(
@@ -214,7 +214,7 @@ fn git(dir: &Path, token: &str, args: &[&str]) -> Result<(), String> {
         .env("GIT_TERMINAL_PROMPT", "0")
         .stdin(Stdio::null())
         .output()
-        .map_err(|error| format!("git could not be run: {error}"))?;
+        .map_err(|error| format!("Git couldn't be run: {error}."))?;
 
     if output.status.success() {
         return Ok(());
@@ -237,7 +237,7 @@ pub(crate) fn said(stderr: &str) -> String {
         .lines()
         .map(str::trim)
         .find(|line| !line.is_empty())
-        .unwrap_or("git said nothing about why")
+        .unwrap_or("Git said nothing about why.")
         .to_owned()
 }
 

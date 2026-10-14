@@ -269,7 +269,7 @@
         "path": "/var/cache/verkstead-node",
         "resolution": {
           "Unresolved": {
-            "why": "the server cannot see it: there is nothing at that path"
+            "why": "The server can't see it. There's nothing at that path."
           }
         },
         "source": "Settings"
@@ -278,7 +278,7 @@
         "path": "/var/cache/verkstead-cargo",
         "resolution": {
           "Unresolved": {
-            "why": "the server cannot see it: there is nothing at that path"
+            "why": "The server can't see it. There's nothing at that path."
           }
         },
         "source": "Settings"

@@ -1366,8 +1366,8 @@ impl Ended {
     pub(crate) fn badly(&self) -> Option<String> {
         match self {
             Self::Stopped | Self::Well => None,
-            Self::Badly(status) => Some(format!("the session {status}")),
-            Self::Unknown => Some("the session ended and nothing could say how".to_owned()),
+            Self::Badly(status) => Some(format!("The session {status}.")),
+            Self::Unknown => Some("The session ended, and nothing could say how.".to_owned()),
         }
     }
 
@@ -2838,10 +2838,9 @@ impl Sessions {
                     printing,
                     &mut reading,
                     &format!(
-                        "Verkstead did not start a session: this Profile's account is on \
-                         another device of the cluster, and the account could not be fetched \
-                         — {}.",
-                        why.saying,
+                        "Verkstead didn't start a session. This profile's account is on \
+                         another device of the cluster, and it couldn't be fetched. {}",
+                        crate::stopping::sentence(&why.saying),
                     ),
                 )
                 .await;
@@ -4274,7 +4273,7 @@ async fn relay(
             // else killed.
             Ended::Badly(match status.code() {
                 Some(code) => format!("exited with status {code}"),
-                None => format!("was killed — {status}"),
+                None => killed(*status),
             })
         }
         Err(error) => {
@@ -4557,6 +4556,28 @@ async fn summarise(
             conversation: conversation_id,
         }),
     }
+}
+
+/// How a session with no exit status ended, for [`Ended::Badly`]: the signal
+/// that killed it, by number.
+///
+/// The number alone rather than the status's own words, which on Unix read as
+/// `signal: 9 (SIGKILL)` and set inside a sentence's brackets of their own made
+/// a line of nested ones.
+#[cfg(unix)]
+fn killed(status: std::process::ExitStatus) -> String {
+    use std::os::unix::process::ExitStatusExt;
+
+    match status.signal() {
+        Some(signal) => format!("was killed by signal {signal}"),
+        None => "was killed".to_owned(),
+    }
+}
+
+/// And off Unix, where every exit carries a code and this is never reached.
+#[cfg(not(unix))]
+fn killed(_status: std::process::ExitStatus) -> String {
+    "was killed".to_owned()
 }
 
 #[cfg(test)]

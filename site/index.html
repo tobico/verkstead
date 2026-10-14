@@ -1,0 +1,453 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Verkstead</title>
+<meta name="description" content="Build intentional software with AI agents, on your terms. Verkstead is an open source coding workshop for Linux, macOS and Windows.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" type="image/png" href="favicon.png">
+<script>document.documentElement.classList.add("js")</script>
+<link rel="stylesheet" href="site.css">
+<script src="site.js" defer></script>
+</head>
+<body>
+<header class="nav">
+  <div class="nav-inner">
+    <nav class="tabs" aria-label="Sections">
+      <span class="tabs-indicator" aria-hidden="true"></span>
+      <a class="tab" href="#features">Features</a>
+      <a class="tab" href="#process">Process</a>
+      <a class="tab" href="#platforms">Platforms</a>
+    </nav>
+    <div class="nav-cta">
+      <a class="button button-small" data-download href="#downloads"><span class="long" data-download-label>Download</span><span class="short">Download</span></a>
+      <a class="quiet nav-all" href="#downloads">All downloads</a>
+    </div>
+  </div>
+</header>
+
+<main>
+  <section class="hero">
+    <div class="brand">
+      <img src="icon-512.png" alt="" width="128" height="128">
+      <h1>Verkstead</h1>
+    </div>
+    <p class="tagline">Build <em>intentional</em> software with AI agents, <em>on your terms</em></p>
+  </section>
+
+  <div class="download-bar">
+    <a class="button" data-download href="#downloads"><span data-download-label>Download</span></a>
+    <a class="quiet" href="#downloads">All downloads</a>
+  </div>
+
+  <section class="section" id="features" aria-labelledby="features-heading">
+    <h2 id="features-heading">Features</h2>
+    <div class="carousel" style="--cards: 3">
+      <button class="card" type="button" id="review-card" aria-controls="review-panel" aria-pressed="true">
+        <span class="card-title" id="review-title">Don't read the code</span>
+        <span class="card-sub">Review the decisions, not every line.</span>
+      </button>
+      <div class="panel" id="review-panel" role="region" aria-labelledby="review-title">
+        <div class="vk-frame" aria-hidden="true">
+          <div class="vk-head"><b>Commit</b><span>rate-limiting</span></div>
+          <div class="vk-commit">
+            <p class="vk-subject">Refuse requests over the limit with 429 and Retry-After</p>
+            <p class="vk-changed"><span class="vk-chip">tidewatch</span><span class="vk-sha">b7e41c2</span><span>3 files</span><span class="vk-added">+58</span><span class="vk-removed">−4</span></p>
+          </div>
+          <p class="vk-heading">Message</p>
+          <div class="vk-box">
+            <p>Requests past a key's limit are refused with 429 rather than queued. The limiter sets Retry-After from the window's remaining seconds, so a well-behaved client backs off without guessing.</p>
+            <svg class="vk-diagram" viewBox="0 0 308 36" role="presentation">
+              <defs><marker id="vk-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 8 4 0 8z"/></marker></defs>
+              <rect x="1" y="2" width="93" height="32" rx="6"/><text x="47.5" y="22">middleware</text>
+              <rect class="vk-modified" x="118" y="2" width="60" height="32" rx="6"/><text x="148" y="22">limiter</text>
+              <rect class="vk-new" x="202" y="2" width="105" height="32" rx="6"/><text x="254.5" y="22">429 response</text>
+              <path class="vk-link" d="M95 18h21" marker-end="url(#vk-arrow)"/>
+              <path class="vk-link" d="M179 18h21" marker-end="url(#vk-arrow)"/>
+            </svg>
+          </div>
+          <p class="vk-heading">Diff</p>
+          <div class="vk-diff">
+            <p class="vk-diff-file"><b>src/limit.rs</b><span><span class="vk-added">+31</span> <span class="vk-removed">−2</span></span></p>
+            <p class="vk-hunk">@@ -41,6 +41,8 @@ pub fn check(&amp;self, key: &amp;ApiKey) -&gt; Verdict</p>
+            <div class="vk-lines">
+              <span><i>41</i><i> </i>        let window = self.window(key);</span>
+              <span class="vk-del"><i>42</i><i>−</i>        if window.count &gt; key.limit { return Verdict::Queue; }</span>
+              <span class="vk-add"><i>42</i><i>+</i>        if window.count &gt;= key.limit {</span>
+              <span class="vk-add"><i>43</i><i>+</i>            return Verdict::Refuse { retry_after: window.remaining() };</span>
+              <span><i>44</i><i> </i>        }</span>
+              <span><i>45</i><i> </i>        window.count += 1;</span>
+              <span><i>46</i><i> </i>        Verdict::Allow</span>
+            </div>
+          </div>
+        </div>
+        <p>Experienced developers know AI output needs a human eye, and that reading every line of a fast-moving codebase is impossible. Verkstead presents each change as a written summary and a diagram above the diff, so you can judge the decisions that matter at a glance. Then a fresh-eyed review session reads the whole pull request and puts its findings to you as questions, each with a fix you approve before it is made.</p>
+      </div>
+
+      <button class="card" type="button" id="pace-card" aria-controls="pace-panel" aria-pressed="false">
+        <span class="card-title" id="pace-title">Work at your own pace</span>
+        <span class="card-sub">Run as many conversations as you like, and answer when it suits you.</span>
+      </button>
+      <div class="panel" id="pace-panel" role="region" aria-labelledby="pace-title">
+        <div class="vk-over" aria-hidden="true">
+          <div class="vk-frame">
+            <div class="vk-sidebar">
+              <div class="vk-wordmark"><img src="icon-512.png" alt="" width="32" height="32">Verkstead</div>
+              <span class="vk-new-conversation">New conversation</span>
+              <span class="vk-row"><span><b>rate-limiting</b><small>tidewatch</small></span><i class="vk-mark vk-working"></i></span>
+              <span class="vk-row"><span><b>retry-backoff</b><small>tidewatch</small></span><i class="vk-mark vk-waiting"></i></span>
+              <span class="vk-row"><span><b>metrics-endpoint</b><small>tidewatch</small></span><i class="vk-mark vk-idle"></i></span>
+              <span class="vk-row vk-done"><span><b>onboarding-copy</b><small>docs-site</small></span></span>
+            </div>
+          </div>
+          <div class="vk-notification">
+            <img src="icon-512.png" alt="" width="24" height="24">
+            <span><b>Question set</b><small>Rate limiting for the public API, 3 questions</small></span>
+          </div>
+        </div>
+        <p>Waiting on an agent drains your momentum, and juggling terminal tabs only splits your attention. Verkstead runs each piece of work as its own conversation and asks for you only when a decision needs you, with a push to wherever you are. When a run stops you get a notice, and can step in to resolve it whenever you have time. Everything else keeps going.</p>
+      </div>
+
+      <button class="card" type="button" id="sandbox-card" aria-controls="sandbox-panel" aria-pressed="false">
+        <span class="card-title" id="sandbox-title">Sandboxed by default</span>
+        <span class="card-sub">Every session sees only the files it needs.</span>
+      </button>
+      <div class="panel" id="sandbox-panel" role="region" aria-labelledby="sandbox-title">
+        <div class="vk-frame" aria-hidden="true">
+          <div class="vk-tabs"><span>limit.rs</span><span class="vk-pressed">Terminal</span></div>
+          <pre class="vk-terminal"><span class="vk-dim">$ pwd
+/work/tidewatch</span>
+$ ls ~/Documents
+ls: cannot access '/home/you/Documents': No such file or directory
+<span class="vk-dim">$ cargo test
+running 14 tests ... ok</span>
+$ <span class="vk-cursor"> </span></pre>
+        </div>
+        <p>Every agent session runs inside a sandbox with its worktree, its git directory, and nothing else of your machine. Bubblewrap on Linux, Apple's sandbox on macOS, a dedicated local account on Windows. Where no boundary is available, Verkstead refuses to run the session rather than running it bare. Let your agent run unattended, knowing it can never reach the wrong files.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="process" aria-labelledby="process-heading">
+    <h2 id="process-heading">Process</h2>
+    <div class="carousel" style="--cards: 5">
+      <button class="card" type="button" id="draft-card" aria-controls="draft-panel" aria-pressed="true">
+        <span class="card-title" id="draft-title">Draft</span>
+        <span class="card-sub">Start with your idea, in plain words.</span>
+      </button>
+      <div class="panel" id="draft-panel" role="region" aria-labelledby="draft-title">
+        <div class="vk-frame" aria-hidden="true">
+          <div class="vk-head"><b>New conversation</b></div>
+          <div class="vk-centred">
+            <div class="vk-composer">
+              <p class="vk-brief">Add rate limiting to the public API. Last night one client sent 40k requests in a minute and took the service down. Limit per API key, with a sensible default that can be changed per key.</p>
+              <div class="vk-setup">
+                <span class="vk-setting"><small>Repo</small>tidewatch</span>
+                <span class="vk-setting"><small>Process</small>Develop</span>
+                <span class="vk-setting"><small>Agent</small><span><img src="marks/claude-color.svg" alt="" width="16" height="16">Opus 5</span></span>
+              </div>
+            </div>
+            <div class="vk-compose-actions">
+              <span class="vk-quiet-button">+</span>
+              <span class="vk-secondary">Save as draft</span>
+              <span class="vk-button">Start work</span>
+            </div>
+          </div>
+        </div>
+        <p>Verkstead starts with a clean text box. Write what you want in your own words, as rough as you like. There is no prompt engineering to do. The development process is built in through Verkstead's agent skills, so you are free to focus entirely on your problem.</p>
+      </div>
+
+      <button class="card" type="button" id="grill-card" aria-controls="grill-panel" aria-pressed="false">
+        <span class="card-title" id="grill-title">Grill</span>
+        <span class="card-sub">Settle every detail before any code is written.</span>
+      </button>
+      <div class="panel" id="grill-panel" role="region" aria-labelledby="grill-title">
+        <div class="vk-frame" aria-hidden="true">
+          <div class="vk-head"><b>Rate limiting for the public API</b></div>
+          <p class="vk-heading">Preface</p>
+          <div class="vk-box"><p><code>POST /v1/keys</code> has no limit today. A limiter can land this week; where the counter lives is the one call that is yours.</p></div>
+          <p class="vk-heading">Questions</p>
+          <div class="vk-question">
+            <p class="vk-ask"><b>Q1</b>Where should the counter live?</p>
+            <span class="vk-choice vk-chosen"><i class="vk-radio"></i><small>1</small>In-process counter<span class="vk-star">★</span></span>
+            <span class="vk-choice"><i class="vk-radio"></i><small>2</small>Shared Redis counter</span>
+            <span class="vk-thoughts">Q1 — Your thoughts</span>
+          </div>
+          <div class="vk-question">
+            <p class="vk-ask"><b>Q2</b>Default limit per key?</p>
+            <span class="vk-choice"><i class="vk-radio"></i><small>1</small>600 requests a minute<span class="vk-star">★</span></span>
+            <span class="vk-choice"><i class="vk-radio"></i><small>2</small>60 requests a minute</span>
+          </div>
+        </div>
+        <p>Grilling is the single biggest change that separates intentional development from vibe coding. Your agent reads the code you have, then asks you about every technical detail that matters, with a recommended answer for each, and goes on only once everything is settled. Related questions arrive together as one question set you consider and answer as a whole, from your phone if you like.</p>
+      </div>
+
+      <button class="card" type="button" id="build-card" aria-controls="build-panel" aria-pressed="false">
+        <span class="card-title" id="build-title">Build</span>
+        <span class="card-sub">Sized to the work, and run without you.</span>
+      </button>
+      <div class="panel" id="build-panel" role="region" aria-labelledby="build-title">
+        <div class="vk-frame" aria-hidden="true">
+          <p class="vk-status"><b>Running</b><span>Implementing</span></p>
+          <div class="vk-pinned">
+            <p class="vk-event-head"><b>Task list</b><span>rate-limiting</span><span class="vk-end">2 of 5 done</span></p>
+            <ol class="vk-tasks">
+              <li class="vk-ticked"><i>☑</i><span>Count requests per key in a sliding window</span><small>01</small></li>
+              <li class="vk-ticked"><i>☑</i><span>Refuse requests over the limit with 429 and Retry-After</span><small>02</small></li>
+              <li><i>☐</i><span>Make the limit configurable per key</span><small>03</small></li>
+              <li><i>☐</i><span>An admin endpoint to read a key's usage</span><small>04</small></li>
+              <li><i>☐</i><span>Document the limit</span><small>05</small></li>
+            </ol>
+          </div>
+          <div class="vk-event">
+            <p class="vk-event-head"><b>Commit</b><span class="vk-chip">tidewatch</span><span class="vk-sha">a19f3d7</span></p>
+            <p class="vk-subject">Count requests per key in a sliding window</p>
+            <p class="vk-changed"><span>4 files</span><span class="vk-added">+121</span><span class="vk-removed">−2</span></p>
+          </div>
+          <div class="vk-event">
+            <p class="vk-event-head"><b>Commit</b><span class="vk-chip">tidewatch</span><span class="vk-sha">b7e41c2</span></p>
+            <p class="vk-subject">Refuse requests over the limit with 429 and Retry-After</p>
+            <p class="vk-changed"><span>3 files</span><span class="vk-added">+58</span><span class="vk-removed">−4</span></p>
+          </div>
+          <div class="vk-event">
+            <p class="vk-event-head"><b>Agent run</b><span>14 turns</span><i class="vk-mark vk-working vk-end"></i></p>
+          </div>
+        </div>
+        <p>Your settled design becomes a handoff, a task list, or a staged roadmap, depending on its size, and each step runs in a fresh session with just the context it needs. Every commit arrives with a written summary and a diagram of what changed, so you can follow along without scanning every line.</p>
+      </div>
+
+      <button class="card" type="button" id="wrap-card" aria-controls="wrap-panel" aria-pressed="false">
+        <span class="card-title" id="wrap-title">Wrap</span>
+        <span class="card-sub">A pull request, green checks, and a review you direct.</span>
+      </button>
+      <div class="panel" id="wrap-panel" role="region" aria-labelledby="wrap-title">
+        <div class="vk-frame" aria-hidden="true">
+          <p class="vk-status"><b>Waiting on checks</b><span>Wrapping</span></p>
+          <div class="vk-pinned">
+            <p class="vk-event-head"><b>Pull request</b><span class="vk-sha">#128</span><span class="vk-chip">tidewatch</span><span class="vk-checks vk-end"><i class="vk-check">✓</i><i class="vk-mark vk-idle"></i></span></p>
+            <p>Rate limiting for the public API</p>
+          </div>
+          <div class="vk-event">
+            <p class="vk-event-head"><b>Question set</b><span>Review of rate-limiting</span><i class="vk-mark vk-waiting vk-end"></i></p>
+            <ol class="vk-asks">
+              <li><b>Q1</b><span>Retry-After rounds down to 0 on the window's last second</span><small>—</small></li>
+              <li><b>Q2</b><span>The admin endpoint is unauthenticated</span><small>—</small></li>
+              <li><b>Q3</b><span>Limit config is read on every request</span><small>—</small></li>
+            </ol>
+          </div>
+        </div>
+        <p>A job is rarely done just because every task is ticked. Verkstead opens the pull request, waits on CI, fixes what fails, resolves merge conflicts, and runs a fresh session to review the whole thing. Its findings come to you as one question set, so you choose what gets fixed and how.</p>
+      </div>
+
+      <button class="card" type="button" id="done-card" aria-controls="done-panel" aria-pressed="false">
+        <span class="card-title" id="done-title">Done</span>
+        <span class="card-sub">Share the thinking, or carry on.</span>
+      </button>
+      <div class="panel" id="done-panel" role="region" aria-labelledby="done-title">
+        <div class="vk-frame" aria-hidden="true">
+          <p class="vk-status"><b>Done</b></p>
+          <p class="vk-moved">Wrapping → Done</p>
+          <div class="vk-pinned">
+            <p class="vk-event-head"><b>Pull request</b><span class="vk-sha">#128</span><span class="vk-chip">tidewatch</span><span class="vk-checks vk-end"><i class="vk-check">✓</i><i class="vk-check">✓</i></span></p>
+            <p>Rate limiting for the public API</p>
+          </div>
+          <div class="vk-modal">
+            <div class="vk-dialog">
+              <b>Share this conversation</b>
+              <p>The brief, every question and answer, and every commit, as one file or a secret link.</p>
+              <div class="vk-dialog-actions"><span class="vk-secondary">Download file</span><span class="vk-button">Copy link</span></div>
+            </div>
+          </div>
+        </div>
+        <p>The record of every question and decision is yours to share with colleagues, as a single file or a link. And when there is more to do, steer the conversation into a follow-up and extend the same pull request.</p>
+      </div>
+    </div>
+
+    <div class="others">
+      <h3>Not everything is a feature.</h3>
+      <ul>
+        <li><b>Tinker</b><span>Make a series of simple one-off changes with minimal fuss</span></li>
+        <li><b>Investigate</b><span>Ask questions about a code base without committing any code</span></li>
+        <li><b>Review</b><span>Review an existing PR or branch, and fix any issues found</span></li>
+        <li><b>Fix merge issues</b><span>Fix up a PR which is unable to merge</span></li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="section" id="platforms" aria-labelledby="platforms-heading">
+    <h2 id="platforms-heading">Platforms</h2>
+    <svg class="vk-glyphs" aria-hidden="true">
+      <symbol id="os-linux" viewBox="0 0 24 24"><path fill-rule="evenodd" d="M5.5 13.5a6.5 9 0 1 0 13 0a6.5 9 0 1 0-13 0zM8 16.5a4 5 0 1 0 8 0a4 5 0 1 0-8 0zM9 8.5a1 1 0 1 0 2 0a1 1 0 1 0-2 0zM13 8.5a1 1 0 1 0 2 0a1 1 0 1 0-2 0z"/></symbol>
+      <symbol id="os-apple" viewBox="0 0 24 24"><path d="M12 7.6c-1.3-1-3.9-1.5-5.6.4-1.9 2.1-1.6 6 .2 9.2 1.3 2.3 2.8 3.8 4.2 3 .8-.4 1.6-.4 2.4 0 1.4.8 2.9-.7 4.2-3 .6-1.1 1-2.2 1.2-3.2-1.6-.6-2.6-2-2.6-3.7 0-1.3.6-2.4 1.6-3.1-1.6-1.6-4-1.5-5.6.4zM12.1 6.4c-.1-2 1.4-3.8 3.4-3.9.1 2-1.4 3.8-3.4 3.9z"/></symbol>
+      <symbol id="os-windows" viewBox="0 0 24 24"><path d="M3 3h8.5v8.5H3zM12.5 3H21v8.5h-8.5zM3 12.5h8.5V21H3zM12.5 12.5H21V21h-8.5z"/></symbol>
+    </svg>
+    <div class="carousel" style="--cards: 4">
+      <button class="card" type="button" id="desktop-card" aria-controls="desktop-panel" aria-pressed="true">
+        <span class="card-title" id="desktop-title">Your desktop</span>
+        <span class="card-sub">Linux, macOS, and Windows.</span>
+      </button>
+      <div class="panel" id="desktop-panel" role="region" aria-labelledby="desktop-title">
+        <div class="vk-frame" aria-hidden="true">
+          <div class="vk-head"><b>Code</b><svg class="vk-icon vk-end" viewBox="0 0 16 16"><path d="M9.5 2.5h4v4M13.5 2.5 9 7M6.5 13.5h-4v-4M2.5 13.5 7 9"/></svg></div>
+          <div class="vk-code">
+            <div class="vk-tree">
+              <b>tidewatch</b>
+              <span><i>▾</i>src/</span>
+              <span class="vk-leaf">main.rs</span>
+              <span class="vk-leaf vk-open">limit.rs<em>M</em></span>
+              <span class="vk-leaf">keys.rs</span>
+              <span><i>▸</i>tests/</span>
+            </div>
+            <div class="vk-editing">
+              <div class="vk-tabs"><span class="vk-pressed">limit.rs</span><span>Terminal</span></div>
+              <div class="vk-editor vk-lines">
+                <span><i>1</i><span class="vk-tok-comment">// One key's requests in the current window.</span></span>
+                <span><i>2</i><span class="vk-tok-keyword">pub struct</span> <span class="vk-tok-name">Window</span> {</span>
+                <span><i>3</i>    count: u32,</span>
+                <span><i>4</i>    opened: Instant,</span>
+                <span><i>5</i>}</span>
+                <span><i>6</i></span>
+                <span><i>7</i><span class="vk-tok-keyword">impl</span> <span class="vk-tok-name">Limiter</span> {</span>
+                <span><i>8</i>    <span class="vk-tok-keyword">pub fn</span> <span class="vk-tok-name">allow</span>(&amp;<span class="vk-tok-keyword">mut</span> self, key: &amp;str) -&gt; Decision {</span>
+                <span><i>9</i>        <span class="vk-tok-keyword">let</span> window = self.window(key);</span>
+                <span><i>10</i>        <span class="vk-tok-keyword">if</span> window.count &gt;= self.limit(key) {</span>
+                <span><i>11</i>            log::debug!(<span class="vk-tok-string">"refused {key}"</span>);</span>
+                <span><i>12</i>            <span class="vk-tok-keyword">return</span> Decision::Refuse;</span>
+                <span><i>13</i>        }</span>
+                <span><i>14</i>        window.count += 1;</span>
+                <span><i>15</i>        Decision::Allow</span>
+                <span><i>16</i>    }</span>
+                <span><i>17</i>}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <p>Verkstead Desktop runs with full functionality on all three. The workbench includes a code editor and a terminal that run inside the session's sandbox, so you can try the agent's work and finish it by hand without leaving the window.</p>
+      </div>
+
+      <button class="card" type="button" id="phone-card" aria-controls="phone-panel" aria-pressed="false">
+        <span class="card-title" id="phone-title">Your phone</span>
+        <span class="card-sub">Pop in and out from anywhere.</span>
+      </button>
+      <div class="panel" id="phone-panel" role="region" aria-labelledby="phone-title">
+        <div class="vk-stage" aria-hidden="true">
+          <div class="vk-phone">
+            <span class="vk-back">← Conversations</span>
+            <div class="vk-head"><b>rate-limiting</b><span>tidewatch</span></div>
+            <p class="vk-status vk-yours"><b>Waiting on you</b><span>Grilling</span></p>
+            <div class="vk-pinned">
+              <p class="vk-event-head"><b>Question set</b><i class="vk-mark vk-waiting vk-end"></i></p>
+              <p class="vk-subject">Rate limiting for the public API</p>
+              <ol class="vk-asks">
+                <li><b>Q1</b><span>Where should the counter live?</span><small>—</small></li>
+                <li><b>Q2</b><span>Default limit per key?</span><small>—</small></li>
+                <li><b>Q3</b><span>What does a refused client get back?</span><small>—</small></li>
+              </ol>
+            </div>
+            <div class="vk-pinned">
+              <p class="vk-event-head"><b>Brief</b></p>
+              <p class="vk-clamp">Add rate limiting to the public API. Last night one client sent 40k requests in a minute and took the service down. Limit per API key, with a sensible default that can be changed per key.</p>
+            </div>
+          </div>
+        </div>
+        <p>The workbench is fully responsive, and Verkstead's client-server design means the work carries on at home while you answer from the train. Switch on remote access over Tailscale, scan the code, and the next question finds you wherever you are.</p>
+      </div>
+
+      <button class="card" type="button" id="devices-card" aria-controls="devices-panel" aria-pressed="false">
+        <span class="card-title" id="devices-title">All your devices</span>
+        <span class="card-sub">Linked machines, one workbench.</span>
+      </button>
+      <div class="panel" id="devices-panel" role="region" aria-labelledby="devices-title">
+        <div class="vk-frame" aria-hidden="true">
+          <div class="vk-head"><b>Remote access</b><span>Settings</span></div>
+          <p class="vk-heading">Devices</p>
+          <div class="vk-devices">
+            <span class="vk-device"><svg class="vk-glyph"><use href="#os-linux"/></svg><span><b>forge</b><small>this device</small><code>100.64.0.3, 192.168.1.20</code></span></span>
+            <span class="vk-device"><svg class="vk-glyph"><use href="#os-apple"/></svg><span><b>anvil</b><code>100.64.0.5</code></span><span class="vk-small-button">Unlink</span></span>
+            <span class="vk-device"><svg class="vk-glyph"><use href="#os-windows"/></svg><span><b>lathe</b><code>100.64.0.9</code></span><span class="vk-small-button">Unlink</span></span>
+          </div>
+          <div class="vk-question vk-transfer">
+            <b>Transfer to…</b>
+            <p>Move this conversation, its branch and its working changes to another device.</p>
+            <span class="vk-choice"><svg class="vk-glyph"><use href="#os-apple"/></svg>anvil</span>
+            <span class="vk-choice"><svg class="vk-glyph"><use href="#os-windows"/></svg>lathe</span>
+          </div>
+        </div>
+        <p>Install Verkstead on more than one machine and they form a cluster. Open any one of them and drive them all. Move a conversation to the Mac to build the Mac side, branch and working changes included, and bring it back when it is done. Cross-platform development, from one place.</p>
+      </div>
+
+      <button class="card" type="button" id="agent-card" aria-controls="agent-panel" aria-pressed="false">
+        <span class="card-title" id="agent-title">Your choice of agent</span>
+        <span class="card-sub">Open source, and open to any harness.</span>
+      </button>
+      <div class="panel" id="agent-panel" role="region" aria-labelledby="agent-title">
+        <div class="vk-frame" aria-hidden="true">
+          <div class="vk-head"><b>New conversation</b></div>
+          <div class="vk-centred">
+            <div class="vk-popover">
+              <span class="vk-picker"><small>Grilling</small><span class="vk-pick"><img src="marks/claude-color.svg" alt="" width="16" height="16">Claude Code Opus 5</span></span>
+              <span class="vk-picker"><small>Implementation</small><span class="vk-pick"><i class="vk-harness vk-codex"></i>GPT-5 Codex</span></span>
+              <span class="vk-picker"><small>Review</small><span class="vk-pick"><i class="vk-harness vk-opencode"></i>OpenCode Minimax M2.1</span></span>
+              <span class="vk-away">No review</span>
+            </div>
+            <div class="vk-composer">
+              <p class="vk-brief vk-clamp">Add rate limiting to the public API. Last night one client sent 40k requests in a minute and took the service down. Limit per API key, with a sensible default that can be changed per key.</p>
+              <div class="vk-setup">
+                <span class="vk-setting"><small>Repo</small>tidewatch</span>
+                <span class="vk-setting"><small>Process</small>Develop</span>
+                <span class="vk-setting vk-open"><small>Agent</small><span><img src="marks/claude-color.svg" alt="" width="16" height="16">Opus 5</span></span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <p>Verkstead is MIT-licensed and works with Claude Code, Codex, Grok Build, and the open-source OpenCode, so you get the latest frontier models without being tied to one provider. Yes, it works with your Claude subscription. Your process lives in Verkstead, not in any one vendor's tool.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="downloads" id="downloads" aria-labelledby="downloads-heading">
+    <h2 id="downloads-heading">Downloads</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th scope="col">Platform</th><th scope="col">File</th><th scope="col">Note</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th scope="row">Linux</th>
+            <td><a href="https://github.com/tobico/verkstead/releases/latest/download/Verkstead-x86_64.AppImage"><code>Verkstead-x86_64.AppImage</code></a></td>
+            <td>Needs bubblewrap and FUSE on the host</td>
+          </tr>
+          <tr>
+            <th scope="row">macOS</th>
+            <td><a href="https://github.com/tobico/verkstead/releases/latest/download/Verkstead-universal.dmg"><code>Verkstead-universal.dmg</code></a></td>
+            <td><a href="https://github.com/tobico/verkstead#status">Unsigned: allow it under Privacy &amp; Security, Open Anyway</a></td>
+          </tr>
+          <tr>
+            <th scope="row">Windows</th>
+            <td><a href="https://github.com/tobico/verkstead/releases/latest/download/Verkstead-x86_64.msi"><code>Verkstead-x86_64.msi</code></a></td>
+            <td><a href="https://github.com/tobico/verkstead#status">Unsigned: SmartScreen, More info, then Run anyway</a></td>
+          </tr>
+          <tr>
+            <th scope="row">Command line and NixOS</th>
+            <td></td>
+            <td>The <a href="https://github.com/tobico/verkstead/releases">releases page</a>, and the <a href="https://github.com/tobico/verkstead#status">README</a></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<footer class="footer">
+  <p>
+    <span>Verkstead is early, at version 0.1 and changing fast.</span>
+    <span aria-hidden="true">·</span>
+    <a href="https://github.com/tobico/verkstead">GitHub</a>
+    <span aria-hidden="true">·</span>
+    <a href="https://github.com/tobico/verkstead/blob/main/LICENSE">MIT</a>
+  </p>
+</footer>
+</body>
+</html>

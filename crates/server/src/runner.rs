@@ -451,8 +451,8 @@ fn todo() -> PathBuf {
 /// again.
 fn broken(label: &str) -> String {
     format!(
-        "entry {label} of `{}/{TODO}` is not ticked off and names no task file, so there is \
-         nothing for a session to work from",
+        "Entry {label} of `{}/{TODO}` isn't ticked off and names no task file, so there's \
+         nothing for a session to work from.",
         BACKLOG,
     )
 }
@@ -844,9 +844,9 @@ async fn nothing_left(
                 conversation_id,
                 crate::stopping::Decided::Verkstead,
                 "working out what is left of the backlog",
-                "there is nothing in `.tasks/` to work, nothing on this branch ever wrote \
-                 a backlog, and there is no pull request to wrap up — the breakdown never \
-                 landed, so there is nothing built here to carry anywhere",
+                "There's nothing in `.tasks/` to work, nothing on this branch ever wrote \
+                 a backlog, and there's no pull request to wrap up. The breakdown never \
+                 landed, so nothing built here can be carried anywhere.",
                 None,
             )
             .await;
@@ -1704,7 +1704,7 @@ async fn follow_inline(
             // that being in the log already and no more of an answer than it
             // was.
             Some((_, _, Err(github::Trouble::NoPullRequest))) | None => {
-                "the session ended without committing anything".to_owned()
+                "The session ended without committing anything.".to_owned()
             }
             // Anything else is what the landed arm above makes of it, made in
             // the one place that knows how: a pull request found is a wrap-up,
@@ -1875,7 +1875,7 @@ pub(crate) async fn instructed(
     // shown.
     let how = ended
         .badly()
-        .unwrap_or_else(|| "the session ended without committing anything".to_owned());
+        .unwrap_or_else(|| "The session ended without committing anything.".to_owned());
 
     stop(
         &state,
@@ -1968,7 +1968,7 @@ async fn onwards(state: AppState, conversation_id: i64, writing: i64, driving: D
                 conversation_id,
                 crate::stopping::Decided::Verkstead,
                 "carrying the work on from what the instruction left",
-                "the branch holds no backlog to work and no pull request to wrap up",
+                "The branch holds no backlog to work and no pull request to wrap up.",
                 Some(writing),
             )
             .await;
@@ -2170,8 +2170,8 @@ pub(crate) async fn following_up(
     // ending is the whole of it, a session that has finished with the follow-up
     // still running being exactly as gone as one that fell over.
     let how = match ended.badly() {
-        Some(how) => format!("{how}, so {NOBODY_FOLLOWING_UP}"),
-        None => format!("the follow-up session finished, so {NOBODY_FOLLOWING_UP}"),
+        Some(how) => format!("{how} {NOBODY_FOLLOWING_UP}"),
+        None => format!("The follow-up session finished. {NOBODY_FOLLOWING_UP}"),
     };
 
     stop(
@@ -2268,8 +2268,8 @@ async fn owed_a_pull_request(state: &AppState, conversation_id: i64) -> bool {
 ///
 /// [`store::Decision::Verkstead`], as every stop written here is: what to do
 /// about it is the human's, and steering is what they have.
-const NOBODY_FOLLOWING_UP: &str = "nobody is left to ask you anything or to act on what you say, and any question it had \
-     put to you has been closed unanswered";
+const NOBODY_FOLLOWING_UP: &str = "Nobody is left to ask you anything or to act on what you say. \
+     Any question the session put to you has been closed unanswered.";
 
 /// The human has said there is nothing else: end the session, and land the
 /// Conversation wherever this follow-up ends.
@@ -2626,8 +2626,8 @@ pub(crate) async fn investigating(
     // ending is the whole of it, a session that has finished with the
     // investigation still standing being exactly as gone as one that fell over.
     let how = match ended.badly() {
-        Some(how) => format!("{how}, so {NOBODY_INVESTIGATING}"),
-        None => format!("the investigating session finished, so {NOBODY_INVESTIGATING}"),
+        Some(how) => format!("{how} {NOBODY_INVESTIGATING}"),
+        None => format!("The investigating session finished. {NOBODY_INVESTIGATING}"),
     };
 
     stop(
@@ -2779,8 +2779,8 @@ async fn found_out(state: &AppState, conversation_id: i64, driving: Driving) {
 /// [`NOBODY_FOLLOWING_UP`]'s sentence with the one word that differs: what is
 /// left unfinished is the question rather than the follow-up, and there is
 /// nothing on the branch either way.
-const NOBODY_INVESTIGATING: &str = "nobody is left to find anything out or to ask you about it, and any question it had put to \
-     you has been closed unanswered";
+const NOBODY_INVESTIGATING: &str = "Nobody is left to find anything out or to ask you about it. \
+     Any question the session put to you has been closed unanswered.";
 
 /// Whether the Conversation's own work is on a pull request, or `None` where the
 /// record would not say.
@@ -3525,7 +3525,7 @@ async fn see_out(
     // interactive agent that decides there is nothing to do exits zero.
     let how = ended
         .badly()
-        .unwrap_or_else(|| "the session ended without finishing the step".to_owned());
+        .unwrap_or_else(|| "The session ended without finishing the step.".to_owned());
 
     stop(
         state,

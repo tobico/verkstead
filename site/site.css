@@ -1,0 +1,1026 @@
+/* The workbench's own tokens, light and dark, so the page reads as the product. */
+:root {
+  color-scheme: light dark;
+  --ink: #1c1a17;
+  --ink-soft: #6b645c;
+  --paper: #faf8f5;
+  --card: #ffffff;
+  --edge: #e3ddd4;
+  --accent: #a34b12;
+  --code-wash: #efe8dd;
+  --added: #2a7248;
+  --added-wash: #e9f5ec;
+  --removed: #b3382c;
+  --removed-wash: #fbeceb;
+  --hunk: #f2ede6;
+  --tok-keyword: #9b3f5e;
+  --tok-name: #2f6f8f;
+  --tok-string: #4a7a4f;
+  --tok-comment: #8d857a;
+  --accent-deep: color-mix(in srgb, var(--accent) 88%, var(--ink));
+  --lift: 0 0.75rem 2rem rgb(0 0 0 / 22%), 0 0.15rem 0.4rem rgb(0 0 0 / 14%);
+  --mono: ui-monospace, SFMono-Regular, monospace;
+  --measure: 60rem;
+  --gutter: 16px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink: #ece7e0;
+    --ink-soft: #a19a91;
+    --paper: #171614;
+    --card: #201e1b;
+    --edge: #35312c;
+    --accent: #f08a3c;
+    --code-wash: #2e2b26;
+    --added: #79c48f;
+    --added-wash: #1b2a20;
+    --removed: #e0857a;
+    --removed-wash: #2d1f1d;
+    --hunk: #26241f;
+    --tok-keyword: #e08aa6;
+    --tok-name: #86bcd8;
+    --tok-string: #9dc493;
+    --tok-comment: #8b8378;
+    --lift: 0 0.75rem 2rem rgb(0 0 0 / 55%), 0 0.15rem 0.4rem rgb(0 0 0 / 40%);
+  }
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html { scroll-padding-top: 4.5rem; }
+
+body {
+  margin: 0;
+  font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: var(--ink);
+  background: var(--paper);
+}
+
+a { color: var(--accent); }
+b, strong, th { font-weight: 600; }
+code { font-family: var(--mono); font-size: 0.9em; }
+
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* The nav: the Transcript/Screen switch, stuck to the top. */
+.nav {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: color-mix(in srgb, var(--paper) 92%, transparent);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--edge);
+}
+
+.nav-inner {
+  max-width: var(--measure);
+  margin: 0 auto;
+  padding: 0.6rem var(--gutter);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.tabs {
+  position: relative;
+  display: flex;
+  gap: 0.25rem;
+  padding: 0.2rem;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+}
+
+.tab {
+  position: relative;
+  z-index: 1;
+  padding: 0.35rem 0.7rem;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+  background: none;
+  border: 0;
+  border-radius: 0.4rem;
+  text-decoration: none;
+}
+
+.tab[aria-current="true"] { color: var(--paper); }
+
+.tabs-indicator {
+  position: absolute;
+  top: 0.2rem;
+  bottom: 0.2rem;
+  left: 0;
+  width: 0;
+  background: var(--accent);
+  border-radius: 0.4rem;
+}
+
+.nav-cta {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  white-space: nowrap;
+}
+
+/* Buttons and quiet links */
+.button {
+  display: inline-block;
+  padding: 0.7rem 1.4rem;
+  color: var(--paper);
+  background: var(--accent);
+  border-radius: 0.4rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.button:hover { background: var(--accent-deep); }
+
+.button-small {
+  padding: 0.4rem 0.85rem;
+  font-size: 0.85rem;
+}
+
+.button-small .short { display: none; }
+
+.quiet {
+  color: var(--ink-soft);
+  text-decoration: none;
+}
+
+.quiet:hover { color: var(--accent); }
+
+.nav-cta .quiet { font-size: 0.85rem; }
+
+/* On a phone the tabs and the button share 328px, so both draw a little tighter. */
+@media (max-width: 40rem) {
+  .nav-inner { gap: 0.5rem; }
+  .tab { padding: 0.35rem 0.45rem; }
+  .button-small { padding: 0.4rem 0.7rem; }
+  .button-small .long { display: none; }
+  .button-small .short { display: inline; }
+  .nav-all { display: none; }
+}
+
+/* The hero */
+main > * {
+  max-width: var(--measure);
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: var(--gutter);
+  padding-right: var(--gutter);
+}
+
+.hero {
+  padding-top: 7rem;
+  padding-bottom: 2.5rem;
+  text-align: center;
+}
+
+.brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+}
+
+.brand img {
+  width: 8rem;
+  height: 8rem;
+}
+
+.brand h1 {
+  margin: 0;
+  font-size: 3rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.tagline {
+  max-width: 34rem;
+  margin: 1.5rem auto 0;
+  font-size: clamp(1.4rem, 4vw, 2rem);
+  line-height: 1.3;
+  font-weight: 600;
+  text-wrap: balance;
+}
+
+.tagline em {
+  font-style: normal;
+  color: var(--accent);
+}
+
+/* The download bar */
+.download-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 1.5rem;
+  padding-bottom: 7rem;
+}
+
+/* The sections */
+.section {
+  padding-top: 5rem;
+  padding-bottom: 5rem;
+  border-top: 1px solid var(--edge);
+}
+
+h2 {
+  margin: 0 0 2rem;
+  font-size: 2rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+/* The carousel every section is: cards down one side, the pressed card's
+   screenshot and paragraph beside them. Without the script every panel shows
+   in order under its card; `.js` on the root, set in the head before the
+   first paint, is what makes it a carousel, and the cards' own
+   `aria-pressed` is what shows one panel, so the first paint is already one. */
+.card {
+  display: block;
+  width: 100%;
+  padding: 1rem;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 0.6rem;
+  cursor: pointer;
+}
+
+.card[aria-pressed="true"] { background: var(--card); }
+
+@media (hover: hover) {
+  .card:hover { background: var(--card); }
+}
+
+.card-title { display: block; font-weight: 600; }
+.card-sub { display: block; color: var(--ink-soft); }
+
+.panel > p {
+  margin: 1.25rem 0 0;
+  color: var(--ink-soft);
+}
+
+.carousel .panel { margin: 0.5rem 0 2rem; }
+
+.js .carousel .card[aria-pressed="false"] + .panel { display: none; }
+
+/* Under a carousel, the quieter rest of what it is one of. */
+.others {
+  margin-top: 3rem;
+  padding-top: 2rem;
+  border-top: 1px solid var(--edge);
+}
+
+.others h3 { margin: 0 0 1.25rem; font-size: 1.1rem; font-weight: 600; }
+
+.others ul {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.25rem 1.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+@media (min-width: 48rem) {
+  .others ul { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+.others b { display: block; font-weight: 600; }
+.others span { display: block; margin-top: 0.2rem; font-size: 0.9rem; color: var(--ink-soft); }
+
+/* On a desktop the cards are a column and every panel stands in the one cell
+   beside them, so the carousel is as tall as its tallest and nothing jumps. */
+@media (min-width: 60rem) {
+  .js .carousel {
+    display: grid;
+    grid-template-columns: 17rem minmax(0, 1fr);
+    grid-template-rows: repeat(var(--cards), auto) 1fr;
+    column-gap: 2.5rem;
+    row-gap: 0.25rem;
+  }
+
+  .js .carousel .card { grid-column: 1; }
+
+  .js .carousel .panel {
+    grid-column: 2;
+    grid-row: 1 / -1;
+    margin: 0;
+  }
+
+  .js .carousel .card[aria-pressed="false"] + .panel {
+    display: block;
+    visibility: hidden;
+    opacity: 0;
+  }
+}
+
+/* The screenshot primitives: workbench parts drawn in the site's tokens, a
+   little larger than the real ones so they read at card size on a phone. */
+.vk-frame {
+  display: flex;
+  flex-direction: column;
+  height: 33rem;
+  padding: 0 1.25rem 1rem;
+  overflow: hidden;
+  font-size: 0.95rem;
+  line-height: 1.45;
+  text-align: left;
+  color: var(--ink);
+  background: var(--paper);
+  border: 0.5rem solid var(--card);
+  outline: 1px solid var(--edge);
+  border-radius: 0.6rem;
+  box-shadow: 0 0.5rem 1.5rem rgb(0 0 0 / 8%), 0 0.1rem 0.3rem rgb(0 0 0 / 6%);
+}
+
+@media (prefers-color-scheme: dark) {
+  .vk-frame { box-shadow: 0 0.5rem 1.5rem rgb(0 0 0 / 35%), 0 0.1rem 0.3rem rgb(0 0 0 / 25%); }
+}
+
+.vk-frame :where(p) { margin: 0; }
+.vk-frame > * { flex: none; }
+
+/* A screenshot with something laid over its corner, the notification. */
+.vk-over { position: relative; margin-bottom: 2.75rem; }
+
+.vk-sidebar { width: 100%; max-width: 22rem; }
+
+.vk-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  padding: 1rem 0;
+}
+
+.vk-head > span { font-size: 0.9rem; color: var(--ink-soft); }
+.vk-head > :last-child:not(:nth-child(-n + 2)) { margin-left: auto; }
+
+.vk-wordmark {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 1rem 0;
+  font-size: 1.4rem;
+  font-weight: 600;
+}
+
+.vk-wordmark img { width: 2rem; height: 2rem; }
+
+.vk-new-conversation {
+  display: block;
+  padding: 0.6rem;
+  margin-bottom: 0.75rem;
+  text-align: center;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+}
+
+.vk-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.85rem 1rem;
+  border-radius: 0.6rem;
+}
+
+.vk-row > span { flex: 1; min-width: 0; }
+.vk-row b { display: block; font-weight: 600; }
+.vk-row small { display: block; font-size: 0.85rem; color: var(--ink-soft); }
+.vk-done { opacity: 0.45; }
+
+.vk-mark {
+  flex: none;
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: 50%;
+}
+
+.vk-waiting { background: var(--accent); }
+.vk-working { border: 1.5px solid var(--edge); border-top-color: var(--ink-soft); }
+.vk-idle { border: 1.5px solid var(--accent); }
+
+.vk-status {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  padding: 0.6rem 0.85rem;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+}
+
+.vk-status b { font-weight: 600; }
+.vk-status span { font-size: 0.9rem; color: var(--ink-soft); }
+.vk-status::after { content: "›"; display: inline-block; margin-left: auto; color: var(--ink-soft); transform: rotate(90deg); }
+.vk-status.vk-yours b, .vk-status.vk-yours span { color: var(--accent); }
+
+.vk-event { padding: 1rem; border: 1px solid transparent; border-radius: 0.6rem; }
+.vk-event-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.6rem; }
+.vk-event-head b { font-size: 1.1rem; font-weight: 600; }
+.vk-event-head span { color: var(--ink-soft); font-size: 0.9rem; }
+
+.vk-commit { margin-bottom: 1rem; }
+.vk-subject { font-weight: 600; }
+
+.vk-changed {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.6rem;
+  margin-top: 0.3rem;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+.vk-chip {
+  padding: 0.05rem 0.35rem;
+  font-size: 0.8rem;
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+}
+
+.vk-sha { font-family: var(--mono); }
+.vk-added { color: var(--added); font-weight: 600; }
+.vk-removed { color: var(--removed); font-weight: 600; }
+
+.vk-heading {
+  margin: 0 0 0.5rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.vk-box {
+  margin-bottom: 1rem;
+  padding: 1rem;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+}
+
+.vk-diagram {
+  display: block;
+  width: 19.25rem;
+  max-width: 100%;
+  margin-top: 0.85rem;
+  font: 12.5px system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+.vk-diagram rect { fill: var(--paper); stroke: var(--edge); stroke-width: 1.5; }
+.vk-diagram rect.vk-modified { stroke: var(--accent); }
+.vk-diagram rect.vk-new { stroke: var(--added); }
+.vk-diagram text { fill: var(--ink); text-anchor: middle; }
+.vk-diagram .vk-link { fill: none; stroke: var(--ink-soft); stroke-width: 1.5; }
+.vk-diagram marker path { fill: var(--ink-soft); }
+
+.vk-diff {
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+  overflow: hidden;
+}
+
+.vk-diff-file {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.6rem 0.8rem;
+  font-family: var(--mono);
+  font-size: 0.85rem;
+}
+
+.vk-hunk {
+  padding: 0.3rem 0.8rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+  background: var(--hunk);
+  border-block: 1px solid var(--edge);
+}
+
+.vk-lines {
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.vk-lines > span { display: block; padding-right: 0.8rem; white-space: pre; }
+.vk-lines i { display: inline-block; font-style: normal; color: var(--ink-soft); }
+.vk-lines i:first-child { width: 2.6em; padding-right: 0.6em; text-align: right; }
+.vk-lines i + i { width: 1.4em; }
+.vk-add { background: var(--added-wash); }
+.vk-add i + i { color: var(--added); }
+.vk-del { background: var(--removed-wash); }
+.vk-del i + i { color: var(--removed); }
+
+.vk-tabs {
+  display: flex;
+  align-self: flex-start;
+  margin: 1rem 0 0.75rem;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+  background: var(--code-wash);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+  overflow: hidden;
+}
+
+.vk-tabs > span { padding: 0.35rem 0.75rem; }
+.vk-tabs > span + span { border-left: 1px solid var(--edge); }
+.vk-tabs > .vk-pressed { color: var(--ink); background: var(--paper); }
+
+.vk-terminal {
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  flex: 1;
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  line-height: 1.6;
+  color: #e8e4dd;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: #000;
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+}
+
+.vk-terminal .vk-dim { color: #8f8a83; }
+.vk-cursor { background: #e8e4dd; }
+
+.vk-button, .vk-secondary, .vk-quiet-button {
+  display: inline-block;
+  padding: 0.5rem 1rem;
+  font-weight: 600;
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+}
+
+.vk-button { color: var(--paper); background: var(--accent); border-color: var(--accent); }
+.vk-secondary { color: var(--ink); background: var(--card); }
+.vk-quiet-button { font-weight: 400; color: var(--accent); background: none; }
+
+.vk-notification {
+  position: absolute;
+  right: -1rem;
+  bottom: -1.5rem;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  width: 20rem;
+  padding: 0.75rem 0.9rem;
+  font-size: 0.9rem;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 1rem;
+  box-shadow: var(--lift);
+}
+
+.vk-notification img { flex: none; width: 1.5rem; height: 1.5rem; }
+.vk-notification b { display: block; font-weight: 600; }
+.vk-notification small { display: block; font-size: 0.85rem; color: var(--ink-soft); }
+
+/* The compose page: the box the Brief is written in, its setup along the
+   inside of the bottom edge, and the presses under it, centred in the pane. */
+.vk-centred { margin-block: auto; }
+
+.vk-composer {
+  padding: 1rem 0.75rem 0.85rem;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.9rem;
+}
+
+.vk-brief { padding: 0 0.6rem; min-height: 4.5em; }
+
+.vk-setup { display: flex; margin-top: 1rem; }
+
+.vk-setting {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 0 0.6rem 0.15rem;
+  white-space: nowrap;
+}
+
+.vk-setting small { font-size: 0.75rem; color: var(--ink-soft); }
+.vk-setting > span { display: flex; align-items: center; gap: 0.4rem; }
+.vk-setting img { width: 1em; height: 1em; }
+.vk-setting::after { content: "›"; grid-row: 1 / 3; grid-column: 2; align-self: center; color: var(--ink-soft); transform: rotate(90deg); }
+
+.vk-compose-actions { display: flex; align-items: center; gap: 0.6rem; margin-top: 0.85rem; white-space: nowrap; }
+.vk-compose-actions > :first-child { margin-right: auto; }
+
+/* A question set's sheet: the question cards, their options and the box under
+   them a reply is written in. */
+.vk-question {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-bottom: 1rem;
+  padding: 1rem;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+}
+
+.vk-ask { margin-bottom: 0.35rem; }
+
+.vk-ask b, .vk-asks b {
+  margin-right: 0.5rem;
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.vk-choice {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+}
+
+.vk-choice small { font-family: var(--mono); font-size: 0.85rem; color: var(--ink-soft); }
+.vk-chosen { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.vk-star { margin-left: auto; padding-left: 0.5rem; color: var(--accent); }
+
+.vk-radio {
+  flex: none;
+  align-self: center;
+  width: 0.85rem;
+  height: 0.85rem;
+  border: 1.5px solid var(--ink-soft);
+  border-radius: 50%;
+}
+
+.vk-chosen .vk-radio { border-color: var(--accent); background: radial-gradient(var(--accent) 0 45%, transparent 50%); }
+
+.vk-thoughts {
+  margin-top: 0.35rem;
+  padding: 0.5rem 0.6rem;
+  min-height: 3.5em;
+  color: var(--ink-soft);
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+}
+
+/* The Timeline: the cards pinned over it, the task list and the pull request,
+   and the rows a question set's card lists. */
+.vk-status { margin-bottom: 0.75rem; }
+.vk-frame > .vk-status:first-child { margin-top: 1rem; }
+.vk-pinned ~ .vk-event { padding-block: 0.85rem; }
+
+.vk-pinned {
+  margin-bottom: 0;
+  padding: 1rem;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+}
+
+.vk-pinned .vk-event-head { margin-bottom: 0.4rem; }
+.vk-end { margin-left: auto; }
+
+.vk-tasks, .vk-asks {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.vk-tasks li, .vk-asks li { display: flex; align-items: baseline; gap: 0.6rem; font-size: 0.9rem; }
+.vk-asks li { font-size: 0.85rem; }
+.vk-asks b { margin: 0; }
+.vk-tasks span, .vk-asks span { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.vk-tasks i { font-style: normal; color: var(--ink-soft); }
+.vk-tasks small, .vk-asks small { flex: none; font-family: var(--mono); font-size: 0.85rem; color: var(--ink-soft); }
+.vk-ticked span { color: var(--ink-soft); text-decoration: line-through; }
+
+.vk-event .vk-event-head { margin-bottom: 0.3rem; }
+.vk-event .vk-changed { margin-top: 0.15rem; }
+.vk-event-head .vk-chip, .vk-event-head .vk-sha { font-size: 0.85rem; }
+.vk-event-head .vk-end, .vk-event-head .vk-mark { align-self: center; }
+
+.vk-checks { display: flex; align-items: center; gap: 0.5rem; }
+.vk-check { font-style: normal; font-size: 1.1rem; font-weight: 600; line-height: 1; color: var(--added); }
+
+.vk-moved { margin: 0.25rem 0 1rem; text-align: center; font-size: 0.9rem; color: var(--ink-soft); }
+
+/* A dialog over the pane, the pane dimmed behind it. */
+.vk-frame:has(.vk-modal) { position: relative; }
+
+.vk-modal {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 1.25rem 1.25rem 3rem;
+  background: rgb(0 0 0 / 22%);
+}
+
+.vk-dialog {
+  width: 100%;
+  max-width: 24rem;
+  padding: 1.25rem;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+  box-shadow: var(--lift);
+}
+
+.vk-dialog > b { display: block; font-weight: 600; font-size: 1.1rem; }
+.vk-dialog > p { margin-top: 0.4rem; color: var(--ink-soft); }
+.vk-dialog-actions { display: flex; justify-content: flex-end; gap: 0.6rem; margin-top: 1rem; white-space: nowrap; }
+
+/* The code pane: the file tree on its wash, and the editor beside it under
+   the pane's tabs, its tokens in the viewer's colours. */
+.vk-icon { width: 1rem; height: 1rem; align-self: center; fill: none; stroke: var(--ink-soft); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+
+.vk-code {
+  display: grid;
+  grid-template-columns: 12rem minmax(0, 1fr);
+  gap: 0.75rem;
+  flex: 1;
+  min-height: 0;
+}
+
+.vk-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.6rem;
+  font-size: 0.9rem;
+  background: var(--code-wash);
+  border-radius: 0.6rem;
+}
+
+.vk-tree b { padding: 0.2rem 0.4rem; font-weight: 600; }
+.vk-tree span { display: flex; gap: 0.4rem; padding: 0.2rem 0.4rem; border-radius: 0.4rem; white-space: nowrap; }
+.vk-tree i { width: 0.8rem; font-style: normal; color: var(--ink-soft); }
+.vk-tree .vk-leaf { padding-left: 1.6rem; }
+.vk-tree .vk-open { background: var(--paper); }
+.vk-tree em { margin-left: auto; font-style: normal; font-weight: 600; color: var(--accent); }
+
+.vk-editing { display: flex; flex-direction: column; min-width: 0; }
+.vk-editing .vk-tabs { margin-top: 0; }
+
+.vk-editor {
+  flex: 1;
+  padding-top: 0.5rem;
+  overflow: hidden;
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+}
+
+.vk-tok-keyword { color: var(--tok-keyword); }
+.vk-tok-name { color: var(--tok-name); }
+.vk-tok-string { color: var(--tok-string); }
+.vk-tok-comment { color: var(--tok-comment); font-style: italic; }
+
+/* A phone, standing in the screenshot's place: the Timeline at phone width. */
+.vk-stage {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 33rem;
+}
+
+.vk-phone {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  width: 18rem;
+  height: 31rem;
+  padding: 1.5rem 0.75rem 1rem;
+  overflow: hidden;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  text-align: left;
+  color: var(--ink);
+  background: var(--paper);
+  border: 0.5rem solid var(--card);
+  outline: 1px solid var(--edge);
+  border-radius: 2.25rem;
+  box-shadow: 0 0.5rem 1.5rem rgb(0 0 0 / 8%), 0 0.1rem 0.3rem rgb(0 0 0 / 6%);
+}
+
+@media (prefers-color-scheme: dark) {
+  .vk-phone { box-shadow: 0 0.5rem 1.5rem rgb(0 0 0 / 35%), 0 0.1rem 0.3rem rgb(0 0 0 / 25%); }
+}
+
+.vk-phone :where(p) { margin: 0; }
+.vk-phone > * { flex: none; }
+.vk-phone .vk-head { padding: 0; }
+.vk-phone .vk-status { margin: 0; white-space: nowrap; }
+.vk-phone .vk-pinned { padding: 0.75rem; }
+.vk-phone .vk-event-head b { font-size: 1rem; }
+.vk-phone .vk-subject { margin-bottom: 0.4rem; }
+.vk-back { color: var(--accent); }
+
+.vk-clamp {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
+  color: var(--ink-soft);
+}
+
+/* Settings' devices: an OS glyph, the name and its addresses, and the
+   Conversation's own way across to another of them. */
+.vk-glyphs { display: none; }
+
+.vk-glyph { flex: none; width: 1.25rem; height: 1.25rem; fill: currentColor; }
+
+.vk-devices {
+  margin-bottom: 1.25rem;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+}
+
+.vk-device { display: flex; align-items: center; gap: 0.85rem; padding: 0.75rem 1rem; }
+.vk-device + .vk-device { border-top: 1px solid var(--edge); }
+.vk-device > span:not([class]) { flex: 1; min-width: 0; }
+.vk-device b { font-weight: 600; }
+.vk-device small { margin-left: 0.5rem; font-size: 0.85rem; color: var(--ink-soft); }
+.vk-device code { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 0.85rem; color: var(--ink-soft); }
+
+.vk-small-button {
+  flex: none;
+  padding: 0.25rem 0.7rem;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+}
+
+.vk-transfer > b { font-weight: 600; }
+.vk-transfer > p { margin-bottom: 0.4rem; color: var(--ink-soft); }
+.vk-transfer .vk-choice { align-items: center; }
+
+/* The composer's Agent panel: a picker for each phase, each a mark and the
+   words naming the harness and model. */
+.vk-popover {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  max-width: 22rem;
+  margin: 0 0 0.6rem auto;
+  padding: 1.1rem;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+  box-shadow: var(--lift);
+}
+
+.vk-picker small { display: block; margin-bottom: 0.3rem; font-size: 0.8rem; color: var(--ink-soft); }
+
+.vk-pick {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.7rem;
+  white-space: nowrap;
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+}
+
+.vk-pick::after { content: "›"; margin-left: auto; color: var(--ink-soft); transform: rotate(90deg); }
+.vk-pick img { width: 1em; height: 1em; }
+
+.vk-harness {
+  flex: none;
+  width: 1em;
+  height: 1em;
+  background: currentColor;
+  mask: center / contain no-repeat;
+}
+
+.vk-codex { mask-image: url(marks/codex.svg); }
+.vk-opencode { mask-image: url(marks/opencode.svg); }
+
+.vk-away { margin-top: -0.4rem; font-size: 0.85rem; color: var(--ink-soft); }
+.vk-popover + .vk-composer .vk-brief { min-height: 0; -webkit-line-clamp: 2; line-clamp: 2; color: var(--ink); }
+.vk-setting.vk-open { background: var(--code-wash); border-radius: 0.4rem; }
+
+@media (max-width: 40rem) {
+  .vk-frame { height: 36rem; padding: 0 0.85rem 0.85rem; font-size: 0.9rem; }
+  .vk-notification { right: 0.5rem; width: calc(100% - 1rem); max-width: 20rem; }
+  .vk-lines i:first-child { display: none; }
+  .vk-box { padding: 0.75rem; }
+  .vk-pinned .vk-event-head { flex-wrap: nowrap; }
+  .vk-pinned .vk-event-head > span { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .vk-pinned .vk-event-head > :is(b, .vk-sha, .vk-end) { flex: none; }
+  .vk-modal { padding: 0.75rem 0.75rem 2.5rem; }
+  .vk-dialog { padding: 1rem; }
+  .vk-pinned ~ .vk-event { padding-block: 0.6rem; }
+  .vk-stage { height: 36rem; }
+  .vk-compose-actions { gap: 0.4rem; font-size: 0.85rem; }
+  .vk-compose-actions > * { padding: 0.45rem 0.7rem; }
+  .vk-setting { padding-inline: 0.35rem; font-size: 0.85rem; }
+  .vk-pick { overflow: hidden; font-size: 0.9rem; }
+  .vk-code { grid-template-columns: 6.75rem minmax(0, 1fr); gap: 0.5rem; }
+  .vk-editing .vk-tabs { max-width: 100%; }
+  .vk-editing .vk-tabs > span { padding-inline: 0.55rem; }
+  .vk-tree { padding: 0.4rem; font-size: 0.85rem; }
+  .vk-tree .vk-leaf { padding-left: 1rem; }
+  .vk-device { gap: 0.6rem; padding: 0.65rem 0.75rem; }
+}
+
+/* The downloads table */
+.downloads {
+  padding-top: 5rem;
+  padding-bottom: 5rem;
+  border-top: 1px solid var(--edge);
+}
+
+.table-wrap {
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+  overflow: hidden;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th, td {
+  padding: 0.8rem 1rem;
+  text-align: left;
+  vertical-align: top;
+  border-top: 1px solid var(--edge);
+}
+
+thead th {
+  border-top: 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+td { color: var(--ink-soft); }
+td a code { color: var(--accent); white-space: nowrap; }
+
+@media (max-width: 40rem) {
+  table, thead, tbody, tr, th, td { display: block; }
+  thead { display: none; }
+  tbody tr { padding: 0.8rem 1rem; border-top: 1px solid var(--edge); }
+  tbody tr:first-child { border-top: 0; }
+  tbody th, tbody td { padding: 0; border: 0; }
+  tbody td:empty { display: none; }
+  td a code { white-space: normal; word-break: break-all; }
+}
+
+/* The footer */
+.footer {
+  max-width: var(--measure);
+  margin: 0 auto;
+  padding: 2rem var(--gutter) 3rem;
+  border-top: 1px solid var(--edge);
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+.footer p {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.6rem;
+}
+
+/* On a phone the sentence takes a line of its own, and the links the next. */
+@media (max-width: 40rem) {
+  .footer p > span:first-child { flex-basis: 100%; }
+  .footer p > span:first-child + span { display: none; }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  html { scroll-behavior: smooth; }
+  .tabs-indicator { transition: transform 0.1s ease-in-out, width 0.1s ease-in-out; }
+  .tab, .button, .quiet { transition: color 0.1s ease-in-out, background-color 0.1s ease-in-out; }
+  .card { transition: background-color 0.1s ease-in-out; }
+  .js .carousel .panel { transition: opacity 0.15s ease-in-out, visibility 0.15s; }
+}

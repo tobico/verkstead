@@ -146,8 +146,8 @@ export function Asked(props: { by: AskingDevice | null }): JSX.Element {
 
             <p class={styles.why}>
               It joins this device's cluster, and every device linked to this one
-              is told about it. Allow it only if you know the machine below —
-              compare the fingerprint with the one shown on its own screen.
+              is told about it. Allow it only if you know the machine below.
+              Compare the fingerprint with the one on its own screen.
             </p>
 
             <dl class={styles.about}>

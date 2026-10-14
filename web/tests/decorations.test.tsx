@@ -1063,8 +1063,8 @@ const FRESH = fresh as OnboardingView;
 
 /// The wizard's own heading, and what the app answers a path nothing has: the
 /// two of the three pages that draw anything at all.
-const WIZARD = "Set Verkstead up";
-const MISSED = "No such page.";
+const WIZARD = "Set Up Verkstead";
+const MISSED = "There's no page at this address.";
 
 /// What the machine answers with, which is a value or a hang: how long the read
 /// takes is one of the three cases.

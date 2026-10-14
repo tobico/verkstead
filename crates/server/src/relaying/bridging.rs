@@ -110,7 +110,7 @@ pub(super) fn not_upgradable() -> Response {
     refused(
         StatusCode::INTERNAL_SERVER_ERROR,
         ApiError::new(
-            "this connection cannot be upgraded, so a member's socket cannot be relayed over it",
+            "This connection can't be upgraded, so a member's socket can't be relayed over it.",
         ),
     )
 }

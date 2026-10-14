@@ -33,7 +33,7 @@ export function label(chosen: Chosen): string {
     case "open":
       return "Open";
     case "logs":
-      return "View Logs";
+      return "View logs";
     case "quit":
       return "Quit";
   }
