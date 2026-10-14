@@ -113,11 +113,11 @@ export function AtOnceCard(props: {
   return (
     <Choose>
       <Match when={settings.isPending}>
-        <Empty>Loading…</Empty>
+        <Empty>Reading the settings…</Empty>
       </Match>
       <Match when={settings.isError}>
         <ErrorLine>
-          Could not read the settings: {settings.error?.message}
+          The settings couldn't be read. {settings.error?.message}
         </ErrorLine>
       </Match>
       <Match when={settings.data?.at_once}>
@@ -156,7 +156,7 @@ function refused(typed: string, what: string): string | null {
 
   return /^\d+$/.test(said) && Number(said) >= 1
     ? null
-    : `A whole number of ${what}, one or more — or nothing at all for the default.`;
+    : `That isn't a whole number of ${what}. Use one or more, or leave it empty for the default.`;
 }
 
 /// And the fields that change it, which is the details pane the card opens.
@@ -283,11 +283,11 @@ export function AtOncePane(props: {
 
       <Choose>
         <Match when={settings.isPending}>
-          <Empty>Loading…</Empty>
+          <Empty>Reading the settings…</Empty>
         </Match>
         <Match when={settings.isError}>
           <ErrorLine>
-            Could not read the settings: {settings.error?.message}
+            The settings couldn't be read. {settings.error?.message}
           </ErrorLine>
         </Match>
         <Match when={atOnce()}>
@@ -304,10 +304,9 @@ export function AtOncePane(props: {
                   a whole server — can be holding all of them without anything
                   running. */}
                 <Note>
-                  Every stage that is under way holds a place, including one
-                  waiting on an answer from you, and so does every conversation
-                  with a session running or a run being driven. A change takes
-                  effect at the next start and stops nothing already running.
+                  Every stage under way holds a place, even one waiting on you,
+                  as does every conversation with a session or run going. A
+                  change applies from the next start, and stops nothing.
                 </Note>
 
                 <label for="at-once-roadmap-stages">
@@ -380,7 +379,7 @@ export function AtOncePane(props: {
 
                 <Show when={save.isError}>
                   <ErrorLine class={styles.failure}>
-                    The settings could not be saved: {save.error?.message}
+                    The settings couldn't be saved. {save.error?.message}
                   </ErrorLine>
                 </Show>
               </form>

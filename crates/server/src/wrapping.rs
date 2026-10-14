@@ -607,7 +607,7 @@ pub(crate) async fn covering(state: AppState, conversation_id: i64) {
                     "the work committed in a companion Verkstead can find no pull request in",
                 );
 
-                missing.push(format!("`{}`: {}", companion.name, trouble.why()));
+                missing.push(format!("In `{}`: {}", companion.name, trouble.why()));
                 continue;
             }
         };
@@ -688,8 +688,8 @@ pub(crate) async fn covering(state: AppState, conversation_id: i64) {
         &state,
         conversation_id,
         &format!(
-            "the work committed in a companion repo that has no pull request — {}",
-            missing.join("; ")
+            "The work committed in a companion repo that has no pull request. {}",
+            missing.join(" ")
         ),
         writing,
     )

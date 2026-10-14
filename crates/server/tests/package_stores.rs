@@ -1532,8 +1532,8 @@ async fn one_javascript_tools_store(proof: Installs) {
         // the third install's to say, below, which is the assertion that
         // matters either way.
         //
-        // **Where both lost**, the first is run again, alone, as
-        // `docs/adoption.md` tells a human to: over whatever the collision
+        // **Where both lost**, the first is run again, alone, as a
+        // human would: over whatever the collision
         // left in the store, it has to finish.
         Racing::OneMayLose => {
             if !first.worked && !second.worked {
@@ -2374,8 +2374,7 @@ async fn a_repos_config_loses_to_the_session_and_its_command_line_wins() {
 /// taking the decision twice.
 ///
 /// So what a Repo loses here is the project-local cache, and what it keeps is
-/// an install that works out of a store. Which is worth saying out loud, and
-/// is what the adoption doc has to carry.
+/// an install that works out of a store. Which is worth saying out loud.
 #[tokio::test]
 async fn a_repo_that_switches_berrys_global_cache_off_gets_a_shared_one_anyway() {
     let Some(tools) = tools("yarn-berry", &["yarn-berry"]) else {

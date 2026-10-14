@@ -288,16 +288,16 @@ describe("reading a Set", () => {
   /// there reads like any other read that did not land — the "No such Set."
   /// of its own went with the page it was the whole of.
   it("shows the server's own wording when the Set cannot be read", async () => {
-    serving(json({ error: "there is no Question Set 404" }, 404));
+    serving(json({ error: "There is no question set 404." }, 404));
     mount("404");
 
-    await waitFor(() => screen.getByText(/there is no Question Set 404/));
+    await waitFor(() => screen.getByText(/There is no question set 404/));
 
     cleanup();
-    serving(json({ error: "the Question Set could not be read" }, 500));
+    serving(json({ error: "The question set couldn't be read." }, 500));
     mount();
 
-    await waitFor(() => screen.getByText(/the Question Set could not be read/));
+    await waitFor(() => screen.getByText(/The question set couldn't be read/));
   });
 });
 
@@ -360,8 +360,8 @@ describe("the record of a settled Set", () => {
     expect(page.querySelector("#q2a, #q3")).toBeTruthy();
     expect(page.innerHTML).toContain("What should Retry-After say?");
     expect(texts(page, `.${sheet.unanswered}`)).toEqual([
-      "Unanswered — the agent was told this one is still open.",
-      "Unanswered — the agent was told this one is still open.",
+      "Unanswered. The agent was told this one is still open.",
+      "Unanswered. The agent was told this one is still open.",
     ]);
   });
 
@@ -610,7 +610,7 @@ describe("the record of a settled Set", () => {
     // A Response that resolved nothing is still a Response, and has to read as
     // one rather than as a page whose Answers failed to arrive.
     expect(page.querySelector(`.${sheet.counterQuestion}`)!.textContent).toContain(
-      "The comment below is the whole Response",
+      "The comment below is the whole response",
     );
     expect(page.querySelectorAll(`.${sheet.unanswered}`)).toHaveLength(5);
     expect(page.querySelector(`.${sheet.setComment} .${sheet.comment}`)!.textContent).toBe(
@@ -652,7 +652,7 @@ describe("the record of a settled Set", () => {
     );
     expect(page.querySelector(`.${sheet.answeredAt}`)).toBeNull();
     expect(page.querySelector(`.${sheet.counterQuestion}`)!.textContent).toContain(
-      "This Set was locked unanswered",
+      "This question set was locked unanswered",
     );
 
     // Nothing was decided, and only a Response can leave a question open — so
@@ -811,7 +811,7 @@ describe("the record of a question whose Options were declared as a table", () =
     expect(asked.querySelector(`tr.${sheet.chosen}`)).toBeNull();
     expect(asked.querySelector(`.${sheet.chose}`)).toBeNull();
     expect(asked.querySelector(`.${sheet.unanswered}`)!.textContent).toBe(
-      "Unanswered — the agent was told this one is still open.",
+      "Unanswered. The agent was told this one is still open.",
     );
   });
 
@@ -827,7 +827,7 @@ describe("the record of a question whose Options were declared as a table", () =
 
     // The head-of-page account is the one it has always been.
     expect(page.querySelector(`.${sheet.counterQuestion}`)!.textContent).toContain(
-      "This Set was locked unanswered",
+      "This question set was locked unanswered",
     );
     // The Recommendation is still the agent's, and still marked on its row.
     expect(row(page, "Q1", 2).querySelector(`.${sheet.star}`)).toBeTruthy();
@@ -869,7 +869,7 @@ describe("a Set this build cannot read", () => {
     const page = await unreadably(UNREADABLE);
 
     expect(page.querySelector(`.${illegible.unreadableBadge}`)!.textContent).toBe(
-      "cannot be read",
+      "can't be read",
     );
     // Serde's own sentence, which names the field that has left the schema.
     expect(page.querySelector(`.${illegible.unreadableWhy}`)!.textContent).toContain(

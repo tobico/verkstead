@@ -34,9 +34,8 @@ export function TokenScopes(props: { class?: string }): JSX.Element {
   return (
     <div class={[styles.scopes, props.class].filter(Boolean).join(" ")}>
       <p class={styles.why}>
-        Tick these on GitHub's own form before pasting a token here. One that
-        may not do all of them fails inside a session, where the refusal names
-        no scope.
+        Tick these on GitHub's form before pasting a token here. A token
+        missing one fails inside a session, where the refusal names no scope.
       </p>
       <ul>
         <li>
@@ -45,8 +44,8 @@ export function TokenScopes(props: { class?: string }): JSX.Element {
           share.
         </li>
         <li>
-          A <b>fine-grained</b> token wants Contents, Pull requests, Issues and
-          Workflows set to write, and Actions to read.
+          A <b>fine-grained</b> token wants Contents, Pull requests, Issues,
+          and Workflows set to write, and Actions to read.
         </li>
       </ul>
     </div>

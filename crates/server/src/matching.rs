@@ -122,7 +122,7 @@ pub async fn each_across(
 
         Err(why) => {
             return Err(Refusal::ours(format!(
-                "this device could not read its own repositories' origins: {why:#}",
+                "This device couldn't read its own repos' origins: {why:#}.",
             )));
         }
     };

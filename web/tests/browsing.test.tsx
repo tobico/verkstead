@@ -381,7 +381,7 @@ describe("what the server said instead of rows", () => {
     browse(WHERE);
 
     await waitFor(() =>
-      screen.getByText("There is nothing at that path."),
+      screen.getByText("There's nothing at that path."),
     );
     expect(offered(WHERE)).toEqual([]);
   });
@@ -390,7 +390,7 @@ describe("what the server said instead of rows", () => {
     theFilesystem(
       whenever(
         at("/root"),
-        json({ Unreadable: { why: "the server cannot read it: denied" } }),
+        json({ Unreadable: { why: "The server can't read it: denied." } }),
       ),
     );
     mounted("/root/");
@@ -398,7 +398,7 @@ describe("what the server said instead of rows", () => {
     browse(WHERE);
 
     await waitFor(() =>
-      screen.getByText("the server cannot read it: denied"),
+      screen.getByText("The server can't read it: denied."),
     );
   });
 
@@ -414,7 +414,7 @@ describe("what the server said instead of rows", () => {
 
     browse(WHERE);
 
-    await waitFor(() => screen.getByText(/Could not read that directory/));
+    await waitFor(() => screen.getByText(/That directory couldn't be read/));
   });
 });
 

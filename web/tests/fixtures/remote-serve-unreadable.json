@@ -3,7 +3,7 @@
   "node": "workbench.tailnet-name.ts.net",
   "serve": {
     "serve": "Unreadable",
-    "trouble": "the serve configuration named no Web section"
+    "trouble": "The serve configuration named no Web section."
   },
   "tailscale": "Up"
 }

@@ -958,7 +958,7 @@ async fn ask(
     let how = format!(
         "{} on {} after {ATTEMPTS} fix sessions each:\n\n{}",
         match failed.len() {
-            1 => "a check is still failing".to_owned(),
+            1 => "A check is still failing".to_owned(),
             many => format!("{many} checks are still failing"),
         },
         named(watched),
@@ -1320,10 +1320,10 @@ async fn unsyncable(
 ) -> Watching {
     let how = format!(
         "{} is one of a stack, and a stack is synced with the `gh {extension}` extension \
-         rather than merged into branch by branch — which a session here cannot run: \
-         {why}. Install it with `{install}` and Resume. Nothing has been spent on the \
-         conflict: the goes are still there once the extension is.",
-        named(watched),
+         rather than merged into branch by branch. A session here can't run it. {why} \
+         Install it with `{install}` and press **Resume**. Nothing has been spent on the \
+         conflict, and the goes are still there once the extension is.",
+        crate::stopping::opening(&named(watched)),
         extension = crate::stacks::EXTENSION,
         install = crate::stacks::INSTALL,
     );
@@ -1368,7 +1368,7 @@ async fn unmergeable(
     let how = format!(
         "{} still conflicts with its base branch after {ATTEMPTS} resolution sessions. \
          Nothing lands until the conflict is resolved by hand.",
-        named(watched),
+        crate::stopping::opening(&named(watched)),
     );
 
     if let Err(error) = crate::stopping::stop(

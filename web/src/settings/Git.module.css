@@ -23,6 +23,12 @@
 /* What a token has to be able to do, under the section's heading and above
    everything about the one that is saved — see `scopes.tsx`, which is where the
    words are. Only the spacing is this pane's. */
+/* What becomes of a pasted token, said beside its field rather than in the
+   label, which names the field and no more. */
+.form .stored {
+  margin: -0.15rem 0 0.4rem;
+}
+
 .tokenScopes {
   margin: 0 0 0.85rem;
 }

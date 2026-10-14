@@ -182,7 +182,7 @@ mac:
   # half the Macs it is built for. `-` is `codesign --sign -` through
   # @electron/osx-sign, which is exactly what the Rust bundle this replaced did
   # by hand. It buys nothing from Gatekeeper: there is no Developer ID, the
-  # download is unsigned in the sense `docs/adoption.md` means, and the three
+  # download is unsigned in the sense `README.md` means, and the three
   # steps it describes stay (ADR-0020).
   identity: "-"
 
@@ -205,7 +205,7 @@ mac:
   # `LSMinimumSystemVersion` is left unsaid for the opposite reason: it is
   # Electron's own floor, out of the runtime electron-builder fetched, rather
   # than a number written here. What is written down is the promise
-  # `docs/adoption.md` makes a downloader, and that same leg reads the key off
+  # made to a downloader, and that same leg reads the key off
   # the packed bundle and refuses anything above it — so the promise and the
   # floor are one number, and moving Electron moves both.
 
@@ -223,7 +223,7 @@ mac:
 
 dmg:
   # Written down rather than defaulted, for the reason the AppImage's is:
-  # `release.yml` uploads this name, `docs/adoption.md` spells it, and
+  # `release.yml` uploads this name, `README.md` spells it, and
   # electron-builder's own pattern would put the version in the middle of both.
   artifactName: Verkstead-universal.dmg
 
@@ -268,7 +268,7 @@ win:
 
 msi:
   # Written down rather than defaulted, for the reason the AppImage's and the
-  # dmg's are: `release.yml` checks this name, `docs/adoption.md` spells it, and
+  # dmg's are: `release.yml` checks this name, `README.md` spells it, and
   # electron-builder's own pattern would put the version in the middle of both.
   artifactName: Verkstead-x86_64.msi
 
@@ -278,7 +278,7 @@ msi:
   # the app id unless it is told — derived afresh, this package would install
   # *beside* a machine's Rust msi rather than over it: two install directories,
   # two `PATH` entries, two Start-menu entries and two rows in **Installed
-  # apps**, against what `docs/adoption.md` promises in as many words.
+  # apps**, against what a downloader is promised in as many words.
   #
   # Never changed again, for the same reason it is not regenerated here.
   upgradeCode: "{A4727089-F5B9-40A6-A196-1856E8D6827A}"

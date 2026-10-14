@@ -499,8 +499,8 @@ pub(crate) async fn reading(state: AppState, conversation_id: i64, brought: Brou
                 // a roadmap that is not there at all is said.
                 None => Next::Unstartable {
                     why: format!(
-                        "this Conversation is a stage of the {roadmap} roadmap, and this \
-                         repository holds no branch its declarations could be read off"
+                        "this conversation is a stage of the `{roadmap}` roadmap, and no branch \
+                         of this repository holds its declarations to read"
                     ),
                 },
             };
@@ -532,7 +532,7 @@ pub(crate) async fn reading(state: AppState, conversation_id: i64, brought: Brou
                     &state,
                     conversation_id,
                     &format!(
-                        "Every stage of the `{roadmap}` roadmap is done, so there is no stage to \
+                        "Every stage of the `{roadmap}` roadmap is done, so there's no stage to \
                          start. The roadmap is complete."
                     ),
                 )
@@ -573,9 +573,8 @@ pub(crate) async fn reading(state: AppState, conversation_id: i64, brought: Brou
                     &state,
                     conversation_id,
                     &format!(
-                        "No stage of the `{roadmap}` roadmap can start yet: every stage it has \
-                         left is in flight, or stands on one that is. The roadmap is not \
-                         complete."
+                        "No stage of the `{roadmap}` roadmap can start yet. Every stage it has \
+                         left is in flight or stands on one that is."
                     ),
                 )
                 .await;
@@ -591,7 +590,10 @@ pub(crate) async fn reading(state: AppState, conversation_id: i64, brought: Brou
                 .not_started(
                     &state,
                     conversation_id,
-                    &format!("No stage of the roadmap could be started: {why}."),
+                    &format!(
+                        "No stage of the roadmap could be started. {}",
+                        crate::stopping::sentence(&why)
+                    ),
                 )
                 .await;
         }
@@ -783,9 +785,8 @@ async fn unrecorded(
                 state,
                 id,
                 "This stage was started before Verkstead recorded which roadmap a stage belongs \
-                 to, so there is nothing on the record saying where to carry on. Nothing was \
-                 started — continue the roadmap from *Continue a roadmap* to pick the next \
-                 stage up.",
+                 to, so nothing was started. Pick the next stage up from **Continue a \
+                 roadmap**.",
             )
             .await;
     }
@@ -800,9 +801,9 @@ async fn unrecorded(
             .not_started(
                 state,
                 id,
-                "This branch did not write exactly one roadmap, so there is none recorded \
-                 against it and no stage was started. Start a roadmap's first stage from \
-                 *Continue a roadmap*.",
+                "This branch didn't write exactly one roadmap, so none is recorded against it \
+                 and no stage was started. Start a roadmap's first stage from **Continue a \
+                 roadmap**.",
             )
             .await;
     }
@@ -852,8 +853,8 @@ async fn start(
             brought,
             settled,
             format!(
-                "Stage {} of the `{}` roadmap was ready to start, and this Conversation's \
-                 implementation Profile has gone, so there is no account to run it under. Nothing \
+                "Stage {} of the `{}` roadmap was ready to start, but this conversation's \
+                 implementation profile is gone, so there's no account to run it under. Nothing \
                  was started.",
                 stage.label, stage.roadmap,
             ),
@@ -879,9 +880,9 @@ async fn start(
             brought,
             settled,
             format!(
-                "Stage {} of the `{}` roadmap was ready to start, and no git author is \
-                 configured, so Verkstead cannot commit on its branch. Nothing was started. Set \
-                 one in Settings and continue the roadmap from there.",
+                "Stage {} of the `{}` roadmap was ready to start, but no git author is set, so \
+                 Verkstead can't commit on its branch. Nothing was started. Set one in settings, \
+                 then continue the roadmap.",
                 stage.label, stage.roadmap,
             ),
         )
@@ -935,9 +936,8 @@ async fn start(
             brought,
             settled,
             format!(
-                "Stage {} of the `{}` roadmap was ready to start, and `{found}` is already a \
-                 branch of this repository — so it looks to have been started already. Nothing \
-                 was started.",
+                "Stage {} of the `{}` roadmap was ready to start, but `{found}` is already a \
+                 branch of this repository, so it looks started already. Nothing was started.",
                 stage.label, stage.roadmap,
             ),
         )
@@ -959,8 +959,8 @@ async fn start(
             brought,
             settled,
             format!(
-                "Stage {} of the `{}` roadmap was ready to start, and `{by}` is already a branch \
-                 of this repository, which stands in the way of `{branch}`. Nothing was started, \
+                "Stage {} of the `{}` roadmap was ready to start, but `{by}` is already a branch \
+                 of this repository, and it stands in the way of `{branch}`. Nothing was started, \
                  and nothing will start until that branch is renamed or gone.",
                 stage.label, stage.roadmap,
             ),
@@ -994,10 +994,9 @@ async fn start(
                 brought,
                 settled,
                 format!(
-                    "Stage {} of the `{}` roadmap was ready to start, and git would not fetch \
-                     from this repository's remote — so what its branch would come off cannot be \
-                     trusted to be what origin is holding. Nothing was started, and the server \
-                     log says why the fetch failed.",
+                    "Stage {} of the `{}` roadmap was ready to start, but git wouldn't fetch \
+                     from this repository's remote, so its base can't be trusted to match origin. \
+                     Nothing was started. The server log says why the fetch failed.",
                     stage.label, stage.roadmap,
                 ),
             )
@@ -1045,8 +1044,8 @@ async fn start(
             brought,
             settled,
             format!(
-                "Stage {} of the `{}` roadmap could not be given everything it inherits from \
-                 this Conversation: {error}. Nothing was started.",
+                "Stage {} of the `{}` roadmap couldn't be given everything it inherits from \
+                 this conversation: {error}. Nothing was started.",
                 stage.label, stage.roadmap,
             ),
         )
@@ -1196,8 +1195,8 @@ async fn start(
         state,
         settled,
         &format!(
-            "Stage {} of the `{}` roadmap — *{}* — has started as a Conversation of its own, \
-             on `{branch}`.",
+            "Stage {} of the `{}` roadmap, *{}*, has started as a conversation of its own on \
+             `{branch}`.",
             stage.label, stage.roadmap, stage.title,
         ),
     )
@@ -1401,28 +1400,27 @@ fn begun(stage: &Stage, branch: &str, stands: &Stands) -> String {
     // workbench has no route to, and a link that went nowhere would be worse
     // than the path itself.
     let started = format!(
-        "Stage {} of the `{}` roadmap — *{}* — started from `{}` with nobody asked.",
+        "Stage {} of the `{}` roadmap, *{}*, started from `{}` with nobody asked.",
         stage.label, stage.roadmap, stage.title, stage.brief_path,
     );
 
     match stands {
         Stands::Recorded { base } => format!(
             "{started} Its branch `{branch}` was cut from `{base}`, the highest settled branch \
-             of this roadmap's chain, and it joins that chain at its finish the way this \
-             repository's `{}` records.",
+             of this roadmap's chain. It joins that chain at its finish, as this repository's \
+             `{}` records.",
             stages::GIT_WORKFLOW,
         ),
         Stands::Unrecorded { base, default } => format!(
             "{started} Its branch `{branch}` was cut from `{base}`, the highest settled branch \
-             of this roadmap's chain, because `{default}` does not hold that work yet — a stage \
-             off the default branch would be built without the work it builds on. This \
-             repository's `{}` records no way to stack a stage for review, so the pull request \
-             this one ends on carries the branch below it until that one merges.",
+             of this roadmap's chain, because `{default}` doesn't hold that work yet. This \
+             repository's `{}` records no way to stack a stage for review, so its pull request \
+             carries the branch below it until that one merges.",
             stages::GIT_WORKFLOW,
         ),
         Stands::Off { default } => format!(
             "{started} Its branch `{branch}` came off `{default}`, which already holds \
-             everything this roadmap has finished: there is nothing left to stand on.",
+             everything this roadmap has finished.",
         ),
     }
 }
@@ -1500,13 +1498,12 @@ impl Halted {
 
         match self {
             Self::Own => format!(
-                "{start} could not be given a worktree on `{branch}` off `{from}`. Nothing was \
+                "{start} couldn't be given a worktree on `{branch}` off `{from}`. Nothing was \
                  started.",
             ),
             Self::Companion { repo, why } => format!(
-                "{start} works alongside `{repo}`, the companion repository it inherits from \
-                 this Conversation, and {}. Nothing was started, and nothing it had begun to \
-                 check out was left behind.",
+                "{start} works alongside `{repo}`, the companion repo it inherits from this \
+                 conversation, and {}. Nothing was started, and nothing was left behind.",
                 why.said(),
             ),
         }
@@ -1522,23 +1519,22 @@ impl Why {
     fn said(&self) -> String {
         match self {
             Self::FetchFailed => {
-                "git would not fetch from that repository's remote — so what its checkout would \
-                 come off cannot be trusted to be what origin is holding, and the server log \
-                 says why the fetch failed"
+                "git wouldn't fetch from that repo's remote, so what its checkout would come off \
+                 can't be trusted to be what origin is holding. The server log says why the \
+                 fetch failed"
                     .to_owned()
             }
             Self::NoBaseCommit => {
                 "what its checkout comes off resolves to no commit there".to_owned()
             }
             Self::BranchExists => {
-                "the branch this stage would cut in it is already a branch of that repository"
-                    .to_owned()
+                "the branch this stage would cut in it is already a branch of that repo".to_owned()
             }
             Self::BranchInTheWay { by } => format!(
-                "`{by}` is already a branch of that repository, which stands in the way of the \
-                 branch this stage would cut in it"
+                "`{by}` is already a branch of that repo, which stands in the way of the branch \
+                 this stage would cut in it"
             ),
-            Self::WorktreeRefused => "git would not make its checkout".to_owned(),
+            Self::WorktreeRefused => "git wouldn't make its checkout".to_owned(),
         }
     }
 }

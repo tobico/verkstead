@@ -558,7 +558,7 @@ async fn a_set_that_does_not_exist_says_so_however_it_was_asked_for() {
         assert_eq!(status, StatusCode::NOT_FOUND, "{path} answered {body}");
         let refused: ApiError = read(&body);
         assert!(
-            refused.error.contains("no Question Set"),
+            refused.error.contains("no question set"),
             "expected a refusal that says what is missing, got {:?}",
             refused.error
         );

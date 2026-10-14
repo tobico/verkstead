@@ -517,7 +517,7 @@ function AttachMenu(props: {
                 picker.click();
               }}
             >
-              Attach file
+              Attach file…
             </button>
 
             {props.offering(shut)}

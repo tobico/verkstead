@@ -74,7 +74,7 @@ export function ShowArchived(props: { children?: JSX.Element }): JSX.Element {
       </div>
       <Show when={flip.isError}>
         <ErrorLine>
-          The setting could not be saved: {flip.error?.message}
+          The setting couldn't be saved. {flip.error?.message}
         </ErrorLine>
       </Show>
     </div>

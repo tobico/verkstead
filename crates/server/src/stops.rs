@@ -36,11 +36,11 @@ use crate::store::{self, Lifecycle};
 /// nothing failed, nothing was decided about the work, somebody pressed a
 /// button. Written as the *how* half of a stop's Notice — see
 /// [`crate::stopping::stop`].
-const AFTER_THE_STEP: &str = "you pressed Stop, so the session that was running \
-     was carried to its end and nothing was started after it";
+const AFTER_THE_STEP: &str = "You pressed **Stop**, so the session that was running \
+     was carried to its end and nothing was started after it.";
 const NOTHING_RUNNING: &str =
-    "you pressed Stop, and nothing was running to see out, so it stopped where it stood";
-const AT_ONCE: &str = "you pressed Force stop, so what was running was ended where it stood";
+    "You pressed **Stop**, and nothing was running to see out, so it stopped where it stood.";
+const AT_ONCE: &str = "You pressed **Force stop**, so what was running was ended where it stood.";
 
 /// Press Stop: pause after the current task.
 ///

@@ -69,11 +69,15 @@ fn binds_told(binds: &SandboxConfig, written: &[String]) -> Vec<BindEntry> {
                 source: PathSource::Settings,
                 resolution: there(&path),
             },
-            Err(error) => BindEntry {
+            // The one way an entry can fail to read is to be relative, and the
+            // reading's own words quote the entry back, which the row already
+            // shows: so the row's sentence is written here instead.
+            Err(_) => BindEntry {
                 path: written.to_owned(),
                 source: PathSource::Settings,
                 resolution: PathResolution::Unresolved {
-                    why: format!("{error:#}"),
+                    why: "This isn't an absolute path. Write the directory's whole path."
+                        .to_owned(),
                 },
             },
         });
@@ -88,7 +92,7 @@ fn there(path: &Path) -> PathResolution {
     match path.exists() {
         true => PathResolution::Resolves,
         false => PathResolution::Unresolved {
-            why: "the server cannot see it: there is nothing at that path".to_owned(),
+            why: "The server can't see it. There's nothing at that path.".to_owned(),
         },
     }
 }

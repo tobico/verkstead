@@ -118,22 +118,22 @@ describe("the Attach menu on a draft's composer", () => {
     // `docs` and `archive` are on the Conversation already, so what is left to
     // offer is the one declaration it has not been given — and, last, the way
     // to declare another.
-    expect(rows(menu)).toEqual(["Attach file", "tickets", "Add a server…"]);
+    expect(rows(menu)).toEqual(["Attach file…", "tickets", "Add a server…"]);
   });
 
   /// The servers are a section of the menu of their own, under a heading, with
   /// the way to declare another at its foot: *Attach file* is a different kind
   /// of thing to put on the work, and the section says which rows are which.
-  it("groups the servers under MCP Servers, with Add a server last", async () => {
+  it("groups the servers under MCP servers, with Add a server last", async () => {
     theWorkbench();
 
     const menu = await openMenu(await openComposer());
-    const section = within(menu).getByRole("group", { name: "MCP Servers" });
+    const section = within(menu).getByRole("group", { name: "MCP servers" });
 
     expect(rows(section)).toEqual(["tickets", "Add a server…"]);
-    expect(section.textContent).toContain("MCP Servers");
+    expect(section.textContent).toContain("MCP servers");
     expect(
-      within(section).queryByRole("menuitem", { name: "Attach file" }),
+      within(section).queryByRole("menuitem", { name: "Attach file…" }),
     ).toBeNull();
   });
 
@@ -158,9 +158,9 @@ describe("the Attach menu on a draft's composer", () => {
 
     const menu = await openMenu(await openComposer());
 
-    expect(rows(menu)).toEqual(["Attach file", "Add a server…"]);
+    expect(rows(menu)).toEqual(["Attach file…", "Add a server…"]);
     expect(
-      within(menu).getByRole("group", { name: "MCP Servers" }),
+      within(menu).getByRole("group", { name: "MCP servers" }),
     ).toBeTruthy();
   });
 
@@ -237,7 +237,7 @@ describe("adding a server from the Attach menu", () => {
     const menu = await openMenu(pane);
     fireEvent.click(within(menu).getByRole("menuitem", { name: "Add a server…" }));
 
-    return waitFor(() => screen.getByRole("dialog", { name: "Add an MCP server" }));
+    return waitFor(() => screen.getByRole("dialog", { name: "Add an MCP Server" }));
   }
 
   /// The press is a save of the whole list — every declaration as it stands,
@@ -316,7 +316,7 @@ describe("adding a server from the Attach menu", () => {
 
     await waitFor(() =>
       expect(
-        screen.queryByRole("dialog", { name: "Add an MCP server" }),
+        screen.queryByRole("dialog", { name: "Add an MCP Server" }),
       ).toBeNull(),
     );
   });
@@ -421,7 +421,7 @@ describe("adding a server from the Attach menu", () => {
     );
     await waitFor(() =>
       expect(
-        screen.queryByRole("dialog", { name: "Add an MCP server" }),
+        screen.queryByRole("dialog", { name: "Add an MCP Server" }),
       ).toBeNull(),
     );
   });
@@ -507,7 +507,7 @@ describe("adding a server from the Attach menu", () => {
 
     await waitFor(() =>
       expect(
-        screen.queryByRole("dialog", { name: "Add an MCP server" }),
+        screen.queryByRole("dialog", { name: "Add an MCP Server" }),
       ).toBeNull(),
     );
     expect(writes(fetching, "/api/ui/settings")).toHaveLength(0);

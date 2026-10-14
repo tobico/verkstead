@@ -530,7 +530,7 @@ async fn a_token_github_refuses_is_saved_anyway_and_the_refusal_is_in_words() {
     assert_eq!(
         saved.verified,
         Some(Verified::Refused {
-            why: "`gh` said: gh: Bad credentials (HTTP 401)".to_owned(),
+            why: "The gh command said: gh: Bad credentials (HTTP 401).".to_owned(),
         }),
     );
 
@@ -995,7 +995,7 @@ async fn a_size_that_is_not_one_is_refused_at_the_save() {
     assert_eq!(saved.refused_sizes.len(), 1, "{saved:?}");
     assert_eq!(saved.refused_sizes[0].language, "rust");
     assert!(
-        saved.refused_sizes[0].why.starts_with("is not a size"),
+        saved.refused_sizes[0].why.starts_with("isn't a size"),
         "{:?}",
         saved.refused_sizes[0],
     );
@@ -1033,7 +1033,7 @@ async fn a_hand_written_size_that_is_not_one_is_the_default_and_survives_a_save(
     assert!(
         rust.size_unread
             .as_deref()
-            .is_some_and(|why| why.starts_with("is not a size")),
+            .is_some_and(|why| why.starts_with("isn't a size")),
         "the pane says why: {rust:?}",
     );
 
@@ -1175,7 +1175,7 @@ async fn an_entry_that_would_not_load_says_so_on_the_page_and_stays_in_the_file(
         .unwrap_or_else(|| panic!("the entry was refused, so the page says so: {told:?}"));
 
     assert_eq!(
-        unread.why, "sets RUSTUP_HOME, which is a variable the Sandbox sets itself",
+        unread.why, "sets RUSTUP_HOME, which is a variable the sandbox sets itself",
         "the reason names the variable, because that is what there is to fix",
     );
     assert!(
@@ -2212,7 +2212,7 @@ async fn a_path_the_server_cannot_see_is_saved_anyway_and_said_so() {
     };
 
     assert!(
-        why(&bind.resolution).contains("cannot see it"),
+        why(&bind.resolution).contains("can't see it"),
         "a bind the server cannot see says so: {bind:?}"
     );
 }
@@ -2232,7 +2232,7 @@ async fn a_bind_that_will_not_read_is_still_a_row() {
     assert_eq!(bind.path, "node-cache", "the entry as it was written");
     assert_eq!(bind.source, PathSource::Settings);
     assert!(
-        why(&bind.resolution).contains("not an absolute path"),
+        why(&bind.resolution).contains("isn't an absolute path"),
         "{bind:?}"
     );
 }
@@ -3728,7 +3728,7 @@ mod trying {
         let saved = save_servers(&app, serde_json::json!([server("docs", &nowhere)])).await;
 
         assert!(
-            refused(&saved.tried, "docs").starts_with("It did not answer"),
+            refused(&saved.tried, "docs").starts_with("It didn't answer"),
             "{}",
             refused(&saved.tried, "docs"),
         );
@@ -3777,11 +3777,11 @@ mod trying {
         .await;
 
         let page = refused(&saved.tried, "page");
-        assert!(page.contains("not an MCP server"), "{page}");
+        assert!(page.contains("isn't an MCP server"), "{page}");
         assert!(page.contains("initialize"), "{page}");
 
         let missing = refused(&saved.tried, "missing");
-        assert!(missing.contains("not an MCP server"), "{missing}");
+        assert!(missing.contains("isn't an MCP server"), "{missing}");
         assert!(missing.contains("404"), "{missing}");
 
         assert_eq!(settings(&app).await.mcp_servers.len(), 2);
@@ -3874,7 +3874,7 @@ mod trying {
         let took = began.elapsed();
 
         assert!(
-            refused(&saved.tried, "docs").starts_with("It did not answer"),
+            refused(&saved.tried, "docs").starts_with("It didn't answer"),
             "{}",
             refused(&saved.tried, "docs"),
         );

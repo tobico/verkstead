@@ -65,11 +65,11 @@ import styles from "./Transfer.module.css";
 /// server used.
 const REFUSAL: Record<string, string> = {
   NotTransferable:
-    "This conversation cannot be moved: a draft moves by the device select on " +
-    "its own composer, and a closed one has no work left to move.",
+    "This conversation can't be transferred. A draft moves by the device " +
+    "select on its composer, and a closed one has no work left to move.",
   Elsewhere:
-    "The work has already been moved to another device. This device is keeping " +
-    "a copy of the record, and the press that moves it again is over there.",
+    "The work has already moved to another device. Transfer it again from " +
+    "there.",
   NoSuchConversation: "This conversation is gone.",
 };
 
@@ -94,8 +94,8 @@ const ROLE_NAME: Record<PairingRole, string> = {
 function lacking(said: Lacking, device: string): JSX.Element {
   if (said === "Unreachable") {
     return (
-      `${device} is ${UNREACHABLE}, so it cannot say what it has. ` +
-      "It will answer when it is awake."
+      `${device} is ${UNREACHABLE}, so it can't say what it has. ` +
+      "It'll answer once it's awake."
     );
   }
 
@@ -103,7 +103,7 @@ function lacking(said: Lacking, device: string): JSX.Element {
     return (
       <>
         {said.Repo.companion ? "The companion repo " : "The repo "}
-        {said.Repo.name} is not on {device}. <strong>Open repo</strong> there to
+        {said.Repo.name} isn't on {device}. <strong>Open repo</strong> there to
         register it.
       </>
     );
@@ -258,7 +258,7 @@ function Picking(props: {
       }
 
       if (outcome !== "Transferring") {
-        setRefused(REFUSAL[outcome] ?? "The conversation could not be moved.");
+        setRefused(REFUSAL[outcome] ?? "The conversation couldn't be moved.");
         return;
       }
 
@@ -271,13 +271,13 @@ function Picking(props: {
     },
 
     onError: (error: Error) =>
-      setRefused(`The conversation could not be moved: ${error.message}`),
+      setRefused(`The conversation couldn't be moved. ${error.message}`),
   }));
 
   return (
     <>
       <p class={styles.says}>
-        The session's turn ends, and the record, the branch and the working
+        The session's turn ends, and the record, the branch, and the working
         changes go over. This device keeps a read-only copy.
       </p>
 
@@ -309,18 +309,18 @@ function Picking(props: {
       <Show
         when={onto() !== undefined}
         fallback={
-          <p class={styles.waiting}>Pick the device the work is to move to.</p>
+          <p class={styles.waiting}>Pick the device to move the work to.</p>
         }
       >
         <Show
           when={!reading.isPending}
-          fallback={<p class={styles.waiting}>Checking…</p>}
+          fallback={<p class={styles.waiting}>Checking the device…</p>}
         >
           <Show
             when={found()}
             fallback={
               <ErrorLine class={styles.failure}>
-                That device could not be checked: {reading.error?.message}
+                That device couldn't be checked. {reading.error?.message}
               </ErrorLine>
             }
           >
@@ -377,7 +377,7 @@ function Picking(props: {
             going.mutate(target);
           }}
         >
-          {going.isPending ? "Going…" : "Go"}
+          {going.isPending ? "Transferring…" : "Transfer"}
         </button>
       </div>
     </>

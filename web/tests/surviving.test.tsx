@@ -407,7 +407,7 @@ describe("what a picker shows and what it would send", () => {
     const { container, client } = mount(`/conversations/${OPEN.id}`);
     await openAgent(container);
     await waitFor(() => picker("Grilling"));
-    expect(showing("Grilling")).toBe("Fable 5 — fable");
+    expect(showing("Grilling")).toBe("Fable 5 · fable");
 
     standing.profiles = PROFILES.filter(
       (profile) => profile.id !== chosen.profile.id,

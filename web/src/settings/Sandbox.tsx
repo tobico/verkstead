@@ -44,11 +44,11 @@ export function SandboxCard(props: {
   return (
     <Choose>
       <Match when={settings.isPending}>
-        <Empty>Loading…</Empty>
+        <Empty>Reading the settings…</Empty>
       </Match>
       <Match when={settings.isError}>
         <ErrorLine>
-          Could not read the settings: {settings.error?.message}
+          The settings couldn't be read. {settings.error?.message}
         </ErrorLine>
       </Match>
       <Match when={settings.data}>

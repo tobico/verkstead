@@ -3135,7 +3135,7 @@ fn decided(
     // Both where the human picked an Option and said why, which is the ordinary
     // shape of an Answer that carries a qualification.
     match (chosen, said) {
-        (Some(chosen), Some(said)) => format!("{chosen} — {said}"),
+        (Some(chosen), Some(said)) => format!("{chosen} · {said}"),
         (Some(only), None) | (None, Some(only)) => only,
         (None, None) => String::new(),
     }

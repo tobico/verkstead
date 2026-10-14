@@ -81,7 +81,7 @@ export const NOTHING_LISTED =
 /// The one empty state that is about what was typed rather than about what the
 /// Conversation has, which is why it says so: there is nothing to do about it
 /// but type something else.
-export const NOTHING_MATCHES = "Nothing here matches that.";
+export const NOTHING_MATCHES = "No files match that.";
 
 /// And what it says under the field about a root the server cut short.
 ///
@@ -89,7 +89,7 @@ export const NOTHING_MATCHES = "Nothing here matches that.";
 /// has to know is that this root is not all here, and that a file the palette
 /// does not offer may still be in the checkout.
 export function onlyPartOf(repo: string): string {
-  return `Only part of ${repo} is here: it holds more files than quick open matches over.`;
+  return `Only part of ${repo} is here. It holds more files than quick open searches.`;
 }
 
 /// The palette, while it is up.
@@ -266,7 +266,7 @@ export function Quick(props: {
       >
         <Match when={files.isError}>
           <ErrorLine>
-            Could not read this conversation's files: {files.error?.message}
+            This conversation's files couldn't be read. {files.error?.message}
           </ErrorLine>
         </Match>
 

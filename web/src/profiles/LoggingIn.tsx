@@ -165,11 +165,11 @@ export function LoggingIn(props: {
 
         <Match when={state()?.state === "LoggedIn"}>
           <p class={styles.said}>
-            Logged in. Sessions under this Profile use the new login.
+            Logged in. Sessions under this profile use the new login.
           </p>
           <div class={styles.out}>
             <button type="button" onClick={() => props.close()}>
-              Done
+              Close
             </button>
           </div>
         </Match>

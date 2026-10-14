@@ -118,10 +118,10 @@ export function SetupPage(): JSX.Element {
     <>
       <DragBar />
       <section class={styles.setup}>
-        <h1>Set Verkstead up</h1>
+        <h1>Set Up Verkstead</h1>
         <p class={styles.standing}>
-          There is a little to settle before any work can be started here.
-          Nothing else is reachable until it is done.
+          A few things need settling before any work can start. Nothing else is
+          reachable until they are.
         </p>
 
         <Show
@@ -131,7 +131,7 @@ export function SetupPage(): JSX.Element {
               when={onboarding.isError}
               fallback={<Empty>Reading this machine…</Empty>}
             >
-              <ErrorLine>This machine could not be read.</ErrorLine>
+              <ErrorLine>This machine couldn't be read.</ErrorLine>
             </Show>
           }
         >

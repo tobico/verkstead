@@ -234,7 +234,7 @@ describe("how often the machine is read again", () => {
     const fetching = serving(whenever(ONBOARDING, json(PART_WAY)));
 
     render(() => <App />);
-    await waitFor(() => screen.getByText("Set Verkstead up"));
+    await waitFor(() => screen.getByText("Set Up Verkstead"));
 
     const before = askedFor(fetching, ONBOARDING);
     await vi.advanceTimersByTimeAsync(60_000);

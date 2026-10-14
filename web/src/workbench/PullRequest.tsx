@@ -66,13 +66,13 @@ export const RESOLVE_REFUSAL: Record<Resolved, string> = {
   Resolving: "",
   NoSuchConversation: "This conversation is gone.",
   NotDone:
-    "This conversation is not finished with any more, so whatever is driving it has the conflict in hand.",
+    "This conversation is no longer done, so whatever is driving it has the conflict in hand.",
   NothingConflicts:
-    "This pull request merges again, so there is nothing left to resolve.",
+    "This pull request merges again, so there's nothing left to resolve.",
   NowhereToWork:
-    "This conversation has no worktree recorded, so there is nowhere to resolve the conflict.",
+    "This conversation has no worktree recorded, so there's nowhere to resolve the conflict.",
   WorktreeRefused:
-    "The worktree this conversation was done in has gone, and git would not make it again. The server's log says why.",
+    "The worktree this conversation was done in is gone, and git wouldn't make it again. The server's log says why.",
 };
 
 export function PullRequest(props: {
@@ -129,7 +129,7 @@ export function PullRequest(props: {
   return (
     <>
       <PaneSticky>
-        <PaneHead back={{ to: "Timeline", go: props.back }} title="Pull request" />
+        <PaneHead back={{ to: "Timeline", go: props.back }} title="Pull Request" />
       </PaneSticky>
 
       <div class={styles.summary}>
@@ -191,7 +191,7 @@ export function PullRequest(props: {
           </Show>
           <Show when={resolving.isError}>
             <ErrorLine class={styles.refused}>
-              The conflict could not be sent back to the wrap-up:{" "}
+              The conflict couldn't be sent back to the wrap-up.{" "}
               {resolving.error?.message}
             </ErrorLine>
           </Show>
@@ -200,14 +200,14 @@ export function PullRequest(props: {
 
       <Switch>
         <Match when={carried.isPending}>
-          <Empty>Loading…</Empty>
+          <Empty>Reading this pull request from GitHub…</Empty>
         </Match>
         {/* The server's own wording, which is the thing to act on: no `gh` on
             the machine, an account not logged in, and a GitHub that would not
             answer are three different afternoons. */}
         <Match when={carried.isError}>
           <ErrorLine>
-            Could not read this pull request: {carried.error?.message}
+            This pull request couldn't be read. {carried.error?.message}
           </ErrorLine>
         </Match>
         <Match when={carried.data}>
@@ -217,7 +217,7 @@ export function PullRequest(props: {
                 <h2>Commits</h2>
                 <Show
                   when={read().commits.length > 0}
-                  fallback={<Empty>Nothing is on it yet.</Empty>}
+                  fallback={<Empty>No commits are on it yet.</Empty>}
                 >
                   <ol class={styles.carried}>
                     <For each={read().commits}>
@@ -238,7 +238,7 @@ export function PullRequest(props: {
                 <h2>Checks</h2>
                 <Show
                   when={read().checks.length > 0}
-                  fallback={<Empty>Nothing is running against it.</Empty>}
+                  fallback={<Empty>No checks are running against it.</Empty>}
                 >
                   <ul class={styles.ran}>
                     <For each={read().checks}>
@@ -274,7 +274,7 @@ export function PullRequest(props: {
                 <h2>Comments</h2>
                 <Show
                   when={read().comments.length > 0}
-                  fallback={<Empty>Nobody has said anything.</Empty>}
+                  fallback={<Empty>No comments yet.</Empty>}
                 >
                   <ol class={styles.said}>
                     <For each={read().comments}>

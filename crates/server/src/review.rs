@@ -737,12 +737,15 @@ async fn abandoned(
 ) {
     closed(state, conversation_id, set_id).await;
 
-    let left = "the review put its findings to you and the session that was to act on \
+    let left = "The review put its findings to you, and the session that was to act on \
                 them is gone, so its questions have been closed unanswered. Resuming \
                 reads the branch again.";
 
     let (how, writing) = match ended_badly {
-        Some((how, writing)) => (format!("{how}, and {left}"), Some(writing)),
+        Some((how, writing)) => (
+            format!("{} {left}", crate::stopping::sentence(&how)),
+            Some(writing),
+        ),
         None => (left.to_owned(), None),
     };
 
@@ -835,7 +838,7 @@ async fn stopped(state: &AppState, conversation_id: i64, how: &str, writing: i64
         conversation_id,
         crate::stopping::Decided::Verkstead,
         "reviewing the branch the pull request is on",
-        how,
+        &crate::stopping::sentence(how),
         Some(writing),
     )
     .await
@@ -874,8 +877,8 @@ async fn dropped(state: &AppState, conversation_id: i64, set_id: i64) {
         conversation_id,
         crate::stopping::Decided::Verkstead,
         "acting on the answers to what the review found",
-        "you answered what the review found and the session that was to act on it is \
-         gone, so what became of it is not known here. Resuming reads the branch again.",
+        "You answered what the review found and the session that was to act on it is \
+         gone, so what became of it isn't known here. Resuming reads the branch again.",
         None,
     )
     .await

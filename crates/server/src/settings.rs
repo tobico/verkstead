@@ -1918,27 +1918,27 @@ pub fn trouble_among(servers: &[McpServer]) -> Vec<(usize, ServerTrouble)> {
 fn trouble(server: &McpServer, above: &[McpServer]) -> Option<ServerTrouble> {
     let Some(name) = server.name() else {
         return Some(ServerTrouble::Name(
-            "a server is referred to by name, so it needs one".to_owned(),
+            "A server is referred to by name, so it needs one.".to_owned(),
         ));
     };
 
     if !named_plainly(name) {
         return Some(ServerTrouble::Name(
-            "a name is lowercase letters, digits and hyphens: it is what the agent sees in \
-             front of the server's tool names"
+            "A name is lowercase letters, digits and hyphens. It's what the agent sees in \
+             front of the server's tool names."
                 .to_owned(),
         ));
     }
 
     if above.iter().any(|earlier| earlier.name() == Some(name)) {
         return Some(ServerTrouble::Name(format!(
-            "a server is already declared as {name}, and the name is what tells two of them apart"
+            "A server is already declared as {name}, and the name is what tells two of them apart."
         )));
     }
 
     if server.url().is_none() {
         return Some(ServerTrouble::Url(
-            "a server is reached over HTTP, so it needs a URL".to_owned(),
+            "A server is reached over HTTP, so it needs a URL.".to_owned(),
         ));
     }
 

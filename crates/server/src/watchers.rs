@@ -976,7 +976,7 @@ pub(crate) async fn attach(
         Ok(None) => return crate::ui::no_such_conversation(&id.to_string()),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "loading a Conversation failed");
-            return crate::ui::unavailable("the Conversation could not be read");
+            return crate::ui::unavailable("The conversation couldn't be read.");
         }
     };
 

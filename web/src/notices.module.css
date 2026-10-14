@@ -28,3 +28,28 @@
   font-size: 0.85rem;
   color: var(--ink-soft);
 }
+
+/* The rest of a note, folded: the summary as quiet as a note and pressable, and
+   what unfolds in the note's own size, so opening it reads as the note going
+   on rather than as something new on the page. */
+.more {
+  margin: 0.5rem 0 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+.more > summary {
+  cursor: pointer;
+  width: fit-content;
+}
+
+.more > div > p {
+  margin: 0.4rem 0 0;
+}
+
+/* Under the pointer, the summary takes the accent, as a fold's does. */
+@media (hover: hover) {
+  .more > summary:hover {
+    color: var(--accent);
+  }
+}

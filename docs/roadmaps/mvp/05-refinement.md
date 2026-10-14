@@ -49,7 +49,7 @@ it up.
 - **roadrunner and the wrappers carry no deprecation notice**, deliberately:
   one user, who knows. Nothing to do unless that stops being true.
 
-The switch-over itself is written down — [docs/adoption.md](../../adoption.md)
+The switch-over itself is written down — in `docs/adoption.md`, since retired
 — so the run has a page to follow and to correct.
 
 ## Proposed tasks (provisional)

@@ -1599,9 +1599,9 @@ fn announced(
 
     if let Some(closed) = made_way {
         said.push(format!(
-            "The Conversation on `{closed}` had taken this pull request over and finished with \
-             it, so it was closed to make way: there is one open Conversation per pull request, \
-             and a Steer is the way back into it.",
+            "The conversation on `{closed}` had taken this pull request over and finished with \
+             it, so it was closed to make way. There's one open conversation per pull request, \
+             and a steer is the way back into it.",
         ));
     }
 

@@ -124,7 +124,7 @@ describe("the notifications switch", () => {
     // manager, which is the browser this is about.
     serving();
 
-    const { flip } = await stalled("not available here");
+    const { flip } = await stalled("aren't available here");
 
     expect(flip.disabled).toBe(true);
     expect(flip.checked).toBe(false);
@@ -134,7 +134,7 @@ describe("the notifications switch", () => {
     pushing({ permission: "granted", secure: false });
     serving();
 
-    const { flip } = await stalled("not available here");
+    const { flip } = await stalled("aren't available here");
 
     expect(flip.disabled).toBe(true);
   });
@@ -210,13 +210,13 @@ describe("the notifications switch", () => {
 
   it("says so when the server would not take the subscription", async () => {
     pushing({ permission: "granted" });
-    serving(json({ key: KEY }), json({ error: "the subscription could not be stored" }, 500));
+    serving(json({ key: KEY }), json({ error: "The subscription couldn't be stored." }, 500));
 
     const { flip, state } = await control();
     flip.click();
 
-    await waitFor(() => expect(state()).toContain("The server did not take it"));
-    expect(state()).toContain("the subscription could not be stored");
+    await waitFor(() => expect(state()).toContain("The server didn't take it"));
+    expect(state()).toContain("The subscription couldn't be stored.");
   });
 
   it("hands over a subscription the browser already had rather than asking for a second", async () => {
@@ -270,7 +270,7 @@ describe("the notifications switch", () => {
   it("says the server still has this device when only the browser's half came off", async () => {
     const held = subscription();
     pushing({ permission: "granted", subscription: held });
-    serving(json({ error: "the subscription could not be forgotten" }, 500));
+    serving(json({ error: "The subscription couldn't be forgotten." }, 500));
 
     const { flip, state } = await control();
     flip.click();

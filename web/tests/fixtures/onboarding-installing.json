@@ -92,7 +92,7 @@
   },
   "run": {
     "phase": "Asking",
-    "status": "Waiting for the password dialog on ada-box",
+    "status": "Waiting for the password dialog on ada-box…",
     "done": 0,
     "total": 3,
     "cancelling": false

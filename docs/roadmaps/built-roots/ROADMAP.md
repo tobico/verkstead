@@ -12,8 +12,8 @@ instructions file from the settings page. Alongside it are the smaller things a
 first Windows install turned up: what the reporter could not see while two
 sessions failed, and the hygiene of a first run.
 
-What it realizes is the promise [the adoption doc](../../adoption.md) already
-makes — *a session's behaviour is the product's* — and the decisions are in
+What it realizes is the promise the adoption doc already
+made — *a session's behaviour is the product's* — and the decisions are in
 [ADR-0011](../../adr/0011-agent-backends.md) (*Amended: the account is built
 rather than joined*) and [ADR-0014](../../adr/0014-windows-sessions.md) (the
 amendment of the same name). The terms are in [CONTEXT.md](../../../CONTEXT.md),

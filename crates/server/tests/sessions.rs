@@ -6522,7 +6522,7 @@ async fn an_inline_grilling_that_writes_no_handoff_halts_the_run() {
     assert!(
         stopped
             .html
-            .contains("the session ended without finishing the step"),
+            .contains("The session ended without finishing the step."),
         "and an agent that stops short exits zero, so nothing but this could say \
          it: {:?}",
         stopped.html,
@@ -9216,7 +9216,7 @@ esac
         "the signal was taken: {answered:?}",
     );
     assert!(
-        stopped.html.contains("not logged in"),
+        stopped.html.contains("isn't logged in"),
         "and the stop after it is the one GitHub's silence has always given: {:?}",
         stopped.html,
     );
@@ -15381,7 +15381,7 @@ async fn a_pull_request_opening_and_a_conversation_finishing_reach_the_devices()
     );
     assert_eq!(
         opened["title"],
-        format!("{} is on pull request #41", before.branch),
+        format!("{} is on pull request #41.", before.branch),
         "and the pull request's says which one, because that is where the human's \
          own part of the work starts",
     );
@@ -15390,7 +15390,7 @@ async fn a_pull_request_opening_and_a_conversation_finishing_reach_the_devices()
     assert_eq!(done["path"], format!("/conversations/{}", fixture.id));
     assert_eq!(
         done["title"],
-        format!("{} is done", before.branch),
+        format!("{} is done.", before.branch),
         "and Done's says so in words nothing else here says",
     );
 
@@ -16154,7 +16154,7 @@ async fn a_session_that_exits_badly_halts_the_run_with_a_notice() {
         stopped.html,
     );
     assert!(
-        stopped.html.contains("the session exited with status 1"),
+        stopped.html.contains("The session exited with status 1."),
         "and how it ended, which is the thing a status can say: {:?}",
         stopped.html,
     );
@@ -16262,7 +16262,7 @@ async fn a_session_that_printed_nothing_says_how_it_ended_in_its_notice() {
     let stopped = fixture.stopped().await;
 
     assert!(
-        stopped.html.contains("the session exited with status 1"),
+        stopped.html.contains("The session exited with status 1."),
         "the reason the Notice opens with is the one it always was: {:?}",
         stopped.html,
     );
@@ -16423,7 +16423,7 @@ async fn a_backlog_halts_at_the_task_whose_session_died() {
         stopped.html,
     );
     assert!(
-        stopped.html.contains("the session exited with status 1"),
+        stopped.html.contains("The session exited with status 1."),
         "{:?}",
         stopped.html,
     );
@@ -16516,7 +16516,7 @@ async fn a_backlog_entry_with_no_task_file_stops_the_run() {
         stopped.html,
     );
     assert!(
-        stopped.html.contains("entry 02 of"),
+        stopped.html.contains("Entry 02 of"),
         "and names the entry there is nothing to work from: {:?}",
         stopped.html,
     );
@@ -16556,7 +16556,7 @@ async fn a_backlog_entry_with_no_task_file_stops_the_run() {
         .await;
 
     assert!(
-        again.html.contains("entry 02 of"),
+        again.html.contains("Entry 02 of"),
         "the resumed run stops at the same entry, and says so again: {:?}",
         again.html,
     );
@@ -16740,9 +16740,9 @@ async fn an_account_out_of_window_stops_the_run_and_tells_the_devices() {
         notice.html,
     );
     assert!(
-        notice.html.contains(
-            "the account <strong>implementation</strong> was being spent is out of window"
-        ),
+        notice
+            .html
+            .contains("The <strong>implementation</strong> account is out of window."),
         "naming the account that ran out, which is the implementation Profile the \
          task was being worked under: {:?}",
         notice.html,
@@ -16782,7 +16782,7 @@ async fn an_account_out_of_window_stops_the_run_and_tells_the_devices() {
         "tapping it opens the Conversation whose run stopped",
     );
     assert_eq!(
-        told["title"], "implementation is out of window until 2026-08-24T05:00:00Z",
+        told["title"], "implementation is out of window until 2026-08-24T05:00:00Z.",
         "and it says which account and until when, which is what decides whether the \
          human does anything about it",
     );
@@ -16875,7 +16875,7 @@ async fn an_account_that_signs_out_stops_the_run_with_a_log_in_press() {
     assert!(
         notice
             .html
-            .contains("the account <strong>implementation</strong> has signed out"),
+            .contains("The <strong>implementation</strong> account has signed out."),
         "naming the account whose login went: {:?}",
         notice.html,
     );
@@ -16920,7 +16920,7 @@ async fn an_account_that_signs_out_stops_the_run_with_a_log_in_press() {
     let told = phone.read(&pushed[0]);
 
     assert_eq!(told["path"], format!("/conversations/{}", fixture.id));
-    assert_eq!(told["title"], "implementation has signed out");
+    assert_eq!(told["title"], "implementation has signed out.");
 
     pause(Duration::from_secs(2)).await;
 
@@ -17270,7 +17270,7 @@ async fn a_codex_account_out_of_window_stops_the_run_on_codexs_own_sentence() {
     assert!(
         notice
             .html
-            .contains("the account <strong>codex</strong> was being spent is out of window"),
+            .contains("The <strong>codex</strong> account is out of window."),
         "naming the Profile whose account ran out, which is the Codex one every \
          role of this run is on: {:?}",
         notice.html,
@@ -17354,7 +17354,7 @@ async fn a_codex_session_saying_so_only_in_its_rollout_is_stopped_off_the_transc
     assert!(
         notice
             .html
-            .contains("the account <strong>codex</strong> was being spent is out of window"),
+            .contains("The <strong>codex</strong> account is out of window."),
         "the stop is the same stop, named for the same Profile: {:?}",
         notice.html,
     );
@@ -17424,7 +17424,7 @@ async fn a_grok_account_out_of_window_stops_the_run_on_the_card_it_draws() {
     assert!(
         notice
             .html
-            .contains("the account <strong>grok</strong> was being spent is out of window"),
+            .contains("The <strong>grok</strong> account is out of window."),
         "naming the Profile whose account ran out, which is the Grok Build one \
          every role of this run is on: {:?}",
         notice.html,
@@ -17520,7 +17520,7 @@ async fn a_grok_session_saying_so_only_in_its_log_is_stopped_off_the_transcript(
     assert!(
         notice
             .html
-            .contains("the account <strong>grok</strong> was being spent is out of window"),
+            .contains("The <strong>grok</strong> account is out of window."),
         "the stop is the same stop, named for the same Profile: {:?}",
         notice.html,
     );
@@ -17897,7 +17897,7 @@ async fn stop_lets_the_task_finish_and_halts_before_the_next_one() {
     let stopped = fixture.stopped().await;
 
     assert!(
-        stopped.html.contains("you pressed Stop"),
+        stopped.html.contains("You pressed <strong>Stop</strong>"),
         "the Notice says whose stop it was: {:?}",
         stopped.html,
     );
@@ -17998,7 +17998,9 @@ async fn force_stop_ends_the_session_where_it_stands_and_halts_at_once() {
     let stopped = fixture.stopped().await;
 
     assert!(
-        stopped.html.contains("you pressed Force stop"),
+        stopped
+            .html
+            .contains("You pressed <strong>Force stop</strong>"),
         "the Notice says whose stop it was, and which of the two: {:?}",
         stopped.html,
     );
@@ -18136,7 +18138,9 @@ async fn force_stop_as_the_handoff_lands_starts_nothing_behind_the_halt() {
     let stopped = fixture.stopped().await;
 
     assert!(
-        stopped.html.contains("you pressed Force stop"),
+        stopped
+            .html
+            .contains("You pressed <strong>Force stop</strong>"),
         "the run stopped because of the press: {:?}",
         stopped.html,
     );
@@ -19275,7 +19279,7 @@ async fn the_servers_places_hold_a_settle_back_and_never_a_press() {
         "which stage is waiting: {said:?}",
     );
     assert!(
-        !said.contains("this roadmap runs"),
+        !said.contains("This roadmap runs"),
         "and not on its roadmap, which was given five places: {said:?}",
     );
 
@@ -19855,7 +19859,7 @@ async fn a_place_coming_free_starts_the_stage_that_waited_for_one() {
     let said = said_on(&fixture, fixture.id, "Stage 04").await;
 
     assert!(
-        said.contains("has started as a Conversation of its own"),
+        said.contains("has started as a conversation of its own"),
         "the foot's Timeline says the stage started: {said:?}",
     );
 
@@ -19970,7 +19974,7 @@ esac
         "the lowest-numbered root is the one waiting: {said:?}",
     );
     assert!(
-        !said.contains("this roadmap runs"),
+        !said.contains("This roadmap runs"),
         "and not on its roadmap, which has three places and two roots: {said:?}",
     );
 
@@ -20344,7 +20348,7 @@ async fn a_roadmap_at_its_own_limit_is_passed_over_and_the_next_one_starts() {
     // Waited on rather than read as it stands: the older roadmap's fourth stage
     // is told about the server's places while its siblings are still starting,
     // and what is asked here is what it settles on once they have.
-    said_on(&fixture, fixture.id, "this roadmap runs").await;
+    said_on(&fixture, fixture.id, "This roadmap runs").await;
 
     let last = notices_on(&fixture, fixture.id)
         .await
@@ -20354,7 +20358,7 @@ async fn a_roadmap_at_its_own_limit_is_passed_over_and_the_next_one_starts() {
         .expect("the older roadmap said something about its fourth stage");
 
     assert!(
-        last.contains("this roadmap runs") && !last.contains("on the server"),
+        last.contains("This roadmap runs") && !last.contains("on the server"),
         "the older roadmap's fourth stage waits on its own roadmap rather than the machine: \
          {last:?}",
     );
@@ -20662,7 +20666,7 @@ async fn a_roadmap_moving_on_tells_the_devices_which_stage_started() {
 
     let started = told
         .iter()
-        .find(|notice| notice["title"] == "Stage 01 of the `rate-limiting` roadmap has started")
+        .find(|notice| notice["title"] == "Stage 01 of the rate-limiting roadmap has started.")
         .unwrap_or_else(|| panic!("nothing said a stage had started: {titles:?}"));
 
     assert_eq!(
@@ -20674,11 +20678,11 @@ async fn a_roadmap_moving_on_tells_the_devices_which_stage_started() {
     assert_eq!(started["project"], roadmap.repo.name);
 
     assert!(
-        titles.contains(&format!("{} is done", roadmap.branch).as_str()),
+        titles.contains(&format!("{} is done.", roadmap.branch).as_str()),
         "and the Conversation that settled says so in words of its own: {titles:?}",
     );
     assert!(
-        titles.contains(&format!("{} is on pull request #41", roadmap.branch).as_str()),
+        titles.contains(&format!("{} is on pull request #41.", roadmap.branch).as_str()),
         "as does the pull request it opened on the way: {titles:?}",
     );
 
@@ -20726,7 +20730,7 @@ async fn a_repository_with_no_stacking_recorded_still_stands_its_stage_on_the_pr
         "the branch was cut from the one the stage before it was worked on: {said:?}",
     );
     assert!(
-        said.contains("<code>main</code>") && said.contains("does not hold that work yet"),
+        said.contains("<code>main</code>") && said.contains("doesn't hold that work yet"),
         "and why, which is a fact about git rather than about the file: {said:?}",
     );
     assert!(
@@ -21049,7 +21053,7 @@ async fn a_stage_whose_fetch_fails_halts_with_a_notice_and_starts_nothing() {
     let said = said_by(&fixture).await;
 
     assert!(
-        said.contains("would not fetch"),
+        said.contains("wouldn't fetch"),
         "the fetch is what is named, that being what the human can go and fix: {said:?}",
     );
 
@@ -21226,14 +21230,14 @@ async fn a_settle_with_no_git_author_starts_no_stage_and_says_so() {
 
     let roadmap = fixture.view().await;
 
-    let said = said_on(&fixture, fixture.id, "no git author is configured").await;
+    let said = said_on(&fixture, fixture.id, "no git author is set").await;
 
     assert!(
         said.contains("Stage 01") && said.contains("<code>rate-limiting</code>"),
         "the notice names the stage that would have started: {said:?}",
     );
     assert!(
-        said.contains("Nothing was started") && said.contains("Set one in Settings"),
+        said.contains("Nothing was started") && said.contains("Set one in settings"),
         "and what the human does about it: {said:?}",
     );
 
@@ -21269,11 +21273,11 @@ async fn a_settle_with_no_git_author_starts_no_stage_and_says_so() {
         .collect();
 
     assert!(
-        titles.contains(&"Stage 01 of the `rate-limiting` roadmap needs a git author".to_owned()),
+        titles.contains(&"Stage 01 of the rate-limiting roadmap needs a git author.".to_owned()),
         "the phone is told what the roadmap has stopped for: {titles:?}",
     );
     assert!(
-        titles.contains(&format!("{} is done", roadmap.branch)),
+        titles.contains(&format!("{} is done.", roadmap.branch)),
         "beside the Conversation that settled saying so: {titles:?}",
     );
 }
@@ -21681,7 +21685,7 @@ async fn a_stage_whose_companion_cannot_be_delivered_starts_nothing() {
         "the repository that stopped it is named: {said:?}",
     );
     assert!(
-        said.contains("already a branch of that repository"),
+        said.contains("already a branch of that repo"),
         "and what git would not do about it: {said:?}",
     );
 
@@ -21874,7 +21878,7 @@ async fn a_roadmap_with_every_stage_checked_starts_nothing_and_says_it_is_comple
 
     let finished = told
         .iter()
-        .find(|notice| notice["title"] == "The `rate-limiting` roadmap is complete")
+        .find(|notice| notice["title"] == "The rate-limiting roadmap is complete.")
         .unwrap_or_else(|| {
             panic!(
                 "nothing said the roadmap was finished: {:?}",
@@ -22070,7 +22074,7 @@ async fn a_branch_that_wrote_two_roadmaps_starts_nothing_and_says_why() {
     let said = said_by(&fixture).await;
 
     assert!(
-        said.contains("did not write exactly one roadmap"),
+        said.contains("didn't write exactly one roadmap"),
         "the Timeline says why nothing started: {said:?}",
     );
     assert!(
@@ -24803,7 +24807,7 @@ async fn a_stage_waits_its_turn_behind_the_stage_whose_tasks_finished_first() {
     let said = said_on(&fixture, fixture.id, "Waiting to join").await;
 
     assert!(
-        said.contains("stage 02 finished its tasks before this one and has not joined yet"),
+        said.contains("stage 02 finished its tasks before this one and hasn't joined yet"),
         "the Timeline says which stage is in front of it, and why: {said:?}",
     );
 
@@ -24850,7 +24854,7 @@ async fn a_stage_waits_its_turn_behind_the_stage_whose_tasks_finished_first() {
     let said = said_on(
         &fixture,
         fixture.id,
-        "stage 02 has joined the chain and has not settled",
+        "stage 02 has joined the chain and hasn't settled",
     )
     .await;
 
@@ -25288,7 +25292,7 @@ async fn a_fix_merge_issues_wrap_up_reads_no_branch_and_answers_nothing_said_on_
         .expect("the press wrote down what it took up");
 
     assert!(
-        taken.contains("narrowed") && taken.contains("no review will be read"),
+        taken.contains("waits only on the checks") && taken.contains("No review is read"),
         "the note says the wrap-up is narrowed and what that leaves out: {taken}",
     );
 
@@ -27107,7 +27111,7 @@ async fn a_halt_verkstead_decided_on_tells_the_devices_once() {
         );
         assert_eq!(
             notice["title"],
-            format!("Implementing the work inline stopped on {}", before.branch),
+            format!("Implementing the work inline stopped on {}.", before.branch),
             "and say what stopped and which piece of work it stopped in — the \
              words the Notice opens with",
         );
@@ -27337,7 +27341,7 @@ async fn a_conversation_nothing_is_driving_is_halted_while_the_server_runs() {
     );
     assert!(
         stalled.html.contains(
-            "nothing is driving it: no session is running, and nothing is left to start one"
+            "Nothing is driving it. No session is running, and nothing is left to start one."
         ),
         "and nothing failed, because nothing was ever launched: {:?}",
         stalled.html,
@@ -27637,8 +27641,8 @@ async fn halted_by(fixture: &Grilling, decision: Decision) {
         &pool,
         fixture.id,
         decision,
-        "**Grilling the work** stopped.\n\nnothing is driving it: no session is \
-         running, and nothing is left to start one\n\n### The worktree\n\nGit had \
+        "**Grilling the work** stopped.\n\nNothing is driving it. No session is \
+         running, and nothing is left to start one.\n\n### The worktree\n\nGit had \
          nothing pending, or the repository would not answer.\n\n### What the last \
          session said\n\n    the grilling has nothing to say\n",
         None,
@@ -28267,7 +28271,7 @@ async fn resuming_an_inline_run_github_cannot_be_asked_about_halts_unspent() {
     let first = fixture.stopped().await;
 
     assert!(
-        first.html.contains("not logged in"),
+        first.html.contains("isn't logged in"),
         "the run stopped because nothing could be asked: {:?}",
         first.html,
     );
@@ -28286,7 +28290,7 @@ async fn resuming_an_inline_run_github_cannot_be_asked_about_halts_unspent() {
         .await;
 
     assert!(
-        again.html.contains("not logged in"),
+        again.html.contains("isn't logged in"),
         "and it stops on the same thing, named again: {:?}",
         again.html,
     );
@@ -31258,12 +31262,12 @@ async fn a_follow_up_session_that_is_gone_stops_the_conversation() {
         stopped.html,
     );
     assert!(
-        stopped.html.contains("the follow-up session finished"),
+        stopped.html.contains("The follow-up session finished"),
         "and what came of it, which is nothing worse than an ending: {:?}",
         stopped.html,
     );
     assert!(
-        stopped.html.contains("nobody is left to ask you anything"),
+        stopped.html.contains("Nobody is left to ask you anything"),
         "and why that is a stop: nothing is dispatched to finish somebody \
          else's follow-up: {:?}",
         stopped.html,
@@ -31790,7 +31794,7 @@ async fn a_gone_follow_up_session_takes_the_question_it_left_with_it() {
     assert!(
         stopped
             .html
-            .contains("any question it had put to you has been closed unanswered"),
+            .contains("Any question the session put to you has been closed unanswered"),
         "the stop says what became of what it left: {:?}",
         stopped.html,
     );
@@ -36533,11 +36537,11 @@ async fn a_restart_that_can_start_nothing_halts_with_the_refusal_on_the_timeline
         "what nobody could be started for is named as the run it was: {refused:?}",
     );
     assert!(
-        refused.contains("nothing could be started for it as the server came back up"),
+        refused.contains("Nothing could be started for it as the server came back up."),
         "and the restart is what could not start it: {refused:?}",
     );
     assert!(
-        refused.contains("git would not make it again from the branch"),
+        refused.contains("make it again from the branch."),
         "in the words the press refuses in, rather than the sweep's: {refused:?}",
     );
     assert_eq!(

@@ -332,17 +332,16 @@ function Questions(props: {
           Questions. */}
       <Show when={orphaned()}>
         <p class={styles.counterQuestion}>
-          This Set was locked unanswered: nobody answered these questions, and
-          no Response was ever sent. The agent was told the Set had been
-          locked.
+          This question set was locked unanswered. Nobody answered it, and the
+          agent was told it was locked.
         </p>
       </Show>
       {/* And the Set that had simply not been got to yet, which only a
           read-only sheet ever draws. */}
       <Show when={props.open}>
         <p class={styles.counterQuestion}>
-          This Set was still open when this record was made: nobody had answered
-          these questions yet.
+          This question set was still open when this record was made. Nobody had
+          answered it yet.
         </p>
       </Show>
       <Show when={nothing()}>
@@ -384,7 +383,7 @@ function Questions(props: {
           <Show when={comment()}>
             {(comment) => (
               <section class={`${styles.setComment} ${styles.decided}`}>
-                <h2>On the Set as a whole</h2>
+                <h2>On the Question Set as a Whole</h2>
                 <p class={styles.comment}>{comment()}</p>
               </section>
             )}
@@ -436,7 +435,7 @@ function Chosen(props: {
               >
                 <span class={styles.directionName}>{DIRECTION[offered]}</span>
                 <Show when={props.proposal.direction === offered}>
-                  <span class={styles.star} title="the agent's Recommendation">
+                  <span class={styles.star} title="The agent's recommendation">
                     ★
                   </span>
                 </Show>
@@ -614,7 +613,7 @@ function Ask(props: {
       />
       <Show when={open()}>
         <p class={styles.unanswered}>
-          Unanswered — the agent was told this one is still open.
+          Unanswered. The agent was told this one is still open.
         </p>
       </Show>
     </div>
@@ -652,7 +651,7 @@ function Offered(props: {
         innerHTML={props.option.text_html}
       />
       <Show when={props.option.recommended}>
-        <span class={styles.star} title="the agent's Recommendation">
+        <span class={styles.star} title="The agent's recommendation">
           ★
         </span>
       </Show>
@@ -741,7 +740,7 @@ function Chose(props: {
       <Show when={props.starred}>
         <td class={styles.starCell}>
           <Show when={props.option.recommended}>
-            <span class={styles.star} title="the agent's Recommendation">
+            <span class={styles.star} title="The agent's recommendation">
               ★
             </span>
           </Show>
@@ -808,7 +807,7 @@ function nothingAnswered(
   const commented = (response.comment ?? "").trim() !== "";
 
   return commented
-    ? "Nothing here was answered. The comment below is the whole Response — a " +
-        "counter-question — and every question went back to the agent still open."
+    ? "Nothing here was answered. The comment below is the whole response, and " +
+        "every question went back to the agent still open."
     : null;
 }

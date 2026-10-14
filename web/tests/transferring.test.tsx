@@ -630,7 +630,7 @@ describe("pressing Go", () => {
     fireEvent.click(go(card));
 
     await waitFor(() =>
-      expect(card.textContent).toContain("already been moved"),
+      expect(card.textContent).toContain("already moved"),
     );
 
     expect(dialog()).not.toBeNull();

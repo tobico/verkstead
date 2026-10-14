@@ -26,11 +26,11 @@ export function Mark(props: { standing: Standing }): JSX.Element {
   return (
     <Switch
       fallback={
-        <span class={styles.waiting} aria-label="not yet" role="img" />
+        <span class={styles.waiting} aria-label="Not yet" role="img" />
       }
     >
       <Match when={props.standing === "met"}>
-        <Icon of={faCheck} label="done" class={styles.done} />
+        <Icon of={faCheck} label="Done" class={styles.done} />
       </Match>
     </Switch>
   );

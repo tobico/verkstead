@@ -224,7 +224,7 @@ describe("the pane", () => {
 
     await waitFor(() => theBox());
     expect(theBox().value).toBe("");
-    expect(screen.queryByText(/Could not read the settings/)).toBeNull();
+    expect(screen.queryByText(/The settings couldn't be read/)).toBeNull();
   });
 
   /// What the section is for, said where somebody is about to type into it —
@@ -235,7 +235,7 @@ describe("the pane", () => {
 
     const note = await waitFor(() =>
       screen.getByText(
-        "Additional instructions for the agent to include in every initial prompt.",
+        "This text is added to the first prompt of every session.",
       ),
     );
     expect(note.classList.contains(styles.lead!)).toBe(true);
@@ -303,7 +303,7 @@ describe("the pane", () => {
     fireEvent.input(theBox(), { target: { value: written } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
-    await waitFor(() => screen.getByText(/could not be saved/));
+    await waitFor(() => screen.getByText(/couldn't be saved/));
     expect(theBox().value).toBe(written);
   });
 });

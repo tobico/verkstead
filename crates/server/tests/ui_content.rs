@@ -2694,7 +2694,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         // which is the stop the accent badge is for.
         store::Decision::Verkstead,
         "**The task in .tasks/03-commit-events.md** stopped.\n\n\
-         the session exited with status 1\n\n\
+         The session exited with status 1.\n\n\
          ### The worktree\n\n\
          \x20   ## task-runner\n    \x20M crates/store/src/commits.rs\n    ?? crates/store/src/sweep.rs\n\n\
          ### What the last session said\n\n\
@@ -2790,7 +2790,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         store::Decision::Verkstead,
         &format!(
             "**Implementing the work** stopped.\n\n\
-             the account **{}** was being spent is out of window: {printed}\n\n\
+             The **{}** account is out of window. The session said: {printed}.\n\n\
              ### The worktree\n\n\
              Git had nothing pending, or the repository would not answer.\n\n\
              ### What the last session said\n\n\
@@ -3078,8 +3078,8 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     store::note(
         &pool,
         staged,
-        "Stage 01 of the `mvp` roadmap — *Workbench* — has started as a Conversation of its \
-         own, on `workbench`.",
+        "Stage 01 of the `mvp` roadmap, *Workbench*, has started as a conversation of its own \
+         on `workbench`.",
     )
     .await
     .unwrap();
@@ -4339,7 +4339,7 @@ fn pin_tried(json: &str) -> String {
             "server": "tickets",
             "outcome": {
                 "Refused": {
-                    "why": "It did not answer: failed to lookup address information.",
+                    "why": "It didn't answer: failed to lookup address information.",
                 },
             },
         },
