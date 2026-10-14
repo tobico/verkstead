@@ -39172,3 +39172,149 @@ async fn a_wrap_up_session_is_refused_a_memo_naming_the_kinds_that_may() {
     );
     assert!(memos(&fixture).await.is_empty(), "and nothing lands");
 }
+
+/// Put a Memo on the Conversation straight through the store, left in `session`
+/// — for the tests about what a launch is told rather than about who may leave
+/// one.
+async fn a_memo_on_the_record(fixture: &Grilling, session: i64, markdown: &str) -> i64 {
+    let pool = open_database(&fixture.database).await.unwrap();
+
+    verkstead_store::leave_memo(
+        &pool,
+        fixture.id,
+        markdown,
+        "the session that worked task 01",
+        session,
+    )
+    .await
+    .unwrap()
+    .unwrap()
+}
+
+/// The Memos left before a session starts are in its prompt, oldest first, and
+/// in the prompt of every session after it: nothing is spent by being read.
+#[tokio::test]
+async fn the_memos_left_are_in_the_prompt_of_every_later_session() {
+    let spill = tempfile::tempdir().unwrap();
+    let written = spill.path().join("task-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_of_two_writing_prompts(&written),
+        PULL_REQUEST,
+    )
+    .await;
+
+    let grilling = fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let first = a_memo_on_the_record(&fixture, grilling, "The limiter's test flakes.\n").await;
+    let second = a_memo_on_the_record(&fixture, grilling, "Run clippy first.\n").await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
+
+    fixture
+        .until(|view| {
+            commits(view)
+                .iter()
+                .any(|commit| commit.subject.starts_with("chore: finish"))
+                .then_some(())
+        })
+        .await;
+
+    let started = prompts_by_step(&written);
+    assert_eq!(started.len(), 3, "a session per step: {started:?}");
+
+    let block = format!(
+        "# What earlier sessions left for you\n\n\
+         **Memo {first}**, left by the session that worked task 01.\n\
+         Retire it with `verkstead memo --retire {first}` once it no longer holds.\n\n\
+         The limiter's test flakes.\n\n\
+         **Memo {second}**, left by the session that worked task 01.\n\
+         Retire it with `verkstead memo --retire {second}` once it no longer holds.\n\n\
+         Run clippy first.\n"
+    );
+
+    for (step, prompt) in &started {
+        assert!(
+            prompt.contains(&block),
+            "{step} is told both memos, oldest first: {prompt:?}",
+        );
+    }
+}
+
+/// A grilling relaunched by a steer and a steered instruction are told the
+/// Memos too, being launched where every session is — and a Conversation with
+/// none, or with only retired ones, launches a session told nothing of them.
+#[tokio::test]
+async fn a_steered_session_is_told_the_memos_and_a_session_with_none_is_not() {
+    let fixture = grilling(
+        r#"
+        printf 'prompt was: %s\n' "$2"
+        sleep 300
+        "#,
+    )
+    .await;
+
+    let grilled = fixture.printed_after(0).await;
+
+    assert!(
+        !grilled.contains("What earlier sessions left"),
+        "no memos, no heading: {grilled:?}",
+    );
+
+    let grilling = output(&fixture.view().await).unwrap().id;
+    let standing = a_memo_on_the_record(&fixture, grilling, "The limiter's test flakes.\n").await;
+    let retired = a_memo_on_the_record(&fixture, grilling, "A retired one.\n").await;
+
+    let pool = open_database(&fixture.database).await.unwrap();
+    sqlx::query(
+        "UPDATE memos SET retired_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), retired_by = 'you' \
+         WHERE event_id = ?",
+    )
+    .bind(retired)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let before = outputs(&fixture.view().await).len();
+
+    assert_eq!(fixture.steer().await, SteerOpened::Opened);
+    assert_eq!(
+        fixture.steer_grilling(None, false).await,
+        ConversationSteered::Steered,
+    );
+
+    let relaunched = fixture.printed_after(before).await;
+
+    assert!(
+        relaunched.contains("/verkstead/skills/grilling/SKILL.md")
+            && relaunched.contains(&format!("**Memo {standing}**"))
+            && relaunched.contains("The limiter's test flakes."),
+        "a relaunched grilling is told the memo standing: {relaunched:?}",
+    );
+    assert!(
+        !relaunched.contains("A retired one."),
+        "and nothing of the one retired: {relaunched:?}",
+    );
+
+    let before = outputs(&fixture.view().await).len();
+
+    assert_eq!(fixture.steer().await, SteerOpened::Opened);
+    assert_eq!(
+        fixture
+            .steer_instructed("Note the window the count is against.\n")
+            .await,
+        ConversationSteered::Steered,
+    );
+
+    let instructed = fixture.printed_after(before).await;
+
+    assert!(
+        instructed.contains("/verkstead/skills/instruction/SKILL.md")
+            && instructed.contains(&format!("**Memo {standing}**")),
+        "and so is a steered instruction: {instructed:?}",
+    );
+}

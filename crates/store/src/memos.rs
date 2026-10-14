@@ -181,3 +181,44 @@ pub(crate) async fn on_timeline(
         )
         .collect())
 }
+
+/// A Memo still standing, as the prompt of a later session is told it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StandingMemo {
+    /// Its Event, which is the number it is retired by.
+    pub id: i64,
+
+    /// See [`Memo::left_by`].
+    pub left_by: String,
+
+    /// What the session wrote, as it wrote it.
+    pub markdown: String,
+}
+
+/// Every Memo on a Conversation that nothing has retired, oldest first: what
+/// each session launched on it is told.
+///
+/// Read off the record at every launch and never marked delivered, unlike a
+/// deferred Set's Answers — a Memo is not spent by being read, and stands until
+/// something retires it.
+pub async fn standing_memos(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<StandingMemo>> {
+    let rows: Vec<(i64, String, String)> = sqlx::query_as(
+        "SELECT memos.event_id, memos.left_by, timeline_events.body
+         FROM memos JOIN timeline_events ON timeline_events.id = memos.event_id
+         WHERE memos.conversation_id = ? AND memos.retired_at IS NULL
+         ORDER BY memos.event_id",
+    )
+    .bind(conversation_id)
+    .fetch_all(pool)
+    .await
+    .with_context(|| format!("reading the standing Memos of Conversation {conversation_id}"))?;
+
+    Ok(rows
+        .into_iter()
+        .map(|(id, left_by, markdown)| StandingMemo {
+            id,
+            left_by,
+            markdown,
+        })
+        .collect())
+}

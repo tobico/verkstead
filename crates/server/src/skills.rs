@@ -844,6 +844,47 @@ pub(crate) fn folded(prompt: &str, answers: &str) -> String {
     format!("{prompt}\n# What I have since said about the deferred questions\n\n{answers}\n")
 }
 
+/// The same prompt again, with the Memos earlier sessions of the Conversation
+/// left and nothing has retired listed under it, oldest first (ADR-0023).
+///
+/// On **every** session prompt, for the companions' reason: appended where every
+/// session is launched from, so a grilling relaunched, a steered session and
+/// every step are told alike, and a builder added later cannot forget it. Ahead
+/// of the companions in the order the launch applies them, so that a prompt
+/// reads documents, then what earlier sessions left, then the facts of the
+/// machine.
+///
+/// Each Memo says who left it and how it is retired, then its markdown as it
+/// was written. Nothing is marked delivered: the list is read off the record at
+/// every launch, and a Memo is not spent by being read.
+///
+/// A Conversation with none standing is the prompt unchanged — no heading over
+/// an empty list.
+pub(crate) fn left(prompt: &str, memos: &[store::StandingMemo]) -> String {
+    if memos.is_empty() {
+        return prompt.to_owned();
+    }
+
+    let listed: Vec<String> = memos
+        .iter()
+        .map(|memo| {
+            format!(
+                "**Memo {id}**, left by {left_by}.\nRetire it with \
+                 `verkstead memo --retire {id}` once it no longer holds.\n\n{}",
+                memo.markdown.trim_end(),
+                id = memo.id,
+                left_by = memo.left_by,
+            )
+        })
+        .collect();
+
+    format!(
+        "{}\n\n# What earlier sessions left for you\n\n{}\n",
+        prompt.trim_end(),
+        listed.join("\n\n"),
+    )
+}
+
 /// The same prompt again, with the companion repos the Conversation was
 /// configured with listed under it.
 ///
@@ -4589,6 +4630,55 @@ mod tests {
     /// What a companion's base resolved to when it was checked out, which is
     /// what a detached one is named by.
     const COMMIT: &str = "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7";
+
+    /// Every standing Memo under one heading, oldest first, each in the shape
+    /// the Guide quotes: who left it, how to retire it, then the markdown.
+    #[test]
+    fn the_standing_memos_are_listed_oldest_first_under_one_heading() {
+        let memo = |id: i64, left_by: &str, markdown: &str| store::StandingMemo {
+            id,
+            left_by: left_by.to_owned(),
+            markdown: markdown.to_owned(),
+        };
+
+        let prompt = left(
+            &next_task(&mounted(), "# Rate limiting\n\nThe API has none.\n", None),
+            &[
+                memo(
+                    42,
+                    "the session that worked task 03",
+                    "The limiter's test flakes under load.\n",
+                ),
+                memo(57, "the finish session", "Run clippy before pushing.\n"),
+            ],
+        );
+
+        assert!(
+            prompt.contains(
+                "# What earlier sessions left for you\n\n\
+                 **Memo 42**, left by the session that worked task 03.\n\
+                 Retire it with `verkstead memo --retire 42` once it no longer holds.\n\n\
+                 The limiter's test flakes under load.\n\n\
+                 **Memo 57**, left by the finish session.\n\
+                 Retire it with `verkstead memo --retire 57` once it no longer holds.\n\n\
+                 Run clippy before pushing.\n"
+            ),
+            "{prompt:?}"
+        );
+        assert!(
+            prompt.find("# The Brief this started from")
+                < prompt.find("# What earlier sessions left for you"),
+            "under the kind's own sections: {prompt:?}"
+        );
+    }
+
+    /// No Memos standing is the prompt unchanged — no heading at all.
+    #[test]
+    fn no_standing_memos_leave_the_prompt_unchanged() {
+        let prompt = next_task(&mounted(), "# Rate limiting\n\nThe API has none.\n", None);
+
+        assert_eq!(left(&prompt, &[]), prompt);
+    }
 
     /// What a session is told about the companions: where each one is, what it
     /// holds and whether it may be written to, under one heading and under

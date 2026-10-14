@@ -2637,12 +2637,20 @@ impl Sessions {
         // [`session_name`].
         let session = session_name();
 
+        // What earlier sessions of the Conversation left for the ones after them,
+        // under the kind's own sections and ahead of the listings below — here
+        // for the companions' reason, and read off the record at every launch.
+        // A carried conversation is primed with its note instead of this
+        // prompt, so it is told none of it: it was launched after they were
+        // left, and has read them. See [`skills::left`].
+        let prompt = skills::left(prompt, &store::standing_memos(pool, conversation.id).await?);
+
         // And the companion repos this Conversation was configured with, listed
         // under whatever prompt the caller built. Here rather than in each
         // builder because this is the one place every session is launched from
         // — the grilling one included, which is built nowhere near the rest —
         // so a prompt builder added later cannot forget it.
-        let prompt = skills::alongside(prompt, &conversation.branch, &conversation.companions);
+        let prompt = skills::alongside(&prompt, &conversation.branch, &conversation.companions);
 
         // And the files the human attached to it, listed under that again —
         // here for the listing above's reason, and naming each file at the path
