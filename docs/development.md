@@ -1,9 +1,9 @@
 # Development
 
 Working *on* Verkstead, rather than with it: running the loop out of a checkout,
-and the commands the two halves are built and tested with. There is no other
-way in yet — nothing has been released under this name, so a checkout is the
-only Verkstead there is.
+and the commands the two halves are built and tested with. A checkout is for
+working on Verkstead; the released builds, and the four ways to get one, are in
+the [README](../README.md#status).
 
 The vocabulary in bold is the project's, and is defined in
 [CONTEXT.md](../CONTEXT.md). How it is written on a screen — and every other
