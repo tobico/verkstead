@@ -39318,3 +39318,131 @@ async fn a_steered_session_is_told_the_memos_and_a_session_with_none_is_not() {
         "and so is a steered instruction: {instructed:?}",
     );
 }
+
+/// Retire Memo `memo` from the session running in `fixture`, the way `verkstead
+/// memo --retire` does, with `reason` as the body.
+async fn retire_a_memo(fixture: &Grilling, memo: i64, reason: &str) -> (StatusCode, String) {
+    fetch(
+        &fixture.app,
+        Request::builder()
+            .method("POST")
+            .uri(format!(
+                "/conversations/{}/api/v1/memos/{memo}/retire",
+                fixture.id
+            ))
+            .body(Body::from(reason.to_owned()))
+            .unwrap(),
+    )
+    .await
+}
+
+/// A task session retiring a Memo marks it retired with its own stamp and the
+/// reason it gave, and every session after it is told the rest and not that
+/// one — while a retirement of one already retired, or of a number that is no
+/// memo of this Conversation's, is refused by name.
+#[tokio::test]
+async fn a_memo_a_task_session_retires_leaves_every_later_prompt() {
+    let spill = tempfile::tempdir().unwrap();
+    let written = spill.path().join("task-prompts");
+
+    // The two-task backlog, with the first task held open until the test has
+    // retired its memo, so the retirement comes from a running task session.
+    let stub = a_backlog_of_two_writing_prompts(&written).replacen(
+        "    if [ -n \"$next\" ]; then\n",
+        "    if [ \"$number\" = 01 ]; then\n        \
+         : > /tmp/verkstead/retire-now\n        \
+         while [ ! -f /tmp/verkstead/retired ]; do sleep 0.05; done\n    \
+         fi\n    \
+         if [ -n \"$next\" ]; then\n",
+        1,
+    );
+
+    let fixture = grilling_spilling(spill, &stub, PULL_REQUEST).await;
+
+    let grilling = fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let flaky = a_memo_on_the_record(&fixture, grilling, "The limiter's test flakes.\n").await;
+    let clippy = a_memo_on_the_record(&fixture, grilling, "Run clippy first.\n").await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
+
+    let directory = handoff_directory(&fixture);
+    let deadline = Instant::now() + *PATIENCE;
+    while !directory.join("retire-now").exists() {
+        assert!(
+            Instant::now() < deadline,
+            "the first task session never got as far as retiring"
+        );
+        pause(Duration::from_millis(25)).await;
+    }
+
+    let (status, body) = retire_a_memo(&fixture, flaky, "fixed in 8f3c2a1\n").await;
+    assert_eq!(
+        status,
+        StatusCode::NO_CONTENT,
+        "the retirement is taken: {body}"
+    );
+
+    let (status, body) = retire_a_memo(&fixture, flaky, "").await;
+    let said = body.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert!(
+        said.contains(&format!(
+            "memo {flaky} is already retired, by the session that worked task 01"
+        )),
+        "a second retirement is refused naming the first: {body}",
+    );
+
+    let (status, body) = retire_a_memo(&fixture, grilling, "").await;
+    let said = body.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert!(
+        said.contains(&format!(
+            "memo {grilling} is not one of this Conversation's"
+        )),
+        "an id that is no memo here is refused by name: {body}",
+    );
+
+    std::fs::write(directory.join("retired"), "").unwrap();
+
+    fixture
+        .until(|view| {
+            commits(view)
+                .iter()
+                .any(|commit| commit.subject.starts_with("chore: finish"))
+                .then_some(())
+        })
+        .await;
+
+    let retired = memos(&fixture)
+        .await
+        .into_iter()
+        .find(|memo| memo.id == flaky)
+        .and_then(|memo| memo.retired)
+        .expect("the memo reads back retired");
+    assert_eq!(retired.by, "the session that worked task 01");
+    assert_eq!(retired.reason.as_deref(), Some("fixed in 8f3c2a1"));
+
+    let started = prompts_by_step(&written);
+    assert_eq!(started.len(), 3, "a session per step: {started:?}");
+
+    let (first, _) = &started[0];
+    assert!(
+        started[0].1.contains(&format!("**Memo {flaky}**")),
+        "{first} was started before the retirement, and told it",
+    );
+
+    for (step, prompt) in &started[1..] {
+        assert!(
+            !prompt.contains(&format!("**Memo {flaky}**")) && !prompt.contains("flakes"),
+            "{step} is not told the retired memo: {prompt:?}",
+        );
+        assert!(
+            prompt.contains(&format!("**Memo {clippy}**")) && prompt.contains("Run clippy first."),
+            "{step} is told the rest: {prompt:?}",
+        );
+    }
+}

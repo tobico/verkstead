@@ -1692,6 +1692,11 @@ fn serving(state: AppState, gate: &key::Gate) -> Router {
             &format!("{ASKING_FROM}/{{conversation}}/api/v1/memos"),
             post(memos::leave),
         )
+        // And taking one back that no longer holds.
+        .route(
+            &format!("{ASKING_FROM}/{{conversation}}/api/v1/memos/{{id}}/retire"),
+            post(memos::retire),
+        )
         // And saying it is waiting on work of its own, which keeps it at work.
         .route(
             &format!("{ASKING_FROM}/{{conversation}}/api/v1/waiting"),

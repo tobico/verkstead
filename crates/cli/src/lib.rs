@@ -154,7 +154,20 @@ enum Command {
     /// — on stdout and exits 0, and every later session of the Conversation is
     /// shown it in its prompt; refused, it exits non-zero and says why on
     /// stderr, and nothing is left.
+    ///
+    /// `--retire <id> [reason]` takes one back instead, by the number the
+    /// prompt names it by, once it no longer holds: nothing is read from stdin,
+    /// the rest of the line is the reason, and no later session is shown it.
+    /// Accepted, it prints nothing on stdout.
     Memo {
+        /// Retire the memo with this id rather than leave a new one.
+        #[arg(long, value_name = "ID")]
+        retire: Option<i64>,
+
+        /// Why it is retired, with `--retire`: the rest of the line.
+        #[arg(requires = "retire", trailing_var_arg = true)]
+        reason: Vec<String>,
+
         /// Where the Verkstead server is: its base URL, or `pipe://<name>` for
         /// a named pipe, which is Windows' own and what a session in a
         /// container asks through.
@@ -265,7 +278,14 @@ impl Cli {
             }) => ask::ask(file.as_deref(), deferred, &server),
             Some(Command::Answers { id, server }) => answers::answers(id, &server),
             Some(Command::Done { server }) => done::done(&server),
-            Some(Command::Memo { server }) => memo::memo(&server),
+            Some(Command::Memo {
+                retire,
+                reason,
+                server,
+            }) => match retire {
+                Some(id) => memo::retire(id, &reason, &server),
+                None => memo::memo(&server),
+            },
             Some(Command::Waiting { length, server }) => {
                 waiting::waiting(length.as_deref(), &server)
             }

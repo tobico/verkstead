@@ -20,10 +20,16 @@ const NOWHERE: &str = "http://127.0.0.1:9/conversations/1";
 
 /// Run `verkstead memo` against `server` with `markdown` on stdin.
 fn memo(server: &str, markdown: &str) -> Output {
+    memo_with(&[], server, markdown)
+}
+
+/// The same, with `args` after `memo`.
+fn memo_with(args: &[&str], server: &str, markdown: &str) -> Output {
     let tmp = tempfile::tempdir().unwrap();
 
     let mut child = Command::new(env!("CARGO_BIN_EXE_verkstead"))
         .arg("memo")
+        .args(args)
         .env("VERKSTEAD_SERVER", server)
         .current_dir(tmp.path())
         .stdin(Stdio::piped())
@@ -118,5 +124,37 @@ fn a_memo_with_no_session_running_is_refused_by_name() {
             "The sessions suite flakes under parallelism.\n",
         ),
         "no session running in this Conversation",
+    );
+}
+
+/// A retirement is put to the server, which refuses it here the way it refuses
+/// a memo: by name, with a non-zero exit and nothing on stdout.
+#[test]
+fn a_retirement_with_no_session_running_is_refused_by_name() {
+    let tmp = tempfile::tempdir().unwrap();
+    let server = Server::start(tmp.path().join("verkstead.db"));
+
+    refused_saying(
+        &memo_with(
+            &["--retire", "42", "fixed", "in", "8f3c2a1"],
+            &server.url(),
+            "",
+        ),
+        "no session running in this Conversation",
+    );
+}
+
+/// A reason with nothing to retire is a mistake on the command line, caught
+/// before anything is read or sent.
+#[test]
+fn a_reason_without_retire_is_refused() {
+    let output = memo_with(&["fixed", "in", "8f3c2a1"], NOWHERE, "A memo.\n");
+
+    assert!(!output.status.success(), "{:?}", output.status);
+    assert!(stdout(&output).is_empty(), "{}", stdout(&output));
+    assert!(
+        stderr(&output).contains("--retire"),
+        "naming what it needs: {}",
+        stderr(&output)
     );
 }

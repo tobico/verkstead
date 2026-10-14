@@ -15,8 +15,8 @@
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use axum::response::Response;
-use verkstead_schema::{ApiError, MemoLeft, memo_refused};
+use axum::response::{IntoResponse, Response};
+use verkstead_schema::{ApiError, MemoLeft, Nudge, memo_refused};
 
 use crate::AppState;
 use crate::reply::yaml;
@@ -99,6 +99,9 @@ pub(crate) async fn leave(
                 left_by,
                 "a session left a memo for the sessions after it"
             );
+            state.nudges.announce(Nudge::Conversation {
+                conversation: conversation_id,
+            });
 
             yaml(StatusCode::OK, &MemoLeft { id })
         }
@@ -115,6 +118,90 @@ pub(crate) async fn leave(
             )
         }
     }
+}
+
+/// `POST /conversations/{conversation}/api/v1/memos/{id}/retire` — the
+/// session running in this Conversation takes a Memo back, with the body as
+/// its reason where it gave one.
+///
+/// Under the rule leaving one is under, and refused for the same things, plus
+/// two of its own, each by name: a Memo that is not this Conversation's, and
+/// one already retired. 204 once it is, and the Memo has left every later
+/// prompt.
+pub(crate) async fn retire(
+    State(state): State<AppState>,
+    Path((conversation_id, memo_id)): Path<(i64, String)>,
+    reason: String,
+) -> Response {
+    let Some(event_id) = state.sessions.writing(conversation_id) else {
+        return refused(
+            conversation_id,
+            "there is no session running in this Conversation, so there is nobody here to retire \
+             a memo"
+                .to_owned(),
+        );
+    };
+
+    let Some(building) = crate::done::building(&state, conversation_id, event_id).await else {
+        return refused(
+            conversation_id,
+            format!(
+                "only a building session may retire a memo — {MAY} — and this session was sent \
+                 for something else"
+            ),
+        );
+    };
+
+    // A number the prompt never named names no memo of this Conversation's,
+    // and is said the way any other is.
+    let Ok(memo_id) = memo_id.parse::<i64>() else {
+        return not_this_conversations(conversation_id, &memo_id);
+    };
+
+    let reason = reason.trim();
+    let reason = (!reason.is_empty()).then_some(reason);
+    let retired_by = building.left_by();
+
+    match store::retire_memo(&state.pool, conversation_id, memo_id, &retired_by, reason).await {
+        Ok(store::Retiring::Retired) => {
+            tracing::info!(
+                conversation_id,
+                memo_id,
+                retired_by,
+                "a session retired a memo"
+            );
+            state.nudges.announce(Nudge::Conversation {
+                conversation: conversation_id,
+            });
+
+            StatusCode::NO_CONTENT.into_response()
+        }
+        Ok(store::Retiring::AlreadyRetired { by }) => refused(
+            conversation_id,
+            format!("memo {memo_id} is already retired, by {by}, so there is nothing to take back"),
+        ),
+        Ok(store::Retiring::NotThisConversations) => {
+            not_this_conversations(conversation_id, &memo_id.to_string())
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, memo_id, "retiring a memo failed");
+
+            yaml(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                &ApiError::new("Verkstead could not retire the memo, so run it again"),
+            )
+        }
+    }
+}
+
+fn not_this_conversations(conversation_id: i64, memo_id: &str) -> Response {
+    refused(
+        conversation_id,
+        format!(
+            "memo {memo_id} is not one of this Conversation's: retire one by the number its \
+             prompt names"
+        ),
+    )
 }
 
 fn refused(conversation_id: i64, why: String) -> Response {

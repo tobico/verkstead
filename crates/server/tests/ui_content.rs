@@ -2534,8 +2534,9 @@ async fn the_viewers_own_tests_are_fed_from_here() {
 
     // And the session that worked a task on it, with the Memos it left for the
     // sessions after it: one still standing, and one a later session has taken
-    // back. Nothing retires one yet, so the second is retired straight in —
-    // what a retired card looks like is this fixture's to show either way.
+    // back. The second is retired straight in rather than through
+    // `retire_memo`, so its moment is a fixed one and the fixture does not move
+    // with the clock.
     let session = store::start_capture(&pool, directing, Some("task-02"), None)
         .await
         .unwrap();

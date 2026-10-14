@@ -2332,6 +2332,22 @@ pub struct MemoRetirement {
     pub at: String,
 }
 
+/// What a Retire or a Restore pressed on a Memo's card answers with: the card
+/// as it now stands, for the page to redraw from.
+///
+/// The Memo whatever the press found, rather than a word for each way it could
+/// have gone: a Retire on one another device already retired and a Restore on
+/// one already standing both leave it the way the human asked, and the card is
+/// what says so.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum MemoPressed {
+    Memo(MemoEvent),
+
+    /// No Memo of this Conversation's has that id.
+    NoSuchMemo,
+}
+
 /// A notice as the page receives it: what Verkstead did, and when.
 ///
 /// HTML alone, like the handoff and unlike the Brief: nobody edits it. Rendered
@@ -3516,13 +3532,25 @@ pub fn memo_event(
     left_by: String,
     retired: Option<MemoRetirement>,
 ) -> TimelineEvent {
-    TimelineEvent::Memo(MemoEvent {
+    TimelineEvent::Memo(memo_card(id, at, markdown, left_by, retired))
+}
+
+/// The same Memo as the card alone, for a press on one that answers with what
+/// it changed.
+pub fn memo_card(
+    id: i64,
+    at: String,
+    markdown: &str,
+    left_by: String,
+    retired: Option<MemoRetirement>,
+) -> MemoEvent {
+    MemoEvent {
         id,
         at,
         html: crate::markdown::to_html(markdown),
         left_by,
         retired,
-    })
+    }
 }
 
 /// A notice as an Event, rendered the same way and for the same reason: it is a

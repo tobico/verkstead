@@ -142,7 +142,10 @@ pub use members::{
     member_holding, member_unreachable, members, members_yet_to_acknowledge, owe_announcement,
     record_member, record_renewal, renewal_acknowledged,
 };
-pub use memos::{Memo, Retirement, StandingMemo, leave_memo, standing_memos};
+pub use memos::{
+    Memo, Retirement, Retiring, StandingMemo, leave_memo, memo_of, restore_memo, retire_memo,
+    standing_memos,
+};
 pub use migrations::{rank_the_conversations, stamp_the_births};
 pub use pairings::{RepoPairings, last_started_pairings, remembered_pairings};
 pub use pauses::Pause;

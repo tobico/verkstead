@@ -256,6 +256,35 @@ impl Client {
         }
     }
 
+    /// Take Memo `id` back, with `reason` where one was given, so no later
+    /// session is shown it.
+    ///
+    /// No retry, for [`Client::memo`]'s reason: a retry of one that landed would
+    /// be refused as already retired, which is the wrong thing to tell an agent
+    /// whose retirement worked.
+    pub fn retire_memo(&self, id: i64, reason: &str) -> Result<()> {
+        let mut reply = self
+            .agent
+            .post(format!("{}/api/v1/memos/{id}/retire", self.base))
+            .send(reason)
+            .with_context(|| format!("retiring memo {id} with {}", self.said))?;
+
+        let status = reply.status().as_u16();
+        let text = reply
+            .body_mut()
+            .read_to_string()
+            .context("reading the server's reply")?;
+
+        match status {
+            200 | 204 => Ok(()),
+            404 => bail!(
+                "the server at {} has no memos to retire — it is older than this command",
+                self.said
+            ),
+            _ => bail!("the server refused: {}", refusal(&text)),
+        }
+    }
+
     /// Say this session is waiting on work of its own for `length` — the
     /// server's default where `None` — and hand back what the server made of it.
     ///

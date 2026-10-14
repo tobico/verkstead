@@ -67,6 +67,7 @@ import type {
   ForwardsView,
   GrillingStarted,
   LanguageCleared,
+  MemoPressed,
   MergedRow,
   OnboardingView,
   Preflight,
@@ -1257,6 +1258,32 @@ export function saveBrief(
 ): Promise<BriefSaved> {
   return post<BriefSaved>(
     on(device, `/api/ui/conversations/${id}/brief`), { markdown },
+  );
+}
+
+/// Take a Memo out of every later prompt of its Conversation, from its card.
+///
+/// Nothing goes with it: the press is stamped *you* and carries no reason, and
+/// it asks nothing first because Restore undoes it. What comes back is the card
+/// as it now stands.
+export function retireMemo(
+  device: Device,
+  id: number,
+  memo: number,
+): Promise<MemoPressed> {
+  return post<MemoPressed>(
+    on(device, `/api/ui/conversations/${id}/memos/${memo}/retire`),
+  );
+}
+
+/// And put one back.
+export function restoreMemo(
+  device: Device,
+  id: number,
+  memo: number,
+): Promise<MemoPressed> {
+  return post<MemoPressed>(
+    on(device, `/api/ui/conversations/${id}/memos/${memo}/restore`),
   );
 }
 

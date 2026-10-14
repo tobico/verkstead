@@ -696,6 +696,11 @@
   color: var(--ink-soft);
 }
 
+/* The one act on the card, at the far end of its head. */
+.memo .memoPress {
+  margin-left: auto;
+}
+
 .memo .retiredBy {
   margin: 0 0 0.5rem;
 }

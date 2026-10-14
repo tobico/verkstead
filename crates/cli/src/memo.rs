@@ -46,3 +46,17 @@ pub fn memo(server: &str) -> Result<()> {
 
     Ok(())
 }
+
+/// Take memo `id` back, with the rest of the line as the reason, and say so on
+/// stderr alone: there is nothing for an agent to read back.
+pub fn retire(id: i64, reason: &[String], server: &str) -> Result<()> {
+    let reason = reason.join(" ");
+
+    Client::new(server)?.retire_memo(id, reason.trim())?;
+
+    eprintln!(
+        "Verkstead has retired memo {id}: no later session of this Conversation will be shown it."
+    );
+
+    Ok(())
+}

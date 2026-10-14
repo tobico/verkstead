@@ -3538,6 +3538,17 @@ left_by: string,
 retired: MemoRetirement | null, };
 
 /**
+ * What a Retire or a Restore pressed on a Memo's card answers with: the card
+ * as it now stands, for the page to redraw from.
+ *
+ * The Memo whatever the press found, rather than a word for each way it could
+ * have gone: a Retire on one another device already retired and a Restore on
+ * one already standing both leave it the way the human asked, and the card is
+ * what says so.
+ */
+export type MemoPressed = { "Memo": MemoEvent } | "NoSuchMemo";
+
+/**
  * A Memo taken back: by whom, why, and when.
  */
 export type MemoRetirement = { 

@@ -222,3 +222,116 @@ pub async fn standing_memos(pool: &SqlitePool, conversation_id: i64) -> Result<V
         })
         .collect())
 }
+
+/// What became of a retirement asked for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Retiring {
+    /// The Memo is retired: it has left every later prompt, and its card says
+    /// who took it back.
+    Retired,
+
+    /// It was retired already, by the words here. Said rather than taken as
+    /// done, because a session retiring a Memo somebody else has is a session
+    /// with the wrong one in mind.
+    AlreadyRetired { by: String },
+
+    /// No Memo of this Conversation's has that id — another Conversation's, an
+    /// Event of some other kind, or nothing at all, which are one answer
+    /// because a session can tell none of them apart from where it stands.
+    NotThisConversations,
+}
+
+/// Take a Memo of `conversation_id`'s back, stamped `by` — the retiring
+/// session's words, or *you* — with the reason where one was given.
+///
+/// Read and written in one transaction, so two retirements racing write one
+/// stamp and the other is told it was already retired. The Event is never
+/// touched: a retirement is the Memo's row changing, and the record keeps one
+/// card per Memo.
+pub async fn retire_memo(
+    pool: &SqlitePool,
+    conversation_id: i64,
+    memo_id: i64,
+    by: &str,
+    reason: Option<&str>,
+) -> Result<Retiring> {
+    let mut tx = super::writing(pool, "retiring a Memo").await?;
+
+    let row: Option<(Option<String>,)> =
+        sqlx::query_as("SELECT retired_by FROM memos WHERE event_id = ? AND conversation_id = ?")
+            .bind(memo_id)
+            .bind(conversation_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .with_context(|| format!("reading Memo {memo_id} of Conversation {conversation_id}"))?;
+
+    match row {
+        None => return Ok(Retiring::NotThisConversations),
+        Some((Some(by),)) => return Ok(Retiring::AlreadyRetired { by }),
+        Some((None,)) => {}
+    }
+
+    sqlx::query(
+        "UPDATE memos SET retired_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), retired_by = ?,
+                          reason = ?
+         WHERE event_id = ?",
+    )
+    .bind(by)
+    .bind(reason)
+    .bind(memo_id)
+    .execute(&mut *tx)
+    .await
+    .with_context(|| format!("retiring Memo {memo_id} of Conversation {conversation_id}"))?;
+
+    tx.commit().await.context("retiring a Memo")?;
+
+    Ok(Retiring::Retired)
+}
+
+/// Put a retired Memo of `conversation_id`'s back into every later prompt:
+/// the three retirement columns cleared.
+///
+/// `false` where no Memo of this Conversation's has that id. One already
+/// standing is restored by doing nothing, which is what was asked for.
+pub async fn restore_memo(pool: &SqlitePool, conversation_id: i64, memo_id: i64) -> Result<bool> {
+    let restored = sqlx::query(
+        "UPDATE memos SET retired_at = NULL, retired_by = NULL, reason = NULL
+         WHERE event_id = ? AND conversation_id = ?",
+    )
+    .bind(memo_id)
+    .bind(conversation_id)
+    .execute(pool)
+    .await
+    .with_context(|| format!("restoring Memo {memo_id} of Conversation {conversation_id}"))?;
+
+    Ok(restored.rows_affected() > 0)
+}
+
+/// One Memo of a Conversation's as the Timeline reads it — when it was left,
+/// its markdown, and its row — for a press that answers with the card it
+/// changed. `None` where no Memo of this Conversation's has that id.
+pub async fn memo_of(
+    pool: &SqlitePool,
+    conversation_id: i64,
+    memo_id: i64,
+) -> Result<Option<(String, String, Memo)>> {
+    let at: Option<(String, String)> = sqlx::query_as(
+        "SELECT timeline_events.at, timeline_events.body
+         FROM memos JOIN timeline_events ON timeline_events.id = memos.event_id
+         WHERE memos.event_id = ? AND memos.conversation_id = ?",
+    )
+    .bind(memo_id)
+    .bind(conversation_id)
+    .fetch_optional(pool)
+    .await
+    .with_context(|| format!("reading Memo {memo_id} of Conversation {conversation_id}"))?;
+
+    let Some((at, markdown)) = at else {
+        return Ok(None);
+    };
+
+    Ok(on_timeline(pool, conversation_id)
+        .await?
+        .remove(&memo_id)
+        .map(|memo| (at, markdown, memo)))
+}

@@ -65,6 +65,7 @@ import type {
   RemoteBanner,
   RepoSwitched,
   RepoView,
+  MemoPressed,
   Resolved,
   Resumed,
   RoadmapPane,
@@ -13964,6 +13965,11 @@ describe("a memo a session left", () => {
     return [...container.querySelectorAll(`.${timeline.timelineEvent} > .${timeline.memo}`)];
   };
 
+  /// The card's own button with these words on it, which is a real button
+  /// standing on a card that is itself only an article in a button's role.
+  const saying = (card: Element, words: string) =>
+    [...card.querySelectorAll("button")].find((button) => button.textContent === words);
+
   it("draws as a card numbered by its event, stamped with the session that left it", async () => {
     expect(MEMOS.map((memo) => memo.retired === null)).toEqual([true, false]);
 
@@ -14010,6 +14016,58 @@ describe("a memo a session left", () => {
     expect(retired!.querySelector(`.${timeline.retiredBy}`)?.textContent).toBe(
       "Retired by the session that worked task 03: moved back into the relay",
     );
+  });
+
+  /// Retire is one press with nothing asked first — Restore is what undoes it —
+  /// and the card turns over from what the server answered: retired by *you*,
+  /// with Restore where Retire was.
+  it("retires a standing one in one press, redrawing from the server's answer", async () => {
+    const memo = MEMOS[0]!;
+    const route = `/api/ui/conversations/${BUILDING.id}/memos/${memo.id}/retire`;
+    const answered: MemoPressed = {
+      Memo: {
+        ...memo,
+        retired: { by: "you", reason: null, at: "2026-10-14T09:00:00.000Z" },
+      },
+    };
+    const fetching = theBuilding({}, whenever(route, json(answered), "POST"));
+    const { container } = mount(`/conversations/${BUILDING.id}`);
+
+    const [standing] = await cards(container);
+    fireEvent.click(saying(standing!, "Retire")!);
+
+    await waitFor(() => expect(sent(fetching, route)).toEqual({}));
+
+    const [retired] = await waitFor(async () => {
+      const [card] = await cards(container);
+      expect(card!.classList.contains(timeline.retired!)).toBe(true);
+      return [card];
+    });
+    expect(retired!.querySelector(`.${timeline.retiredBy}`)?.textContent).toBe("Retired by you");
+    expect(saying(retired!, "Restore")).toBeTruthy();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  /// And Restore on a retired one puts it back, by its own route.
+  it("restores a retired one in one press", async () => {
+    const memo = MEMOS[1]!;
+    const route = `/api/ui/conversations/${BUILDING.id}/memos/${memo.id}/restore`;
+    const answered: MemoPressed = { Memo: { ...memo, retired: null } };
+    const fetching = theBuilding({}, whenever(route, json(answered), "POST"));
+    const { container } = mount(`/conversations/${BUILDING.id}`);
+
+    const [, retired] = await cards(container);
+
+    fireEvent.click(saying(retired!, "Restore")!);
+
+    await waitFor(() => expect(sent(fetching, route)).toEqual({}));
+
+    await waitFor(async () => {
+      const [, card] = await cards(container);
+      expect(card!.classList.contains(timeline.retired!)).toBe(false);
+      expect(card!.querySelector(`.${timeline.retiredBy}`)).toBeNull();
+      expect(saying(card!, "Retire")).toBeTruthy();
+    });
   });
 });
 
