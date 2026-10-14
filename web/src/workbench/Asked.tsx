@@ -73,7 +73,7 @@ export function Asked(props: {
       </Match>
       <Match when={set.isError}>
         {head}
-        <ErrorLine>Could not read this set: {set.error?.message}</ErrorLine>
+        <ErrorLine>This question set couldn't be read. {set.error?.message}</ErrorLine>
       </Match>
       {/* A stored body this build cannot read is the record drawn as itself —
           the narrower match, so it goes first. Both of these draw their own

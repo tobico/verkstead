@@ -949,7 +949,7 @@ async fn refused(
         conversation_id,
         crate::stopping::Decided::Verkstead,
         crate::stalls::driving(lifecycle),
-        &format!("nothing could be started for it {occasion}: {why}"),
+        &format!("Nothing could be started for it {occasion}. {why}"),
         crate::stalls::said_last(state, conversation_id).await,
     )
     .await;
@@ -979,28 +979,27 @@ fn why(refusal: Resumed) -> Option<&'static str> {
     Some(match refusal {
         Resumed::Resumed => return None,
         Resumed::NoSuchConversation | Resumed::NotDriven | Resumed::AlreadyDriven => return None,
-        // A clause rather than a sentence of its own, as every one of these is:
-        // what it is read after is "nothing could be started for it as the
-        // server came back up", and a colon of its own would be the second in
-        // one line.
-        Resumed::NowhereToWork => "there is no Worktree on the record to work in",
+        // A sentence of its own, as every one of these is: what it is read
+        // after is "Nothing could be started for it as the server came back
+        // up."
+        Resumed::NowhereToWork => "There's no worktree on the record to work in.",
         Resumed::WorktreeRefused => {
-            "its Worktree is not one any more, and git would not make it again from the branch"
+            "Its worktree is gone, and git wouldn't make it again from the branch."
         }
-        Resumed::NoDirection => "nothing on the record says how the work is being built",
+        Resumed::NoDirection => "Nothing on the record says how the work is being built.",
         Resumed::NothingToWork => {
-            "there is nothing left in `.tasks/` to work and nothing on this branch ever \
-             wrote a backlog, so there is nothing built here to carry anywhere"
+            "There's nothing left in `.tasks/` to work, and nothing on this branch ever \
+             wrote a backlog, so nothing built here can be carried anywhere."
         }
-        Resumed::NoGrillingPairing => "the grilling Profile and model it runs under have gone",
+        Resumed::NoGrillingPairing => "The grilling profile and model it runs under are gone.",
         Resumed::NoImplementationPairing => {
-            "the implementation Profile and model the work runs under have gone"
+            "The implementation profile and model the work runs under are gone."
         }
         Resumed::NoFollowUpBrief => {
-            "nothing on the record says what the follow-up was opened about"
+            "Nothing on the record says what the follow-up was opened about."
         }
         Resumed::NoInvestigation => {
-            "nothing on the record says what the investigation was opened about"
+            "Nothing on the record says what the investigation was opened about."
         }
     })
 }

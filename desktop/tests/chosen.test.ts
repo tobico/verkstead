@@ -19,8 +19,8 @@ const said = (stderr: MockInstance<typeof process.stderr.write>): string =>
 afterEach(() => vi.restoreAllMocks());
 
 describe("the menu", () => {
-  it("is Open, View Logs and then Quit", () => {
-    expect(MENU.map(label)).toEqual(["Open", "View Logs", "Quit"]);
+  it("is Open, View logs and then Quit", () => {
+    expect(MENU.map(label)).toEqual(["Open", "View logs", "Quit"]);
   });
 
   /// Because a panel that reports no click of its own opens the menu instead,
@@ -40,7 +40,7 @@ describe("the menu", () => {
   /// here that is a checkbox on the Desktop page (ADR-0020), and the tray is
   /// the three things a page cannot do.
   it("leaves Launch on Startup to the page", () => {
-    expect(MENU.map(label)).not.toContain("Launch on Startup");
+    expect(MENU.map(label)).not.toContain("Launch on startup");
   });
 });
 

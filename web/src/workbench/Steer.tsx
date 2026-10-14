@@ -169,29 +169,29 @@ export const STEER_REFUSAL: Record<
   Steered: "",
   NoSuchConversation: "This conversation is gone.",
   NoPullRequest:
-    "This work is on no pull request, so there is no wrap-up to steer it into.",
+    "This work has no pull request, so there's no wrap-up to steer it into.",
   NoInstruction:
-    "There is nothing on this branch to carry on — no backlog with work left in it, and no roadmap it has written — so write what to do.",
+    "This branch has no backlog with work left and no roadmap, so there's nothing to carry on. Write what to do.",
   NoFollowUpBrief:
-    "A follow-up is whatever you want taken up about this pull request, so write what that is.",
+    "A follow-up needs something to take up about this pull request. Write what that is.",
   NoInvestigationBrief:
-    "An investigation is whatever you want found out about this work, so write what that is.",
+    "An investigation needs something to find out about this work. Write what that is.",
   EmptyBrief:
-    "There is no brief to grill: this conversation has none written yet, so write the one this round is about.",
+    "This conversation has no brief to grill yet. Write the one this round is about.",
   NoPairing: "Pick the account and model the work runs under from here.",
   NoSuchProfile: "That profile has been removed.",
   NoSuchModel: "That profile no longer lists that model.",
   NoBaseCommit:
     "Nothing in the repository answers to what this branch would come off. Fix the base branch and steer it again.",
   WorktreeRefused:
-    "Its worktree is not one any more, and git would not make it again from the branch.",
+    "Its worktree is gone, and git wouldn't make it again from the branch.",
   // Both halves of the companion section can reach this — a row ticked to go
   // in, and a row ticked to be opened up — so it says which repo was picked
   // rather than what was being done with it. It is also the one companion
   // refusal with no name in it: an unregistered repo is a row Verkstead knows
   // nothing about but the id the page sent.
   NoSuchCompanionRepo:
-    "One of the repos you picked to work alongside is not registered any more, so nothing was steered.",
+    "One of the repos you picked to work alongside isn't registered any more, so nothing was steered.",
 };
 
 /// And each way a save of the form is refused, both of which stop it for good.
@@ -206,26 +206,26 @@ export const STEER_SAVE_REFUSAL: Record<
   string
 > = {
   NoSuchConversation:
-    "This conversation is gone, so nothing more can be saved here. What you have written is only on this device now.",
+    "This conversation is gone, so nothing more can be saved. What you've written is only on this device now.",
   NoPendingSteer:
-    "This steer was submitted or cancelled somewhere else, so there is nothing left to save into. What you have written is only on this device now.",
+    "This steer was submitted or cancelled somewhere else, so there's nothing to save into. What you've written is only on this device now.",
 };
 
 /// And each way one companion could not be put into the sandbox, which says the
 /// same kinds of thing about a different repository.
 const STEER_COMPANION_REFUSAL: Record<SteerCompanionRefusal, string> = {
   OwnRepo:
-    "This conversation's own repo is already the work's, so it cannot go in beside itself.",
-  AlreadyAdded: "It is already on this conversation.",
-  NotACompanion: "It is not on this conversation, so there is nothing to open.",
+    "This is the conversation's own repo, so it can't go in beside itself.",
+  AlreadyAdded: "It's already on this conversation.",
+  NotACompanion: "It isn't on this conversation, so there's nothing to open up.",
   AlreadyReadWrite:
-    "It is read-write on this conversation already, which is as open as a repo gets.",
+    "It's already read-write on this conversation.",
   FetchFailed:
-    "Git could not fetch from its remote, so nothing was steered. The server log says why.",
+    "Git couldn't fetch from its remote, so nothing was steered. The server log says why.",
   NoBaseCommit: "It has nothing to check out any more.",
   BranchExists:
-    "The branch already exists there, and Verkstead did not make it.",
-  WorktreeRefused: "Git would not make its worktree. The server log says why.",
+    "The branch already exists there, and Verkstead didn't make it.",
+  WorktreeRefused: "Git wouldn't make its worktree. The server log says why.",
 };
 
 /// Which of a target's notes this conversation reads, there being one target that
@@ -255,11 +255,11 @@ function note(offered: (typeof TARGETS)[number], process: Process): string {
 /// says what submitting again does. The take-up says the same thing about its own
 /// press — see `WOULD_DISCARD` in [`TakeUp`](./TakeUp.tsx).
 const WOULD_DISCARD =
-  "took this pull request over and would be closed to make way, and the uncommitted changes in its worktree would go with it. Press steer again to go ahead.";
+  "took this pull request over and would be closed to make way, and the uncommitted changes in its worktree would go with it.";
 
 /// And what `AlreadyHeld` says, as the plain sentence with nobody to lead to.
 const ALREADY_HELD =
-  "Another conversation is still at work on this pull request, so the way on is that conversation rather than a second one beside it.";
+  "Another conversation is still at work on this pull request. Carry on there rather than starting a second one beside it.";
 
 /// What to say about a steer that was refused.
 ///
@@ -281,7 +281,7 @@ export function steerRefusal(outcome: ConversationSteered): string {
     if ("WouldDiscard" in outcome) {
       return `The conversation on ${outcome.WouldDiscard.uncommitted
         .map((one) => one.branch)
-        .join(", ")} ${WOULD_DISCARD}`;
+        .join(", ")} ${WOULD_DISCARD} Press Steer anyway to go ahead.`;
     }
 
     return `${outcome.Companion.repo}: ${STEER_COMPANION_REFUSAL[outcome.Companion.why]}`;
@@ -349,8 +349,8 @@ export function SteerRefusal(props: {
           {(conversation) => (
             <>
               <A href={pathOf(conversation())}>Another conversation</A> is still
-              at work on this pull request, so the way on is that conversation
-              rather than a second one beside it.
+              at work on this pull request. Carry on there rather than starting a
+              second one beside it.
             </>
           )}
         </Show>
@@ -367,7 +367,7 @@ export function SteerRefusal(props: {
               </>
             )}
           </For>{" "}
-          {WOULD_DISCARD}
+          {WOULD_DISCARD} Press <strong>Steer anyway</strong> to go ahead.
         </>
       )}
     </Show>
@@ -412,44 +412,44 @@ const TARGETS: {
   {
     target: "Grilling",
     label: "Grilling",
-    note: "A new round: the work interviewed again, from a fresh brief if you write one. Whatever is missing is made — the branch for a draft, the worktree for a conversation that has been closed.",
+    note: "A new round of questions, from a fresh brief if you write one. A missing branch or worktree is made again.",
     runs: true,
     role: "grilling",
   },
   {
     target: "Implementing",
     label: "Implementing",
-    note: "The work built: what you write here done first, and then whatever the branch holds — the next task of its backlog, or the pull request wrapped up again.",
+    note: "The agent does what you write here first, then carries on with the backlog or wraps the pull request up again.",
     runs: true,
     role: "implementation",
   },
   {
     target: "Wrapping",
     label: "Wrapping up",
-    note: "The branch looked at again: the checks watched, the review run, the comments answered. What you pick runs the fixes, and the review too where nothing was picked for it. The fix attempts start over.",
+    note: "The checks are watched, the review is run, and the comments are answered again, with the fix attempts started over. What you pick runs the fixes, and the review where nothing was picked for it.",
     narrowedNote:
-      "The pull request looked at again: the checks watched, and whether it merges. This process wraps up narrowed to what GitHub refuses a merge for, so nothing reads the branch and nothing said on the pull request is answered. What you pick runs the fixes. The fix attempts start over.",
+      "The checks and whether it merges are watched again, with the fix attempts started over. Only what GitHub refuses a merge for is fixed, so nothing reviews the branch or answers comments.",
     runs: true,
     role: "implementation",
   },
   {
     target: "FollowUp",
     label: "Follow-up",
-    note: "The pull request followed up on: a session that answers what you ask, does what you want done about it, and keeps asking what else there is until you are finished.",
+    note: "The agent answers what you ask about the pull request and does what you want done about it, until you're finished.",
     runs: true,
     role: "implementation",
   },
   {
     target: "Investigating",
     label: "Investigating",
-    note: "A question about this work answered without changing it: a session that reads, writes and runs whatever it needs to find out, commits none of it, and keeps asking what else there is until you are finished. It then goes back to the state you steered it from, or to Done where there is nowhere to go back to.",
+    note: "The agent answers a question about this work without committing anything. It then returns to the state you steered it from.",
     runs: true,
     role: "implementation",
   },
   {
     target: "Done",
     label: "Done",
-    note: "Finished with. Nothing runs, so there is nothing to pick and nothing to write.",
+    note: "Finished. Nothing runs, so there's nothing to pick or write.",
     runs: false,
   },
 ];
@@ -679,7 +679,7 @@ function Companions(props: {
         when={!repos.isError}
         fallback={
           <ErrorLine class={styles.failure}>
-            Could not read the repos: {repos.error?.message}
+            The repos couldn't be read. {repos.error?.message}
           </ErrorLine>
         }
       >
@@ -711,10 +711,8 @@ function Companions(props: {
       </Show>
 
       <Note class={styles.fieldNote}>
-        What goes in is checked out as the steer lands and stays for the rest of
-        this conversation, and a repo opened up is cut a branch off its base as
-        that stands now. Nothing here takes a repo away or closes one back down:
-        what a session has been given is not taken back.
+        Repos added here are checked out as the steer lands and stay for the rest
+        of the conversation. Nothing here removes a repo or makes one read-only again.
       </Note>
     </fieldset>
   );
@@ -805,9 +803,8 @@ function Alongside(props: {
                 onBlur={() => props.keeper.keep()}
               />
               <Note class={styles.fieldNote}>
-                Cleared, it follows this conversation's own branch. It is cut
-                from this repo's base as that stands now — the detached checkout
-                it has been read through goes.
+                Cleared, it follows this conversation's own branch. It's cut from this repo's base as it stands now, and replaces the checkout
+                it was read through.
               </Note>
             </div>
           )}
@@ -1419,7 +1416,7 @@ export function Steer(props: {
       <PaneSticky>
         <PaneHead
           back={{ to: "Timeline", go: props.back }}
-          title="Steer this conversation"
+          title="Steer This Conversation"
         />
       </PaneSticky>
 
@@ -1431,8 +1428,8 @@ export function Steer(props: {
         }}
       >
         <Note class={styles.lead}>
-          The run has stopped while you decide. Cancel leaves it stopped, with
-          resume on offer.
+          The run has stopped while you decide. <strong>Cancel</strong> leaves it
+          stopped, ready to resume.
         </Note>
 
         {/* One block per target, each saying what it means, for the reason the
@@ -1491,15 +1488,13 @@ export function Steer(props: {
               }}
               onBlur={() => keeper.keep()}
               disabled={submit.isPending}
-              placeholder={
-                stands()
-                  ? "Leave it empty to grill the brief that is already there."
-                  : "Nothing is written down yet, so say what this round is about."
-              }
             />
             <Note class={styles.fieldNote}>
-              What you write lands as a brief of its own, frozen at once. The
-              brief the earlier round was built from stays on the timeline.
+              {stands()
+                ? "Leave it empty to grill the brief that's already there."
+                : "Nothing is written down yet, so say what this round is about."}{" "}
+              What you write lands as a brief of its own, and the earlier one
+              stays on the timeline.
             </Note>
 
             {/* Pressed as a row — see `rowPress`, and the press a label stops
@@ -1545,16 +1540,12 @@ export function Steer(props: {
               }}
               onBlur={() => keeper.keep()}
               disabled={submit.isPending}
-              placeholder={
-                props.conversation.ready_to_continue
-                  ? "Leave it empty to carry on with what the branch already holds."
-                  : "There is nothing on this branch to carry on, so say what to do."
-              }
             />
             <Note>
-              A session does what you write and commits it. What follows is
-              Verkstead’s: the next task of the backlog, or the pull request
-              wrapped up again.
+              {props.conversation.ready_to_continue
+                ? "Leave it empty to carry on with what the branch already holds."
+                : "There's nothing on this branch to carry on, so say what to do."}{" "}
+              The agent commits what it does.
             </Note>
           </div>
         </Show>
@@ -1576,12 +1567,10 @@ export function Steer(props: {
               }}
               onBlur={() => keeper.keep()}
               disabled={submit.isPending}
-              placeholder="Ask about this pull request, or say what you want done to it."
             />
             <Note>
-              A session answers what you ask and does what you want done, then
-              asks you what else there is. It goes on until you are finished
-              with it.
+              Ask about this pull request, or say what you want done to it. The
+              agent asks what else there is until you're finished.
             </Note>
           </div>
         </Show>
@@ -1602,14 +1591,10 @@ export function Steer(props: {
               }}
               onBlur={() => keeper.keep()}
               disabled={submit.isPending}
-              placeholder="Ask about this work: what it does, why it does it, or whether something holds."
             />
             <Note>
-              A session reads, writes and runs whatever it needs to answer you,
-              and commits none of it. It goes on asking what else there is until
-              you are finished, and then the conversation goes back to the state
-              you steered it from — or to Done, where there is nowhere to go back
-              to.
+              Ask what it does, why it does it, or whether something holds. The
+              agent reads and runs whatever it needs, and commits none of it.
             </Note>
           </div>
         </Show>
@@ -1634,7 +1619,7 @@ export function Steer(props: {
               fallback={
                 <Note class={styles.fieldNote}>
                   {profiles.isError
-                    ? `Could not read the agent profiles: ${profiles.error?.message}`
+                    ? `The agent profiles couldn't be read. ${profiles.error?.message}`
                     : "Reading the agent profiles…"}
                 </Note>
               }
@@ -1700,10 +1685,9 @@ export function Steer(props: {
               Interrupt current task
             </label>
             <Note class={styles.optionNote}>
-              End the session running now where it stands, leaving the step
-              however far it had got. Left alone it keeps the worktree — to its
-              own end into done, where nothing is started, and otherwise until
-              the session this steer starts is ready to take it over.
+              End the running session now, wherever its step has got to. Left alone, it
+              runs on until the session this steer starts takes over, or to its own end
+              if nothing is started.
             </Note>
           </div>
         </Show>
@@ -1769,19 +1753,19 @@ export function Steer(props: {
         </Show>
         <Show when={saving.isError}>
           <ErrorLine class={styles.failure}>
-            The form could not be saved: {saving.error?.message}
+            The form couldn't be saved. {saving.error?.message}
           </ErrorLine>
         </Show>
         {/* A server that could not answer at all, which is the one thing here
             that is an error rather than an outcome. */}
         <Show when={submit.isError}>
           <ErrorLine class={styles.failure}>
-            The conversation could not be steered: {submit.error?.message}
+            The conversation couldn't be steered. {submit.error?.message}
           </ErrorLine>
         </Show>
         <Show when={cancelling.isError}>
           <ErrorLine class={styles.failure}>
-            The steer could not be cancelled: {cancelling.error?.message}
+            The steer couldn't be cancelled. {cancelling.error?.message}
           </ErrorLine>
         </Show>
       </form>
@@ -1887,7 +1871,7 @@ export function Frozen(props: {
 
       <div class={styles.steered}>
         <p class={styles.steeredInto}>
-          You steered this into {STATE[props.steer.target]}
+          You steered this into {STATE[props.steer.target]}.
         </p>
 
         {/* What was written to steer it with, under the name the field had when

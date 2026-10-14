@@ -226,7 +226,7 @@ function Configuration(props: {
           is most of them, and a section saying so would read as something
           having gone missing. */}
       <Show when={props.conversation.companions.length > 0}>
-        <h3>Companion repos</h3>
+        <h3>Companion Repos</h3>
         <ul class={styles.companions}>
           <For each={props.conversation.companions}>
             {(companion) => (

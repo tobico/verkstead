@@ -95,7 +95,7 @@
   },
   "run": {
     "phase": "Done",
-    "status": "3 of 3 could not be installed",
+    "status": "3 of 3 couldn't be installed.",
     "done": 3,
     "total": 3,
     "cancelling": false

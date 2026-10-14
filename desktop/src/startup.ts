@@ -96,7 +96,7 @@
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
-import { say } from "./log.js";
+import { reason, say } from "./log.js";
 import { absolute, type Machine } from "./platform.js";
 import { reg, type Registry, RUN } from "./registry.js";
 import type { Settings } from "./settings.js";
@@ -150,9 +150,9 @@ const COMMENT = "The workbench, in the system tray";
 /// Worded for the human reading it under a greyed box, which is where it is
 /// drawn: what is wrong is the app rather than their machine.
 const UNPACKAGED =
-  "Launch on Startup needs an installed Verkstead. This one is running from a " +
-  "checkout, and a registration made here would name a build that will not be " +
-  "there the next time the machine starts.";
+  "Launch on startup needs an installed Verkstead. This one runs from a checkout, " +
+  "and a registration made here would name a build that won't be there the next " +
+  "time the machine starts.";
 
 /// Why a registration that is there starts nothing, on a Mac whose platform is
 /// holding it for the human's approval.
@@ -164,16 +164,15 @@ const UNPACKAGED =
 /// register afresh. **The row rather than a switch**, because that is what was
 /// found on a real Mac: see the note at the top of this file.
 const HELD =
-  "macOS is holding Verkstead's login item for your approval, so it will not " +
-  "start with your session. Verkstead is listed under Open at Login in System " +
-  "Settings, where the minus button removes it — and this box can register it " +
-  "again once it is gone.";
+  "macOS is holding Verkstead's login item for your approval, so it won't start " +
+  "with your session. Remove it from Open at Login in System Settings with the " +
+  "minus button, and this box can register it again.";
 
 /// And why a machine may have nowhere to keep one — the tray app's own wording,
 /// for the same situation.
 const NOWHERE =
   "Verkstead has nowhere to keep a startup registration on this machine, so it " +
-  "cannot start itself with your desktop session.";
+  "can't start with your desktop session.";
 
 /// What a registration is a function of.
 ///
@@ -492,7 +491,7 @@ export function startup(
     if ("nowhere" in put) {
       // The box is greyed, so this is a page that should not have asked — said
       // rather than enacted, and what comes back is what is true.
-      say(`Launch on Startup was asked for, and ${put.nowhere}`);
+      say(`Launch on startup was asked for, and refused: ${put.nowhere}`);
       return standing();
     }
 
@@ -510,9 +509,9 @@ export function startup(
       // page.
       const refused =
         (asked
-          ? "Verkstead could not ask this machine to start it with your desktop session"
-          : "Verkstead could not ask this machine to stop starting it with your desktop session") +
-        ` — ${String(trouble)}`;
+          ? "Verkstead couldn't ask this machine to start it with your desktop session"
+          : "Verkstead couldn't ask this machine to stop starting it with your desktop session") +
+        ` (${reason(trouble)}).`;
 
       say(refused);
       return { ...standing(), refused };

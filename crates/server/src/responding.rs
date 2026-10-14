@@ -309,12 +309,15 @@ async fn abandoned(
     forget(state, conversation_id, batch).await;
     unsettle(state, conversation_id, batch).await;
 
-    let left = "a session read what was said on the pull request and put what it would \
-                do to you, and it is gone, so its questions have been closed unanswered. \
+    let left = "A session read what was said on the pull request and put what it would \
+                do to you, and it's gone, so its questions have been closed unanswered. \
                 Resuming reads what was said again.";
 
     let (how, writing) = match ended_badly {
-        Some((how, writing)) => (format!("{how}, and {left}"), Some(writing)),
+        Some((how, writing)) => (
+            format!("{} {left}", crate::stopping::sentence(&how)),
+            Some(writing),
+        ),
         None => (left.to_owned(), None),
     };
 
@@ -438,7 +441,7 @@ async fn stopped(
         conversation_id,
         crate::stopping::Decided::Verkstead,
         "answering what was said on the pull request",
-        how,
+        &crate::stopping::sentence(how),
         Some(writing),
     )
     .await

@@ -551,7 +551,7 @@ async fn a_members_news_lights_a_phone_on_another_device_with_the_device_leading
     let locally = shown(&received, &on_b).await;
     assert_eq!(
         locally.title,
-        format!("{BRANCH} is done"),
+        format!("{BRANCH} is done."),
         "B's own phone is told about B's own work, so nothing leads the title",
     );
     assert_eq!(
@@ -564,7 +564,7 @@ async fn a_members_news_lights_a_phone_on_another_device_with_the_device_leading
     let relayed = shown(&received, &on_a).await;
     assert_eq!(
         relayed.title,
-        format!("{B_MACHINE} — {BRANCH} is done"),
+        format!("{B_MACHINE} · {BRANCH} is done."),
         "and the phone installed from A is told which machine the work was on",
     );
     assert_eq!(
@@ -600,7 +600,7 @@ async fn a_device_linked_to_nothing_tells_its_phone_what_it_always_did() {
     push::the_work_is_done(&alone.pool, conversation);
 
     let notice = shown(&received, &phone).await;
-    assert_eq!(notice.title, format!("{BRANCH} is done"));
+    assert_eq!(notice.title, format!("{BRANCH} is done."));
     assert_eq!(notice.path, format!("/conversations/{conversation}"));
 
     settle().await;
@@ -651,7 +651,7 @@ async fn a_member_that_is_switched_off_costs_the_notification_and_nothing_else()
     let locally = shown(&received, &on_b).await;
     assert_eq!(
         locally.title,
-        format!("{BRANCH} is done"),
+        format!("{BRANCH} is done."),
         "the local push went out, which is what a member being off must not cost",
     );
 
@@ -696,7 +696,7 @@ async fn a_device_that_is_not_a_member_is_refused_the_news() {
 
     let news = RelayedNews {
         conversation: 1,
-        said: format!("{BRANCH} is done"),
+        said: format!("{BRANCH} is done."),
         project: Some(REPO.to_owned()),
     };
 
@@ -721,7 +721,7 @@ async fn a_device_that_is_not_a_member_is_refused_the_news() {
     let shown_on_a = shown(&received, &on_a).await;
     assert_eq!(
         shown_on_a.title,
-        format!("{B_MACHINE} — {BRANCH} is done"),
+        format!("{B_MACHINE} · {BRANCH} is done."),
         "and it is titled by the device A holds the certificate for, not by the body",
     );
 
@@ -765,7 +765,7 @@ async fn news_a_member_told_this_device_is_not_passed_on() {
             &member_at(&a, B),
             &RelayedNews {
                 conversation: 7,
-                said: format!("{BRANCH} is done"),
+                said: format!("{BRANCH} is done."),
                 project: Some(REPO.to_owned()),
             },
         )
@@ -773,7 +773,7 @@ async fn news_a_member_told_this_device_is_not_passed_on() {
         .expect("B is a member of A");
 
     let shown_on_a = shown(&received, &on_a).await;
-    assert_eq!(shown_on_a.title, format!("{B_MACHINE} — {BRANCH} is done"));
+    assert_eq!(shown_on_a.title, format!("{B_MACHINE} · {BRANCH} is done."));
 
     settle().await;
     assert_eq!(
@@ -805,7 +805,7 @@ async fn the_app_hears_the_work_is_done_with_no_phone_subscribed() {
     assert_eq!(
         app.notice().await,
         Notice {
-            title: format!("{BRANCH} is done"),
+            title: format!("{BRANCH} is done."),
             path: format!("/conversations/{conversation}"),
             project: Some(REPO.to_owned()),
         },
@@ -833,7 +833,7 @@ async fn the_app_hears_a_members_news_with_the_device_leading_it() {
     assert_eq!(
         on_a.notice().await,
         Notice {
-            title: format!("{B_MACHINE} — {BRANCH} is done"),
+            title: format!("{B_MACHINE} · {BRANCH} is done."),
             path: format!("/devices/{B}/conversations/{conversation}"),
             project: Some(REPO.to_owned()),
         },

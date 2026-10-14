@@ -313,8 +313,8 @@ impl MovedFor {
     /// Whose request the Timeline says the move was made at.
     pub fn whose(self) -> &'static str {
         match self {
-            MovedFor::Human => "the human's",
-            MovedFor::Session => "the session's",
+            MovedFor::Human => "your",
+            MovedFor::Session => "the agent's",
         }
     }
 }

@@ -623,7 +623,10 @@ fn how_it_ended(ended: &store::Ended) -> String {
 /// sentence is what makes the record read as one kind of stopped thing rather
 /// than two: see the Timeline's own read, which is the other caller.
 pub(crate) fn out_of_window(profile: &str, said: &str) -> String {
-    format!("the account **{profile}** was being spent is out of window: {said}")
+    format!(
+        "The **{profile}** account is out of window. The session said: {}",
+        ended(said)
+    )
 }
 
 /// Why a run stopped when the account it was spending signed out: which
@@ -636,11 +639,14 @@ pub(crate) fn signed_out(profile: &str, said: &str, home: Option<&str>) -> Strin
     let login = match home {
         None => "Log in, and the run carries on by itself.".to_owned(),
         Some(home) => format!(
-            "The account is at home on **{home}**, so log in there, then press Resume here."
+            "The account is at home on **{home}**, so log in there, then press **Resume** here."
         ),
     };
 
-    format!("the account **{profile}** has signed out: {said}\n\n{login}")
+    format!(
+        "The **{profile}** account has signed out. The session said: {}\n\n{login}",
+        ended(said)
+    )
 }
 
 /// Why a run stopped when its session signed out on a login that had already
@@ -648,9 +654,10 @@ pub(crate) fn signed_out(profile: &str, said: &str, home: Option<&str>) -> Strin
 /// run carries on with the new login without anybody doing anything.
 pub(crate) fn signed_out_since(profile: &str, said: &str) -> String {
     format!(
-        "the account **{profile}** signed out in this session: {said}\n\n\
+        "The **{profile}** account signed out in this session. The session said: {}\n\n\
          It was logged in again after the session started, so the run carries on by itself \
-         with the new login."
+         with the new login.",
+        ended(said)
     )
 }
 
@@ -663,6 +670,32 @@ pub(crate) fn opening(what: &str) -> String {
     match letters.next() {
         Some(first) => first.to_uppercase().collect::<String>() + letters.as_str(),
         None => String::new(),
+    }
+}
+
+/// A reason as a sentence of its own: its first letter up, and a full stop where
+/// it ends without one.
+///
+/// For a reason that can arrive as either an error's own text or a sentence
+/// somebody already wrote, so that what the Notice says reads as sentences
+/// whichever way it came.
+pub(crate) fn sentence(why: &str) -> String {
+    ended(&opening(why.trim()))
+}
+
+/// Words somebody else wrote, ended as a sentence where they were not already:
+/// the words themselves are left as they came, and only the full stop the
+/// screen wants is added.
+///
+/// [`sentence`] is this with the first letter raised, for a reason that may be
+/// a fragment of Verkstead's own; this is for words that are quoted, where a
+/// raised letter would change what was said.
+pub(crate) fn ended(said: &str) -> String {
+    let said = said.trim_end();
+
+    match said.ends_with(['.', '?', '!', '…']) {
+        true => said.to_owned(),
+        false => format!("{said}."),
     }
 }
 
@@ -816,7 +849,8 @@ mod tests {
     fn a_signed_out_stop_says_where_the_login_is_made() {
         assert_eq!(
             signed_out("fable", "Login expired · Please run /login", None),
-            "the account **fable** has signed out: Login expired · Please run /login\n\n\
+            "The **fable** account has signed out. The session said: Login expired · Please run \
+             /login.\n\n\
              Log in, and the run carries on by itself.",
         );
         assert_eq!(
@@ -825,8 +859,9 @@ mod tests {
                 "Login expired · Please run /login",
                 Some("laptop")
             ),
-            "the account **theirs** has signed out: Login expired · Please run /login\n\n\
-             The account is at home on **laptop**, so log in there, then press Resume here.",
+            "The **theirs** account has signed out. The session said: Login expired · Please run \
+             /login.\n\n\
+             The account is at home on **laptop**, so log in there, then press **Resume** here.",
         );
     }
 
@@ -882,7 +917,7 @@ mod tests {
     fn the_notice_says_what_stopped_why_and_what_the_evidence_was() {
         let said = said(
             "implementing the work",
-            "nothing is driving it: no session is running",
+            "Nothing is driving it. No session is running.",
             "## rate-limiting\n M limiter.md",
             "the task is beyond me",
             None,
@@ -891,7 +926,7 @@ mod tests {
         assert_eq!(
             said,
             "**Implementing the work** stopped.\n\n\
-             nothing is driving it: no session is running\n\n\
+             Nothing is driving it. No session is running.\n\n\
              ### The worktree\n\n\
              \x20   ## rate-limiting\n    \x20M limiter.md\n\n\
              ### What the last session said\n\n\
@@ -906,7 +941,7 @@ mod tests {
     fn evidence_holding_a_fence_stays_inside_its_own_block() {
         let said = said(
             "wrapping the work up",
-            "the checks are red",
+            "The checks are red.",
             "",
             "```\nrm -rf\n```",
             None,
@@ -923,7 +958,7 @@ mod tests {
     /// looked into.
     #[test]
     fn evidence_nobody_could_gather_says_that_it_is_missing() {
-        let said = said("grilling the work", "nothing is driving it", "", "", None);
+        let said = said("grilling the work", "Nothing is driving it.", "", "", None);
 
         assert!(
             said.contains("Git had nothing pending, or the repository would not answer."),
@@ -939,7 +974,7 @@ mod tests {
     fn a_session_that_printed_nothing_says_how_it_ended_instead() {
         let said = said(
             "implementing the work",
-            "the session exited with status 1",
+            "The session exited with status 1.",
             "## rate-limiting",
             "",
             Some(&store::Ended {
@@ -958,7 +993,7 @@ mod tests {
             "in place of the sentence that pointed nowhere, rather than beside it: {said:?}",
         );
         assert!(
-            said.contains("the session exited with status 1"),
+            said.contains("The session exited with status 1."),
             "and the reason the Notice opens with is the one it always was: {said:?}",
         );
     }
@@ -978,7 +1013,7 @@ mod tests {
     fn a_capture_holding_only_verksteads_own_lines_is_still_a_session_that_said_nothing() {
         let said = said(
             "implementing the work",
-            "the session exited with status 1",
+            "The session exited with status 1.",
             "",
             "Verkstead is writing this session's boundary: 60 access-control entries on this \
              machine's own directories. The agent starts once they are written.\n\
@@ -1008,7 +1043,7 @@ mod tests {
     fn a_session_that_spoke_keeps_its_own_words() {
         let said = said(
             "implementing the work",
-            "the session exited with status 1",
+            "The session exited with status 1.",
             "",
             "the task is beyond me",
             Some(&store::Ended {

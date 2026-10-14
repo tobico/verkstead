@@ -501,8 +501,8 @@ function offering(label: string, value: string): Promise<HTMLSelectElement> {
 
 /// What the Create repo card's two fields are labelled, which is how they are
 /// found — on this device and on a member both, it being the one card.
-const WHERE = "Where it goes";
-const CALLED = "What it is called";
+const WHERE = "Parent directory";
+const CALLED = "Name";
 
 /// And what the Open repo card's one field is labelled.
 const PATH = "Absolute path of a git repository";
@@ -672,7 +672,7 @@ describe("the compose page", () => {
 
       // And why, on the press itself: one thing is missing, and it is the first
       // control in the row above.
-      expect(press.getAttribute("title")).toBe("No repo selected");
+      expect(press.getAttribute("title")).toBe("Select a repo first.");
     }
 
     // Pressed, either of them does nothing at all — which is what the press
@@ -686,7 +686,7 @@ describe("the compose page", () => {
     await waitFor(() => expect(draft.getAttribute("aria-disabled")).toBe("false"));
     expect(draft.classList.contains(composer.inert!)).toBe(false);
     expect(draft.getAttribute("title")).toBeNull();
-    expect(start.getAttribute("title")).not.toBe("No repo selected");
+    expect(start.getAttribute("title")).not.toBe("Select a repo first.");
   });
 
   /// And the two presses part company there. Creating is the whole of what the
@@ -866,7 +866,7 @@ describe("the compose page", () => {
     await waitFor(() =>
       expect(
         screen.getByText(
-          `The branch could not be named: ${BRANCH_REFUSAL.NotABranchName}`,
+          `The branch couldn't be named. ${BRANCH_REFUSAL.NotABranchName}`,
         ),
       ).toBeTruthy(),
     );
@@ -893,7 +893,7 @@ describe("the compose page", () => {
     await waitFor(() =>
       expect(
         screen.getByText(
-          "That repo is not registered any more, so nothing was created.",
+          "That repo isn't registered any more, so nothing was created.",
         ),
       ).toBeTruthy(),
     );
@@ -926,10 +926,10 @@ describe("the compose page", () => {
     await pickRepo(container, REPOS[1]!.id);
 
     await waitFor(() =>
-      expect(showing("Grilling")).toBe("Fable 5 — fable"),
+      expect(showing("Grilling")).toBe("Fable 5 · fable"),
     );
-    expect(showing("Implementation")).toBe("Opus 5 — opus");
-    expect(showing("Review")).toBe("Sonnet 5 — sonnet");
+    expect(showing("Implementation")).toBe("Opus 5 · opus");
+    expect(showing("Review")).toBe("Sonnet 5 · sonnet");
   });
 
   it("re-reads on a switch, and leaves a role the human touched alone", async () => {
@@ -951,23 +951,23 @@ describe("the compose page", () => {
     await openAgent(container);
 
     await waitFor(() =>
-      expect(showing("Grilling")).toBe("Fable 5 — fable"),
+      expect(showing("Grilling")).toBe("Fable 5 · fable"),
     );
 
     // One of the three made the human's own, which is what the switch must not
     // touch.
-    pick("Grilling", "Claude Code Sonnet 5 — sonnet");
-    expect(showing("Grilling")).toBe("Sonnet 5 — sonnet");
+    pick("Grilling", "Claude Code Sonnet 5 · sonnet");
+    expect(showing("Grilling")).toBe("Sonnet 5 · sonnet");
 
     await pickRepo(container, REPOS[0]!.id);
 
     // The two nobody touched are the other repo's memory now; the one they did
     // is still theirs.
     await waitFor(() =>
-      expect(showing("Review")).toBe("Fable 5 — fable"),
+      expect(showing("Review")).toBe("Fable 5 · fable"),
     );
-    expect(showing("Implementation")).toBe("Sonnet 5 — sonnet");
-    expect(showing("Grilling")).toBe("Sonnet 5 — sonnet");
+    expect(showing("Implementation")).toBe("Sonnet 5 · sonnet");
+    expect(showing("Grilling")).toBe("Sonnet 5 · sonnet");
   });
 
   it("sends nothing for a role left showing the prefill", async () => {
@@ -1001,7 +1001,7 @@ describe("the compose page", () => {
     await openAgent(container);
 
     await waitFor(() =>
-      expect(showing("Grilling")).toBe("Fable 5 — fable"),
+      expect(showing("Grilling")).toBe("Fable 5 · fable"),
     );
 
     // One picked away from what was shown, the other two left on it.
@@ -1119,19 +1119,19 @@ describe("the device the compose page is drafting onto", () => {
     // above the accounts, which is on no machine at all.
     await waitFor(() =>
       expect(rows("Implementation")).toContain(
-        `Claude Code Opus 5 — personal · ${SHARED_MACHINE.name}`,
+        `Claude Code Opus 5 · personal · ${SHARED_MACHINE.name}`,
       ),
     );
 
     for (const role of ["Grilling", "Review"]) {
       expect(rows(role)).toContain(
-        `Claude Code Opus 5 — personal · ${SHARED_MACHINE.name}`,
+        `Claude Code Opus 5 · personal · ${SHARED_MACHINE.name}`,
       );
     }
 
     // This device's own say nothing about a machine: a name on every row would
     // be a column of one answer repeated.
-    expect(rows("Implementation")).toContain("Claude Code Fable 5 — fable");
+    expect(rows("Implementation")).toContain("Claude Code Fable 5 · fable");
 
     // And the member's row wears its machine's mark after the harness's, which
     // is what a list of several devices' accounts is scanned by.
@@ -1172,13 +1172,13 @@ describe("the device the compose page is drafting onto", () => {
 
     await waitFor(() =>
       expect(rows("Implementation")).toContain(
-        `Claude Code Opus 5 — personal · ${SHARED_MACHINE.name} · ${said}`,
+        `Claude Code Opus 5 · personal · ${SHARED_MACHINE.name} · ${said}`,
       ),
     );
 
     // And this device's own, which nothing is in the way of, read as they
     // always did.
-    expect(rows("Implementation")).toContain("Claude Code Fable 5 — fable");
+    expect(rows("Implementation")).toContain("Claude Code Fable 5 · fable");
   });
 
   /// The select stands left of the Repo, because the Repo is one of the picked
@@ -1263,7 +1263,7 @@ describe("the device the compose page is drafting onto", () => {
 
     await openAgent(container);
     await waitFor(() =>
-      expect(showing("Grilling")).toBe("Sonnet 5 — sonnet"),
+      expect(showing("Grilling")).toBe("Sonnet 5 · sonnet"),
     );
   });
 
@@ -1296,7 +1296,7 @@ describe("the device the compose page is drafting onto", () => {
     );
     await drawn(container, `.${setup.companion}`);
     await openAgent(container);
-    pick("Grilling", "Claude Code Sonnet 5 — sonnet");
+    pick("Grilling", "Claude Code Sonnet 5 · sonnet");
 
     await waitFor(() => {
       const held = stored();
@@ -1924,7 +1924,7 @@ describe("the target a compose page is pointed at", () => {
     await waitFor(() =>
       expect(
         screen.getByText(
-          `The target could not be named: ${TARGET_REFUSAL.NotDrafting}`,
+          `The target couldn't be named. ${TARGET_REFUSAL.NotDrafting}`,
         ),
       ).toBeTruthy(),
     );
@@ -1971,7 +1971,7 @@ describe("the target a compose page is pointed at", () => {
     await waitFor(() =>
       expect(
         screen.getByText(
-          /The pull request could not be taken up: Another conversation is still at work on that pull request/,
+          /The pull request couldn't be taken up\. Another conversation is still at work on that pull request/,
         ),
       ).toBeTruthy(),
     );
@@ -2221,7 +2221,7 @@ describe("the pickers a compose page's process draws", () => {
     const start = screen.getByRole("button", { name: "Start work" });
     // The one role, on the control the table gave it: a dropdown rather than a
     // trigger, so there is nothing to open to read it.
-    await waitFor(() => expect(showing("Agent")).toBe("Opus 5 — opus"));
+    await waitFor(() => expect(showing("Agent")).toBe("Opus 5 · opus"));
 
     // The one role it uses is answered, so there is nothing left to wait on —
     // and the two it does not use are not drawn to be waited on.
@@ -2254,7 +2254,7 @@ describe("the pickers a compose page's process draws", () => {
 
     const start = screen.getByRole("button", { name: "Start work" });
     await waitFor(() =>
-      expect(showing("Implementation")).toBe("Opus 5 — opus"),
+      expect(showing("Implementation")).toBe("Opus 5 · opus"),
     );
 
     expect(start.getAttribute("aria-disabled")).toBe("true");
@@ -2344,7 +2344,7 @@ describe("the agent control on a compose page", () => {
     await composing(container);
     await pickRepo(container, REPOS[1]!.id);
 
-    await waitFor(() => expect(agentReads()).toBe("Opus 5 — opus +2"));
+    await waitFor(() => expect(agentReads()).toBe("Opus 5 · opus +2"));
   });
 
   /// The count is never what gives way to a long name: the words are cut with an
@@ -2357,7 +2357,7 @@ describe("the agent control on a compose page", () => {
 
     await composing(container);
     await pickRepo(container, REPOS[1]!.id);
-    await waitFor(() => expect(agentReads()).toBe("Opus 5 — opus +2"));
+    await waitFor(() => expect(agentReads()).toBe("Opus 5 · opus +2"));
 
     const value = container.querySelector(
       `.${setup.agentOption} > button .${setup.optionValue}`,
@@ -2365,7 +2365,7 @@ describe("the agent control on a compose page", () => {
     const words = value.querySelector(`.${setup.optionWords}`)!;
     const count = value.querySelector(`.${setup.optionCount}`)!;
 
-    expect(words.textContent).toBe("Opus 5 — opus");
+    expect(words.textContent).toBe("Opus 5 · opus");
     expect(count.textContent).toBe(" +2");
     expect(words.contains(count)).toBe(false);
   });
@@ -2389,7 +2389,7 @@ describe("the agent control on a compose page", () => {
     await composing(container);
     await pickRepo(container, REPOS[1]!.id);
 
-    await waitFor(() => expect(agentReads()).toBe("Opus 5 — opus"));
+    await waitFor(() => expect(agentReads()).toBe("Opus 5 · opus"));
   });
 
   /// One for the one role that is somewhere else — and off what the pickers are
@@ -2407,14 +2407,14 @@ describe("the agent control on a compose page", () => {
 
     await composing(container);
     await pickRepo(container, REPOS[1]!.id);
-    await waitFor(() => expect(agentReads()).toBe("Opus 5 — opus"));
+    await waitFor(() => expect(agentReads()).toBe("Opus 5 · opus"));
 
     await openAgent(container);
     // The row reads out in full where the list does; the trigger drops the
     // backend's name, its mark having said it already.
-    pick("Review", "Claude Code Fable 5 — fable");
+    pick("Review", "Claude Code Fable 5 · fable");
 
-    expect(agentReads()).toBe("Opus 5 — opus +1");
+    expect(agentReads()).toBe("Opus 5 · opus +1");
   });
 
   /// And *Not chosen* while a role the Process uses is empty, which is what the
@@ -2432,7 +2432,7 @@ describe("the agent control on a compose page", () => {
     expect(stored().implementation).toBeNull();
 
     await pickRepo(container, REPOS[1]!.id);
-    await waitFor(() => expect(agentReads()).toBe("Opus 5 — opus +2"));
+    await waitFor(() => expect(agentReads()).toBe("Opus 5 · opus +2"));
   });
 
   /// A role the Process does not use is not one of them, and the table is what
@@ -2465,7 +2465,7 @@ describe("the agent control on a compose page", () => {
 
     await composing(container);
 
-    await waitFor(() => expect(agentReads()).toBe("Opus 5 — opus"));
+    await waitFor(() => expect(agentReads()).toBe("Opus 5 · opus"));
     expect(ROLES.Review.uses).toEqual(["implementation", "review"]);
   });
 });
@@ -2546,7 +2546,7 @@ describe("the agent dropdown on a compose page", () => {
     expect(picker("Agent").id).toBe("implementation-pairing");
     // The implementation memory and not another role's, which is what the two
     // other accounts the repo remembers are there to tell it from.
-    await waitFor(() => expect(showing("Agent")).toBe("Opus 5 — opus"));
+    await waitFor(() => expect(showing("Agent")).toBe("Opus 5 · opus"));
     expect(stored().implementation, "nobody touched it").toBeNull();
   });
 
@@ -2576,12 +2576,12 @@ describe("the agent dropdown on a compose page", () => {
     fireEvent.input(await composing(container), {
       target: { value: "What does the cache do?" },
     });
-    await waitFor(() => expect(showing("Agent")).toBe("Opus 5 — opus"));
+    await waitFor(() => expect(showing("Agent")).toBe("Opus 5 · opus"));
 
     // The row reads out in full where the list does; the closed control drops
     // the backend's name, its mark having said it already.
-    pick("Agent", "Claude Code Sonnet 5 — sonnet");
-    expect(showing("Agent")).toBe("Sonnet 5 — sonnet");
+    pick("Agent", "Claude Code Sonnet 5 · sonnet");
+    expect(showing("Agent")).toBe("Sonnet 5 · sonnet");
 
     fireEvent.click(screen.getByRole("button", { name: "Start work" }));
 
@@ -2906,7 +2906,7 @@ describe("starting the work on the picked device", () => {
   /// A refusal keyed by the number alone would be drawn on the composer of an
   /// unrelated draft the moment two devices are in play.
   it("says what the member refused on the draft it made, and not on the same number here", async () => {
-    const said = `The branch could not be named: ${BRANCH_REFUSAL.NotABranchName}`;
+    const said = `The branch couldn't be named. ${BRANCH_REFUSAL.NotABranchName}`;
 
     creatingOnTheMember(
       whenever(
@@ -3167,7 +3167,7 @@ describe("moving a saved draft to another device", () => {
     await waitFor(() => expect(offered("Repo")).toHaveLength(THEIRS.length));
     pick("Repo", THEIRS[0]!.name);
 
-    fireEvent.click(screen.getByRole("button", { name: "Keep it here" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
     await waitFor(() =>
       expect(screen.queryByText(`Move this draft to ${MEMBER.name}?`)).toBeNull(),
@@ -3308,7 +3308,7 @@ describe("moving a saved draft to another device", () => {
     await move(THEIRS[0]!);
 
     await screen.findByText(
-      `docs could not be attached: ${SERVER_REFUSAL.NoSuchServer}`,
+      `docs couldn't be attached. ${SERVER_REFUSAL.NoSuchServer}`,
     );
 
     expect(writes(fetching, moved)).toBe(0);
@@ -3347,7 +3347,7 @@ describe("moving a saved draft to another device", () => {
     await move(THEIRS[0]!);
 
     await screen.findByText(
-      `The base branch could not be recorded: ${BASE_REFUSAL.NoSuchBranch}`,
+      `The base branch couldn't be recorded. ${BASE_REFUSAL.NoSuchBranch}`,
     );
 
     expect(writes(fetching, moved)).toBe(0);
@@ -3393,7 +3393,7 @@ describe("moving a saved draft to another device", () => {
     );
 
     await screen.findByText(
-      `The branch could not be named: ${BRANCH_REFUSAL.NotABranchName}`,
+      `The branch couldn't be named. ${BRANCH_REFUSAL.NotABranchName}`,
     );
 
     // And nothing closed the draft it came off.
@@ -3417,7 +3417,7 @@ describe("moving a saved draft to another device", () => {
     await move(THEIRS[0]!);
 
     await screen.findByText(
-      `${refused.name} could not be attached: ${ATTACH_REFUSAL.TooLarge}`,
+      `${refused.name} couldn't be attached. ${ATTACH_REFUSAL.TooLarge}`,
     );
 
     expect(writes(fetching, moved)).toBe(0);
@@ -3443,7 +3443,7 @@ describe("moving a saved draft to another device", () => {
       ),
     );
 
-    await screen.findByText(/the draft it came off could not be closed/i);
+    await screen.findByText(/the draft it came off couldn't be closed/i);
     expect(writes(fetching, moved)).toBe(1);
   });
 
@@ -3504,7 +3504,7 @@ describe("moving a saved draft to another device", () => {
     await move(THEIRS[0]!);
 
     await screen.findByText(
-      new RegExp(`not registered on ${MEMBER.name} any more`),
+      new RegExp(`isn't registered on ${MEMBER.name} any more`),
     );
 
     expect(writes(fetching, moved)).toBe(0);
@@ -4062,7 +4062,7 @@ describe("making a repo from the Repo dropdown", () => {
       json({
         MadeWithoutRemote: {
           repo: MADE,
-          why: "`gh` said: Name already exists on this account",
+          why: "The gh command said: Name already exists on this account.",
         },
       } satisfies Created),
       json(TOKENED),
@@ -4077,14 +4077,16 @@ describe("making a repo from the Repo dropdown", () => {
     // `gh`'s own words, the way git's are for a git that would not commit — and
     // the fields are gone, there being nothing left to fill in.
     await waitFor(() =>
-      screen.getByText("`gh` said: Name already exists on this account"),
+      screen.getByText(
+        "The gh command said: Name already exists on this account.",
+      ),
     );
     expect(screen.queryByLabelText(WHERE)).toBeNull();
     expect(stored().repo).toBeNull();
 
     // And the one press out lands it: the repository is registered whatever
     // GitHub said, so the draft goes on it the way a clean create's does.
-    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
 
     await waitFor(() => expect(stored().repo).toBe(MADE.id));
     await waitFor(() =>
@@ -4915,7 +4917,7 @@ describe("continuing a roadmap from the compose page", () => {
     await waitFor(() =>
       expect(
         screen.getByText(
-          `The stage could not be started: ${ADOPT_REFUSAL.NoGrillingProfile}`,
+          `The stage couldn't be started. ${ADOPT_REFUSAL.NoGrillingProfile}`,
         ),
       ).toBeTruthy(),
     );
@@ -5182,7 +5184,7 @@ describe("the files a compose page holds", () => {
     await waitFor(() =>
       expect(
         screen.getByText(
-          `huge.bin could not be attached: ${ATTACH_REFUSAL.TooLarge}`,
+          `huge.bin couldn't be attached. ${ATTACH_REFUSAL.TooLarge}`,
         ),
       ).toBeTruthy(),
     );
@@ -5239,7 +5241,7 @@ describe("the MCP servers a compose page holds", () => {
     await composing(container);
 
     expect(offeredIn(await attachMenu())).toEqual([
-      "Attach file",
+      "Attach file…",
       ...SETTINGS.mcp_servers.map((one) => one.name),
       "Add a server…",
     ]);
@@ -5255,7 +5257,7 @@ describe("the MCP servers a compose page holds", () => {
     await composing(container);
 
     expect(offeredIn(await attachMenu())).toEqual([
-      "Attach file",
+      "Attach file…",
       "Add a server…",
     ]);
   });
@@ -5292,7 +5294,7 @@ describe("the MCP servers a compose page holds", () => {
     );
 
     const dialog = await waitFor(() =>
-      screen.getByRole("dialog", { name: "Add an MCP server" }),
+      screen.getByRole("dialog", { name: "Add an MCP Server" }),
     );
     fireEvent.input(within(dialog).getByLabelText("Name"), {
       target: { value: "wiki" },
@@ -5338,7 +5340,7 @@ describe("the MCP servers a compose page holds", () => {
     await waitFor(() => expect(chips(container)).toEqual(["docs"]));
 
     expect(offeredIn(await attachMenu())).toEqual([
-      "Attach file",
+      "Attach file…",
       "tickets",
       "Add a server…",
     ]);
@@ -5348,7 +5350,7 @@ describe("the MCP servers a compose page holds", () => {
 
     await waitFor(() => expect(chips(container)).toEqual([]));
     expect(offeredIn(await attachMenu())).toEqual([
-      "Attach file",
+      "Attach file…",
       ...SETTINGS.mcp_servers.map((one) => one.name),
       "Add a server…",
     ]);
@@ -5597,7 +5599,7 @@ describe("the MCP servers a compose page holds", () => {
     await waitFor(() =>
       expect(
         screen.getByText(
-          `docs could not be attached: ${SERVER_REFUSAL.NoSuchServer}`,
+          `docs couldn't be attached. ${SERVER_REFUSAL.NoSuchServer}`,
         ),
       ).toBeTruthy(),
     );

@@ -926,7 +926,7 @@ pub(crate) async fn moved(
     to: &ConversationMove,
 ) -> Result<ConversationClosed> {
     let said = format!(
-        "This draft's work moved to **{}** — it is Conversation {} there. \
+        "This draft's work moved to **{}**, where it's conversation {}. \
          Nothing was left to do here, so this one is closed.\n\n\
          The device is `{}`.",
         to.name, to.conversation, to.device,
@@ -2039,10 +2039,10 @@ impl Unmade {
     /// a different thing to go and look at.
     fn said(&self) -> String {
         match self {
-            Unmade::Own => "git would not make its worktree".to_owned(),
+            Unmade::Own => "git wouldn't make its worktree".to_owned(),
             Unmade::Companion { repo, why } => format!(
-                "it works alongside `{repo}`, the companion repository it inherits from this \
-                 Conversation, and {}",
+                "it works alongside `{repo}`, the companion repo it inherits from this \
+                 conversation, and {}",
                 refusal(why),
             ),
         }
@@ -2059,23 +2059,22 @@ impl Unmade {
 fn refusal(why: &CompanionRefusal) -> String {
     match why {
         CompanionRefusal::FetchFailed => {
-            "git would not fetch from that repository's remote — so what its checkout would come \
-             off cannot be trusted to be what origin is holding, and the server log says why the \
-             fetch failed"
+            "git wouldn't fetch from that repo's remote, so what its checkout would come off \
+             can't be trusted to be what origin is holding. The server log says why the fetch \
+             failed"
                 .to_owned()
         }
         CompanionRefusal::NoBaseCommit => {
             "what its checkout comes off resolves to no commit there".to_owned()
         }
         CompanionRefusal::BranchExists => {
-            "the branch this stage would cut in it is already a branch of that repository"
-                .to_owned()
+            "the branch this stage would cut in it is already a branch of that repo".to_owned()
         }
         CompanionRefusal::BranchInTheWay { by } => format!(
-            "`{by}` is already a branch of that repository, which stands in the way of the branch \
+            "`{by}` is already a branch of that repo, which stands in the way of the branch \
              this stage would cut in it"
         ),
-        CompanionRefusal::WorktreeRefused => "git would not make its checkout".to_owned(),
+        CompanionRefusal::WorktreeRefused => "git wouldn't make its checkout".to_owned(),
     }
 }
 
@@ -2774,9 +2773,7 @@ async fn alongside(
             state,
             pressed,
             &stage,
-            &format!(
-                "it could not be given everything it inherits from this Conversation: {error}"
-            ),
+            &format!("it couldn't be given everything it inherits from this conversation: {error}"),
         )
         .await;
     }
@@ -2885,10 +2882,10 @@ async fn alongside(
                 state,
                 pressed,
                 &format!(
-                    "Stage {} of the `{}` roadmap — *{}* — was ready to start beside this one, \
-                     and making its checkouts failed outright. Nothing was started for it and \
-                     the server log says what happened; a directory it got as far as making is \
-                     one the sweep of orphaned worktrees takes.",
+                    "Stage {} of the `{}` roadmap, *{}*, was ready to start beside this one, \
+                     but making its checkouts failed outright. Nothing was started for it, and \
+                     the server log says what happened. The sweep of orphaned worktrees takes \
+                     any directory it got as far as making.",
                     stage.label, stage.roadmap, stage.title,
                 ),
             )
@@ -2976,7 +2973,7 @@ async fn alongside(
         state,
         pressed,
         &format!(
-            "Stage {} of the `{}` roadmap — *{}* — started beside it, as a Conversation of its \
+            "Stage {} of the `{}` roadmap, *{}*, started beside it as a conversation of its \
              own on `{branch}`.",
             stage.label, stage.roadmap, stage.title,
         ),
@@ -3043,7 +3040,7 @@ async fn halted(state: &AppState, pressed: i64, stage: &crate::stages::Stage, wh
         state,
         pressed,
         &format!(
-            "Stage {} of the `{}` roadmap — *{}* — was ready to start beside this one, and {why}. \
+            "Stage {} of the `{}` roadmap, *{}*, was ready to start beside this one, but {why}. \
              Nothing was started for it, and nothing was left behind.",
             stage.label, stage.roadmap, stage.title,
         ),
@@ -3074,20 +3071,20 @@ fn adopted(
     // is a path in a Worktree the workbench has no route to, and a link that
     // went nowhere would be worse than the path itself.
     let started = format!(
-        "Stage {} of the `{}` roadmap — *{}* — was adopted from `{}`.",
+        "Stage {} of the `{}` roadmap, *{}*, was adopted from `{}`.",
         stage.label, stage.roadmap, stage.title, stage.brief_path,
     );
 
     match stacks_on {
         Some(predecessor) => format!(
             "{started} Its branch `{branch}` was cut from `{predecessor}`, the base this \
-             Conversation was fixed to, and it joins its roadmap's chain at its finish the way \
-             this repository's `{}` records.",
+             conversation was fixed to. It joins its roadmap's chain at its finish, as this \
+             repository's `{}` records.",
             crate::stages::GIT_WORKFLOW,
         ),
         None => format!(
-            "{started} Its branch `{branch}` came off `{from}` and was cut from nothing else: \
-             the base is the default branch, or work already in it, or this repository's `{}` \
+            "{started} Its branch `{branch}` came off `{from}` and was cut from nothing else. \
+             The base is the default branch or work already in it, or this repository's `{}` \
              records no way to stack a roadmap stage on the one before it.",
             crate::stages::GIT_WORKFLOW,
         ),
@@ -4120,9 +4117,9 @@ pub(crate) async fn neighbours_give_way(
             tracing::error!(error = ?error, conversation_id = id, "reading who is standing on this stack failed");
 
             return Err(
-                "Verkstead could not read which Conversations are standing on the rest of this \
-                 stack, so it has not closed any of them: a sync rebases every branch of the \
-                 chain, and git will not move one that is checked out elsewhere."
+                "Verkstead couldn't read which conversations are standing on the rest of this \
+                 stack, so it hasn't closed any of them. A sync rebases every branch of the \
+                 chain, and git won't move one that's checked out elsewhere."
                     .to_owned(),
             );
         }
@@ -4132,18 +4129,18 @@ pub(crate) async fn neighbours_give_way(
         Some(WillNotMakeWay::StillAtWork { conversation }) => {
             return Err(format!(
                 "{whose} is still at work on one of the pull requests of this stack, so nothing \
-                 here may take it over: there is one open Conversation per pull request. Nothing \
-                 was closed and no sync was dispatched — a sync rebases every branch of the \
-                 chain, and git will not move one that is checked out elsewhere.",
+                 here may take it over. There's one open conversation per pull request. Nothing \
+                 was closed and no sync was dispatched, because a sync rebases every branch of \
+                 the chain and git won't move one that's checked out elsewhere.",
                 whose = by_branch(state, conversation).await,
             ));
         }
         Some(WillNotMakeWay::CheckedOutElsewhere { at }) => {
             return Err(format!(
-                "A branch of this stack is checked out at {at}, which is no Conversation's, so \
-                 Verkstead cannot give it back. Nothing was closed and no sync was dispatched — a \
-                 sync rebases every branch of the chain, and git will not move one that is checked \
-                 out elsewhere.",
+                "A branch of this stack is checked out at {at}, which is no conversation's, so \
+                 Verkstead can't give it back. Nothing was closed and no sync was dispatched, \
+                 because a sync rebases every branch of the chain and git won't move one that's \
+                 checked out elsewhere.",
             ));
         }
         None => {}
@@ -4161,10 +4158,10 @@ pub(crate) async fn neighbours_give_way(
             .collect();
 
         return Err(format!(
-            "The Conversation on {named} is standing on a pull request of this stack and has \
+            "The conversation on {named} is standing on a pull request of this stack and has \
              uncommitted changes, so closing it would throw them away and nobody is here to be \
              asked. Nothing was closed and no sync was dispatched.",
-            named = named.join(", the Conversation on "),
+            named = named.join(", the conversation on "),
         ));
     }
 
@@ -4180,7 +4177,7 @@ pub(crate) async fn neighbours_give_way(
                 tracing::error!(error = ?error, conversation_id = id, closing = holder_id, "closing a Conversation standing on this stack failed");
 
                 return Err(format!(
-                    "{whose} had finished with a pull request of this stack and could not be \
+                    "{whose} had finished with a pull request of this stack and couldn't be \
                      closed to make way, so no sync was dispatched.",
                     whose = by_branch(state, holder_id).await,
                 ));
@@ -4199,7 +4196,7 @@ pub(crate) async fn neighbours_give_way(
 /// would not.
 async fn by_branch(state: &AppState, conversation: i64) -> String {
     match store::load_conversation(&state.pool, conversation).await {
-        Ok(Some(held)) => format!("The Conversation on `{}`", held.branch),
+        Ok(Some(held)) => format!("The conversation on `{}`", held.branch),
         _ => format!("Conversation {conversation}"),
     }
 }
@@ -4607,15 +4604,13 @@ fn taken(
 ) -> String {
     let taken = match taking {
         Target::PullRequest(held) => format!(
-            "Pull request #{} — *{}* — was taken up for wrapping. The work carries on `{}`, and \
-             what this Timeline records starts at that branch's head: the commits already on the \
-             pull request are its own, and `{named}` is what it merges into.",
+            "Pull request #{}, *{}*, was taken up for wrapping. The work carries on `{}` into \
+             `{named}`, and this timeline starts at that branch's head.",
             held.number, held.title, held.head,
         ),
         Target::Branch(branch) => format!(
-            "The branch `{branch}` was taken up for wrapping, and it is on no pull request: one is \
-             being opened against `{named}` before the wrap-up reads it. What this Timeline records \
-             starts at that branch's head — the commits already on it are the work's own.",
+            "The branch `{branch}` was taken up for wrapping. It's on no pull request, so one is \
+             being opened against `{named}` first, and this timeline starts at its head.",
         ),
     };
 
@@ -4633,9 +4628,9 @@ fn taken(
             };
 
             format!(
-                "{taken} The Conversation on `{branch}` had finished with {which}, so it was \
-                 closed to make way: there is one open Conversation per pull request, and a Steer \
-                 is the way back into it.",
+                "{taken} The conversation on `{branch}` had finished with {which}, so it was \
+                 closed to make way. There's one open conversation per pull request, and a \
+                 steer is the way back into it.",
             )
         }
         None => taken,
@@ -4651,9 +4646,8 @@ fn taken(
     }
 
     format!(
-        "{taken} The wrap-up is narrowed to what GitHub refuses a merge for: no review will be \
-         read, and nothing said on the pull request will be answered — what it waits on is the \
-         checks and whether the pull request merges."
+        "{taken} The wrap-up waits only on the checks and on the pull request merging. No \
+         review is read, and nothing said on the pull request is answered."
     )
 }
 

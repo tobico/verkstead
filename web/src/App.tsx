@@ -314,7 +314,7 @@ function NoSuchPage(): JSX.Element {
   return (
     <>
       <DragBar />
-      <Empty>No such page.</Empty>
+      <Empty>There's no page at this address.</Empty>
     </>
   );
 }

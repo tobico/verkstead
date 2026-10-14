@@ -205,9 +205,9 @@ const APPLES_GIT: &str = "usr/bin/git";
 /// An unanswered question is not a yes: the file a session would run is Apple's
 /// stub either way, so what the row can say is that it could not find out
 /// rather than that the tools are missing.
-const NO_XCODE_SELECT: &str = "the git a session would run is the stub Apple ships under /usr/bin, and there is no \
-     xcode-select on this machine's PATH to ask whether the command line tools behind it are \
-     installed";
+const NO_XCODE_SELECT: &str = "The git a session would run is the stub Apple ships under \
+     /usr/bin, and there's no xcode-select on this machine's PATH to ask whether the command \
+     line tools behind it are installed.";
 
 /// What a stated machine is called, which is a name nobody's box has: what
 /// a test asserts about is what the server made of what it was told, and a
@@ -1546,14 +1546,14 @@ fn trivially(bwrap: &Path) -> DependencyState {
 /// A server always says — see [`crate::routed`] — so this is a stated machine a
 /// suite pointed at no directory, and the honest answer is that there is no
 /// name to ask about rather than that the account is missing.
-const NO_DATA_DIRECTORY: &str = "this server was not told which Data Directory it keeps, so there is no account name to \
-     ask this machine about";
+const NO_DATA_DIRECTORY: &str = "This server wasn't told which data directory it keeps, so \
+     there's no account name to ask this machine about.";
 
 /// And what it says where there is no account database to ask at all, which is
 /// every build that is not a Windows one.
 #[cfg(not(windows))]
 const NO_ACCOUNT_DATABASE: &str =
-    "this Verkstead was not built for Windows, so it has no account database to ask";
+    "This Verkstead wasn't built for Windows, so it has no account database to ask.";
 
 /// Whether the local account called `name` is on this machine, and what the
 /// machine said where it is not.
@@ -2543,7 +2543,7 @@ echo {token}
 
         assert_eq!(seen, None, "an account is nowhere on a `PATH`");
         assert!(
-            trouble.is_some_and(|why| why.contains("Data Directory")),
+            trouble.is_some_and(|why| why.contains("data directory")),
             "the row says why it could not answer",
         );
     }
@@ -3053,7 +3053,7 @@ echo {token}
     fn over() -> RunView {
         RunView {
             phase: RunPhase::Done,
-            status: "1 of 1 could not be installed".to_owned(),
+            status: "1 of 1 couldn't be installed.".to_owned(),
             done: 1,
             total: 1,
             cancelling: false,

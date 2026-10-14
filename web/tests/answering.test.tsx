@@ -259,11 +259,11 @@ describe("the sheet a waiting Set is answered on", () => {
     // different fields — to a screen reader above all, which has nothing else
     // to tell them apart by.
     for (const [label, named] of [
-      ["Q1", "Q1 — Your thoughts"],
-      ["Q2", "Q2 — Your thoughts"],
-      ["Q2a", "Q2a — Your thoughts"],
-      ["Q2b", "Q2b — Your answer"],
-      ["Q3", "Q3 — Your answer"],
+      ["Q1", "Q1 · Your thoughts"],
+      ["Q2", "Q2 · Your thoughts"],
+      ["Q2a", "Q2a · Your thoughts"],
+      ["Q2b", "Q2b · Your answer"],
+      ["Q3", "Q3 · Your answer"],
     ]) {
       const field = words(page, label!);
       expect(field.placeholder).toBe(named);
@@ -713,7 +713,7 @@ describe("submitting a Response", () => {
       "Q2b and Q3 offered nothing, so skipping them is not warned about",
     ).toEqual(["Q2", "Q2a"]);
 
-    press(page, "Keep answering");
+    press(page, "Cancel");
     expect(page.querySelector(`.${sheet.confirm}`)).toBeNull();
     expect(posts(fetching), "nothing was sent").toHaveLength(0);
   });
@@ -771,7 +771,7 @@ describe("a submit that did not land", () => {
     const page = await refused("AlreadyAnswered");
 
     expect(page.querySelector(`.${submitting.submit} .${notices.error}`)!.textContent).toContain(
-      "The first Response stands",
+      "The first response stands",
     );
   });
 
@@ -787,7 +787,7 @@ describe("a submit that did not land", () => {
     const page = await refused("NoSuchSet");
 
     expect(page.querySelector(`.${submitting.submit} .${notices.error}`)!.textContent).toBe(
-      "This Set is no longer here.",
+      "This question set is no longer here.",
     );
   });
 
@@ -802,7 +802,7 @@ describe("a submit that did not land", () => {
   it("says so in the server's own wording when it did not get through", async () => {
     const { page, fetching } = await answering(
       WAITING,
-      json({ error: "the Response could not be taken" }, 503),
+      json({ error: "The response couldn't be taken." }, 503),
     );
     for (const label of ["Q1", "Q2", "Q2a"]) {
       fireEvent.click(option(page, label, 1));
@@ -812,7 +812,7 @@ describe("a submit that did not land", () => {
     await waitFor(() => expect(posts(fetching)).toHaveLength(1));
     await waitFor(() =>
       expect(page.querySelector(`.${submitting.submit} .${notices.error}`)!.textContent).toContain(
-        "the Response could not be taken",
+        "The response couldn't be taken.",
       ),
     );
   });

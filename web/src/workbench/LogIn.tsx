@@ -20,7 +20,7 @@ export function LogIn(props: { press: NoticeLogIn }): JSX.Element {
   // human gave the account where they gave it one.
   const called = () =>
     props.press.name
-      ? `${AGENT_NAME.Claude} — ${props.press.name}`
+      ? `${AGENT_NAME.Claude} · ${props.press.name}`
       : AGENT_NAME.Claude;
 
   return (

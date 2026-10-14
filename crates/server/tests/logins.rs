@@ -535,7 +535,7 @@ async fn a_refused_code_starts_a_fresh_login_with_a_new_address() {
         unreachable!()
     };
     let refused = refused.expect("the modal is told the code was refused");
-    assert!(refused.contains("did not accept"), "{refused}");
+    assert!(refused.contains("didn't accept"), "{refused}");
 
     assert_eq!(workbench.started(profile), 2, "a second login was started");
     assert_eq!(workbench.running(), 1, "and only once the first had gone");

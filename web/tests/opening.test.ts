@@ -20,7 +20,7 @@ const SET = {
 /// And a run that stopped on something Verkstead decided to stop for.
 const STOP = {
   path: "/conversations/3",
-  title: "Implementing the work stopped on rate-limiting",
+  title: "Implementing the work stopped on rate-limiting.",
   project: "verkstead",
 };
 

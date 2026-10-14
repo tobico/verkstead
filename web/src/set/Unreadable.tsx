@@ -42,23 +42,23 @@ export function Unreadable(props: {
       <PaneSticky>
         <PaneHead
           back={props.back && { to: "Timeline", go: props.back }}
-          title={`Question set ${props.set.id}`}
+          title={`Question Set ${props.set.id}`}
         />
       </PaneSticky>
       <div class={page.meta}>
-        <span class={styles.unreadableBadge}>cannot be read</span>
+        <span class={styles.unreadableBadge}>can't be read</span>
       </div>
       <p class={styles.unreadableWhy}>
-        This build cannot read the Set as it was stored, so there is nothing to
-        draw the questions from and nothing to answer. What was asked is still on
-        the record, below, exactly as it was written: {props.set.why}
+        This build can't read this question set, so there's nothing to answer.
+        The record is below, exactly as it was stored. Reading it failed with:{" "}
+        {props.set.why}
       </p>
       {/* The body verbatim, because verbatim is the whole of what is left. It
           scrolls inside its own block rather than widening the page — a stored
           Set carries a Preface and a Diff, and one long line of JSON is not a
           reason for the column beside it to move. */}
       <section class={styles.storedBody} id="stored-body">
-        <h2 class={app.sectionHeading}>As it was stored</h2>
+        <h2 class={app.sectionHeading}>As It Was Stored</h2>
         <pre class={styles.storedJson}>{props.set.body}</pre>
       </section>
     </>

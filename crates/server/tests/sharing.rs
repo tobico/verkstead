@@ -322,7 +322,7 @@ async fn everything(pool: &SqlitePool) -> i64 {
         pool,
         id,
         store::Decision::Verkstead,
-        "**The wrap-up** stopped.\n\nthe session exited with status 1\n",
+        "**The wrap-up** stopped.\n\nThe session exited with status 1.\n",
         None,
     )
     .await

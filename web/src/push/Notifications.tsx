@@ -29,7 +29,7 @@ import { flippable, said } from "./standing";
 /// Nothing is said where it can: a refusal in the OS's own settings is the OS's
 /// to lift, and not something the app can see to guess at.
 export const UNNOTIFIABLE =
-  "This desktop cannot show notifications — there is nothing on it to show them.";
+  "This desktop can't show notifications. There's nothing on it to show them.";
 
 /// The switch on the Settings head: the app's own setting inside the app, and
 /// this browser's push subscription everywhere else.

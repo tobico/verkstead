@@ -509,8 +509,8 @@ export const TERMINAL_REFUSAL: Record<
   NoSuchConversation: "This conversation is gone.",
   NoWorktree: "This conversation has no worktree to open a terminal in.",
   NoProfile:
-    "This conversation has no agent profile settled, so there is no account to run a shell under.",
-  Refused: "The shell would not start. The server's log says why.",
+    "This conversation has no agent profile settled, so there's no account to run a shell under.",
+  Refused: "The shell wouldn't start. The server's log says why.",
 };
 
 /// How many lines a tab keeps above the grid, so that what scrolled past can be
@@ -560,7 +560,7 @@ export const ENDED_AT_ONCE =
 /// Only ever the last group says it. Every other group goes the moment its last
 /// tab does, and one that is the whole of the pane has nowhere to go.
 export const NOTHING_OPEN =
-  "Nothing is open. Press a file in the tree to edit it, or open a terminal — a shell of your own in this conversation's worktree.";
+  "Nothing is open. Press a file in the tree to edit it, or open a terminal in this conversation's worktree.";
 
 /// Each way a file can come back with nothing to draw, in the words of what it
 /// is.
@@ -580,14 +580,14 @@ export const NOTHING_OPEN =
 /// `MAX_BYTES` in the server's `files`, and a round number in the words this
 /// product says sizes in so that this sentence can carry it.
 export const FILE_REFUSAL: Record<Extract<FileReading, string>, string> = {
-  Binary: "This file is not text, so there is nothing here to edit.",
+  Binary: "This file isn't text, so there's nothing here to edit.",
   TooLarge:
-    "This file is larger than 2 MB, so Code does not open it. A terminal will.",
-  Outside: "That is not in any of this conversation's worktrees.",
-  UnderGit: "Code does not show what is inside a repository's .git.",
+    "This file is larger than 2 MB, so Code doesn't open it. A terminal will.",
+  Outside: "That isn't in any of this conversation's worktrees.",
+  UnderGit: "Code doesn't show what's inside a repository's .git.",
   RootGone: "This worktree is no longer on disk.",
   Missing: "That file is no longer there.",
-  NotAFile: "That is a folder rather than a file.",
+  NotAFile: "That's a folder, not a file.",
 };
 
 /// Each way a save can be refused, in the words of what it is.
@@ -607,11 +607,11 @@ export const WRITE_REFUSAL: Record<
 > = {
   ReadOnly:
     "This conversation only reads that worktree, so nothing in it can be saved.",
-  Outside: "That is not in any of this conversation's worktrees.",
-  UnderGit: "Code does not write inside a repository's .git.",
+  Outside: "That isn't in any of this conversation's worktrees.",
+  UnderGit: "Code doesn't write inside a repository's .git.",
   RootGone: "This worktree is no longer on disk, so there is nowhere to save.",
   Missing: "That file is no longer there, so there was nothing to save over.",
-  NotAFile: "That is a folder rather than a file.",
+  NotAFile: "That's a folder, not a file.",
 };
 
 /// And what the bar over a file that moved under unsaved text says.
@@ -660,7 +660,7 @@ const ATTACH_AT_MOST = 10_000;
 /// against a buffer that is still holding text — see [`Opened`], where the two
 /// are told apart.
 export const GONE =
-  "This file is gone from the disk. What is here is the text as it was, kept so it can be copied out; nothing can be saved to it.";
+  "This file is gone from the disk. Its text is kept here so it can be copied out, but nothing can be saved to it.";
 
 /// What a tab is known by, which is the one string that can stand for either.
 ///
@@ -3048,7 +3048,7 @@ export function Code(props: {
               of. */}
           <Show when={terminals.isError}>
             <ErrorLine>
-              Could not read this conversation's terminals:{" "}
+              This conversation's terminals couldn't be read.{" "}
               {terminals.error?.message}
             </ErrorLine>
           </Show>
@@ -3587,7 +3587,7 @@ function Unsaved(props: {
         Close this file without saving it?
       </p>
       <p class={styles.confirmingWhy}>
-        {props.asked} has changes that are not on disk. Closing the tab throws
+        {props.asked} has changes that aren't on disk. Closing the tab throws
         them away.
       </p>
       <div class={styles.confirmingOut}>
@@ -3596,7 +3596,7 @@ function Unsaved(props: {
           class={`${styles.secondary!} secondary`}
           onClick={() => props.keep()}
         >
-          Keep editing
+          Cancel
         </button>
         <button type="button" onClick={() => props.close()}>
           Close {props.asked}
@@ -3655,7 +3655,7 @@ function Busy(props: {
           class={`${styles.secondary!} secondary`}
           onClick={() => props.keep()}
         >
-          Keep it running
+          Cancel
         </button>
         <button type="button" onClick={() => props.close()}>
           Close {props.asked}

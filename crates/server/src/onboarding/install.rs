@@ -110,7 +110,7 @@ const NPM: &str = "npm";
 const NODE: &[&str] = &["nodejs", "npm"];
 
 /// What a skipped row reads.
-const CANCELLED: &str = "cancelled";
+const CANCELLED: &str = "Cancelled.";
 
 /// The directory under the home a local install lands in, and the one a Mac
 /// session reaches whichever way Verkstead was started: it leads the Mac floor
@@ -250,11 +250,11 @@ const HOMEBREW: &str = "NONINTERACTIVE=1 bash -c \"$(curl -fsSL \
 
 /// What a unit that could not even be started says, a command with no output to
 /// quote being a row with nothing else to carry.
-const FAILED_SILENTLY: &str = "the installer failed and said nothing";
+const FAILED_SILENTLY: &str = "The installer failed and said nothing.";
 
 /// What a server with no way to raise a dialog says on every ticked row.
-const NO_DIALOG: &str = "Verkstead has no way to ask this machine for a password: the desktop \
-                         app is what raises the dialog, and this server was not started by it.";
+const NO_DIALOG: &str = "Verkstead has no way to ask this machine for a password. The desktop \
+                         app is what raises the dialog, and this server wasn't started by it.";
 
 /// What the git row on an Intel Mac says.
 ///
@@ -264,9 +264,9 @@ const NO_DIALOG: &str = "Verkstead has no way to ask this machine for a password
 /// is somebody standing at that machine agreeing to a download, which is not a
 /// thing an install run can do for them — and on the machine this wizard is
 /// most often read from, a phone on the tailnet, it is not even visible.
-const XCODE_TOOLS: &str = "git comes with Apple's command line tools. Run xcode-select --install on \
-                           that Mac and agree to Apple's own dialog, which is on its screen rather \
-                           than a command Verkstead can run for you.";
+const XCODE_TOOLS: &str = "Git comes with Apple's command line tools. Run \
+                           xcode-select --install on that Mac and agree to Apple's own dialog, \
+                           which is on its screen rather than a command Verkstead can run for you.";
 
 /// And what the Codex row there says.
 ///
@@ -274,9 +274,9 @@ const XCODE_TOOLS: &str = "git comes with Apple's command line tools. Run xcode-
 /// is what the other Mac's does; a Mac with no Homebrew and no node has
 /// neither, and the binary on its releases page is what is left.
 const CODEX_ON_INTEL: &str = "Codex has no installer script, and the package the other tabs use \
-                              wants an npm this Mac has no package manager to install. Its binary \
-                              is on its releases page, and it goes in ~/.local/bin, which every \
-                              Mac session looks in.";
+                              wants an npm this Mac has no package manager to install. Its \
+                              binary is on its releases page, and it goes in ~/.local/bin, \
+                              which every Mac session looks in.";
 
 /// And GitHub's own release, which is what a ticked `gh` row runs on the Mac
 /// with no Homebrew to `brew install gh` with.
@@ -321,13 +321,13 @@ const NO_USER: &str = "Homebrew's prefix has to belong to somebody, and this ser
 /// Which is a server that cannot say what it is running — see
 /// [`Machine::verkstead`]. The account is still Verkstead's own binary's to
 /// make, so the row goes to the hint screen with the command a human runs.
-const NO_IMAGE: &str = "Verkstead cannot say which program it is running, so it has no binary to \
+const NO_IMAGE: &str = "Verkstead can't say which program it's running, so it has no binary to \
                         make the account with.";
 
 /// And where it does not know which Data Directory the account would belong to,
 /// which is a stated machine nobody pointed at one.
-const NO_DATA_DIRECTORY: &str = "Verkstead was not told which Data Directory it keeps, so it \
-                                 cannot say which account to make.";
+const NO_DATA_DIRECTORY: &str = "Verkstead wasn't told which data directory it keeps, so it \
+                                 can't say which account to make.";
 
 /// How often the marker is glanced at while a dialog is up — see [`STARTED`].
 const GLANCE: Duration = Duration::from_millis(200);
@@ -722,8 +722,8 @@ impl Run {
 
         going.phase = RunPhase::Done;
         going.status = match failed {
-            0 => "Everything that was ticked is installed".to_owned(),
-            failed => format!("{failed} of {} could not be installed", going.rows.len()),
+            0 => "Everything that was ticked is installed.".to_owned(),
+            failed => format!("{failed} of {} couldn't be installed.", going.rows.len()),
         };
     }
 
@@ -1127,7 +1127,7 @@ fn packages(machine: &Machine, ticked: &[Dependency], packager: Packager) -> Pla
         line: lines.join(" && "),
         covers,
         doing: format!(
-            "Installing {}",
+            "Installing {}…",
             packages
                 .iter()
                 .chain(from_npm.iter())
@@ -1171,7 +1171,7 @@ fn vendors_own(row: Dependency, vendor: Vendor, lands: PathBuf) -> Unit {
     Unit {
         line: vendor.line.to_owned(),
         covers: vec![row],
-        doing: format!("Running {}'s installer", vendor.who),
+        doing: format!("Running {}'s installer…", vendor.who),
         how: How::AsTheUser,
         lands: Some(lands),
         chain: None,
@@ -1284,7 +1284,7 @@ fn getting(machine: &Machine, ticked: &[Dependency]) -> Getting {
                 quoted(user),
             ),
             covers: Vec::new(),
-            doing: "Making Homebrew's prefix".to_owned(),
+            doing: "Making Homebrew's prefix…".to_owned(),
             how: How::Raised,
             lands: None,
             chain: Some(Chain::Homebrew),
@@ -1293,7 +1293,7 @@ fn getting(machine: &Machine, ticked: &[Dependency]) -> Getting {
         Unit {
             line: HOMEBREW.to_owned(),
             covers: Vec::new(),
-            doing: "Installing Homebrew".to_owned(),
+            doing: "Installing Homebrew…".to_owned(),
             how: How::AsTheUser,
             lands: None,
             chain: Some(Chain::Homebrew),
@@ -1323,7 +1323,7 @@ impl Brew {
                 self.name,
             ),
             covers: vec![row],
-            doing: format!("Installing {}", self.name),
+            doing: format!("Installing {}…", self.name),
             how: How::AsTheUser,
 
             // Both Homebrew prefixes are on a Mac session's floor already, so
@@ -1496,7 +1496,7 @@ fn ghs_release(home: &Path) -> Unit {
     Unit {
         line: GH_RELEASE.to_owned(),
         covers: vec![Dependency::Gh],
-        doing: "Unpacking GitHub's release of gh".to_owned(),
+        doing: "Unpacking GitHub's release of gh…".to_owned(),
         how: How::AsTheUser,
         lands: Some(home.join(LOCAL_BIN)),
         chain: None,
@@ -1549,7 +1549,7 @@ fn windows(machine: &Machine, ticked: &[Dependency]) -> Plan {
                 units.push(Unit {
                     line: format!("{NPM} install -g {package}"),
                     covers: vec![*row],
-                    doing: format!("Installing {package}"),
+                    doing: format!("Installing {package}…"),
                     how: How::Raised,
                     lands: None,
                     chain: Some(Chain::Node),
@@ -1598,7 +1598,7 @@ fn winget(covers: Vec<Dependency>, id: &str, chain: Option<Chain>) -> Unit {
     Unit {
         line: format!("{WINGET} {id} {UNATTENDED}"),
         covers,
-        doing: format!("Installing {id}"),
+        doing: format!("Installing {id}…"),
         how: How::Raised,
 
         // A winget install lands on the machine's own floor, which every
@@ -1641,7 +1641,7 @@ fn the_account(machine: &Machine) -> Result<Unit, String> {
             said(&data_dir.to_string_lossy()),
         ),
         covers: vec![Dependency::Sandbox],
-        doing: format!("Making the local account {account} sessions run as"),
+        doing: format!("Making the local account {account} sessions run as…"),
         how: How::Raised,
         lands: None,
         chain: None,
@@ -1934,7 +1934,7 @@ fn said(word: &str) -> String {
 /// this wizard can be on a phone on the tailnet, and a dialog is on the screen
 /// of the machine Verkstead is running on.
 fn asking(hostname: &str) -> String {
-    format!("Waiting for the password dialog on {hostname}")
+    format!("Waiting for the password dialog on {hostname}…")
 }
 
 /// `ticked` in the order the step draws its rows, each of them once.
@@ -2241,13 +2241,13 @@ mod tests {
             "curl -fsSL https://claude.ai/install.sh | bash"
         );
         assert_eq!(claude.how, How::AsTheUser);
-        assert_eq!(claude.doing, "Running Anthropic's installer");
+        assert_eq!(claude.doing, "Running Anthropic's installer…");
         assert_eq!(claude.covers, [Dependency::Claude]);
         assert_eq!(claude.lands, Some(PathBuf::from(HOME).join(".local/bin")));
 
         assert_eq!(grok.line, "curl -fsSL https://x.ai/cli/install.sh | bash");
         assert_eq!(grok.how, How::AsTheUser);
-        assert_eq!(grok.doing, "Running xAI's installer");
+        assert_eq!(grok.doing, "Running xAI's installer…");
         assert_eq!(grok.lands, Some(PathBuf::from(HOME).join(".grok/bin")));
     }
 
@@ -2318,7 +2318,7 @@ mod tests {
             "curl -fsSL https://claude.ai/install.sh | bash"
         );
         assert_eq!(claude.how, How::AsTheUser);
-        assert_eq!(claude.doing, "Running Anthropic's installer");
+        assert_eq!(claude.doing, "Running Anthropic's installer…");
         assert_eq!(claude.lands, Some(PathBuf::from(HOME).join(".local/bin")));
         assert_eq!(
             claude.chain, None,
@@ -2457,7 +2457,7 @@ mod tests {
         let (view, rows) = run.reading();
 
         assert_eq!(view.phase, RunPhase::Done);
-        assert_eq!(view.status, "2 of 2 could not be installed");
+        assert_eq!(view.status, "2 of 2 couldn't be installed.");
 
         for (dependency, state) in rows {
             assert_eq!(
@@ -2548,7 +2548,7 @@ mod tests {
             "curl -fsSL https://opencode.ai/install | bash"
         );
         assert_eq!(opencode.how, How::AsTheUser);
-        assert_eq!(opencode.doing, "Running OpenCode's installer");
+        assert_eq!(opencode.doing, "Running OpenCode's installer…");
         assert_eq!(opencode.covers, [Dependency::OpenCode]);
         assert_eq!(
             opencode.lands,
@@ -2572,7 +2572,7 @@ mod tests {
         // nor a vendor's script: a zip a release carries, unpacked into the
         // same directory Anthropic's installer writes into.
         assert_eq!(gh.covers, [Dependency::Gh]);
-        assert_eq!(gh.doing, "Unpacking GitHub's release of gh");
+        assert_eq!(gh.doing, "Unpacking GitHub's release of gh…");
         assert_eq!(gh.lands, Some(PathBuf::from(HOME).join(LOCAL_BIN)));
         assert!(
             gh.line
@@ -2792,7 +2792,7 @@ mod tests {
         );
         assert_eq!(beyond(&plan), [Dependency::Sandbox]);
         assert!(
-            plan.beyond[0].1.contains("which program it is running"),
+            plan.beyond[0].1.contains("which program it's running"),
             "the row says what could not be done: {:?}",
             plan.beyond[0].1,
         );
@@ -2817,7 +2817,7 @@ mod tests {
 
         assert_eq!(claude.line, "irm https://claude.ai/install.ps1 | iex");
         assert_eq!(claude.how, How::Raised);
-        assert_eq!(claude.doing, "Running Anthropic's installer");
+        assert_eq!(claude.doing, "Running Anthropic's installer…");
         assert_eq!(
             claude.lands,
             Some(PathBuf::from(PROFILE).join(r".local\bin")),
@@ -2964,7 +2964,7 @@ mod tests {
         let (view, rows) = run.reading();
 
         assert_eq!(view.phase, RunPhase::Done);
-        assert_eq!(view.status, "3 of 3 could not be installed");
+        assert_eq!(view.status, "3 of 3 couldn't be installed.");
 
         for (dependency, state) in rows {
             assert_eq!(

@@ -30,10 +30,10 @@ import fresh from "./fixtures/onboarding-fresh.json" with { type: "json" };
 const FRESH = fresh as OnboardingView;
 
 /// The wizard's own heading, which is what says the page reached was it.
-const WIZARD = "Set Verkstead up";
+const WIZARD = "Set Up Verkstead";
 
 /// And what the app answers a path nothing has.
-const MISSED = "No such page.";
+const MISSED = "There's no page at this address.";
 
 /// The gate at `path`, over a machine that stands as `machine` says.
 ///

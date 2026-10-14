@@ -880,7 +880,7 @@ describe("the workbench", () => {
     );
     mountSidebar("/");
 
-    await waitFor(() => screen.getByText("Nothing is being worked on yet."));
+    await waitFor(() => screen.getByText(/No conversations yet\./));
   });
 
   /// The sidebar is where the rest of Verkstead is reached from, now that the
@@ -1946,7 +1946,12 @@ describe("the order the human puts the sidebar in", () => {
     three(
       whenever(
         RANK,
-        json({ error: "the server is not taking orders" }, 503),
+        json(
+          {
+            error: "The gap couldn't be opened: the database is locked.",
+          },
+          503,
+        ),
         "PUT",
       ),
     );
@@ -1956,7 +1961,10 @@ describe("the order the human puts the sidebar in", () => {
     fireEvent.keyDown(card(rows[2]!), { key: "ArrowUp" });
 
     await waitFor(() =>
-      screen.getByText(/The order could not be saved/, { exact: false }),
+      screen.getByText(
+        "Your order wasn't saved. The list is back in the server's order. " +
+          "The gap couldn't be opened: the database is locked.",
+      ),
     );
     expect(await order(container)).toEqual(["first", "second", "third"]);
   });
@@ -2196,7 +2204,7 @@ describe("what a right-click on a card offers", () => {
     // again there is no read to count at all: it threw where the id should have
     // been, and the error line stood in the Timeline's place.
     await waitFor(() => {
-      expect(screen.queryByText(/Could not read this conversation/)).toBeNull();
+      expect(screen.queryByText(/This conversation couldn't be read/)).toBeNull();
       expect(askedFor(fetching, reading)).toBeGreaterThan(read);
     });
 
@@ -2729,7 +2737,7 @@ describe("the adoption page", () => {
       expect(
         container.querySelector(`.${adoption.adoption} .${notices.error}`)!.textContent,
       ).toBe(
-        "A branch named roadmaps stands in the way of the stage's own branch, and Verkstead did not make it.",
+        "A branch named roadmaps stands in the way of the stage's own branch, and Verkstead didn't make it.",
       ),
     );
   });
@@ -2763,7 +2771,7 @@ describe("the adoption page", () => {
       expect(
         container.querySelector(`.${adoption.adoption} .${notices.error}`)!.textContent,
       ).toBe(
-        "That roadmap declares badly, so nothing of it can start: stage 04 of the mvp roadmap says `after 09`, and no stage of it is labelled 09.",
+        "That roadmap declares badly, so none of it can start: stage 04 of the mvp roadmap says `after 09`, and no stage of it is labelled 09.",
       ),
     );
   });
@@ -3092,13 +3100,13 @@ describe("a conversation's timeline", () => {
       whenever("/api/ui/repos", json(REPOS)),
       whenever(
         `/api/ui/conversations/${OPEN.id}`,
-        json({ error: "the Conversation could not be read" }, 500),
+        json({ error: "The conversation couldn't be read." }, 500),
       ),
     );
     mount(`/conversations/${OPEN.id}`);
 
     await waitFor(() =>
-      screen.getByText(/the Conversation could not be read/),
+      screen.getByText(/The conversation couldn't be read/),
     );
   });
 });
@@ -3123,7 +3131,7 @@ describe("the escape hatch on a conversation that will not load", () => {
       whenever("/api/ui/abandoned-roadmaps", json([])),
       whenever(
         `/api/ui/conversations/${OPEN.id}`,
-        json({ error: "the Conversation could not be read" }, 500),
+        json({ error: "The conversation couldn't be read." }, 500),
       ),
       ...answers,
     );
@@ -3153,7 +3161,7 @@ describe("the escape hatch on a conversation that will not load", () => {
     expect(head.querySelector("h1")?.textContent).toBe(DRAFTING.branch);
 
     await drawn(container, `.${actions.conversationActions} > .${dropdown.trigger}`);
-    await waitFor(() => screen.getByText(/the Conversation could not be read/));
+    await waitFor(() => screen.getByText(/The conversation couldn't be read/));
   });
 
   /// And the way back out, which is the whole reason the hatch is on the pane
@@ -3297,7 +3305,7 @@ describe("the escape hatch on a conversation that will not load", () => {
       theWorkbench(whenever(READING, hangs()));
       const { container } = mount(`/conversations/${OPEN.id}`);
 
-      await waitFor(() => screen.getByText("Loading…"));
+      await waitFor(() => screen.getByText("Reading the conversation…"));
       expect(timeout).toHaveBeenCalledWith(DEADLINE);
 
       expire();
@@ -3344,7 +3352,7 @@ describe("the escape hatch on a conversation that will not load", () => {
       window.history.pushState({}, "", `/conversations/${OPEN.id}`);
       const { container } = render(() => <App />);
 
-      await waitFor(() => screen.getByText("Loading…"));
+      await waitFor(() => screen.getByText("Reading the conversation…"));
 
       expire();
 
@@ -3425,7 +3433,7 @@ describe("the escape hatch on a conversation that will not load", () => {
     await openActions(container);
     fireEvent.click(await drawn(container, `.${actions.closeAndArchive}`));
 
-    const said = await waitFor(() => screen.getByText(/could not be closed/));
+    const said = await waitFor(() => screen.getByText(/couldn't be closed/));
 
     expect(said.closest(`.${toasts.toast}`)).toBeTruthy();
     expect(said.textContent).toContain("the server is not answering");
@@ -4154,7 +4162,7 @@ describe("a conversation's setup", () => {
     const pane = await drawn(container, `.${composer.composer}`);
     const warning = await drawn(pane, `.${setup.uncached}`);
 
-    expect(warning.textContent).toMatch(/No sccache is installed/);
+    expect(warning.textContent).toMatch(/isn't installed where the server can see it/);
     expect(
       warning.textContent,
       "a CMake project is warned too, and it has no crates to download",
@@ -4388,7 +4396,7 @@ describe("a conversation's setup", () => {
     });
     fireEvent.blur(screen.getByLabelText("Branch"));
 
-    await waitFor(() => screen.getByText(/will not take that as a branch name/i));
+    await waitFor(() => screen.getByText(/won't take that as a branch name/i));
 
     // The next keystroke fixes it, and the save after that clears the refusal:
     // a name refused is not a field that has stopped trying.
@@ -4404,7 +4412,7 @@ describe("a conversation's setup", () => {
       ).toBe(2),
     );
     await waitFor(() =>
-      expect(screen.queryByText(/will not take that as a branch name/i)).toBeNull(),
+      expect(screen.queryByText(/won't take that as a branch name/i)).toBeNull(),
     );
   });
 
@@ -4852,7 +4860,7 @@ describe("switching a draft's repo", () => {
     press("Repo", "Create repo");
 
     fireEvent.input(
-      await waitFor(() => screen.getByLabelText("Where it goes")),
+      await waitFor(() => screen.getByLabelText("Parent directory")),
       { target: { value: "/home/ada/src" } },
     );
 
@@ -4863,7 +4871,7 @@ describe("switching a draft's repo", () => {
         screen.getByLabelText("Create it on GitHub too, privately"),
       ).toBeTruthy(),
     );
-    fireEvent.input(screen.getByLabelText("What it is called"), {
+    fireEvent.input(screen.getByLabelText("Name"), {
       target: { value: "widgets" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
@@ -4890,7 +4898,7 @@ describe("switching a draft's repo", () => {
         json({
           MadeWithoutRemote: {
             repo: { ...(repoView as RepoView), id: 4343 },
-            why: "`gh` said: Name already exists on this account",
+            why: "The gh command said: Name already exists on this account.",
           },
         }),
         "POST",
@@ -4904,10 +4912,10 @@ describe("switching a draft's repo", () => {
     press("Repo", "Create repo");
 
     fireEvent.input(
-      await waitFor(() => screen.getByLabelText("Where it goes")),
+      await waitFor(() => screen.getByLabelText("Parent directory")),
       { target: { value: "/home/ada/src" } },
     );
-    fireEvent.input(screen.getByLabelText("What it is called"), {
+    fireEvent.input(screen.getByLabelText("Name"), {
       target: { value: "widgets" },
     });
     await waitFor(() =>
@@ -4920,7 +4928,7 @@ describe("switching a draft's repo", () => {
     // The card is what happened rather than a form now, and the one press out
     // of it is what lands the Repo.
     fireEvent.click(
-      await waitFor(() => screen.getByRole("button", { name: "Done" })),
+      await waitFor(() => screen.getByRole("button", { name: "Close" })),
     );
 
     await waitFor(() =>
@@ -5186,7 +5194,7 @@ describe("a conversation's companion repos", () => {
       screen.getByText(/No repos are registered yet/),
     );
 
-    expect(said.textContent).toContain("Open repo");
+    expect(said.textContent).toContain("Open one from the Repo dropdown");
     // No link at all: there is no path that drops a dropdown, and one to the
     // settings would be the pointer this replaced.
     expect(said.querySelector("a")).toBeNull();
@@ -5625,10 +5633,10 @@ const pairing = (profile: ProfileEntry, model: string) =>
 /// profile's after an em dash — said here because the fixture holds three Claude
 /// Code accounts, so which of them a row is cannot be read off the model alone.
 const READINGS = [
-  "Claude Code Fable 5 — fable",
-  "Claude Code Opus 5 — opus",
-  "Claude Code Haiku 4.5 — opus",
-  "Claude Code Sonnet 5 — sonnet",
+  "Claude Code Fable 5 · fable",
+  "Claude Code Opus 5 · opus",
+  "Claude Code Haiku 4.5 · opus",
+  "Claude Code Sonnet 5 · sonnet",
 ];
 
 /// And what the *closed* trigger in the setup row reads, which is every one of
@@ -5965,7 +5973,7 @@ describe("a conversation's pairings", () => {
 
     await waitFor(() => picker("Grilling"));
     expect(showing("Grilling")).toBe("Not chosen");
-    await waitFor(() => screen.getByText(/was chosen before models were/));
+    await waitFor(() => screen.getByText(/was chosen without a model/));
   });
 
   /// Both pairings are fixed when grilling starts, and the refusal is the
@@ -6067,7 +6075,7 @@ describe("a conversation's pairings", () => {
     mount(`/conversations/${OPEN.id}`);
 
     await waitFor(() => screen.getByText(/No agent profiles are saved yet/));
-    expect(screen.getByText("add one").getAttribute("href")).toBe("/settings");
+    expect(screen.getByText("Add one").getAttribute("href")).toBe("/settings");
   });
 });
 
@@ -7395,7 +7403,7 @@ describe("starting the work", () => {
   /// into another repository, a number GitHub has nothing open under, a fork, and
   /// a `gh` that would not answer are six different things to go and do.
   it.each([
-    ["NoTarget", /Nothing is named in the Target field/],
+    ["NoTarget", /The Target field is empty/],
     ["NoHeadBranch", /Origin has no branch by that name/],
     ["Fork", /in a fork/],
     [
@@ -7403,7 +7411,7 @@ describe("starting the work", () => {
       /tobico\/askance/,
     ],
     [{ NoSuchPullRequest: { number: 41 } }, /nothing open under #41/],
-    [{ GitHubRefused: { why: "nobody is logged in" } }, /nobody is logged in/],
+    [{ GitHubRefused: { why: "Nobody is logged in." } }, /Nobody is logged in\./],
   ] satisfies Array<[TakenUp, RegExp]>)(
     "says in words what a refused review means",
     async (outcome, said) => {
@@ -7605,7 +7613,7 @@ describe("starting the work", () => {
       },
       /the-workstation is unreachable/,
     ],
-    ["WorktreeRefused", /Git would not make the worktree/],
+    ["WorktreeRefused", /Git wouldn't make the worktree/],
     ["NotDrafting", /already been started/],
   ] satisfies Array<[GrillingStarted, RegExp]>)(
     "says in words what %s means",
@@ -7646,7 +7654,7 @@ describe("starting the work", () => {
 
     await waitFor(() =>
       screen.getByText(
-        "askance: A branch named roadmaps stands in the way of the branch it would be given there, and Verkstead did not make it.",
+        "askance: A branch named roadmaps stands in the way of the branch it would be given there, and Verkstead didn't make it.",
       ),
     );
   });
@@ -7777,7 +7785,7 @@ describe("a session's output on the timeline", () => {
 
     await waitFor(() =>
       expect(output.querySelector(`.${timeline.ranAs}`)!.textContent).toBe(
-        "Claude Code Fable 5 — Work",
+        "Claude Code Fable 5 · Work",
       ),
     );
   });
@@ -7797,7 +7805,7 @@ describe("a session's output on the timeline", () => {
 
     await waitFor(() =>
       expect(output.querySelector(`.${timeline.ranAs}`)!.textContent).toBe(
-        "Fable 5 — Work",
+        "Fable 5 · Work",
       ),
     );
   });
@@ -7835,7 +7843,7 @@ describe("a session's output on the timeline", () => {
     const head = await drawn(container, `.${shell.detailsPane} .${paneHead.head} h1`);
 
     await waitFor(() =>
-      expect(head.textContent).toBe("Claude Code Fable 5 — Work"),
+      expect(head.textContent).toBe("Claude Code Fable 5 · Work"),
     );
   });
 
@@ -8850,7 +8858,7 @@ describe("the mark of the harness a session ran under", () => {
     );
 
     await waitFor(() => expect(marked(head)).toBe(art(opencodeMarkFile)));
-    expect(head.textContent).toBe("OpenCode Minimax M2.1 — Work");
+    expect(head.textContent).toBe("OpenCode Minimax M2.1 · Work");
   });
 
   /// And the Brief's three pairing facts, which say what each role *will* run
@@ -8903,7 +8911,7 @@ describe("the mark of the harness a session ran under", () => {
       `.${timeline.timelineEvent} .${timeline.agentOutput} .${timeline.ranAs}`,
     );
 
-    await waitFor(() => expect(head.textContent).toBe("Fable 5 — Work"));
+    await waitFor(() => expect(head.textContent).toBe("Fable 5 · Work"));
     expect(head.querySelector(`.${harnessMark.mark}`)).toBeNull();
   });
 
@@ -9013,7 +9021,7 @@ describe("the foot of the timeline pane", () => {
 
     await waitFor(() =>
       expect(card.querySelector(`.${timeline.ranAs}`)!.textContent).toBe(
-        "Claude Code Fable 5 — Work",
+        "Claude Code Fable 5 · Work",
       ),
     );
   });
@@ -9616,7 +9624,7 @@ describe("closing a conversation", () => {
     fireEvent.click(await drawn(container, `.${actions.conversationActions} .${actions.close}`));
 
     const said = await waitFor(() =>
-      screen.getByText(/could not be closed/),
+      screen.getByText(/couldn't be closed/),
     );
     expect(said.closest(`.${toasts.toast}`)).toBeTruthy();
     expect(said.textContent).toContain("the server is not answering");
@@ -9878,7 +9886,7 @@ describe("a close pressed over a run in flight", () => {
     );
 
     const card = await asked();
-    expect(ways(card)[0]!.textContent).toBe("Keep it running");
+    expect(ways(card)[0]!.textContent).toBe("Cancel");
     fireEvent.click(ways(card)[0]!);
 
     await waitFor(() => expect(asking()).toBeNull());
@@ -9998,12 +10006,12 @@ describe("a close pressed over a run in flight", () => {
       "Close while the agent is running?",
     );
     expect(card.querySelector(`.${actions.confirmingWhy}`)!.textContent).toBe(
-      "The agent is still working on this conversation. Closing now will end the run.",
+      "Closing now ends the agent's run.",
     );
 
     // Two of them, and no third: Stop is a row of the menu this press came from.
     expect(ways(card).map((way) => way.textContent)).toEqual([
-      "Keep it running",
+      "Cancel",
       "Close conversation",
     ]);
   });
@@ -10484,7 +10492,7 @@ describe("a press whose outcome is drawn before the server has answered", () => 
     // over, which is what the sidebar is saying, and the conversation's own
     // landed saying Grilling — which is what this server has said about it
     // throughout, and what the page would be drawing if it had let go.
-    await waitFor(() => screen.getByText(/Could not read the conversations/));
+    await waitFor(() => screen.getByText(/The conversations couldn't be read/));
     await waitFor(() =>
       expect(
         askedFor(fetching, `/api/ui/conversations/${GRILLING.id}`),
@@ -10649,7 +10657,7 @@ describe("a second round", () => {
       container,
       `.${timeline.steeredWith} > .${timeline.steered}`,
     );
-    expect(boundary.textContent).toBe("You steered this into Grilling");
+    expect(boundary.textContent).toBe("You steered this into Grilling.");
 
     // And it is drawn between the two briefs, which is where the rounds part.
     const briefs = [...container.querySelectorAll(`.${timeline.brief}`)];
@@ -11126,7 +11134,7 @@ describe("the share pane", () => {
 
     expect(container.querySelector(`.${sharePane.published}`)).toBeNull();
     expect(
-      screen.getByText(/This conversation has not been published\./),
+      screen.getByText(/This conversation hasn't been published\./),
     ).toBeTruthy();
   });
 });
@@ -11225,7 +11233,7 @@ describe("publishing a share", () => {
     fireEvent.click(await drawn(container, `.${sharePane.publish}`));
 
     const said = await waitFor(() =>
-      screen.getByText("The saved GitHub token may not write gists.", {
+      screen.getByText("The saved GitHub token can't write gists.", {
         exact: false,
       }),
     );
@@ -11272,7 +11280,7 @@ const ON_ITS_OWN = {
 const MISSED = {
   number: 7,
   repo: "verkstead-site",
-  why: "`gh` said: Not Found (HTTP 404)",
+  why: "The gh command said: Not Found (HTTP 404).",
 };
 
 describe("sharing a conversation to its pull requests", () => {
@@ -11338,8 +11346,8 @@ describe("sharing a conversation to its pull requests", () => {
 
     await waitFor(() =>
       screen.getByText(
-        "Commented on #41. Nothing could be said on #7 in verkstead-site: " +
-          "`gh` said: Not Found (HTTP 404)",
+        "Commented on #41. The comment on #7 in verkstead-site couldn't be posted: " +
+          "The gh command said: Not Found (HTTP 404).",
       ),
     );
   });
@@ -11364,7 +11372,7 @@ describe("sharing a conversation to its pull requests", () => {
     fireEvent.click(await drawn(container, `.${sharePane.comment}`));
 
     const said = await waitFor(() =>
-      screen.getByText("The saved GitHub token may not write gists.", {
+      screen.getByText("The saved GitHub token can't write gists.", {
         exact: false,
       }),
     );
@@ -11612,7 +11620,7 @@ describe("steering a conversation", () => {
       "Investigating",
       "Done",
     ]);
-    expect(screen.getByText(/Finished with. Nothing runs/)).toBeTruthy();
+    expect(screen.getByText(/Finished. Nothing runs/)).toBeTruthy();
     unmount();
 
     theGrillingSteering(
@@ -11630,7 +11638,7 @@ describe("steering a conversation", () => {
       "Investigating",
       "Done",
     ]);
-    expect(screen.getByText(/The branch looked at again/)).toBeTruthy();
+    expect(screen.getByText(/The checks are watched, the review is run/)).toBeTruthy();
   });
 
   /// And what wrapping up *means* is the Process's, which is the one target that
@@ -11653,7 +11661,7 @@ describe("steering a conversation", () => {
     const pane = await openSteer(container);
 
     expect(targets(pane)).toContain("Wrapping");
-    expect(screen.getByText(/The pull request looked at again/)).toBeTruthy();
+    expect(screen.getByText(/Only what GitHub refuses a merge for is fixed/)).toBeTruthy();
     expect(
       screen.queryByText(/the review run, the comments answered/),
     ).toBeNull();
@@ -11699,7 +11707,7 @@ describe("steering a conversation", () => {
       "Investigating",
       "Done",
     ]);
-    expect(screen.getByText(/The pull request followed up on/)).toBeTruthy();
+    expect(screen.getByText(/The agent answers what you ask about the pull request/)).toBeTruthy();
   });
 
   /// And the brief a follow-up is opened on is required whatever the record
@@ -11805,7 +11813,7 @@ describe("steering a conversation", () => {
     // neither is a state anything goes back to.
     expect(
       screen.getByText(
-        /goes back to the state you steered it from, or to Done where there is nowhere to go back to/,
+        /returns to the state you steered it from/,
       ),
     ).toBeTruthy();
 
@@ -11886,8 +11894,7 @@ describe("steering a conversation", () => {
 
     await waitFor(() => expect(held.disabled).toBe(true));
     expect(
-      (bare.querySelector("#steer-instruction") as HTMLTextAreaElement)
-        .placeholder,
+      bare.querySelector("#steer-instruction")!.parentElement!.textContent,
     ).toContain("nothing on this branch to carry on");
 
     fireEvent.input(await drawn(bare, "#steer-instruction"), {
@@ -11918,8 +11925,7 @@ describe("steering a conversation", () => {
 
     await waitFor(() => expect(press.disabled).toBe(false));
     expect(
-      (pane.querySelector("#steer-instruction") as HTMLTextAreaElement)
-        .placeholder,
+      pane.querySelector("#steer-instruction")!.parentElement!.textContent,
     ).toContain("carry on with what the branch already holds");
   });
 
@@ -11957,7 +11963,7 @@ describe("steering a conversation", () => {
 
     await waitFor(() => expect(held.disabled).toBe(true));
     expect(
-      (bare.querySelector("#steer-brief") as HTMLTextAreaElement).placeholder,
+      bare.querySelector("#steer-brief")!.parentElement!.textContent,
     ).toContain("Nothing is written down yet");
 
     fireEvent.input(await drawn(bare, "#steer-brief"), {
@@ -11986,8 +11992,8 @@ describe("steering a conversation", () => {
 
     await waitFor(() => expect(press.disabled).toBe(false));
     expect(
-      (pane.querySelector("#steer-brief") as HTMLTextAreaElement).placeholder,
-    ).toContain("brief that is already there");
+      pane.querySelector("#steer-brief")!.parentElement!.textContent,
+    ).toContain("brief that's already there");
   });
 
   /// And the instruction is drawn under implementing alone: what a hand-written
@@ -13205,7 +13211,7 @@ describe("steering a conversation", () => {
       `.${timeline.steeredWith} > .${timeline.steered}`,
     );
 
-    expect(steered.textContent).toBe("You steered this into Done");
+    expect(steered.textContent).toBe("You steered this into Done.");
 
     const moved = [
       ...container.querySelectorAll(`.${timeline.timelineEvent} > .${timeline.moved}`),
@@ -13238,7 +13244,7 @@ describe("steering a conversation", () => {
       `.${timeline.timelineEvent} > .${timeline.pressed}`,
     );
 
-    expect(pressed.textContent).toBe("You asked for the conflict to be resolved");
+    expect(pressed.textContent).toBe("You asked for the conflict to be resolved.");
 
     expect(
       container.querySelector(
@@ -13399,7 +13405,7 @@ describe("steering a conversation", () => {
     );
 
     expect(pane.textContent).toContain("Run it under");
-    expect(pane.textContent).toContain("Claude Code Fable 5 — fable");
+    expect(pane.textContent).toContain("Claude Code Fable 5 · fable");
 
     const put = await drawn(pane, `ul[aria-label="Repos it put in"]`);
 
@@ -13805,7 +13811,7 @@ describe("a question set the build cannot read", () => {
     const row = container.querySelector(`.${timeline.questionSet}.${timeline.unreadable}`)!;
 
     expect(row.querySelector(`.${illegible.unreadableBadge}`)!.textContent).toBe(
-      "cannot be read",
+      "can't be read",
     );
     // Serde's own sentence, which names the field that has left the schema.
     expect(row.querySelector(`.${illegible.unreadableWhy}`)!.textContent).toContain(
@@ -14486,7 +14492,7 @@ describe("a commit on the timeline", () => {
         Promise.resolve(
           new Response(
             JSON.stringify({
-              error: "there is no such commit on that Conversation",
+              error: "This conversation has no such commit.",
             }),
             { status: 404, headers: { "content-type": "application/json" } },
           ),
@@ -14500,7 +14506,7 @@ describe("a commit on the timeline", () => {
     const error = await drawn(container, `.${shell.detailsPane} .${notices.error}`);
 
     expect(error.textContent).toContain(
-      "there is no such commit on that Conversation",
+      "This conversation has no such commit.",
     );
   });
 
@@ -14893,7 +14899,7 @@ describe("the pinned task list", () => {
 
     const head = await drawn(container, `.${timeline.pinned} .${timeline.taskList} .${timeline.eventHead}`);
 
-    expect(head.textContent).toContain("Task list");
+    expect(head.textContent).toContain("Task List");
     expect(head.querySelector(`.${timeline.feature}`)!.textContent).toBe(BACKLOG.feature);
     expect(head.querySelector(`.${timeline.progress}`)!.textContent).toBe("2 of 4 done");
   });
@@ -15213,7 +15219,7 @@ describe("the task list opened", () => {
     );
 
     expect(missing.textContent).toBe(
-      "The list names a task document that is not there to read.",
+      "The list names a task document that isn't there.",
     );
     expect(missing.closest(`.${documents.section}`)!.id).toBe("task-04");
   });
@@ -15270,7 +15276,7 @@ describe("the task list opened", () => {
 
     const head = await drawn(container, `.${shell.detailsPane} .${paneHead.head}`);
 
-    expect(head.querySelector("h1")!.textContent).toBe("Task list");
+    expect(head.querySelector("h1")!.textContent).toBe("Task List");
     expect(head.textContent).not.toContain("Close");
     expect(
       (await drawn(container, `.${shell.detailsPane} .${documents.feature}`)).textContent,
@@ -15288,7 +15294,7 @@ describe("the task list opened", () => {
       {},
       whenever(
         THE_BACKLOG,
-        json({ error: "there is no backlog on that Conversation" }, 404),
+        json({ error: "This conversation has no backlog." }, 404),
       ),
     );
     const { container } = mount(`/conversations/${TASKED.id}`);
@@ -15299,7 +15305,7 @@ describe("the task list opened", () => {
 
     const line = await drawn(container, `.${shell.detailsPane} .${notices.error}`);
 
-    expect(line.textContent).toContain("there is no backlog on that Conversation");
+    expect(line.textContent).toContain("This conversation has no backlog.");
   });
 });
 
@@ -16791,7 +16797,7 @@ describe("the stage list opened", () => {
     );
 
     expect(missing.textContent).toBe(
-      "The roadmap names a brief that is not there to read.",
+      "The roadmap names a brief that isn't there.",
     );
     expect(missing.closest(`.${documents.section}`)!.id).toBe("stage-04");
   });
@@ -16873,7 +16879,7 @@ describe("the stage list opened", () => {
       {},
       whenever(
         THE_ROADMAP,
-        json({ error: "there is no roadmap of that name on that Conversation" }, 404),
+        json({ error: "This conversation has no roadmap of that name." }, 404),
       ),
     );
     const { container } = mount(`/conversations/${STAGED.id}`);
@@ -16885,7 +16891,7 @@ describe("the stage list opened", () => {
     const line = await drawn(container, `.${shell.detailsPane} .${notices.error}`);
 
     expect(line.textContent).toContain(
-      "there is no roadmap of that name on that Conversation",
+      "This conversation has no roadmap of that name.",
     );
   });
 });
@@ -16934,7 +16940,7 @@ describe("the notice of a stop", () => {
     expect(notice.textContent).toContain(
       "The task in .tasks/03-commit-events.md",
     );
-    expect(notice.textContent).toContain("the session exited with status 1");
+    expect(notice.textContent).toContain("The session exited with status 1.");
     expect(notice.textContent).toContain("crates/store/src/commits.rs");
     expect(notice.textContent).toContain("could not compile");
 
@@ -16984,7 +16990,7 @@ describe("the notice of a stop", () => {
       container.querySelector(`.${shell.detailsPane} .${paneHead.head} h1`)!
         .textContent,
     ).toBe("Notice");
-    expect(pane.textContent).toContain("the session exited with status 1");
+    expect(pane.textContent).toContain("The session exited with status 1.");
     expect(pane.querySelectorAll("pre").length).toBe(2);
   });
 });
@@ -17028,7 +17034,7 @@ describe("a run stopped because its account signed out", () => {
 
     // The same modal the Profile's card opens, named the way the card reads.
     await waitFor(() =>
-      screen.getByText("Log in to Claude for Claude Code — opus"),
+      screen.getByText("Log in to Claude for Claude Code · opus"),
     );
     await waitFor(() =>
       expect(
@@ -17566,7 +17572,7 @@ describe("the pinned pull request", () => {
 
     const opened = await drawn(container, `.${timeline.pinned} .${timeline.pullRequest}`);
 
-    expect(opened.textContent).toContain("Pull request");
+    expect(opened.textContent).toContain("Pull Request");
     expect(opened.querySelector(`.${timeline.number}`)!.textContent).toBe(
       `#${OPENED.number}`,
     );
@@ -17891,7 +17897,7 @@ describe("the pinned pull request", () => {
     );
 
     expect(checks.querySelector(`.${notices.empty}`)!.textContent).toBe(
-      "Nothing is running against it.",
+      "No checks are running against it.",
     );
   });
 
@@ -18062,7 +18068,7 @@ describe("the pinned pull request", () => {
           new Response(
             JSON.stringify({
               error:
-                "this machine's `gh` is not logged in, so Verkstead cannot ask GitHub anything",
+                "This machine's gh isn't logged in, so Verkstead can't ask GitHub anything.",
             }),
             { status: 502, headers: { "content-type": "application/json" } },
           ),
@@ -18076,7 +18082,7 @@ describe("the pinned pull request", () => {
 
     const error = await drawn(container, `.${shell.detailsPane} .${notices.error}`);
 
-    expect(error.textContent).toContain("is not logged in");
+    expect(error.textContent).toContain("isn't logged in");
   });
 
   /// Nothing is fetched until somebody opens it: reading this is an API call
@@ -18228,7 +18234,7 @@ describe("the pinned carousel", () => {
     );
     await waitFor(() =>
       expect(card.querySelector(`.${timeline.ranAs}`)!.textContent).toBe(
-        "Claude Code Fable 5 — Work",
+        "Claude Code Fable 5 · Work",
       ),
     );
 
@@ -18246,7 +18252,7 @@ describe("the pinned carousel", () => {
     // And the pane behind it is that session's, titled by the same reading.
     const head = await drawn(container, `.${shell.detailsPane} .${paneHead.head} h1`);
     await waitFor(() =>
-      expect(head.textContent).toBe("Claude Code Fable 5 — Work"),
+      expect(head.textContent).toBe("Claude Code Fable 5 · Work"),
     );
   });
 
@@ -18985,7 +18991,7 @@ describe("the resume row", () => {
     const said = await drawn(document.body, `.${actions.refused} .${actions.refusedWhy}`);
 
     expect(said.textContent).toBe(RESUME_REFUSAL.NothingToWork);
-    expect(said.textContent).toContain("no backlog left");
+    expect(said.textContent).toContain("No backlog is left");
   });
 
   /// And a second press on a conversation the first one got going is refused as
@@ -19130,7 +19136,7 @@ describe("what a refused press says", () => {
 
     const said = await drawn(document.body, `.${actions.refused} .${actions.refusedWhy}`);
 
-    expect(said.textContent).toContain("could not be resumed");
+    expect(said.textContent).toContain("couldn't be resumed");
     expect(said.textContent).toContain("the server is not answering");
   });
 
@@ -19464,9 +19470,9 @@ describe("the configuration on the brief's pane", () => {
       // The shared reading, which is what every picker of a pairing says too:
       // the backend, the model, and the account's name after an em dash — said
       // here because all three of the fixture's accounts are Claude Code ones.
-      Grilling: "Claude Code Fable 5 — fable",
-      Implementation: "Claude Code Opus 5 — opus",
-      Review: "Claude Code Sonnet 5 — sonnet",
+      Grilling: "Claude Code Fable 5 · fable",
+      Implementation: "Claude Code Opus 5 · opus",
+      Review: "Claude Code Sonnet 5 · sonnet",
     });
   });
 
@@ -19481,7 +19487,7 @@ describe("the configuration on the brief's pane", () => {
     expect(
       configuration().Implementation,
       "and the roles beside it read as they always did",
-    ).toBe("Claude Code Opus 5 — opus");
+    ).toBe("Claude Code Opus 5 · opus");
   });
 
   /// The grilling role has no such row — *No grilling* is retired — so a record
@@ -19494,7 +19500,7 @@ describe("the configuration on the brief's pane", () => {
     expect(
       configuration().Review,
       "and the roles beside it read as they always did",
-    ).toBe("Claude Code Sonnet 5 — sonnet");
+    ).toBe("Claude Code Sonnet 5 · sonnet");
   });
 
   /// And a Conversation that reads Review says Review: the word is the record's,
@@ -19520,9 +19526,9 @@ describe("the configuration on the brief's pane", () => {
     await openBrief(GRILLING);
 
     await waitFor(() =>
-      expect(configuration().Implementation).toBe("Claude Code Opus 5 — opus"),
+      expect(configuration().Implementation).toBe("Claude Code Opus 5 · opus"),
     );
-    expect(configuration().Review).toBe("Claude Code Sonnet 5 — sonnet");
+    expect(configuration().Review).toBe("Claude Code Sonnet 5 · sonnet");
 
     expect(uses("Review", "grilling")).toBe(false);
     expect(Object.keys(configuration())).not.toContain("Grilling");
@@ -19554,7 +19560,7 @@ describe("the configuration on the brief's pane", () => {
     });
     await openBrief(GRILLING);
 
-    expect(configuration().Implementation).toBe("Claude Code — opus");
+    expect(configuration().Implementation).toBe("Claude Code · opus");
   });
 
   /// And the account's name is dropped where its backend has one account saved:
@@ -19573,7 +19579,7 @@ describe("the configuration on the brief's pane", () => {
     await waitFor(() =>
       expect(configuration().Implementation).toBe("Claude Code Opus 5"),
     );
-    expect(configuration().Grilling).toBe("Claude Code Fable 5 — fable");
+    expect(configuration().Grilling).toBe("Claude Code Fable 5 · fable");
   });
 
   it("lists each companion with its mode, its branch and its directory", async () => {
@@ -20455,7 +20461,7 @@ describe("the way into the code pane", () => {
 
     expect(icon.disabled).toBe(true);
     expect(icon.getAttribute("aria-label")).toBe(
-      "Code — there is no worktree yet",
+      "Code. There's no worktree yet.",
     );
   });
 
@@ -23410,7 +23416,7 @@ describe("what a right-click on a row of the code pane's tree offers", () => {
       fireEvent.keyDown(field(container)!, { key: "Enter" });
 
       await waitFor(() =>
-        expect(refused(container)).toBe("That is a path rather than a name."),
+        expect(refused(container)).toBe("That's a path, not a name."),
       );
     }
 
@@ -23784,7 +23790,7 @@ describe("what a right-click on a row of the code pane's tree offers", () => {
     // nothing has been asked of the server yet: the press is still ahead of it.
     const asking = await carded();
     expect(asking.textContent).toContain("Delete this folder?");
-    expect(asking.textContent).toContain("everything in it goes with it");
+    expect(asking.textContent).toContain("and everything in it are deleted from the disk");
     expect(asked(fetching, DELETING)).toHaveLength(0);
 
     held = {
@@ -23827,7 +23833,7 @@ describe("what a right-click on a row of the code pane's tree offers", () => {
     expect(asking.textContent).toContain("Delete this file?");
     expect(asking.textContent).not.toContain("everything in it");
 
-    fireEvent.click(confirms(asking, "Keep it"));
+    fireEvent.click(confirms(asking, "Cancel"));
 
     await waitFor(() => expect(card()).toBeNull());
     expect(asked(fetching, DELETING)).toHaveLength(0);
@@ -24060,7 +24066,7 @@ describe("a file opened out of the code pane's tree", () => {
     // The line is drawn, and the file is open under it.
     await waitFor(() =>
       expect(said(container)).toContain(
-        "Could not read this conversation's terminals",
+        "This conversation's terminals couldn't be read",
       ),
     );
 
@@ -24156,7 +24162,7 @@ describe("a file opened out of the code pane's tree", () => {
       Object.keys(FILE_REFUSAL).length,
     );
 
-    expect(FILE_REFUSAL.Binary).toContain("not text");
+    expect(FILE_REFUSAL.Binary).toContain("isn't text");
     expect(FILE_REFUSAL.TooLarge).toContain("2 MB");
     expect(FILE_REFUSAL.Missing).toContain("no longer");
     expect(FILE_REFUSAL.NotAFile).toContain("folder");

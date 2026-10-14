@@ -111,7 +111,7 @@ export function reading(said: Said, saved: ProfileEntry[] | undefined): string {
   // name reads as the name rather than as an em dash with a name after it.
   return [words(harness, said.model, model), named(said, saved)]
     .filter((part) => part !== "")
-    .join(" — ");
+    .join(" · ");
 }
 
 /// The reading's first half: the backend and the model, with the backend dropped
@@ -215,7 +215,7 @@ export function briefly(said: Said, saved: ProfileEntry[] | undefined): string {
     named(said, saved),
   ]
     .filter((part) => part !== "")
-    .join(" — ");
+    .join(" · ");
 }
 
 /// What one finished or running session was launched under, off the record it

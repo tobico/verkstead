@@ -36,7 +36,7 @@ const carried: PromiseLike<Renderer> = {
 
     return renderer === undefined
       ? Promise.reject<never>(
-          new Error("this share is not carrying the diagram renderer"),
+          new Error("This share isn't carrying the diagram renderer."),
         ).then(resolve, reject)
       : Promise.resolve(renderer).then(resolve, reject);
   },

@@ -1268,8 +1268,8 @@ pub(crate) async fn ports_of(
         return crate::ui::refused(
             StatusCode::FORBIDDEN,
             ApiError::new(
-                "a terminal's ports are read by a device of the cluster attached to it, \
-                 over the link, and not by a browser on the machine they are on",
+                "A terminal's ports are read over the link by a device of the cluster \
+                 attached to it, not by a browser on this machine.",
             ),
         );
     }
@@ -1328,8 +1328,8 @@ pub(crate) async fn connect(
         return crate::ui::refused(
             StatusCode::FORBIDDEN,
             ApiError::new(
-                "a terminal's port is connected to for a device of the cluster attached to \
-                 it, over the link, and not for a browser on the machine it is on",
+                "A terminal's port is connected to over the link for a device of the \
+                 cluster attached to it, not for a browser on this machine.",
             ),
         );
     }
@@ -1346,8 +1346,8 @@ pub(crate) async fn connect(
         return crate::ui::refused(
             StatusCode::BAD_REQUEST,
             ApiError::new(format!(
-                "a connection to a terminal's port is an upgrade to {FORWARD}, and this \
-                 request asked for none",
+                "A connection to a terminal's port is an upgrade to {FORWARD}, and this \
+                 request asked for none.",
             )),
         );
     }
@@ -1369,7 +1369,7 @@ pub(crate) async fn connect(
     else {
         return crate::ui::refused(
             StatusCode::INTERNAL_SERVER_ERROR,
-            ApiError::new("this connection cannot be upgraded, so no port can be joined to it"),
+            ApiError::new("This connection can't be upgraded, so no port can be joined to it."),
         );
     };
 
@@ -1377,8 +1377,8 @@ pub(crate) async fn connect(
         return crate::ui::refused(
             StatusCode::BAD_GATEWAY,
             ApiError::new(format!(
-                "nothing answered on port {port} here: the server in the terminal has \
-                 stopped since it was read",
+                "Nothing answered on port {port} here. The server in the terminal has \
+                 stopped since it was read.",
             )),
         );
     };
@@ -1438,7 +1438,7 @@ fn not_attached() -> HttpResponse {
     crate::ui::refused(
         StatusCode::FORBIDDEN,
         ApiError::new(
-            "a terminal's ports are connected to only for a device holding an attach on it",
+            "A terminal's ports are connected to only for a device holding an attach on it.",
         ),
     )
 }
@@ -1447,9 +1447,7 @@ fn not_attached() -> HttpResponse {
 fn not_listening(port: &str) -> HttpResponse {
     crate::ui::refused(
         StatusCode::NOT_FOUND,
-        ApiError::new(format!(
-            "the terminal is not listening on port {port}, so it is not one to connect to",
-        )),
+        ApiError::new(format!("The terminal isn't listening on port {port}.",)),
     )
 }
 

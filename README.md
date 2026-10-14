@@ -1,8 +1,8 @@
 # Verkstead
 
 A management platform for agentic coding. Everything is driven from a web GUI:
-a background orchestrator creates worktrees, runs and monitors sandboxed coding
-sessions, puts question sets and commits to you, and works through task lists
+a background orchestrator creates Worktrees, runs and monitors sandboxed coding
+sessions, puts Question Sets and commits to you, and works through task lists
 and staged roadmaps unattended.
 
 Verkstead (Norse *verk*, work + *stead*: a workshop) began as a clone of
@@ -13,43 +13,61 @@ separate, maintained product; Verkstead diverges freely from it.
 
 ## Status
 
-**Early, and released.** The downloads are on the website,
-<https://tobico.github.io/verkstead/>, and on the
-[releases page](https://github.com/tobico/verkstead/releases). The workbench,
-the sandboxed sessions, the task-list and roadmap pipelines and the per-PR
-wrap-up are built; [adoption](docs/adoption.md) is where driving a real
-repository through them stands.
+**Released, and early.** Each version is published on
+[GitHub Releases](https://github.com/tobico/verkstead/releases), and the latest
+is what any of the four ways in below fetches, and what the website,
+<https://tobico.github.io/verkstead/>, links to. It is a single-user workbench,
+and still young enough to change a good deal from one release to the next.
 
-What a tag will produce is four ways in rather than one, and no two of them are
-the same thing. On a host that is always on, the flake builds the headless
-daemon and the NixOS module runs it. On a Linux desktop,
-`Verkstead-x86_64.AppImage` is that same server started from an icon: the
-workbench in a window of its own, with a tray icon beside it — or no icon at all
-where the desktop has no tray host, vanilla GNOME being the case people meet,
-and the window is there just the same. On a Mac, `Verkstead-universal.dmg`
-carries `Verkstead.app` — one download for both Macs, the same server again: the
-workbench in a window, a tile in the Dock the window comes back from, and an
-icon in the menu bar beside it. That app is unsigned, so the first launch is
-refused and System Settings is where it is allowed through; the steps are
-written out beside the download in
-[adoption](docs/adoption.md#the-desktop-app-on-a-mac). On Windows,
-`Verkstead-x86_64.msi` installs that same app into your own profile — no
-administrator, its icon in the notification area, and `verkstead` on your `PATH`
-for a terminal. It is unsigned there too, so SmartScreen stops the install
-behind a **More info** link with **Run anyway** under it — also written out
-beside the download in [adoption](docs/adoption.md#the-desktop-app-on-windows).
-Which of the four you want is [adoption](docs/adoption.md#getting-it-running).
+There are four ways in, and they are four different things rather than four
+spellings of one. Which you want is which machine you are describing; two at
+once is two Verksteads, and the second to reach port 8422 says so and exits.
+
+**The NixOS module**, for a host that is always on. The flake builds the
+headless daemon and `services.verkstead` runs it, with `paths` naming the
+repositories and agent accounts it may reach — a directory not named there is
+not there as far as the service is concerned — and `sandboxBinds` the
+Sandbox Configuration.
+
+**`Verkstead-x86_64.AppImage`**, on a Linux desktop: that same server started
+from an icon, the workbench in a window of its own and a tray icon beside it —
+or no icon at all where the desktop has no tray host, and the window is there
+just the same. Make it executable and run it; sessions want the distribution's
+`bubblewrap` package installed, since it cannot ride inside an AppImage.
+
+**`Verkstead-universal.dmg`**, on a Mac: one download for Apple silicon and
+Intel alike, the workbench in a window, a tile in the Dock and an icon in the
+menu bar. Drag **Verkstead** into Applications. The app is unsigned
+([ADR-0020](docs/adr/0020-electron-desktop.md)), so the first launch is refused:
+
+1. Open it once, and click **Done** on the refusal.
+2. In **System Settings → Privacy & Security**, under **Security**, click
+   **Open Anyway** beside the line about Verkstead, and authenticate.
+3. Click **Open Anyway** in the dialog that follows.
+
+That is once per copy of the app; a newer download asks again.
+
+**`Verkstead-x86_64.msi`**, on Windows: the same app installed into your own
+profile, with no administrator asked for, an icon in the notification area and
+`verkstead` on your `PATH` for a terminal opened after the install. It is
+unsigned too, so SmartScreen stops it behind *Windows protected your PC*:
+click **More info**, then **Run anyway**. Once per download; right-clicking the
+msi, **Properties**, and ticking **Unblock** does the same beforehand.
 
 **Sessions run on all three, and on all three behind a boundary.** One
-description of what a session may reach, rendered over the mechanism each
-platform has: bubblewrap on Linux, where the rest of the machine is not in the
-session's namespace at all; Apple's sandbox on a Mac, where the machine is in
-plain sight and refused; and a local account of Verkstead's own on Windows,
-where reach is an access-control entry written for that account on each real
-directory the description names. What is inside is the same on all three, and
-[adoption](docs/adoption.md) says what a session can and cannot get to on each
-— including the one elevated command a Windows machine wants once, to make
-that account. The daemon install is the NixOS module's.
+description of what a session may reach — its Worktree, the Repo's git
+directory, the Sandbox Configuration's entries, the Build Cache, a home of its
+own with a Built Root of the Agent Profile's account inside it, the network,
+and nothing else of the machine — rendered over the mechanism each platform
+has. On Linux it is bubblewrap, and the rest of the machine is not in the
+session's namespace at all. On a Mac it is Apple's sandbox, `sandbox-exec`,
+and the machine is in plain sight and refused. On Windows it is a local account
+of Verkstead's own, with an access-control entry written for it on each
+directory the description names; making that account is the one elevated step
+Verkstead asks for, and the setup wizard takes it behind a User Account Control
+prompt, or `verkstead session-account create` in an elevated terminal does.
+A boundary that cannot be made refuses the session rather than running it
+without one.
 
 ## Where things are written down
 
@@ -62,9 +80,8 @@ a Verkstead that covers the whole loop, and the brief for each.
 **[CONTEXT.md](CONTEXT.md)** — the project's vocabulary. Conversation, Brief,
 Timeline, Question Set, Answer and the rest, defined once.
 
-**[Adoption](docs/adoption.md)** — what Verkstead replaces, how to get it
-running, and how a day's work goes through it from Brief to settled pull
-request.
+**[Copy](docs/copy.md)** — how Verkstead speaks to the human: the rules for
+every string on a screen, and the reasons behind them.
 
 **[Development](docs/development.md)** — the dev shell, building the viewer,
 and the loop for working on Verkstead itself.
@@ -72,6 +89,6 @@ and the loop for working on Verkstead itself.
 **[Releasing](docs/releasing.md)** — the one workflow that turns a version
 number into the published binaries, the AppImage, the dmg and the msi.
 
-## License
+## Licence
 
 MIT — see [LICENSE](LICENSE).

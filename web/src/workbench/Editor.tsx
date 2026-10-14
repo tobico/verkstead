@@ -83,7 +83,7 @@ const SCHEME = "(prefers-color-scheme: dark)";
 /// tab that simply stayed blank would be the pane saying nothing at all about a
 /// network that had gone.
 export const NO_EDITOR =
-  "The editor could not be loaded. Check the connection and open the file again.";
+  "The editor couldn't be loaded. Check the connection and open the file again.";
 
 /// The pane's three settings, in the words Monaco takes them in.
 ///

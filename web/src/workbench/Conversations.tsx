@@ -584,15 +584,17 @@ export function Conversations(props: {
 
       <Switch>
         <Match when={conversations.isPending}>
-          <Empty>Loading…</Empty>
+          <Empty>Reading the conversations…</Empty>
         </Match>
         <Match when={conversations.isError}>
           <ErrorLine>
-            Could not read the conversations: {conversations.error?.message}
+            The conversations couldn't be read. {conversations.error?.message}
           </ErrorLine>
         </Match>
         <Match when={conversations.data?.length === 0}>
-          <Empty>Nothing is being worked on yet.</Empty>
+          <Empty>
+            No conversations yet. Start one with <strong>New conversation</strong>.
+          </Empty>
         </Match>
         <Match when={conversations.data}>
           <ul class={styles.conversationList} ref={list}>
@@ -621,10 +623,13 @@ export function Conversations(props: {
       </Switch>
 
       {/* The order was not saved, which is worth saying because what is on the
-          screen is the server's order rather than the one they just made. */}
+          screen is the server's order rather than the one they just made. The
+          server's sentence says why, which is not always that the order was
+          lost, so the line here says that itself. */}
       <Show when={place.isError}>
         <ErrorLine>
-          The order could not be saved: {place.error?.message}
+          Your order wasn't saved. The list is back in the server's order.{" "}
+          {place.error?.message}
         </ErrorLine>
       </Show>
 

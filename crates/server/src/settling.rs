@@ -228,8 +228,8 @@ async fn narrowing(state: &AppState, conversation_id: i64) {
                 &state.pool,
                 conversation_id,
                 "**Waiting on checks.** The review is answered and nothing said on the pull \
-                 request is left unaddressed, so the checks going green is the whole of what \
-                 this wrap-up is still waiting on.",
+                 request is left unaddressed, so this wrap-up waits only on the checks going \
+                 green.",
             )
             .await
             {
@@ -318,9 +318,8 @@ async fn share_to_pull_requests(state: &AppState, conversation_id: i64) {
         say(
             state,
             conversation_id,
-            "**The record could not be shared to the pull request** — it could not be read to \
-             compose a share of, and the log says what failed. The Share pane's own press is \
-             where to try it again.",
+            "**The record couldn't be shared to the pull request.** It couldn't be read to \
+             compose a share, and the server log says why. Try again from the share pane.",
         )
         .await;
         return;
@@ -341,8 +340,9 @@ async fn share_to_pull_requests(state: &AppState, conversation_id: i64) {
                 state,
                 conversation_id,
                 &format!(
-                    "**The record could not be shared to the pull request** — {why}. The Share \
-                     pane's own press is where to try it again.",
+                    "**The record couldn't be shared to the pull request.** {} Try again from \
+                     the share pane.",
+                    crate::stopping::sentence(&format!("{why:#}")),
                 ),
             )
             .await;
@@ -372,7 +372,7 @@ fn unshared(said: &ShareCommented) -> Option<String> {
         ShareCommented::NoPullRequest => None,
 
         ShareCommented::NotPublished { why } => Some(format!(
-            "**The record could not be shared to the pull request.** {}",
+            "**The record couldn't be shared to the pull request.** {}",
             unpublished(why),
         )),
 
@@ -380,12 +380,16 @@ fn unshared(said: &ShareCommented) -> Option<String> {
         // missed out and why, so the human can paste the link there themselves.
         // The link is on the record either way, and the Share pane draws it.
         ShareCommented::Commented { missed, .. } if !missed.is_empty() => Some(format!(
-            "**The share was published, and could not be commented on {}.** {} The link is on \
-             the Share pane, to paste there by hand.",
+            "**The share was published, but couldn't be commented on {}.** {} The link is on \
+             the share pane, to paste there by hand.",
             listed(missed.iter().map(named)),
             missed
                 .iter()
-                .map(|pull| format!("{}: {}.", named(pull), pull.why.trim_end_matches('.')))
+                .map(|pull| format!(
+                    "{} wasn't commented on. {}",
+                    crate::stopping::opening(&named(pull)),
+                    crate::stopping::sentence(&pull.why),
+                ))
                 .collect::<Vec<_>>()
                 .join(" "),
         )),
@@ -403,15 +407,15 @@ fn unshared(said: &ShareCommented) -> Option<String> {
 /// are fixed.
 fn unpublished(why: &SharePublished) -> String {
     match why {
-        SharePublished::NoToken => "No GitHub token is configured, so there is nobody to publish \
-             a share as. The settings page is where one is saved."
+        SharePublished::NoToken => "No GitHub token is saved, so there's nobody to publish a \
+             share as. Save one on the settings page."
             .to_owned(),
-        SharePublished::NoGistScope => "The configured GitHub token may not write gists. \
-             Re-issue it with the `gist` scope and save it again on the settings page."
+        SharePublished::NoGistScope => "The saved GitHub token can't write gists. Reissue it \
+             with the `gist` scope and save it again on the settings page."
             .to_owned(),
-        SharePublished::Refused { why } => {
-            format!("GitHub refused it: {}.", why.trim_end_matches('.'))
-        }
+        // The publish's own sentence, which says whose refusal it was: it can
+        // be git's as well as GitHub's.
+        SharePublished::Refused { why } => crate::stopping::sentence(why),
         // Never arrives: this is the shape of a press that got no further than
         // the publish, and a publish that worked is not one of them.
         SharePublished::Published { .. } => "The publish worked.".to_owned(),
@@ -434,7 +438,9 @@ fn listed(names: impl Iterator<Item = String>) -> String {
     match names.split_last() {
         None => String::new(),
         Some((last, [])) => last.clone(),
-        Some((last, rest)) => format!("{} and {last}", rest.join(", ")),
+        Some((last, [one])) => format!("{one} and {last}"),
+        // The serial comma, which keeps the last two from reading as one.
+        Some((last, rest)) => format!("{}, and {last}", rest.join(", ")),
     }
 }
 
@@ -511,12 +517,27 @@ mod tests {
 
         let said = unshared(&ShareCommented::NotPublished {
             why: SharePublished::Refused {
-                why: "gh: Not Found (HTTP 404)".to_owned(),
+                why: "The gh command said: gh: Not Found (HTTP 404).".to_owned(),
             },
         })
         .expect("and so is GitHub refusing it");
 
-        assert!(said.contains("gh: Not Found (HTTP 404)"), "{said}");
+        assert_eq!(
+            said,
+            "**The record couldn't be shared to the pull request.** The gh command said: gh: \
+             Not Found (HTTP 404).",
+        );
+
+        // And a refusal that was git's, which the publish says in its own
+        // words rather than as GitHub's.
+        let said = unshared(&ShareCommented::NotPublished {
+            why: SharePublished::Refused {
+                why: "Git said nothing about why.".to_owned(),
+            },
+        })
+        .expect("and so is git refusing it");
+
+        assert!(!said.contains("GitHub"), "{said}");
     }
 
     /// A share that was published and could not be commented everywhere names
@@ -530,14 +551,19 @@ mod tests {
             missed: vec![missed(
                 7,
                 Some("verkstead-site"),
-                "gh: Not Found (HTTP 404)",
+                "The gh command said: gh: Not Found (HTTP 404).",
             )],
         })
         .expect("a pull request that missed out is worth a Notice");
 
-        assert!(said.contains("#7 in verkstead-site"), "{said}");
-        assert!(said.contains("gh: Not Found (HTTP 404)"), "{said}");
-        assert!(said.contains("Share pane"), "{said}");
+        assert!(
+            said.contains(
+                "#7 in verkstead-site wasn't commented on. The gh command said: gh: Not Found \
+                 (HTTP 404). The link"
+            ),
+            "{said}"
+        );
+        assert!(said.contains("share pane"), "{said}");
 
         // And the ones that worked are not named: what is left to do is about
         // the ones that did not.
@@ -559,7 +585,7 @@ mod tests {
         .expect("three that missed out are worth a Notice");
 
         assert!(
-            said.contains("#7 in verkstead-site, #9 in askance and #41"),
+            said.contains("#7 in verkstead-site, #9 in askance, and #41"),
             "{said}",
         );
     }

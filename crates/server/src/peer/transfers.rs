@@ -452,9 +452,8 @@ pub(crate) async fn arrived(
         &state.pool,
         id,
         &format!(
-            "Transferred to **{here}** at {whose} request: this Conversation was moved onto \
-             this device from **{named}**. Its branch, its Worktree and whatever was \
-             uncommitted in it are here, and the record above it came across with them.",
+            "Transferred to **{here}** from **{named}** at {whose} request. The branch, the \
+             worktree, anything uncommitted in it, and the record above came with it.",
             here = state
                 .devices
                 .as_ref()

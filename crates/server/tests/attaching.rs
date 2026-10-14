@@ -599,7 +599,7 @@ async fn a_draft_that_moved_is_closed_and_says_where_it_went() {
         .expect("the move left a notice on the Timeline");
 
     assert!(said.contains("laptop"), "the device it went to: {said}");
-    assert!(said.contains("Conversation 7"), "and which one: {said}");
+    assert!(said.contains("conversation 7"), "and which one: {said}");
     assert!(
         said.contains("0011223344556677889900aabbccddee"),
         "and the id beside the name, names moving: {said}",

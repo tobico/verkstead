@@ -216,11 +216,11 @@ import styles from "./Tree.module.css";
 /// that has are four different things, and only the human can tell which of them
 /// they are looking at.
 export const FOLDER_REFUSAL: Record<Extract<FolderListing, string>, string> = {
-  Outside: "That is not in any of this conversation's worktrees.",
-  UnderGit: "Code does not show what is inside a repository's .git.",
+  Outside: "That isn't in any of this conversation's worktrees.",
+  UnderGit: "Code doesn't show what's inside a repository's .git.",
   RootGone: "This worktree is no longer on disk.",
   Missing: "That folder is no longer there.",
-  NotAFolder: "That is not a folder.",
+  NotAFolder: "That isn't a folder.",
 };
 
 /// What either name field says about a name that is really a path.
@@ -232,7 +232,7 @@ export const FOLDER_REFUSAL: Record<Extract<FolderListing, string>, string> = {
 /// is meant to be, so there is no shape the request arrives in for the server to
 /// tell a separator that was typed from one that was always in the folder: it
 /// is refused here, where the two halves are still apart.
-export const A_PATH = "That is a path rather than a name.";
+export const A_PATH = "That's a path, not a name.";
 
 /// And whether what was typed into one of them is a name at all.
 ///
@@ -251,13 +251,13 @@ export function aName(name: string): boolean {
 /// about is what was just typed, and the field keeps it so the next Enter is a
 /// correction rather than a retype.
 export const MADE_REFUSAL: Record<Extract<FileMade, string>, string> = {
-  Taken: "There is already something called that in this folder.",
+  Taken: "There's already something called that in this folder.",
   ReadOnly: "Nothing can be written in this worktree.",
-  Outside: "That is not in any of this conversation's worktrees.",
-  UnderGit: "Code does not touch what is inside a repository's .git.",
+  Outside: "That isn't in any of this conversation's worktrees.",
+  UnderGit: "Code doesn't touch what's inside a repository's .git.",
   RootGone: "This worktree is no longer on disk.",
   Missing: "That folder is no longer there.",
-  NotAFolder: "That is not a folder.",
+  NotAFolder: "That isn't a folder.",
 };
 
 /// What a making came back saying, where it was refused — and `null` where it
@@ -286,11 +286,11 @@ export function madeRefusal(made: FileMade): string | null {
 /// answer arriving where the tree cannot ask for it: said anyway, because a
 /// refusal nobody worded is a refusal drawn as blank.
 export const RENAMED_REFUSAL: Record<Extract<FileRenamed, string>, string> = {
-  Taken: "There is already something called that in this folder.",
-  IsRoot: "A worktree is not renamed from here.",
+  Taken: "There's already something called that in this folder.",
+  IsRoot: "A worktree can't be renamed from here.",
   ReadOnly: "Nothing can be written in this worktree.",
   Outside: A_PATH,
-  UnderGit: "Code does not touch what is inside a repository's .git.",
+  UnderGit: "Code doesn't touch what's inside a repository's .git.",
   RootGone: "This worktree is no longer on disk.",
   Missing: "That is no longer there.",
 };
@@ -323,10 +323,10 @@ export const DELETED_REFUSAL: Record<
   Exclude<Extract<FileDeleted, string>, "Deleted">,
   string
 > = {
-  IsRoot: "A worktree is not deleted from here.",
+  IsRoot: "A worktree can't be deleted from here.",
   ReadOnly: "Nothing can be written in this worktree.",
-  Outside: "That is not in any of this conversation's worktrees.",
-  UnderGit: "Code does not touch what is inside a repository's .git.",
+  Outside: "That isn't in any of this conversation's worktrees.",
+  UnderGit: "Code doesn't touch what's inside a repository's .git.",
   RootGone: "This worktree is no longer on disk.",
   Missing: "That is no longer there.",
 };
@@ -1092,7 +1092,7 @@ export function Tree(props: {
       <Switch fallback={<Empty>Reading this conversation's worktrees…</Empty>}>
         <Match when={roots.isError}>
           <ErrorLine>
-            Could not read this conversation's worktrees: {roots.error?.message}
+            This conversation's worktrees couldn't be read. {roots.error?.message}
           </ErrorLine>
         </Match>
         <Match when={roots.data && roots.data.roots.length > 0}>
@@ -1283,9 +1283,9 @@ function Removing(props: {
       <p class={styles.confirmingWhy}>
         <Show
           when={props.asked?.folder === true}
-          fallback={`${name()} will be taken off the disk.`}
+          fallback={`${name()} is deleted from the disk.`}
         >
-          {`${name()} will be taken off the disk, and everything in it goes with it.`}
+          {`${name()} and everything in it are deleted from the disk.`}
         </Show>{" "}
         This cannot be undone.
       </p>
@@ -1305,7 +1305,7 @@ function Removing(props: {
           class={`${styles.secondary!} secondary`}
           onClick={() => props.keep()}
         >
-          Keep it
+          Cancel
         </button>
         <button type="button" onClick={() => props.remove()}>
           Delete {name()}

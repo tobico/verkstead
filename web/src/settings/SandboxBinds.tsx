@@ -88,15 +88,15 @@ export function SandboxBinds(): JSX.Element {
 
   return (
     <section>
-      <h3 class={styles.heading}>Sandbox binds</h3>
+      <h3 class={styles.heading}>Sandbox Binds</h3>
 
       <Choose>
         <Match when={settings.isPending}>
-          <Empty>Loading…</Empty>
+          <Empty>Reading the settings…</Empty>
         </Match>
         <Match when={settings.isError}>
           <ErrorLine>
-            Could not read the settings: {settings.error?.message}
+            The settings couldn't be read. {settings.error?.message}
           </ErrorLine>
         </Match>
         <Match when={told()?.paths}>
@@ -106,13 +106,12 @@ export function SandboxBinds(): JSX.Element {
                   says its own in, under the heading that names these in the
                   Sandbox pane. */}
               <Note>
-                Configures additional paths which are accessible from within the
-                sandbox.
+                These paths are bound into every session's sandbox.
               </Note>
 
               <Rows
                 rows={drawn(paths())}
-                none="No paths are configured yet."
+                none="No paths are bound yet. Add one below."
                 saving={save.isPending}
                 remove={(at) => writeBinds(without(held().sandbox_binds, at))}
               />
@@ -127,7 +126,7 @@ export function SandboxBinds(): JSX.Element {
 
               <Show when={save.isError}>
                 <ErrorLine class={styles.failure}>
-                  The settings could not be saved: {save.error?.message}
+                  The settings couldn't be saved. {save.error?.message}
                 </ErrorLine>
               </Show>
             </div>

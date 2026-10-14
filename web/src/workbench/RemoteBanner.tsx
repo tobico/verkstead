@@ -94,7 +94,7 @@ export function RemoteBanner(props: {
       <aside class={styles.banner}>
         <span>
           Nothing to do here while the first questions are written. Answer them
-          from your phone: <A href="/settings/remote">Remote access</A> puts
+          from your phone: <A href="/settings/remote">Remote Access</A> puts
           this workbench on your tailnet.
         </span>
 
@@ -106,7 +106,7 @@ export function RemoteBanner(props: {
           class={styles.done}
           onClick={() => press.mutate()}
         >
-          Got it
+          Dismiss
         </button>
       </aside>
     </Show>

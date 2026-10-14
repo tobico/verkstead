@@ -189,7 +189,7 @@ import styles from "./Languages.module.css";
 
 /// What the section is called, wherever it names itself: the card's heading and
 /// the pane's head.
-const TITLE = "Build caches";
+const TITLE = "Build Caches";
 
 /// The settings as they stand, read once for the two panes that draw them.
 ///
@@ -227,9 +227,9 @@ function useSettings() {
 function uncompiled(): JSX.Element {
   return (
     <p class={styles.warning}>
-      No sccache is installed where the server can see it, so <em>compiles</em>{" "}
-      are not cached, and every session compiles again what the last one did.
-      Install sccache on the server to cache them.
+      The server can't see an sccache, so <em>compiles</em> aren't cached and
+      every session compiles again what the last one did. Install sccache on the
+      server to cache them.
     </p>
   );
 }
@@ -387,7 +387,7 @@ function held(disk: DiskUse): string | undefined {
   }
 
   if (disk === "NotMeasured") {
-    return "Not measured yet: the server measures its store in the background.";
+    return "Not measured yet. The server measures its store in the background.";
   }
 
   const { bytes, in_units } = disk.Measured;
@@ -418,7 +418,7 @@ function sweptSaid(
 
   if (language.swept === null) {
     return {
-      said: "Not trimmed since the server started: trimming waits until no session or terminal is running.",
+      said: "Not trimmed since the server started. Trimming waits until no session or terminal is running.",
     };
   }
 
@@ -448,7 +448,7 @@ export function clearWaits(running: Running): string | undefined {
   const verb =
     running.sessions + running.terminals === 1 ? "is running" : "are running";
 
-  return `Clear waits until no session or terminal is running: ${what.join(" and ")} ${verb}.`;
+  return `Clear waits until no session or terminal is running. ${what.join(" and ")} ${verb}.`;
 }
 
 /// Whether a language's store is held to its size twice over: once by a tool
@@ -511,7 +511,7 @@ function linked(
     return {
       said:
         through === undefined || through.name === language.name
-          ? "Compile Server cache"
+          ? "Compile server cache"
           : `Compiles through ${through.label}'s cache`,
       quiet,
     };
@@ -540,8 +540,7 @@ function unreadable(entry: UnreadEntry): JSX.Element {
       Its entry in <code>config.yaml</code> {entry.why}.{" "}
       <Choose>
         <Match when={entry.running_on === "BuiltIn"}>
-          Verkstead is using the descriptor it ships, which is what this
-          language had before that entry was written.
+          Verkstead is using the descriptor it ships until the entry is fixed.
         </Match>
         <Match when={entry.running_on === "Nothing"}>
           Verkstead ships no descriptor of that name, so this language is off
@@ -816,7 +815,7 @@ export function BuildCaches(): JSX.Element {
             }}
           >
             <label for={`language-size-${language().name}`}>
-              How large its store may grow
+              Store size limit
             </label>
             <input
               id={`language-size-${language().name}`}
@@ -869,7 +868,7 @@ export function BuildCaches(): JSX.Element {
           }
         >
           <p class={styles.note}>
-            Compiles through the Compile Server {sizer(set())?.label} sizes, so
+            Compiles through the compile server {sizer(set())?.label} sizes, so
             its cache is {sizer(set())?.label}'s and its size is set there.
           </p>
         </Show>
@@ -895,8 +894,8 @@ export function BuildCaches(): JSX.Element {
 
         <Show when={twice(language())}>
           <p class={styles.note}>
-            sccache holds its compile cache to this size by itself, so together
-            with the rest the store may hold up to twice it.
+            sccache holds its compile cache to this size by itself, so the store
+            may hold up to twice it.
           </p>
         </Show>
 
@@ -938,7 +937,7 @@ export function BuildCaches(): JSX.Element {
             </button>
             <span class={styles.note}>
               {clearWaits(set().running) ??
-                "Empties its store; the next install fetches again."}
+                "Empties its store. The next install fetches again."}
             </span>
           </div>
         </Show>
@@ -952,11 +951,11 @@ export function BuildCaches(): JSX.Element {
 
       <Choose>
         <Match when={settings.isPending}>
-          <Empty>Loading…</Empty>
+          <Empty>Reading the settings…</Empty>
         </Match>
         <Match when={settings.isError}>
           <ErrorLine>
-            Could not read the settings: {settings.error?.message}
+            The settings couldn't be read. {settings.error?.message}
           </ErrorLine>
         </Match>
         <Match when={told()}>
@@ -1021,13 +1020,13 @@ export function BuildCaches(): JSX.Element {
 
               <Show when={clearing.isError}>
                 <ErrorLine class={styles.failure}>
-                  The store could not be cleared: {clearing.error?.message}
+                  The store couldn't be cleared. {clearing.error?.message}
                 </ErrorLine>
               </Show>
 
               <Show when={save.isError}>
                 <ErrorLine class={styles.failure}>
-                  The settings could not be saved: {save.error?.message}
+                  The settings couldn't be saved. {save.error?.message}
                 </ErrorLine>
               </Show>
             </div>

@@ -57,6 +57,20 @@ export function Note(props: Notice): JSX.Element {
   return <Line of={styles.note} notice={props} />;
 }
 
+/// And the rest of what a note would say, folded behind a line naming it: what
+/// the copy guide means by a disclosure. A note beside a control is a sentence
+/// or two, and what somebody needs only when they go looking — the rules a
+/// field's value follows, how a mechanism works — waits here rather than being
+/// read past every time the pane is opened.
+export function More(props: Notice & { summary: string }): JSX.Element {
+  return (
+    <details class={[styles.more, props.class].filter(Boolean).join(" ")}>
+      <summary>{props.summary}</summary>
+      <div>{props.children}</div>
+    </details>
+  );
+}
+
 /// The one element all three are, told which of the module's classes says
 /// which.
 ///

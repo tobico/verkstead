@@ -155,9 +155,9 @@ export const DISTROS: readonly Distro[] = [
 const CLAUDE_NATIVE: Instruction = {
   command: "curl -fsSL https://claude.ai/install.sh | bash",
   note:
-    "Anthropic's own installer, and the one that stays current. It puts claude " +
-    "in ~/.local/bin, so that directory has to be on the PATH of the shell " +
-    "Verkstead is started from, with Verkstead started again once it is.",
+    "Anthropic's own installer, which keeps claude current. It puts claude in " +
+    "~/.local/bin, which has to be on the PATH of the shell Verkstead is started " +
+    "from. Start Verkstead again once it is.",
 };
 
 /// And the same installer on a Mac, which is the same line with a note of its
@@ -179,9 +179,8 @@ const CLAUDE_NATIVE: Instruction = {
 const CLAUDE_ON_A_MAC: Instruction = {
   command: "curl -fsSL https://claude.ai/install.sh | bash",
   note:
-    "Anthropic's own installer, and the one that stays current. It puts " +
-    "claude in ~/.local/bin, which is on every Mac session's PATH whichever " +
-    "way Verkstead was started.",
+    "Anthropic's own installer, which keeps claude current. It puts claude in " +
+    "~/.local/bin, which is on every Mac session's PATH.",
 };
 
 /// The same installer on Windows, where it is the PowerShell one and the home
@@ -189,10 +188,9 @@ const CLAUDE_ON_A_MAC: Instruction = {
 const CLAUDE_NATIVE_WINDOWS: Instruction = {
   command: "irm https://claude.ai/install.ps1 | iex",
   note:
-    "Anthropic's own installer, and the one that stays current. It puts " +
-    "claude.exe in %USERPROFILE%\\.local\\bin, so that directory has to be on " +
-    "the PATH of the shell Verkstead is started from, with Verkstead started " +
-    "again once it is.",
+    "Anthropic's own installer, which keeps claude current. It puts claude.exe " +
+    "in %USERPROFILE%\\.local\\bin, which has to be on the PATH of the shell " +
+    "Verkstead is started from. Start Verkstead again once it is.",
 };
 
 /// Grok Build, which is a link on every tab.
@@ -205,11 +203,10 @@ const CLAUDE_NATIVE_WINDOWS: Instruction = {
 const GROK_UNIX: Instruction = {
   link: "https://x.ai/cli",
   note:
-    "xAI's own installer puts grok in ~/.grok/bin and symlinks it into " +
-    "/usr/local/bin where it can. Where it could not, ~/.grok/bin has to be on " +
-    "the PATH of the shell Verkstead is started from. The grok-cli packaged by " +
-    "nixpkgs and the one on npm are other people's projects rather than xAI's " +
-    "grok.",
+    "xAI's own installer puts grok in ~/.grok/bin and links it into " +
+    "/usr/local/bin where it can. Where it can't, put ~/.grok/bin on the PATH " +
+    "of the shell Verkstead is started from. The grok-cli in nixpkgs and on " +
+    "npm is a different project.",
 };
 
 /// The same on Windows, where the installer is the PowerShell one.
@@ -217,7 +214,7 @@ const GROK_WINDOWS: Instruction = {
   link: "https://x.ai/cli",
   note:
     "irm https://x.ai/cli/install.ps1 | iex is xAI's own installer. The " +
-    "grok-cli on npm is somebody else's project rather than xAI's grok.",
+    "grok-cli on npm is a different project.",
 };
 
 /// OpenCode the way OpenCode installs it, which is what the one tab with no
@@ -232,11 +229,10 @@ const GROK_WINDOWS: Instruction = {
 const OPENCODE_NATIVE: Instruction = {
   command: "curl -fsSL https://opencode.ai/install | bash",
   note:
-    "OpenCode's own installer. It puts opencode in ~/.opencode/bin, which is " +
-    "not a directory a Mac session looks in by itself: tick the row and " +
-    "Verkstead puts it on every session's PATH, or run this by hand and put " +
-    "that directory on the PATH of the shell Verkstead is started from, with " +
-    "Verkstead started again once it is.",
+    "OpenCode's own installer. It puts opencode in ~/.opencode/bin, which a " +
+    "Mac session doesn't look in by itself. Tick the row and Verkstead puts it " +
+    "on every session's PATH, or run this by hand and add it to the PATH of " +
+    "the shell Verkstead is started from.",
 };
 
 /// A harness from npm, installed for the whole machine rather than for a user.
@@ -249,9 +245,8 @@ function npm(pkg: string, node: string): Instruction {
   return {
     command: `sudo npm install -g ${pkg}`,
     note:
-      "An -g install lands the binary in /usr/local/bin or /usr/bin, a system " +
-      "directory a session reaches with nothing else to set. Where there is no " +
-      `npm yet: ${node}.`,
+      "A -g install puts the binary in /usr/local/bin or /usr/bin, which a " +
+      `session reaches with nothing else to set. Without npm yet: ${node}.`,
   };
 }
 
@@ -260,9 +255,9 @@ function windowsNpm(pkg: string): Instruction {
   return {
     command: `npm install -g ${pkg}`,
     note:
-      "An -g install lands the binary in %APPDATA%\\npm, which Node's own " +
-      "installer puts on your PATH. Where there is no npm yet: winget install " +
-      "--id OpenJS.NodeJS.",
+      "A -g install puts the binary in %APPDATA%\\npm, which Node's own " +
+      "installer puts on your PATH. Without npm yet: winget install --id " +
+      "OpenJS.NodeJS.",
   };
 }
 
@@ -283,8 +278,8 @@ function nixos(attribute: string, note?: string): Instruction {
     note:
       (note ? `${note} ` : "") +
       "In configuration.nix, then sudo nixos-rebuild switch. A nix profile " +
-      "install goes to ~/.nix-profile/bin instead, which has to be on the PATH " +
-      "of the shell Verkstead is started from.",
+      "install goes to ~/.nix-profile/bin, which has to be on the PATH of the " +
+      "shell Verkstead is started from.",
   };
 }
 
@@ -311,16 +306,15 @@ export const GUIDES: Record<Distro, Guide> = {
         '/bin/bash -c "$(curl -fsSL ' +
         'https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"',
       note:
-        "The brew commands below are Homebrew's, and a Mac without Homebrew " +
-        "has nothing to run them with. It installs into /opt/homebrew on " +
-        "Apple silicon and /usr/local on Intel, and a session looks in both.",
+        "The brew commands below need Homebrew. It installs into /opt/homebrew " +
+        "on Apple silicon and /usr/local on Intel, and a session looks in both.",
     },
 
     rows: {
       Sandbox: {
         note:
-          "Apple's own sandbox-exec is on every Mac, and it is what a session " +
-          "runs inside here. There is nothing to install.",
+          "A session runs inside Apple's own sandbox-exec, which is on every " +
+          "Mac. There's nothing to install.",
       },
       // Apple's own dialog first, and Homebrew's git under it. Every Mac has a
       // /usr/bin/git and without the command line tools that file is a stub
@@ -333,13 +327,13 @@ export const GUIDES: Record<Distro, Guide> = {
         command: "xcode-select --install",
         note:
           "git comes with Apple's command line tools, and this opens Apple's " +
-          "own dialog to install them. The git in /usr/bin without them is a " +
-          "stub that opens the same dialog instead of running.",
+          "dialog to install them. Without them, /usr/bin/git is a stub that " +
+          "opens the same dialog.",
         alternative: {
           command: "brew install git",
           note:
-            "Homebrew's own, which is the git most Macs with brew run. It " +
-            "wants the command line tools above installed first.",
+            "Homebrew's git. It needs the command line tools above installed " +
+            "first.",
         },
       },
       Claude: CLAUDE_ON_A_MAC,
@@ -366,14 +360,14 @@ export const GUIDES: Record<Distro, Guide> = {
     title: "macOS (Intel)",
 
     about:
-      "Homebrew no longer supports Intel Macs — its installer refuses one " +
-      "outright — so nothing on this tab is a brew install.",
+      "Homebrew no longer supports Intel Macs, so nothing on this tab is a " +
+      "brew install.",
 
     rows: {
       Sandbox: {
         note:
-          "Apple's own sandbox-exec is on every Mac, and it is what a session " +
-          "runs inside here. There is nothing to install.",
+          "A session runs inside Apple's own sandbox-exec, which is on every " +
+          "Mac. There's nothing to install.",
       },
 
       // Apple's own dialog rather than a package: every Mac has a
@@ -383,8 +377,8 @@ export const GUIDES: Record<Distro, Guide> = {
         command: "xcode-select --install",
         note:
           "git comes with Apple's command line tools, and this opens Apple's " +
-          "own dialog to install them. The git in /usr/bin without them is a " +
-          "stub that opens the same dialog instead of running.",
+          "dialog to install them. Without them, /usr/bin/git is a stub that " +
+          "opens the same dialog.",
       },
 
       Claude: CLAUDE_ON_A_MAC,
@@ -395,10 +389,9 @@ export const GUIDES: Record<Distro, Guide> = {
       Codex: {
         link: "https://github.com/openai/codex/releases",
         note:
-          "Codex has no installer script, and the package the other tabs use " +
-          "wants an npm this Mac has no package manager to install. Put the " +
-          "binary in ~/.local/bin, which is on every Mac session's PATH " +
-          "whichever way Verkstead was started.",
+          "Codex has no installer script, and the other tabs' package needs " +
+          "npm. Put the binary in ~/.local/bin, which is on every Mac " +
+          "session's PATH.",
       },
 
       Grok: GROK_UNIX,
@@ -407,9 +400,8 @@ export const GUIDES: Record<Distro, Guide> = {
       Gh: {
         link: "https://github.com/cli/cli/releases",
         note:
-          "GitHub ships a zip for this Mac rather than a package it can " +
-          "install. Unpack gh into ~/.local/bin, which is on every Mac " +
-          "session's PATH whichever way Verkstead was started.",
+          "GitHub ships a zip for this Mac, not a package. Unpack gh into " +
+          "~/.local/bin, which is on every Mac session's PATH.",
       },
     },
   },
@@ -420,13 +412,11 @@ export const GUIDES: Record<Distro, Guide> = {
       Sandbox: {
         command: "verkstead session-account create",
         note:
-          "Sessions on this machine run as a local account of Verkstead's " +
-          "own, which is the sandbox on Windows. Ticking this row makes it " +
-          "for you: making a local account wants an administrator, and the " +
-          "wizard asks Windows for one. This line is the same thing by hand, " +
-          "from a terminal opened with Run as administrator, and it wants " +
-          "running once. Until there is an account, a session on this " +
-          "machine is refused rather than started without a boundary.",
+          "Sessions here run as a local account of Verkstead's own, which is " +
+          "the sandbox on Windows. Until it exists, a session is refused " +
+          "rather than run without one. Ticking this row makes it, and " +
+          "Windows asks for an administrator. To do it by hand, run this line " +
+          "once from a terminal opened with Run as administrator.",
       },
       Git: { command: "winget install --id Git.Git" },
       Claude: orElse(
@@ -445,10 +435,9 @@ export const GUIDES: Record<Distro, Guide> = {
     rows: {
       Sandbox: nixos(
         "bubblewrap",
-        "Verkstead's own NixOS module adds this line for you, so a module " +
-          "install has nothing to do here. It is wanted in " +
-          "environment.systemPackages even so, and not only on the service's " +
-          "own PATH: what a session looks along is the machine's profile.",
+        "Verkstead's NixOS module adds this line for you. Without the module, " +
+          "add it to environment.systemPackages, not only the service's PATH: a " +
+          "session looks along the machine's profile.",
       ),
       Git: nixos("git"),
       Claude: orElse(CLAUDE_NATIVE, nixos("claude-code")),
@@ -530,9 +519,9 @@ export const GUIDES: Record<Distro, Guide> = {
     rows: {
       Sandbox: {
         note:
-          "Install your distribution's bubblewrap package — the program is " +
-          "bwrap — and allow unprivileged user namespaces, which some kernels " +
-          "ship switched off.",
+          "Install your distribution's bubblewrap package, whose program is " +
+          "bwrap. Allow unprivileged user namespaces, which some kernels ship " +
+          "switched off.",
       },
       Git: { note: "Install your distribution's git package." },
       Claude: orElse(

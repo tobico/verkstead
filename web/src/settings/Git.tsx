@@ -79,7 +79,8 @@
 //! match, and an empty one constrains nothing — see **Ignore rule** in
 //! `CONTEXT.md`, which is where that is written down now: nothing on this pane
 //! explains a control it stands under, the scopes above being about the value
-//! rather than about the field.
+//! rather than about the field. The one note is what becomes of a pasted token,
+//! said beside its field rather than in the label, as the copy guide has it.
 //!
 //! The rules travel as an action rather than a value for a reason of their own
 //! — a save is *refused* over a pattern that will not compile — so the rows are
@@ -119,7 +120,7 @@ import type {
   TokenSaved,
   Verified,
 } from "../api/types";
-import { Empty, ErrorLine } from "../notices";
+import { Empty, ErrorLine, Note } from "../notices";
 import { utcStamp } from "../set/when";
 import { PaneHead } from "../workbench/PaneHead";
 import { heldConfig } from "./held";
@@ -197,11 +198,11 @@ export function GitCard(props: {
   return (
     <Switch>
       <Match when={settings.isPending}>
-        <Empty>Loading…</Empty>
+        <Empty>Reading the settings…</Empty>
       </Match>
       <Match when={settings.isError}>
         <ErrorLine>
-          Could not read the settings: {settings.error?.message}
+          The settings couldn't be read. {settings.error?.message}
         </ErrorLine>
       </Match>
       <Match when={settings.data}>
@@ -524,17 +525,17 @@ export function GitPane(props: {
 
       <Switch>
         <Match when={settings.isPending}>
-          <Empty>Loading…</Empty>
+          <Empty>Reading the settings…</Empty>
         </Match>
         <Match when={settings.isError}>
           <ErrorLine>
-            Could not read the settings: {settings.error?.message}
+            The settings couldn't be read. {settings.error?.message}
           </ErrorLine>
         </Match>
         <Match when={told()}>
           <form class={styles.form} onSubmit={submit}>
             <section>
-              <h3>GitHub token</h3>
+              <h3>GitHub Token</h3>
 
               {/* What a token has to be able to do, above everything about the
                   one that is saved: this is the list to tick against before
@@ -551,7 +552,7 @@ export function GitPane(props: {
               <Show when={account()}>
                 {(login) => (
                   <p class={styles.verified}>
-                    GitHub says it is <span class={styles.login}>{login()}</span>
+                    GitHub says it's <span class={styles.login}>{login()}</span>
                     .
                   </p>
                 )}
@@ -564,9 +565,9 @@ export function GitPane(props: {
                   issuing with another box ticked. */}
               <Show when={missing().length > 0}>
                 <p class={styles.unscoped}>
-                  It cannot publish a share: GitHub has not given it the{" "}
+                  It can't publish a share without the{" "}
                   <code class={styles.scope}>{missing().join(", ")}</code>{" "}
-                  scope. Re-issue the token on GitHub with that ticked and save
+                  scope. Re-issue the token on GitHub with it ticked, and save
                   it here again.
                 </p>
               </Show>
@@ -574,7 +575,7 @@ export function GitPane(props: {
 
                 {(why) => (
                   <ErrorLine class={styles.unverified}>
-                    It is saved, but GitHub would not say whose it is: {why()}
+                    It's saved, but GitHub wouldn't say whose it is. {why()}
                   </ErrorLine>
                 )}
               </Show>
@@ -600,9 +601,8 @@ export function GitPane(props: {
                   </div>
                 }
               >
-                <label for="github-token">
-                  Token, pasted — it is stored and never shown again
-                </label>
+                <label for="github-token">Token</label>
+                <Note class={styles.stored}>Stored, and never shown again.</Note>
                 <input
                   id="github-token"
                   type="password"
@@ -635,7 +635,7 @@ export function GitPane(props: {
             </section>
 
             <section>
-              <h3>Git author</h3>
+              <h3>Git Author</h3>
 
               <label for="author-name">Name</label>
               <input
@@ -668,7 +668,7 @@ export function GitPane(props: {
                   one: what a second line under it could say is the heading's
                   own words again. */}
               <h3>
-                <label for="conflict-resolution">Conflict resolution</label>
+                <label for="conflict-resolution">Conflict Resolution</label>
               </h3>
 
               <Picker
@@ -683,7 +683,7 @@ export function GitPane(props: {
 
               <Show when={picking.isError}>
                 <ErrorLine class={styles.failure}>
-                  The settings could not be saved: {picking.error?.message}
+                  The settings couldn't be saved. {picking.error?.message}
                 </ErrorLine>
               </Show>
             </section>
@@ -705,25 +705,28 @@ export function GitPane(props: {
 
               <Show when={flipping.isError}>
                 <ErrorLine class={styles.failure}>
-                  The settings could not be saved: {flipping.error?.message}
+                  The settings couldn't be saved. {flipping.error?.message}
                 </ErrorLine>
               </Show>
             </section>
 
             <section>
-              <h3>Ignored comments</h3>
+              <h3>Ignored Comments</h3>
 
               <Show
                 when={rows().length > 0}
-                fallback={<Empty>No comments are ignored.</Empty>}
+                fallback={
+                  <Empty>
+                    No comments are ignored. Add a rule with{" "}
+                    <strong>Add a rule</strong>.
+                  </Empty>
+                }
               >
                 <ul class={styles.rules}>
                   <Index each={rows()}>
                     {(rule, at) => (
                       <li class={styles.rule}>
-                        <label for={`ignored-author-${at}`}>
-                          Author, matched against who wrote it
-                        </label>
+                        <label for={`ignored-author-${at}`}>Author</label>
                         <input
                           id={`ignored-author-${at}`}
                           type="text"
@@ -744,9 +747,7 @@ export function GitPane(props: {
                           )}
                         </Show>
 
-                        <label for={`ignored-body-${at}`}>
-                          Body, matched against what it says
-                        </label>
+                        <label for={`ignored-body-${at}`}>Body</label>
                         <input
                           id={`ignored-body-${at}`}
                           type="text"
@@ -807,7 +808,7 @@ export function GitPane(props: {
                 credentials go missing. */}
             <Show when={save.isError}>
               <ErrorLine class={styles.failure}>
-                The settings could not be saved: {save.error?.message}
+                The settings couldn't be saved. {save.error?.message}
               </ErrorLine>
             </Show>
           </form>

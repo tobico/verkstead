@@ -169,10 +169,10 @@ pub(crate) async fn across(
         )
     })
     .await
-    .map_err(|why| format!("the branch and the working changes could not be read: {why}"))??;
+    .map_err(|why| format!("The branch and the working changes couldn't be read: {why}."))??;
 
     let saying = serde_json::to_vec(&going)
-        .map_err(|why| format!("the checkout could not be written down to send: {why}"))?;
+        .map_err(|why| format!("The checkout couldn't be written down to send: {why}."))?;
 
     relaying::put_to(
         state.devices.as_ref(),
@@ -271,9 +271,7 @@ async fn alongside(
     }
 
     let Some(devices) = state.devices.as_ref() else {
-        return Err(
-            "this server holds no device identity to match repositories through".to_owned(),
-        );
+        return Err("This server holds no device identity to match repos through.".to_owned());
     };
 
     let ours: Vec<store::Repo> = conversation
@@ -291,7 +289,7 @@ async fn alongside(
     for (companion, there) in conversation.companions.iter().zip(theirs) {
         let Some(there) = there else {
             return Err(format!(
-                "no repository there is {name}, which this Conversation's work is done alongside",
+                "No repo there is {name}, which this conversation's work is done alongside.",
                 name = companion.repo.name,
             ));
         };
@@ -332,11 +330,12 @@ fn packed(
 
     let Some(commit) = crate::worktrees::resolve(repo, &named) else {
         return Err(format!(
-            "the branch {branch} is not in this device's copy of the repository any more",
+            "The branch `{branch}` isn't in this device's copy of the repo any more.",
         ));
     };
 
-    let bundle = bundle(repo, &named, tips)?;
+    let bundle =
+        bundle(repo, &named, tips).map_err(|why| format!("{}.", crate::stopping::opening(&why)))?;
 
     let mut weighs = bundle.as_ref().map_or(0, Vec::len);
 
@@ -362,8 +361,8 @@ fn packed(
 
     if weighs > MOST_A_CHECKOUT_IS {
         return Err(format!(
-            "the checkout of {branch} is larger than the {MOST_A_CHECKOUT_IS} bytes one may be \
-             to cross a link",
+            "The checkout of `{branch}` is larger than the {MOST_A_CHECKOUT_IS} bytes one may be \
+             to cross a link.",
         ));
     }
 
@@ -412,7 +411,7 @@ fn packed_alongside(
             .or_else(|| companion.base_commit.clone())
             .ok_or_else(|| {
                 format!(
-                    "the read-only companion {name} is at no commit this device could read",
+                    "The read-only companion {name} is at no commit this device could read.",
                     name = companion.name,
                 )
             })?;
@@ -438,14 +437,19 @@ fn packed_alongside(
 
     let Some(commit) = crate::worktrees::resolve(&companion.repo, &held) else {
         return Err(format!(
-            "the branch {branch} of the companion {name} is not in this device's copy of that \
-             repository any more",
+            "The branch `{branch}` of the companion {name} isn't in this device's copy of that \
+             repo any more.",
             name = companion.name,
         ));
     };
 
-    let bundle = bundle(&companion.repo, &held, &companion.tips)
-        .map_err(|why| format!("{why}, for the companion {name}", name = companion.name))?;
+    let bundle = bundle(&companion.repo, &held, &companion.tips).map_err(|why| {
+        format!(
+            "{}, for the companion {name}.",
+            crate::stopping::opening(&why),
+            name = companion.name,
+        )
+    })?;
 
     *weighs += bundle.as_ref().map_or(0, Vec::len);
 
@@ -492,7 +496,7 @@ fn bundle(repo: &Path, named: &str, tips: &[String]) -> Result<Option<Vec<u8>>, 
     }
 
     let Some(count) = git(repo, &counting) else {
-        return Err("this device's copy of the repository could not be walked".to_owned());
+        return Err("this device's copy of the repo couldn't be walked".to_owned());
     };
 
     // Nothing to pack: the far end is standing on the branch's own tip already,
@@ -513,7 +517,7 @@ fn bundle(repo: &Path, named: &str, tips: &[String]) -> Result<Option<Vec<u8>>, 
     // is a bundle that will not open — see [`crate::repos::bytes`].
     repos::bytes(repo, &packing, &[0])
         .map(Some)
-        .ok_or_else(|| "the branch could not be packed into a bundle".to_owned())
+        .ok_or_else(|| "the branch couldn't be packed into a bundle".to_owned())
 }
 
 /// Which of `tips` this device's copy of the repository actually has.
@@ -608,7 +612,7 @@ fn untracked(worktree: &Path, weighs: &mut usize) -> Result<Vec<UntrackedFile>, 
 
             Err(why) => {
                 return Err(format!(
-                    "the untracked file {path} could not be read: {why}"
+                    "The untracked file `{path}` couldn't be read: {why}."
                 ));
             }
         };
@@ -617,8 +621,8 @@ fn untracked(worktree: &Path, weighs: &mut usize) -> Result<Vec<UntrackedFile>, 
 
         if *weighs > MOST_A_CHECKOUT_IS {
             return Err(format!(
-                "the checkout is larger than the {MOST_A_CHECKOUT_IS} bytes one may be to cross \
-                 a link",
+                "The checkout is larger than the {MOST_A_CHECKOUT_IS} bytes one may be to cross \
+                 a link.",
             ));
         }
 

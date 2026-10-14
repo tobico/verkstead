@@ -75,7 +75,7 @@ export function Share(props: {
           when={props.shared}
           fallback={
             <Empty>
-              This file is not carrying a conversation. Ask whoever sent it for
+              This file isn't carrying a conversation. Ask whoever sent it for
               another.
             </Empty>
           }
@@ -111,7 +111,7 @@ function Record(props: { shared: SharedConversation }): JSX.Element {
   // folder among other files and other tabs, and *Verkstead* would name every
   // one of them the same thing.
   createEffect(() => {
-    document.title = `${titled(conversation())} — Verkstead`;
+    document.title = `${titled(conversation())} · Verkstead`;
   });
 
   return (

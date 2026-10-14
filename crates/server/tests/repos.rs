@@ -1023,7 +1023,7 @@ async fn a_machine_with_no_gh_leaves_the_local_repository_registered_too() {
     };
 
     assert!(
-        why.contains("no `gh` on this machine's PATH"),
+        why.contains("no gh on this machine's PATH"),
         "the sentence that names what to go and do: {why}",
     );
     assert_eq!(listed(&app).await.len(), 1);
