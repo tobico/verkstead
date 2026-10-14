@@ -1348,7 +1348,7 @@ async fn matched(
             }
             Err(why) => {
                 return Err(format!(
-                    "a repository the record names could not be read: {why:#}"
+                    "A repo the record names couldn't be read: {why:#}."
                 ));
             }
         }
@@ -1363,7 +1363,7 @@ async fn matched(
     for ((id, repo), there) in ids.into_iter().zip(&ours).zip(theirs) {
         let Some(there) = there else {
             return Err(format!(
-                "no repository there is {name}, which this Conversation's record names",
+                "No repo there is {name}, which this conversation's record names.",
                 name = repo.name,
             ));
         };

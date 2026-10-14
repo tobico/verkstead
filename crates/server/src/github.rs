@@ -211,7 +211,11 @@ impl Gh {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 return Err(Trouble::NoGh);
             }
-            Err(error) => return Err(Trouble::Refused(error.to_string())),
+            Err(error) => {
+                return Err(Trouble::Ours(format!(
+                    "The gh command couldn't be run: {error}."
+                )));
+            }
         };
 
         // Written before the output is waited on, and the pipe dropped so that
@@ -238,7 +242,11 @@ impl Gh {
 
         let output = match child.wait_with_output() {
             Ok(output) => output,
-            Err(error) => return Err(Trouble::Refused(error.to_string())),
+            Err(error) => {
+                return Err(Trouble::Ours(format!(
+                    "The gh command couldn't be run: {error}."
+                )));
+            }
         };
 
         if !output.status.success() {
@@ -250,7 +258,9 @@ impl Gh {
         // without what the request was, and whatever it answered is about
         // something nobody asked for.
         if let Some(error) = unwritten {
-            return Err(Trouble::Refused(error.to_string()));
+            return Err(Trouble::Ours(format!(
+                "The gh command couldn't be given its input: {error}."
+            )));
         }
 
         Ok(String::from_utf8_lossy(&output.stdout).into_owned())
@@ -320,7 +330,11 @@ impl Gh {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 return Err(Trouble::NoGh);
             }
-            Err(error) => return Err(Trouble::Refused(error.to_string())),
+            Err(error) => {
+                return Err(Trouble::Ours(format!(
+                    "The gh command couldn't be run: {error}."
+                )));
+            }
         };
 
         match output.status.success() {
@@ -361,6 +375,11 @@ pub(crate) enum Trouble {
 
     /// Something else, in `gh`'s own words.
     Refused(String),
+
+    /// Something else that `gh` did not put into words — it could not be run,
+    /// said nothing, or answered what could not be read — in a sentence of
+    /// Verkstead's own, so that none of it is passed off as a quotation.
+    Ours(String),
 }
 
 impl Trouble {
@@ -397,14 +416,10 @@ impl Trouble {
             return Trouble::NoRemote;
         }
 
-        Trouble::Refused(
-            stderr
-                .lines()
-                .map(str::trim)
-                .find(|line| !line.is_empty())
-                .unwrap_or("nothing about why")
-                .to_owned(),
-        )
+        match stderr.lines().map(str::trim).find(|line| !line.is_empty()) {
+            Some(said) => Trouble::Refused(said.to_owned()),
+            None => Trouble::Ours("The gh command failed without saying why.".to_owned()),
+        }
     }
 
     /// The sentence the Timeline carries, and the one the viewer draws as plain
@@ -426,18 +441,11 @@ impl Trouble {
                 "GitHub has no pull request on this branch, so the session that finished didn't open one."
                     .to_owned()
             }
-            Trouble::Refused(said) => format!("The gh command said: {}", sentence(said)),
+            Trouble::Refused(said) => {
+                format!("The gh command said: {}", crate::stopping::ended(said))
+            }
+            Trouble::Ours(said) => said.clone(),
         }
-    }
-}
-
-/// Words somebody else wrote, ended as a sentence where they were not already:
-/// the words themselves are left as they came, and only the full stop the
-/// screen wants is added.
-pub(crate) fn sentence(said: &str) -> String {
-    match said.trim_end().ends_with(['.', '!', '?', '…']) {
-        true => said.trim_end().to_owned(),
-        false => format!("{}.", said.trim_end()),
     }
 }
 
@@ -494,8 +502,11 @@ pub(crate) fn authenticates_as(gh: &Gh, token: &str) -> Result<Account, Trouble>
     let said = gh.ask_as(token, &["api", "-i", "user"])?;
     let (headers, body) = split(&said);
 
-    let account: Login = serde_json::from_str(body)
-        .map_err(|error| Trouble::Refused(format!("something that couldn't be read ({error})")))?;
+    let account: Login = serde_json::from_str(body).map_err(|error| {
+        Trouble::Ours(format!(
+            "The gh command answered something that couldn't be read: {error}."
+        ))
+    })?;
 
     Ok(Account {
         login: account.login,
@@ -657,8 +668,11 @@ pub(crate) fn create_gist(
         &body.to_string(),
     )?;
 
-    let made: Made = serde_json::from_str(&said)
-        .map_err(|error| Trouble::Refused(format!("something that couldn't be read ({error})")))?;
+    let made: Made = serde_json::from_str(&said).map_err(|error| {
+        Trouble::Ours(format!(
+            "The gh command answered something that couldn't be read: {error}."
+        ))
+    })?;
 
     Ok(Gist {
         id: made.id,
@@ -766,8 +780,11 @@ pub(crate) fn comment(
         &serde_json::json!({ "body": body }).to_string(),
     )?;
 
-    let said: Said = serde_json::from_str(&said)
-        .map_err(|error| Trouble::Refused(format!("something that couldn't be read ({error})")))?;
+    let said: Said = serde_json::from_str(&said).map_err(|error| {
+        Trouble::Ours(format!(
+            "The gh command answered something that couldn't be read: {error}."
+        ))
+    })?;
 
     Ok(said.html_url)
 }
@@ -813,8 +830,11 @@ pub(crate) fn pull_request(
         ],
     )?;
 
-    let opened: Opened = serde_json::from_str(&said)
-        .map_err(|error| Trouble::Refused(format!("something that couldn't be read ({error})")))?;
+    let opened: Opened = serde_json::from_str(&said).map_err(|error| {
+        Trouble::Ours(format!(
+            "The gh command answered something that couldn't be read: {error}."
+        ))
+    })?;
 
     Ok(store::PullRequest {
         number: opened.number,
@@ -879,8 +899,11 @@ pub(crate) fn open_pull_requests(gh: &Gh, repo: &Path) -> Result<Vec<Numbered>, 
         ],
     )?;
 
-    let listed: Vec<Listed> = serde_json::from_str(&said)
-        .map_err(|error| Trouble::Refused(format!("something that couldn't be read ({error})")))?;
+    let listed: Vec<Listed> = serde_json::from_str(&said).map_err(|error| {
+        Trouble::Ours(format!(
+            "The gh command answered something that couldn't be read: {error}."
+        ))
+    })?;
 
     Ok(listed
         .into_iter()
@@ -981,8 +1004,11 @@ pub(crate) fn pull_request_numbered(
         ],
     )?;
 
-    let viewed: Viewed = serde_json::from_str(&said)
-        .map_err(|error| Trouble::Refused(format!("something that couldn't be read ({error})")))?;
+    let viewed: Viewed = serde_json::from_str(&said).map_err(|error| {
+        Trouble::Ours(format!(
+            "The gh command answered something that couldn't be read: {error}."
+        ))
+    })?;
 
     Ok(Numbered {
         number: viewed.number,
@@ -1087,8 +1113,11 @@ pub(crate) fn checks(gh: &Gh, repo: &Path, number: i64) -> Result<Suite, Trouble
         ],
     )?;
 
-    let rollup: Rollup = serde_json::from_str(&said)
-        .map_err(|error| Trouble::Refused(format!("something that couldn't be read ({error})")))?;
+    let rollup: Rollup = serde_json::from_str(&said).map_err(|error| {
+        Trouble::Ours(format!(
+            "The gh command answered something that couldn't be read: {error}."
+        ))
+    })?;
 
     Ok(Suite {
         head: rollup.head_ref_oid,
@@ -1221,8 +1250,11 @@ pub(crate) fn landing(gh: &Gh, repo: &Path, number: i64) -> Result<Landing, Trou
         ],
     )?;
 
-    let read: Read = serde_json::from_str(&said)
-        .map_err(|error| Trouble::Refused(format!("something that couldn't be read ({error})")))?;
+    let read: Read = serde_json::from_str(&said).map_err(|error| {
+        Trouble::Ours(format!(
+            "The gh command answered something that couldn't be read: {error}."
+        ))
+    })?;
 
     Ok(Landing {
         mergeable: Mergeable::read(&read.mergeable),
@@ -1462,8 +1494,11 @@ fn conversation(gh: &Gh, repo: &Path, number: i64) -> Result<Vec<Comment>, Troub
         ],
     )?;
 
-    let said: Said = serde_json::from_str(&said)
-        .map_err(|error| Trouble::Refused(format!("something that couldn't be read ({error})")))?;
+    let said: Said = serde_json::from_str(&said).map_err(|error| {
+        Trouble::Ours(format!(
+            "The gh command answered something that couldn't be read: {error}."
+        ))
+    })?;
 
     let comments = said.comments.into_iter().map(|one| Comment {
         which: identity(&one.id, &one.url, &one.author.login, &one.created_at),
@@ -1532,8 +1567,11 @@ fn on_the_diff(gh: &Gh, repo: &Path, number: i64) -> Result<Vec<Comment>, Troubl
     // `--paginate` concatenates the pages as separate arrays where it cannot
     // merge them, so this reads what came back as one array and says so plainly
     // when it is something else.
-    let said: Vec<OnALine> = serde_json::from_str(&said)
-        .map_err(|error| Trouble::Refused(format!("something that couldn't be read ({error})")))?;
+    let said: Vec<OnALine> = serde_json::from_str(&said).map_err(|error| {
+        Trouble::Ours(format!(
+            "The gh command answered something that couldn't be read: {error}."
+        ))
+    })?;
 
     Ok(said
         .into_iter()
@@ -1680,8 +1718,11 @@ pub(crate) fn details(gh: &Gh, repo: &Path, number: i64) -> Result<Details, Trou
         ],
     )?;
 
-    let carried: Carried = serde_json::from_str(&said)
-        .map_err(|error| Trouble::Refused(format!("something that couldn't be read ({error})")))?;
+    let carried: Carried = serde_json::from_str(&said).map_err(|error| {
+        Trouble::Ours(format!(
+            "The gh command answered something that couldn't be read: {error}."
+        ))
+    })?;
 
     let checks = read_checks(carried.status_check_rollup);
 

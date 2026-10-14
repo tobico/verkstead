@@ -625,7 +625,7 @@ fn how_it_ended(ended: &store::Ended) -> String {
 pub(crate) fn out_of_window(profile: &str, said: &str) -> String {
     format!(
         "The **{profile}** account is out of window. The session said: {}",
-        crate::github::sentence(said)
+        ended(said)
     )
 }
 
@@ -645,7 +645,7 @@ pub(crate) fn signed_out(profile: &str, said: &str, home: Option<&str>) -> Strin
 
     format!(
         "The **{profile}** account has signed out. The session said: {}\n\n{login}",
-        crate::github::sentence(said)
+        ended(said)
     )
 }
 
@@ -657,7 +657,7 @@ pub(crate) fn signed_out_since(profile: &str, said: &str) -> String {
         "The **{profile}** account signed out in this session. The session said: {}\n\n\
          It was logged in again after the session started, so the run carries on by itself \
          with the new login.",
-        crate::github::sentence(said)
+        ended(said)
     )
 }
 
@@ -680,11 +680,22 @@ pub(crate) fn opening(what: &str) -> String {
 /// somebody already wrote, so that what the Notice says reads as sentences
 /// whichever way it came.
 pub(crate) fn sentence(why: &str) -> String {
-    let why = opening(why.trim());
+    ended(&opening(why.trim()))
+}
 
-    match why.ends_with(['.', '?', '!', '…']) {
-        true => why,
-        false => why + ".",
+/// Words somebody else wrote, ended as a sentence where they were not already:
+/// the words themselves are left as they came, and only the full stop the
+/// screen wants is added.
+///
+/// [`sentence`] is this with the first letter raised, for a reason that may be
+/// a fragment of Verkstead's own; this is for words that are quoted, where a
+/// raised letter would change what was said.
+pub(crate) fn ended(said: &str) -> String {
+    let said = said.trim_end();
+
+    match said.ends_with(['.', '?', '!', '…']) {
+        true => said.to_owned(),
+        false => format!("{said}."),
     }
 }
 

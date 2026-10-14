@@ -93,7 +93,9 @@ export function published(outcome: SharePublished): JSX.Element {
   }
 
   if ("Refused" in outcome) {
-    return <>GitHub refused it: {ended(outcome.Refused.why)}</>;
+    // The server's own sentence, which says whose refusal it was: it can be
+    // git's as well as GitHub's.
+    return <>{ended(outcome.Refused.why)}</>;
   }
 
   // Through the share viewer, which is what the server composed it as — see

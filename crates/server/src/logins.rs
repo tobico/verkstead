@@ -948,8 +948,8 @@ fn failure(status: std::process::ExitStatus, said: &Mutex<Vec<String>>) -> Strin
 
     match said.last() {
         Some(line) => format!(
-            "Claude stopped without logging in: {}.",
-            line.trim_end_matches('.')
+            "Claude stopped without logging in: {}",
+            crate::stopping::ended(line)
         ),
         None => format!("Claude stopped without logging in ({status})."),
     }

@@ -385,7 +385,11 @@ fn unshared(said: &ShareCommented) -> Option<String> {
             listed(missed.iter().map(named)),
             missed
                 .iter()
-                .map(|pull| format!("{}: {}.", named(pull), pull.why.trim_end_matches('.')))
+                .map(|pull| format!(
+                    "{} wasn't commented on. {}",
+                    crate::stopping::opening(&named(pull)),
+                    crate::stopping::sentence(&pull.why),
+                ))
                 .collect::<Vec<_>>()
                 .join(" "),
         )),
@@ -409,9 +413,9 @@ fn unpublished(why: &SharePublished) -> String {
         SharePublished::NoGistScope => "The saved GitHub token can't write gists. Reissue it \
              with the `gist` scope and save it again on the settings page."
             .to_owned(),
-        SharePublished::Refused { why } => {
-            format!("GitHub refused it: {}.", why.trim_end_matches('.'))
-        }
+        // The publish's own sentence, which says whose refusal it was: it can
+        // be git's as well as GitHub's.
+        SharePublished::Refused { why } => crate::stopping::sentence(why),
         // Never arrives: this is the shape of a press that got no further than
         // the publish, and a publish that worked is not one of them.
         SharePublished::Published { .. } => "The publish worked.".to_owned(),
@@ -513,12 +517,27 @@ mod tests {
 
         let said = unshared(&ShareCommented::NotPublished {
             why: SharePublished::Refused {
-                why: "gh: Not Found (HTTP 404)".to_owned(),
+                why: "The gh command said: gh: Not Found (HTTP 404).".to_owned(),
             },
         })
         .expect("and so is GitHub refusing it");
 
-        assert!(said.contains("gh: Not Found (HTTP 404)"), "{said}");
+        assert_eq!(
+            said,
+            "**The record couldn't be shared to the pull request.** The gh command said: gh: \
+             Not Found (HTTP 404).",
+        );
+
+        // And a refusal that was git's, which the publish says in its own
+        // words rather than as GitHub's.
+        let said = unshared(&ShareCommented::NotPublished {
+            why: SharePublished::Refused {
+                why: "Git said nothing about why.".to_owned(),
+            },
+        })
+        .expect("and so is git refusing it");
+
+        assert!(!said.contains("GitHub"), "{said}");
     }
 
     /// A share that was published and could not be commented everywhere names
@@ -532,13 +551,18 @@ mod tests {
             missed: vec![missed(
                 7,
                 Some("verkstead-site"),
-                "gh: Not Found (HTTP 404)",
+                "The gh command said: gh: Not Found (HTTP 404).",
             )],
         })
         .expect("a pull request that missed out is worth a Notice");
 
-        assert!(said.contains("#7 in verkstead-site"), "{said}");
-        assert!(said.contains("gh: Not Found (HTTP 404)"), "{said}");
+        assert!(
+            said.contains(
+                "#7 in verkstead-site wasn't commented on. The gh command said: gh: Not Found \
+                 (HTTP 404). The link"
+            ),
+            "{said}"
+        );
         assert!(said.contains("share pane"), "{said}");
 
         // And the ones that worked are not named: what is left to do is about
