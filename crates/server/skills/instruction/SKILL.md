@@ -97,6 +97,29 @@ Trailers go at the end as usual; the workbench takes them off what it shows.
       class throttle removed
     ```
 
+## Leaving a memo for the sessions after you
+
+The sessions after this one — whatever the pipeline runs next on this
+Conversation — start with none of this session's context, and a memo is what
+carries the working knowledge no commit holds. So leave one when you learn
+something the next session would otherwise find again or miss — a flaky suite,
+a trap in the build, a shape you settled that the instruction did not ask about
+— markdown on stdin:
+
+    verkstead memo <<'MD'
+    The transfer suite's locked-Set test fails on main too; run it alone first.
+    MD
+
+Leave none for what the commit message already says. Every later session of
+this Conversation is shown the memos still standing, under *What earlier
+sessions left for you* in its prompt, each with its number; retire one you find
+no longer holds, the rest of the line being the reason:
+
+    verkstead memo --retire 42 fixed in 8f3c2a1
+
+The Guide's *Leaving a memo for the sessions after you* section has the
+details.
+
 ## 4. Say you are done
 
 Then **run `verkstead done`**, and stop there. Do not go looking for more to do,

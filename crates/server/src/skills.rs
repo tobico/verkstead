@@ -2027,13 +2027,13 @@ mod tests {
         }
     }
 
-    /// The three skills whose sessions have a next one teach the memo, both
+    /// The four skills whose sessions may leave a memo teach it, both
     /// invocations of it, and no other skill names the command: their sessions
     /// are refused it, and a skill that mentioned it would be sending them to a
     /// refusal. See ADR-0023.
     #[test]
     fn only_the_skills_with_a_next_session_teach_the_memo() {
-        let teaching = [NEXT_TASK, IMPLEMENTING, NEXT_STAGE];
+        let teaching = [NEXT_TASK, IMPLEMENTING, NEXT_STAGE, INSTRUCTION];
 
         for name in NAMED {
             let skill = flowed(name);
