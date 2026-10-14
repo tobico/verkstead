@@ -1,18 +1,21 @@
-# The share viewer, hosted. A published share is a secret gist, and a browser
-# draws a gist as source rather than as a page; the viewer is the small static
-# page that fetches one and draws it properly. This workflow keeps the one copy
-# of it, at <https://tobico.github.io/verkstead/share-viewer.html>, which is the
-# address every share link Verkstead composes points at. Nobody hosts their own:
-# there is nothing to configure and nothing the page would learn either way.
+# The public website and the share viewer, hosted together. The website is
+# `site/`, served at the root, <https://tobico.github.io/verkstead/>. The viewer
+# is beside it: a published share is a secret gist, and a browser draws a gist
+# as source rather than as a page; the viewer is the small static page that
+# fetches one and draws it properly. This workflow keeps the one copy of it, at
+# <https://tobico.github.io/verkstead/share-viewer.html>, which is the address
+# every share link Verkstead composes points at. Nobody hosts their own: there
+# is nothing to configure and nothing the page would learn either way.
 #
 # Pinned throughout, as the other workflows are: the actions to released
 # versions, and the runners to images rather than `-latest`.
 name: Pages
 
-# The viewer landing on `main`, and nothing else. The page is one file with no
-# build and no dependency, so no other commit changes what is served. This
-# workflow is in the list beside it because a change to how the page is
-# published is a reason to publish it again.
+# The website or the viewer landing on `main`, and nothing else. Neither has a
+# build or a dependency — the website is what is in `site/`, the viewer one
+# file — so no other commit changes what is served. This workflow is in the
+# list beside them because a change to how they are published is a reason to
+# publish them again.
 #
 # `workflow_dispatch` is the first run and the recovery: a site has to be
 # deployed once before it exists, and a deployment that went wrong is re-run
@@ -21,6 +24,7 @@ on:
   push:
     branches: [main]
     paths:
+      - site/**
       - crates/server/share-viewer.html
       - .github/workflows/pages.yml
   workflow_dispatch:
@@ -33,15 +37,16 @@ permissions:
 
 # One deployment at a time. Two runs racing would leave whichever finished last
 # live, which is not necessarily the newer file. Queued rather than cancelled:
-# a cancelled run publishes nothing, and there is only ever one page.
+# a cancelled run publishes nothing, and there is only ever one site.
 concurrency:
   group: pages
   cancel-in-progress: false
 
 jobs:
-  # The site, which is the one file under the name it is served as. The URL it
-  # makes is the address every share link is composed through — `HOSTED` in
-  # `crates/server/src/sharing.rs` — so the name is not free to move.
+  # The site: `site/` as it is, and the viewer beside it under the name it is
+  # served as. The URL that makes is the address every share link is composed
+  # through — `HOSTED` in `crates/server/src/sharing.rs` — so the name is not
+  # free to move.
   site:
     name: Site
     runs-on: ubuntu-24.04
@@ -51,6 +56,7 @@ jobs:
       - name: Assemble the site
         run: |
           mkdir -p _site
+          cp -R site/. _site/
           cp crates/server/share-viewer.html _site/share-viewer.html
           ls -l _site
 
@@ -161,6 +167,31 @@ jobs:
             *"<title>Verkstead share</title>"*) ;;
             *)
               echo "::error::$url does not answer with the share viewer."
+              printf '%s\n' "$page" | head -20
+              exit 1
+              ;;
+          esac
+
+      # The website, read back the same way at the root. Its title is
+      # `Verkstead` alone, which nothing else on the site carries, so a root
+      # answering with anything else — Pages' own 404 page included — fails.
+      - name: The website is up
+        env:
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+          EXPECTED: https://tobico.github.io/verkstead/
+        run: |
+          url="${PAGE_URL%/}/"
+          echo "$url"
+          if [ "$url" != "$EXPECTED" ]; then
+            echo "::error::The website is at $url, where it is promised at $EXPECTED."
+            exit 1
+          fi
+          page=$(curl --fail --silent --show-error --location \
+            --retry 10 --retry-delay 3 --retry-all-errors "$url")
+          case "$page" in
+            *"<title>Verkstead</title>"*) ;;
+            *)
+              echo "::error::$url does not answer with the website."
               printf '%s\n' "$page" | head -20
               exit 1
               ;;

@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Verkstead</title>
+<meta name="description" content="Build intentional software with AI agents, on your terms. Verkstead is an open source coding workshop for Linux, macOS and Windows.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" type="image/png" href="favicon.png">
+<link rel="stylesheet" href="site.css">
+<script src="site.js" defer></script>
+</head>
+<body>
+<header class="nav">
+  <div class="nav-inner">
+    <nav class="tabs" aria-label="Sections">
+      <span class="tabs-indicator" aria-hidden="true"></span>
+      <a class="tab" href="#features">Features</a>
+      <a class="tab" href="#process">Process</a>
+      <a class="tab" href="#platforms">Platforms</a>
+    </nav>
+    <div class="nav-cta">
+      <a class="button button-small" data-download href="#downloads"><span class="long" data-download-label>Download</span><span class="short">Download</span></a>
+      <a class="quiet nav-all" href="#downloads">All downloads</a>
+    </div>
+  </div>
+</header>
+
+<main>
+  <section class="hero">
+    <div class="brand">
+      <img src="icon-512.png" alt="" width="128" height="128">
+      <h1>Verkstead</h1>
+    </div>
+    <p class="tagline">Build <em>intentional</em> software with AI agents, <em>on your terms</em></p>
+  </section>
+
+  <div class="download-bar">
+    <a class="button" data-download href="#downloads"><span data-download-label>Download</span></a>
+    <a class="quiet" href="#downloads">All downloads</a>
+  </div>
+
+  <section class="section" id="features" aria-labelledby="features-heading">
+    <h2 id="features-heading">Features</h2>
+  </section>
+
+  <section class="section" id="process" aria-labelledby="process-heading">
+    <h2 id="process-heading">Process</h2>
+  </section>
+
+  <section class="section" id="platforms" aria-labelledby="platforms-heading">
+    <h2 id="platforms-heading">Platforms</h2>
+  </section>
+
+  <section class="downloads" id="downloads" aria-labelledby="downloads-heading">
+    <h2 id="downloads-heading">Downloads</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th scope="col">Platform</th><th scope="col">File</th><th scope="col">Note</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th scope="row">Linux</th>
+            <td><a href="https://github.com/tobico/verkstead/releases/latest/download/Verkstead-x86_64.AppImage"><code>Verkstead-x86_64.AppImage</code></a></td>
+            <td>Needs bubblewrap and FUSE on the host</td>
+          </tr>
+          <tr>
+            <th scope="row">macOS</th>
+            <td><a href="https://github.com/tobico/verkstead/releases/latest/download/Verkstead-universal.dmg"><code>Verkstead-universal.dmg</code></a></td>
+            <td><a href="https://github.com/tobico/verkstead/blob/main/docs/adoption.md#the-desktop-app-on-a-mac">Unsigned: allow it under Privacy &amp; Security, Open Anyway</a></td>
+          </tr>
+          <tr>
+            <th scope="row">Windows</th>
+            <td><a href="https://github.com/tobico/verkstead/releases/latest/download/Verkstead-x86_64.msi"><code>Verkstead-x86_64.msi</code></a></td>
+            <td><a href="https://github.com/tobico/verkstead/blob/main/docs/adoption.md#the-desktop-app-on-windows">Unsigned: SmartScreen, More info, then Run anyway</a></td>
+          </tr>
+          <tr>
+            <th scope="row">Command line and NixOS</th>
+            <td></td>
+            <td>The <a href="https://github.com/tobico/verkstead/releases">releases page</a>, and the <a href="https://github.com/tobico/verkstead/blob/main/docs/adoption.md#getting-it-running">adoption guide</a></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<footer class="footer">
+  <p>
+    <span>Verkstead is early, at version 0.1 and changing fast.</span>
+    <span aria-hidden="true">·</span>
+    <a href="https://github.com/tobico/verkstead">GitHub</a>
+    <span aria-hidden="true">·</span>
+    <a href="https://github.com/tobico/verkstead/blob/main/LICENSE">MIT</a>
+    <span aria-hidden="true">·</span>
+    <a href="https://github.com/tobico/verkstead/blob/main/docs/adoption.md">Adoption guide</a>
+  </p>
+</footer>
+</body>
+</html>

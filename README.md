@@ -13,10 +13,12 @@ separate, maintained product; Verkstead diverges freely from it.
 
 ## Status
 
-**Early, private, and unreleased.** There is nothing to download yet. The
-workbench, the sandboxed sessions, the task-list and roadmap pipelines and the
-per-PR wrap-up are built; what has not happened yet is a real repository driven
-through them end to end, which is where [adoption](docs/adoption.md) stands.
+**Early, and released.** The downloads are on the website,
+<https://tobico.github.io/verkstead/>, and on the
+[releases page](https://github.com/tobico/verkstead/releases). The workbench,
+the sandboxed sessions, the task-list and roadmap pipelines and the per-PR
+wrap-up are built; [adoption](docs/adoption.md) is where driving a real
+repository through them stands.
 
 What a tag will produce is four ways in rather than one, and no two of them are
 the same thing. On a host that is always on, the flake builds the headless
@@ -68,8 +70,7 @@ request.
 and the loop for working on Verkstead itself.
 
 **[Releasing](docs/releasing.md)** — the one workflow that turns a version
-number into the published binaries, the AppImage, the dmg and the msi. Nothing
-has been released under this name yet.
+number into the published binaries, the AppImage, the dmg and the msi.
 
 ## License
 

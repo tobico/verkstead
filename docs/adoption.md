@@ -42,8 +42,9 @@ wrappers that launched it — see [The old tools](#the-old-tools).
 
 ## Getting it running
 
-Nothing has been released under this name yet, so what follows is what a
-release produces rather than something to fetch today —
+What follows is what each release publishes, on the
+[releases page](https://github.com/tobico/verkstead/releases) and on the
+website, <https://tobico.github.io/verkstead/> —
 [releasing.md](releasing.md) says what a release builds and where it puts it.
 
 There are four ways in, and they are four different things rather than four

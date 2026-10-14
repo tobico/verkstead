@@ -19,7 +19,7 @@ details each screenshot needs are in the task that draws it.
 
 ## Tasks
 
-- [ ] 01: The page, live — [details](01-the-page-live.md)
+- [x] 01: The page, live — [details](01-the-page-live.md)
 - [ ] 02: Features — [details](02-features.md)
 - [ ] 03: Process — [details](03-process.md)
 - [ ] 04: Platforms — [details](04-platforms.md)
