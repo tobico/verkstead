@@ -615,9 +615,9 @@ jobs:
       #
       # `xvfb` is the screen: the window is the point of this app, and a run
       # with no display is a run that proves the sidecar and nothing else.
-      # `dbus-x11` is `dbus-run-session`, the name Ubuntu packages it under — the
+      # `dbus-x11` is `dbus-launch`, the name Ubuntu packages it under — the
       # tray is published onto the session bus, and a runner has no session, so
-      # the run below brings a bus of its own. `fuse3` is `fusermount3`: the
+      # the runs below bring a bus of their own. `fuse3` is `fusermount3`: the
       # pinned AppImage runtime links its own squashfuse but still asks that
       # helper for the mount, and the mount is what the two assertions after it
       # stand on. And `binutils` is `objdump`, which the floor below is read
@@ -795,7 +795,7 @@ jobs:
       # **And a session bus, deliberately.** The app says the icon is in the
       # tray whether or not anything is listening, so this assertion would pass
       # on a runner with no bus at all — and would mean less than it reads.
-      # `dbus-run-session` gives the run a bus of its own, so the line is said
+      # `dbus-launch` gives the run a bus of its own, so the line is said
       # after a StatusNotifierItem was really exported onto one. What it still
       # does not prove is a *panel*: nothing here owns the watcher name, which
       # is the desktop-with-no-tray-host case the README describes
@@ -844,7 +844,12 @@ jobs:
           mkdir -p "$VERKSTEAD_DATA_DIR"
           printf '%s\n' "$key" > "$VERKSTEAD_DATA_DIR/workbench.key"
 
-          dbus-run-session -- ./"$APPIMAGE" &
+          # The bus is started apart from the app rather than around it, so
+          # that `$app` is the app: a `dbus-run-session` in front of it is what
+          # a kill would reach, and the app and its server would outlive this
+          # step and hold the address the next step starts on.
+          eval "$(dbus-launch --sh-syntax)"
+          ./"$APPIMAGE" &
           app=$!
           document=$(curl --fail --silent --show-error \
             --retry 10 --retry-delay 1 --retry-connrefused \
@@ -863,7 +868,11 @@ jobs:
             sleep 0.2
           done
 
-          kill "$app" "$screen"
+          # Waited for, so that the server is gone before the next step starts
+          # one of its own on the same address.
+          kill "$app"
+          wait "$app" || true
+          kill "$screen" "$DBUS_SESSION_BUS_PID" || true
 
           # As in the CLI legs: an absent viewer is a 503 that `--fail` has
           # already caught, and this is the rest of it — the document vite wrote
