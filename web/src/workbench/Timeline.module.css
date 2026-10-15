@@ -162,6 +162,13 @@
 
    One card is ever inside it: with more than one pinned the carousel below is
    what is here, and the card is inside that. */
+/* The Code icon on the header while any preview stands on the conversation:
+   the accent, which is the icon's ink rather than its fill — the open fill still
+   goes over it — so the Timeline says there is something to try (ADR-0024). */
+.previewing {
+  --icon-ink: var(--accent);
+}
+
 .pinned {
   display: flex;
   flex-direction: column;

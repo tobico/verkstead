@@ -61,6 +61,15 @@ const COMM: usize = 15;
 #[cfg(not(target_os = "linux"))]
 const COMM: usize = usize::MAX;
 
+/// Whether this platform can ever read a terminal as *not* busy: a foreground
+/// to read and a name to read off it, which is Linux alone.
+///
+/// What a terminal opened for a Preview waits on before its command is typed —
+/// see [`crate::terminals`] — and where it is `false` there is nothing to wait
+/// for, so the line is typed at once and held by the terminal until the shell
+/// reads it.
+pub const TELLS: bool = cfg!(target_os = "linux");
+
 /// Whether something other than `shell` is in the foreground of `terminal`.
 ///
 /// `shell` is the name, not the path — see [`named`], which is what the register

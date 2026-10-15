@@ -38891,7 +38891,9 @@ async fn a_terminal_says_whether_somebody_is_working_in_it() {
         terminals_of(&fixture).await,
         vec![TerminalView {
             number,
-            busy: false
+            busy: false,
+            preview: None,
+            title: None,
         }],
         "a shell at its prompt is a terminal nobody is working in",
     );
@@ -38904,7 +38906,12 @@ async fn a_terminal_says_whether_somebody_is_working_in_it() {
 
     assert_eq!(
         terminals_of(&fixture).await,
-        vec![TerminalView { number, busy: true }],
+        vec![TerminalView {
+            number,
+            busy: true,
+            preview: None,
+            title: None,
+        }],
         "a shell running something is a terminal somebody is working in",
     );
 
@@ -38946,6 +38953,112 @@ async fn a_terminal_says_whether_somebody_is_working_in_it() {
     assert!(
         terminals_of(&fixture).await.is_empty(),
         "a terminal that was closed should be off the register",
+    );
+}
+
+/// A terminal opened for a Preview is the ordinary shell with the Preview's
+/// command typed into it once the shell has come up — run, and the shell still
+/// there after it — and the terminals view says which Preview it was opened for
+/// and the title its tab is called by (ADR-0024). A title no Preview stands
+/// under is refused by name, with nothing opened.
+#[tokio::test]
+async fn a_terminal_opened_for_a_preview_runs_its_command_in_the_shell() {
+    let fixture = grilling(
+        r#"
+        printf 'reading the brief\r\n'
+        while :; do sleep 0.05; done
+        "#,
+    )
+    .await;
+
+    fixture
+        .until(|view| view.worktree.as_ref().map(|worktree| worktree.path.clone()))
+        .await;
+
+    // Left on the record the way `verkstead preview` leaves one, which the
+    // suite's own preview tests prove; here it is the press that is asked about.
+    // The word is put together by the shell, so that the echo of the line typed
+    // is not what the grid is found holding.
+    let pool = open_database(&fixture.database).await.unwrap();
+    verkstead_store::suggest_preview(
+        &pool,
+        fixture.id,
+        "Build and test",
+        "printf 'the preview %s\\n' ran",
+        "a test",
+    )
+    .await
+    .unwrap();
+
+    let at = fixture.listening().await;
+
+    let refused: TerminalOpened = post(
+        &fixture.app,
+        &format!("/api/ui/conversations/{}/terminals", fixture.id),
+        &serde_json::json!({ "preview": "Deploy" }),
+    )
+    .await;
+
+    assert_eq!(refused, TerminalOpened::NoSuchPreview);
+    assert!(
+        terminals_of(&fixture).await.is_empty(),
+        "a refused press opens nothing",
+    );
+
+    let opened: TerminalOpened = post(
+        &fixture.app,
+        &format!("/api/ui/conversations/{}/terminals", fixture.id),
+        &serde_json::json!({ "preview": "Build and test" }),
+    )
+    .await;
+
+    let TerminalOpened::Opened { number } = opened else {
+        panic!("expected a terminal to open for the preview, and the server said: {opened:?}");
+    };
+
+    let live = terminals_of(&fixture).await;
+    assert_eq!(
+        live.iter()
+            .map(|terminal| (
+                terminal.number,
+                terminal.preview.clone(),
+                terminal.title.clone()
+            ))
+            .collect::<Vec<_>>(),
+        vec![(
+            number,
+            Some("Build and test".to_owned()),
+            Some("Build and test".to_owned())
+        )],
+        "the terminal says the preview it was opened for, and the title it is called by",
+    );
+
+    let mut watcher = Watcher::terminal(at, fixture.id, number).await;
+    watcher.resize(200, 40).await;
+
+    let showing = watcher.until(|grid| grid.contains("the preview ran")).await;
+    assert!(
+        showing.iter().any(|row| row.contains("the preview ran")),
+        "the preview's command should have run in the shell: {showing:?}",
+    );
+
+    // And the shell is still there once it has, which is a terminal rather than
+    // a command: the human's next line is answered.
+    watcher.types("printf 'still %s\\n' here\r").await;
+    let showing = watcher.until(|grid| grid.contains("still here")).await;
+    assert!(
+        showing.iter().any(|row| row.contains("still here")),
+        "the shell should still be answering after the preview's command: {showing:?}",
+    );
+
+    // Once, and not again: the line was typed a single time.
+    assert_eq!(
+        showing
+            .iter()
+            .filter(|row| row.contains("the preview ran"))
+            .count(),
+        1,
+        "the preview's command is typed once: {showing:?}",
     );
 }
 

@@ -242,6 +242,99 @@
   }
 }
 
+/* The column down the side of the pane: the Previews box, where any preview
+   stands, over the tree. The column is what has the tree's width now, and the
+   tree takes whatever height the box leaves it. */
+.side {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 0.75rem;
+  width: 16rem;
+  min-height: 0;
+}
+
+/* And where the pane stacks, the column is the width of it — the box over the
+   tree as the tree is over the groups. */
+@media (max-width: 40rem) {
+  .side {
+    width: auto;
+  }
+}
+
+/* The Previews box: a box of its own in the tree's wash and border, so the two
+   read as two things down the one side (ADR-0024). Never more than a few rows
+   tall before it scrolls, the tree under it being the thing that wants the
+   height. */
+.previews {
+  flex: none;
+  max-height: 12rem;
+  padding: 0.5rem 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  background: var(--code-wash);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+}
+
+/* Its heading, quieter than the rows under it: it names the box once, and the
+   rows are what is read. */
+.previewsHead {
+  margin: 0 0 0.25rem;
+  padding: 0 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.previewRows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* A row, drawn as a row of the tree is — see `.file` in `Tree.module.css` —
+   because it is the same gesture: a name down the side, pressed to open
+   something in the group beside it. */
+.preview {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+  padding: 0.2rem 0.5rem;
+  font: inherit;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+  text-align: left;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  user-select: none;
+}
+
+@media (hover: hover) {
+  .preview:hover {
+    color: var(--ink);
+    background: var(--card);
+  }
+}
+
+/* The title, cut off at the row rather than wrapping, as a name in the tree is. */
+.previewTitle {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* And the play icon at the right edge, a shade quieter than the title. */
+.play {
+  flex: none;
+  font-size: 0.8em;
+  opacity: 0.75;
+}
+
 /* Code's tab bar, holding a Conversation's own terminals one per tab — see
    `Code.tsx`.
 

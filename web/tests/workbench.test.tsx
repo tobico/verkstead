@@ -58,6 +58,7 @@ import type {
   Nudge,
   PendingSteerView,
   PairingView,
+  PreviewView,
   Process,
   ProfileEntry,
   PinnedEvent,
@@ -86,6 +87,7 @@ import type {
   TaskListEvent,
   TerminalClosed,
   TerminalOpened,
+  TerminalView,
   TerminalsView,
   TimelineEvent,
   TranscriptView,
@@ -113,6 +115,7 @@ import pressableCss from "../src/CardButton.module.css?raw";
 // And the pressable icon, which is the other thing in a pane that opens into a
 // subpane: the gear at the head of the sidebar is one.
 import button from "../src/IconButton.module.css";
+import iconButtonCss from "../src/IconButton.module.css?raw";
 // The brand mark of the harness a session runs under, two ways: the hashed name
 // a drawn mark is queried by, and the four files it is drawn out of — read here
 // as lobehub published them, so that a test naming a mark and the component
@@ -20517,7 +20520,14 @@ function codeIcon(container: ParentNode): HTMLButtonElement | null {
 /// that had to write one out per terminal would be writing the server's
 /// judgement rather than the pane's behaviour.
 function idle(live: number[]): TerminalsView {
-  return { live: live.map((number) => ({ number, busy: false })) };
+  return {
+    live: live.map((number) => ({
+      number,
+      busy: false,
+      preview: null,
+      title: null,
+    })),
+  };
 }
 
 /// The workbench with a conversation holding one live terminal, the socket
@@ -20645,6 +20655,223 @@ describe("the way into the code pane", () => {
     );
     await drawn(container, `.${shell.detailsPane} .${attachedPane.screen}`);
     expect(codeIcon(container)!.getAttribute("aria-pressed")).toBe("true");
+  });
+});
+
+describe("the previews in the code pane", () => {
+  /// Two previews the agent left, oldest first, as the conversation view
+  /// carries them.
+  const PREVIEWS: PreviewView[] = [
+    { title: "Build and test", command: "cargo test" },
+    { title: "Serve", command: "cargo run -- serve" },
+  ];
+
+  /// The workbench with the conversation standing with `previews`, the
+  /// terminals in `live` and whatever else the test wants answered.
+  function withPreviews(
+    previews: PreviewView[],
+    live: TerminalView[],
+    ...answers: Parameters<typeof serving>
+  ): ReturnType<typeof serving> {
+    Attached.opened = [];
+    vi.stubGlobal("WebSocket", Attached);
+
+    return theGrillingStanding(
+      { previews },
+      whenever(TERMINALS_OF_IT, json({ live } satisfies TerminalsView)),
+      whenever(ROOTS_OF_IT, json(codeRoots)),
+      whenever(STATUS_OF_IT, json(NOTHING_MOVED)),
+      ...answers,
+    );
+  }
+
+  /// The rows of the Previews box, where it is drawn.
+  function rows(container: ParentNode): HTMLButtonElement[] {
+    return [
+      ...container.querySelectorAll<HTMLButtonElement>(
+        `.${shell.detailsPane} .${codePane.previews} .${codePane.preview}`,
+      ),
+    ];
+  }
+
+  /// The tabs the pane is drawing, in the order it drew them.
+  function tabs(container: ParentNode): HTMLButtonElement[] {
+    return [
+      ...container.querySelectorAll<HTMLButtonElement>(
+        `.${shell.detailsPane} .${codePane.tab}`,
+      ),
+    ];
+  }
+
+  /// What the pane asked the server to open, body and all.
+  function opened(fetching: ReturnType<typeof serving>): unknown[] {
+    return fetching.mock.calls
+      .filter(
+        ([path, init]) =>
+          String(path) === TERMINALS_OF_IT && init?.method === "POST",
+      )
+      .map(([, init]) => JSON.parse(String(init!.body)) as unknown);
+  }
+
+  /// A conversation with no previews draws no box, and the plain icon.
+  it("draws no box and a plain icon where none stand", async () => {
+    withPreviews([], []);
+    const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+    await drawn(container, `.${shell.detailsPane} .${codePane.nothing}`);
+
+    expect(
+      container.querySelector(`.${shell.detailsPane} .${codePane.previews}`),
+    ).toBeNull();
+    expect(codeIcon(container)!.getAttribute("aria-label")).toBe("Code");
+    expect(codeIcon(container)!.className).not.toContain(timeline.previewing);
+  });
+
+  /// One with any draws the box above the tree, a row per preview oldest first
+  /// with a play icon at its right, and the icon on the header in the accent.
+  it("draws the box above the tree and the icon in the accent", async () => {
+    withPreviews(PREVIEWS, []);
+    const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+    const box = await drawn(
+      container,
+      `.${shell.detailsPane} .${codePane.previews}`,
+    );
+
+    expect(box.querySelector("h3")?.textContent).toBe("Previews");
+    expect(rows(container).map((row) => row.textContent)).toEqual([
+      "Build and test",
+      "Serve",
+    ]);
+    expect(
+      rows(container).every((row) => row.lastElementChild?.tagName === "svg"),
+    ).toBe(true);
+
+    // Above the tree, in the column down the side.
+    const side = box.parentElement!;
+    expect(side.className).toContain(codePane.side);
+    expect(side.firstElementChild).toBe(box);
+    expect(side.lastElementChild?.getAttribute("aria-label")).toBe(
+      "This conversation's files",
+    );
+
+    expect(codeIcon(container)!.className).toContain(timeline.previewing);
+    expect(codeIcon(container)!.getAttribute("aria-label")).toBe(
+      "Code. There's something to try.",
+    );
+  });
+
+  /// And the accent is the icon's ink, which holds while its pane is open: the
+  /// open fill goes over it rather than in place of it.
+  it("keeps the accent under the open fill", () => {
+    expect(timelineCss).toMatch(
+      /\.previewing\s*\{\s*--icon-ink:\s*var\(--accent\);/,
+    );
+    expect(iconButtonCss).toMatch(
+      /\.open\s*\{\s*color:\s*var\(--icon-ink, var\(--ink\)\);/,
+    );
+  });
+
+  /// And where the pane stacks, the box stacks above the tree as the tree
+  /// stacks above the groups: the column the width of the pane.
+  it("stacks the box above the tree under 40rem", () => {
+    expect(codeCss).toMatch(
+      /@media \(max-width: 40rem\) \{\s*\.side \{\s*width: auto;/,
+    );
+  });
+
+  /// A press opens a terminal for the preview in the active group and shows
+  /// it, called by the preview's title.
+  it("opens a terminal for a preview on a press, called by its title", async () => {
+    const fetching = withPreviews(
+      PREVIEWS,
+      [],
+      whenever(
+        TERMINALS_OF_IT,
+        json({ Opened: { number: 3 } } satisfies TerminalOpened),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+    // Once the register has been read, which is when the pane is ready to be
+    // pressed in at all.
+    await drawn(container, `.${shell.detailsPane} .${codePane.nothing}`);
+    fireEvent.click(rows(container)[1]!);
+
+    const socket = await attached();
+    expect(socket.url.endsWith(`${TERMINALS_OF_IT}/3/attach`)).toBe(true);
+
+    expect(opened(fetching)).toEqual([{ preview: "Serve" }]);
+
+    await waitFor(() =>
+      expect(tabs(container).map((tab) => tab.textContent)).toEqual(["Serve"]),
+    );
+    expect(tabs(container)[0]!.getAttribute("aria-pressed")).toBe("true");
+
+    // And New terminal still asks for a plain one.
+    fireEvent.click(
+      await drawn(
+        container,
+        `.${shell.detailsPane} .${button.iconButton}[aria-label="New terminal"]`,
+      ),
+    );
+    await waitFor(() =>
+      expect(opened(fetching)).toEqual([
+        { preview: "Serve" },
+        { preview: null },
+      ]),
+    );
+  });
+
+  /// The name is the server's, so a reload brings it back with the tab — ahead
+  /// of whatever the shell titled itself.
+  it("calls a terminal opened for a preview by its title after a reload", async () => {
+    withPreviews(PREVIEWS, [
+      { number: 1, busy: false, preview: null, title: null },
+      {
+        number: 2,
+        busy: true,
+        preview: "Build and test",
+        title: "Build and test",
+      },
+    ]);
+    const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+    await waitFor(() =>
+      expect(tabs(container).map((tab) => tab.textContent)).toEqual([
+        "Terminal 1",
+        "Build and test",
+      ]),
+    );
+  });
+
+  /// A title retired since the page read it is refused by name, in a tab of
+  /// its own, the way the other refusals of that press are.
+  it("says so where the preview is no longer there", async () => {
+    withPreviews(
+      PREVIEWS,
+      [],
+      whenever(
+        TERMINALS_OF_IT,
+        json("NoSuchPreview" satisfies TerminalOpened),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+    await drawn(container, `.${shell.detailsPane} .${codePane.nothing}`);
+    fireEvent.click(rows(container)[0]!);
+
+    await waitFor(() =>
+      expect(
+        container.querySelector(`.${shell.detailsPane} .${notices.error}`)
+          ?.textContent,
+      ).toBe(TERMINAL_REFUSAL.NoSuchPreview),
+    );
+    expect(TERMINAL_REFUSAL.NoSuchPreview).toBe(
+      "This preview is no longer here.",
+    );
   });
 });
 

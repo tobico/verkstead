@@ -190,6 +190,14 @@ const LINGERING: Duration = Duration::from_secs(2);
 /// nothing to do every couple of seconds for the few terminals anybody is
 /// looking at from another machine.
 const READING: Duration = Duration::from_secs(2);
+/// How often a terminal opened for a Preview is read for its shell having come
+/// up, before the command is typed into it.
+///
+/// A read is one `/proc` lookup, and what is waited on is a shell starting —
+/// half a second at best, ten where a login shell takes its time — so a tenth
+/// of a second is a line typed as soon as anybody would have typed it.
+const COMING_UP: Duration = Duration::from_millis(100);
+
 /// The terminals this server is holding, by the Conversation each belongs to.
 #[derive(Clone, Default)]
 pub(crate) struct Terminals {
@@ -281,6 +289,15 @@ struct Watched {
     /// second one — see [`reading`] — and the word that hurries it, which the
     /// relay following the output holds too. See [`printed`].
     hurry: Arc<printed::Hurry>,
+
+    /// The title of the Preview it was opened for, where it was — see
+    /// [`TerminalView::preview`].
+    preview: Option<String>,
+
+    /// And what its tab is called, held here so that a reattach brings it back
+    /// — see [`TerminalView::title`]. The Preview's title, for as long as the
+    /// terminal lives.
+    title: Option<String>,
 }
 
 impl Watched {
@@ -332,6 +349,8 @@ impl Terminals {
             .map(|(&number, watched)| TerminalView {
                 number,
                 busy: watched.busy(),
+                preview: watched.preview.clone(),
+                title: watched.title.clone(),
             })
             .collect();
 
@@ -752,7 +771,17 @@ async fn reading(
 /// What comes back is the number the terminal answers to, or the named reason
 /// there is none — see [`TerminalOpened`], whose refusals are the ones a
 /// session's start refuses by, asked about a shell.
-pub(crate) async fn open(state: &AppState, conversation_id: i64) -> anyhow::Result<TerminalOpened> {
+///
+/// **And opened for a Preview where `preview` names one** (ADR-0024): the same
+/// shell, holding the Preview's title as the name its tab is called by, with
+/// the Preview's command typed into it as the human would have typed it — see
+/// [`typed`]. A title no standing Preview has is refused by name, with nothing
+/// started.
+pub(crate) async fn open(
+    state: &AppState,
+    conversation_id: i64,
+    preview: Option<&str>,
+) -> anyhow::Result<TerminalOpened> {
     let Some(agents) = state.sessions.agents() else {
         tracing::warn!(
             conversation_id,
@@ -768,6 +797,21 @@ pub(crate) async fn open(state: &AppState, conversation_id: i64) -> anyhow::Resu
     if conversation.worktree.is_none() {
         return Ok(TerminalOpened::NoWorktree);
     }
+
+    // The Preview as it stands at the press, read off the record rather than
+    // taken from the page: what is typed is what the agent last suggested, and
+    // a title retired since the page loaded is refused rather than run.
+    let preview = match preview {
+        None => None,
+        Some(title) => {
+            let standing = store::standing_previews(&state.pool, conversation_id).await?;
+
+            match standing.into_iter().find(|preview| preview.title == title) {
+                Some(preview) => Some(preview),
+                None => return Ok(TerminalOpened::NoSuchPreview),
+            }
+        }
+    };
 
     // A terminal has no role of its own: it is the human working where the agent
     // worked, so it runs under the account the work is done under. The grilling
@@ -954,15 +998,28 @@ pub(crate) async fn open(state: &AppState, conversation_id: i64) -> anyhow::Resu
         Watched {
             screen: screen.clone(),
             terminal: terminal.clone(),
-            shell: named,
+            shell: named.clone(),
             closing,
             ended,
             leader: ports::Tree::of(&child),
             members: HashMap::new(),
             ports: BTreeSet::new(),
             hurry: hurry.clone(),
+            preview: preview.as_ref().map(|preview| preview.title.clone()),
+            title: preview.as_ref().map(|preview| preview.title.clone()),
         },
     );
+
+    if let Some(preview) = preview {
+        tokio::spawn(typed(
+            state.terminals.clone(),
+            conversation_id,
+            number,
+            terminal.clone(),
+            named,
+            preview.command,
+        ));
+    }
 
     tokio::spawn(follow(
         state.terminals.clone(),
@@ -981,6 +1038,60 @@ pub(crate) async fn open(state: &AppState, conversation_id: i64) -> anyhow::Resu
     tracing::info!(conversation_id, number, "a terminal is running");
 
     Ok(TerminalOpened::Opened { number })
+}
+
+/// Type a Preview's command into the terminal opened for it, followed by a
+/// return, as the human would have typed it (ADR-0024).
+///
+/// **Once the shell is at the foreground, and never before.** The first moments
+/// of a terminal read as the sandbox wrapper that started it, and a line typed
+/// then is a line typed at whatever is in front — so the terminal is read every
+/// [`COMING_UP`] until it reads *not busy* for the first time, which is the
+/// shell having come up and taken the terminal for itself (see [`busy`]). A
+/// shell that ends before then, or a tab closed, ends the wait with nothing
+/// typed.
+///
+/// **And at once where the platform cannot read a foreground** — Windows, whose
+/// pseudoconsole has none, and a Unix with no `/proc` to name one by — the
+/// terminal holding the line until the shell reads it.
+async fn typed(
+    terminals: Terminals,
+    conversation_id: i64,
+    number: i64,
+    terminal: Arc<Terminal>,
+    shell: String,
+    command: String,
+) {
+    if busy::TELLS {
+        loop {
+            if terminals.screen(conversation_id, number).is_none() {
+                return;
+            }
+
+            if !busy::of(&terminal, &shell) {
+                break;
+            }
+
+            tokio::time::sleep(COMING_UP).await;
+        }
+    }
+
+    let mut line = command.into_bytes();
+    line.push(b'\r');
+
+    match terminal.write(&line).await {
+        Ok(()) => tracing::info!(
+            conversation_id,
+            number,
+            "a preview's command was typed into its terminal"
+        ),
+        Err(error) => tracing::warn!(
+            error = ?error,
+            conversation_id,
+            number,
+            "a preview's command could not be typed into its terminal"
+        ),
+    }
 }
 
 /// Follow one terminal's shell until it exits, putting what it prints on its

@@ -629,14 +629,26 @@ export function Timeline(props: {
                 Disabled where there is no Worktree to edit or open a shell in —
                 a Draft, and a Conversation that has been closed — with the
                 label saying so, because an icon that does nothing when it is
-                pressed says nothing about why. */}
+                pressed says nothing about why.
+
+                And in the accent while any preview stands, so the Timeline says
+                there is something to try (ADR-0024): the open fill still goes
+                over it, and the label says it for whoever cannot see the
+                colour. */}
             <Show when={!props.readOnly}>
               <IconButton
                 of={faCode}
+                class={
+                  props.conversation.previews.length > 0
+                    ? styles.previewing
+                    : undefined
+                }
                 label={
                   props.conversation.worktree === null
                     ? "Code. There's no worktree yet."
-                    : "Code"
+                    : props.conversation.previews.length > 0
+                      ? "Code. There's something to try."
+                      : "Code"
                 }
                 disabled={props.conversation.worktree === null}
                 open={props.selected === "code"}

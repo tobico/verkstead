@@ -1942,7 +1942,15 @@ async fn a_terminal_runs_powershell_in_the_conversations_worktree() {
     )
     .await;
 
-    assert_eq!(live.live, vec![TerminalView { number, busy: true }]);
+    assert_eq!(
+        live.live,
+        vec![TerminalView {
+            number,
+            busy: true,
+            preview: None,
+            title: None,
+        }]
+    );
 
     let mut watcher = Watcher::terminal(at, fixture.id, number).await;
 
@@ -2013,7 +2021,12 @@ async fn a_terminal_runs_powershell_in_the_conversations_worktree() {
 
     assert_eq!(
         terminals_of(&fixture).await,
-        vec![TerminalView { number, busy: true }],
+        vec![TerminalView {
+            number,
+            busy: true,
+            preview: None,
+            title: None,
+        }],
         "a close that was refused should have left the terminal on the register",
     );
 

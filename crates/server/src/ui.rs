@@ -46,10 +46,10 @@ use verkstead_render::{
     FolderListing, GrillingStarted, HeaderEdit, IgnoreRule, IgnoredCommentsEdit, InstallPress,
     LanguageCleared, LanguageEdit, LanguageView, Lifecycle, Locked, McpHeader, McpServer,
     McpServerEdit, McpServersEdit, Merging, MissedOut, NewAdoption, NewCompanion, NewConversation,
-    NewJoin, NewRank, PairingView, Parked, PendingSteerView, Permitting, Process, ProcessChoice,
-    ProcessPicked, ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration, RemoteBanner,
-    RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice, RuleField,
-    RuleRefused, Running, RunningOn, ServeEdit, ServePress, ServerAttached, ServerField,
+    NewJoin, NewRank, OpenTerminal, PairingView, Parked, PendingSteerView, Permitting, Process,
+    ProcessChoice, ProcessPicked, ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration,
+    RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice,
+    RuleField, RuleRefused, Running, RunningOn, ServeEdit, ServePress, ServerAttached, ServerField,
     ServerRefused, ServerRemoved, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView,
     ShareCommented, SharePublished, SharedCommit, SharedConversation, ShowArchived,
     ShowingArchived, SizeRefused, Standing, SteerCancelled, SteerForm, SteerOpened,
@@ -3387,12 +3387,33 @@ async fn terminals(State(state): State<AppState>, Path(id): Path<String>) -> Htt
 /// Answered once the shell is running rather than once it has printed anything:
 /// what the browser is waiting for is a number to attach to, and what the shell
 /// says comes down the socket.
-async fn open_terminal(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+///
+/// The body is an [`OpenTerminal`]: empty for **New terminal**, and naming a
+/// Preview by its title for a press on its row, which opens the terminal for it
+/// (ADR-0024). No body at all is read as the empty one.
+async fn open_terminal(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    body: axum::body::Bytes,
+) -> HttpResponse {
     let Ok(id) = id.parse::<i64>() else {
         return Json(TerminalOpened::NoSuchConversation).into_response();
     };
 
-    match crate::terminals::open(&state, id).await {
+    let asked = match body.is_empty() {
+        true => OpenTerminal::default(),
+        false => match serde_json::from_slice::<OpenTerminal>(&body) {
+            Ok(asked) => asked,
+            Err(error) => {
+                return refused(
+                    StatusCode::BAD_REQUEST,
+                    ApiError::new(format!("The terminal asked for isn't one: {error}")),
+                );
+            }
+        },
+    };
+
+    match crate::terminals::open(&state, id, asked.preview.as_deref()).await {
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "opening a terminal failed");

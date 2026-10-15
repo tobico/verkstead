@@ -3845,6 +3845,13 @@ run: RunView | null,
 data_directory: string | null, };
 
 /**
+ * What a press asking for another terminal says: nothing, for one of
+ * **New terminal**'s, and the title of the Preview it is opened for, for a
+ * press on a row of the Previews box (ADR-0024).
+ */
+export type OpenTerminal = { preview: string | null, };
+
+/**
  * One Option as the page draws it: the number a Response answers by, its text
  * already rendered, and whether the agent recommended it.
  *
@@ -6914,7 +6921,7 @@ export type TerminalClosed = "Closed" | "Busy";
  * that could not be opened is one the pane has to say something about rather
  * than one that quietly never appears.
  */
-export type TerminalOpened = { "Opened": { number: number, } } | "NoSuchConversation" | "NoWorktree" | "NoProfile" | "Refused";
+export type TerminalOpened = { "Opened": { number: number, } } | "NoSuchConversation" | "NoWorktree" | "NoProfile" | "Refused" | "NoSuchPreview";
 
 /**
  * One of them: which terminal, and the TCP ports something inside it is
@@ -6927,14 +6934,15 @@ export type TerminalPorts = {
 number: number, ports: Array<number>, };
 
 /**
- * One of them: which of the Conversation's it is, and whether somebody is
- * working in it.
+ * One of them: which of the Conversation's it is, whether somebody is
+ * working in it, and — where it was opened for a Preview — which, and what
+ * its tab is called.
  *
  * Nearly nothing, and that is the shape of the thing. A terminal is a shell in
  * a Sandbox and nothing else — no record, no Event, nothing in a Share
  * (ADR 0013) — so what is *on* one arrives down a socket of its own, and what
- * is here is the number the socket is found by and the one judgement only the
- * server can make about it.
+ * is here is the number the socket is found by and what only the server can
+ * say about it.
  */
 export type TerminalView = { 
 /**
@@ -6953,7 +6961,21 @@ number: number,
  * one it cannot tell on confirms every close rather than ending a shell
  * somebody was in.
  */
-busy: boolean, };
+busy: boolean, 
+/**
+ * The title of the Preview it was opened for, and `None` for one opened
+ * by **New terminal** (ADR-0024). The title as it was at the press: a
+ * Preview retired since leaves the terminal saying what it was for.
+ */
+preview: string | null, 
+/**
+ * What its tab is called, where the server holds a name for it — the
+ * Preview's title — ahead of anything the shell's own title escape sets.
+ * Held here rather than by the page so that a reattach after a reload
+ * brings the name back with the tab, a repaint carrying the grid and not
+ * the title. `None` is a tab called as any tab is.
+ */
+title: string | null, };
 
 /**
  * The terminals a Conversation has running, as the pane that draws them reads

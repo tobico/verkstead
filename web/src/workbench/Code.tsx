@@ -397,6 +397,7 @@ import {
   faCompress,
   faExpand,
   faFile,
+  faPlay,
   faPlus,
   faTableColumns,
   faTerminal,
@@ -436,6 +437,7 @@ import {
 } from "../api/client";
 import type {
   ConversationView,
+  PreviewView,
   FileReading,
   FileWritten,
   FolderListing,
@@ -511,6 +513,7 @@ export const TERMINAL_REFUSAL: Record<
   NoProfile:
     "This conversation has no agent profile settled, so there's no account to run a shell under.",
   Refused: "The shell wouldn't start. The server's log says why.",
+  NoSuchPreview: "This preview is no longer here.",
 };
 
 /// How many lines a tab keeps above the grid, so that what scrolled past can be
@@ -1064,6 +1067,14 @@ export function Code(props: {
   /// guards a request this mount made, and a pane taken down while one was in
   /// flight has no press left to guard.
   let opening = false;
+
+  /// What the server calls each terminal it holds a name for, by number: the
+  /// title of the preview it was opened for (ADR-0024). Read off the register
+  /// when the pane opens and added to by a press on a preview, so that a tab
+  /// is called by it ahead of whatever its shell titles itself — and called by
+  /// it again after a reload, the name being the server's rather than this
+  /// page's.
+  const [names, setNames] = createSignal<Record<number, string>>({});
 
   /// Every group there is, in the order the pane draws them, and where each of
   /// them stands — both read off the tree, which is the one thing the pane is
@@ -1950,6 +1961,12 @@ export function Code(props: {
       return named(tab.file);
     }
 
+    const held = names()[tab.terminal];
+
+    if (held) {
+      return held;
+    }
+
     const said = titles()[tab.terminal]?.trim();
 
     if (said) {
@@ -1994,15 +2011,20 @@ export function Code(props: {
 
   /// Open another, and show it. What **New terminal** does, from the plus at the
   /// end of the strip or from the press in the empty pane — the only two things
-  /// that ask for a shell, the pane asking for none of its own accord.
-  const open = (): Promise<void> => {
+  /// that ask for a plain shell, the pane asking for none of its own accord.
+  ///
+  /// **And what a press on a preview does**, with its title: the same shell,
+  /// opened in the active group exactly where **New terminal** puts one, with
+  /// the preview's command typed into it by the server and the tab called by
+  /// the preview's title (ADR-0024).
+  const open = (preview?: string): Promise<void> => {
     if (opening) {
       return Promise.resolve();
     }
 
     opening = true;
 
-    return openTerminal(device(), props.conversation.id)
+    return openTerminal(device(), props.conversation.id, preview)
       .then((outcome) => {
         if (typeof outcome === "string") {
           stand(TERMINAL_REFUSAL[outcome]);
@@ -2013,6 +2035,10 @@ export function Code(props: {
 
         replace();
         askedAt.set(number, Date.now());
+
+        if (preview !== undefined) {
+          setNames((was) => ({ ...was, [number]: preview }));
+        }
 
         const group = into();
 
@@ -2872,6 +2898,15 @@ export function Code(props: {
 
     const running = new Set(live.map((terminal) => terminal.number));
 
+    setNames((was) => ({
+      ...was,
+      ...Object.fromEntries(
+        live.flatMap((terminal) =>
+          terminal.title === null ? [] : [[terminal.number, terminal.title]],
+        ),
+      ),
+    }));
+
     // Dropped from whichever group holds it, wherever that is — and a group
     // whose last tab was a shell that has ended goes the way any other emptied
     // group goes.
@@ -3019,19 +3054,33 @@ export function Code(props: {
           a terminal are neither of them prose, and every column they are given
           is a column they use. */}
       <div class={`${styles.body} ${shell.paneScreen} ${shell.paneWide}`}>
-        {/* The tree's open folders come out of the same keeping the tabs do,
-            and for the same reason: a swap to an Event and back would
-            otherwise be the walk down to a file made over again. */}
-        <Tree
-          conversation={props.conversation.id}
-          open={openFile}
-          pick={pick}
-          carried={taken}
-          renamed={renamed}
-          deleted={deleted}
-          held={expanded}
-          setHeld={setExpanded}
-        />
+        {/* The column down the side: the previews the agent left over the
+            tree, where any stand, and the tree under them (ADR-0024). */}
+        <div class={styles.side}>
+          {/* Not drawn where none stand: every conversation starts with none,
+              and a box saying so on each would be noise where a box appearing
+              says the thing. */}
+          <Show when={props.conversation.previews.length > 0}>
+            <Previews
+              previews={props.conversation.previews}
+              press={(title) => void open(title)}
+            />
+          </Show>
+
+          {/* The tree's open folders come out of the same keeping the tabs do,
+              and for the same reason: a swap to an Event and back would
+              otherwise be the walk down to a file made over again. */}
+          <Tree
+            conversation={props.conversation.id}
+            open={openFile}
+            pick={pick}
+            carried={taken}
+            renamed={renamed}
+            deleted={deleted}
+            held={expanded}
+            setHeld={setExpanded}
+          />
+        </div>
 
         <div class={styles.groups}>
           {/* The register not answering is a line *above* whatever is open
@@ -4000,3 +4049,39 @@ function zoned(box: DOMRect, x: number, y: number): Zone {
 /// A function of its own rather than one made per drag, because removing a
 /// listener means handing back the very same function.
 const refuseScroll = (event: Event): void => event.preventDefault();
+
+/// The previews standing on the conversation, as a box above the tree: a row
+/// each, oldest first, the title with a play icon at its right (ADR-0024).
+///
+/// The whole row is the press, lit under the pointer the way a row of the tree
+/// is, and what it does is the pane's — a terminal opened for the preview in the
+/// active group, exactly where **New terminal** puts one.
+function Previews(props: {
+  previews: PreviewView[];
+  press: (title: string) => void;
+}): JSX.Element {
+  return (
+    <section class={styles.previews} aria-labelledby="code-previews">
+      <h3 id="code-previews" class={styles.previewsHead}>
+        Previews
+      </h3>
+
+      <ul class={styles.previewRows}>
+        <For each={props.previews}>
+          {(preview) => (
+            <li>
+              <button
+                type="button"
+                class={styles.preview}
+                onClick={() => props.press(preview.title)}
+              >
+                <span class={styles.previewTitle}>{preview.title}</span>
+                <Icon of={faPlay} class={styles.play!} />
+              </button>
+            </li>
+          )}
+        </For>
+      </ul>
+    </section>
+  );
+}

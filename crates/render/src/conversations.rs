@@ -2906,15 +2906,16 @@ pub struct TerminalsView {
     pub live: Vec<TerminalView>,
 }
 
-/// One of them: which of the Conversation's it is, and whether somebody is
-/// working in it.
+/// One of them: which of the Conversation's it is, whether somebody is
+/// working in it, and — where it was opened for a Preview — which, and what
+/// its tab is called.
 ///
 /// Nearly nothing, and that is the shape of the thing. A terminal is a shell in
 /// a Sandbox and nothing else — no record, no Event, nothing in a Share
 /// (ADR 0013) — so what is *on* one arrives down a socket of its own, and what
-/// is here is the number the socket is found by and the one judgement only the
-/// server can make about it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// is here is the number the socket is found by and what only the server can
+/// say about it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct TerminalView {
     /// The number this server issued it, which is what its socket and its close
@@ -2931,6 +2932,18 @@ pub struct TerminalView {
     /// one it cannot tell on confirms every close rather than ending a shell
     /// somebody was in.
     pub busy: bool,
+
+    /// The title of the Preview it was opened for, and `None` for one opened
+    /// by **New terminal** (ADR-0024). The title as it was at the press: a
+    /// Preview retired since leaves the terminal saying what it was for.
+    pub preview: Option<String>,
+
+    /// What its tab is called, where the server holds a name for it — the
+    /// Preview's title — ahead of anything the shell's own title escape sets.
+    /// Held here rather than by the page so that a reattach after a reload
+    /// brings the name back with the tab, a repaint carrying the grid and not
+    /// the title. `None` is a tab called as any tab is.
+    pub title: Option<String>,
 }
 
 /// What one device's attached terminals on a Conversation are listening on —
@@ -2957,6 +2970,16 @@ pub struct TerminalPorts {
     pub number: i64,
 
     pub ports: Vec<u16>,
+}
+
+/// What a press asking for another terminal says: nothing, for one of
+/// **New terminal**'s, and the title of the Preview it is opened for, for a
+/// press on a row of the Previews box (ADR-0024).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct OpenTerminal {
+    #[serde(default)]
+    pub preview: Option<String>,
 }
 
 /// And what became of asking for another one.
@@ -2991,6 +3014,10 @@ pub enum TerminalOpened {
     /// the shell inside it would not run. The reason is in the server's log —
     /// this is the one refusal with nothing for the human to correct.
     Refused,
+
+    /// It was asked for a Preview, and none stands under that title: retired
+    /// since the page read the Conversation, which the next read will show.
+    NoSuchPreview,
 }
 
 /// And what became of closing one.
