@@ -120,6 +120,7 @@ use windows_sys::Win32::Storage::FileSystem::{
     DELETE, FILE_GENERIC_EXECUTE, FILE_GENERIC_READ, FILE_GENERIC_WRITE,
 };
 
+use super::super::account::removing::Came;
 use super::super::starting::wide;
 use super::super::surface::Reach;
 use super::lists::{ALLOWED, Found, INHERITED, STEP, THE_SID, inherited, mask, whose};
@@ -531,8 +532,59 @@ fn took(began: std::time::Instant, entries: usize, what: &str) {
 /// thing, so a grant of this session's still standing up there is one more
 /// thing for a copy to be told from.
 pub(crate) fn strip(entries: &[Entry], cut: &[PathBuf], sid: &str) {
-    let Ok(sid) = Sid::of(sid) else {
-        return;
+    stripped(entries, cut, sid, &mut |_| {});
+}
+
+/// The same taking off, saying what came of each entry, with `before` told of
+/// each one as it is reached.
+///
+/// **What removing the account reads**, where a boundary ending reads nothing:
+/// the removal is a verb a person is watching, and it has to say how many came
+/// off and which did not — see [`super::super::account::removing`]. `before`
+/// is called for every entry, in the order they are tried, before anything is
+/// asked of the machine about it, so a directory Windows is walking for
+/// seconds has a line in front of it rather than after it.
+///
+/// **An entry whose path is not there came off**, as far as this says: a
+/// closed Worktree's directory goes and its entry with it, and there is
+/// nothing on the machine left to take.
+pub(crate) fn stripped<'a>(
+    entries: &'a [Entry],
+    cut: &[PathBuf],
+    sid: &str,
+    before: &mut dyn FnMut(&Entry),
+) -> Vec<(&'a Entry, Came)> {
+    let mut came = Vec::with_capacity(entries.len());
+
+    // A SID that will not parse is one no entry can be taken off for, which is
+    // every entry still on the machine kept, and said so — rather than the
+    // silence it used to be, which a removal would have counted as nothing
+    // there at all.
+    let sid = match Sid::of(sid) {
+        Ok(sid) => sid,
+        Err(error) => {
+            tracing::warn!(
+                error = ?error,
+                sid,
+                "a record names an identity that is not a SID, so none of its entries can be \
+                 taken off",
+            );
+
+            for entry in grants_first(entries) {
+                before(entry);
+
+                came.push((
+                    entry,
+                    if entry.path.exists() {
+                        Came::Kept(format!("the record's SID {sid} would not read: {error}"))
+                    } else {
+                        Came::NotThere
+                    },
+                ));
+            }
+
+            return came;
+        }
     };
 
     let _one = one_at_a_time();
@@ -540,7 +592,11 @@ pub(crate) fn strip(entries: &[Entry], cut: &[PathBuf], sid: &str) {
     let mut walked = 0usize;
 
     for entry in grants_first(entries) {
+        before(entry);
+
         if !entry.path.exists() {
+            came.push((entry, Came::NotThere));
+
             continue;
         }
 
@@ -555,35 +611,39 @@ pub(crate) fn strip(entries: &[Entry], cut: &[PathBuf], sid: &str) {
             Wanted::Refused => restored(&sid, &entry.path, cut.contains(&entry.path)),
         };
 
-        if let Err(error) = taken {
-            // **A step is the one entry whose failing to come off is ordinary**,
-            // because a record says every step a description asked for rather
-            // than the ones the machine took — see
-            // [`super::super::entries::Entries::wrote`], which writes the
+        match taken {
+            Ok(()) => came.push((entry, Came::Off)),
+            Err(error) => {
+                // **A step is the one entry whose failing to come off is
+                // ordinary**, because a record says every step a description
+                // asked for rather than the ones the machine took — see
+                // [`super::super::entries::Entries::wrote`], which writes the
+                // record before a word of it is written. So an ancestor
+                // Verkstead could not write is one it now cannot take back,
+                // and there was never anything there to take: that is a line
+                // for somebody reading the log on purpose rather than a
+                // warning. One left alone for being walked through already
+                // never gets this far — see [`revoked`], which finds nothing
+                // of the account's on it and writes nothing.
+                if entry.wanted == Wanted::Stepped {
+                    tracing::debug!(
+                        error = ?error,
+                        path = %entry.path.display(),
+                        "a step through a directory on the way to a session's own would not \
+                         come off, which is what a directory that would not take one in the \
+                         first place answers",
+                    );
+                } else {
+                    tracing::warn!(
+                        error = ?error,
+                        path = %entry.path.display(),
+                        "an access-control entry written for a session's identity could not be \
+                         taken off again, so it is left on a directory naming an identity that \
+                         has gone"
+                    );
+                }
 
-            // record before a word of it is written. So an ancestor Verkstead
-            // could not write is one it now cannot take back, and there was
-            // never anything there to take: that is a line for somebody
-            // reading the log on purpose rather than a warning. One left alone
-            // for being walked through already never gets this far — see
-            // [`revoked`], which finds nothing of the account's on it and
-            // writes nothing.
-            if entry.wanted == Wanted::Stepped {
-                tracing::debug!(
-                    error = ?error,
-                    path = %entry.path.display(),
-                    "a step through a directory on the way to a session's own would not come \
-                     off, which is what a directory that would not take one in the first place \
-                     answers",
-                );
-            } else {
-                tracing::warn!(
-                    error = ?error,
-                    path = %entry.path.display(),
-                    "an access-control entry written for a session's identity could not be \
-                     taken off again, so it is left on a directory naming an identity that has \
-                     gone"
-                );
+                came.push((entry, Came::Kept(error.to_string())));
             }
         }
 
@@ -592,6 +652,8 @@ pub(crate) fn strip(entries: &[Entry], cut: &[PathBuf], sid: &str) {
     }
 
     took(began, walked, "taken off");
+
+    came
 }
 
 /// `entries` with every refusal in front of every grant, each half in the order

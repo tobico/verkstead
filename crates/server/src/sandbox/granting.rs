@@ -74,6 +74,12 @@
 #[cfg(windows)]
 pub(crate) mod writing;
 
+// And every record read and every entry in it taken off, which is what
+// removing the account does before the account goes — see
+// [`super::account::removing`], which is the counting of it.
+#[cfg(windows)]
+pub(crate) mod removing;
+
 // And what was written down about what was written: the record under the Data
 // Directory that lets a server which did not write an entry take it away all
 // the same. Built everywhere, for this module's own reason — a record is a

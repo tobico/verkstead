@@ -20,12 +20,21 @@
 //! to run as rather than one anybody signs in with, and [`kept_off_the_screen`]
 //! and [`denied`] are the two halves of saying so.
 //!
-//! **And taking it away takes the profile directory with it.** Starting a
-//! process as the account loads its profile, which makes `C:\Users\<account>`
-//! at the first session and leaves it there — the account being deleted does
-//! not take it. So [`remove`] deletes the profile first, while there is still a
-//! SID to name it by, and the account after: a machine that has run sessions
-//! and then had Verkstead taken off it should look as it did.
+//! **And taking it away takes everything it left with it.** Starting a process
+//! as the account loads its profile, which makes `C:\Users\<account>` at the
+//! first session and leaves it there — the account being deleted does not take
+//! it. And every entry a record under the Data Directory names is still on the
+//! human's directories. So [`remove`] takes every one of those entries off
+//! first, then deletes the profile while there is still a SID to name it by,
+//! and the account after: a machine that has run sessions and then had
+//! Verkstead taken off it should look as it did.
+//!
+//! **The entries do not need the account to be there.** Every record holds the
+//! SID its entries name as text, and an entry comes off by that — so a machine
+//! whose account has already gone, with entries still standing that name it,
+//! is one [`remove`] run again repairs. What the account going takes away is
+//! nothing about the entries; what an uninstall takes away is anything that
+//! would ever read the records again, which is why this reads them all.
 
 use std::ffi::OsStr;
 use std::os::windows::ffi::OsStringExt;
@@ -56,6 +65,7 @@ use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken}
 use windows_sys::Win32::UI::Shell::DeleteProfileW;
 
 use super::super::starting::{Handle, wide};
+use super::removing::Tally;
 use super::{MAKE_IT, Missing, named, password};
 use crate::settings::{Secrets, Settings};
 
@@ -310,10 +320,18 @@ pub fn create(data_dir: &Path) -> Result<(String, Made)> {
     Ok((name, made))
 }
 
-/// What taking the account away came to: which of the three things that could
-/// have been there was.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+/// What taking the account away came to: what came of every entry the records
+/// named, and which of the three things that could have been there was.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Removed {
+    /// Every entry every record named, and what came of each.
+    pub entries: Tally,
+
+    /// Whether the removal stopped after the entries, because one that would
+    /// not come off was a grant or a refusal and nobody said `--force` — in
+    /// which case the three below are all `false`, and were not tried.
+    pub held_back: bool,
+
     /// Whether there was an account to delete.
     pub account: bool,
 
@@ -325,58 +343,50 @@ pub struct Removed {
     pub password: bool,
 }
 
-/// Take the account away, and its profile directory and its password with it.
+/// Take the account away: every entry naming it, its profile directory, the
+/// account and its password.
 ///
-/// **In that order, and the order matters.** A profile is named by a SID, so it
-/// is deleted while the account is still there to resolve one; the account
-/// after it; and the password last, because a password cleared before a failed
-/// deletion would leave an account nothing could use and nothing could name.
+/// **In that order, and the order matters.** The entries first, because once
+/// Verkstead is uninstalled nothing will read the records that name them —
+/// see [`super::super::granting::removing`] — and because one that would not
+/// come off is a reason to stop with everything still in place, rather than a
+/// line nobody reads after the account has gone. Then the profile, which is
+/// named by a SID and so is deleted while the account is still there to
+/// resolve one; the account after it; and the password last, because a
+/// password cleared before a failed deletion would leave an account nothing
+/// could use and nothing could name.
+///
+/// **A grant or a refusal that would not come off stops it**, with
+/// [`Removed::held_back`] set and nothing after the entries tried, unless
+/// `force` says to go on. `before` is told of each entry before it is taken
+/// off, with where it is in the whole.
 ///
 /// Nothing here is a failure for not having been there. A Data Directory whose
 /// account was never made, or was deleted by hand, is one this says it found
-/// nothing of — which is what a verb run twice should do.
-pub fn remove(data_dir: &Path) -> Result<(String, Removed)> {
+/// nothing of — and still takes off every entry its records name, which is
+/// what a verb run again on a machine left half done should do.
+pub fn remove(
+    data_dir: &Path,
+    force: bool,
+    before: &mut dyn FnMut(usize, usize, &Path),
+) -> Result<(String, Removed)> {
     elevated_enough("remove")?;
 
     let name = named(data_dir);
     let settings = Settings::in_data_dir(data_dir);
-    let mut removed = Removed::default();
+
+    let mut removed = Removed {
+        entries: super::super::granting::removing::taken_off(data_dir, before),
+        ..Removed::default()
+    };
+
+    if !removed.entries.goes_on(force) {
+        removed.held_back = true;
+
+        return Ok((name, removed));
+    }
 
     if let Ok(sid) = sid_of(&name) {
-        // Before the account goes, because the entries name it: the entries
-        // that stand for the installation are the ones no boundary ever takes
-        // off — see [`super::super::Surface::standing`] — so the account being
-        // removed is the one moment there is to take them off, and after
-        // `NetUserDel` there is no SID left to say whose they were.
-        //
-        // **Read rather than worked out.** What stands is a description's
-        // answer at the moment it was written — the `PATH` a session was given,
-        // the drives its Worktrees were on, the ancestors those implied — and
-        // none of that is derivable from a Data Directory afterwards. So the
-        // machine keeps a record of them and this reads it. See
-        // [`super::super::granting::remembering::standing_wrote`].
-        //
-        // Said and not insisted on, the way the rest of this verb is: an entry
-        // that would not come off is an entry naming an identity this machine
-        // is about to stop having, which grants nobody anything. What it costs
-        // is a line on somebody's directory list.
-        if let Some(standing) = super::super::granting::remembering::standing_read(data_dir) {
-            if standing.sid == sid.text() {
-                super::super::granting::writing::strip(&standing.entries, &[], sid.text());
-                super::super::granting::remembering::standing_forget(data_dir);
-            } else {
-                // A record for somebody else's identity, which is a machine
-                // whose account was made again since: those entries are the
-                // other SID's and are not this removal's to take off.
-                tracing::warn!(
-                    recorded = standing.sid,
-                    removing = sid.text(),
-                    "what this installation had standing was written for another identity, so \
-                     it is left where it is",
-                );
-            }
-        }
-
         removed.profile = profile_deleted(&sid)?;
     }
 
