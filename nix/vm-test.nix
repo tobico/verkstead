@@ -893,7 +893,7 @@ testers.runNixOSTest {
         machine.wait_until_succeeds("test -S /run/tailscale/tailscaled.sock")
         machine.wait_until_succeeds(
             "curl -sf http://127.0.0.1:8422/api/ui/remote"
-            " | grep -q 'the Tailscale daemon reports'"
+            " | grep -q 'The Tailscale daemon reports'"
         )
 
         reading = json.loads(
@@ -902,7 +902,7 @@ testers.runNixOSTest {
         assert reading["tailscale"] == "Down", (
             f"an unauthenticated daemon reads as not up: {reading}"
         )
-        assert "the Tailscale daemon reports" in reading["trouble"], (
+        assert "The Tailscale daemon reports" in reading["trouble"], (
             "the reading has to be the daemon's own answer rather than a socket "
             f"the unit could not reach: {reading['trouble']!r}"
         )
