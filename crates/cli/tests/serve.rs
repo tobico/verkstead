@@ -870,6 +870,47 @@ fn the_annex_forward_address_comes_from_its_flag_and_the_environment() {
     }
 }
 
+/// And an Annex binds no forward at all, a forward being a Keeper's: started
+/// with `kept_by` in its config and the forward's port already taken — which is
+/// its Keeper's under WSL's mirrored networking — it comes up regardless, and
+/// the startup line says it forwards nothing (ADR-0024).
+#[test]
+fn an_annex_binds_no_forward() {
+    let tmp = tempfile::tempdir().unwrap();
+    let data_dir = tmp.path().join("annex");
+    std::fs::create_dir_all(&data_dir).unwrap();
+    std::fs::write(
+        data_dir.join("config.yaml"),
+        "kept_by:\n  device: 86f1933fecb070cbee865fbb84819d14\n  fingerprint: \"3F:0A\"\n",
+    )
+    .unwrap();
+
+    // The Keeper's forward, holding the port the Annex would be told to bind.
+    let keepers = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let taken = keepers.local_addr().unwrap().to_string();
+
+    let port = free_port();
+    let listen = format!("127.0.0.1:{port}");
+
+    let mut serving = Serve::start(
+        tmp.path(),
+        port,
+        &[
+            "--listen",
+            &listen,
+            "--data-dir",
+            data_dir.to_str().unwrap(),
+        ],
+        &[("VERKSTEAD_ANNEX_FORWARD_LISTEN", taken.as_str())],
+    );
+    let logged = uncoloured(&serving.stop());
+
+    assert!(
+        logged.contains("annex_forward=none"),
+        "an Annex says it forwards nothing, got:\n{logged}",
+    );
+}
+
 /// A signal is an ordered stop: the server ends of its own accord, saying so,
 /// rather than dying where it stands (ADR-0020, *Discovery*).
 ///

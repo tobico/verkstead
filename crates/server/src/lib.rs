@@ -2329,7 +2329,23 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
     // refuse rather than a Keeper whose Annex nobody can reach (ADR-0024) — see
     // [`peer::annex_forward`]. Pointed nowhere until the Keeper's Join points
     // it, which is what the handle is for.
-    let annex_forward = peer::annex_forward::Listener::bound(config.annex_forward_listen)?;
+    //
+    // **Not on an Annex**, whose `config.yaml` names a Keeper: a forward is a
+    // Keeper's, and an Annex keeps nothing. Under WSL's mirrored networking an
+    // Annex shares its Keeper's interfaces, so the port is the Keeper's already
+    // and binding it would refuse the Annex's start (ADR-0024, *The Keeper
+    // forwards for its Annex*).
+    let annex_forward = if settings::Settings::in_data_dir(&data_dir)
+        .config()
+        .kept_by()
+        .is_some()
+    {
+        None
+    } else {
+        Some(peer::annex_forward::Listener::bound(
+            config.annex_forward_listen,
+        )?)
+    };
     let annex_pointing = peer::annex_forward::Pointing::at_nothing();
 
     // And where a session's HOME comes from, which wants the Data Directory
@@ -2524,7 +2540,9 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
     tracing::info!(
         listen = %config.listen,
         peer_listen = %peer.address(),
-        annex_forward = %annex_forward.address(),
+        annex_forward = %annex_forward
+            .as_ref()
+            .map_or_else(|| "none".to_owned(), |forward| forward.address().to_string()),
         workbench = %hands_over.startup_line(config.listen, &key),
         data_dir = %data_dir.display(),
         device = %device.id(),
@@ -2615,8 +2633,11 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
     // to advertise at.
     let reading = device::reading::Reading::of_this_machine(tailscale.clone())
         .told_by(settings.clone())
-        .asking_its_keeper(peer::dialling::Peers::of(device.clone(), members.clone()))
-        .forwarding_at(annex_forward.address().port());
+        .asking_its_keeper(peer::dialling::Peers::of(device.clone(), members.clone()));
+    let reading = match &annex_forward {
+        Some(forward) => reading.forwarding_at(forward.address().port()),
+        None => reading,
+    };
 
     // And what this device says about itself on the LAN, so that a Verkstead on
     // the next desk can draw a row for it with nobody typing an address
@@ -2803,7 +2824,7 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
             served = axum::serve(listener, app.clone()) => served.context("serving Verkstead"),
             served = axum::serve(pipe, app) => served.context("serving Verkstead over its named pipe"),
             served = peer.serving(peers) => served,
-            served = annex_forward.serving(annex_pointing) => served,
+            served = peer::annex_forward::serving(annex_forward, annex_pointing) => served,
             signal = stopping.told() => stopped(signal, &advertisement).await,
         }
     }
@@ -2815,7 +2836,7 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
         tokio::select! {
             served = axum::serve(listener, app) => served.context("serving Verkstead"),
             served = peer.serving(peers) => served,
-            served = annex_forward.serving(annex_pointing) => served,
+            served = peer::annex_forward::serving(annex_forward, annex_pointing) => served,
             signal = stopping.told() => stopped(signal, &advertisement).await,
         }
     }

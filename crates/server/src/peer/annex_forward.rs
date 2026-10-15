@@ -160,6 +160,18 @@ impl Listener {
     }
 }
 
+/// Serve `listener` where this start bound one, and wait for ever where it did
+/// not — an **Annex**, which forwards for nobody (ADR-0024).
+///
+/// What the start selects on beside the other listeners, so a device with no
+/// forward is one listener fewer rather than a server that ends at once.
+pub async fn serving(listener: Option<Listener>, pointing: Pointing) -> Result<()> {
+    match listener {
+        Some(listener) => listener.serving(pointing).await,
+        None => std::future::pending().await,
+    }
+}
+
 /// Where an Annex asks its Keeper what to advertise: the Keeper's own addresses,
 /// each at this forward's port (ADR-0024, *advertise as told*).
 ///
