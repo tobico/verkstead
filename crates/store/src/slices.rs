@@ -472,6 +472,13 @@ const CARRIED: &[Carried] = &[
             ("left_in", Holds::Event),
         ],
     },
+    // And the Previews suggested for trying the work, which name nothing but
+    // the Conversation: how to try the branch is true wherever it is worked.
+    Carried {
+        table: "previews",
+        found: Found::ByConversation,
+        ids: &[("conversation_id", Holds::Conversation)],
+    },
     // What GitHub last said about the work, and what the wrap-up got through.
     Carried {
         table: "pull_request_checks",

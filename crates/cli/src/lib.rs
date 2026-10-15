@@ -35,6 +35,7 @@ mod memo;
 /// one. Read on every platform, so that a pipe named where there are none is
 /// refused as the pipe it is rather than as an unparseable URL.
 mod pipe;
+mod preview;
 pub mod repo;
 mod serve;
 /// The elevated pair that puts the local account a Windows session runs as on
@@ -175,6 +176,36 @@ enum Command {
         server: String,
     },
 
+    /// Suggest a preview: a title and the one-line command that tries this
+    /// session's work by hand, which the human runs from the Code pane with a
+    /// press.
+    ///
+    /// The command on stdin, one line of at most 4 KiB written for the
+    /// terminal's own shell; the trailing newline a heredoc ends in is dropped.
+    /// Only a building session may suggest one: a backlog task, the finish, a
+    /// stage's planning, an inline run or a steered instruction. A title that
+    /// already stands has its command replaced. Accepted, it prints the title
+    /// as YAML — `title: Build and test` — on stdout and exits 0; refused, it
+    /// exits non-zero and says why on stderr, and nothing is suggested.
+    ///
+    /// `--retire <title>` takes one back instead: nothing is read from stdin,
+    /// and nothing is printed on stdout.
+    Preview {
+        /// What the preview is called, such as "Build and test".
+        #[arg(required_unless_present = "retire", conflicts_with = "retire")]
+        title: Option<String>,
+
+        /// Retire the preview with this title rather than suggest one.
+        #[arg(long, value_name = "TITLE")]
+        retire: Option<String>,
+
+        /// Where the Verkstead server is: its base URL, or `pipe://<name>` for
+        /// a named pipe, which is Windows' own and what a session in a
+        /// container asks through.
+        #[arg(long, env = "VERKSTEAD_SERVER", default_value = DEFAULT_SERVER)]
+        server: String,
+    },
+
     /// Say this session is about to end its turn with work of its own still
     /// running in the background — a build, a test run — so it is not taken as
     /// stopped.
@@ -285,6 +316,15 @@ impl Cli {
             }) => match retire {
                 Some(id) => memo::retire(id, &reason, &server),
                 None => memo::memo(&server),
+            },
+            Some(Command::Preview {
+                title,
+                retire,
+                server,
+            }) => match (title, retire) {
+                (_, Some(title)) => preview::retire(&title, &server),
+                (Some(title), None) => preview::preview(&title, &server),
+                (None, None) => unreachable!("clap requires a title or --retire"),
             },
             Some(Command::Waiting { length, server }) => {
                 waiting::waiting(length.as_deref(), &server)

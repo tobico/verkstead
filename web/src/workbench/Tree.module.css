@@ -5,8 +5,10 @@
    file or the shell somebody opened out of it. The rows are dense, because a
    tree is scanned rather than read, and a worktree is deep. */
 .tree {
-  flex: none;
-  width: 16rem;
+  /* The height the column it stands in leaves it, under the Previews box where
+     there is one; the width is the column's — see `.side` in
+     `Code.module.css`. */
+  flex: 1;
   min-height: 0;
   padding: 0.5rem 0;
   overflow: auto;
@@ -25,7 +27,7 @@
    is the pane's own, in `Code.module.css`. */
 @media (max-width: 40rem) {
   .tree {
-    width: auto;
+    flex: none;
     max-height: 12rem;
   }
 }

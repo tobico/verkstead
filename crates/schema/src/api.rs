@@ -102,6 +102,75 @@ pub struct MemoLeft {
     pub id: i64,
 }
 
+/// The most a Preview's command may hold, in bytes (ADR-0024).
+///
+/// Here for [`MAX_MEMO_BYTES`]'s reason: the CLI refuses a longer one before
+/// sending anything, as a courtesy, and the server refuses one sent by hand,
+/// as the rule.
+pub const MAX_PREVIEW_COMMAND_BYTES: usize = 4 * 1024;
+
+/// What `POST …/api/v1/previews` takes: the title the Preview goes by, and
+/// the one line typed into a terminal to try the work.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PreviewSuggestion {
+    pub title: String,
+    pub command: String,
+}
+
+impl PreviewSuggestion {
+    /// The suggestion as it is stored: the title trimmed, and the command
+    /// trimmed of the trailing newline a heredoc always ends in, before
+    /// anything is checked.
+    pub fn new(title: &str, command: &str) -> Self {
+        PreviewSuggestion {
+            title: title.trim().to_owned(),
+            command: command.trim_end_matches(['\n', '\r']).to_owned(),
+        }
+    }
+
+    /// Why the suggestion is refused before it goes anywhere, or `None` where
+    /// it may be left: an empty title, an empty command, a newline anywhere in
+    /// the command, or a command over [`MAX_PREVIEW_COMMAND_BYTES`].
+    pub fn refused(&self) -> Option<String> {
+        if self.title.trim().is_empty() {
+            return Some(
+                "the preview has no title: name it for what it tries, such as \"Build and test\""
+                    .to_owned(),
+            );
+        }
+
+        if self.command.trim().is_empty() {
+            return Some(
+                "the preview's command is empty: write the one line that tries the work".to_owned(),
+            );
+        }
+
+        if self.command.contains(['\n', '\r']) {
+            return Some(
+                "the preview's command has a newline in it: it is typed into a shell as one \
+                 line, so join the steps with the shell's own separator"
+                    .to_owned(),
+            );
+        }
+
+        (self.command.len() > MAX_PREVIEW_COMMAND_BYTES).then(|| {
+            format!(
+                "the preview's command is {} bytes, over the maximum of {} (4 KiB): put the \
+                 steps in a script and run that",
+                self.command.len(),
+                MAX_PREVIEW_COMMAND_BYTES
+            )
+        })
+    }
+}
+
+/// What `POST …/api/v1/previews` returns once a Preview stands: its title,
+/// which is what it goes by. The CLI prints this and nothing else on stdout.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PreviewLeft {
+    pub title: String,
+}
+
 /// What the API returns when it refuses a request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]

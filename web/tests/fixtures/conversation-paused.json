@@ -57,6 +57,7 @@
   "pending_steer": null,
   "permitted": [],
   "pinned": [],
+  "previews": [],
   "process": "Develop",
   "ready_to_continue": false,
   "ready_to_grill": false,

@@ -972,6 +972,16 @@ pub struct ConversationView {
     /// a Share, which is the record, carries no trace of it.
     pub pending_steer: Option<PendingSteerView>,
 
+    /// The Previews standing on this Conversation, oldest first: what a
+    /// building session suggested for trying its work by hand (ADR-0024).
+    ///
+    /// Empty is every Conversation until a session suggests one. **Not a
+    /// Timeline Event**, for the pending steer's reason the other way round: a
+    /// Preview is a press in the Code pane rather than a reading of the record,
+    /// so it is here, where the header's Code icon can read it without the pane
+    /// open, and a Share carries none.
+    pub previews: Vec<PreviewView>,
+
     /// Where the live record of this Conversation is, where this copy is not it
     /// (ADR-0020, *Transfer*).
     ///
@@ -1036,6 +1046,18 @@ pub struct TransferredTo {
     /// And the id that machine numbered its copy, which is the other half of
     /// where the redirect goes.
     pub id: i64,
+}
+
+/// One Preview as the page receives it: the title its row is drawn with, and
+/// the command a press types into a terminal.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct PreviewView {
+    /// What it goes by, which is what its row says.
+    pub title: String,
+
+    /// The one line typed into the terminal.
+    pub command: String,
 }
 
 /// A pending steer as the page receives it: when the press was made, and the
@@ -2884,15 +2906,16 @@ pub struct TerminalsView {
     pub live: Vec<TerminalView>,
 }
 
-/// One of them: which of the Conversation's it is, and whether somebody is
-/// working in it.
+/// One of them: which of the Conversation's it is, whether somebody is
+/// working in it, and — where it was opened for a Preview — which, and what
+/// its tab is called.
 ///
 /// Nearly nothing, and that is the shape of the thing. A terminal is a shell in
 /// a Sandbox and nothing else — no record, no Event, nothing in a Share
 /// (ADR 0013) — so what is *on* one arrives down a socket of its own, and what
-/// is here is the number the socket is found by and the one judgement only the
-/// server can make about it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// is here is the number the socket is found by and what only the server can
+/// say about it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct TerminalView {
     /// The number this server issued it, which is what its socket and its close
@@ -2909,6 +2932,50 @@ pub struct TerminalView {
     /// one it cannot tell on confirms every close rather than ending a shell
     /// somebody was in.
     pub busy: bool,
+
+    /// The title of the Preview it was opened for, and `None` for one opened
+    /// by **New terminal** (ADR-0024) — and for one whose Preview has been
+    /// retired since, which is an ordinary tab from then on.
+    pub preview: Option<String>,
+
+    /// What its tab is called, where the server holds a name for it — the
+    /// Preview's title, while its run stands — ahead of anything the shell's
+    /// own title escape sets. Held here rather than by the page so that a
+    /// reattach after a reload brings the name back with the tab, a repaint
+    /// carrying the grid and not the title. `None` is a tab called as any tab
+    /// is, which is what one is once its run has ended.
+    pub title: Option<String>,
+
+    /// What is in front of it, as the server last read it, where it was opened
+    /// for a Preview — `None` for every other terminal, nothing being read of
+    /// one. See [`InFront`].
+    pub in_front: Option<InFront>,
+}
+
+/// What is in front of a terminal opened for a Preview: the server's reading of
+/// the pseudo-terminal's foreground, taken on a turn while a Code pane is
+/// attached and again at every press on the Preview (ADR-0024).
+///
+/// What the row's icon and the tab's title follow, and what a press is decided
+/// by — see [`TerminalOpened`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum InFront {
+    /// The run: any process group in front since the command was typed and
+    /// before the shell held the front again — each step of a chain is its
+    /// own — or the command typed and not yet started, the shell having a
+    /// moment to read the line.
+    Run,
+
+    /// The shell, at its prompt: the run has ended, or was never seen start.
+    Shell,
+
+    /// Something that is neither: a command the human started of their own.
+    Other,
+
+    /// Nothing can be said — the platform reads no foreground, which is
+    /// Windows. A press there refocuses the terminal and never types into it.
+    Unknown,
 }
 
 /// What one device's attached terminals on a Conversation are listening on —
@@ -2937,6 +3004,16 @@ pub struct TerminalPorts {
     pub ports: Vec<u16>,
 }
 
+/// What a press asking for another terminal says: nothing, for one of
+/// **New terminal**'s, and the title of the Preview it is opened for, for a
+/// press on a row of the Previews box (ADR-0024).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct OpenTerminal {
+    #[serde(default)]
+    pub preview: Option<String>,
+}
+
 /// And what became of asking for another one.
 ///
 /// Named refusals like every other press in the workbench, because each of them
@@ -2948,7 +3025,25 @@ pub struct TerminalPorts {
 pub enum TerminalOpened {
     /// A shell is running in the Conversation's Sandbox, and this is the number
     /// it answers to for as long as the server holds it.
+    ///
+    /// For a press on a Preview, a new terminal: none of the Preview's was
+    /// live, or something else was in front of the newest of them, which is
+    /// left alone.
     Opened {
+        number: i64,
+    },
+
+    /// A press on a Preview whose newest terminal has its run in front, or one
+    /// nothing can be said about: that terminal is to be shown, and nothing was
+    /// typed into it.
+    Refocused {
+        number: i64,
+    },
+
+    /// A press on a Preview whose newest terminal has its shell in front: that
+    /// terminal is to be shown, and the command was typed into it again, which
+    /// is a new run.
+    Retyped {
         number: i64,
     },
 
@@ -2969,6 +3064,10 @@ pub enum TerminalOpened {
     /// the shell inside it would not run. The reason is in the server's log —
     /// this is the one refusal with nothing for the human to correct.
     Refused,
+
+    /// It was asked for a Preview, and none stands under that title: retired
+    /// since the page read the Conversation, which the next read will show.
+    NoSuchPreview,
 }
 
 /// And what became of closing one.

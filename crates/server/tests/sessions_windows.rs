@@ -1907,6 +1907,70 @@ async fn a_session_reaches_what_the_description_names_and_is_refused_what_it_doe
     );
 }
 
+/// A press on a Preview whose terminal is live refocuses it and types nothing,
+/// ever: a pseudoconsole has no foreground to read, so whether the run stands
+/// cannot be said, and a line typed into a shell that might be busy lands in
+/// whatever is running (ADR-0024).
+#[tokio::test]
+async fn a_press_on_a_preview_with_a_live_terminal_only_refocuses_it() {
+    let fixture = grilling(
+        r#"
+        Say 'reading the brief'
+        Idle
+        "#,
+    )
+    .await;
+
+    fixture.worktree().await;
+    let at = fixture.listening().await;
+
+    // The word is put together by the shell, so that the echo of the line
+    // typed is not what the grid is found holding.
+    let pool = open_database(&fixture.state.path().join("verkstead.db"))
+        .await
+        .unwrap();
+    verkstead_store::suggest_preview(
+        &pool,
+        fixture.id,
+        "Build and test",
+        "Write-Output ('the preview ' + 'ran')",
+        "a test",
+    )
+    .await
+    .unwrap();
+
+    let press = || async {
+        post::<TerminalOpened>(
+            &fixture.app,
+            &format!("/api/ui/conversations/{}/terminals", fixture.id),
+            &serde_json::json!({ "preview": "Build and test" }),
+        )
+        .await
+    };
+
+    let TerminalOpened::Opened { number } = press().await else {
+        panic!("the first press opens a terminal for the preview");
+    };
+
+    let mut watcher = Watcher::terminal(at, fixture.id, number).await;
+    watcher.resize(200, 40).await;
+    watcher.until(|grid| grid.contains("the preview ran")).await;
+
+    assert_eq!(press().await, TerminalOpened::Refocused { number });
+
+    watcher.types("Write-Output ('still ' + 'here')\r").await;
+    let showing = watcher.until(|grid| grid.contains("still here")).await;
+
+    assert_eq!(
+        showing
+            .iter()
+            .filter(|row| row.contains("the preview ran"))
+            .count(),
+        1,
+        "nothing is typed into a terminal whose foreground cannot be read: {showing:?}",
+    );
+}
+
 /// A Conversation's own terminal comes up on PowerShell, in the Conversation's
 /// Worktree.
 ///
@@ -1942,7 +2006,16 @@ async fn a_terminal_runs_powershell_in_the_conversations_worktree() {
     )
     .await;
 
-    assert_eq!(live.live, vec![TerminalView { number, busy: true }]);
+    assert_eq!(
+        live.live,
+        vec![TerminalView {
+            number,
+            busy: true,
+            preview: None,
+            title: None,
+            in_front: None,
+        }]
+    );
 
     let mut watcher = Watcher::terminal(at, fixture.id, number).await;
 
@@ -2013,7 +2086,13 @@ async fn a_terminal_runs_powershell_in_the_conversations_worktree() {
 
     assert_eq!(
         terminals_of(&fixture).await,
-        vec![TerminalView { number, busy: true }],
+        vec![TerminalView {
+            number,
+            busy: true,
+            preview: None,
+            title: None,
+            in_front: None,
+        }],
         "a close that was refused should have left the terminal on the register",
     );
 

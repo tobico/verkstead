@@ -33,7 +33,7 @@ use verkstead_store::{
     record_fix_attempt, record_merging, record_pull_request, record_share, record_share_comment,
     record_standing, register_repo, save_brief, save_pending_steer, set_grilling_pairing,
     set_process, set_target, settle_wrap_up, skip_review, stamp_unseen, start_capture,
-    start_conversation, start_grilling, start_implementing, stop, submit_response,
+    start_conversation, start_grilling, start_implementing, stop, submit_response, suggest_preview,
     trim_conversation, unarchive_conversation,
 };
 
@@ -295,6 +295,20 @@ pub async fn owning(pool: &SqlitePool, branch: &str) -> Worked {
     .await
     .unwrap()
     .expect("the Conversation is there to leave one on");
+
+    // And how it suggested trying the work.
+    assert!(
+        suggest_preview(
+            pool,
+            id,
+            "Build and test",
+            "cargo run -- serve",
+            "the session that worked task 03",
+        )
+        .await
+        .unwrap(),
+        "the Conversation is there to suggest one on",
+    );
 
     // Three Sets, because a Set can end three ways and each way is its own row:
     // answered, stored for nobody, and locked unanswered.

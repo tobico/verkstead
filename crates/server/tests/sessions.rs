@@ -38891,7 +38891,10 @@ async fn a_terminal_says_whether_somebody_is_working_in_it() {
         terminals_of(&fixture).await,
         vec![TerminalView {
             number,
-            busy: false
+            busy: false,
+            preview: None,
+            title: None,
+            in_front: None,
         }],
         "a shell at its prompt is a terminal nobody is working in",
     );
@@ -38904,7 +38907,13 @@ async fn a_terminal_says_whether_somebody_is_working_in_it() {
 
     assert_eq!(
         terminals_of(&fixture).await,
-        vec![TerminalView { number, busy: true }],
+        vec![TerminalView {
+            number,
+            busy: true,
+            preview: None,
+            title: None,
+            in_front: None,
+        }],
         "a shell running something is a terminal somebody is working in",
     );
 
@@ -38947,6 +38956,326 @@ async fn a_terminal_says_whether_somebody_is_working_in_it() {
         terminals_of(&fixture).await.is_empty(),
         "a terminal that was closed should be off the register",
     );
+}
+
+/// A terminal opened for a Preview is the ordinary shell with the Preview's
+/// command typed into it once the shell has come up — run, and the shell still
+/// there after it — and the terminals view says which Preview it was opened for
+/// and the title its tab is called by (ADR-0024). A title no Preview stands
+/// under is refused by name, with nothing opened.
+#[tokio::test]
+async fn a_terminal_opened_for_a_preview_runs_its_command_in_the_shell() {
+    let fixture = grilling(
+        r#"
+        printf 'reading the brief\r\n'
+        while :; do sleep 0.05; done
+        "#,
+    )
+    .await;
+
+    fixture
+        .until(|view| view.worktree.as_ref().map(|worktree| worktree.path.clone()))
+        .await;
+
+    // Left on the record the way `verkstead preview` leaves one, which the
+    // suite's own preview tests prove; here it is the press that is asked about.
+    // The word is put together by the shell, so that the echo of the line typed
+    // is not what the grid is found holding.
+    let pool = open_database(&fixture.database).await.unwrap();
+    verkstead_store::suggest_preview(
+        &pool,
+        fixture.id,
+        "Build and test",
+        "printf 'the preview %s\\n' ran",
+        "a test",
+    )
+    .await
+    .unwrap();
+
+    let at = fixture.listening().await;
+
+    let refused: TerminalOpened = post(
+        &fixture.app,
+        &format!("/api/ui/conversations/{}/terminals", fixture.id),
+        &serde_json::json!({ "preview": "Deploy" }),
+    )
+    .await;
+
+    assert_eq!(refused, TerminalOpened::NoSuchPreview);
+    assert!(
+        terminals_of(&fixture).await.is_empty(),
+        "a refused press opens nothing",
+    );
+
+    let opened: TerminalOpened = post(
+        &fixture.app,
+        &format!("/api/ui/conversations/{}/terminals", fixture.id),
+        &serde_json::json!({ "preview": "Build and test" }),
+    )
+    .await;
+
+    let TerminalOpened::Opened { number } = opened else {
+        panic!("expected a terminal to open for the preview, and the server said: {opened:?}");
+    };
+
+    let live = terminals_of(&fixture).await;
+    assert_eq!(
+        live.iter()
+            .map(|terminal| (
+                terminal.number,
+                terminal.preview.clone(),
+                terminal.title.clone()
+            ))
+            .collect::<Vec<_>>(),
+        vec![(
+            number,
+            Some("Build and test".to_owned()),
+            Some("Build and test".to_owned())
+        )],
+        "the terminal says the preview it was opened for, and the title it is called by",
+    );
+
+    let mut watcher = Watcher::terminal(at, fixture.id, number).await;
+    watcher.resize(200, 40).await;
+
+    let showing = watcher.until(|grid| grid.contains("the preview ran")).await;
+    assert!(
+        showing.iter().any(|row| row.contains("the preview ran")),
+        "the preview's command should have run in the shell: {showing:?}",
+    );
+
+    // And the shell is still there once it has, which is a terminal rather than
+    // a command: the human's next line is answered.
+    watcher.types("printf 'still %s\\n' here\r").await;
+    let showing = watcher.until(|grid| grid.contains("still here")).await;
+    assert!(
+        showing.iter().any(|row| row.contains("still here")),
+        "the shell should still be answering after the preview's command: {showing:?}",
+    );
+
+    // Once, and not again: the line was typed a single time.
+    assert_eq!(
+        showing
+            .iter()
+            .filter(|row| row.contains("the preview ran"))
+            .count(),
+        1,
+        "the preview's command is typed once: {showing:?}",
+    );
+}
+
+/// A press on a Preview with a live terminal is decided by what is in front of
+/// it (ADR-0024): the run in front is the tab refocused with nothing typed, the
+/// shell in front is the command typed again, and a command of the human's own
+/// in front is a second terminal opened beside it. What is in front follows the
+/// run with a Code pane attached, each move a `terminals` Nudge — and a retire
+/// leaves the terminals as ordinary ones, called as any tab is.
+#[tokio::test]
+async fn a_press_on_a_preview_with_a_live_terminal_follows_what_is_in_front() {
+    use verkstead_render::InFront;
+
+    let fixture = grilling(&a_backlog_that_says_so(
+        ": > /tmp/verkstead/preview-now\n        \
+         while [ ! -f /tmp/verkstead/previewed ]; do sleep 0.05; done",
+        "",
+    ))
+    .await;
+
+    picked_through_to_the_task(&fixture).await;
+
+    let directory = handoff_directory(&fixture);
+    let deadline = Instant::now() + *PATIENCE;
+    while !directory.join("preview-now").exists() {
+        assert!(
+            Instant::now() < deadline,
+            "the task session never got as far as its preview"
+        );
+        pause(Duration::from_millis(25)).await;
+    }
+
+    // The word is put together by the shell, so that the echo of the line
+    // typed is never what the grid is found holding; and it goes on running,
+    // which is what a run is — in two steps, which a shell gives a process
+    // group each, the way `cargo build && cargo run` is.
+    let (status, body) = suggest_a_preview(
+        &fixture,
+        "Build and test",
+        "printf 'the run %s\\n' began; sleep 1 && sleep 600",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let at = fixture.listening().await;
+    let _pane = a_code_pane(at, fixture.id).await;
+
+    let press = || async {
+        post::<TerminalOpened>(
+            &fixture.app,
+            &format!("/api/ui/conversations/{}/terminals", fixture.id),
+            &serde_json::json!({ "preview": "Build and test" }),
+        )
+        .await
+    };
+    let ran = |grid: &str| grid.matches("the run began").count();
+
+    let TerminalOpened::Opened { number } = press().await else {
+        panic!("the first press opens a terminal for the preview");
+    };
+
+    let mut watcher = Watcher::terminal(at, fixture.id, number).await;
+    watcher.resize(200, 40).await;
+    watcher.until(|grid| ran(grid) == 1).await;
+    until_in_front(&fixture, number, |terminal| terminal.busy).await;
+
+    // The run in front: refocused, and nothing typed.
+    assert_eq!(press().await, TerminalOpened::Refocused { number });
+
+    // And still the run once its first step is over and the second has taken
+    // the front: the chain is one run, refocused again rather than started
+    // over beside it.
+    pause(Duration::from_millis(2500)).await;
+    let chained = until_in_front(&fixture, number, |_| true).await;
+    assert_eq!(
+        (chained.in_front, chained.title.as_deref()),
+        (Some(InFront::Run), Some("Build and test")),
+        "the second step of the chain is the run too",
+    );
+    assert_eq!(press().await, TerminalOpened::Refocused { number });
+
+    // Ended, with Ctrl+C: the shell in front, followed without anybody asking,
+    // and the tab called as any tab is. The page opens the stream here rather
+    // than at the top, a page that falls behind a session's chatter having its
+    // stream ended under it.
+    let mut page = Listening::open(&fixture.app).await;
+    watcher.types("\u{3}").await;
+    until_nudged(
+        &mut page,
+        Nudge::Terminals {
+            conversation: fixture.id,
+        },
+    )
+    .await;
+    let ended = until_in_front(&fixture, number, |terminal| {
+        terminal.in_front == Some(InFront::Shell)
+    })
+    .await;
+    assert_eq!(
+        ended.title, None,
+        "the tab is called by the shell once the run ends"
+    );
+
+    // So the press types the command again, into the same terminal, and the
+    // title comes back with the run.
+    assert_eq!(press().await, TerminalOpened::Retyped { number });
+    watcher.until(|grid| ran(grid) == 2).await;
+    let again = until_in_front(&fixture, number, |terminal| {
+        terminal.busy && terminal.in_front == Some(InFront::Run)
+    })
+    .await;
+    assert_eq!(again.title.as_deref(), Some("Build and test"));
+
+    // Past the first step, so the Ctrl+C below ends the run rather than
+    // racing the chain into its second.
+    pause(Duration::from_millis(2500)).await;
+
+    // And with a command of the human's own in front, a second terminal opens
+    // for the preview and the first is left exactly as it is.
+    watcher.types("\u{3}").await;
+    until_in_front(&fixture, number, |terminal| {
+        terminal.in_front == Some(InFront::Shell)
+    })
+    .await;
+    watcher.types("sleep 700\r").await;
+    until_in_front(&fixture, number, |terminal| {
+        terminal.in_front == Some(InFront::Other)
+    })
+    .await;
+
+    let TerminalOpened::Opened { number: second } = press().await else {
+        panic!("a press with the human's own command in front opens another terminal");
+    };
+    assert_ne!(second, number);
+
+    let mut beside = Watcher::terminal(at, fixture.id, second).await;
+    beside.resize(200, 40).await;
+    beside.until(|grid| ran(grid) == 1).await;
+
+    let first = until_in_front(&fixture, number, |_| true).await;
+    assert_eq!(
+        (first.busy, first.in_front),
+        (true, Some(InFront::Other)),
+        "the human's command is left running",
+    );
+
+    // Retired, the preview's terminals are ordinary ones.
+    let mut page = Listening::open(&fixture.app).await;
+    let (status, body) = retire_a_preview(&fixture, "Build and test").await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+    until_nudged(
+        &mut page,
+        Nudge::Terminals {
+            conversation: fixture.id,
+        },
+    )
+    .await;
+
+    assert_eq!(
+        terminals_of(&fixture)
+            .await
+            .into_iter()
+            .map(|terminal| (
+                terminal.number,
+                terminal.preview,
+                terminal.title,
+                terminal.in_front
+            ))
+            .collect::<Vec<_>>(),
+        vec![(number, None, None, None), (second, None, None, None)],
+        "a retired preview's terminals are called as any tab is",
+    );
+
+    std::fs::write(directory.join("previewed"), "").unwrap();
+}
+
+/// A Code pane attached to the Conversation, the way the pane says it is
+/// drawn: the socket held open for as long as what comes back is.
+async fn a_code_pane(
+    at: SocketAddr,
+    conversation: i64,
+) -> WebSocketStream<MaybeTlsStream<TcpStream>> {
+    let (socket, _) = tokio_tungstenite::connect_async(format!(
+        "ws://{at}/api/ui/conversations/{conversation}/files/attach"
+    ))
+    .await
+    .expect("a Code pane attaches");
+
+    socket
+}
+
+/// Read the terminals view until terminal `number` is as `reached` wants it,
+/// and hand it back.
+async fn until_in_front(
+    fixture: &Grilling,
+    number: i64,
+    reached: impl Fn(&TerminalView) -> bool,
+) -> TerminalView {
+    let deadline = Instant::now() + *PATIENCE;
+
+    loop {
+        let live = terminals_of(fixture).await;
+
+        if let Some(terminal) = live.iter().find(|terminal| terminal.number == number)
+            && reached(terminal)
+        {
+            return terminal.clone();
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "terminal {number} never got there: {live:?}"
+        );
+        pause(Duration::from_millis(50)).await;
+    }
 }
 
 /// The terminals a Conversation is holding, as the pane reads them back.
@@ -39332,6 +39661,143 @@ async fn a_steered_session_is_told_the_memos_and_a_session_with_none_is_not() {
     );
 }
 
+/// The shell a terminal on this server runs, as a building session's prompt
+/// names it: by `comm`'s name and the path it is started at.
+fn the_terminals_shell_said() -> String {
+    let shell = verkstead_server::terminals::shell::of_the_server();
+    let named = verkstead_server::terminals::busy::named(&shell);
+
+    format!(
+        "A terminal here runs `{named}`, at `{shell}`: write a preview's command for that shell."
+    )
+}
+
+/// Every step of a backlog with no Preview standing is told so under the
+/// heading, over the cue to suggest one, with the terminal's shell named — and
+/// each step's done signal is accepted all the same, a session that left no
+/// Preview being one nothing refuses. See ADR-0024.
+#[tokio::test]
+async fn every_building_session_is_told_to_suggest_a_preview_when_none_stands() {
+    let spill = tempfile::tempdir().unwrap();
+    let written = spill.path().join("task-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_of_two_writing_prompts(&written),
+        PULL_REQUEST,
+    )
+    .await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
+
+    fixture
+        .until(|view| {
+            commits(view)
+                .iter()
+                .any(|commit| commit.subject.starts_with("chore: finish"))
+                .then_some(())
+        })
+        .await;
+
+    let started = prompts_by_step(&written);
+    assert_eq!(
+        started.len(),
+        3,
+        "a session per step, each signal accepted: {started:?}"
+    );
+
+    let block = format!(
+        "# The previews standing\n\n\
+         None stands yet. Suggest one with `verkstead preview` as soon as there is \
+         anything to try, whether or not a manual test looks called for, so it is \
+         there whenever the human decides one is.\n\n{}\n",
+        the_terminals_shell_said(),
+    );
+
+    for (step, prompt) in &started {
+        assert!(
+            prompt.contains(&block),
+            "{step} is shown the empty heading over the hint: {prompt:?}",
+        );
+    }
+}
+
+/// A grilling is told nothing of the Previews, being refused the verb, and a
+/// steered instruction is told the ones standing, title over command.
+#[tokio::test]
+async fn a_steered_instruction_is_told_the_previews_and_a_grilling_is_not() {
+    let fixture = grilling(
+        r#"
+        printf 'prompt was: %s\n' "$2"
+        sleep 300
+        "#,
+    )
+    .await;
+
+    let grilled = fixture.printed_after(0).await;
+
+    assert!(
+        !grilled.contains("previews standing") && !grilled.contains("verkstead preview"),
+        "a grilling has no such heading: {grilled:?}",
+    );
+
+    let pool = open_database(&fixture.database).await.unwrap();
+    verkstead_store::suggest_preview(
+        &pool,
+        fixture.id,
+        "Build and test",
+        "cargo run -- serve",
+        "the session that worked task 01",
+    )
+    .await
+    .unwrap();
+
+    let before = outputs(&fixture.view().await).len();
+
+    assert_eq!(fixture.steer().await, SteerOpened::Opened);
+    assert_eq!(
+        fixture.steer_grilling(None, false).await,
+        ConversationSteered::Steered,
+    );
+
+    let relaunched = fixture.printed_after(before).await;
+
+    assert!(
+        relaunched.contains("/verkstead/skills/grilling/SKILL.md")
+            && !relaunched.contains("previews standing"),
+        "nor does a relaunched one, with a Preview standing: {relaunched:?}",
+    );
+
+    let before = outputs(&fixture.view().await).len();
+
+    assert_eq!(fixture.steer().await, SteerOpened::Opened);
+    assert_eq!(
+        fixture
+            .steer_instructed("Note the window the count is against.\n")
+            .await,
+        ConversationSteered::Steered,
+    );
+
+    let instructed = fixture.printed_after(before).await;
+
+    assert!(
+        instructed.contains("/verkstead/skills/instruction/SKILL.md")
+            && instructed.contains(&format!(
+                "# The previews standing\n\n\
+                 **Build and test**\n\n    cargo run -- serve\n\n\
+                 Suggest one again under its title when its command changes, and retire \
+                 one that no longer runs.\n\n{}\n",
+                the_terminals_shell_said(),
+            )),
+        "a steered instruction is told the Preview standing: {instructed:?}",
+    );
+}
+
 /// Retire Memo `memo` from the session running in `fixture`, the way `verkstead
 /// memo --retire` does, with `reason` as the body.
 async fn retire_a_memo(fixture: &Grilling, memo: i64, reason: &str) -> (StatusCode, String) {
@@ -39458,4 +39924,151 @@ async fn a_memo_a_task_session_retires_leaves_every_later_prompt() {
             "{step} is told the rest: {prompt:?}",
         );
     }
+}
+
+/// Suggest a Preview from the session running in `fixture`, the way
+/// `verkstead preview` does, and hand back what the server answered.
+async fn suggest_a_preview(fixture: &Grilling, title: &str, command: &str) -> (StatusCode, String) {
+    let body = serde_saphyr::to_string(&verkstead_schema::PreviewSuggestion {
+        title: title.to_owned(),
+        command: command.to_owned(),
+    })
+    .unwrap();
+
+    fetch(
+        &fixture.app,
+        Request::builder()
+            .method("POST")
+            .uri(format!("/conversations/{}/api/v1/previews", fixture.id))
+            .body(Body::from(body))
+            .unwrap(),
+    )
+    .await
+}
+
+/// Retire the Preview called `title` from the session running in `fixture`,
+/// the way `verkstead preview --retire` does.
+async fn retire_a_preview(fixture: &Grilling, title: &str) -> (StatusCode, String) {
+    fetch(
+        &fixture.app,
+        Request::builder()
+            .method("POST")
+            .uri(format!(
+                "/conversations/{}/api/v1/previews/retire",
+                fixture.id
+            ))
+            .body(Body::from(title.to_owned()))
+            .unwrap(),
+    )
+    .await
+}
+
+/// The titles and commands standing on the Conversation's view, in order.
+async fn previews(fixture: &Grilling) -> Vec<(String, String)> {
+    fixture
+        .view()
+        .await
+        .previews
+        .into_iter()
+        .map(|preview| (preview.title, preview.command))
+        .collect()
+}
+
+/// A task session's preview lands on the Conversation's view, and the same
+/// title again replaces its command rather than adding a row — while a retire
+/// of a title that does not stand is refused by name, and one that does takes
+/// it off the view.
+#[tokio::test]
+async fn a_task_session_suggests_a_preview_and_the_same_title_replaces_it() {
+    let fixture = grilling(&a_backlog_that_says_so(
+        ": > /tmp/verkstead/preview-now\n        \
+         while [ ! -f /tmp/verkstead/previewed ]; do sleep 0.05; done",
+        "",
+    ))
+    .await;
+
+    picked_through_to_the_task(&fixture).await;
+
+    let directory = handoff_directory(&fixture);
+    let deadline = Instant::now() + *PATIENCE;
+    while !directory.join("preview-now").exists() {
+        assert!(
+            Instant::now() < deadline,
+            "the task session never got as far as its preview"
+        );
+        pause(Duration::from_millis(25)).await;
+    }
+
+    let (status, body) = suggest_a_preview(&fixture, "Build and test", "cargo test\n").await;
+    assert_eq!(status, StatusCode::OK, "the preview is taken: {body}");
+    assert_eq!(
+        body.trim(),
+        "title: Build and test",
+        "and the reply is its title"
+    );
+
+    let (status, body) = suggest_a_preview(&fixture, "Serve", "cargo run -- serve").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let (status, body) =
+        suggest_a_preview(&fixture, "Build and test", "cargo test --workspace").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    assert_eq!(
+        previews(&fixture).await,
+        [
+            (
+                "Build and test".to_owned(),
+                "cargo test --workspace".to_owned()
+            ),
+            ("Serve".to_owned(), "cargo run -- serve".to_owned()),
+        ],
+        "replaced in place, oldest first, the trailing newline dropped",
+    );
+
+    let (status, body) = retire_a_preview(&fixture, "Deploy").await;
+    let said = body.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert!(
+        said.contains("no preview called") && said.contains("Deploy") && said.contains("stands"),
+        "a title that does not stand is refused by name: {body}",
+    );
+
+    let (status, body) = retire_a_preview(&fixture, "Serve").await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+
+    std::fs::write(directory.join("previewed"), "").unwrap();
+
+    assert_eq!(
+        previews(&fixture).await,
+        [(
+            "Build and test".to_owned(),
+            "cargo test --workspace".to_owned()
+        )],
+        "and the retired one is gone",
+    );
+}
+
+/// A grilling may not suggest a preview: it is refused naming the kinds that
+/// may, and nothing lands.
+#[tokio::test]
+async fn a_grilling_session_is_refused_a_preview_naming_the_kinds_that_may() {
+    let fixture = grilling("printf 'grilling\\n'\nsleep 300").await;
+
+    // Once it has printed, so the session is running rather than launching.
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let (status, body) = suggest_a_preview(&fixture, "Build and test", "cargo test").await;
+
+    assert_eq!(status, StatusCode::CONFLICT, "refused: {body}");
+    // Unfolded, because the YAML reply wraps a long line wherever it likes.
+    let said = body.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(
+        said.contains("only a building session may suggest a preview")
+            && said.contains("a backlog task, the finish, a stage's planning"),
+        "naming the kinds that may: {body}",
+    );
+    assert!(previews(&fixture).await.is_empty(), "and nothing lands");
 }

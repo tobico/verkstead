@@ -120,6 +120,26 @@ no longer holds, the rest of the line being the reason:
 The Guide's *Leaving a memo for the sessions after you* section has the
 details.
 
+## Suggesting a preview
+
+A preview is a title and the one line the human runs from the Code pane to try
+this work by hand. Suggest one **as soon as anything this instruction changed
+can be tried** — whether or not a manual test looks called for — so it is
+already there when the human decides to try it:
+
+    verkstead preview "Build and test" <<'SH'
+    cargo build && cargo run -- serve
+    SH
+
+Suggest it again under the same title when the way to run the work changes,
+and retire one that no longer runs:
+
+    verkstead preview --retire "Build and test"
+
+Your prompt lists the previews standing, under *The previews standing*, and
+names the shell the terminal runs — write the command for that one, not for
+this sandbox's. The Guide's *Suggesting a preview* section has the details.
+
 ## 4. Say you are done
 
 Then **run `verkstead done`**, and stop there. Do not go looking for more to do,

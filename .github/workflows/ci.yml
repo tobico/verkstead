@@ -523,6 +523,15 @@ jobs:
       - name: A terminal's ports, read on a real Mac
         run: 'cargo test -p verkstead-server --lib terminals::ports::'
 
+      # And what is in front of a terminal, read the Mac's way: `tcgetpgrp` on
+      # the pty's master side for the group, `proc_name` for what it is
+      # running. The test starts a real zsh on a real terminal and reads the
+      # shell, a command it runs, and the shell again once that is interrupted
+      # — which is whether a tab at its prompt closes without asking, and what
+      # a Preview's press is decided by (ADR-0024). Quoted for the same colon.
+      - name: What is in front of a terminal, read on a real Mac
+        run: 'cargo test -p verkstead-server --lib terminals::busy::'
+
   # And what the same workspace comes to on Windows, asked of Windows. The
   # session machinery is compiled there like everything else — what a Windows
   # build has not got is the pseudo-terminal under it, and four leaf call sites

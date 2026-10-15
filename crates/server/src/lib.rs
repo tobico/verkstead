@@ -241,6 +241,9 @@ mod places;
 /// for every binary that parses a [`Config`] rather than the server's alone.
 pub mod platform;
 pub mod preflight;
+/// Suggesting a Preview for trying the work by hand, from a building session
+/// alone (ADR-0024).
+mod previews;
 mod profiles;
 /// Putting a share where a link reaches it, which is Verkstead's own write to
 /// GitHub.
@@ -1696,6 +1699,16 @@ fn serving(state: AppState, gate: &key::Gate) -> Router {
         .route(
             &format!("{ASKING_FROM}/{{conversation}}/api/v1/memos/{{id}}/retire"),
             post(memos::retire),
+        )
+        // And saying how to try the work by hand (ADR-0024), and taking that
+        // back.
+        .route(
+            &format!("{ASKING_FROM}/{{conversation}}/api/v1/previews"),
+            post(previews::suggest),
+        )
+        .route(
+            &format!("{ASKING_FROM}/{{conversation}}/api/v1/previews/retire"),
+            post(previews::retire),
         )
         // And saying it is waiting on work of its own, which keeps it at work.
         .route(

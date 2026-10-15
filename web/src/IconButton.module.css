@@ -21,7 +21,11 @@
   font: inherit;
   font-size: var(--icon-size, 1.1rem);
   line-height: 1;
-  color: var(--ink-soft);
+  /* Its ink is the caller's to say where the icon carries state in its colour
+     — the Code icon taking the accent while a preview stands, in
+     `Timeline.module.css` — and the soft ink everywhere else. It holds under
+     the pointer and while open: what the colour says is still true then. */
+  color: var(--icon-ink, var(--ink-soft));
   background: transparent;
   /* An edge that is there and cannot be seen, as the card's is: nothing is
      drawn here, and a button that reserved no edge could not be given one
@@ -36,7 +40,7 @@
    that one way rather than two. The ink comes up with it, which is what the ⋯
    did while its own drop was down. */
 .open {
-  color: var(--ink);
+  color: var(--icon-ink, var(--ink));
   background: var(--card);
 }
 
@@ -44,7 +48,7 @@
    already there and does not move under the hand. */
 @media (hover: hover) {
   .iconButton:not(.open):not(:disabled):hover {
-    color: var(--ink);
+    color: var(--icon-ink, var(--ink));
     background: var(--card);
   }
 }

@@ -46,10 +46,10 @@ use verkstead_render::{
     FolderListing, GrillingStarted, HeaderEdit, IgnoreRule, IgnoredCommentsEdit, InstallPress,
     LanguageCleared, LanguageEdit, LanguageView, Lifecycle, Locked, McpHeader, McpServer,
     McpServerEdit, McpServersEdit, Merging, MissedOut, NewAdoption, NewCompanion, NewConversation,
-    NewJoin, NewRank, PairingView, Parked, PendingSteerView, Permitting, Process, ProcessChoice,
-    ProcessPicked, ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration, RemoteBanner,
-    RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice, RuleField,
-    RuleRefused, Running, RunningOn, ServeEdit, ServePress, ServerAttached, ServerField,
+    NewJoin, NewRank, OpenTerminal, PairingView, Parked, PendingSteerView, Permitting, Process,
+    ProcessChoice, ProcessPicked, ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration,
+    RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice,
+    RuleField, RuleRefused, Running, RunningOn, ServeEdit, ServePress, ServerAttached, ServerField,
     ServerRefused, ServerRemoved, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView,
     ShareCommented, SharePublished, SharedCommit, SharedConversation, ShowArchived,
     ShowingArchived, SizeRefused, Standing, SteerCancelled, SteerForm, SteerOpened,
@@ -2195,6 +2195,26 @@ pub(crate) async fn conversation_view(
         }
     };
 
+    // And the Previews standing on it, which the header's Code icon and the
+    // Code pane are drawn from. Rows beside the Conversation rather than on its
+    // Timeline — see [`store::standing_previews`].
+    //
+    // A read that fails reads as *none standing*, for the pending steer's
+    // reason: the rows are untouched, and the next read draws them again.
+    let previews = match store::standing_previews(&state.pool, id).await {
+        Ok(previews) => previews
+            .into_iter()
+            .map(|preview| verkstead_render::PreviewView {
+                title: preview.title,
+                command: preview.command,
+            })
+            .collect(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading the previews of a Conversation failed");
+            Vec::new()
+        }
+    };
+
     // And the accounts the steers on this Timeline were made under, read as
     // rows before any of them is drawn: the pane a steer opens names its
     // Pairing the way the picker does, which wants the Profile as it stands
@@ -2273,6 +2293,7 @@ pub(crate) async fn conversation_view(
         attachments: attached,
         mcp_servers: servers,
         pending_steer,
+        previews,
         // And where the live record is, where this copy is not it: what takes
         // the page off a tombstone and onto the device doing the work — see
         // [`ConversationView::transferred`].
@@ -3366,12 +3387,33 @@ async fn terminals(State(state): State<AppState>, Path(id): Path<String>) -> Htt
 /// Answered once the shell is running rather than once it has printed anything:
 /// what the browser is waiting for is a number to attach to, and what the shell
 /// says comes down the socket.
-async fn open_terminal(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+///
+/// The body is an [`OpenTerminal`]: empty for **New terminal**, and naming a
+/// Preview by its title for a press on its row, which opens the terminal for it
+/// (ADR-0024). No body at all is read as the empty one.
+async fn open_terminal(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    body: axum::body::Bytes,
+) -> HttpResponse {
     let Ok(id) = id.parse::<i64>() else {
         return Json(TerminalOpened::NoSuchConversation).into_response();
     };
 
-    match crate::terminals::open(&state, id).await {
+    let asked = match body.is_empty() {
+        true => OpenTerminal::default(),
+        false => match serde_json::from_slice::<OpenTerminal>(&body) {
+            Ok(asked) => asked,
+            Err(error) => {
+                return refused(
+                    StatusCode::BAD_REQUEST,
+                    ApiError::new(format!("The terminal asked for isn't one: {error}")),
+                );
+            }
+        },
+    };
+
+    match crate::terminals::open(&state, id, asked.preview.as_deref()).await {
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "opening a terminal failed");

@@ -28,8 +28,8 @@ use crate::{
     FileRenaming, FileRootsView, FileStatusView, FileWrite, FileWritten, FolderListing,
     ForwardsView, GrillingStarted, InstallPress, LanguageCleared, LinkedDevice, Locked,
     LoginClosed, LoginCode, LoginOpened, LoginState, MemoPressed, NewAdoption, NewCompanion,
-    NewConversation, NewJoin, NewRank, OnboardingView, PendingJoin, Permitting, PortsView,
-    PrefillView, Preflight, ProcessChoice, ProcessPicked, ProfileChoice, ProfileChosen,
+    NewConversation, NewJoin, NewRank, OnboardingView, OpenTerminal, PendingJoin, Permitting,
+    PortsView, PrefillView, Preflight, ProcessChoice, ProcessPicked, ProfileChoice, ProfileChosen,
     ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails, PushKey,
     Registered, Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoPairingsView,
     RepoRemoved, RepoSwitched, RepoView, Resolved, Resumed, RoadmapPane, RoleChoice, Screen,
@@ -259,6 +259,7 @@ fn the_viewers_types_are_written_from_these() {
     // is watched in.
     TerminalsView::export_all(&config).unwrap();
     TerminalOpened::export_all(&config).unwrap();
+    OpenTerminal::export_all(&config).unwrap();
     TerminalClosed::export_all(&config).unwrap();
     // And what a device reads over the link of the ports its attached terminals
     // are listening on, which no page reads yet: the hub is what asks.

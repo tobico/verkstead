@@ -2040,6 +2040,17 @@ mcp_servers: Array<AttachedServerView>,
  */
 pending_steer: PendingSteerView | null, 
 /**
+ * The Previews standing on this Conversation, oldest first: what a
+ * building session suggested for trying its work by hand (ADR-0024).
+ *
+ * Empty is every Conversation until a session suggests one. **Not a
+ * Timeline Event**, for the pending steer's reason the other way round: a
+ * Preview is a press in the Code pane rather than a reading of the record,
+ * so it is here, where the header's Code icon can read it without the pane
+ * open, and a Share carries none.
+ */
+previews: Array<PreviewView>, 
+/**
  * Where the live record of this Conversation is, where this copy is not it
  * (ADR-0020, *Transfer*).
  *
@@ -3096,6 +3107,16 @@ export type IgnoreRule = { author: string, body: string, };
 export type IgnoredCommentsEdit = "Keep" | { "Set": { rules: Array<IgnoreRule>, } };
 
 /**
+ * What is in front of a terminal opened for a Preview: the server's reading of
+ * the pseudo-terminal's foreground, taken on a turn while a Code pane is
+ * attached and again at every press on the Preview (ADR-0024).
+ *
+ * What the row's icon and the tab's title follow, and what a press is decided
+ * by — see [`TerminalOpened`].
+ */
+export type InFront = "Run" | "Shell" | "Other" | "Unknown";
+
+/**
  * The press that starts one: the rows that were ticked.
  *
  * Every one of them is a row the reading said was absent. A row that is
@@ -3724,7 +3745,7 @@ name: string | null, };
  * the behaviour every kind used to get — so a new kind is safe to add and an
  * old page stays correct against a newer server.
  */
-export type Nudge = { "kind": "transcript", conversation: number, } | { "kind": "screen", conversation: number, } | { "kind": "commit", conversation: number, } | { "kind": "files", conversation: number, } | { "kind": "ports", conversation: number, } | { "kind": "forwards" } | { "kind": "set", conversation: number, } | { "kind": "liveness", conversation: number, } | { "kind": "conversation", conversation: number, } | { "kind": "conversations" } | { "kind": "repos" } | { "kind": "joins" } | { "kind": "devices" } | { "kind": "discovered" } | { "kind": "profiles" } | { "kind": "login", profile: number, } | { "kind": "everything" };
+export type Nudge = { "kind": "transcript", conversation: number, } | { "kind": "screen", conversation: number, } | { "kind": "commit", conversation: number, } | { "kind": "files", conversation: number, } | { "kind": "ports", conversation: number, } | { "kind": "terminals", conversation: number, } | { "kind": "forwards" } | { "kind": "set", conversation: number, } | { "kind": "liveness", conversation: number, } | { "kind": "conversation", conversation: number, } | { "kind": "conversations" } | { "kind": "repos" } | { "kind": "joins" } | { "kind": "devices" } | { "kind": "discovered" } | { "kind": "profiles" } | { "kind": "login", profile: number, } | { "kind": "everything" };
 
 /**
  * One Nudge as it goes down a stream: what moved, and **whose news it is**.
@@ -3749,7 +3770,7 @@ export type Nudged = {
  * Device Id — absent for this device's own, which is every Nudge a
  * workbench has ever sent about its own work.
  */
-device?: string | null, } & ({ "kind": "transcript", conversation: number, } | { "kind": "screen", conversation: number, } | { "kind": "commit", conversation: number, } | { "kind": "files", conversation: number, } | { "kind": "ports", conversation: number, } | { "kind": "forwards" } | { "kind": "set", conversation: number, } | { "kind": "liveness", conversation: number, } | { "kind": "conversation", conversation: number, } | { "kind": "conversations" } | { "kind": "repos" } | { "kind": "joins" } | { "kind": "devices" } | { "kind": "discovered" } | { "kind": "profiles" } | { "kind": "login", profile: number, } | { "kind": "everything" });
+device?: string | null, } & ({ "kind": "transcript", conversation: number, } | { "kind": "screen", conversation: number, } | { "kind": "commit", conversation: number, } | { "kind": "files", conversation: number, } | { "kind": "ports", conversation: number, } | { "kind": "terminals", conversation: number, } | { "kind": "forwards" } | { "kind": "set", conversation: number, } | { "kind": "liveness", conversation: number, } | { "kind": "conversation", conversation: number, } | { "kind": "conversations" } | { "kind": "repos" } | { "kind": "joins" } | { "kind": "devices" } | { "kind": "discovered" } | { "kind": "profiles" } | { "kind": "login", profile: number, } | { "kind": "everything" });
 
 /**
  * Whether a fresh Verkstead can do anything yet, and what it would take.
@@ -3832,6 +3853,13 @@ run: RunView | null,
  * at a directory.
  */
 data_directory: string | null, };
+
+/**
+ * What a press asking for another terminal says: nothing, for one of
+ * **New terminal**'s, and the title of the Preview it is opened for, for a
+ * press on a row of the Previews box (ADR-0024).
+ */
+export type OpenTerminal = { preview: string | null, };
 
 /**
  * One Option as the page draws it: the number a Response answers by, its text
@@ -4178,6 +4206,20 @@ device: string,
  * go to.
  */
 lacks: Array<Lacking>, };
+
+/**
+ * One Preview as the page receives it: the title its row is drawn with, and
+ * the command a press types into a terminal.
+ */
+export type PreviewView = { 
+/**
+ * What it goes by, which is what its row says.
+ */
+title: string, 
+/**
+ * The one line typed into the terminal.
+ */
+command: string, };
 
 /**
  * What kind of work a Conversation is for, and so which states it runs
@@ -6889,7 +6931,7 @@ export type TerminalClosed = "Closed" | "Busy";
  * that could not be opened is one the pane has to say something about rather
  * than one that quietly never appears.
  */
-export type TerminalOpened = { "Opened": { number: number, } } | "NoSuchConversation" | "NoWorktree" | "NoProfile" | "Refused";
+export type TerminalOpened = { "Opened": { number: number, } } | { "Refocused": { number: number, } } | { "Retyped": { number: number, } } | "NoSuchConversation" | "NoWorktree" | "NoProfile" | "Refused" | "NoSuchPreview";
 
 /**
  * One of them: which terminal, and the TCP ports something inside it is
@@ -6902,14 +6944,15 @@ export type TerminalPorts = {
 number: number, ports: Array<number>, };
 
 /**
- * One of them: which of the Conversation's it is, and whether somebody is
- * working in it.
+ * One of them: which of the Conversation's it is, whether somebody is
+ * working in it, and — where it was opened for a Preview — which, and what
+ * its tab is called.
  *
  * Nearly nothing, and that is the shape of the thing. A terminal is a shell in
  * a Sandbox and nothing else — no record, no Event, nothing in a Share
  * (ADR 0013) — so what is *on* one arrives down a socket of its own, and what
- * is here is the number the socket is found by and the one judgement only the
- * server can make about it.
+ * is here is the number the socket is found by and what only the server can
+ * say about it.
  */
 export type TerminalView = { 
 /**
@@ -6928,7 +6971,28 @@ number: number,
  * one it cannot tell on confirms every close rather than ending a shell
  * somebody was in.
  */
-busy: boolean, };
+busy: boolean, 
+/**
+ * The title of the Preview it was opened for, and `None` for one opened
+ * by **New terminal** (ADR-0024) — and for one whose Preview has been
+ * retired since, which is an ordinary tab from then on.
+ */
+preview: string | null, 
+/**
+ * What its tab is called, where the server holds a name for it — the
+ * Preview's title, while its run stands — ahead of anything the shell's
+ * own title escape sets. Held here rather than by the page so that a
+ * reattach after a reload brings the name back with the tab, a repaint
+ * carrying the grid and not the title. `None` is a tab called as any tab
+ * is, which is what one is once its run has ended.
+ */
+title: string | null, 
+/**
+ * What is in front of it, as the server last read it, where it was opened
+ * for a Preview — `None` for every other terminal, nothing being read of
+ * one. See [`InFront`].
+ */
+in_front: InFront | null, };
 
 /**
  * The terminals a Conversation has running, as the pane that draws them reads

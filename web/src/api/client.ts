@@ -70,6 +70,7 @@ import type {
   MemoPressed,
   MergedRow,
   OnboardingView,
+  OpenTerminal,
   Preflight,
   PrefillView,
   Process,
@@ -670,12 +671,21 @@ export function listTerminals(
 /// A request rather than a path, and named refusals rather than a status: the
 /// shell is started in the conversation's sandbox, and every way that can be
 /// refused is a sentence the pane has to say.
+///
+/// `preview` is the title of the preview a row of the Previews box was pressed
+/// for, which opens the terminal *for* it: the server types the preview's
+/// command into the shell once it is up, and holds the title as the tab's name
+/// (ADR-0024). Absent for **New terminal**.
 export function openTerminal(
   device: Device,
   id: number,
+  preview?: string,
 ): Promise<TerminalOpened> {
+  const asked: OpenTerminal = { preview: preview ?? null };
+
   return post<TerminalOpened>(
     on(device, `/api/ui/conversations/${id}/terminals`),
+    asked,
   );
 }
 
