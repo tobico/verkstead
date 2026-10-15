@@ -6243,10 +6243,13 @@ fn a_repository_whose_flake_has_a_dev_shell_runs_its_command_under_nix_develop()
         under_dev_shell(Platform::HERE, dir.path(), &["claude".to_owned()]),
         vec![
             "nix".to_owned(),
+            "--extra-experimental-features".to_owned(),
+            "nix-command flakes".to_owned(),
             "develop".to_owned(),
             "--command".to_owned(),
             "claude".to_owned()
         ],
+        "the features are named, not assumed: the sandbox may not see the nix.conf that turns them on"
     );
 }
 

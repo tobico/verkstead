@@ -5373,11 +5373,9 @@ pub fn under_dev_shell(platform: Platform, worktree: &Path, argv: &[String]) -> 
         return argv.to_vec();
     }
 
-    let mut wrapped = vec![
-        "nix".to_owned(),
-        "develop".to_owned(),
-        "--command".to_owned(),
-    ];
+    let mut wrapped = vec!["nix".to_owned()];
+    wrapped.extend(NIX_FEATURES.iter().map(|&arg| arg.to_owned()));
+    wrapped.extend(["develop".to_owned(), "--command".to_owned()]);
     wrapped.extend_from_slice(argv);
     wrapped
 }
@@ -5422,15 +5420,19 @@ fn dev_shell(worktree: &Path) -> bool {
     })
 }
 
-/// Run nix in `dir` and take its stdout, or `None` if it failed.
+/// The experimental features every `nix` this module starts is given.
 ///
-/// The experimental features are named rather than assumed: this runs as
-/// whichever user the server does, and a flake command that works in the human's
-/// shell and not in the service's would be a repository that mysteriously stops
-/// having a dev shell.
+/// Named rather than assumed, for the question and for the shell alike: they run
+/// as whichever user the server does, and the session's `nix` runs inside the
+/// sandbox besides, where the `nix.conf` that turns them on in the human's own
+/// shell may not be there to read. A probe that names them and a wrapper that
+/// does not is a repository whose dev shell is found and then refused.
+const NIX_FEATURES: [&str; 2] = ["--extra-experimental-features", "nix-command flakes"];
+
+/// Run nix in `dir` and take its stdout, or `None` if it failed.
 fn nix(dir: &Path, args: &[&str]) -> Option<String> {
     let output = Command::new("nix")
-        .args(["--extra-experimental-features", "nix-command flakes"])
+        .args(NIX_FEATURES)
         .args(args)
         .unseen()
         .current_dir(dir)
