@@ -57,8 +57,9 @@
   font-size: 0.9em;
 }
 
-/* And what a clone it sent was refused with, under that finding rather than
-   at the foot of the card: it is about that one repository. */
+/* And a clone it sent that never reached the far end, under that finding
+   rather than at the foot of the card: it is about that one repository. A
+   refusal the far end answered is on the parent card instead. */
 .transferring .refused {
   margin-top: 0.3rem;
 }

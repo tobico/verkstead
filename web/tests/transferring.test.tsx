@@ -773,18 +773,32 @@ describe("cloning what the far end lacks", () => {
     expect(repoParent(LAPTOP)).toBe("/mnt/code");
   });
 
-  /// A clone the laptop refuses is said under its finding, in the laptop's own
-  /// words, and Go stays refused.
-  it("says a refused clone under its finding in the far end's words", async () => {
+  /// A clone the laptop refuses comes back as the parent card, in the laptop's
+  /// own words under the parent it was sent to, and Go stays refused — until
+  /// another parent is picked there and the clone lands.
+  it("brings a refused clone back as the parent card, where another can be picked", async () => {
     setRepoParent(LAPTOP, "/mnt/code");
 
     const refusal =
       "fatal: destination path 'verkstead' already exists and is not an empty directory.";
 
-    theCluster(
+    let landed = false;
+    const fetching = theCluster(
       whenever(`/api/ui/conversations/${GRILLING.id}`, json(GRILLING)),
-      whenever(preflightOf(LAPTOP), json(CLONABLE)),
-      whenever(CLONE, json({ Refused: refusal } satisfies Cloned), "POST"),
+      whenever(preflightOf(LAPTOP), () => json(landed ? READY : CLONABLE)()),
+      whenever(
+        CLONE,
+        (init) => {
+          const { parent } = JSON.parse(String(init?.body)) as { parent: string };
+          if (parent === "/mnt/code") {
+            return json({ Refused: refusal } satisfies Cloned)();
+          }
+
+          landed = true;
+          return json({ Cloned: CLONED_THERE } satisfies Cloned)();
+        },
+        "POST",
+      ),
     );
 
     const { container } = mount(`/conversations/${GRILLING.id}`);
@@ -798,8 +812,17 @@ describe("cloning what the far end lacks", () => {
     });
     fireEvent.click(press);
 
-    await waitFor(() => expect(findings(card)[0]!).toContain(refusal));
+    const field = await waitFor(() => screen.getByLabelText("Parent directory"));
+    expect((field as HTMLInputElement).value).toBe("/mnt/code");
+    expect(screen.getByText(refusal)).toBeTruthy();
     expect(go(card).disabled).toBe(true);
+
+    fireEvent.input(field, { target: { value: "/mnt/elsewhere" } });
+    fireEvent.click(screen.getByRole("button", { name: "Clone" }));
+
+    await waitFor(() => expect(go(card).disabled).toBe(false));
+    expect(askedFor(fetching, CLONE)).toBe(2);
+    expect(screen.queryByLabelText("Parent directory")).toBeNull();
   });
 });
 

@@ -24,9 +24,9 @@
 //! as a press: the far device clones it the way its own Repo dropdown would —
 //! into the parent **Create repo** remembers there, or through the same path
 //! card where none is — and once it lands the preflight is read again, Go
-//! unlocking if nothing else is in the way. A refusal is said under that
-//! finding, in the far end's words. A repository with no origin is not
-//! clonable, and still points at **Open repo** there.
+//! unlocking if nothing else is in the way. A refusal brings up that card, in
+//! the far end's words, so another parent can be picked. A repository with no
+//! origin is not clonable, and still points at **Open repo** there.
 //!
 //! **And *unreachable* is never *no match*.** A machine that did not answer is
 //! said as that, named, and offers no clone — a device asleep will answer
@@ -182,9 +182,10 @@ function lacking(
 /// is not picked by anything here — the preflight read again is what notices
 /// it, the far end's registry now holding a match.
 ///
-/// A straight clone that is refused says so under the finding, in the far
-/// end's words; one from the card says so on the card, where another parent
-/// can be picked.
+/// A straight clone that is refused comes back as that card, the far end's
+/// words under the parent it was sent to, the way the Repo dropdown's does:
+/// what answers a refusal is usually another parent, and the card is where one
+/// is picked.
 function CloneThere(props: {
   repo: ClonableRepo;
   cloned: () => void;
@@ -192,19 +193,18 @@ function CloneThere(props: {
   const device = useDevice();
   const cloning = useCloning();
 
-  /// Whether the parent card is up, for a device nothing is remembered on.
-  const [asking, setAsking] = createSignal(false);
-
-  /// What a straight clone was refused with, where one was.
-  const [refused, setRefused] = createSignal<string | null>(null);
+  /// The parent card while it is up — for a device nothing is remembered on,
+  /// or a straight clone that was refused, with what it was refused with — and
+  /// `null` while it is not.
+  const [asking, setAsking] = createSignal<{ refused: string | null } | null>(
+    null,
+  );
 
   const clone = () => {
-    setRefused(null);
-
     const parent = repoParent(device());
 
     if (parent === "") {
-      setAsking(true);
+      setAsking({ refused: null });
       return;
     }
 
@@ -213,7 +213,7 @@ function CloneThere(props: {
       {
         onSuccess: (landing) => {
           if ("refused" in landing) {
-            setRefused(landing.refused);
+            setAsking({ refused: landing.refused });
             return;
           }
 
@@ -234,9 +234,6 @@ function CloneThere(props: {
         {cloning.isPending ? "Cloning…" : "Clone it there"}
       </button>
 
-      <Show when={refused()}>
-        {(why) => <ErrorLine class={styles.refused}>{why()}</ErrorLine>}
-      </Show>
       <Show when={cloning.isError}>
         <ErrorLine class={styles.refused}>
           The repo couldn't be cloned. {cloning.error?.message}
@@ -244,14 +241,17 @@ function CloneThere(props: {
       </Show>
 
       <Show when={asking()}>
-        <CloneRepo
-          repo={props.repo}
-          close={() => setAsking(false)}
-          landed={() => {
-            setAsking(false);
-            props.cloned();
-          }}
-        />
+        {(card) => (
+          <CloneRepo
+            repo={props.repo}
+            refused={card().refused}
+            close={() => setAsking(null)}
+            landed={() => {
+              setAsking(null);
+              props.cloned();
+            }}
+          />
+        )}
       </Show>
     </>
   );
