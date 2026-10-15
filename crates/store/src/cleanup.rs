@@ -164,6 +164,8 @@ const CONVERSATION_KEYED: &[&str] = &[
     "steers",
     // And who left each Memo, and whether it has been taken back.
     "memos",
+    // And the Previews suggested for trying the work.
+    "previews",
     // What GitHub last said about the work.
     "pull_request_checks",
     "pull_request_merges",

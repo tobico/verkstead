@@ -11,7 +11,9 @@
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
-use verkstead_schema::{ApiError, MemoLeft, QuestionSet, Response, SetCreated};
+use verkstead_schema::{
+    ApiError, MemoLeft, PreviewLeft, PreviewSuggestion, QuestionSet, Response, SetCreated,
+};
 
 /// How long the server is asked to hold each wait open. Its own ceiling is a
 /// minute; well under that leaves room for a reply to make it back before any
@@ -279,6 +281,64 @@ impl Client {
             200 | 204 => Ok(()),
             404 => bail!(
                 "the server at {} has no memos to retire — it is older than this command",
+                self.said
+            ),
+            _ => bail!("the server refused: {}", refusal(&text)),
+        }
+    }
+
+    /// Suggest `suggestion` as a Preview for trying this session's work, and
+    /// hand back the title it stands under.
+    ///
+    /// No retry, for [`Client::done`]'s reason: a refusal is a session that
+    /// may not suggest one or a suggestion to put right.
+    pub fn preview(&self, suggestion: &PreviewSuggestion) -> Result<PreviewLeft> {
+        let body = serde_saphyr::to_string(suggestion).context("writing the preview")?;
+
+        let mut reply = self
+            .agent
+            .post(format!("{}/api/v1/previews", self.base))
+            .send(&body)
+            .with_context(|| format!("suggesting a preview with {}", self.said))?;
+
+        let status = reply.status().as_u16();
+        let text = reply
+            .body_mut()
+            .read_to_string()
+            .context("reading the server's reply")?;
+
+        match status {
+            200 => serde_saphyr::from_str(&text)
+                .with_context(|| format!("reading the server's reply: {}", text.trim())),
+            404 => bail!(
+                "the server at {} has no previews to take — it is older than this command",
+                self.said
+            ),
+            _ => bail!("the server refused: {}", refusal(&text)),
+        }
+    }
+
+    /// Take back the Preview standing under `title`.
+    ///
+    /// No retry, for [`Client::retire_memo`]'s reason: a retry of one that
+    /// landed would be refused as not standing.
+    pub fn retire_preview(&self, title: &str) -> Result<()> {
+        let mut reply = self
+            .agent
+            .post(format!("{}/api/v1/previews/retire", self.base))
+            .send(title)
+            .with_context(|| format!("retiring preview {title:?} with {}", self.said))?;
+
+        let status = reply.status().as_u16();
+        let text = reply
+            .body_mut()
+            .read_to_string()
+            .context("reading the server's reply")?;
+
+        match status {
+            200 | 204 => Ok(()),
+            404 => bail!(
+                "the server at {} has no previews to retire — it is older than this command",
                 self.said
             ),
             _ => bail!("the server refused: {}", refusal(&text)),

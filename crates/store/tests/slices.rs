@@ -26,8 +26,8 @@ use verkstead_store::{
     Account, Arrival, ArrivingPicked, Ask, Birth, Event, Lifecycle, Memo, ProfileFacts, Renaming,
     STAYS_BEHIND, Settlements, Submission, arrive, ask, capture, carried_tables, create_profile,
     deleted_tables, land, load_conversation, load_response, queue_to_join, register_repo,
-    session_id, sets_as_they_landed, slice, start_conversation, submit_response, timeline,
-    transcript,
+    session_id, sets_as_they_landed, slice, standing_previews, start_conversation, submit_response,
+    timeline, transcript,
 };
 
 mod owning;
@@ -187,6 +187,23 @@ async fn the_record_lands_on_the_far_end_reading_as_it_read_here() {
         landed(&moved.there.pool).await.contains(&notice),
         "and its Notice names an Event of this database's own",
     );
+}
+
+/// A Preview crosses with its command and its stamp, under the id the far end
+/// gave the Conversation.
+#[tokio::test]
+async fn a_preview_crosses_with_its_command_and_stamp() {
+    let moved = moved("rate-limiting").await;
+
+    let here = standing_previews(&moved.here.pool, moved.worked.id)
+        .await
+        .unwrap();
+    let there = standing_previews(&moved.there.pool, moved.to)
+        .await
+        .unwrap();
+
+    assert_eq!(here.len(), 1, "the fixture suggested one: {here:?}");
+    assert_eq!(there, here, "and it crossed as it stood");
 }
 
 /// A Memo crosses with its stamp, and the session it names is the one that

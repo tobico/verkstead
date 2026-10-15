@@ -2195,6 +2195,26 @@ pub(crate) async fn conversation_view(
         }
     };
 
+    // And the Previews standing on it, which the header's Code icon and the
+    // Code pane are drawn from. Rows beside the Conversation rather than on its
+    // Timeline — see [`store::standing_previews`].
+    //
+    // A read that fails reads as *none standing*, for the pending steer's
+    // reason: the rows are untouched, and the next read draws them again.
+    let previews = match store::standing_previews(&state.pool, id).await {
+        Ok(previews) => previews
+            .into_iter()
+            .map(|preview| verkstead_render::PreviewView {
+                title: preview.title,
+                command: preview.command,
+            })
+            .collect(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading the previews of a Conversation failed");
+            Vec::new()
+        }
+    };
+
     // And the accounts the steers on this Timeline were made under, read as
     // rows before any of them is drawn: the pane a steer opens names its
     // Pairing the way the picker does, which wants the Profile as it stands
@@ -2273,6 +2293,7 @@ pub(crate) async fn conversation_view(
         attachments: attached,
         mcp_servers: servers,
         pending_steer,
+        previews,
         // And where the live record is, where this copy is not it: what takes
         // the page off a tombstone and onto the device doing the work — see
         // [`ConversationView::transferred`].

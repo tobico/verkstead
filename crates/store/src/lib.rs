@@ -52,6 +52,7 @@ mod pairings;
 mod pauses;
 mod pending_steers;
 mod permitted;
+mod previews;
 mod profiles;
 mod pull_requests;
 mod push;
@@ -154,6 +155,7 @@ pub use pending_steers::{
     discard_pending_steer, open_pending_steer, pending_steer, save_pending_steer,
 };
 pub use permitted::{forbid_device, permit_device, permitted_devices};
+pub use previews::{Preview, retire_preview, standing_previews, suggest_preview};
 pub use profiles::{
     Account, AgentType, Channel, Clash, Deleting, Mirror, Pairing, Picked, Profile, ProfileFacts,
     Saving, create_profile, delete_profile, forget_mirrors_except, forget_mirrors_of_departed,
@@ -841,6 +843,11 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // hang off their Events the way a steer's record does — and name a second
     // Event beside it, the session's own output, so after the Timelines too.
     memos::apply_schema(pool).await?;
+
+    // And the Previews building sessions suggested for trying their work, which
+    // are beside the Conversation rather than on its Timeline — see
+    // [`previews`]. After the Conversations, which is all its rows point at.
+    previews::apply_schema(pool).await?;
 
     // And that driving has stopped, which is columns on the Conversation
     // itself: a stop is how things are rather than something that happened,

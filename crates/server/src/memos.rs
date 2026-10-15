@@ -38,7 +38,7 @@ pub(crate) enum Building {
 }
 
 /// The kinds that may, as a refusal names them.
-const MAY: &str = "a backlog task, the finish, a stage's planning, an inline run or a steered \
+pub(crate) const MAY: &str = "a backlog task, the finish, a stage's planning, an inline run or a steered \
                    instruction";
 
 impl Building {

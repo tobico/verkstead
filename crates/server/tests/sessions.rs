@@ -39459,3 +39459,150 @@ async fn a_memo_a_task_session_retires_leaves_every_later_prompt() {
         );
     }
 }
+
+/// Suggest a Preview from the session running in `fixture`, the way
+/// `verkstead preview` does, and hand back what the server answered.
+async fn suggest_a_preview(fixture: &Grilling, title: &str, command: &str) -> (StatusCode, String) {
+    let body = serde_saphyr::to_string(&verkstead_schema::PreviewSuggestion {
+        title: title.to_owned(),
+        command: command.to_owned(),
+    })
+    .unwrap();
+
+    fetch(
+        &fixture.app,
+        Request::builder()
+            .method("POST")
+            .uri(format!("/conversations/{}/api/v1/previews", fixture.id))
+            .body(Body::from(body))
+            .unwrap(),
+    )
+    .await
+}
+
+/// Retire the Preview called `title` from the session running in `fixture`,
+/// the way `verkstead preview --retire` does.
+async fn retire_a_preview(fixture: &Grilling, title: &str) -> (StatusCode, String) {
+    fetch(
+        &fixture.app,
+        Request::builder()
+            .method("POST")
+            .uri(format!(
+                "/conversations/{}/api/v1/previews/retire",
+                fixture.id
+            ))
+            .body(Body::from(title.to_owned()))
+            .unwrap(),
+    )
+    .await
+}
+
+/// The titles and commands standing on the Conversation's view, in order.
+async fn previews(fixture: &Grilling) -> Vec<(String, String)> {
+    fixture
+        .view()
+        .await
+        .previews
+        .into_iter()
+        .map(|preview| (preview.title, preview.command))
+        .collect()
+}
+
+/// A task session's preview lands on the Conversation's view, and the same
+/// title again replaces its command rather than adding a row — while a retire
+/// of a title that does not stand is refused by name, and one that does takes
+/// it off the view.
+#[tokio::test]
+async fn a_task_session_suggests_a_preview_and_the_same_title_replaces_it() {
+    let fixture = grilling(&a_backlog_that_says_so(
+        ": > /tmp/verkstead/preview-now\n        \
+         while [ ! -f /tmp/verkstead/previewed ]; do sleep 0.05; done",
+        "",
+    ))
+    .await;
+
+    picked_through_to_the_task(&fixture).await;
+
+    let directory = handoff_directory(&fixture);
+    let deadline = Instant::now() + *PATIENCE;
+    while !directory.join("preview-now").exists() {
+        assert!(
+            Instant::now() < deadline,
+            "the task session never got as far as its preview"
+        );
+        pause(Duration::from_millis(25)).await;
+    }
+
+    let (status, body) = suggest_a_preview(&fixture, "Build and test", "cargo test\n").await;
+    assert_eq!(status, StatusCode::OK, "the preview is taken: {body}");
+    assert_eq!(
+        body.trim(),
+        "title: Build and test",
+        "and the reply is its title"
+    );
+
+    let (status, body) = suggest_a_preview(&fixture, "Serve", "cargo run -- serve").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let (status, body) =
+        suggest_a_preview(&fixture, "Build and test", "cargo test --workspace").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    assert_eq!(
+        previews(&fixture).await,
+        [
+            (
+                "Build and test".to_owned(),
+                "cargo test --workspace".to_owned()
+            ),
+            ("Serve".to_owned(), "cargo run -- serve".to_owned()),
+        ],
+        "replaced in place, oldest first, the trailing newline dropped",
+    );
+
+    let (status, body) = retire_a_preview(&fixture, "Deploy").await;
+    let said = body.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert!(
+        said.contains("no preview called") && said.contains("Deploy") && said.contains("stands"),
+        "a title that does not stand is refused by name: {body}",
+    );
+
+    let (status, body) = retire_a_preview(&fixture, "Serve").await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+
+    std::fs::write(directory.join("previewed"), "").unwrap();
+
+    assert_eq!(
+        previews(&fixture).await,
+        [(
+            "Build and test".to_owned(),
+            "cargo test --workspace".to_owned()
+        )],
+        "and the retired one is gone",
+    );
+}
+
+/// A grilling may not suggest a preview: it is refused naming the kinds that
+/// may, and nothing lands.
+#[tokio::test]
+async fn a_grilling_session_is_refused_a_preview_naming_the_kinds_that_may() {
+    let fixture = grilling("printf 'grilling\\n'\nsleep 300").await;
+
+    // Once it has printed, so the session is running rather than launching.
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let (status, body) = suggest_a_preview(&fixture, "Build and test", "cargo test").await;
+
+    assert_eq!(status, StatusCode::CONFLICT, "refused: {body}");
+    // Unfolded, because the YAML reply wraps a long line wherever it likes.
+    let said = body.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(
+        said.contains("only a building session may suggest a preview")
+            && said.contains("a backlog task, the finish, a stage's planning"),
+        "naming the kinds that may: {body}",
+    );
+    assert!(previews(&fixture).await.is_empty(), "and nothing lands");
+}

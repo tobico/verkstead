@@ -17,7 +17,7 @@ amended. Every task reads those three before touching anything, and
 
 ## Tasks
 
-- [ ] 01: The record and the verb — [details](01-the-record-and-the-verb.md)
+- [x] 01: The record and the verb — [details](01-the-record-and-the-verb.md)
 - [ ] 02: A terminal opened for a preview, and the box — [details](02-a-terminal-for-a-preview-and-the-box.md)
 - [ ] 03: The run — [details](03-the-run.md)
 - [ ] 04: What the agent is told — [details](04-what-the-agent-is-told.md)

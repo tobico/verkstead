@@ -972,6 +972,16 @@ pub struct ConversationView {
     /// a Share, which is the record, carries no trace of it.
     pub pending_steer: Option<PendingSteerView>,
 
+    /// The Previews standing on this Conversation, oldest first: what a
+    /// building session suggested for trying its work by hand (ADR-0024).
+    ///
+    /// Empty is every Conversation until a session suggests one. **Not a
+    /// Timeline Event**, for the pending steer's reason the other way round: a
+    /// Preview is a press in the Code pane rather than a reading of the record,
+    /// so it is here, where the header's Code icon can read it without the pane
+    /// open, and a Share carries none.
+    pub previews: Vec<PreviewView>,
+
     /// Where the live record of this Conversation is, where this copy is not it
     /// (ADR-0020, *Transfer*).
     ///
@@ -1036,6 +1046,18 @@ pub struct TransferredTo {
     /// And the id that machine numbered its copy, which is the other half of
     /// where the redirect goes.
     pub id: i64,
+}
+
+/// One Preview as the page receives it: the title its row is drawn with, and
+/// the command a press types into a terminal.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct PreviewView {
+    /// What it goes by, which is what its row says.
+    pub title: String,
+
+    /// The one line typed into the terminal.
+    pub command: String,
 }
 
 /// A pending steer as the page receives it: when the press was made, and the

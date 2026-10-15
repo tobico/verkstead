@@ -268,6 +268,11 @@ pub fn shared(
             // work might be going rather than where it went.
             pending_steer: None,
 
+            // And the Previews suggested for trying the work, which are not on
+            // the record either: a press in a Code pane the reader does not
+            // have, typing a command into a terminal that is not theirs.
+            previews: Vec::new(),
+
             // And where its agent was allowed to take the work, which names the
             // human's own machines — a share leaves the tailnet, and nothing on
             // it could be moved anywhere.

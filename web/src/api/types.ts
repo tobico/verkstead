@@ -2040,6 +2040,17 @@ mcp_servers: Array<AttachedServerView>,
  */
 pending_steer: PendingSteerView | null, 
 /**
+ * The Previews standing on this Conversation, oldest first: what a
+ * building session suggested for trying its work by hand (ADR-0024).
+ *
+ * Empty is every Conversation until a session suggests one. **Not a
+ * Timeline Event**, for the pending steer's reason the other way round: a
+ * Preview is a press in the Code pane rather than a reading of the record,
+ * so it is here, where the header's Code icon can read it without the pane
+ * open, and a Share carries none.
+ */
+previews: Array<PreviewView>, 
+/**
  * Where the live record of this Conversation is, where this copy is not it
  * (ADR-0020, *Transfer*).
  *
@@ -4178,6 +4189,20 @@ device: string,
  * go to.
  */
 lacks: Array<Lacking>, };
+
+/**
+ * One Preview as the page receives it: the title its row is drawn with, and
+ * the command a press types into a terminal.
+ */
+export type PreviewView = { 
+/**
+ * What it goes by, which is what its row says.
+ */
+title: string, 
+/**
+ * The one line typed into the terminal.
+ */
+command: string, };
 
 /**
  * What kind of work a Conversation is for, and so which states it runs
