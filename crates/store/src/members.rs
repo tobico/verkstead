@@ -176,9 +176,9 @@ pub struct Member {
     /// And the Device Id of its **Keeper**, where it is an **Annex**: the mark
     /// its row is drawn with (ADR-0024).
     ///
-    /// What the member said about itself, written afresh at every recording the
-    /// way its name is — see [`Linking::kept_by`]. `None` is every member but an
-    /// Annex.
+    /// What the member said about itself when its row was first written, and
+    /// kept through every recording after — see [`Linking::kept_by`]. `None` is
+    /// every member but an Annex.
     pub kept_by: Option<String>,
 }
 
@@ -250,9 +250,15 @@ pub struct Linking {
     pub addresses: Vec<String>,
     pub fingerprint: String,
 
-    /// And whose Annex it says it is, where it says so: the mark, carried on
-    /// every recording rather than set once, because every refresh of a member
-    /// is rebuilt from what that device said it is and this is part of it.
+    /// And whose Annex it says it is, where it says so: the mark, **taken on a
+    /// row's first recording and never after** — see [`record_member`].
+    ///
+    /// Unlink is refused on a marked row everywhere, so a mark a refresh could
+    /// add would be a member that could make itself impossible to unlink by
+    /// editing its own `config.yaml` — a stolen laptop, say, which is the case
+    /// Unlink is for. An Annex is first recorded off the Keeper's Join, the
+    /// roster or an announcement, all of which carry it, so it is marked from
+    /// its first row on; a device linked as an ordinary member stays one.
     pub kept_by: Option<String>,
 }
 
@@ -451,6 +457,9 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
 /// why this is also what puts a dimmed row back: the exchange behind it *is*
 /// the member answering, so a row that was marked unreachable is reachable
 /// again by the same fact that moves the moment.
+///
+/// **Except the mark**, which a new row takes and an existing one keeps,
+/// whatever this recording says — see [`Linking::kept_by`].
 pub async fn record_member(pool: &SqlitePool, linking: &Linking) -> Result<()> {
     let mut tx = writing(pool, "recording a member").await?;
 
@@ -462,8 +471,7 @@ pub async fn record_member(pool: &SqlitePool, linking: &Linking) -> Result<()> {
                os          = excluded.os,
                fingerprint = excluded.fingerprint,
                last_seen   = excluded.last_seen,
-               reachable   = 1,
-               kept_by     = excluded.kept_by",
+               reachable   = 1",
     )
     .bind(&linking.device)
     .bind(&linking.name)

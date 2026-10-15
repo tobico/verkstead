@@ -437,8 +437,9 @@ impl Peers {
                 // is the far end's word for it.
                 fingerprint: member.fingerprint.clone(),
 
-                // And the mark, as the member says it of itself: a refresh is
-                // rebuilt from what it answered, and an Annex answers whose it is.
+                // And the mark, as the member says it of itself — which a
+                // refresh never adds to a row, the store keeping whatever the
+                // row was first recorded with. See [`Linking::kept_by`].
                 kept_by: identity.kept_by.clone(),
             })
             .await?;

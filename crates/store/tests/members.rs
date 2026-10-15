@@ -225,6 +225,64 @@ async fn a_device_recorded_again_is_the_same_member() {
     );
 }
 
+/// The Annex mark is the one thing a device recorded again does not rewrite: a
+/// row takes it when it is first written and keeps it (ADR-0024).
+///
+/// Unlink is refused on a marked row, so a member linked as an ordinary one
+/// that later said it was an Annex would have made itself impossible to unlink
+/// — and an Annex that once answered without its mark would have lost it.
+#[tokio::test]
+async fn the_annex_mark_is_taken_once_and_kept() {
+    let (_dir, pool) = fresh_pool().await;
+
+    record_member(&pool, &advertising(B, "workbench", B_FINGERPRINT))
+        .await
+        .unwrap();
+    record_member(
+        &pool,
+        &Linking {
+            kept_by: Some(A.to_owned()),
+            ..advertising(B, "workbench", B_FINGERPRINT)
+        },
+    )
+    .await
+    .unwrap();
+
+    record_member(
+        &pool,
+        &Linking {
+            kept_by: Some(A.to_owned()),
+            ..advertising(C, "annex", C_FINGERPRINT)
+        },
+    )
+    .await
+    .unwrap();
+    record_member(&pool, &advertising(C, "annex", C_FINGERPRINT))
+        .await
+        .unwrap();
+
+    let listed = members(&pool).await.unwrap();
+    let kept = |device: &str| {
+        listed
+            .iter()
+            .find(|member| member.device == device)
+            .unwrap()
+            .kept_by
+            .clone()
+    };
+
+    assert_eq!(
+        kept(B),
+        None,
+        "an ordinary member saying it is an Annex later is still an ordinary member",
+    );
+    assert_eq!(
+        kept(C).as_deref(),
+        Some(A),
+        "and an Annex recorded again without its mark still has it",
+    );
+}
+
 /// A member a dial found nothing at is marked, and nothing else about the row
 /// moves.
 ///

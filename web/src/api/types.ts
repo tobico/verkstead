@@ -2462,9 +2462,9 @@ addresses: Array<string>,
  *
  * **Said by the Annex about itself** rather than asserted by anybody about
  * it: an Annex is told in its own `config.yaml` that it is kept, and every
- * answer it gives says so. Which is what keeps the mark on a member row
- * through every refresh — each of them is rebuilt from what the device
- * last said it is, and this is part of what it says.
+ * answer it gives says so. A member row takes it when it is first written
+ * and keeps it through every refresh after, so a device linked as an
+ * ordinary member cannot later say itself out of being unlinked.
  *
  * `None` is every device but an Annex, and what a Verkstead from before
  * the Annex existed answers by saying nothing.
