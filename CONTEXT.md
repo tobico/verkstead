@@ -3123,6 +3123,18 @@ always so where it does not.
 A tab is called whatever its shell sets the terminal's title to, and *Terminal N*
 by the server's number where it has set none — a fresh attach reads the number
 again, a repaint carrying the grid and not the title.
+**Opened for a Preview** — see **Preview** — it is the same shell with the
+Preview's command typed into it once the shell is at the foreground, at once
+on Windows where there is none to read, and the server records the foreground
+group that follows as the **run**, read on a turn while the terminal lives and
+a Code pane is attached, a change being a `terminals` Nudge. While the run
+stands the tab is called by the Preview's title, held by the server so a
+reattach keeps it and not replaced by the shell's own; when it ends the tab is
+called as any tab is. A press on the Preview while its terminal is live is the
+server's decision: the run in front refocuses the tab, the shell in front
+refocuses and types the command again, anything else in front opens a new
+Terminal — and where the foreground cannot be read, which is Windows, it
+refocuses and never types again. Retiring the Preview leaves the terminal.
 The same server-held pseudo-terminal, virtual terminal and xterm window as a
 Screen, save that a tab keeps what scrolled past it where a Screen keeps
 nothing — the server holds the grid alone either way, so those lines are the
@@ -3138,7 +3150,13 @@ pane (it is a tab of Code now)
 **Code**:
 The Conversation's editor: a details pane at `/code`, opened by the code icon
 beside Share on the Timeline's header, for trying the agent's work and
-finishing it by hand without leaving the workbench. Down one side a **tree**
+finishing it by hand without leaving the workbench — and that icon takes the
+accent while any **Preview** stands on the Conversation, the header icon alone,
+so the Timeline says there is something to try. Down one side, a **Previews**
+box above the tree where any stand and no box where none do: a row per
+Preview, the title with a play icon at its right that becomes the terminal
+icon while its run stands, the whole row the press, lit as a row of the tree
+is. Under it a **tree**
 with a root per Worktree — the Conversation's own first, then each Companion,
 a read-only one opening read-only — hiding what git ignores and `.git`, marked
 where git says a file is modified or untracked, with new file, new folder,
@@ -3296,6 +3314,31 @@ The human cannot leave one from the Timeline; a **Steer** carries their words.
 Refused empty, and over 8 KiB. See ADR-0023.
 _Avoid_: note (that is the carried Conversation's), notes, comment, annotation,
 hint, reminder
+
+**Preview**:
+A title and a one-line command a building session suggests for trying its
+work by hand — *Build and test* over the command that runs it — by running
+`verkstead preview <title>` with the command on stdin, the moment there is
+anything that could be tried and whether or not a manual test looks called
+for, so it is already there when the human decides one is. Accepted, it prints
+`title:` as YAML. **Stored with the Conversation and not an Event**: a side
+table, no card, no place on a **Share**, carried on a **Transfer** and gone
+with the Conversation. **Keyed on its title**: the same title suggested again
+replaces the command in place, and `verkstead preview --retire <title>` takes
+it back — the agent alone, the human having no Remove. **Building sessions
+only**, the **Memo**'s rule, refused by name from every other kind. One line
+of at most 4 KiB, refused empty or with a newline in it, written for the
+**Terminal**'s own shell, which the prompt names. Stands until retired, through
+a **Steer** and a **Follow-up** alike, being true of the branch rather than of
+the round.
+**Drawn in Code** as a row of the Previews box above the tree, and **run in a
+Terminal** opened for it, the command typed as the human would have typed it —
+both entries have the rules. Every building session's prompt lists the
+standing Previews, title and command, under a heading of its own, shown over a
+hint when none stand; every other kind's prompt carries no such heading. See
+ADR-0024.
+_Avoid_: script (what the command is in, not what it is for), launcher, run
+configuration, task (that is a backlog's), command (what a Preview holds)
 
 **Agent Profile**:
 A coding-agent account Verkstead can run a session under: an agent type, the
