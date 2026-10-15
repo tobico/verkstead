@@ -20775,6 +20775,24 @@ describe("the previews in the code pane", () => {
     );
   });
 
+  /// But not on an icon that is off: previews stand through a close, and a
+  /// closed conversation has no worktree to try them in.
+  it("leaves the accent off where there is no worktree", async () => {
+    theGrillingStanding({ previews: PREVIEWS, worktree: null });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const icon = await drawn<HTMLButtonElement>(
+      container,
+      `.${shell.middlePane} .${button.iconButton}[aria-label^="Code"]`,
+    );
+
+    expect(icon.disabled).toBe(true);
+    expect(icon.getAttribute("aria-label")).toBe(
+      "Code. There's no worktree yet.",
+    );
+    expect(icon.className).not.toContain(timeline.previewing);
+  });
+
   /// And where the pane stacks, the box stacks above the tree as the tree
   /// stacks above the groups: the column the width of the pane.
   it("stacks the box above the tree under 40rem", () => {

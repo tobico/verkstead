@@ -634,11 +634,14 @@ export function Timeline(props: {
                 And in the accent while any preview stands, so the Timeline says
                 there is something to try (ADR-0024): the open fill still goes
                 over it, and the label says it for whoever cannot see the
-                colour. */}
+                colour. Where there is a Worktree to try it in alone: previews
+                stand through a close, and an icon that is off has nothing to
+                offer, whatever stands. */}
             <Show when={!props.readOnly}>
               <IconButton
                 of={faCode}
                 class={
+                  props.conversation.worktree !== null &&
                   props.conversation.previews.length > 0
                     ? styles.previewing
                     : undefined
