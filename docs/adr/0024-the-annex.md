@@ -174,8 +174,10 @@ member row gone and the Components row reading not installed. The card is
 where installing more later lives too — a harness added after setup — which
 is why it is *Components* rather than *Annex*.
 
-**On the Devices list the Annex is a row like any other** — the same
-hostname, which WSL shares with its Keeper, and *Linux (WSL)* — wearing the
+**On the Devices list the Annex is a row like any other** — its Keeper's
+hostname, which the written configuration sets as `networking.hostName`
+(NixOS-WSL takes the distro's name from it, and its default is `nixos`), and
+*Linux (WSL)* — wearing the
 Annex mark and no Unlink; the press on it opens Components.
 
 ## Clonable repos

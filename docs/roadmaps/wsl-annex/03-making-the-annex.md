@@ -45,6 +45,8 @@ Windows.
   Annex's own, never the Keeper's 8422 and 8423, because under WSL's mirrored
   networking the Annex shares the Keeper's loopback and interfaces (ADR-0024,
   *The Keeper forwards for its Annex*) — `paths = [ "/srv/repos" ]`,
+  `networking.hostName` set to the Keeper's hostname so the Devices row
+  reads as the same machine rather than NixOS's default `nixos`,
   bwrap, git, gh, nix, sccache, and `claude-code`, `codex`, `opencode` and
   `grok` from the unstable input where nixpkgs has them; `kept_by` with the
   Keeper's id and fingerprint in `config.yaml`; the Keeper's git author in
@@ -82,6 +84,7 @@ Windows.
    into the disk directory, `wsl --import`, the flake and the two YAML files
    written in, `nixos-rebuild switch` with its output on the install screen.
    - The written flake pins the Keeper's own version and evaluates.
+   - The booted Annex's identity answers the Keeper's hostname.
 4. **Boot, link and terminate with the Keeper** — the background boot at
    startup, the address read, the forward pointed, stage 01's linking run;
    the terminate at shutdown; the Notice on a failure.
@@ -102,7 +105,8 @@ Windows.
   `web/src/setup/instructions.ts`.
 - Assumes the NixOS module's options are still `listen`, `peerListen`,
   `paths`, `home` and `shell` in `nix/module.nix`, and that NixOS-WSL's
-  current release boots systemd by default.
+  current release boots systemd by default and takes the distro's hostname
+  from `networking.hostName`.
 - Assumes `flake.nix` still pins `nixos-26.05`; the box follows whatever it
   pins then.
 - Assumes nixpkgs unstable packages `claude-code`, `codex`, `opencode` and a
