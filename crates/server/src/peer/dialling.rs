@@ -140,7 +140,9 @@ pub enum Reached {
     /// it: the address that answered with the question now held over there, or
     /// this device's account of why it is not held. Either way that device is
     /// there.
-    Answered(Result<(String, JoinHeld)>),
+    ///
+    /// Boxed, the device in it being the far larger half of the two.
+    Answered(Box<Result<(String, JoinHeld)>>),
 
     /// And nothing answered at any of them, which is a row that went stale
     /// between being drawn and being pressed.
@@ -966,7 +968,7 @@ impl Peers {
         for address in &found.addresses {
             match self.knocked(address, saying).await {
                 Knocked::Answered(held) => {
-                    return Reached::Answered(held.map(|held| (address.clone(), held)));
+                    return Reached::Answered(Box::new(held.map(|held| (address.clone(), held))));
                 }
 
                 Knocked::Nobody(why) => {

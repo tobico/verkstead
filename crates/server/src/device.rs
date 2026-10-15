@@ -1213,7 +1213,7 @@ impl Devices {
             // A device that spoke is a device that is there, whether what it said
             // was a question held or a refusal: the row stays exactly as it was,
             // and the press is refused in the far end's own terms.
-            Reached::Answered(answered) => answered?,
+            Reached::Answered(answered) => (*answered)?,
 
             Reached::Nobody(why) => {
                 // Nothing answered anywhere, so the row was wrong and this press
