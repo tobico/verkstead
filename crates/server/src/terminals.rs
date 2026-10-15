@@ -130,8 +130,13 @@ mod printed;
 /// [`run`].
 pub(crate) mod run;
 
-use std::collections::{BTreeSet, HashMap};
-use std::sync::atomic::{AtomicUsize, Ordering};
+/// And whether anything is running in a Conversation's terminals as the
+/// sidebar's card draws it, which is that reading held for a second turn — see
+/// [`settled`], and [`settling`].
+mod settled;
+
+use std::collections::{BTreeSet, HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -213,6 +218,12 @@ pub(crate) struct Terminals {
     /// And how many are being opened and are not on the register yet — see
     /// [`Terminals::opening`].
     opening: Arc<AtomicUsize>,
+
+    /// Whether [`settling`] is running, which it is for as long as any terminal
+    /// is live. Read and written under the register's own lock, so that the
+    /// turn finding the register empty and stopping and a terminal going onto
+    /// it cannot pass each other.
+    settling: Arc<AtomicBool>,
 }
 
 /// One terminal being opened, counted for as long as it is held — see
@@ -237,6 +248,11 @@ struct Held {
 
     /// The ones still running, by that number.
     live: HashMap<i64, Watched>,
+
+    /// And whether anything is running in them, as the sidebar's card draws it
+    /// — the reading of every turn of [`settling`], held for a second turn
+    /// before it lights. See [`settled`].
+    settled: settled::Settled,
 }
 
 /// One live terminal, as the register holds it: what it is drawing, what it is
@@ -428,16 +444,69 @@ impl Terminals {
     }
 
     /// Put one on the register under this Conversation's next number, and hand
-    /// that number back.
-    fn register(&self, conversation_id: i64, watched: Watched) -> i64 {
-        let mut open = self.held();
-        let held = open.entry(conversation_id).or_default();
+    /// that number back — starting [`settling`] where nothing was live for it
+    /// to read until now.
+    fn register(&self, conversation_id: i64, watched: Watched, nudges: &Nudges) -> i64 {
+        let (number, start) = {
+            let mut open = self.held();
+            let held = open.entry(conversation_id).or_default();
 
-        held.issued += 1;
-        let number = held.issued;
-        held.live.insert(number, watched);
+            held.issued += 1;
+            let number = held.issued;
+            held.live.insert(number, watched);
+
+            (number, !self.settling.swap(true, Ordering::AcqRel))
+        };
+
+        if start {
+            tokio::spawn(settling(self.clone(), nudges.clone()));
+        }
 
         number
+    }
+
+    /// Which Conversations have something running in their terminals, as the
+    /// sidebar's card draws it: the last turn's settled reading, and only where
+    /// a terminal is still live — so a Conversation closed a moment ago, its
+    /// terminals ended with it, says nothing is running before the next turn
+    /// has noticed. See [`settled`].
+    ///
+    /// Read off the register rather than off the terminals themselves, because
+    /// the turn is what holds a reading for a second turn before it lights.
+    pub(crate) fn busy(&self) -> HashSet<i64> {
+        self.held()
+            .iter()
+            .filter(|(_, held)| held.settled.busy() && !held.live.is_empty())
+            .map(|(&conversation_id, _)| conversation_id)
+            .collect()
+    }
+
+    /// One turn of [`settling`]: every Conversation's terminals read for
+    /// anything running, the readings settled, and the Conversations whose
+    /// card moved handed back — with whether any terminal is still live, which
+    /// is whether there is to be another turn.
+    ///
+    /// Where none is, the turn stops the reading in the same hold, so that a
+    /// terminal registered after it starts another.
+    fn settle(&self) -> (Vec<i64>, bool) {
+        let mut open = self.held();
+
+        let moved = open
+            .iter_mut()
+            .filter_map(|(&conversation_id, held)| {
+                let busy = held.live.values().any(Watched::busy);
+
+                held.settled.read(busy).then_some(conversation_id)
+            })
+            .collect();
+
+        let live = open.values().any(|held| !held.live.is_empty());
+
+        if !live {
+            self.settling.store(false, Ordering::Release);
+        }
+
+        (moved, live)
     }
 
     /// End one of them: the shell hung up and then killed where it lingers, and
@@ -942,6 +1011,38 @@ async fn reading(
     }
 }
 
+/// Read whether anything is running in each Conversation's terminals every
+/// [`READING`], for as long as any terminal is live, announcing a
+/// `conversation` Nudge for every Conversation whose card moved (ADR-0025).
+///
+/// **The `conversation` Nudge rather than `terminals`**, because what moved is
+/// the sidebar's row: the viewer re-reads its list on it, and so does a hub
+/// holding this device's rows for its merged one — neither of which listens
+/// for the other. A build finishing in a shell is news nothing else would
+/// carry, so without this the card would say it runs until the list was next
+/// read for some other reason.
+///
+/// **Started by the first terminal to open and stopped by the turn that finds
+/// none live**, so that nothing ticks on a server nobody has opened a shell on.
+/// That last turn reads every Conversation as quiet, so whatever was lit goes
+/// out with it. A terminal opened or closed needs nothing of its own: the next
+/// turn reads the register as it now stands.
+async fn settling(terminals: Terminals, nudges: Nudges) {
+    loop {
+        tokio::time::sleep(READING).await;
+
+        let (moved, live) = terminals.settle();
+
+        for conversation in moved {
+            nudges.announce(Nudge::Conversation { conversation });
+        }
+
+        if !live {
+            return;
+        }
+    }
+}
+
 /// Open a terminal on `conversation`: a shell running in its Sandbox, with its
 /// Worktree as the working directory.
 ///
@@ -1223,6 +1324,7 @@ pub(crate) async fn open(
             preview: preview.as_ref().map(|preview| preview.title.clone()),
             run: preview.as_ref().map(|_| run::Run::new()),
         },
+        &state.nudges,
     );
 
     if let Some(preview) = preview {

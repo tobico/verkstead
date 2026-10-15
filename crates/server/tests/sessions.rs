@@ -38958,6 +38958,122 @@ async fn a_terminal_says_whether_somebody_is_working_in_it() {
     );
 }
 
+/// And the sidebar's row says the same thing, as the card's code icon draws it
+/// (ADR-0025) — held until the reading has said so on a second turn, so a
+/// shell still coming up never lights it, and out on the first turn that reads
+/// the prompt back or finds the terminal gone. Each flip is a `conversation`
+/// Nudge, which is what has the sidebar read its list again.
+#[tokio::test]
+async fn the_sidebar_row_says_whether_a_terminal_is_running_something() {
+    let spill = tempfile::tempdir().unwrap();
+    let ticks = spill.path().join("ticks");
+
+    let fixture = grilling_spilling(
+        spill,
+        r#"
+        printf 'reading the brief\r\n'
+        while :; do sleep 0.05; done
+        "#,
+        PULL_REQUEST,
+    )
+    .await;
+
+    fixture
+        .until(|view| view.worktree.as_ref().map(|worktree| worktree.path.clone()))
+        .await;
+
+    assert!(
+        !fixture.row().await.terminal_busy,
+        "a Conversation with no terminal has nothing running in one",
+    );
+
+    let at = fixture.listening().await;
+
+    let opened: TerminalOpened = post(
+        &fixture.app,
+        &format!("/api/ui/conversations/{}/terminals", fixture.id),
+        &serde_json::json!({}),
+    )
+    .await;
+
+    let TerminalOpened::Opened { number } = opened else {
+        panic!("expected a terminal to open, and the server said: {opened:?}");
+    };
+
+    let mut watcher = Watcher::terminal(at, fixture.id, number).await;
+    watcher.resize(200, 40).await;
+    watcher.types("printf 'at a %s\\n' prompt\r").await;
+    watcher.until(|grid| grid.contains("at a prompt")).await;
+
+    // Two turns and more at the prompt, which is long enough for a reading
+    // that was going to light to have lit.
+    pause(Duration::from_millis(4500)).await;
+
+    assert!(
+        !fixture.row().await.terminal_busy,
+        "a shell at its prompt, and one that was coming up a moment ago, is \
+         nothing running",
+    );
+
+    let mut page = Listening::open(&fixture.app).await;
+
+    watcher.types(&ticking_away(&ticks)).await;
+    until_ticking(&ticks).await;
+    let started = Instant::now();
+
+    fixture
+        .row_until(|row| row.terminal_busy.then_some(()))
+        .await;
+
+    // The first turn to read it running cannot light it, so the row says so
+    // no sooner than a turn after the one that saw it start.
+    assert!(
+        started.elapsed() >= Duration::from_millis(1900),
+        "the row said a terminal was running something {:?} after it started, \
+         which is sooner than a second turn could have read it",
+        started.elapsed(),
+    );
+
+    // And the prompt coming back puts it out, with a Nudge to say so.
+    watcher.types("\x03").await;
+
+    fixture
+        .row_until(|row| (!row.terminal_busy).then_some(()))
+        .await;
+    until_nudged(
+        &mut page,
+        Nudge::Conversation {
+            conversation: fixture.id,
+        },
+    )
+    .await;
+
+    // And so does the terminal closing under something running, at once: a
+    // Conversation with no terminal has nothing running in one, whatever the
+    // last turn read.
+    watcher.types(&ticking_away(&ticks)).await;
+    fixture
+        .row_until(|row| row.terminal_busy.then_some(()))
+        .await;
+
+    assert_eq!(
+        delete::<TerminalClosed>(
+            &fixture.app,
+            &format!(
+                "/api/ui/conversations/{}/terminals/{number}?asked=true",
+                fixture.id
+            ),
+        )
+        .await,
+        TerminalClosed::Closed,
+    );
+
+    assert!(
+        !fixture.row().await.terminal_busy,
+        "a terminal that was closed has nothing running in it",
+    );
+}
+
 /// A terminal opened for a Preview is the ordinary shell with the Preview's
 /// command typed into it once the shell has come up — run, and the shell still
 /// there after it — and the terminals view says which Preview it was opened for
