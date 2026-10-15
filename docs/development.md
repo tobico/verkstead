@@ -31,7 +31,7 @@ and Gradle among them.
 ```console
 $ (cd web && pnpm install && pnpm build)
 $ cargo run -p verkstead-cli -- serve --data-dir .
-  INFO verkstead_server: verkstead is listening listen=127.0.0.1:8422 peer_listen=0.0.0.0:8423 workbench=http://127.0.0.1:8422/?key=… data_dir=. device=86f1933fecb070cbee865fbb84819d14 fingerprint=3F:0A:… home=/home/you sandbox_binds=0 build_cache=Some("/home/you/.cache/verkstead") skills=./skills
+  INFO verkstead_server: verkstead is listening listen=127.0.0.1:8422 peer_listen=0.0.0.0:8423 annex_forward=0.0.0.0:8424 workbench=http://127.0.0.1:8422/?key=… data_dir=. device=86f1933fecb070cbee865fbb84819d14 fingerprint=3F:0A:… home=/home/you sandbox_binds=0 build_cache=Some("/home/you/.cache/verkstead") skills=./skills
 ```
 
 **`workbench=` is how you get in.** Every page of the workbench and the viewer's
@@ -93,6 +93,14 @@ device, the tailnet name and address first where Tailscale is up and the LAN
 behind them. Ask it again from another machine on the same tailnet and it says
 the same thing; ask it off a laptop that has moved and the addresses have
 moved with it.
+
+**`annex_forward=` is a third port, 8424 on every interface**, and the one
+nothing answers on until this device keeps an **Annex**: linking one points it
+at the Annex's peer listener, and from then on it forwards raw TCP there, the
+TLS inside it the Annex's own (ADR-0024). Before that a connection to it is
+closed as soon as it is accepted. `--annex-forward-listen` or
+`VERKSTEAD_ANNEX_FORWARD_LISTEN` moves it, and a second Verkstead on this
+machine needs its own here too.
 
 **And the same device says so on the LAN, so that nobody has to type any of
 that.** A start advertises `_verkstead._tcp.local` over mDNS — in this process,
@@ -173,13 +181,14 @@ list, a device taken off it, and the certificate one of them stands under
 changed.
 
 **Seeing a link made takes a second Verkstead**, which on one machine means a
-second of everything: its own Data Directory, its own workbench port and its own
-peer port. In a terminal of its own —
+second of everything: its own Data Directory, its own workbench port, its own
+peer port and its own forward port. In a terminal of its own —
 
 ```console
 $ mkdir -p /tmp/other
 $ cargo run -p verkstead-cli -- serve --data-dir /tmp/other \
-    --listen 127.0.0.1:8522 --peer-listen 0.0.0.0:8523
+    --listen 127.0.0.1:8522 --peer-listen 0.0.0.0:8523 \
+    --annex-forward-listen 0.0.0.0:8524
 ```
 
 Two installs, two device ids, two certificates. Open the **Remote access** pane

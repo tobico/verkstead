@@ -728,6 +728,22 @@ pub struct Config {
     )]
     pub peer_listen: SocketAddr,
 
+    /// Address and port the Annex Forward binds — the listener a Keeper puts a
+    /// third device through to its Annex's peer listener on, forwarding raw
+    /// TCP and never terminating the TLS inside it (ADR-0024).
+    ///
+    /// Every interface by default, for the peer listener's reason: the device
+    /// reaching an Annex through here may be on the LAN or on the tailnet. A
+    /// connection is closed as soon as it is accepted until an Annex is linked,
+    /// so a device that keeps none forwards nothing. A second Verkstead on this
+    /// machine wants a port of its own here too.
+    #[arg(
+        long,
+        env = "VERKSTEAD_ANNEX_FORWARD_LISTEN",
+        default_value_t = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), peer::ANNEX_FORWARD_PORT),
+    )]
+    pub annex_forward_listen: SocketAddr,
+
     /// An extra read-write bind every sandbox gets. Repeat the flag, or separate
     /// several in the environment variable the way the platform writes `PATH`.
     ///
@@ -2308,6 +2324,14 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
     // to stop at the file a human could delete.
     let peer = peer::Listener::bound(config.peer_listen, &device)?;
 
+    // And the Annex Forward beside it, taken for the same reason: a third
+    // address this start claims, and one somebody else is on is a start to
+    // refuse rather than a Keeper whose Annex nobody can reach (ADR-0024) — see
+    // [`peer::annex_forward`]. Pointed nowhere until the Keeper's Join points
+    // it, which is what the handle is for.
+    let annex_forward = peer::annex_forward::Listener::bound(config.annex_forward_listen)?;
+    let annex_pointing = peer::annex_forward::Pointing::at_nothing();
+
     // And where a session's HOME comes from, which wants the Data Directory
     // above on the platform that makes a real one under it — see
     // [`sandbox::Homes`]. Refused for the reason the binds are: a HOME the unit
@@ -2500,6 +2524,7 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
     tracing::info!(
         listen = %config.listen,
         peer_listen = %peer.address(),
+        annex_forward = %annex_forward.address(),
         workbench = %hands_over.startup_line(config.listen, &key),
         data_dir = %data_dir.display(),
         device = %device.id(),
@@ -2648,7 +2673,10 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
     // Not behind the advertising switch either, and for the same reason the browse
     // is not: what that turns off is what this machine *says* about itself, and a
     // machine told to keep quiet has not been told to stop looking.
-    .probing(discovery::Probe::of_this_tailnet(tailscale));
+    .probing(discovery::Probe::of_this_tailnet(tailscale))
+    // And the Annex Forward's handle, which linking an Annex points — see
+    // [`device::Devices::keep`].
+    .forwarding_for_the_annex(annex_pointing.clone());
 
     // Which is where the changeover above is picked up. A start that re-issued the
     // certificate owes every member the new fingerprint, and until they hold it
@@ -2769,6 +2797,7 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
             served = axum::serve(listener, app.clone()) => served.context("serving Verkstead"),
             served = axum::serve(pipe, app) => served.context("serving Verkstead over its named pipe"),
             served = peer.serving(peers) => served,
+            served = annex_forward.serving(annex_pointing) => served,
             signal = stopping.told() => stopped(signal, &advertisement).await,
         }
     }
@@ -2780,6 +2809,7 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
         tokio::select! {
             served = axum::serve(listener, app) => served.context("serving Verkstead"),
             served = peer.serving(peers) => served,
+            served = annex_forward.serving(annex_pointing) => served,
             signal = stopping.told() => stopped(signal, &advertisement).await,
         }
     }

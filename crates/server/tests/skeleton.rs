@@ -185,3 +185,20 @@ fn the_log_directory_is_reachable_from_another_crate() {
         );
     }
 }
+
+/// The Annex Forward listens on every interface at 8424 unless told otherwise,
+/// beside the peer listener on 8423 (ADR-0024), and its flag moves it.
+#[test]
+fn the_annex_forward_defaults_to_every_interface_on_8424() {
+    let config = Config::parse_from(["verkstead serve"]);
+
+    assert_eq!(config.annex_forward_listen.to_string(), "0.0.0.0:8424");
+
+    let told = Config::parse_from([
+        "verkstead serve",
+        "--annex-forward-listen",
+        "127.0.0.1:9424",
+    ]);
+
+    assert_eq!(told.annex_forward_listen.to_string(), "127.0.0.1:9424");
+}

@@ -739,6 +739,12 @@ pub struct Devices {
     /// **Forward** listens on — see [`crate::forwarding`]. Both loopbacks unless
     /// said otherwise, see [`Devices::forwarding_on`].
     forwarding_on: Vec<std::net::IpAddr>,
+
+    /// And where its **Annex Forward** puts a connection through to, which the
+    /// Keeper's Join points at the Annex it links — see
+    /// [`crate::peer::annex_forward`]. Pointed nowhere unless a start said
+    /// otherwise, see [`Devices::forwarding_for_the_annex`].
+    annex_forward: crate::peer::annex_forward::Pointing,
 }
 
 impl Devices {
@@ -764,6 +770,7 @@ impl Devices {
             probe: Probe::asked_nothing(),
             peers,
             forwarding_on: crate::forwarding::LOOPBACKS.to_vec(),
+            annex_forward: crate::peer::annex_forward::Pointing::at_nothing(),
         }
     }
 
@@ -841,6 +848,22 @@ impl Devices {
     pub fn forwarding_on(self, forwarding_on: Vec<std::net::IpAddr>) -> Devices {
         Devices {
             forwarding_on,
+            ..self
+        }
+    }
+
+    /// The same, pointing `annex_forward` at the Annex it links rather than a
+    /// handle nothing serves — see [`crate::peer::annex_forward`].
+    ///
+    /// **Handed over rather than made here**, because the listener reading it is
+    /// the start's: a router stood up to answer a question about a membership
+    /// forwards nothing.
+    pub fn forwarding_for_the_annex(
+        self,
+        annex_forward: crate::peer::annex_forward::Pointing,
+    ) -> Devices {
+        Devices {
+            annex_forward,
             ..self
         }
     }
@@ -986,9 +1009,12 @@ impl Devices {
     /// device's, and its roster — is recorded here, with no pending row: the
     /// whole link is the one round trip.
     ///
+    /// **And then the Annex Forward**, pointed at `address` once the join has
+    /// gone through it — see [`crate::peer::annex_forward`].
+    ///
     /// **Idempotent**, so a Keeper runs it at every start: nothing unchanged is
     /// rewritten, the join is taken again, and each side's row for the other is
-    /// the same row said again.
+    /// the same row said again, and the one forward is pointed again.
     ///
     /// No page presses this — see [`crate::ui`], where it is a route with no
     /// button, and stage 03 of the WSL roadmap, which calls it at every boot.
@@ -1038,6 +1064,11 @@ impl Devices {
 
         let saying = self.reading.identity(&self.device).await;
         let kept = self.peers.keep(address, &expecting, &saying).await?;
+
+        // And the Annex Forward pointed at the address the join just went
+        // through, in place of wherever it pointed before: one forward, at
+        // the one Annex — see [`crate::peer::annex_forward`].
+        self.annex_forward.point_at(address);
 
         let annex = kept.introducer.device.clone();
 

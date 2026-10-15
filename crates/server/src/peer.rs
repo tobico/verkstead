@@ -75,6 +75,7 @@
 //! and every address that row carries tried in the order it was advertised.
 
 pub mod account;
+pub mod annex_forward;
 pub mod announcing;
 pub mod authors;
 pub mod checkouts;
@@ -132,6 +133,14 @@ use joining::Joins;
 /// one thing to remember, and the pair reads as an installation rather than as
 /// two unrelated numbers.
 pub const PEER_PORT: u16 = 8423;
+
+/// The port a Keeper's **Annex Forward** listens on when nobody has said otherwise
+/// (ADR-0024) — see [`annex_forward`].
+///
+/// One past the peer port, for the reason that is one past the workbench's: the
+/// three read as one installation. It is what an Annex advertises in place of
+/// its own addresses, so it is what a third device dials to reach one.
+pub const ANNEX_FORWARD_PORT: u16 = 8424;
 
 /// Where a device answers for itself — the one route on this listener that asks
 /// the caller for nothing at all.

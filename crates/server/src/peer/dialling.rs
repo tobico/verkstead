@@ -1436,7 +1436,7 @@ fn reaching(address: &str, path: &str) -> String {
 /// listener is on, so a device that is not on the default one is reachable only
 /// by an address that says which — and an address with a port on it is also the
 /// shape of the one somebody types when they link two machines.
-fn authority(address: &str) -> String {
+pub(crate) fn authority(address: &str) -> String {
     // A bare IP, which is most of what a device advertises. The brackets are
     // what makes a v6 address a URL authority rather than an address with a
     // port already in it.
