@@ -91,6 +91,15 @@ Annex is a full member of the roster. The Annex dials out on its own: its
 Keeper for announcements and account mirrors, and any member through the
 Keeper's addresses as the roster says.
 
+**The Annex listens on ports of its own** — its peer listener on 8425 and its
+workbench on the loopback at 8426, never 8423 and 8422. Under WSL's default
+NAT that changes nothing, but `networkingMode=mirrored` in `.wslconfig` is a
+per-user setting every distro shares, and under it the Annex has the Keeper's
+interfaces and the Keeper's loopback: the ports would collide, and there would
+be no NAT address to forward to. On ports of its own the Annex works under
+either, and the forward points at the Annex's NAT address under NAT and at the
+loopback under mirrored — which mode it is being the backend's probe to say.
+
 **Keeping the Annex private to its Keeper** — not announced, its work shown
 only in the Keeper's workbench — was rejected for making a Mac blind to half
 the cluster. **Tailscale inside the box** was rejected for the tailnet login

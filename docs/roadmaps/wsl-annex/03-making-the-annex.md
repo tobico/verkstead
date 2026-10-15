@@ -28,7 +28,7 @@ Windows.
 - **A backend behind an interface** — make, boot, terminate, run inside (as
   root and as the service user), read a file, and a probe of the machine's
   state (no WSL, needs a restart, virtualization off, distro present, distro
-  running) — with WSL the one implementation. The human wants a Docker or
+  running, and whether WSL's networking is NAT or mirrored) — with WSL the one implementation. The human wants a Docker or
   Lima box on a Mac and a Windows VM on a Linux desktop behind the same
   shape later; nothing of either is written now.
 - **A distro of Verkstead's own**, named `Verkstead`, disk under
@@ -41,7 +41,10 @@ Windows.
   names the previous release in. A development build names a binary copied
   in instead, through an override the brief's re-verify list names.
 - **What the configuration declares**: the module with `listen` on the
-  loopback, `peerListen` on every interface, `paths = [ "/srv/repos" ]`,
+  loopback at 8426, `peerListen` on every interface at 8425 — ports of the
+  Annex's own, never the Keeper's 8422 and 8423, because under WSL's mirrored
+  networking the Annex shares the Keeper's loopback and interfaces (ADR-0024,
+  *The Keeper forwards for its Annex*) — `paths = [ "/srv/repos" ]`,
   bwrap, git, gh, nix, sccache, and `claude-code`, `codex`, `opencode` and
   `grok` from the unstable input where nixpkgs has them; `kept_by` with the
   Keeper's id and fingerprint in `config.yaml`; the Keeper's git author in
@@ -51,7 +54,8 @@ Windows.
   stage 02's clone on the Annex is preset to it.
 - **Boot with the Keeper, terminate with it.** The Keeper's startup boots the
   distro in the background and never waits; once the Annex answers, the
-  Keeper reads its address, points the forward at it and runs stage 01's
+  Keeper reads its address — the NAT address under NAT, the loopback under
+  mirrored, as the probe says — points the forward at it and runs stage 01's
   linking operation again, which is idempotent. The Keeper's shutdown
   terminates the distro. An Annex that will not boot is a Notice and a line
   on its row.
@@ -66,7 +70,7 @@ Windows.
 
 1. **The backend interface and the WSL probe** — the trait and the
    `wsl.exe` implementation of make, boot, terminate, run inside, read file;
-   the probe's five answers.
+   the probe's five answers and the networking mode.
    - Unit-tested over a stub `wsl.exe` the way the install suite stubs
      package managers; the probe reads each state off the stub.
 2. **The wizard row and the elevated step** — the row on Windows, the plan
@@ -82,7 +86,8 @@ Windows.
    startup, the address read, the forward pointed, stage 01's linking run;
    the terminate at shutdown; the Notice on a failure.
    - After a restart of the Keeper, Devices lists the Annex reachable within
-     the boot's time and nothing was pressed.
+     the boot's time and nothing was pressed — under NAT and under
+     `networkingMode=mirrored` both.
 5. **A session in the Annex** — the end-to-end proof: a Conversation drafted
    onto *Linux (WSL)* with a mirrored Profile runs under bwrap and commits.
    - The Keeper's git author is on the commit.

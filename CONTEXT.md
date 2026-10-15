@@ -2239,6 +2239,10 @@ so **the Annex advertises its Keeper's addresses at the forward port** rather
 than its own interfaces, asked from the Keeper at each **Device Reading**, and
 a third device records it at an address it can reach. An Annex is never
 advertised over mDNS and never discovered: its address is its Keeper's.
+**The Annex listens on ports of its own** — peer 8425, workbench 8426 — so
+that WSL's mirrored networking, where it shares the Keeper's loopback, cannot
+collide them with the Keeper's; the forward points at the loopback there and
+at the Annex's NAT address otherwise.
 _Avoid_: proxy, tunnel, port forward (as a noun for this), relay (which is the
 **Relay**, and is HTTP)
 
