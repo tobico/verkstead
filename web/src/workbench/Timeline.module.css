@@ -151,6 +151,13 @@
   }
 }
 
+/* The Code icon on the header while any preview stands on the conversation:
+   the accent, which is the icon's ink rather than its fill — the open fill still
+   goes over it — so the Timeline says there is something to try (ADR-0024). */
+.previewing {
+  --icon-ink: var(--accent);
+}
+
 /* The pinned events, above the timeline and inside the chrome that holds the top
    of the pane: the fixed set — a task list, a stage list and a PR — each of
    which is the current state of something the work is against rather than a
@@ -162,13 +169,6 @@
 
    One card is ever inside it: with more than one pinned the carousel below is
    what is here, and the card is inside that. */
-/* The Code icon on the header while any preview stands on the conversation:
-   the accent, which is the icon's ink rather than its fill — the open fill still
-   goes over it — so the Timeline says there is something to try (ADR-0024). */
-.previewing {
-  --icon-ink: var(--accent);
-}
-
 .pinned {
   display: flex;
   flex-direction: column;
