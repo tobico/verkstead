@@ -54,6 +54,23 @@ unsigned too, so SmartScreen stops it behind *Windows protected your PC*:
 click **More info**, then **Run anyway**. Once per download; right-clicking the
 msi, **Properties**, and ticking **Unblock** does the same beforehand.
 
+**Taking it off Windows again** starts before the msi is uninstalled, because
+the msi knows nothing of the account sessions ran as or of what was granted to
+it. Quit Verkstead, then run `verkstead session-account remove` in an elevated
+terminal. It reads every record Verkstead kept under its Data Directory of the
+access-control entries it wrote on your directories, takes each one off with a
+line saying which, and then deletes the account, the `C:\Users` directory
+Windows made for it the first time a session ran, and its password out of the
+secrets file. A machine that has run Verkstead and then had it taken off should
+look as it did, and the `entries = 6 of 6 taken off` line it ends with is how
+you check. A grant that will not come off is named, and then nothing else is
+deleted, so the path can be put right and the command run again; `--force`
+deletes the account regardless, still naming the paths. Run again on a machine
+whose account is already gone, it takes off whatever entries the records still
+name. A Conversation's own grants, on its Worktree and the Repo's git
+directory, stand for as long as the Conversation is open, Verkstead running or
+not, and come off when it closes or when the account is removed.
+
 **Sessions run on all three, and on all three behind a boundary.** One
 description of what a session may reach — its Worktree, the Repo's git
 directory, the Sandbox Configuration's entries, the Build Cache, a home of its
