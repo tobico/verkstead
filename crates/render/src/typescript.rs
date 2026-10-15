@@ -20,26 +20,26 @@ use crate::{
     AbandonedRepo, Adopted, AnswerAttached, AnswerAttachmentRemoved, AskingDevice, Attached,
     AttachmentRemoved, AuthorEdit, AuthorEdited, AuthorEntry, AuthorRemoved, BacklogPane,
     BaseBranchChoice, BaseRecorded, BranchRename, BranchRenamed, BriefEdit, BriefSaved, Capture,
-    ClonableRepo, CommitPane, CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed,
-    CompanionModeChoice, CompanionModeChosen, CompanionRemoved, Confirming, ConversationArchived,
-    ConversationClosed, ConversationEntry, ConversationMove, ConversationSteered,
-    ConversationStopped, ConversationUnarchived, ConversationView, Created, Creation,
-    DeviceIdentity, DevicesView, DirectoryListing, DiscoveredDevice, DroppedRow, FileDeleted,
-    FileDeleting, FileListsView, FileMade, FileMaking, FileReading, FileRenamed, FileRenaming,
-    FileRootsView, FileStatusView, FileWrite, FileWritten, FolderListing, ForwardsView,
-    GrillingStarted, InstallPress, LanguageCleared, LinkedDevice, Locked, LoginClosed, LoginCode,
-    LoginOpened, LoginState, MemoPressed, NewAdoption, NewCompanion, NewConversation, NewJoin,
-    NewRank, OnboardingView, OpenTerminal, PendingJoin, Permitting, PortsView, PrefillView,
-    Preflight, ProcessChoice, ProcessPicked, ProfileChoice, ProfileChosen, ProfileDeleted,
-    ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails, PushKey, Registered, Registration,
-    RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoPairingsView, RepoRemoved, RepoSwitched,
-    RepoView, Repointed, Repointing, Resolved, Resumed, RoadmapPane, RoleChoice, Screen, ServeEdit,
-    ServePress, ServerAttached, ServerRemoved, SetReading, SettingsEdit, SettingsSaved,
-    SettingsView, ShareCommented, SharePublished, SharedConversation, ShowArchived,
-    ShowingArchived, Shown, Started, SteerCancelled, SteerForm, SteerOpened, SteerSaved,
-    SteerSubmission, Submitted, Subscribed, Subscription, TakenUp, TargetNamed, TargetRecorded,
-    TerminalClosed, TerminalOpened, TerminalsView, TranscriptView, Transferring, Unsubscribe,
-    UpdateNotice, Watching,
+    ClonableRepo, Cloned, Cloning, CommitPane, CompanionAdded, CompanionBaseRecorded,
+    CompanionBranchRenamed, CompanionModeChoice, CompanionModeChosen, CompanionRemoved, Confirming,
+    ConversationArchived, ConversationClosed, ConversationEntry, ConversationMove,
+    ConversationSteered, ConversationStopped, ConversationUnarchived, ConversationView, Created,
+    Creation, DeviceIdentity, DevicesView, DirectoryListing, DiscoveredDevice, DroppedRow,
+    FileDeleted, FileDeleting, FileListsView, FileMade, FileMaking, FileReading, FileRenamed,
+    FileRenaming, FileRootsView, FileStatusView, FileWrite, FileWritten, FolderListing,
+    ForwardsView, GrillingStarted, InstallPress, LanguageCleared, LinkedDevice, Locked,
+    LoginClosed, LoginCode, LoginOpened, LoginState, MemoPressed, NewAdoption, NewCompanion,
+    NewConversation, NewJoin, NewRank, OnboardingView, OpenTerminal, PendingJoin, Permitting,
+    PortsView, PrefillView, Preflight, ProcessChoice, ProcessPicked, ProfileChoice, ProfileChosen,
+    ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails, PushKey,
+    Registered, Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoPairingsView,
+    RepoRemoved, RepoSwitched, RepoView, Repointed, Repointing, Resolved, Resumed, RoadmapPane,
+    RoleChoice, Screen, ServeEdit, ServePress, ServerAttached, ServerRemoved, SetReading,
+    SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedConversation,
+    ShowArchived, ShowingArchived, Shown, Started, SteerCancelled, SteerForm, SteerOpened,
+    SteerSaved, SteerSubmission, Submitted, Subscribed, Subscription, TakenUp, TargetNamed,
+    TargetRecorded, TerminalClosed, TerminalOpened, TerminalsView, TranscriptView, Transferring,
+    Unsubscribe, UpdateNotice, Watching,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -84,6 +84,10 @@ fn the_viewers_types_are_written_from_these() {
     // And what the rest of the cluster holds that a device lacks, which is the
     // Repo dropdown's second group.
     ClonableRepo::export_all(&config).unwrap();
+
+    // And cloning one of them onto that device.
+    Cloning::export_all(&config).unwrap();
+    Cloned::export_all(&config).unwrap();
 
     // The workbench: the sidebar, one Conversation with its Timeline, and the
     // three things the human changes about a drafting one. Each edit brings its

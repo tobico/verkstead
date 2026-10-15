@@ -155,9 +155,11 @@ that act, each row the repository's name with where its origin is; a Repo
 this device already matches is not among them, and a repository with no
 origin anywhere is not clonable at all. **Picking one clones it on the device
 the dropdown is for** — into the parent **Create repo** remembers there, over
-a path field where none is remembered yet, with that device's own GitHub
-token — registers it, and it is the draft's Repo from that moment, as a pick
-on a registered row is. The **Transfer** dialog's **Preflight** offers the
+a path field where none is remembered yet, as the **Author** the member's
+Repo works as and with that Author's token — registers it as that Author,
+and it is the draft's Repo from that moment, as a pick on a registered row
+is. A member's Repo that names no Author is the one Author's here, and is
+refused by name where there are several: a clone carries no picker. The **Transfer** dialog's **Preflight** offers the
 same where it finds no match on the device picked, reading *clone it there*
 rather than sending anybody to Open repo. Cluster-wide rather than an
 **Annex**'s: the problem is the same on any device that is not this one. A

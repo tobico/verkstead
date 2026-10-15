@@ -34,6 +34,7 @@ import type {
   BriefSaved,
   Capture,
   ClonableRepo,
+  Cloned,
   CommitPane,
   CompanionAdded,
   CompanionBaseRecorded,
@@ -391,6 +392,30 @@ export function createRepo(
     on(device, "/api/ui/repos/new"),
     { parent, name, github, author },
   );
+}
+
+/// Ask `device` to clone a **Clonable Repo** under `parent` and take it on, as
+/// the Author with the uuid `author` — the one the clonable row carried.
+///
+/// The third way a Repo arrives, ending in the registration **Open repo**
+/// makes: git runs on that device, as that Author's token, and the directory is
+/// named off the origin the way the clonable row was. A path registered there already
+/// is that Repo rather than a second one, and every refusal is in the body, git's
+/// own words where git is what refused.
+///
+/// No deadline, for the reason no press here has one: a big repository takes as
+/// long as it takes, and the relayed hop has none either.
+export function cloneRepo(
+  device: Device,
+  origin: string,
+  parent: string,
+  author: string | null,
+): Promise<Cloned> {
+  return post<Cloned>(on(device, "/api/ui/repos/clone"), {
+    origin,
+    parent,
+    ...(author === null ? {} : { author }),
+  });
 }
 
 /// Take one off the registry, which is an unregistering rather than a delete:

@@ -1005,7 +1005,47 @@ delete: CleanupStepView, };
  * made from: the two readings above are for a person to read, and neither is a
  * URL git could be handed.
  */
-export type ClonableRepo = { name: string, place: string, origin: string, };
+export type ClonableRepo = { name: string, place: string, origin: string, 
+/**
+ * The uuid of the Author the member's Repo works as (ADR-0025), which is
+ * the one a clone of it is recorded as and fetched with — the member met
+ * first, as the origin's spelling is. `None` where that member says none:
+ * the clone is then the one Author's, as a registration naming none is.
+ */
+author: string | null, };
+
+/**
+ * What became of a clone.
+ *
+ * Shaped like [`Registered`], because a clone ends in the very registration
+ * **Open repo** makes, and the two outcomes that leave a Repo carry it for the
+ * same reason: whoever asked is about to put a draft on it.
+ *
+ * A refusal registers nothing, and a directory the clone made on the way is
+ * taken back.
+ */
+export type Cloned = { "Cloned": RepoEntry } | { "AlreadyRegistered": RepoEntry } | "ParentMissing" | "AuthorUnpicked" | "NoSuchAuthor" | { "Refused": string };
+
+/**
+ * A **Clonable Repo** the human is asking this device to clone, and where.
+ *
+ * The origin as the clonable reading carried it, which is a URL git can be
+ * handed, and the parent the clone goes under: the directory itself is named
+ * off the origin on the device that clones, the way the reading named the row,
+ * so the two can never disagree about what the clone is called.
+ */
+export type Cloning = { origin: string, 
+/**
+ * The directory the clone goes in. Absolute, and somewhere the server can
+ * write — the one **Create repo** remembers for this device.
+ */
+parent: string, 
+/**
+ * The uuid of the Author the clone is recorded as and fetched with: the
+ * clonable row's own, sent back as it came. With none, the one Author
+ * where there is one — see [`Registration::author`].
+ */
+author?: string, };
 
 /**
  * One pull request the comment landed on.

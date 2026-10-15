@@ -7,8 +7,9 @@ lists that device's own Repos, then, behind a rule, a second group: the
 repositories other members of the cluster have registered, by origin, that
 this device lacks — each row the repository's name with where its origin is.
 Picking one clones it on the named device into the parent **Create repo**
-remembers there, over a path field where none is remembered yet, with that
-device's own GitHub token; registers it; and it becomes the draft's Repo, the
+remembers there, over a path field where none is remembered yet, as the
+Author the member's Repo works as, with that Author's token; registers it as
+that Author; and it becomes the draft's Repo, the
 page landing as a pick on an existing row does. The Transfer dialog's
 Preflight, where it finds no match on the device picked, reads *clone it
 there* and does the same, Go unlocking once it is done. Demonstrable with

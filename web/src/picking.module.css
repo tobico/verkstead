@@ -305,3 +305,13 @@ dialog .backdrop {
 .clonable .says {
   overflow-wrap: anywhere;
 }
+
+/* And a clonable row held while a clone is out: quieter, and not a press. The
+   row that started it says *Cloning…* where its place was. */
+.clonable[aria-disabled="true"] {
+  cursor: default;
+}
+
+.clonable[aria-disabled="true"] .words {
+  color: var(--ink-soft);
+}

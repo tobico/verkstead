@@ -50,7 +50,7 @@
 
 use std::borrow::Cow;
 
-use verkstead_render::{ClonableRepo, RepoAcross};
+use verkstead_render::{AuthorThere, ClonableRepo, RepoAcross};
 
 use crate::device::Devices;
 use crate::peer::repos::REPOS;
@@ -168,7 +168,8 @@ const MOST_A_MEMBER_IS_WAITED_ON: std::time::Duration = std::time::Duration::fro
 /// a reason to list or to hide anything here.
 ///
 /// **One origin is one row**, however many members hold it and however each
-/// spelled it: the first spelling met is the one cloned from.
+/// spelled it: the first spelling met is the one cloned from, and the Author
+/// that member's Repo works as is the one the clone is made as (ADR-0025).
 ///
 /// **A member that does not answer contributes nothing and refuses nothing.**
 /// Each is asked concurrently and given [`MOST_A_MEMBER_IS_WAITED_ON`], and
@@ -268,6 +269,10 @@ pub async fn clonable(
             name: named(&bare).to_owned(),
             place: placed(&bare).to_owned(),
             origin,
+            author: match there.author {
+                AuthorThere::As { id, .. } => Some(id),
+                AuthorThere::Unpicked | AuthorThere::Unsaid => None,
+            },
         });
         seen.push(bare);
     }
@@ -280,6 +285,14 @@ pub async fn clonable(
     });
 
     Ok(rows)
+}
+
+/// What a clone of `origin`, spelled however a member spelled it, is called:
+/// the name its clonable row carries, and the directory a clone onto this device
+/// makes — see [`crate::repos::clone`]. One reading for both, so the row and the
+/// Repo it becomes are never called two things.
+pub(crate) fn clone_name(origin: &str) -> String {
+    named(&normalised(origin)).to_owned()
 }
 
 /// What a clone of the [`normalised`] origin `bare` would call its directory:

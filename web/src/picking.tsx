@@ -325,8 +325,14 @@ export type Clonable = {
   name: string;
   /// And where the repository is, read under the name.
   place: string;
-  /// What pressing it does, where anything does yet.
-  press?: () => void;
+  /// What pressing it does: the clone, run on the device the dropdown is for.
+  press: () => void;
+  /// What is being done while a clone is out — *Cloning…* on the row pressed,
+  /// drawn where the place was — or `null` on the rows beside it, which are
+  /// held as well. A row with either is inert: a clone runs once, and the
+  /// press that started it says so rather than starting another. Absent while
+  /// nothing is out.
+  doing?: string | null;
 };
 
 /// The same choice, drawn out of ordinary elements so that every row can carry
@@ -490,7 +496,9 @@ export function Listbox<T>(
     shut();
 
     if (option) props.pick(props.value(option));
-    else if (clone) clone.press?.();
+    else if (clone) {
+      if (clone.doing === undefined) clone.press();
+    }
     else if (action) action.press();
   };
 
@@ -696,6 +704,9 @@ export function Listbox<T>(
                       aria-selected="false"
                       aria-labelledby={wordsId(at())}
                       aria-describedby={saysId(at())}
+                      aria-disabled={
+                        clone.doing === undefined ? undefined : "true"
+                      }
                       onClick={() => take(at())}
                     >
                       <span class={styles.described}>
@@ -703,7 +714,7 @@ export function Listbox<T>(
                           {clone.name}
                         </span>
                         <span id={saysId(at())} class={styles.says}>
-                          {clone.place}
+                          {clone.doing ?? clone.place}
                         </span>
                       </span>
                     </div>

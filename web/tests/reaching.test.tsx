@@ -67,7 +67,8 @@ import {
   drawn,
   mount,
 } from "./bench";
-import { offered, pick, picker, press } from "./pickers";
+import { clonables, offered, pick, picker, press } from "./pickers";
+import { repoParent, setRepoParent } from "../src/remembered";
 import {
   askedFor,
   json,
@@ -335,6 +336,71 @@ describe("a press on a conversation that lives on another device", () => {
       ).toHaveLength(1),
     );
     expect(askedFor(fetching, "/api/ui/repos")).toBe(0);
+  });
+
+  /// And a clonable row in that dropdown, which lands the same way: the clone
+  /// runs on the member, into the parent remembered for it, and the draft moves
+  /// onto the Repo it made there.
+  it("clones a repo on the member, and moves the draft onto it", async () => {
+    setRepoParent(MEMBER, "/srv/repos");
+
+    const cloned: RepoEntry = {
+      id: 4343,
+      name: "verkstead",
+      path: "/srv/repos/verkstead",
+      default_branch: "main",
+      author: null,
+      author_unpicked: false,
+    };
+    const fetching = theMember(
+      whenever(
+        at("/repos/clonable"),
+        json([
+          {
+            name: "verkstead",
+            place: "github.com/tobico/verkstead",
+            origin: "https://github.com/tobico/verkstead",
+            author: null,
+          },
+        ]),
+      ),
+      whenever(at("/repos/clone"), json({ Cloned: cloned }), "POST"),
+      whenever(at(`/conversations/${OPEN.id}/repo`), json("Switched"), "POST"),
+      whenever(at(`/conversations/${OPEN.id}/seen`), json({}), "POST"),
+      ...OPEN.companions.map((companion) =>
+        whenever(at(`/repos/${companion.repo.id}/branches`), json(BRANCHES)),
+      ),
+    );
+    const { container } = mount(on(`/conversations/${OPEN.id}`));
+
+    fireEvent.click(
+      await drawn<HTMLButtonElement>(container, `.${setup.repoOption} > button`),
+    );
+    await waitFor(() => expect(clonables("Repo")).toHaveLength(1));
+    fireEvent.click(clonables("Repo")[0]!);
+
+    await waitFor(() =>
+      expect(
+        fetching.mock.calls
+          .filter(
+            ([asked, init]) =>
+              String(asked) === at(`/conversations/${OPEN.id}/repo`) &&
+              init?.method === "POST",
+          )
+          .map(([, init]) => JSON.parse(String(init?.body)) as unknown),
+      ).toEqual([{ repo_id: cloned.id }]),
+    );
+    expect(
+      fetching.mock.calls
+        .filter(
+          ([asked, init]) =>
+            String(asked) === at("/repos/clone") && init?.method === "POST",
+        )
+        .map(([, init]) => JSON.parse(String(init?.body)) as unknown),
+    ).toEqual([
+      { origin: "https://github.com/tobico/verkstead", parent: "/srv/repos" },
+    ]);
+    expect(repoParent(MEMBER)).toBe("/srv/repos");
   });
 });
 

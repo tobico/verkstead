@@ -24,9 +24,13 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use axum::http::StatusCode;
+use axum::Router;
+use axum::body::Body;
+use axum::http::{Request, StatusCode, header};
+use http_body_util::BodyExt;
 use sqlx::SqlitePool;
-use verkstead_render::ClonableRepo;
+use tower::ServiceExt;
+use verkstead_render::{ClonableRepo, Cloned};
 use verkstead_server::device::reading::Reading;
 use verkstead_server::device::{Device, Devices};
 use verkstead_server::matching;
@@ -62,6 +66,10 @@ struct Verkstead {
     pool: SqlitePool,
     cluster: Devices,
     address: SocketAddr,
+
+    /// What this device's browser reaches, which is where a press made on it —
+    /// a clone, relayed to a member or not — is asked.
+    workbench: Router,
 
     /// Held for the length of the test: the identity, the database and every
     /// repository registered on it live in it.
@@ -100,7 +108,10 @@ impl Verkstead {
         )
         .waiting(PATIENCE);
 
-        let Routers { over_the_link, .. } = routers_answering_devices_telling(
+        let Routers {
+            workbench,
+            over_the_link,
+        } = routers_answering_devices_telling(
             pool.clone(),
             cluster.clone(),
             nudges.clone(),
@@ -121,6 +132,7 @@ impl Verkstead {
             pool,
             cluster,
             address,
+            workbench,
             dir,
         }
     }
@@ -491,6 +503,7 @@ async fn what_one_member_holds_and_another_lacks_is_clonable_there() {
             name: "widgets".to_owned(),
             place: "git.example.com/you/widgets".to_owned(),
             origin: "git@git.example.com:you/widgets.git".to_owned(),
+            author: None,
         }],
         "B lacks A's widgets, named off the origin rather than off A's directory",
     );
@@ -501,6 +514,7 @@ async fn what_one_member_holds_and_another_lacks_is_clonable_there() {
             name: "gadgets".to_owned(),
             place: "github.com/you/gadgets".to_owned(),
             origin: "https://github.com/you/gadgets.git".to_owned(),
+            author: None,
         }],
         "and A lacks B's gadgets, but not the widgets it holds itself",
     );
@@ -584,5 +598,198 @@ async fn a_member_that_does_not_answer_adds_nothing_and_holds_nothing_up() {
         started.elapsed() < std::time::Duration::from_secs(5),
         "and neither held the reading past its bound: {:?}",
         started.elapsed(),
+    );
+}
+
+impl Verkstead {
+    /// Clone `origin` under `parent` on `device`, pressed on this device's
+    /// workbench the way the Repo dropdown presses it: at its own path where
+    /// `device` is this one, and over the Relay where it is a member.
+    async fn clone_on(&self, device: &str, origin: &str, parent: &Path) -> Cloned {
+        let path = match device == self.device.id() {
+            true => "/api/ui/repos/clone".to_owned(),
+            false => format!("/api/ui/members/{device}/repos/clone"),
+        };
+
+        let body = serde_json::to_vec(&serde_json::json!({
+            "origin": origin,
+            "parent": parent.to_string_lossy(),
+        }))
+        .unwrap();
+
+        let answered = self
+            .workbench
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(&path)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .header(header::CONTENT_LENGTH, body.len())
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let status = answered.status();
+        let bytes = answered.into_body().collect().await.unwrap().to_bytes();
+        let said = String::from_utf8_lossy(&bytes);
+
+        assert_eq!(status, StatusCode::OK, "POST {path}: {said}");
+        serde_json::from_str(&said).unwrap_or_else(|why| panic!("{path} answered {said}: {why}"))
+    }
+
+    /// Every Repo registered here.
+    async fn registered(&self) -> Vec<store::Repo> {
+        store::registered_repos(&self.pool).await.unwrap()
+    }
+}
+
+/// A repository on A whose origin is a real one a clone can be made from: a bare
+/// copy of it, named `name.git` in a directory of its own, so the origin's last
+/// path segment is `name` whatever A calls its checkout.
+async fn held_with_a_real_origin(a: &Verkstead, checkout: &str, name: &str) -> String {
+    let origins = a.dir.path().join("origins");
+    std::fs::create_dir_all(&origins).unwrap();
+
+    let source = repository(a.dir.path().join("sources").join(name));
+    let bare = origins.join(format!("{name}.git"));
+    git(
+        &origins,
+        &[
+            "clone",
+            "--bare",
+            "--quiet",
+            &source.to_string_lossy(),
+            &bare.to_string_lossy(),
+        ],
+    );
+
+    let origin = bare.to_string_lossy().into_owned();
+    a.repo(checkout, Some(&origin)).await;
+
+    origin
+}
+
+/// Pressing a clonable row on a member: B reads what it lacks, A's browser
+/// clones it onto B over the Relay, and the Repo B registers is named off the
+/// origin. Asking again answers the same Repo, and nothing registers twice.
+#[tokio::test]
+async fn a_clonable_repo_clones_onto_the_member_lacking_it() {
+    let (a, b) = linked_up().await;
+
+    let origin = held_with_a_real_origin(&a, "widgets-work", "widgets").await;
+
+    let row = b
+        .clonable()
+        .await
+        .into_iter()
+        .find(|row| row.origin == origin)
+        .expect("B lists A's widgets as clonable");
+
+    let parent = b.dir.path().join("clones");
+    std::fs::create_dir_all(&parent).unwrap();
+
+    let cloned = a.clone_on(B, &row.origin, &parent).await;
+    let Cloned::Cloned(repo) = cloned else {
+        panic!("the clone lands on B: {cloned:?}");
+    };
+
+    assert_eq!(
+        repo.name, "widgets",
+        "named off the origin, not off A's checkout"
+    );
+    assert!(
+        Path::new(&repo.path).join("README.md").is_file(),
+        "and it is the repository, cloned: {}",
+        repo.path,
+    );
+    assert_eq!(repo.default_branch, "main");
+    assert_eq!(
+        b.registered()
+            .await
+            .iter()
+            .map(|held| held.id)
+            .collect::<Vec<_>>(),
+        vec![repo.id],
+        "registered on B",
+    );
+    assert!(
+        a.registered()
+            .await
+            .iter()
+            .all(|held| held.name != "widgets")
+    );
+
+    assert!(
+        b.clonable().await.iter().all(|row| row.origin != origin),
+        "and B lacks it no longer",
+    );
+
+    let again = a.clone_on(B, &row.origin, &parent).await;
+
+    assert_eq!(
+        again,
+        Cloned::AlreadyRegistered(repo.clone()),
+        "the same path again is the same Repo",
+    );
+    assert_eq!(
+        b.registered().await.len(),
+        1,
+        "with nothing registered twice"
+    );
+}
+
+/// A clone git refuses is git's own words, registers nothing, and leaves no
+/// directory it made — and a directory somebody else put there is refused and
+/// left exactly as it was.
+#[tokio::test]
+async fn a_clone_git_refuses_leaves_nothing_behind() {
+    let (a, b) = linked_up().await;
+
+    let parent = b.dir.path().join("clones");
+    std::fs::create_dir_all(&parent).unwrap();
+
+    let nowhere = a.dir.path().join("origins").join("gone.git");
+
+    let Cloned::Refused(why) = a.clone_on(B, &nowhere.to_string_lossy(), &parent).await else {
+        panic!("an origin with nothing at it is refused");
+    };
+
+    assert!(why.starts_with("fatal:"), "in git's own words: {why}");
+    assert!(
+        !parent.join("gone").exists(),
+        "and no directory is left behind"
+    );
+    assert!(b.registered().await.is_empty(), "and nothing is registered");
+
+    // A directory of that name that nobody registered: git's to refuse, and
+    // nobody's to take away.
+    let origin = held_with_a_real_origin(&a, "gadgets-work", "gadgets").await;
+    let theirs = parent.join("gadgets");
+    std::fs::create_dir_all(&theirs).unwrap();
+    std::fs::write(theirs.join("notes.txt"), "mine\n").unwrap();
+
+    let Cloned::Refused(why) = b.clone_on(B, &origin, &parent).await else {
+        panic!("a directory that is there is refused");
+    };
+
+    assert!(why.contains("already exists"), "in git's own words: {why}");
+    assert_eq!(
+        std::fs::read_to_string(theirs.join("notes.txt")).unwrap(),
+        "mine\n",
+        "and what was there is left alone",
+    );
+    assert!(b.registered().await.is_empty(), "and nothing is registered");
+
+    // And a parent that is not there is the create's own sentence.
+    assert_eq!(
+        b.clone_on(B, &origin, &parent.join("not-here")).await,
+        Cloned::ParentMissing,
+    );
+    assert_eq!(
+        b.clone_on(B, &origin, Path::new("relative/clones")).await,
+        Cloned::ParentMissing,
     );
 }

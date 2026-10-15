@@ -98,6 +98,7 @@ import { Modal } from "../Modal";
 import { PaneSticky } from "../Panes";
 import { PathField } from "../PathField";
 import {
+  cloneRepo,
   createRepo,
   listRepos,
   registerRepo,
@@ -106,6 +107,8 @@ import {
 } from "../api/client";
 import type {
   AuthorEntry,
+  ClonableRepo,
+  Cloned,
   Created,
   Registered,
   RepoEntry,
@@ -892,6 +895,204 @@ export function OpenRepo(props: {
   );
 }
 
+/// Remember the directory a repository that has just arrived on `device` is
+/// in, which is where the next create or clone there opens.
+///
+/// The parent as the server resolved it rather than as it was typed: that is the
+/// directory the repository is actually in — on that device, this being a path
+/// on it and on no other. One writer for the create and the clone, so the two
+/// never come to remember one answer two ways.
+function rememberParentOf(device: Device, path: string): void {
+  const cut = path.lastIndexOf("/");
+  setRepoParent(device, cut > 0 ? path.slice(0, cut) : "/");
+}
+
+/// What a clone is told where the member's repo it was found on names no
+/// author and more than one is configured here: there is no picker on a clone,
+/// so it says where the repo can be taken on with one.
+const CLONE_UNPICKED =
+  "The device this repo is on doesn't say which author it's committed as, and more than one is configured here. Pick one on that device, or open the repo with Open repo.";
+
+/// And one whose author this device's list doesn't hold yet.
+const CLONE_NO_SUCH_AUTHOR =
+  "This repo's author hasn't reached this device yet. Try again in a moment.";
+
+/// What a clone that answered comes to: the Repo to land on, or the sentence it
+/// was refused in.
+export type CloneLanding = { repo: RepoEntry } | { refused: string };
+
+/// Clone a **Clonable Repo** onto the device the dropdown is for, as a mutation
+/// whose answer is a [`CloneLanding`].
+///
+/// One for the dropdown's own press, where a parent is remembered, and one for
+/// [`CloneRepo`]'s card, where none is: both end in the same remembering and the
+/// same lists read again, and what is done with the Repo is the caller's.
+///
+/// A clone that lands is a repository arrived, the way a create's is: the
+/// parent it went in is remembered for that device, and the lists drawn over the
+/// registry are out of date — the clonable group under it among them, there
+/// being one fewer thing to clone.
+export function useCloning() {
+  const queries = useQueryClient();
+  const device = useDevice();
+
+  return useMutation(() => ({
+    mutationFn: async (asked: {
+      origin: string;
+      parent: string;
+      author: string | null;
+    }): Promise<CloneLanding> => {
+      const on = device();
+      const outcome: Cloned = await cloneRepo(
+        on,
+        asked.origin,
+        asked.parent,
+        asked.author,
+      );
+
+      if (outcome === "ParentMissing") {
+        return { refused: "There's no directory at that path to clone into." };
+      }
+
+      if (outcome === "AuthorUnpicked") {
+        return { refused: CLONE_UNPICKED };
+      }
+
+      if (outcome === "NoSuchAuthor") {
+        return { refused: CLONE_NO_SUCH_AUTHOR };
+      }
+
+      // git's own words, for the reason a create's are drawn as they come.
+      if ("Refused" in outcome) {
+        return { refused: outcome.Refused };
+      }
+
+      const repo =
+        "Cloned" in outcome ? outcome.Cloned : outcome.AlreadyRegistered;
+
+      rememberParentOf(on, repo.path);
+      void queries.invalidateQueries({ queryKey: keyOf(on, "repos") });
+      void queries.invalidateQueries({
+        queryKey: keyOf(on, "abandoned-roadmaps"),
+      });
+
+      return { repo };
+    },
+  }));
+}
+
+/// The card a clonable row opens where no parent is remembered for the device
+/// yet: where the clone goes, browsed for in the field **Create repo**'s parent
+/// is, and one press.
+///
+/// Also where a clone sent straight to a remembered parent comes back to when it
+/// is refused, with the reason under the field: what answers a refusal is
+/// usually another parent, and this is where one is picked.
+///
+/// The Repo goes onto the draft the moment it lands, which is what takes this
+/// card away.
+export function CloneRepo(props: {
+  /// The row that was pressed.
+  repo: ClonableRepo;
+  /// What a clone already sent was refused with, where one was.
+  refused?: string | null;
+  /// Said when the modal has closed itself — Escape, a press on the backdrop,
+  /// or the Cancel beside the press.
+  close: () => void;
+  /// And what a clone that landed does with the Repo, which is the caller's.
+  landed: (repo: RepoEntry) => void;
+}): JSX.Element {
+  const device = useDevice();
+  const id = createUniqueId();
+
+  // Read once, as the card is built, for [`CreateRepo`]'s reason.
+  const remembered = repoParent(device());
+
+  const [parent, setParent] = createSignal(remembered);
+  const [refused, setRefused] = createSignal<string | null>(
+    props.refused ?? null,
+  );
+
+  const cloning = useCloning();
+
+  const clone = (ev: SubmitEvent) => {
+    ev.preventDefault();
+
+    const where = parent().trim();
+    if (where === "") {
+      return;
+    }
+
+    cloning.mutate(
+      {
+        origin: props.repo.origin,
+        parent: where,
+        author: props.repo.author,
+      },
+      {
+        onSuccess: (landing) => {
+          if ("refused" in landing) {
+            setRefused(landing.refused);
+            return;
+          }
+
+          props.landed(landing.repo);
+        },
+      },
+    );
+  };
+
+  return (
+    <Modal class={styles.cloneRepo!} open close={props.close} labelledBy={id}>
+      <h3 id={id}>Clone a Repo</h3>
+
+      <form class={styles.form} onSubmit={clone}>
+        <Note class={styles.from}>
+          {props.repo.name} is cloned from {props.repo.place} into a directory
+          of that name.
+        </Note>
+
+        <label for="clone-parent">Parent directory</label>
+        <PathField
+          id="clone-parent"
+          opened={remembered !== ""}
+          placeholder="/home/you/src"
+          value={parent()}
+          write={(where) => {
+            setParent(where);
+            setRefused(null);
+          }}
+        />
+
+        <div class={styles.buttons}>
+          <button
+            type="submit"
+            disabled={cloning.isPending || parent().trim() === ""}
+          >
+            {cloning.isPending ? "Cloning…" : "Clone"}
+          </button>
+          <button
+            type="button"
+            class={`${styles.cancel} secondary`}
+            onClick={props.close}
+          >
+            Cancel
+          </button>
+        </div>
+
+        <Show when={refused()}>
+          {(why) => <ErrorLine class={styles.failure}>{why()}</ErrorLine>}
+        </Show>
+        <Show when={cloning.isError}>
+          <ErrorLine class={styles.failure}>
+            The repo couldn't be cloned. {cloning.error?.message}
+          </ErrorLine>
+        </Show>
+      </form>
+    </Modal>
+  );
+}
+
 /// And the other row at that foot: **Create repo**, which makes one rather than
 /// taking on one that is there.
 ///
@@ -1118,12 +1319,7 @@ export function CreateRepo(props: {
   /// not GitHub was reached — everything but landing it on the draft, which is
   /// the one thing the two answer differently.
   const made = (repo: RepoView) => {
-    // The parent as the server resolved it rather than as it was typed: that
-    // is the directory the repository is actually in, and so the one the next
-    // create should open in — on that device, this being a path on it and on no
-    // other.
-    const cut = repo.path.lastIndexOf("/");
-    setRepoParent(device(), cut > 0 ? repo.path.slice(0, cut) : "/");
+    rememberParentOf(device(), repo.path);
 
     // The list this was made over is now out of date, and so are the roadmaps
     // waiting to be adopted — a registration invalidates both for the same
