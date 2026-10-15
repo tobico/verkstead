@@ -281,6 +281,16 @@ impl Watchers {
         );
     }
 
+    /// Whether a Code pane is attached to `conversation_id` now — which is also
+    /// when a terminal opened for a Preview is read for what is in front of it
+    /// (see [`crate::terminals::run`]), the row and the tab that follow it
+    /// being the pane's.
+    pub(crate) fn attached(&self, conversation_id: i64) -> bool {
+        self.held()
+            .get(&conversation_id)
+            .is_some_and(|following| following.panes > 0)
+    }
+
     /// The register, locked.
     fn held(&self) -> std::sync::MutexGuard<'_, HashMap<i64, Following>> {
         self.held

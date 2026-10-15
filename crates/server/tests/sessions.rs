@@ -38894,6 +38894,7 @@ async fn a_terminal_says_whether_somebody_is_working_in_it() {
             busy: false,
             preview: None,
             title: None,
+            in_front: None,
         }],
         "a shell at its prompt is a terminal nobody is working in",
     );
@@ -38911,6 +38912,7 @@ async fn a_terminal_says_whether_somebody_is_working_in_it() {
             busy: true,
             preview: None,
             title: None,
+            in_front: None,
         }],
         "a shell running something is a terminal somebody is working in",
     );
@@ -39060,6 +39062,267 @@ async fn a_terminal_opened_for_a_preview_runs_its_command_in_the_shell() {
         1,
         "the preview's command is typed once: {showing:?}",
     );
+}
+
+/// A press on a Preview with a live terminal is decided by what is in front of
+/// it (ADR-0024): the run in front is the tab refocused with nothing typed, the
+/// shell in front is the command typed again, and a command of the human's own
+/// in front is a second terminal opened beside it. What is in front follows the
+/// run with a Code pane attached, each move a `terminals` Nudge — and a retire
+/// leaves the terminals as ordinary ones, called as any tab is.
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn a_press_on_a_preview_with_a_live_terminal_follows_what_is_in_front() {
+    use verkstead_render::InFront;
+
+    let fixture = grilling(&a_backlog_that_says_so(
+        ": > /tmp/verkstead/preview-now\n        \
+         while [ ! -f /tmp/verkstead/previewed ]; do sleep 0.05; done",
+        "",
+    ))
+    .await;
+
+    picked_through_to_the_task(&fixture).await;
+
+    let directory = handoff_directory(&fixture);
+    let deadline = Instant::now() + *PATIENCE;
+    while !directory.join("preview-now").exists() {
+        assert!(
+            Instant::now() < deadline,
+            "the task session never got as far as its preview"
+        );
+        pause(Duration::from_millis(25)).await;
+    }
+
+    // The word is put together by the shell, so that the echo of the line
+    // typed is never what the grid is found holding; and it goes on running,
+    // which is what a run is.
+    let (status, body) = suggest_a_preview(
+        &fixture,
+        "Build and test",
+        "printf 'the run %s\\n' began; sleep 600",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let at = fixture.listening().await;
+    let _pane = a_code_pane(at, fixture.id).await;
+
+    let press = || async {
+        post::<TerminalOpened>(
+            &fixture.app,
+            &format!("/api/ui/conversations/{}/terminals", fixture.id),
+            &serde_json::json!({ "preview": "Build and test" }),
+        )
+        .await
+    };
+    let ran = |grid: &str| grid.matches("the run began").count();
+
+    let TerminalOpened::Opened { number } = press().await else {
+        panic!("the first press opens a terminal for the preview");
+    };
+
+    let mut watcher = Watcher::terminal(at, fixture.id, number).await;
+    watcher.resize(200, 40).await;
+    watcher.until(|grid| ran(grid) == 1).await;
+    until_in_front(&fixture, number, |terminal| terminal.busy).await;
+
+    // The run in front: refocused, and nothing typed.
+    assert_eq!(press().await, TerminalOpened::Refocused { number });
+
+    // Ended, with Ctrl+C: the shell in front, followed without anybody asking,
+    // and the tab called as any tab is. The page opens the stream here rather
+    // than at the top, a page that falls behind a session's chatter having its
+    // stream ended under it.
+    let mut page = Listening::open(&fixture.app).await;
+    watcher.types("\u{3}").await;
+    until_nudged(
+        &mut page,
+        Nudge::Terminals {
+            conversation: fixture.id,
+        },
+    )
+    .await;
+    let ended = until_in_front(&fixture, number, |terminal| {
+        terminal.in_front == Some(InFront::Shell)
+    })
+    .await;
+    assert_eq!(
+        ended.title, None,
+        "the tab is called by the shell once the run ends"
+    );
+
+    // So the press types the command again, into the same terminal, and the
+    // title comes back with the run.
+    assert_eq!(press().await, TerminalOpened::Retyped { number });
+    watcher.until(|grid| ran(grid) == 2).await;
+    let again = until_in_front(&fixture, number, |terminal| {
+        terminal.busy && terminal.in_front == Some(InFront::Run)
+    })
+    .await;
+    assert_eq!(again.title.as_deref(), Some("Build and test"));
+
+    // And with a command of the human's own in front, a second terminal opens
+    // for the preview and the first is left exactly as it is.
+    watcher.types("\u{3}").await;
+    until_in_front(&fixture, number, |terminal| {
+        terminal.in_front == Some(InFront::Shell)
+    })
+    .await;
+    watcher.types("sleep 700\r").await;
+    until_in_front(&fixture, number, |terminal| {
+        terminal.in_front == Some(InFront::Other)
+    })
+    .await;
+
+    let TerminalOpened::Opened { number: second } = press().await else {
+        panic!("a press with the human's own command in front opens another terminal");
+    };
+    assert_ne!(second, number);
+
+    let mut beside = Watcher::terminal(at, fixture.id, second).await;
+    beside.resize(200, 40).await;
+    beside.until(|grid| ran(grid) == 1).await;
+
+    let first = until_in_front(&fixture, number, |_| true).await;
+    assert_eq!(
+        (first.busy, first.in_front),
+        (true, Some(InFront::Other)),
+        "the human's command is left running",
+    );
+
+    // Retired, the preview's terminals are ordinary ones.
+    let mut page = Listening::open(&fixture.app).await;
+    let (status, body) = retire_a_preview(&fixture, "Build and test").await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+    until_nudged(
+        &mut page,
+        Nudge::Terminals {
+            conversation: fixture.id,
+        },
+    )
+    .await;
+
+    assert_eq!(
+        terminals_of(&fixture)
+            .await
+            .into_iter()
+            .map(|terminal| (
+                terminal.number,
+                terminal.preview,
+                terminal.title,
+                terminal.in_front
+            ))
+            .collect::<Vec<_>>(),
+        vec![(number, None, None, None), (second, None, None, None)],
+        "a retired preview's terminals are called as any tab is",
+    );
+
+    std::fs::write(directory.join("previewed"), "").unwrap();
+}
+
+/// A terminal opened for a Preview on a platform that reads no foreground: a
+/// press with it live refocuses it and types nothing, ever (ADR-0024).
+#[cfg(not(target_os = "linux"))]
+#[tokio::test]
+async fn a_press_on_a_preview_where_nothing_can_be_read_only_refocuses() {
+    let fixture = grilling(
+        r#"
+        printf 'reading the brief\r\n'
+        while :; do sleep 0.05; done
+        "#,
+    )
+    .await;
+
+    fixture
+        .until(|view| view.worktree.as_ref().map(|worktree| worktree.path.clone()))
+        .await;
+
+    let pool = open_database(&fixture.database).await.unwrap();
+    verkstead_store::suggest_preview(
+        &pool,
+        fixture.id,
+        "Build and test",
+        "printf 'the preview %s\\n' ran",
+        "a test",
+    )
+    .await
+    .unwrap();
+
+    let at = fixture.listening().await;
+
+    let press = || async {
+        post::<TerminalOpened>(
+            &fixture.app,
+            &format!("/api/ui/conversations/{}/terminals", fixture.id),
+            &serde_json::json!({ "preview": "Build and test" }),
+        )
+        .await
+    };
+
+    let TerminalOpened::Opened { number } = press().await else {
+        panic!("the first press opens a terminal for the preview");
+    };
+
+    let mut watcher = Watcher::terminal(at, fixture.id, number).await;
+    watcher.resize(200, 40).await;
+    watcher.until(|grid| grid.contains("the preview ran")).await;
+
+    assert_eq!(press().await, TerminalOpened::Refocused { number });
+
+    watcher.types("printf 'still %s\\n' here\r").await;
+    let showing = watcher.until(|grid| grid.contains("still here")).await;
+    assert_eq!(
+        showing
+            .iter()
+            .filter(|row| row.contains("the preview ran"))
+            .count(),
+        1,
+        "nothing is typed into a terminal whose foreground cannot be read: {showing:?}",
+    );
+}
+
+/// A Code pane attached to the Conversation, the way the pane says it is
+/// drawn: the socket held open for as long as what comes back is.
+#[cfg(target_os = "linux")]
+async fn a_code_pane(
+    at: SocketAddr,
+    conversation: i64,
+) -> WebSocketStream<MaybeTlsStream<TcpStream>> {
+    let (socket, _) = tokio_tungstenite::connect_async(format!(
+        "ws://{at}/api/ui/conversations/{conversation}/files/attach"
+    ))
+    .await
+    .expect("a Code pane attaches");
+
+    socket
+}
+
+/// Read the terminals view until terminal `number` is as `reached` wants it,
+/// and hand it back.
+#[cfg(target_os = "linux")]
+async fn until_in_front(
+    fixture: &Grilling,
+    number: i64,
+    reached: impl Fn(&TerminalView) -> bool,
+) -> TerminalView {
+    let deadline = Instant::now() + *PATIENCE;
+
+    loop {
+        let live = terminals_of(fixture).await;
+
+        if let Some(terminal) = live.iter().find(|terminal| terminal.number == number)
+            && reached(terminal)
+        {
+            return terminal.clone();
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "terminal {number} never got there: {live:?}"
+        );
+        pause(Duration::from_millis(50)).await;
+    }
 }
 
 /// The terminals a Conversation is holding, as the pane reads them back.

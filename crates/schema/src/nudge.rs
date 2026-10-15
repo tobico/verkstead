@@ -64,6 +64,17 @@ pub enum Nudge {
     /// server).
     Ports { conversation: i64 },
 
+    /// What is in front of one of a Conversation's terminals opened for a
+    /// Preview moved: its run started or ended, something else took the
+    /// foreground, or the Preview it was opened for was retired (ADR-0024).
+    ///
+    /// Off the server's own reading of the pseudo-terminal, which it takes
+    /// while a Code pane is attached — see `terminals::run` on the server. What
+    /// it says is the Conversation and nothing else: the pane reads the
+    /// terminals view again, and that is where the row's icon and the tab's
+    /// title come from.
+    Terminals { conversation: i64 },
+
     /// What this device is forwarding moved: a Forward was taken up, skipped,
     /// taken up after a skip, or ended.
     ///

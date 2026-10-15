@@ -121,6 +121,14 @@ pub(crate) async fn retire(
                 conversation: conversation_id,
             });
 
+            // And any terminal opened for it is an ordinary one from here,
+            // called as any tab is (ADR-0024).
+            if state.terminals.retired(conversation_id, title) {
+                state.nudges.announce(Nudge::Terminals {
+                    conversation: conversation_id,
+                });
+            }
+
             StatusCode::NO_CONTENT.into_response()
         }
         Ok(false) => refused(

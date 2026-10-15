@@ -75,15 +75,40 @@ pub const TELLS: bool = cfg!(target_os = "linux");
 /// `shell` is the name, not the path — see [`named`], which is what the register
 /// keeps beside each terminal.
 pub fn of(terminal: &Terminal, shell: &str) -> bool {
+    front(terminal, shell) != Front::Shell
+}
+
+/// What is in the foreground of a terminal, as far as this side can say.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Front {
+    /// The shell the terminal was started on.
+    Shell,
+
+    /// Some other process group, by the id of the process leading it — which
+    /// is what a Preview's run is recorded as (see [`super::run`]).
+    Group(u32),
+
+    /// Nothing can be said: no foreground to read, or no name to read off it.
+    Unreadable,
+}
+
+/// The foreground of `terminal`, measured against `shell` — the reading
+/// [`of`] makes its judgement out of, kept whole for the run's reading, which
+/// wants to know *which* group is in front and not only that it is not the
+/// shell.
+pub fn front(terminal: &Terminal, shell: &str) -> Front {
     let Some(foreground) = terminal.foreground() else {
-        return true;
+        return Front::Unreadable;
     };
 
     let Some(running) = running(foreground) else {
-        return true;
+        return Front::Unreadable;
     };
 
-    running != as_far_as_comm(shell)
+    match running == as_far_as_comm(shell) {
+        true => Front::Shell,
+        false => Front::Group(foreground),
+    }
 }
 
 /// As much of `shell` as the platform's own answer could have carried, cut on a

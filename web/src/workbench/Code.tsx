@@ -835,20 +835,21 @@ export function Code(props: {
 
   /// Which of this Conversation's terminals are live.
   ///
-  /// Read when the pane opens rather than followed: the register is the
-  /// server's and moves only when a shell exits or this pane opens one, and both
-  /// of those are answered where they happen — an exit down the tab's own
-  /// socket. Frozen for that reason — a terminal is no part of the record, so no
-  /// Nudge is ever about one.
+  /// Read when the pane opens, and again on a `terminals` Nudge, which is what
+  /// is in front of a terminal opened for a preview having moved (ADR-0024):
+  /// the row's icon and the tab's title follow that reading. Which tabs there
+  /// are is not re-read off it — the register moves only when a shell exits or
+  /// this pane opens one, and both of those are answered where they happen, an
+  /// exit down the tab's own socket — so the tabs are settled against the first
+  /// reading alone, and every reading after is the names and the runs.
   ///
-  /// **And kept no longer than the pane it was read for.** Frozen means frozen:
-  /// an answer still in the cache is never asked for again, on a mount or on a
-  /// focus. So a pane coming back to a cached one would be reading the register
-  /// as it stood when this pane last closed — and where the shell was opened in
-  /// this pane, that is the empty list it started from, so it would come back to
-  /// no tabs at all and leave the shell running with nothing over it and no way
-  /// to close it. Dropped with the pane instead, which is what makes "read when
-  /// the pane opens" true of every opening rather than of the first.
+  /// **And kept no longer than the pane it was read for.** A pane coming back
+  /// to a cached answer would be reading the register as it stood when this
+  /// pane last closed — and where the shell was opened in this pane, that is
+  /// the empty list it started from, so it would come back to no tabs at all
+  /// and leave the shell running with nothing over it and no way to close it.
+  /// Dropped with the pane instead, which is what makes "read when the pane
+  /// opens" true of every opening rather than of the first.
   ///
   /// Said twice, because `gcTime` is a timer: it is zero, so nothing is kept
   /// past the pane, and the answer is dropped outright as the pane goes so that
@@ -864,7 +865,7 @@ export function Code(props: {
   const terminals = useReading(() => ({
     queryKey: holding(),
     queryFn: () => listTerminals(device(), props.conversation.id),
-    freshness: "static",
+    freshness: { reconcile: "number" },
     gcTime: 0,
   }));
 
@@ -1069,12 +1070,50 @@ export function Code(props: {
   let opening = false;
 
   /// What the server calls each terminal it holds a name for, by number: the
-  /// title of the preview it was opened for (ADR-0024). Read off the register
-  /// when the pane opens and added to by a press on a preview, so that a tab
-  /// is called by it ahead of whatever its shell titles itself — and called by
-  /// it again after a reload, the name being the server's rather than this
-  /// page's.
+  /// title of the preview it was opened for, while its run stands (ADR-0024).
+  /// Read off the register on every reading of it and added to by a press on a
+  /// preview, so that a tab is called by it ahead of whatever its shell titles
+  /// itself — and called by it again after a reload, the name being the
+  /// server's rather than this page's.
   const [names, setNames] = createSignal<Record<number, string>>({});
+
+  // Followed rather than settled once: a run that ended is a name the server
+  // no longer holds, and a run typed again is the name back. A number the
+  // reading does not have is a shell opened since it was read, whose name the
+  // press put here, and is left as it is.
+  createEffect(() => {
+    const live = terminals.data?.live;
+
+    if (live === undefined) {
+      return;
+    }
+
+    setNames((was) => {
+      const now = { ...was };
+
+      for (const terminal of live) {
+        if (terminal.title === null) {
+          delete now[terminal.number];
+        } else {
+          now[terminal.number] = terminal.title;
+        }
+      }
+
+      return now;
+    });
+  });
+
+  /// Whether the run of the preview titled `title` stands: the newest of its
+  /// live terminals, which is the one a press is decided by, with its run in
+  /// front — or with nothing to be said about it, where a press on it shows
+  /// the terminal all the same. The row's icon is the terminal's while it is.
+  const running = (title: string): boolean => {
+    const newest = (terminals.data?.live ?? [])
+      .filter((terminal) => terminal.preview === title)
+      .at(-1);
+
+    return newest?.in_front === "Run" || newest?.in_front === "Unknown";
+  };
 
   /// Every group there is, in the order the pane draws them, and where each of
   /// them stands — both read off the tree, which is the one thing the pane is
@@ -2013,10 +2052,13 @@ export function Code(props: {
   /// end of the strip or from the press in the empty pane — the only two things
   /// that ask for a plain shell, the pane asking for none of its own accord.
   ///
-  /// **And what a press on a preview does**, with its title: the same shell,
-  /// opened in the active group exactly where **New terminal** puts one, with
-  /// the preview's command typed into it by the server and the tab called by
-  /// the preview's title (ADR-0024).
+  /// **And what a press on a preview does**, with its title — decided by the
+  /// server against the newest of the preview's live terminals (ADR-0024). A
+  /// new one is the same shell, opened in the active group exactly where **New
+  /// terminal** puts one, with the preview's command typed into it by the
+  /// server and the tab called by the preview's title; one already there is
+  /// shown wherever it is, with the command typed again or not as the server
+  /// said — see [`refocus`].
   const open = (preview?: string): Promise<void> => {
     if (opening) {
       return Promise.resolve();
@@ -2028,6 +2070,19 @@ export function Code(props: {
       .then((outcome) => {
         if (typeof outcome === "string") {
           stand(TERMINAL_REFUSAL[outcome]);
+          return;
+        }
+
+        if ("Refocused" in outcome) {
+          refocus(outcome.Refocused.number);
+          return;
+        }
+
+        if ("Retyped" in outcome) {
+          // The run is back, and the name with it, ahead of the reading the
+          // Nudge brings.
+          setNames((was) => ({ ...was, [outcome.Retyped.number]: preview! }));
+          refocus(outcome.Retyped.number);
           return;
         }
 
@@ -2052,6 +2107,28 @@ export function Code(props: {
       .finally(() => {
         opening = false;
       });
+  };
+
+  /// Choose the tab of terminal `number` in whichever group holds it, which is
+  /// what a press on a preview whose terminal is already open does — and add it
+  /// to the active group where none does, which is a pane that has not drawn
+  /// it yet.
+  const refocus = (number: number): void => {
+    const tab: Tab = { terminal: number };
+    const holding = groups().find((group) =>
+      group.tabs().some((one) => "terminal" in one && one.terminal === number),
+    );
+
+    if (holding !== undefined) {
+      setActive(holding.id);
+      holding.setChosen(keyed(tab));
+      return;
+    }
+
+    const group = into();
+
+    group.setTabs((was) => [...was, tab]);
+    group.setChosen(keyed(tab));
   };
 
   /// One tab's socket closed, which is its shell gone: the server takes a
@@ -2898,15 +2975,6 @@ export function Code(props: {
 
     const running = new Set(live.map((terminal) => terminal.number));
 
-    setNames((was) => ({
-      ...was,
-      ...Object.fromEntries(
-        live.flatMap((terminal) =>
-          terminal.title === null ? [] : [[terminal.number, terminal.title]],
-        ),
-      ),
-    }));
-
     // Dropped from whichever group holds it, wherever that is — and a group
     // whose last tab was a shell that has ended goes the way any other emptied
     // group goes.
@@ -3063,6 +3131,7 @@ export function Code(props: {
           <Show when={props.conversation.previews.length > 0}>
             <Previews
               previews={props.conversation.previews}
+              running={running}
               press={(title) => void open(title)}
             />
           </Show>
@@ -4051,13 +4120,16 @@ function zoned(box: DOMRect, x: number, y: number): Zone {
 const refuseScroll = (event: Event): void => event.preventDefault();
 
 /// The previews standing on the conversation, as a box above the tree: a row
-/// each, oldest first, the title with a play icon at its right (ADR-0024).
+/// each, oldest first, the title with a play icon at its right that becomes the
+/// terminal icon while its run stands (ADR-0024).
 ///
 /// The whole row is the press, lit under the pointer the way a row of the tree
-/// is, and what it does is the pane's — a terminal opened for the preview in the
-/// active group, exactly where **New terminal** puts one.
+/// is, and what it does is the pane's — decided by the server, and a terminal
+/// opened for the preview in the active group, exactly where **New terminal**
+/// puts one, where there is none to show.
 function Previews(props: {
   previews: PreviewView[];
+  running: (title: string) => boolean;
   press: (title: string) => void;
 }): JSX.Element {
   return (
@@ -4076,7 +4148,10 @@ function Previews(props: {
                 onClick={() => props.press(preview.title)}
               >
                 <span class={styles.previewTitle}>{preview.title}</span>
-                <Icon of={faPlay} class={styles.play!} />
+                <Icon
+                  of={props.running(preview.title) ? faTerminal : faPlay}
+                  class={styles.play!}
+                />
               </button>
             </li>
           )}

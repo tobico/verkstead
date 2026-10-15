@@ -527,6 +527,10 @@ const ABOUT: Record<string, readonly string[]> = {
   // What a member's terminals are listening on, which is read by the device that
   // attached to them over the link rather than by any page.
   ports: [],
+  // What is in front of a terminal opened for a preview, which only the Code
+  // pane reads — and it is not open in this sweep. Its row's icon following
+  // the run is asked about where the box is drawn.
+  terminals: [],
   // And what this device forwards, which the sidebar's foot reads — a read
   // that is none of the five, asked about where it is drawn after this sweep.
   forwards: [],

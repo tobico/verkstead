@@ -125,6 +125,11 @@ pub mod ports;
 /// [`printed`].
 mod printed;
 
+/// And what is in front of one opened for a Preview — its run, its shell or
+/// something else — which is what a press on the Preview is decided by. See
+/// [`run`].
+pub(crate) mod run;
+
 use std::collections::{BTreeSet, HashMap};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -137,7 +142,9 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response as HttpResponse};
 use axum::{Extension, Json};
 use tokio::sync::oneshot;
-use verkstead_render::{PortsView, TerminalClosed, TerminalOpened, TerminalPorts, TerminalView};
+use verkstead_render::{
+    InFront, PortsView, TerminalClosed, TerminalOpened, TerminalPorts, TerminalView,
+};
 use verkstead_schema::{ApiError, Nudge};
 
 use crate::AppState;
@@ -290,14 +297,14 @@ struct Watched {
     /// relay following the output holds too. See [`printed`].
     hurry: Arc<printed::Hurry>,
 
-    /// The title of the Preview it was opened for, where it was — see
-    /// [`TerminalView::preview`].
+    /// The title of the Preview it was opened for, where it was and is still
+    /// standing — see [`TerminalView::preview`].
     preview: Option<String>,
 
-    /// And what its tab is called, held here so that a reattach brings it back
-    /// — see [`TerminalView::title`]. The Preview's title, for as long as the
-    /// terminal lives.
-    title: Option<String>,
+    /// And what is in front of it, which is what its tab is called by and what
+    /// a press on the Preview is decided by — see [`run`]. `None` exactly
+    /// where `preview` is.
+    run: Option<run::Run>,
 }
 
 impl Watched {
@@ -305,6 +312,26 @@ impl Watched {
     /// is what a × on its tab asks before it ends anything — see [`busy`].
     fn busy(&self) -> bool {
         busy::of(&self.terminal, &self.shell)
+    }
+
+    /// Read what is in front of it, where it was opened for a Preview, and say
+    /// whether that moved.
+    fn read_run(&mut self) -> bool {
+        let front = busy::front(&self.terminal, &self.shell);
+
+        self.run
+            .as_mut()
+            .is_some_and(|run| run.read(front, tokio::time::Instant::now()))
+    }
+
+    /// What its tab is called, where the server holds a name for it: the
+    /// Preview's title while its run stands, or while nothing can be said
+    /// about whether it does — see [`TerminalView::title`].
+    fn title(&self) -> Option<String> {
+        match self.run.as_ref()?.in_front() {
+            InFront::Run | InFront::Unknown => self.preview.clone(),
+            InFront::Shell | InFront::Other => None,
+        }
     }
 
     /// Tell the relay this terminal is to end, and hand back what says it has.
@@ -350,7 +377,8 @@ impl Terminals {
                 number,
                 busy: watched.busy(),
                 preview: watched.preview.clone(),
-                title: watched.title.clone(),
+                title: watched.title(),
+                in_front: watched.run.as_ref().map(run::Run::in_front),
             })
             .collect();
 
@@ -623,12 +651,162 @@ impl Terminals {
         }
     }
 
+    /// A press on the Preview titled `preview`, decided against the newest of
+    /// its live terminals by what is in front of it now — see [`Pressed`].
+    ///
+    /// Read here, at the press, rather than taken from the last turn's reading:
+    /// a run somebody stopped a moment ago is a shell to type into, and the
+    /// reading that would have said so may be a turn away. Where the shell is
+    /// in front the run is marked typed in the same hold, so that a second
+    /// press arriving before the line is written finds the run on its way
+    /// rather than typing it twice.
+    fn pressed(&self, conversation_id: i64, preview: &str) -> Pressed {
+        let mut open = self.held();
+
+        let Some(held) = open.get_mut(&conversation_id) else {
+            return Pressed::Nothing;
+        };
+
+        let newest = held
+            .live
+            .iter_mut()
+            .filter(|(_, watched)| watched.preview.as_deref() == Some(preview))
+            .max_by_key(|(number, _)| **number);
+
+        let Some((&number, watched)) = newest else {
+            return Pressed::Nothing;
+        };
+
+        let moved = watched.read_run();
+
+        let Some(run) = watched.run.as_mut() else {
+            return Pressed::Nothing;
+        };
+
+        match run.in_front() {
+            InFront::Run | InFront::Unknown => Pressed::Refocus { number, moved },
+            InFront::Other => Pressed::Nothing,
+            InFront::Shell => {
+                run.typed(tokio::time::Instant::now());
+
+                Pressed::Retype {
+                    number,
+                    terminal: watched.terminal.clone(),
+                }
+            }
+        }
+    }
+
+    /// Mark one terminal's run as typed, now, ahead of the line being written
+    /// into it — `false` where it has ended or its Preview has been retired,
+    /// which is a line nobody is waiting for any more.
+    fn typing(&self, conversation_id: i64, number: i64) -> bool {
+        let mut open = self.held();
+
+        let Some(run) = open
+            .get_mut(&conversation_id)
+            .and_then(|held| held.live.get_mut(&number))
+            .and_then(|watched| watched.run.as_mut())
+        else {
+            return false;
+        };
+
+        run.typed(tokio::time::Instant::now());
+
+        true
+    }
+
+    /// One turn of a Preview terminal's reading — see [`previewing`].
+    ///
+    /// Read where a Code pane is attached, which is somebody able to see the
+    /// row and the tab follow it, and wherever the run is still to be seen
+    /// start whether or not anybody is: the group in front just after typing is
+    /// the one thing about a run that cannot be read later.
+    fn turn(&self, conversation_id: i64, number: i64, attached: bool) -> Turn {
+        let mut open = self.held();
+
+        let Some(watched) = open
+            .get_mut(&conversation_id)
+            .and_then(|held| held.live.get_mut(&number))
+        else {
+            return Turn::Over;
+        };
+
+        let Some(starting) = watched.run.as_ref().map(run::Run::starting) else {
+            return Turn::Over;
+        };
+
+        if !attached && !starting {
+            return Turn::Read {
+                moved: false,
+                starting,
+            };
+        }
+
+        let moved = watched.read_run();
+        let starting = watched.run.as_ref().is_some_and(run::Run::starting);
+
+        Turn::Read { moved, starting }
+    }
+
+    /// The Preview titled `preview` retired: each of its terminals is an
+    /// ordinary one from here, called as any tab is and read for nothing.
+    ///
+    /// Whether any was, which is a `terminals` Nudge for the caller to say.
+    pub(crate) fn retired(&self, conversation_id: i64, preview: &str) -> bool {
+        let mut open = self.held();
+
+        let Some(held) = open.get_mut(&conversation_id) else {
+            return false;
+        };
+
+        let mut any = false;
+
+        for watched in held.live.values_mut() {
+            if watched.preview.as_deref() == Some(preview) {
+                watched.preview = None;
+                watched.run = None;
+                any = true;
+            }
+        }
+
+        any
+    }
+
     /// The register, locked.
     fn held(&self) -> std::sync::MutexGuard<'_, HashMap<i64, Held>> {
         self.open
             .lock()
             .expect("the terminals register is not poisoned")
     }
+}
+
+/// What a press on a Preview comes to, against its newest live terminal.
+enum Pressed {
+    /// No live terminal of the Preview's, or something else in front of the
+    /// newest: a new one is opened, and the human's command left alone.
+    Nothing,
+
+    /// The run in front, or nothing to be said about it: shown, and nothing
+    /// typed. `moved` is whether the reading the press took moved it.
+    Refocus { number: i64, moved: bool },
+
+    /// The shell in front: shown, and the command typed again into it.
+    Retype {
+        number: i64,
+        terminal: Arc<Terminal>,
+    },
+}
+
+/// What one turn of a Preview terminal's reading came to.
+enum Turn {
+    /// The terminal has ended, or its Preview was retired: nothing more to
+    /// read.
+    Over,
+
+    /// Read, or passed over with nobody looking. `moved` is what is in front
+    /// having changed, and `starting` is the run still to be seen start.
+    Read { moved: bool, starting: bool },
 }
 
 /// One member's attach on one terminal, counted for as long as this is held —
@@ -772,11 +950,15 @@ async fn reading(
 /// there is none — see [`TerminalOpened`], whose refusals are the ones a
 /// session's start refuses by, asked about a shell.
 ///
-/// **And opened for a Preview where `preview` names one** (ADR-0024): the same
-/// shell, holding the Preview's title as the name its tab is called by, with
-/// the Preview's command typed into it as the human would have typed it — see
-/// [`typed`]. A title no standing Preview has is refused by name, with nothing
-/// started.
+/// **And a press on a Preview where `preview` names one** (ADR-0024), decided
+/// here against the newest of its live terminals by what is in front of it —
+/// see [`Terminals::pressed`]. The run in front, or nothing to be said, is that
+/// terminal refocused; the shell in front is the command typed into it again;
+/// and something else in front, or no terminal at all, is a new one opened: the
+/// same shell, holding the Preview's title as the name its tab is called by,
+/// with the command typed into it as the human would have typed it — see
+/// [`previewing`]. A title no standing Preview has is refused by name, with
+/// nothing started.
 pub(crate) async fn open(
     state: &AppState,
     conversation_id: i64,
@@ -812,6 +994,36 @@ pub(crate) async fn open(
             }
         }
     };
+
+    if let Some(preview) = &preview {
+        let moved = || {
+            state.nudges.announce(Nudge::Terminals {
+                conversation: conversation_id,
+            })
+        };
+
+        match state.terminals.pressed(conversation_id, &preview.title) {
+            Pressed::Nothing => {}
+
+            Pressed::Refocus {
+                number,
+                moved: read,
+            } => {
+                if read {
+                    moved();
+                }
+
+                return Ok(TerminalOpened::Refocused { number });
+            }
+
+            Pressed::Retype { number, terminal } => {
+                moved();
+                typed(&terminal, &preview.command, conversation_id, number).await;
+
+                return Ok(TerminalOpened::Retyped { number });
+            }
+        }
+    }
 
     // A terminal has no role of its own: it is the human working where the agent
     // worked, so it runs under the account the work is done under. The grilling
@@ -1006,19 +1218,24 @@ pub(crate) async fn open(
             ports: BTreeSet::new(),
             hurry: hurry.clone(),
             preview: preview.as_ref().map(|preview| preview.title.clone()),
-            title: preview.as_ref().map(|preview| preview.title.clone()),
+            run: preview.as_ref().map(|_| run::Run::new()),
         },
     );
 
     if let Some(preview) = preview {
-        tokio::spawn(typed(
-            state.terminals.clone(),
+        tokio::spawn(previewing(
+            state.clone(),
             conversation_id,
             number,
             terminal.clone(),
             named,
             preview.command,
         ));
+
+        // The row's icon follows the run from here, so the pane reads it.
+        state.nudges.announce(Nudge::Terminals {
+            conversation: conversation_id,
+        });
     }
 
     tokio::spawn(follow(
@@ -1041,7 +1258,8 @@ pub(crate) async fn open(
 }
 
 /// Type a Preview's command into the terminal opened for it, followed by a
-/// return, as the human would have typed it (ADR-0024).
+/// return, as the human would have typed it (ADR-0024) — and then read what is
+/// in front of it on a turn for as long as it lives.
 ///
 /// **Once the shell is at the foreground, and never before.** The first moments
 /// of a terminal read as the sandbox wrapper that started it, and a line typed
@@ -1054,14 +1272,22 @@ pub(crate) async fn open(
 /// **And at once where the platform cannot read a foreground** — Windows, whose
 /// pseudoconsole has none, and a Unix with no `/proc` to name one by — the
 /// terminal holding the line until the shell reads it.
-async fn typed(
-    terminals: Terminals,
+///
+/// **Then the reading** — see [`run`], and [`Terminals::turn`] for when a turn
+/// reads anything. Every [`COMING_UP`] while the run is still to be seen start,
+/// so the group the command started is caught in front, and every [`READING`]
+/// after, as ports are; a `terminals` Nudge whenever what is in front moves. It
+/// ends with the terminal, or with its Preview retired.
+async fn previewing(
+    state: AppState,
     conversation_id: i64,
     number: i64,
     terminal: Arc<Terminal>,
     shell: String,
     command: String,
 ) {
+    let terminals = &state.terminals;
+
     if busy::TELLS {
         loop {
             if terminals.screen(conversation_id, number).is_none() {
@@ -1076,7 +1302,40 @@ async fn typed(
         }
     }
 
-    let mut line = command.into_bytes();
+    if !terminals.typing(conversation_id, number) {
+        return;
+    }
+
+    typed(&terminal, &command, conversation_id, number).await;
+
+    let mut starting = true;
+
+    loop {
+        tokio::time::sleep(if starting { COMING_UP } else { READING }).await;
+
+        let attached = state.watchers.attached(conversation_id);
+
+        match terminals.turn(conversation_id, number, attached) {
+            Turn::Over => return,
+            Turn::Read {
+                moved,
+                starting: still,
+            } => {
+                starting = still;
+
+                if moved {
+                    state.nudges.announce(Nudge::Terminals {
+                        conversation: conversation_id,
+                    });
+                }
+            }
+        }
+    }
+}
+
+/// Write a Preview's command into `terminal`, followed by a return.
+async fn typed(terminal: &Terminal, command: &str, conversation_id: i64, number: i64) {
+    let mut line = command.as_bytes().to_vec();
     line.push(b'\r');
 
     match terminal.write(&line).await {

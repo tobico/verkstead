@@ -2934,16 +2934,46 @@ pub struct TerminalView {
     pub busy: bool,
 
     /// The title of the Preview it was opened for, and `None` for one opened
-    /// by **New terminal** (ADR-0024). The title as it was at the press: a
-    /// Preview retired since leaves the terminal saying what it was for.
+    /// by **New terminal** (ADR-0024) — and for one whose Preview has been
+    /// retired since, which is an ordinary tab from then on.
     pub preview: Option<String>,
 
     /// What its tab is called, where the server holds a name for it — the
-    /// Preview's title — ahead of anything the shell's own title escape sets.
-    /// Held here rather than by the page so that a reattach after a reload
-    /// brings the name back with the tab, a repaint carrying the grid and not
-    /// the title. `None` is a tab called as any tab is.
+    /// Preview's title, while its run stands — ahead of anything the shell's
+    /// own title escape sets. Held here rather than by the page so that a
+    /// reattach after a reload brings the name back with the tab, a repaint
+    /// carrying the grid and not the title. `None` is a tab called as any tab
+    /// is, which is what one is once its run has ended.
     pub title: Option<String>,
+
+    /// What is in front of it, as the server last read it, where it was opened
+    /// for a Preview — `None` for every other terminal, nothing being read of
+    /// one. See [`InFront`].
+    pub in_front: Option<InFront>,
+}
+
+/// What is in front of a terminal opened for a Preview: the server's reading of
+/// the pseudo-terminal's foreground, taken on a turn while a Code pane is
+/// attached and again at every press on the Preview (ADR-0024).
+///
+/// What the row's icon and the tab's title follow, and what a press is decided
+/// by — see [`TerminalOpened`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum InFront {
+    /// The run: the process group the typed command started, or the command
+    /// typed and not yet started — the shell has a moment to read the line.
+    Run,
+
+    /// The shell, at its prompt: the run has ended, or was never seen start.
+    Shell,
+
+    /// Something that is neither: a command the human started of their own.
+    Other,
+
+    /// Nothing can be said — the platform reads no foreground, which is
+    /// Windows. A press there refocuses the terminal and never types into it.
+    Unknown,
 }
 
 /// What one device's attached terminals on a Conversation are listening on —
@@ -2993,7 +3023,25 @@ pub struct OpenTerminal {
 pub enum TerminalOpened {
     /// A shell is running in the Conversation's Sandbox, and this is the number
     /// it answers to for as long as the server holds it.
+    ///
+    /// For a press on a Preview, a new terminal: none of the Preview's was
+    /// live, or something else was in front of the newest of them, which is
+    /// left alone.
     Opened {
+        number: i64,
+    },
+
+    /// A press on a Preview whose newest terminal has its run in front, or one
+    /// nothing can be said about: that terminal is to be shown, and nothing was
+    /// typed into it.
+    Refocused {
+        number: i64,
+    },
+
+    /// A press on a Preview whose newest terminal has its shell in front: that
+    /// terminal is to be shown, and the command was typed into it again, which
+    /// is a new run.
+    Retyped {
         number: i64,
     },
 

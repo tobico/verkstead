@@ -55,6 +55,7 @@ import type {
   GrillingStarted,
   Merging,
   NoticeEvent,
+  InFront,
   Nudge,
   PendingSteerView,
   PairingView,
@@ -261,6 +262,7 @@ import { faCircle } from "@fortawesome/free-regular-svg-icons";
 import {
   faCheck,
   faFile,
+  faPlay,
   faTerminal,
   faXmark,
 } from "@fortawesome/free-solid-svg-icons";
@@ -20526,6 +20528,7 @@ function idle(live: number[]): TerminalsView {
       busy: false,
       preview: null,
       title: null,
+      in_front: null,
     })),
   };
 }
@@ -20828,12 +20831,13 @@ describe("the previews in the code pane", () => {
   /// of whatever the shell titled itself.
   it("calls a terminal opened for a preview by its title after a reload", async () => {
     withPreviews(PREVIEWS, [
-      { number: 1, busy: false, preview: null, title: null },
+      { number: 1, busy: false, preview: null, title: null, in_front: null },
       {
         number: 2,
         busy: true,
         preview: "Build and test",
         title: "Build and test",
+        in_front: "Run",
       },
     ]);
     const { container } = mount(`/conversations/${GRILLING.id}/code`);
@@ -20844,6 +20848,144 @@ describe("the previews in the code pane", () => {
         "Build and test",
       ]),
     );
+  });
+
+  /// The terminals as the server reads them: a plain one, and one opened for
+  /// *Build and test* with `in_front` in front of it — called by the preview's
+  /// title while its run stands, as any tab is otherwise.
+  function previewing(in_front: InFront): TerminalView[] {
+    return [
+      { number: 1, busy: false, preview: null, title: null, in_front: null },
+      {
+        number: 2,
+        busy: in_front !== "Shell",
+        preview: "Build and test",
+        title:
+          in_front === "Run" || in_front === "Unknown" ? "Build and test" : null,
+        in_front,
+      },
+    ];
+  }
+
+  /// The shape a row's icon is drawn in, read off the path it draws.
+  function iconOf(row: HTMLButtonElement): string | null | undefined {
+    return row.querySelector("svg path")?.getAttribute("d");
+  }
+
+  /// The row's icon is the terminal's while the run stands and the play icon
+  /// once it has ended, and the tab's title follows it — both off the
+  /// `terminals` Nudge, with nobody reloading anything.
+  describe("following the run", () => {
+    let stop: (() => void) | undefined;
+
+    afterEach(() => {
+      stop?.();
+      stop = undefined;
+    });
+
+    it("follows the run on the row and the tab without a reload", async () => {
+      let reading = previewing("Run");
+      streaming();
+      withPreviews(
+        PREVIEWS,
+        [],
+        whenever(TERMINALS_OF_IT, () => json({ live: reading })()),
+      );
+      const mounted = mount(`/conversations/${GRILLING.id}/code`);
+      const { container } = mounted;
+
+      await waitFor(() =>
+        expect(tabs(container).map((tab) => tab.textContent)).toEqual([
+          "Terminal 1",
+          "Build and test",
+        ]),
+      );
+      expect(iconOf(rows(container)[0]!)).toBe(faTerminal.icon[4]);
+      expect(iconOf(rows(container)[1]!)).toBe(faPlay.icon[4]);
+
+      stop = listenForNudges(mounted.client);
+      stream().opens();
+
+      // Ctrl+C in the terminal, and the server saying what is in front moved.
+      reading = previewing("Shell");
+      stream().nudges({
+        kind: "terminals",
+        conversation: GRILLING.id,
+      } satisfies Nudge);
+
+      await waitFor(() =>
+        expect(iconOf(rows(container)[0]!)).toBe(faPlay.icon[4]),
+      );
+      expect(tabs(container).map((tab) => tab.textContent)).toEqual([
+        "Terminal 1",
+        "Terminal 2",
+      ]);
+    });
+  });
+
+  /// A press the server answers with a terminal already open chooses that
+  /// tab where it is, and opens nothing.
+  it("chooses the preview's tab on a press that refocuses it", async () => {
+    const fetching = withPreviews(
+      PREVIEWS,
+      previewing("Run"),
+      whenever(
+        TERMINALS_OF_IT,
+        json({ Refocused: { number: 2 } } satisfies TerminalOpened),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+    await waitFor(() => expect(tabs(container)).toHaveLength(2));
+    fireEvent.click(tabs(container)[0]!);
+    await waitFor(() =>
+      expect(tabs(container)[0]!.getAttribute("aria-pressed")).toBe("true"),
+    );
+
+    fireEvent.click(rows(container)[0]!);
+
+    await waitFor(() =>
+      expect(tabs(container)[1]!.getAttribute("aria-pressed")).toBe("true"),
+    );
+    expect(opened(fetching)).toEqual([{ preview: "Build and test" }]);
+    expect(tabs(container).map((tab) => tab.textContent)).toEqual([
+      "Terminal 1",
+      "Build and test",
+    ]);
+  });
+
+  /// And one that typed the command again chooses the tab and calls it by the
+  /// preview's title again, the run being back.
+  it("calls the tab by the preview's title again on a press that retypes", async () => {
+    withPreviews(
+      PREVIEWS,
+      previewing("Shell"),
+      whenever(
+        TERMINALS_OF_IT,
+        json({ Retyped: { number: 2 } } satisfies TerminalOpened),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+    await waitFor(() =>
+      expect(tabs(container).map((tab) => tab.textContent)).toEqual([
+        "Terminal 1",
+        "Terminal 2",
+      ]),
+    );
+    fireEvent.click(tabs(container)[0]!);
+
+    fireEvent.click(rows(container)[0]!);
+
+    await waitFor(() =>
+      expect(tabs(container).map((tab) => tab.textContent)).toEqual([
+        "Terminal 1",
+        "Build and test",
+      ]),
+    );
+    expect(tabs(container)[1]!.getAttribute("aria-pressed")).toBe("true");
   });
 
   /// A title retired since the page read it is refused by name, in a tab of

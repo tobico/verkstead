@@ -20,6 +20,10 @@
     "conversation": 7
   },
   {
+    "kind": "terminals",
+    "conversation": 7
+  },
+  {
     "kind": "forwards"
   },
   {

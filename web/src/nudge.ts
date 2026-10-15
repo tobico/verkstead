@@ -483,6 +483,14 @@ function standsFor(device: Device, moved: Nudge): readonly QueryKey[] | null {
     case "ports":
       return [];
 
+    // What is in front of a terminal opened for a preview moved: its run
+    // started or ended, the human started something of their own, or the
+    // preview was retired (ADR-0024). The Code pane's own reading of the
+    // register, which is where a preview's row takes its icon and a tab its
+    // title from.
+    case "terminals":
+      return [keyOf(device, "terminals", moved.conversation)];
+
     // And what *this* device is forwarding moved, which is that reading's other
     // end: a port of a member's terminal taken up on this machine's `localhost`,
     // skipped, or let go. Unkeyed, being this device's own and never a member's.
