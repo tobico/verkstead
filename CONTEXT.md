@@ -2191,7 +2191,8 @@ Repos and Worktrees and sessions. What is different is who it belongs to.
 It joins by the **Keeper's Join** rather than by a press, its row on every
 **Devices** list wears the mark saying whose it is and offers no Unlink, and it
 never unlinks its Keeper. What removes an Annex is removing the box, which
-its Keeper notices at its next start and tells the roster.
+its Keeper notices at its next start and tells the roster, and what unlinks a
+Keeper takes its Annex out of the cluster with it.
 **It runs only while its Keeper runs**: booted in the background at the
 Keeper's start, terminated at its stop, never waited on — a workbench opens
 on the Keeper while the Annex is still coming up, and its rows read

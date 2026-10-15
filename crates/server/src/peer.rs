@@ -406,6 +406,7 @@ pub fn router(
                             .route(unlinking::MEMBER, delete(unlinking::dropped))
                             .with_state(unlinking::Dropping {
                                 device: device.clone(),
+                                reading: reading.clone(),
                                 members: members.clone(),
                                 nudges: nudges.clone(),
                             }),
@@ -894,9 +895,13 @@ impl Members {
     /// this one, so every one of them would refuse it at the gate; what is left
     /// here is a list of machines that no longer hold this device, and holding
     /// it would be a Devices section that lied.
-    pub(crate) async fn forget_everybody(&self) -> Result<()> {
+    ///
+    /// **Bar `keeping`**: a Keeper's Annexes and an Annex's Keeper, whose
+    /// membership leaves with the leaver (ADR-0024) — see
+    /// [`verkstead_store::forget_every_member_but`].
+    pub(crate) async fn forget_everybody(&self, keeping: &[String]) -> Result<()> {
         match &self.recorded {
-            Recorded::InTheStore(pool) => verkstead_store::forget_every_member(pool)
+            Recorded::InTheStore(pool) => verkstead_store::forget_every_member_but(pool, keeping)
                 .await
                 .context("forgetting every device this one was linked to"),
 

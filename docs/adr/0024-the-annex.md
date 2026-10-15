@@ -60,6 +60,9 @@ than a regular join driven from both sides:
   travels with the roster — on the exchange and on every announcement — so no
   device offers Unlink on an Annex's row, and an Annex never unlinks its
   Keeper. What removes an Annex is removing the box, which its Keeper notices.
+  **A Keeper that is unlinked takes its Annex with it**: the pair keep each
+  other, and every other device drops both — an Annex left behind would be a
+  row nobody could unlink, kept by a device nobody there holds.
 
 Driving the ordinary join over both workbench keys — the Keeper posting the
 join and then pressing Allow through the Annex's own API — was the

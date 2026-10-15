@@ -1932,7 +1932,9 @@ impl Devices {
     /// (ADR-0024): the membership is the Keeper's, so the press is refused
     /// naming the device, before anybody is told anything — see
     /// [`Unlinkable`]. A Keeper forgetting its own Annex is a path that is not
-    /// this one.
+    /// this one. **A Keeper unlinked takes its Annexes with it**: each is told
+    /// it has left and forgotten here, and every member is told to drop all of
+    /// them, while the pair keep each other.
     pub(crate) async fn unlink(&self, device: &str) -> std::result::Result<(), Unlinkable> {
         let held = self.members.rows().await?;
 
@@ -1955,59 +1957,49 @@ impl Devices {
             return Err(Unlinkable::Keeper { name: leaver.name });
         }
 
-        // Told while it is still a member here and this device is still one
-        // there. A laptop that is not there is told nothing, and nothing waits
-        // on it — the cluster it was in has moved on without it, and its own
-        // list is wrong until somebody presses Add again.
-        if let Err(why) = self.peers.unlink(&leaver, device).await {
+        // And its Annexes with it: the pair's membership is the Keeper's, so a
+        // Keeper taken out of the cluster takes its Annexes along, each keeping
+        // the other — see [`crate::peer::unlinking`]. Left behind, an Annex
+        // would be a row nobody could ever unlink, kept by a device nobody here
+        // holds any more.
+        let leavers: Vec<_> = std::iter::once(leaver)
+            .chain(
+                held.iter()
+                    .filter(|member| member.kept_by.as_deref() == Some(device))
+                    .cloned(),
+            )
+            .collect();
+
+        for leaver in &leavers {
+            // Told while it is still a member here and this device is still one
+            // there. A laptop that is not there is told nothing, and nothing
+            // waits on it — the cluster it was in has moved on without it, and
+            // its own list is wrong until somebody presses Add again.
+            if let Err(why) = self.peers.unlink(leaver, &leaver.device).await {
+                tracing::info!(
+                    %why,
+                    device = %leaver.device,
+                    "a device that was unlinked could not be told, so it goes on holding a \
+                     cluster that no longer holds it",
+                );
+            }
+
+            self.members.forget(&leaver.device).await?;
+
             tracing::info!(
-                %why,
-                device = %device,
-                "a device that was unlinked could not be told, so it goes on holding a \
-                 cluster that no longer holds it",
+                device = %leaver.device,
+                name = %leaver.name,
+                "a device has been taken out of this one's cluster",
             );
         }
 
-        self.members.forget(device).await?;
+        let staying = held
+            .iter()
+            .filter(|member| !leavers.iter().any(|leaver| leaver.device == member.device));
 
-        tracing::info!(
-            device = %device,
-            name = %leaver.name,
-            "a device has been taken out of this one's cluster",
-        );
-
-        for member in held.iter().filter(|member| member.device != device) {
-            match self.peers.unlink(member, device).await {
-                Ok(()) => {
-                    tracing::info!(
-                        device = %member.device,
-                        leaver = %device,
-                        "a member has been told to drop the device that was unlinked",
-                    );
-
-                    self.caught_up(member).await;
-                }
-
-                Err(why) => {
-                    tracing::info!(
-                        %why,
-                        device = %member.device,
-                        leaver = %device,
-                        "a member could not be told to drop the device that was unlinked, so \
-                         it is owed the telling until it answers again",
-                    );
-
-                    if let Err(why) = self
-                        .members
-                        .owed(&member.device, device, Telling::Removed)
-                        .await
-                    {
-                        tracing::error!(
-                            %why,
-                            "a removal that was not made could not be written down as owed",
-                        );
-                    }
-                }
+        for member in staying {
+            for leaver in &leavers {
+                self.dropping(member, &leaver.device).await;
             }
         }
 
@@ -2019,6 +2011,43 @@ impl Devices {
         self.changeover_settled().await;
 
         Ok(())
+    }
+
+    /// Tell `member` to drop `leaver`, or write down that it is owed the
+    /// telling where it does not answer — see [`Devices::unlink`].
+    async fn dropping(&self, member: &verkstead_store::Member, leaver: &str) {
+        match self.peers.unlink(member, leaver).await {
+            Ok(()) => {
+                tracing::info!(
+                    device = %member.device,
+                    %leaver,
+                    "a member has been told to drop the device that was unlinked",
+                );
+
+                self.caught_up(member).await;
+            }
+
+            Err(why) => {
+                tracing::info!(
+                    %why,
+                    device = %member.device,
+                    %leaver,
+                    "a member could not be told to drop the device that was unlinked, so \
+                     it is owed the telling until it answers again",
+                );
+
+                if let Err(why) = self
+                    .members
+                    .owed(&member.device, leaver, Telling::Removed)
+                    .await
+                {
+                    tracing::error!(
+                        %why,
+                        "a removal that was not made could not be written down as owed",
+                    );
+                }
+            }
+        }
     }
 
     /// What `device` is called here: *this device* where it is this one, the

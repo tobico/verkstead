@@ -1083,17 +1083,42 @@ pub async fn forget_member(pool: &SqlitePool, device: &str) -> Result<()> {
 /// Nothing is refused. A device that holds no members is one that has already
 /// forgotten everybody, and being told twice is not a thing to fail.
 pub async fn forget_every_member(pool: &SqlitePool) -> Result<()> {
+    forget_every_member_but(pool, &[]).await
+}
+
+/// The same, keeping the members `keeping` names — what a leaver does that is
+/// a **Keeper** or an **Annex** (ADR-0024): the pair's membership is the
+/// Keeper's, so it goes with the leaver rather than staying behind with the
+/// cluster it left.
+///
+/// What is owed between the kept is kept too, and every debt naming anybody
+/// else goes, for [`forget_every_member`]'s reason.
+pub async fn forget_every_member_but(pool: &SqlitePool, keeping: &[String]) -> Result<()> {
     let mut tx = writing(pool, "forgetting every member").await?;
 
+    // SQLite reads an empty list as one nothing is in, so keeping nobody is
+    // every row.
+    let kept = vec!["?"; keeping.len()].join(", ");
+
     for statement in [
-        "DELETE FROM owed_announcements",
-        "DELETE FROM member_addresses",
-        "DELETE FROM members",
+        format!(
+            "DELETE FROM owed_announcements WHERE device NOT IN ({kept}) OR about NOT IN ({kept})"
+        ),
+        format!("DELETE FROM member_addresses WHERE device NOT IN ({kept})"),
+        format!("DELETE FROM members WHERE device NOT IN ({kept})"),
         // And every tick, which named machines this one is no longer linked
         // to — see [`forget_member`].
-        "DELETE FROM permitted_devices",
+        format!("DELETE FROM permitted_devices WHERE device NOT IN ({kept})"),
     ] {
-        sqlx::query(statement)
+        let mut query = sqlx::query(&statement);
+
+        for _ in 0..statement.matches("NOT IN").count() {
+            for device in keeping {
+                query = query.bind(device);
+            }
+        }
+
+        query
             .execute(&mut *tx)
             .await
             .context("forgetting every device this one was linked to")?;

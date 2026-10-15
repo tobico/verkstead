@@ -871,6 +871,38 @@ async fn unlinking_an_annex_or_its_keeper_is_refused_everywhere() {
     );
 }
 
+/// A Keeper unlinked by a third device takes its Annex with it: the pair keep
+/// each other, and the third device holds neither.
+#[tokio::test]
+async fn unlinking_a_keeper_takes_its_annex_with_it() {
+    let a = Verkstead::answering(A).await;
+    let b = Verkstead::annex(B).await;
+    let c = Verkstead::answering(C).await;
+
+    linked(&c, &a).await;
+    kept(&a.workbench(), &b).await;
+
+    let (status, said) = unlink(&c.workbench(), A).await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+
+    assert_eq!(
+        c.cluster().await,
+        Vec::<String>::new(),
+        "C holds neither the Keeper nor its Annex, so no row is left it cannot unlink",
+    );
+    assert_eq!(
+        a.cluster().await,
+        sorted(&[B]),
+        "the Keeper, told it has left, keeps its Annex",
+    );
+    assert_eq!(
+        b.cluster().await,
+        sorted(&[A]),
+        "and the Annex keeps its Keeper, through being told it has left and being told \
+         its Keeper has",
+    );
+}
+
 // ---------------------------------------------------------------------------
 // The plumbing
 // ---------------------------------------------------------------------------

@@ -12,9 +12,9 @@ use sqlx::SqlitePool;
 
 use verkstead_store::{
     Linking, Renewal, Telling, announcement_made, announcements_owed, announcements_owed_to,
-    changeover_over, forget_every_member, forget_member, member_count, member_holding,
-    member_reached_at, member_unreachable, members, members_yet_to_acknowledge, open_database,
-    owe_announcement, record_member, record_renewal, renewal_acknowledged,
+    changeover_over, forget_every_member, forget_every_member_but, forget_member, member_count,
+    member_holding, member_reached_at, member_unreachable, members, members_yet_to_acknowledge,
+    open_database, owe_announcement, record_member, record_renewal, renewal_acknowledged,
 };
 
 /// The two devices these tests link to, named by the ids a cluster names them
@@ -664,6 +664,55 @@ async fn a_device_told_it_has_left_forgets_everybody() {
     // And being told twice is not a thing to fail: a device that holds no
     // members has already forgotten everybody.
     forget_every_member(&pool).await.unwrap();
+}
+
+/// A leaver that is a Keeper or an Annex keeps the other half of the pair, and
+/// what is owed between the two, and lets go of everybody else.
+#[tokio::test]
+async fn a_device_told_it_has_left_keeps_the_members_it_is_told_to() {
+    let (_dir, pool) = fresh_pool().await;
+
+    record_member(&pool, &advertising(B, "workbench", B_FINGERPRINT))
+        .await
+        .unwrap();
+    record_member(&pool, &advertising(C, "laptop", C_FINGERPRINT))
+        .await
+        .unwrap();
+
+    record_member(&pool, &advertising(D, "annex", RENEWED))
+        .await
+        .unwrap();
+
+    owe_announcement(&pool, B, C, Telling::Joined)
+        .await
+        .unwrap();
+    owe_announcement(&pool, B, D, Telling::Joined)
+        .await
+        .unwrap();
+
+    forget_every_member_but(&pool, &[B.to_owned(), D.to_owned()])
+        .await
+        .unwrap();
+
+    let mut left: Vec<_> = members(&pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|member| member.device)
+        .collect();
+    left.sort();
+
+    assert_eq!(left, vec![B.to_owned(), D.to_owned()]);
+    assert!(!member_holding(&pool, C_FINGERPRINT).await.unwrap());
+    assert_eq!(
+        announcements_owed_to(&pool, B).await.unwrap().len(),
+        1,
+        "a debt between the kept stays, and one naming a forgotten device goes",
+    );
+    assert_eq!(
+        announcements_owed(&pool, D).await.unwrap(),
+        vec![B.to_owned()]
+    );
 }
 
 // ---------------------------------------------------------------------------
