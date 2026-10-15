@@ -26,6 +26,7 @@ use std::process::{Command, Stdio};
 
 use axum::http::StatusCode;
 use sqlx::SqlitePool;
+use verkstead_render::ClonableRepo;
 use verkstead_server::device::reading::Reading;
 use verkstead_server::device::{Device, Devices};
 use verkstead_server::matching;
@@ -446,5 +447,142 @@ async fn an_unregistered_repo_is_not_matched() {
     assert!(
         b.which_of(A, &ours).await.expect("A answered").is_none(),
         "and stops the moment A stops offering it",
+    );
+}
+
+/// A third device, for the readings that ask every member at once.
+const C: &str = "c0ffee00c0ffee00c0ffee00c0ffee00";
+
+impl Verkstead {
+    /// What the cluster holds that this device could clone, asked the way the
+    /// Repo dropdown asks it: against every Repo this device has registered.
+    async fn clonable(&self) -> Vec<ClonableRepo> {
+        let here = store::registered_repos(&self.pool).await.unwrap();
+
+        matching::clonable(&self.cluster, &here)
+            .await
+            .expect("only this device's own trouble refuses the reading")
+    }
+}
+
+/// The device lacking a repository lists it as clonable, named off its origin;
+/// the device holding it does not.
+#[tokio::test]
+async fn what_one_member_holds_and_another_lacks_is_clonable_there() {
+    let (a, b) = linked_up().await;
+
+    // A host no `insteadOf` rewrites, so the spelling read back is the one
+    // written: a machine set up to fetch GitHub over https says so for its SSH
+    // URLs too.
+    a.repo("widgets-work", Some("git@git.example.com:you/widgets.git"))
+        .await;
+    b.repo("gadgets", Some("https://github.com/you/gadgets.git"))
+        .await;
+
+    // And one both hold, under two names and two spellings: neither lists it.
+    a.repo("shared", Some("https://github.com/you/shared.git"))
+        .await;
+    b.repo("shared-clone", Some("https://github.com/you/shared/"))
+        .await;
+
+    assert_eq!(
+        b.clonable().await,
+        vec![ClonableRepo {
+            name: "widgets".to_owned(),
+            place: "git.example.com/you/widgets".to_owned(),
+            origin: "git@git.example.com:you/widgets.git".to_owned(),
+        }],
+        "B lacks A's widgets, named off the origin rather than off A's directory",
+    );
+
+    assert_eq!(
+        a.clonable().await,
+        vec![ClonableRepo {
+            name: "gadgets".to_owned(),
+            place: "github.com/you/gadgets".to_owned(),
+            origin: "https://github.com/you/gadgets.git".to_owned(),
+        }],
+        "and A lacks B's gadgets, but not the widgets it holds itself",
+    );
+}
+
+/// A Repo with no origin is never clonable, a shared name hides nothing, and one
+/// origin held by two members in two spellings is one row.
+#[tokio::test]
+async fn one_origin_is_one_row_and_no_origin_is_none() {
+    let (a, b) = linked_up().await;
+    let c = Verkstead::answering(C).await;
+
+    b.linked_to(&c.device, "the-laptop", A_OS, vec![c.at()])
+        .await;
+    let (machine, os) = this_machine();
+    c.linked_to(&b.device, &machine, &os, vec![b.at()]).await;
+
+    a.repo("notes", None).await;
+    a.repo("widgets", Some("https://github.com/you/widgets.git"))
+        .await;
+    c.repo("widgets-copy", Some("https://github.com/you/widgets/"))
+        .await;
+
+    // B's own `gadgets` has no origin, so it is not A's — a name is no reason to
+    // hide A's from the list.
+    a.repo("gadgets", Some("https://github.com/you/gadgets.git"))
+        .await;
+    b.repo("gadgets", None).await;
+
+    let listed = b.clonable().await;
+    let names: Vec<&str> = listed.iter().map(|row| row.name.as_str()).collect();
+
+    assert_eq!(
+        names,
+        vec!["gadgets", "widgets"],
+        "one row for the origin two members hold, and none for a Repo with no origin: \
+         {listed:?}",
+    );
+}
+
+/// A member that does not answer — nothing at its address, or something there
+/// that takes the connection and says nothing — adds no rows, fails nothing, and
+/// holds the reading up no longer than its bound.
+#[tokio::test]
+async fn a_member_that_does_not_answer_adds_nothing_and_holds_nothing_up() {
+    let (a, b) = linked_up().await;
+
+    a.repo("widgets", Some("https://github.com/you/widgets.git"))
+        .await;
+
+    // A member that is not there at all.
+    let away = tempfile::tempdir().unwrap();
+    let asleep = Device::stated(away.path(), C).unwrap();
+    b.linked_to(&asleep, "the-laptop", A_OS, vec!["127.0.0.1:1".to_owned()])
+        .await;
+
+    // And one that takes the connection and never says a word.
+    let mute = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let mute_at = mute.local_addr().unwrap().to_string();
+    std::thread::spawn(move || {
+        let held: Vec<_> = mute.incoming().collect();
+        drop(held);
+    });
+
+    let quiet = tempfile::tempdir().unwrap();
+    let silent = Device::stated(quiet.path(), "dd00dd00dd00dd00dd00dd00dd00dd00").unwrap();
+    b.linked_to(&silent, "the-nas", A_OS, vec![mute_at]).await;
+
+    let started = std::time::Instant::now();
+    let listed = b.clonable().await;
+
+    assert_eq!(
+        listed
+            .iter()
+            .map(|row| row.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["widgets"],
+        "the member that answered is read, and the two that did not add nothing",
+    );
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(5),
+        "and neither held the reading past its bound: {:?}",
+        started.elapsed(),
     );
 }

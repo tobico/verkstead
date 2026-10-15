@@ -36,7 +36,7 @@ use tokio_util::io::ReaderStream;
 use verkstead_render::{
     Adopted, AnswerAttached, AnswerAttachmentRemoved, AskingDevice, AtOnceView, Attached,
     AttachmentRemoved, Author, AuthorEdit, AuthorEdited, AuthorSaved, BaseBranchChoice,
-    BranchRename, BriefEdit, CheckRollup, CleanupStepView, CleanupView, CommentedOn,
+    BranchRename, BriefEdit, CheckRollup, CleanupStepView, CleanupView, ClonableRepo, CommentedOn,
     CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed, CompanionModeChoice,
     CompanionModeChosen, CompanionRemoved, CompanionView, CompileCaching, Confirming,
     ConflictResolution, ConversationArchived, ConversationClosed, ConversationEntry,
@@ -104,6 +104,12 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // what it is given is a parent and a name rather than a path, and what
         // it can answer is a different set of sentences.
         .route("/api/ui/repos/new", post(create_repo))
+        // And what the rest of the cluster holds that this device does not: the
+        // Repo dropdown's second group, read beside the first and reached on a
+        // member over the Relay the way the list itself is. A word of its own
+        // under the list rather than a field on it, because it dials every
+        // member and the list is read off this device's own registry alone.
+        .route("/api/ui/repos/clonable", get(clonable_repos))
         // What one Repo's branches are, which is what a drafting Conversation
         // picks the one it comes off out of. Under the Repo rather than under
         // the Conversation: the branches are the repository's, and two
@@ -1061,6 +1067,34 @@ async fn repos(State(state): State<AppState>) -> HttpResponse {
         .collect();
 
     Json(rows).into_response()
+}
+
+/// `GET /api/ui/repos/clonable` — every **Clonable Repo**: what the other
+/// members have registered, by origin, that this device lacks (ADR-0024,
+/// *Clonable repos*). See [`crate::matching::clonable`].
+///
+/// A Verkstead with no device identity is linked to nobody, so nothing in the
+/// cluster could be cloned to it: an empty list rather than a refusal.
+async fn clonable_repos(State(state): State<AppState>) -> HttpResponse {
+    let repos = match store::registered_repos(&state.pool).await {
+        Ok(repos) => repos,
+        Err(error) => {
+            tracing::error!(error = ?error, "reading the registered Repos failed");
+            return unavailable("The registered repos couldn't be read.");
+        }
+    };
+
+    let Some(devices) = state.devices.as_ref() else {
+        return Json(Vec::<ClonableRepo>::new()).into_response();
+    };
+
+    match crate::matching::clonable(devices, &repos).await {
+        Ok(rows) => Json(rows).into_response(),
+        Err(refusal) => {
+            tracing::warn!("what could be cloned here was not read: {}", refusal.saying);
+            refused(refusal.status, ApiError::new(refusal.saying))
+        }
+    }
 }
 
 /// `GET /api/ui/repos/{id}/branches` — every branch of one registered Repo,

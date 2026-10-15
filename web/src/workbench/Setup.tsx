@@ -84,6 +84,7 @@ import {
   chooseReviewPairing,
   listBranches,
   listProfiles,
+  listClonable,
   listRepos,
   pickProcess,
   removeCompanion,
@@ -123,7 +124,7 @@ import { brokenReading } from "../broken";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine, Note } from "../notices";
 import * as pairing from "../pairing";
-import { Listbox, Picker, type Action } from "../picking";
+import { Listbox, Picker, type Action, type Clonable } from "../picking";
 import { Moving } from "./Moving";
 import { keyOf, useDevice } from "../reaching";
 import type { Device } from "../reaching";
@@ -886,6 +887,7 @@ export function RepoSelect(props: {
   }));
 
   const { rows, modal } = repoRows((repoId) => props.pick(repoId));
+  const clonable = useClonable();
 
   return (
     <div class={styles.repoSelect}>
@@ -902,6 +904,7 @@ export function RepoSelect(props: {
         chosen={props.chosen}
         disabled={props.disabled}
         pick={(repo) => props.pick(Number(repo))}
+        clonable={clonable()}
         actions={rows}
       />
 
@@ -969,6 +972,34 @@ function repoRows(pick: (repoId: number) => void): {
       </>
     ),
   };
+}
+
+/// The Repo dropdown's second group: the repositories the rest of the cluster
+/// holds, by origin, that the device the dropdown is for lacks.
+///
+/// Read of that device rather than of this one — a member's is reached over the
+/// Relay like its Repo list — and keyed under that list, so the Nudge that says
+/// its Repos moved reads this again too: a Repo registered there is one fewer
+/// thing to clone. A reading that fails is a group not drawn, for the reason a
+/// member that does not answer adds nothing to it: the rows above are what the
+/// human came for, and they are said to be missing on their own.
+function useClonable(): () => Clonable[] {
+  const device = useDevice();
+
+  const clonable = useReading(() => ({
+    queryKey: keyOf(device(), "repos", "clonable"),
+    queryFn: () => listClonable(device()),
+
+    // Merged by the origin, which is what one row is: a list re-read while the
+    // human has the rows down keeps every row it still holds where it was.
+    freshness: { reconcile: "origin" },
+  }));
+
+  return () =>
+    (clonable.data ?? []).map((repo) => ({
+      name: repo.name,
+      place: repo.place,
+    }));
 }
 
 /// Which Repo the work is in at all: the first thing in the Repo panel, and the
@@ -1101,6 +1132,7 @@ export function RepoChoice(props: {
   };
 
   const { rows, modal } = repoRows((repoId) => props.pick(repoId));
+  const clonable = useClonable();
 
   return (
     <div class={styles.repoPick}>
@@ -1125,6 +1157,7 @@ export function RepoChoice(props: {
             chosen={props.chosen}
             disabled={props.disabled}
             pick={(repo) => props.pick(Number(repo))}
+            clonable={clonable()}
             actions={rows}
           />
         </Match>

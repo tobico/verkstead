@@ -71,7 +71,9 @@
 //! that acted rather than picked is the bug class at the head of this file said
 //! again, the browser having a settled opinion about what an option does. So an
 //! action is a row kind here instead, behind a rule and never a choice: see
-//! [`Action`].
+//! [`Action`]. And above those, behind a rule of its own, the repositories the
+//! rest of the cluster holds that this device lacks — a third kind, pressed
+//! rather than picked for the same reason: see [`Clonable`].
 //!
 //! ## And what a third control borrows
 //!
@@ -309,6 +311,24 @@ export type Action = {
   press: () => void;
 };
 
+/// A row between the choices and the [`Action`]s: a **Clonable Repo**, which
+/// another member of the cluster holds and the device the dropdown is for does
+/// not.
+///
+/// The Repo dropdown's second group, behind a rule of its own. Each row is the
+/// repository's name over where its origin is, and like an action it is never a
+/// choice: it carries no value, so it is never what [`showing`] reads, never what
+/// the closed control draws and never what `pick` is called with. Pressing it is
+/// what makes it a Repo, and the Repo it becomes is what is picked.
+export type Clonable = {
+  /// What a clone would call its directory.
+  name: string;
+  /// And where the repository is, read under the name.
+  place: string;
+  /// What pressing it does, where anything does yet.
+  press?: () => void;
+};
+
 /// The same choice, drawn out of ordinary elements so that every row can carry
 /// its harness's mark.
 ///
@@ -328,6 +348,11 @@ export function Listbox<T>(
     /// [`Action`]. Behind a rule, and walked by the keyboard with the rest,
     /// because a list somebody is reading down does not stop at the rule.
     actions?: Action[];
+
+    /// The rows between the choices and the actions — see [`Clonable`]. Behind
+    /// a rule of their own, walked by the keyboard with the rest, and drawn
+    /// nowhere a caller offers none.
+    clonable?: Clonable[];
 
     /// Which harness's mark goes in front of a row's words, and `null` for a
     /// row that has none — the two rows that are not accounts at all.
@@ -437,6 +462,14 @@ export function Listbox<T>(
   /// none, which is every place this control is drawn but the Repo's.
   const actions = (): Action[] => props.actions ?? [];
 
+  /// And the rows between the two, as they stand — none, likewise, wherever the
+  /// caller offers none.
+  const clonable = (): Clonable[] => props.clonable ?? [];
+
+  /// Where the actions start in the walk: after every option and every
+  /// clonable row.
+  const actionsFrom = (): number => props.options.length + clonable().length;
+
   /// Take one row.
   ///
   /// The pick goes up exactly as the `<select>`'s does, and with nothing to
@@ -445,17 +478,19 @@ export function Listbox<T>(
   /// mistaken for one — the placeholder is something the closed control *says*
   /// rather than a row of the list.
   ///
-  /// The walk runs across both lists as one, the options first, so an index past
-  /// the last option is one of the rows under the rule and is pressed instead.
-  /// Nothing is picked either way it goes: an action carries no value, so there
-  /// is nothing here for `pick` to be handed.
+  /// The walk runs across all three lists as one, the options first, so an index
+  /// past the last option is one of the rows under a rule and is pressed instead.
+  /// Nothing is picked either way it goes: a clonable row and an action carry no
+  /// value, so there is nothing here for `pick` to be handed.
   const take = (index: number): void => {
     const option = props.options[index];
-    const action = actions()[index - props.options.length];
+    const clone = clonable()[index - props.options.length];
+    const action = actions()[index - actionsFrom()];
 
     shut();
 
     if (option) props.pick(props.value(option));
+    else if (clone) clone.press?.();
     else if (action) action.press();
   };
 
@@ -468,7 +503,7 @@ export function Listbox<T>(
   /// than submitting the form it stands in, which is what a native dropdown
   /// does — where the browse field, being a text box, lets both through.
   const { open, above, placing, walking, list, rowId, drop, shut, key } = dropping({
-    rows: () => props.options.length + actions().length,
+    rows: () => actionsFrom() + actions().length,
     from: () => Math.max(0, at()),
     anchor: () => control,
     dropped: () => dropped,
@@ -635,16 +670,58 @@ export function Listbox<T>(
                 Never the choice, though the walk reaches them: they carry no
                 value, so `aria-selected` is false on them for as long as they are
                 drawn — a row that acts is not one the control could be showing. */}
+            {/* The repositories the rest of the cluster holds and this device
+                lacks, behind a rule of their own: not more of what is
+                registered, and not one of the two ways to register something by
+                hand either. Never the choice, for the actions' reason below —
+                and named by the name alone, with where it is as the
+                description, the way a row with a sentence under it is. */}
+            <Show when={clonable().length > 0}>
+              <div class={styles.rule} role="separator" />
+              <For each={clonable()}>
+                {(clone, index) => {
+                  const at = () => props.options.length + index();
+
+                  return (
+                    <div
+                      id={rowId(at())}
+                      class={[
+                        styles.row,
+                        styles.clonable,
+                        at() === walking() ? styles.walked : undefined,
+                      ]
+                        .filter(Boolean)
+                        .join(" ")}
+                      role="option"
+                      aria-selected="false"
+                      aria-labelledby={wordsId(at())}
+                      aria-describedby={saysId(at())}
+                      onClick={() => take(at())}
+                    >
+                      <span class={styles.described}>
+                        <span id={wordsId(at())} class={styles.words}>
+                          {clone.name}
+                        </span>
+                        <span id={saysId(at())} class={styles.says}>
+                          {clone.place}
+                        </span>
+                      </span>
+                    </div>
+                  );
+                }}
+              </For>
+            </Show>
+
             <Show when={actions().length > 0}>
               <div class={styles.rule} role="separator" />
               <For each={actions()}>
                 {(action, index) => (
                   <div
-                    id={rowId(props.options.length + index())}
+                    id={rowId(actionsFrom() + index())}
                     class={[
                       styles.row,
                       styles.action,
-                      props.options.length + index() === walking()
+                      actionsFrom() + index() === walking()
                         ? styles.walked
                         : undefined,
                     ]
@@ -652,7 +729,7 @@ export function Listbox<T>(
                       .join(" ")}
                     role="option"
                     aria-selected="false"
-                    onClick={() => take(props.options.length + index())}
+                    onClick={() => take(actionsFrom() + index())}
                   >
                     <span class={styles.words}>{action.label}</span>
                   </div>

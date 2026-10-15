@@ -20,6 +20,6 @@ Roadmap stage: [02: Clonable repos](docs/roadmaps/wsl-annex/02-clonable-repos.md
 
 ## Tasks
 
-- [ ] 01: The clonable group in the dropdown — [details](01-the-clonable-group.md)
+- [x] 01: The clonable group in the dropdown — [details](01-the-clonable-group.md)
 - [ ] 02: Clone from the dropdown — [details](02-clone-from-the-dropdown.md)
 - [ ] 03: Clone from the Transfer dialog — [details](03-clone-from-the-transfer-dialog.md)

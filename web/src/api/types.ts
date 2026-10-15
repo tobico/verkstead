@@ -992,6 +992,22 @@ trim: CleanupStepView,
 delete: CleanupStepView, };
 
 /**
+ * One **Clonable Repo**: a repository another member has registered, by its
+ * origin, that this device lacks — a row of the Repo dropdown's second group.
+ *
+ * **Named off the origin rather than off any member's row**, because two members
+ * can hold one origin under two directory names and the row is one repository:
+ * `name` is the origin's last path segment, which is what `git clone` would call
+ * the directory, and `place` is the URL with its scheme, its user and its `.git`
+ * taken off — where the repository is, in the words somebody would say it in.
+ *
+ * **And the origin travels as a member reported it**, which is what a clone is
+ * made from: the two readings above are for a person to read, and neither is a
+ * URL git could be handed.
+ */
+export type ClonableRepo = { name: string, place: string, origin: string, };
+
+/**
  * One pull request the comment landed on.
  */
 export type CommentedOn = { 

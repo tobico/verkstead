@@ -50,7 +50,7 @@
 
 use std::borrow::Cow;
 
-use verkstead_render::RepoAcross;
+use verkstead_render::{ClonableRepo, RepoAcross};
 
 use crate::device::Devices;
 use crate::peer::repos::REPOS;
@@ -145,6 +145,167 @@ pub async fn each_across(
                 .cloned()
         })
         .collect())
+}
+
+/// How long one member has to answer the clonable reading before it is taken as
+/// having nothing to offer: **three seconds**.
+///
+/// The Repo dropdown is waiting on this, and a machine that is asleep costs the
+/// dial's own patience per address it advertised — so the bound is on the member
+/// rather than on the address, and short enough that a laptop with its lid shut
+/// is a pause rather than a group that never arrives. A member that answers late
+/// is read again the next time the dropdown is.
+const MOST_A_MEMBER_IS_WAITED_ON: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// Every **Clonable Repo** the cluster holds for this device: what the other
+/// members have registered, by origin, that none of `here` — this device's own
+/// Repos — is (ADR-0024, *Clonable repos*).
+///
+/// **The same reading the match makes, of every member at once**, and the same
+/// rule applied to it on this end: a member's Repo whose origin is one of ours
+/// after the spellings are taken out is one this device already holds, and one
+/// with no origin is not clonable at all, whatever it is called — a name is never
+/// a reason to list or to hide anything here.
+///
+/// **One origin is one row**, however many members hold it and however each
+/// spelled it: the first spelling met is the one cloned from.
+///
+/// **A member that does not answer contributes nothing and refuses nothing.**
+/// Each is asked concurrently and given [`MOST_A_MEMBER_IS_WAITED_ON`], and
+/// whatever went wrong over there is a line in the log: a sleeping machine is a
+/// shorter list rather than a dropdown that cannot be drawn. The reading as a
+/// whole is refused only for this device's own trouble — origins it could not
+/// read off its own disk, or a membership it could not read.
+pub async fn clonable(
+    devices: &Devices,
+    here: &[crate::store::Repo],
+) -> Result<Vec<ClonableRepo>, Refusal> {
+    let read: Vec<std::path::PathBuf> = here.iter().map(|repo| repo.path.clone()).collect();
+    let ours: Vec<String> = match tokio::task::spawn_blocking(move || {
+        read.iter()
+            .filter_map(|path| crate::repos::origin(path))
+            .map(|origin| normalised(&origin))
+            .collect()
+    })
+    .await
+    {
+        Ok(ours) => ours,
+
+        Err(why) => {
+            return Err(Refusal::ours(format!(
+                "This device couldn't read its own repos' origins: {why:#}.",
+            )));
+        }
+    };
+
+    let members = devices.membership().rows().await.map_err(|why| {
+        Refusal::ours(format!(
+            "The devices this one is linked to couldn't be read: {why:#}.",
+        ))
+    })?;
+
+    let mut asking = tokio::task::JoinSet::new();
+
+    for (order, member) in members.into_iter().enumerate() {
+        let devices = devices.clone();
+
+        asking.spawn(async move {
+            let read = tokio::time::timeout(
+                MOST_A_MEMBER_IS_WAITED_ON,
+                relaying::word_from::<Vec<RepoAcross>>(
+                    Some(&devices),
+                    &member.device,
+                    relaying::asking(REPOS.to_owned()),
+                    MOST_THE_REPOS_ARE,
+                ),
+            )
+            .await;
+
+            match read {
+                Ok(Ok(theirs)) => (order, theirs),
+
+                Ok(Err(refusal)) => {
+                    tracing::debug!(
+                        device = %member.device,
+                        "a member's Repos could not be read for what could be cloned here: {}",
+                        refusal.saying,
+                    );
+                    (order, Vec::new())
+                }
+
+                Err(_) => {
+                    tracing::debug!(
+                        device = %member.device,
+                        "a member did not say what it holds in time for what could be cloned here",
+                    );
+                    (order, Vec::new())
+                }
+            }
+        });
+    }
+
+    let mut answered = asking.join_all().await;
+
+    // In the order the membership lists them rather than the order they
+    // answered, so the spelling a row keeps is the same on every reading.
+    answered.sort_by_key(|(order, _)| *order);
+
+    let mut seen: Vec<String> = ours;
+    let mut rows: Vec<ClonableRepo> = Vec::new();
+
+    for there in answered.into_iter().flat_map(|(_, theirs)| theirs) {
+        let Some(origin) = there.origin else {
+            continue;
+        };
+
+        let bare = normalised(&origin);
+
+        if seen.contains(&bare) {
+            continue;
+        }
+
+        rows.push(ClonableRepo {
+            name: named(&bare).to_owned(),
+            place: placed(&bare).to_owned(),
+            origin,
+        });
+        seen.push(bare);
+    }
+
+    rows.sort_by(|one, other| {
+        one.name
+            .to_lowercase()
+            .cmp(&other.name.to_lowercase())
+            .then_with(|| one.place.cmp(&other.place))
+    });
+
+    Ok(rows)
+}
+
+/// What a clone of the [`normalised`] origin `bare` would call its directory:
+/// the last segment of its path.
+///
+/// Off the normalised URL, so the trailing `.git` and slash are already gone, and
+/// split on either slash because an origin can be a Windows path.
+fn named(bare: &str) -> &str {
+    bare.rsplit(['/', '\\']).next().unwrap_or(bare)
+}
+
+/// And where the [`normalised`] origin `bare` is, as a person would say it: the
+/// URL with its scheme and its user taken off.
+///
+/// `git@github.com:you/thing.git` and `https://github.com/you/thing` both read
+/// `github.com/you/thing` — the first is `ssh://git@github.com/you/thing` by
+/// now, its `scp` spelling written out by [`as_ssh`]. The user is only ever
+/// taken from in front of the host, so an `@` further along the path is left
+/// where it is.
+fn placed(bare: &str) -> &str {
+    let after_scheme = bare.split_once("://").map_or(bare, |(_, rest)| rest);
+
+    match after_scheme.split_once('@') {
+        Some((user, host)) if !user.contains('/') => host,
+        _ => after_scheme,
+    }
 }
 
 /// Whether the repository whose origin is `ours` and whose name is `name` is the
@@ -340,6 +501,43 @@ mod tests {
                 "{local} is a path on this machine rather than a host and a path",
             );
         }
+    }
+
+    /// A clonable row reads the same off every spelling of one origin: the name
+    /// is what `git clone` would call the directory, and the place is the URL
+    /// with its scheme, its user and its `.git` taken off.
+    #[test]
+    fn a_clonable_rows_name_and_place_are_read_off_the_origin() {
+        for origin in [
+            "git@github.com:tobico/verkstead.git",
+            "https://github.com/tobico/verkstead",
+            "https://github.com/tobico/verkstead.git/",
+            "ssh://git@github.com/tobico/verkstead",
+        ] {
+            let bare = normalised(origin);
+
+            assert_eq!(named(&bare), "verkstead", "the name off {origin}");
+            assert_eq!(
+                placed(&bare),
+                "github.com/tobico/verkstead",
+                "the place off {origin}",
+            );
+        }
+
+        // A path on a machine is its own place, and its last directory its name
+        // — on either platform's separator.
+        assert_eq!(named(&normalised("/srv/repos/thing.git")), "thing");
+        assert_eq!(
+            placed(&normalised("/srv/repos/thing.git")),
+            "/srv/repos/thing"
+        );
+        assert_eq!(named(&normalised("C:\\src\\thing")), "thing");
+
+        // And an `@` in the path is the path's, not a user in front of a host.
+        assert_eq!(
+            placed(&normalised("https://example.com/a@b/thing")),
+            "example.com/a@b/thing",
+        );
     }
 
     /// And two spellings of one Windows path still meet, which is what leaving

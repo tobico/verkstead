@@ -33,6 +33,7 @@ import type {
   BranchRenamed,
   BriefSaved,
   Capture,
+  ClonableRepo,
   CommitPane,
   CompanionAdded,
   CompanionBaseRecorded,
@@ -281,6 +282,14 @@ export function lockSet(device: Device, id: number): Promise<Locked> {
 /// The Repos Verkstead has been told about, by name.
 export function listRepos(device: Device): Promise<RepoEntry[]> {
   return get<RepoEntry[]>(on(device, "/api/ui/repos"));
+}
+
+/// The repositories the rest of the cluster holds, by origin, that `device`
+/// lacks — the Repo dropdown's second group. That device dials every other
+/// member for it, and a member that does not answer is a shorter list rather
+/// than a refusal.
+export function listClonable(device: Device): Promise<ClonableRepo[]> {
+  return get<ClonableRepo[]>(on(device, "/api/ui/repos/clonable"));
 }
 
 /// Every branch of one registered Repo, local and remote-tracking both — which
