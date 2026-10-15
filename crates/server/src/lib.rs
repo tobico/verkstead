@@ -17,6 +17,10 @@ use verkstead_store::{Settlements, Waits};
 /// Answer to a Question Set rather than on the Brief.
 mod answer_files;
 
+/// What a Keeper does to its Annex's box, said once for every way of having
+/// one, and the WSL distro that is the first of them (ADR-0024).
+pub mod annex;
+
 /// The files the human put on a Conversation for its sessions to read: where
 /// the bytes are kept, and what a file is called once they are there.
 ///
