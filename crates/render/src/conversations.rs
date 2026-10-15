@@ -36,8 +36,8 @@ pub enum Lifecycle {
 
     /// Beside the ladder rather than on it: the human following up on work that
     /// is already on a pull request, in a session they steered into being.
-    /// Reachable from Done and from Wrapping, and leading back into the
-    /// wrap-up.
+    /// Reachable from Done, from Wrapping and from Closed, and leading back
+    /// into the wrap-up.
     FollowUp,
 
     /// Beside the ladder rather than on it, the way Follow-up is: a question
