@@ -18,20 +18,24 @@
 //! The golden fixtures are the workbench's: `cargo test` renders the real
 //! endpoints and writes them, and the mark is a field on the very same record.
 
-import { cleanup, fireEvent, waitFor } from "@solidjs/testing-library";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, screen, waitFor } from "@solidjs/testing-library";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import dropdown from "../src/Menu.module.css";
 import shell from "../src/Panes.module.css";
 import sidebar from "../src/workbench/Conversations.module.css";
 import type {
+  ClonableRepo,
+  Cloned,
   ConversationView,
   DevicesView,
   Preflight,
+  RepoEntry,
 } from "../src/api/types";
 import { harnessAbsentOn, UNREACHABLE } from "../src/broken";
 import chrome from "../src/picking.module.css";
 import { rowKey } from "../src/reaching";
+import { repoParent, setRepoParent } from "../src/remembered";
 import actions from "../src/workbench/Actions.module.css";
 import setup from "../src/workbench/Setup.module.css";
 import transfer from "../src/workbench/Transfer.module.css";
@@ -197,11 +201,52 @@ const preflightOf = (device: string) =>
 /// against real machines.
 const READY = { device: "laptop", lacks: [] } satisfies Preflight;
 
-/// And the three findings, each named against the machine it is about.
+/// And the three findings, each named against the machine it is about. A
+/// repository with no origin first, which is not clonable and points at **Open
+/// repo** over there.
 const NO_REPO = {
   device: "laptop",
-  lacks: [{ Repo: { name: "verkstead", companion: false } }],
+  lacks: [{ Repo: { name: "verkstead", companion: false, clonable: null } }],
 } satisfies Preflight;
+
+/// The repository the work is in, as a **Clonable Repo** off its origin.
+const VERKSTEAD: ClonableRepo = {
+  name: "verkstead",
+  place: "github.com/tobico/verkstead",
+  origin: "https://github.com/tobico/verkstead.git",
+  author: "work",
+};
+
+/// And a Companion beside it.
+const ASKANCE: ClonableRepo = {
+  name: "askance",
+  place: "github.com/tobico/askance",
+  origin: "https://github.com/tobico/askance.git",
+  author: null,
+};
+
+/// The same no match with an origin to clone it from, which is what the dialog
+/// offers *clone it there* on.
+const CLONABLE = {
+  device: "laptop",
+  lacks: [{ Repo: { name: "verkstead", companion: false, clonable: VERKSTEAD } }],
+} satisfies Preflight;
+
+/// And a Companion with nowhere to land, with an origin too.
+const CLONABLE_COMPANION = {
+  device: "laptop",
+  lacks: [{ Repo: { name: "askance", companion: true, clonable: ASKANCE } }],
+} satisfies Preflight;
+
+/// What the laptop registered once it had cloned the repository.
+const CLONED_THERE: RepoEntry = {
+  id: 31,
+  name: "verkstead",
+  path: "/mnt/code/verkstead",
+  default_branch: "main",
+  author: "work",
+  author_unpicked: false,
+};
 
 const NO_HARNESS = {
   device: "laptop",
@@ -563,6 +608,197 @@ describe("transferring a conversation to another device", () => {
     expect(said).toContain("laptop");
     expect(said).toContain(UNREACHABLE);
     expect(said).not.toContain("Open repo");
+    expect(cloneThere(card)).toBeNull();
+    expect(go(card).disabled).toBe(true);
+  });
+});
+
+/// The press a no-match finding with an origin carries, or `null` where the
+/// finding carries none.
+function cloneThere(card: HTMLDialogElement): HTMLButtonElement | null {
+  return card.querySelector<HTMLButtonElement>(`.${transfer.clone}`);
+}
+
+/// What the browser sent on a POST to `path`, read back off the wire.
+function sent(fetching: ReturnType<typeof theCluster>, path: string): unknown {
+  const written = fetching.mock.calls.find(
+    ([asked, init]) => String(asked) === path && init?.method === "POST",
+  );
+  expect(written, `expected a POST to ${path}`).toBeTruthy();
+  return JSON.parse(String(written![1]?.body));
+}
+
+/// Offering the clone where the far end has no match (ADR-0024, *Clonable
+/// repos*): *clone it there* in place of **Open repo** there, the clone run on
+/// the far device, and the preflight read again once it lands.
+describe("cloning what the far end lacks", () => {
+  beforeEach(() => localStorage.clear());
+
+  /// Where the laptop's clones go, as **Create repo** remembers it there.
+  const CLONE = at("/repos/clone");
+
+  /// The cluster, with a preflight that holds `lacking` until the laptop has
+  /// cloned something and nothing after it — the far end's registry holding a
+  /// match being what the reading notices.
+  function lackingUntilCloned(lacking: Preflight, ...answers: Parameters<typeof theCluster>) {
+    let landed = false;
+
+    return theCluster(
+      whenever(`/api/ui/conversations/${GRILLING.id}`, json(GRILLING)),
+      whenever(preflightOf(LAPTOP), () => json(landed ? READY : lacking)()),
+      whenever(
+        CLONE,
+        () => {
+          landed = true;
+          return json({ Cloned: CLONED_THERE } satisfies Cloned)();
+        },
+        "POST",
+      ),
+      ...answers,
+    );
+  }
+
+  /// The offer itself, for the Conversation's own repository and for a
+  /// Companion alike — and never **Open repo**, which is for a repository with
+  /// no origin to clone.
+  it("reads clone it there for the repo and for a companion", async () => {
+    for (const lacking of [CLONABLE, CLONABLE_COMPANION]) {
+      theCluster(
+        whenever(`/api/ui/conversations/${GRILLING.id}`, json(GRILLING)),
+        whenever(preflightOf(LAPTOP), json(lacking)),
+      );
+
+      const { container } = mount(`/conversations/${GRILLING.id}`);
+      const card = await transferring(container);
+      pick("Device", "laptop");
+
+      await waitFor(() => expect(findings(card)).toHaveLength(1));
+
+      const said = findings(card)[0]!;
+      expect(said).toContain(lacking.lacks[0]!.Repo.name);
+      expect(said).toContain("isn't on laptop");
+      expect(said).not.toContain("Open repo");
+      expect(cloneThere(card)?.textContent).toBe("Clone it there");
+      expect(go(card).disabled).toBe(true);
+
+      cleanup();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  /// And one with no origin offers nothing to clone: it still points at **Open
+  /// repo** there.
+  it("still points a repo with no origin at Open repo", async () => {
+    theCluster(
+      whenever(`/api/ui/conversations/${GRILLING.id}`, json(GRILLING)),
+      whenever(preflightOf(LAPTOP), json(NO_REPO)),
+    );
+
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+    const card = await transferring(container);
+    pick("Device", "laptop");
+
+    await waitFor(() => expect(findings(card)).toHaveLength(1));
+
+    expect(findings(card)[0]!).toContain("Open repo");
+    expect(cloneThere(card)).toBeNull();
+  });
+
+  /// The whole of it: one press clones on the laptop into the parent remembered
+  /// there, the preflight is read again, Go unlocks, and the work transfers.
+  it("transfers a conversation whose repo the far end lacked after one press", async () => {
+    setRepoParent(LAPTOP, "/mnt/code");
+    setRepoParent(null, "/home/ada/src");
+
+    const transferTo = `/api/ui/conversations/${GRILLING.id}/transfer/${LAPTOP}`;
+    const fetching = lackingUntilCloned(
+      CLONABLE,
+      whenever(transferTo, json("Transferring"), "POST"),
+    );
+
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+    const card = await transferring(container);
+    pick("Device", "laptop");
+
+    const press = await waitFor(() => {
+      const found = cloneThere(card);
+      if (!found) throw new Error("no clone offered yet");
+      return found;
+    });
+    fireEvent.click(press);
+
+    // Cloned over there, from the origin the finding carried, into the
+    // laptop's own remembered parent rather than this device's.
+    await waitFor(() => expect(go(card).disabled).toBe(false));
+    expect(sent(fetching, CLONE)).toEqual({
+      origin: VERKSTEAD.origin,
+      parent: "/mnt/code",
+    });
+    expect(askedFor(fetching, "/api/ui/repos/clone")).toBe(0);
+    expect(card.textContent).toContain("laptop has everything");
+
+    fireEvent.click(go(card));
+    await waitFor(() => expect(dialog()).toBeNull());
+    expect(askedFor(fetching, transferTo)).toBe(1);
+  });
+
+  /// Where nothing is remembered for the laptop, the press asks where the clone
+  /// goes, with the Repo dropdown's own card, and remembers it there.
+  it("asks for a parent where none is remembered on the far device", async () => {
+    const fetching = lackingUntilCloned(CLONABLE);
+
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+    const card = await transferring(container);
+    pick("Device", "laptop");
+
+    const press = await waitFor(() => {
+      const found = cloneThere(card);
+      if (!found) throw new Error("no clone offered yet");
+      return found;
+    });
+    fireEvent.click(press);
+
+    const field = await waitFor(() => screen.getByLabelText("Parent directory"));
+    expect(askedFor(fetching, CLONE)).toBe(0);
+
+    fireEvent.input(field, { target: { value: "/mnt/code" } });
+    fireEvent.click(screen.getByRole("button", { name: "Clone" }));
+
+    await waitFor(() => expect(go(card).disabled).toBe(false));
+    expect(sent(fetching, CLONE)).toEqual({
+      origin: VERKSTEAD.origin,
+      parent: "/mnt/code",
+    });
+    expect(screen.queryByLabelText("Parent directory")).toBeNull();
+    expect(repoParent(LAPTOP)).toBe("/mnt/code");
+  });
+
+  /// A clone the laptop refuses is said under its finding, in the laptop's own
+  /// words, and Go stays refused.
+  it("says a refused clone under its finding in the far end's words", async () => {
+    setRepoParent(LAPTOP, "/mnt/code");
+
+    const refusal =
+      "fatal: destination path 'verkstead' already exists and is not an empty directory.";
+
+    theCluster(
+      whenever(`/api/ui/conversations/${GRILLING.id}`, json(GRILLING)),
+      whenever(preflightOf(LAPTOP), json(CLONABLE)),
+      whenever(CLONE, json({ Refused: refusal } satisfies Cloned), "POST"),
+    );
+
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+    const card = await transferring(container);
+    pick("Device", "laptop");
+
+    const press = await waitFor(() => {
+      const found = cloneThere(card);
+      if (!found) throw new Error("no clone offered yet");
+      return found;
+    });
+    fireEvent.click(press);
+
+    await waitFor(() => expect(findings(card)[0]!).toContain(refusal));
     expect(go(card).disabled).toBe(true);
   });
 });

@@ -49,6 +49,20 @@
   margin-top: 1rem;
 }
 
+/* *Clone it there*, the press a no-match finding carries: the shared quiet
+   press from `styles/base.css`, made small enough to sit at the end of the
+   sentence it belongs to, and wrapping under it where the line is full. */
+.transferring .clone {
+  padding: 0.2rem 0.6rem;
+  font-size: 0.9em;
+}
+
+/* And what a clone it sent was refused with, under that finding rather than
+   at the foot of the card: it is about that one repository. */
+.transferring .refused {
+  margin-top: 0.3rem;
+}
+
 /* The two ways out, laid out as the close's confirm pair are: half the row
    each, and taller than a press on a card. */
 .transferring .out {

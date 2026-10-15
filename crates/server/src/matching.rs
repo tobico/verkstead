@@ -110,6 +110,22 @@ pub async fn each_across(
     device: &str,
     here: &[crate::store::Repo],
 ) -> Result<Vec<Option<RepoAcross>>, Refusal> {
+    Ok(each_with_origin(devices, device, here)
+        .await?
+        .into_iter()
+        .map(|(_, matched)| matched)
+        .collect())
+}
+
+/// [`each_across`], with the origin this end read for each of `here` beside its
+/// match: what a preflight puts on a finding with no match, for the far device
+/// to clone it from (ADR-0024, *Clonable repos*). One reading of git for both,
+/// so the origin offered is the one the match was made with.
+pub async fn each_with_origin(
+    devices: &Devices,
+    device: &str,
+    here: &[crate::store::Repo],
+) -> Result<Vec<(Option<String>, Option<RepoAcross>)>, Refusal> {
     let read: Vec<std::path::PathBuf> = here.iter().map(|repo| repo.path.clone()).collect();
     let ours = match tokio::task::spawn_blocking(move || {
         read.iter()
@@ -139,10 +155,12 @@ pub async fn each_across(
         .iter()
         .zip(ours)
         .map(|(repo, origin)| {
-            theirs
+            let matched = theirs
                 .iter()
                 .find(|there| same(origin.as_deref(), &repo.name, there))
-                .cloned()
+                .cloned();
+
+            (origin, matched)
         })
         .collect())
 }
@@ -265,15 +283,13 @@ pub async fn clonable(
             continue;
         }
 
-        rows.push(ClonableRepo {
-            name: named(&bare).to_owned(),
-            place: placed(&bare).to_owned(),
+        rows.push(clonable_from(
             origin,
-            author: match there.author {
+            match there.author {
                 AuthorThere::As { id, .. } => Some(id),
                 AuthorThere::Unpicked | AuthorThere::Unsaid => None,
             },
-        });
+        ));
         seen.push(bare);
     }
 
@@ -285,6 +301,22 @@ pub async fn clonable(
     });
 
     Ok(rows)
+}
+
+/// The **Clonable Repo** `origin` is: named and placed off its normalised
+/// spelling, and carrying the spelling it came in, which is what git is handed,
+/// and the uuid of the Author the Repo it was read off works as — what a clone
+/// of it is made as (ADR-0025). One reading for a dropdown's row and a
+/// preflight's finding, so the two say one repository the same way.
+pub(crate) fn clonable_from(origin: String, author: Option<String>) -> ClonableRepo {
+    let bare = normalised(&origin);
+
+    ClonableRepo {
+        name: named(&bare).to_owned(),
+        place: placed(&bare).to_owned(),
+        origin,
+        author,
+    }
 }
 
 /// What a clone of `origin`, spelled however a member spelled it, is called:

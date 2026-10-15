@@ -3335,7 +3335,15 @@ name: string,
  * repository the work itself is in. Both are refusals; they are not
  * the same sentence.
  */
-companion: boolean, } } | { "RepoAuthor": { name: string, companion: boolean, 
+companion: boolean, 
+/**
+ * The repository as a **Clonable Repo**, off its origin as git reads it
+ * on the device holding the work — what the Transfer dialog's *clone it
+ * there* is pressed with, the far device cloning it as its own Repo
+ * dropdown would. Nothing for a repository with no origin, which is
+ * not clonable and is pointed at **Open repo** there instead.
+ */
+clonable: ClonableRepo | null, } } | { "RepoAuthor": { name: string, companion: boolean, 
 /**
  * What this device's Author for it is called.
  */

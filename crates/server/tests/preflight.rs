@@ -16,8 +16,8 @@
 //! rule.
 //!
 //! **And the pair worth keeping apart is *no match* and *unreachable*.** One
-//! sends the human to **Open repo** on a machine that may already have the
-//! repository; the other sends them to the machine. A device that answered
+//! offers to clone the repository onto a machine that may already have it; the
+//! other sends the human to the machine. A device that answered
 //! nothing is the whole of its own preflight here, which is the assertion that
 //! says so.
 //!
@@ -40,7 +40,7 @@ use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
-use verkstead_render::{AuthorEntry, Lacking, PairingRole, Preflight, ProfileEntry};
+use verkstead_render::{AuthorEntry, ClonableRepo, Lacking, PairingRole, Preflight, ProfileEntry};
 use verkstead_schema::Nudge;
 use verkstead_server::device::reading::Reading;
 use verkstead_server::device::{Device, Devices};
@@ -519,6 +519,37 @@ async fn a_repo_with_no_match_is_named() {
         vec![Lacking::Repo {
             name: "widgets".to_owned(),
             companion: false,
+            // And with the origin it would be cloned from over there, as git
+            // reads it on A — which is what the dialog's *clone it there* is
+            // pressed with (ADR-0024, *Clonable repos*).
+            clonable: Some(ClonableRepo {
+                name: "widgets".to_owned(),
+                place: "github.com/you/widgets".to_owned(),
+                origin: "https://github.com/you/widgets.git".to_owned(),
+                author: None,
+            }),
+        }],
+    );
+}
+
+/// A repository with no origin has no match on a device with no Repo of its
+/// name, and nothing to clone it from: the finding carries no origin, and the
+/// dialog points at **Open repo** there instead.
+#[tokio::test]
+async fn a_repo_with_no_origin_carries_none() {
+    let (a, _b) = linked_up().await;
+
+    let here = a.repo("scratch", None).await;
+
+    let profile = a.saves("work").await;
+    let conversation = a.conversation(&here, profile).await;
+
+    assert_eq!(
+        a.preflight(conversation, B).await.lacks,
+        vec![Lacking::Repo {
+            name: "scratch".to_owned(),
+            companion: false,
+            clonable: None,
         }],
     );
 }
@@ -551,6 +582,12 @@ async fn a_companion_with_no_match_is_named_as_a_companion() {
         vec![Lacking::Repo {
             name: "askance".to_owned(),
             companion: true,
+            clonable: Some(ClonableRepo {
+                name: "askance".to_owned(),
+                place: "github.com/you/askance".to_owned(),
+                origin: "https://github.com/you/askance.git".to_owned(),
+                author: None,
+            }),
         }],
     );
 }
@@ -663,6 +700,36 @@ async fn a_repo_under_another_author_over_there_is_named_with_both() {
         Vec::new(),
         "the mirror of Work over there is Work",
     );
+}
+
+/// A repository with no match over there is offered to clone as the Author
+/// this device's Repo works as, which is the one a transfer is checked against
+/// once the clone is there (ADR-0025).
+#[tokio::test]
+async fn a_repo_with_no_match_is_offered_as_its_author() {
+    let (a, _b) = linked_up().await;
+    a.configured(TWO_AUTHORS);
+
+    let here = a
+        .repo("widgets", Some("https://github.com/you/widgets.git"))
+        .await;
+    a.repoint(&here, "home").await;
+
+    let profile = a.saves("work").await;
+    let conversation = a.conversation(&here, profile).await;
+
+    let lacks = a.preflight(conversation, B).await.lacks;
+    let [
+        Lacking::Repo {
+            clonable: Some(clonable),
+            ..
+        },
+    ] = lacks.as_slice()
+    else {
+        panic!("the repo is lacking over there, with an origin to clone: {lacks:?}");
+    };
+
+    assert_eq!(clonable.author.as_deref(), Some("home"));
 }
 
 /// A Companion whose match over there is under another Author is named as the

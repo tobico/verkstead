@@ -13,8 +13,8 @@
 //! **What every assertion reads is the answer as the asking device gets it**:
 //! the Repo row on the machine that answered, or nothing, or a sentence naming a
 //! machine that did not take the question. Those last two are the pair worth
-//! keeping apart — *nothing over there matched* sends the human to **Open repo**,
-//! and *that machine is asleep* sends them to the machine.
+//! keeping apart — *nothing over there matched* offers to clone the repository
+//! there, and *that machine is asleep* sends the human to the machine.
 //!
 //! **And it is asked both ways round**, because the question is: the memory sync
 //! asks it of the device a Profile's account is on, and a transfer asks it of the
@@ -380,8 +380,7 @@ async fn with_no_origin_the_names_decide_and_one_origin_is_enough_to_refuse() {
 /// rather than answered that nothing matched.
 ///
 /// Those are two different things to say, and a preflight that confused them
-/// would send somebody to **Open repo** on a machine that already has the
-/// repository.
+/// would offer to clone the repository onto a machine that already has it.
 #[tokio::test]
 async fn an_unreachable_device_is_refused_by_name() {
     let b = Verkstead::answering(B).await;
@@ -459,6 +458,40 @@ async fn an_unregistered_repo_is_not_matched() {
     assert!(
         b.which_of(A, &ours).await.expect("A answered").is_none(),
         "and stops the moment A stops offering it",
+    );
+}
+
+/// Asked with the origins beside the matches, as the preflight asks it, each of
+/// this device's Repos comes back with the origin git reads off it here — the
+/// one a finding with no match is cloned from — and one with none, with none.
+#[tokio::test]
+async fn each_repo_comes_back_with_the_origin_it_was_matched_on() {
+    let (a, b) = linked_up().await;
+
+    let held = "https://github.com/you/widgets.git";
+    let lacked = "https://github.com/you/askance.git";
+
+    a.repo("widgets-clone", Some(held)).await;
+
+    let ours = [
+        b.repo("widgets", Some(held)).await,
+        b.repo("askance", Some(lacked)).await,
+        b.repo("scratch", None).await,
+    ];
+
+    let read = matching::each_with_origin(&b.cluster, A, &ours)
+        .await
+        .expect("A answered");
+
+    let read: Vec<(Option<&str>, bool)> = read
+        .iter()
+        .map(|(origin, matched)| (origin.as_deref(), matched.is_some()))
+        .collect();
+
+    assert_eq!(
+        read,
+        vec![(Some(held), true), (Some(lacked), false), (None, false)],
+        "in the order asked, each with its own origin and whether A holds it",
     );
 }
 

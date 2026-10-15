@@ -4,7 +4,7 @@
 //! **A reading rather than a press.** The Transfer dialog draws it the moment a
 //! device is picked, and **Go** is refused while it holds anything — by name,
 //! because each finding is an errand somewhere rather than a count: a repository
-//! to open over there, a harness to install over there, or a machine to go and
+//! to clone or open over there, a harness to install over there, or a machine to go and
 //! wake.
 //!
 //! **Asked of the far end, with one exception.** Whether one of that device's
@@ -20,9 +20,15 @@
 //! of them coming back unanswered means the same thing: the machine is not
 //! there. So it is one finding and the whole of the preflight, rather than a
 //! list of everything a silent device failed to confirm — *unreachable* and *no
-//! match* are two different things to say, one sending the human to **Open
-//! repo** on a machine that may already have the repository and the other
-//! sending them to the machine.
+//! match* are two different things to say, one offering to clone the
+//! repository onto a machine that may already have it and the other sending
+//! the human to the machine.
+//!
+//! **A repository with no match carries its origin** (ADR-0024, *Clonable
+//! repos*), read off git here in the same reading the match was made with, so
+//! the dialog can offer *clone it there* and the far device clone it as its
+//! own Repo dropdown would. One with no origin carries nothing, is not
+//! clonable, and is still a matter of **Open repo** over there.
 //!
 //! **And the Conversation's repositories are all of them**: the Repo the work is
 //! in, and every Companion beside it. A Companion travels the same way the
@@ -105,7 +111,7 @@ pub async fn of(
 
     let mut lacks = Vec::new();
 
-    for (at, (repo, matched)) in repos.iter().zip(matched).enumerate() {
+    for (at, (repo, (origin, matched))) in repos.iter().zip(matched).enumerate() {
         // The first of the list is the Conversation's own; everything after it
         // came off the companions.
         let companion = at > 0;
@@ -114,6 +120,17 @@ pub async fn of(
             lacks.push(Lacking::Repo {
                 name: repo.name.clone(),
                 companion,
+                // What the far device would clone it from, which a repository
+                // with no origin has nothing of — as the Author this device's
+                // Repo works as, the one a transfer is checked against below.
+                clonable: origin.map(|origin| {
+                    crate::matching::clonable_from(
+                        origin,
+                        config
+                            .author_of(repo.author.as_deref())
+                            .map(|author| author.id().to_owned()),
+                    )
+                }),
             });
             continue;
         };
@@ -181,8 +198,14 @@ async fn ask(
     devices: &Devices,
     device: &str,
     repos: &[store::Repo],
-) -> Result<(Vec<Option<verkstead_render::RepoAcross>>, Vec<HarnessThere>), Refusal> {
-    let matched = crate::matching::each_across(devices, device, repos).await?;
+) -> Result<
+    (
+        Vec<(Option<String>, Option<verkstead_render::RepoAcross>)>,
+        Vec<HarnessThere>,
+    ),
+    Refusal,
+> {
+    let matched = crate::matching::each_with_origin(devices, device, repos).await?;
 
     let harnesses: Vec<HarnessThere> = relaying::word_from(
         Some(devices),
