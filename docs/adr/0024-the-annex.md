@@ -148,7 +148,10 @@ was rejected again for ADR-0014's reasons.
 own and has no device select, so nothing in the UI reaches an Annex's; its
 Keeper copies in, at every boot, everything that is about the work rather
 than the machine — the git author, the GitHub token, the Instructions, the
-MCP servers, the at-once limit and Cleanup. What stays the Annex's is what
+MCP servers with their header values, the at-once limit and Cleanup. An MCP
+server's header names are in `config.yaml` and their values in
+`secrets.yaml`, so both files are copied from: a server copied without its
+values is one declared in the Annex and refused by its far end. What stays the Annex's is what
 is about its machine: its Repos, its Members, its sandbox binds.
 
 **The wizard row reads *Linux development (WSL)***, on the first step on

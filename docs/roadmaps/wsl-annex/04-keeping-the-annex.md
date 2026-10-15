@@ -9,8 +9,8 @@ updated to a new release finds the Annex pinned to the old one at its next
 start, re-pins and rebuilds before booting it, the row reading *updating*
 meanwhile. Update on the pane moves nixpkgs and NixOS-WSL too, and is refused
 while a session runs in the Annex, naming the Conversation. The Keeper's
-Instructions, MCP servers, at-once limit and Cleanup are copied into the
-Annex at every boot. A distro unregistered by hand is forgotten at the
+Instructions, MCP servers with their header values, at-once limit and
+Cleanup are copied into the Annex at every boot. A distro unregistered by hand is forgotten at the
 Keeper's next start: the member row is gone on every device and the
 Components row reads not installed. The Devices row's press opens the pane.
 Demonstrable end to end on Windows.
@@ -33,7 +33,10 @@ Demonstrable end to end on Windows.
 - **The Annex has no settings of its own.** Everything about the work rather
   than the machine is the Keeper's, copied at every boot: git author and
   GitHub token from stage 03, and now Instructions, MCP servers, the at-once
-  limit and Cleanup. Its Repos, Members and sandbox binds stay its own.
+  limit and Cleanup. An MCP server's header names are in `config.yaml` and
+  their values in `secrets.yaml` (`mcp_headers`), so the copy reads both: a
+  server arriving without its values is declared in the Annex and refused by
+  its far end. Its Repos, Members and sandbox binds stay its own.
 - **Forgetting is not Unlink.** Stage 01 refuses Unlink on an Annex
   everywhere; the Keeper noticing the distro gone is the one path that drops
   the row, and it tells the roster the way an unlink does.
@@ -55,9 +58,12 @@ Demonstrable end to end on Windows.
    - A Keeper one release ahead boots an Annex of its own version.
    - Update with a session running is refused naming the Conversation.
 4. **The settings copied at boot** — Instructions, MCP servers, at-once and
-   Cleanup written into the Annex's config before each boot.
+   Cleanup written into the Annex's config before each boot, and the MCP
+   servers' header values into its `secrets.yaml` beside the GitHub token.
    - A change on the Keeper's Instructions pane reaches the next session in
      the Annex after a restart.
+   - An MCP server declared on the Keeper with an auth header is reached
+     from a session in the Annex with that header sent.
 5. **Forgetting a removed distro** — the probe at start finding no distro,
    the member row dropped and announced gone, the Components row reset.
 
@@ -71,7 +77,9 @@ Demonstrable end to end on Windows.
 - Assumes the install run's state is the in-memory `Installer` in
   `crates/server/src/onboarding/install.rs` and can be started outside the
   wizard.
-- Assumes Instructions, MCP servers, at-once and Cleanup are all in
-  `config.yaml` and nothing else of them is machine-bound.
+- Assumes Instructions, MCP servers, at-once and Cleanup are in
+  `config.yaml`, the MCP servers' header values in `secrets.yaml` as
+  `mcp_headers` (see `crates/server/src/settings.rs`), and nothing else of
+  them is machine-bound.
 - Assumes the unlink broadcast in `peer/unlinking.rs` is reusable for a
   Keeper telling the roster an Annex is gone.

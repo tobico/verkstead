@@ -2193,8 +2193,8 @@ Keeper's start, terminated at its stop, never waited on — a workbench opens
 on the Keeper while the Annex is still coming up, and its rows read
 *unreachable* until it answers. It is reached through the **Annex Forward**,
 and it has no settings of its own: what is about the work rather than the
-machine — the git author, the GitHub token, the Instructions, the MCP servers,
-the at-once limit, Cleanup — is copied in from its Keeper at every boot.
+machine — the git author, the GitHub token, the Instructions, the MCP servers
+and their header values, the at-once limit, Cleanup — is copied in from its Keeper at every boot.
 **And it never enters Onboarding Mode**: a kept Annex is told so in its
 config and skips the verdict, its objective being met by the mirrors its
 Keeper's Profiles arrive as.
