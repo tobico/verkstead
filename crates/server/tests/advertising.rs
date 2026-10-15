@@ -19,8 +19,11 @@
 
 use std::time::{Duration, Instant};
 
+use clap::Parser;
 use mdns_sd::{ResolvedService, ServiceDaemon, ServiceEvent};
+use verkstead_server::Config;
 use verkstead_server::discovery::{Advertisement, Announcement, SERVICE};
+use verkstead_server::settings::Settings;
 
 /// How long a test waits to hear an advertisement it is expecting.
 ///
@@ -196,5 +199,45 @@ fn nothing_is_advertised_where_the_switch_has_been_thrown() {
         !heard.iter().any(|device| device == HUSHED),
         "a device with advertising turned off puts nothing on the wire — not its hostname, \
          not its OS and not its id: {heard:?}",
+    );
+}
+
+/// And an Annex says nothing either, with the switch on: its address is its
+/// Keeper's (ADR-0024), so a row of its own on somebody's Discovered list would
+/// dial the one place it cannot be reached. The unkept device beside it, with
+/// the same switch, goes on being heard.
+#[test]
+fn a_kept_device_is_not_advertised_with_the_switch_on() {
+    let switch_on = Config::parse_from(["verkstead serve"]);
+    assert!(switch_on.advertises(), "nobody has thrown the switch");
+
+    let kept = tempfile::tempdir().unwrap();
+    std::fs::write(
+        kept.path().join("config.yaml"),
+        "kept_by:\n  device: 86f1933fecb070cbee865fbb84819d14\n  fingerprint: \"3F:0A\"\n",
+    )
+    .unwrap();
+    let unkept = tempfile::tempdir().unwrap();
+
+    let _annex = Advertisement::of_this_device_on(
+        5465,
+        switch_on.advertises_over(&Settings::in_data_dir(kept.path()).config()),
+        &announcement(HUSHED, 9301),
+    );
+    let _beside_it = Advertisement::of_this_device_on(
+        5465,
+        switch_on.advertises_over(&Settings::in_data_dir(unkept.path()).config()),
+        &announcement(LOUD, 9302),
+    );
+
+    let heard = heard(5465);
+
+    assert!(
+        heard.iter().any(|device| device == LOUD),
+        "a device nobody keeps is advertised as it always was: {heard:?}",
+    );
+    assert!(
+        !heard.iter().any(|device| device == HUSHED),
+        "and an Annex puts nothing on the wire: {heard:?}",
     );
 }

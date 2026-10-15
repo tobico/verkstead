@@ -1127,8 +1127,12 @@ impl Onboarding {
 
         let (run, dependencies) = installing(probed.dependencies, going);
 
+        // And whether this Verkstead is somebody's Annex, which the verdict is
+        // never reached over — see [`Onboarding::mode`].
+        let kept = settings.config().kept_by().is_some();
+
         Ok(OnboardingView {
-            mode: self.mode(steps).await,
+            mode: self.mode(steps, kept).await,
             platform: shown(self.machine.platform),
             distro: self.machine.distro(),
             dependencies,
@@ -1241,11 +1245,18 @@ impl Onboarding {
 
     /// Whether the mode is on: the verdict, settled off `steps` where nothing
     /// has settled it yet, and off for good once the wizard has finished.
-    async fn mode(&self, steps: StepsView) -> bool {
+    ///
+    /// **A `kept` server is never in it** (ADR-0024): an Annex is a Verkstead
+    /// whose `config.yaml` names a Keeper, and its workbench is a viewer nobody
+    /// opens — the human drives its work from the Keeper's. The mode only
+    /// redirects such a viewer, and a mode nothing will ever clear is worse than
+    /// none, so the verdict is settled off whatever the steps say. Settled
+    /// rather than skipped, so that it is as fixed for the run as any other.
+    async fn mode(&self, steps: StepsView, kept: bool) -> bool {
         let unmet = self
             .mode
             .settled
-            .get_or_init(|| async { !met(steps) })
+            .get_or_init(|| async { !kept && !met(steps) })
             .await;
 
         *unmet && !self.mode.finished.load(Ordering::SeqCst)
@@ -3278,9 +3289,12 @@ echo {token}
             None,
         );
 
-        assert!(onboarding.mode(unmet).await, "the objective was not met");
         assert!(
-            onboarding.mode(met).await,
+            onboarding.mode(unmet, false).await,
+            "the objective was not met"
+        );
+        assert!(
+            onboarding.mode(met, false).await,
             "and a Profile made since is a step that ticks under a mode that stays on",
         );
     }
@@ -3307,14 +3321,43 @@ echo {token}
             None,
         );
 
-        assert!(onboarding.mode(unmet).await);
+        assert!(onboarding.mode(unmet, false).await);
 
         onboarding.finished();
 
         assert!(
-            !onboarding.mode(unmet).await,
+            !onboarding.mode(unmet, false).await,
             "the steps still stand unmet, and the mode is off all the same: what \
              the wizard saved is what the next start will read",
+        );
+    }
+
+    /// And a kept server never enters it, whatever its steps say: nothing
+    /// would ever clear it.
+    #[tokio::test]
+    async fn a_kept_server_settles_the_mode_off_over_steps_that_stand_unmet() {
+        let unmet = StepsView {
+            dependencies: false,
+            accounts: false,
+            git: false,
+        };
+
+        let onboarding = Onboarding::probing(
+            Machine::stated(
+                Platform::Linux,
+                OsString::new(),
+                OsString::new(),
+                None,
+                None,
+                &Environment::default(),
+            ),
+            None,
+        );
+
+        assert!(!onboarding.mode(unmet, true).await);
+        assert!(
+            !onboarding.wizarding(),
+            "and a press is answered the way the reading is: there is no wizard here",
         );
     }
 }

@@ -831,6 +831,18 @@ impl Config {
         !self.no_advertising
     }
 
+    /// And whether it does once `told` — what its `config.yaml` says — has had
+    /// its word: never for an Annex, whatever the switch says.
+    ///
+    /// A kept device's address is its Keeper's (ADR-0024, *The Keeper forwards
+    /// for its Annex*), so an advertisement of its own would be a row on
+    /// another machine's Discovered list that dials the one place it cannot be
+    /// reached. Only the advertising half: what it hears of others is the
+    /// browse's, and that is untouched.
+    pub fn advertises_over(&self, told: &settings::Config) -> bool {
+        self.advertises() && told.kept_by().is_none()
+    }
+
     /// The Data Directory this configuration comes to, made where it is not
     /// there yet.
     ///
@@ -2452,6 +2464,13 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
     #[cfg(windows)]
     pipe::hold_the_grant(pipe.regranting());
 
+    // Whether this device says what it is on the LAN: the switch, and then
+    // whether `config.yaml` names a Keeper — an Annex is never advertised
+    // (ADR-0024), its address being its Keeper's. Read once here, the
+    // advertisement being registered once below and the line under this one
+    // saying which it was.
+    let advertising = config.advertises_over(&settings.config());
+
     // The one line an operator reads as Verkstead comes up — and, on the
     // install where it is the handing over, the login link itself: the address
     // with the key on it, which is what a browser has to be pointed at to be
@@ -2486,7 +2505,7 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
         device = %device.id(),
         fingerprint = %device.fingerprint(),
         update_check = config.releases().is_some(),
-        advertising = config.advertises(),
+        advertising,
         home = %homes.servers().display(),
         sandbox_binds = binds.count(),
         build_cache = ?cache.dir(),
@@ -2578,7 +2597,7 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
     // reading is: the machine a discovered row draws and the machine the
     // identity endpoint answers for are one answer told to two askers.
     let advertisement = discovery::Advertisement::of_this_device(
-        config.advertises(),
+        advertising,
         &discovery::Announcement::of(&device, &reading, peer.address().port()),
     );
 

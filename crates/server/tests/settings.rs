@@ -2057,6 +2057,31 @@ async fn a_save_carrying_the_instructions_as_they_stand_leaves_them() {
     );
 }
 
+/// And `kept_by` rides along the same way, being the other key no section has
+/// a field for: the Keeper wrote it, and a save that dropped it would leave an
+/// Annex that had forgotten who keeps it (ADR-0024).
+#[tokio::test]
+async fn a_save_on_a_kept_server_leaves_its_keeper_where_it_is() {
+    let (dir, app) = app().await;
+
+    let kept = "kept_by:\n  device: 86f1933fecb070cbee865fbb84819d14\n  \
+                fingerprint: \"3F:0A:9C:4B\"\n";
+    hand_edit(dir.path(), "config.yaml", kept);
+
+    save_author(&app, "Ada Lovelace", "ada@example.com").await;
+
+    let written = Settings::in_data_dir(dir.path()).config();
+    let keeper = written.kept_by().expect("the Keeper is still written down");
+
+    assert_eq!(keeper.device(), "86f1933fecb070cbee865fbb84819d14");
+    assert_eq!(keeper.fingerprint(), "3F:0A:9C:4B");
+    assert_eq!(
+        written.authors()[0].git_author().name(),
+        Some("Ada Lovelace"),
+        "and what the page did send is what the file holds",
+    );
+}
+
 /// And a language an installer wrote a descriptor for rides along the same way,
 /// every key of it — **its size included**.
 ///
