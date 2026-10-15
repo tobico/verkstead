@@ -39070,7 +39070,6 @@ async fn a_terminal_opened_for_a_preview_runs_its_command_in_the_shell() {
 /// in front is a second terminal opened beside it. What is in front follows the
 /// run with a Code pane attached, each move a `terminals` Nudge — and a retire
 /// leaves the terminals as ordinary ones, called as any tab is.
-#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn a_press_on_a_preview_with_a_live_terminal_follows_what_is_in_front() {
     use verkstead_render::InFront;
@@ -39238,70 +39237,8 @@ async fn a_press_on_a_preview_with_a_live_terminal_follows_what_is_in_front() {
     std::fs::write(directory.join("previewed"), "").unwrap();
 }
 
-/// A terminal opened for a Preview on a platform that reads no foreground: a
-/// press with it live refocuses it and types nothing, ever (ADR-0024).
-#[cfg(not(target_os = "linux"))]
-#[tokio::test]
-async fn a_press_on_a_preview_where_nothing_can_be_read_only_refocuses() {
-    let fixture = grilling(
-        r#"
-        printf 'reading the brief\r\n'
-        while :; do sleep 0.05; done
-        "#,
-    )
-    .await;
-
-    fixture
-        .until(|view| view.worktree.as_ref().map(|worktree| worktree.path.clone()))
-        .await;
-
-    let pool = open_database(&fixture.database).await.unwrap();
-    verkstead_store::suggest_preview(
-        &pool,
-        fixture.id,
-        "Build and test",
-        "printf 'the preview %s\\n' ran",
-        "a test",
-    )
-    .await
-    .unwrap();
-
-    let at = fixture.listening().await;
-
-    let press = || async {
-        post::<TerminalOpened>(
-            &fixture.app,
-            &format!("/api/ui/conversations/{}/terminals", fixture.id),
-            &serde_json::json!({ "preview": "Build and test" }),
-        )
-        .await
-    };
-
-    let TerminalOpened::Opened { number } = press().await else {
-        panic!("the first press opens a terminal for the preview");
-    };
-
-    let mut watcher = Watcher::terminal(at, fixture.id, number).await;
-    watcher.resize(200, 40).await;
-    watcher.until(|grid| grid.contains("the preview ran")).await;
-
-    assert_eq!(press().await, TerminalOpened::Refocused { number });
-
-    watcher.types("printf 'still %s\\n' here\r").await;
-    let showing = watcher.until(|grid| grid.contains("still here")).await;
-    assert_eq!(
-        showing
-            .iter()
-            .filter(|row| row.contains("the preview ran"))
-            .count(),
-        1,
-        "nothing is typed into a terminal whose foreground cannot be read: {showing:?}",
-    );
-}
-
 /// A Code pane attached to the Conversation, the way the pane says it is
 /// drawn: the socket held open for as long as what comes back is.
-#[cfg(target_os = "linux")]
 async fn a_code_pane(
     at: SocketAddr,
     conversation: i64,
@@ -39317,7 +39254,6 @@ async fn a_code_pane(
 
 /// Read the terminals view until terminal `number` is as `reached` wants it,
 /// and hand it back.
-#[cfg(target_os = "linux")]
 async fn until_in_front(
     fixture: &Grilling,
     number: i64,

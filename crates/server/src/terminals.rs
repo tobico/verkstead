@@ -200,7 +200,7 @@ const READING: Duration = Duration::from_secs(2);
 /// How often a terminal opened for a Preview is read for its shell having come
 /// up, before the command is typed into it.
 ///
-/// A read is one `/proc` lookup, and what is waited on is a shell starting —
+/// A read is one lookup of the process table, and what is waited on is a shell starting —
 /// half a second at best, ten where a login shell takes its time — so a tenth
 /// of a second is a line typed as soon as anybody would have typed it.
 const COMING_UP: Duration = Duration::from_millis(100);
@@ -1273,8 +1273,8 @@ pub(crate) async fn open(
 /// typed.
 ///
 /// **And at once where the platform cannot read a foreground** — Windows, whose
-/// pseudoconsole has none, and a Unix with no `/proc` to name one by — the
-/// terminal holding the line until the shell reads it.
+/// pseudoconsole has none — the terminal holding the line until the shell
+/// reads it. Linux and macOS both read one, and name it (see [`busy`]).
 ///
 /// **Then the reading** — see [`run`], and [`Terminals::turn`] for when a turn
 /// reads anything. Every [`COMING_UP`] while the run is still to be seen start,
