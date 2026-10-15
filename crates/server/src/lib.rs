@@ -2582,8 +2582,10 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
     // One handle rather than one per listener, because the two listeners
     // describe one machine: what a peer reads off the identity endpoint and
     // what the Devices section of the Remote access pane draws are the same
-    // answer told to two different askers.
-    let reading = device::reading::Reading::of_this_machine(tailscale.clone());
+    // answer told to two different askers. Told by this Data Directory's own
+    // config whether it is an Annex, which is part of what it answers.
+    let reading =
+        device::reading::Reading::of_this_machine(tailscale.clone()).told_by(settings.clone());
 
     // And what this device says about itself on the LAN, so that a Verkstead on
     // the next desk can draw a row for it with nobody typing an address

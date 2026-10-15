@@ -3900,6 +3900,7 @@ async fn a_linked_devices_app() -> (tempfile::TempDir, Router) {
                 os: os.to_owned(),
                 addresses: addresses.into_iter().map(str::to_owned).collect(),
                 fingerprint: format!("AA:BB:CC:DD:{device}"),
+                kept_by: None,
             },
         )
         .await
@@ -3972,6 +3973,7 @@ async fn a_shared_profiles_app() -> (tempfile::TempDir, Router) {
             os: "macOS".to_owned(),
             addresses: vec!["100.64.0.2".to_owned()],
             fingerprint: format!("AA:BB:CC:DD:{A_MEMBER}"),
+            kept_by: None,
         },
     )
     .await

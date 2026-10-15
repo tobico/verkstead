@@ -172,6 +172,14 @@ pub struct Member {
     /// and a device that joined in the middle of a changeover, which is why this
     /// is a record of what *was* acknowledged rather than the absence of a debt.
     pub acknowledged: Option<String>,
+
+    /// And the Device Id of its **Keeper**, where it is an **Annex**: the mark
+    /// its row is drawn with (ADR-0024).
+    ///
+    /// What the member said about itself, written afresh at every recording the
+    /// way its name is — see [`Linking::kept_by`]. `None` is every member but an
+    /// Annex.
+    pub kept_by: Option<String>,
 }
 
 /// What a member has yet to be told about a device.
@@ -241,6 +249,11 @@ pub struct Linking {
     pub os: String,
     pub addresses: Vec<String>,
     pub fingerprint: String,
+
+    /// And whose Annex it says it is, where it says so: the mark, carried on
+    /// every recording rather than set once, because every refresh of a member
+    /// is rebuilt from what that device said it is and this is part of it.
+    pub kept_by: Option<String>,
 }
 
 /// And a member that has made its certificate again, saying so: the same five
@@ -281,7 +294,8 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
              last_seen     TEXT NOT NULL,
              reachable     INTEGER NOT NULL DEFAULT 1,
              renewing_from TEXT,
-             acknowledged  TEXT
+             acknowledged  TEXT,
+             kept_by       TEXT
          ) STRICT",
     )
     .execute(pool)
@@ -318,7 +332,10 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // acknowledged one of this device's. A database written by the stage that
     // made the changeover and read by this one is a device that is owed every
     // announcement it never made, which is the right answer to have arrived at.
-    for column in ["renewing_from", "acknowledged"] {
+    //
+    // And the mark an Annex's row wears, by the same rule again: arriving null,
+    // there being no Annex before the column. See [`Member::kept_by`].
+    for column in ["renewing_from", "acknowledged", "kept_by"] {
         let there: Option<(String,)> =
             sqlx::query_as("SELECT name FROM pragma_table_info('members') WHERE name = ?")
                 .bind(column)
@@ -328,7 +345,7 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
 
         if there.is_none() {
             // Interpolated rather than bound, because a column name is not a
-            // value and `ALTER TABLE` takes no parameters. The two names are
+            // value and `ALTER TABLE` takes no parameters. The three names are
             // written above rather than passed in from anywhere.
             sqlx::query(&format!("ALTER TABLE members ADD COLUMN {column} TEXT"))
                 .execute(pool)
@@ -438,19 +455,21 @@ pub async fn record_member(pool: &SqlitePool, linking: &Linking) -> Result<()> {
     let mut tx = writing(pool, "recording a member").await?;
 
     sqlx::query(
-        "INSERT INTO members (device, name, os, fingerprint, last_seen, reachable)
-         VALUES (?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), 1)
+        "INSERT INTO members (device, name, os, fingerprint, last_seen, reachable, kept_by)
+         VALUES (?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), 1, ?)
          ON CONFLICT (device) DO UPDATE
            SET name        = excluded.name,
                os          = excluded.os,
                fingerprint = excluded.fingerprint,
                last_seen   = excluded.last_seen,
-               reachable   = 1",
+               reachable   = 1,
+               kept_by     = excluded.kept_by",
     )
     .bind(&linking.device)
     .bind(&linking.name)
     .bind(&linking.os)
     .bind(&linking.fingerprint)
+    .bind(&linking.kept_by)
     .execute(&mut *tx)
     .await
     .with_context(|| format!("recording device {} as a member", linking.device))?;
@@ -489,11 +508,11 @@ pub async fn record_member(pool: &SqlitePool, linking: &Linking) -> Result<()> {
 /// One member row as the query hands it back, in the order the `SELECT` names the
 /// columns: the device, its name, its OS, the fingerprint it is keyed on, when it
 /// was last heard from, whether the last dial got through, what it is changing over
-/// from, and what it has acknowledged of this device.
+/// from, what it has acknowledged of this device, and whose Annex it is.
 ///
-/// Named because eight columns written out at the call site is a type nobody reads
-/// — and the two nullable ones at the end are exactly the pair it would be easiest
-/// to read the wrong way round.
+/// Named because nine columns written out at the call site is a type nobody reads
+/// — and the nullable ones at the end are exactly the ones it would be easiest
+/// to read in the wrong order.
 type Row = (
     String,
     String,
@@ -501,6 +520,7 @@ type Row = (
     String,
     String,
     bool,
+    Option<String>,
     Option<String>,
     Option<String>,
 );
@@ -515,7 +535,8 @@ type Row = (
 /// cluster mode was written for.
 pub async fn members(pool: &SqlitePool) -> Result<Vec<Member>> {
     let rows: Vec<Row> = sqlx::query_as(
-        "SELECT device, name, os, fingerprint, last_seen, reachable, renewing_from, acknowledged
+        "SELECT device, name, os, fingerprint, last_seen, reachable, renewing_from, acknowledged,
+                kept_by
          FROM members
          ORDER BY name, device",
     )
@@ -542,18 +563,27 @@ pub async fn members(pool: &SqlitePool) -> Result<Vec<Member>> {
     Ok(rows
         .into_iter()
         .map(
-            |(device, name, os, fingerprint, last_seen, reachable, renewing_from, acknowledged)| {
-                Member {
-                    addresses: addresses.remove(&device).unwrap_or_default(),
-                    device,
-                    name,
-                    os,
-                    fingerprint,
-                    last_seen,
-                    reachable,
-                    renewing_from,
-                    acknowledged,
-                }
+            |(
+                device,
+                name,
+                os,
+                fingerprint,
+                last_seen,
+                reachable,
+                renewing_from,
+                acknowledged,
+                kept_by,
+            )| Member {
+                addresses: addresses.remove(&device).unwrap_or_default(),
+                device,
+                name,
+                os,
+                fingerprint,
+                last_seen,
+                reachable,
+                renewing_from,
+                acknowledged,
+                kept_by,
             },
         )
         .collect())

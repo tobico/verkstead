@@ -58,6 +58,7 @@ use verkstead_server::peer::{self, Members};
 use verkstead_server::platform::{self, Platform};
 use verkstead_server::remote::Tailscale;
 use verkstead_server::router_answering_devices_telling;
+use verkstead_server::settings::{KeptBy, Settings};
 use verkstead_store::{
     AskedJoin, HeldJoin, ask_join, asked_joins, held_join, held_joins, hold_join,
 };
@@ -125,9 +126,10 @@ struct Verkstead {
     /// a Verkstead that only ever does the asking.
     address: Option<SocketAddr>,
 
-    /// Held for the length of the test: the identity and the database both live
-    /// in it.
-    _dir: tempfile::TempDir,
+    /// Its Data Directory, held for the length of the test: the identity, the
+    /// database and the `config.yaml` an Annex is told it is kept in all live
+    /// in it — and a Keeper links an Annex by naming it.
+    dir: tempfile::TempDir,
 }
 
 impl Verkstead {
@@ -147,7 +149,7 @@ impl Verkstead {
             reading,
             pool,
             address: None,
-            _dir: dir,
+            dir,
         }
     }
 
@@ -178,6 +180,25 @@ impl Verkstead {
 
         asked.answer();
         asked
+    }
+
+    /// And the device asked as a running server reads itself: told by its own
+    /// `config.yaml` whether it is somebody's **Annex**, which is what a Keeper
+    /// links it by writing.
+    async fn annex() -> Verkstead {
+        let mut annex = Verkstead::called(
+            B,
+            Reading::stated(no_tailscale(), Platform::HERE, None, Vec::new()),
+        )
+        .await;
+
+        annex.reading = annex
+            .reading
+            .clone()
+            .told_by(Settings::in_data_dir(annex.dir.path()));
+
+        annex.answer();
+        annex
     }
 
     /// Stand the peer listener up, serving what a Verkstead serves.
@@ -1265,4 +1286,287 @@ async fn a_push_that_cannot_be_sent_costs_the_notification_and_not_the_request()
     press(&over_here, &request, "allow").await;
 
     assert_eq!(listing(&over_here).await.members.len(), 1);
+}
+
+// The Keeper's Join (ADR-0024): an Annex linked by the one device that can read
+// both Data Directories, with nobody asked.
+
+/// Where a Keeper links its Annex — a route with no button, which a Keeper's
+/// start calls.
+const ANNEXES: &str = "/api/ui/devices/annexes";
+
+/// Link the Annex whose Data Directory is `data_dir` and whose peer listener is
+/// at `address`, through `app`, and hand back what the workbench answered.
+async fn keep(app: &Router, data_dir: &std::path::Path, address: &str) -> (StatusCode, String) {
+    let body = serde_json::to_vec(&serde_json::json!({
+        "data_dir": data_dir.to_str().unwrap(),
+        "address": address,
+    }))
+    .unwrap();
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(ANNEXES)
+                .header("content-type", "application/json")
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let status = response.status();
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+
+    (status, String::from_utf8_lossy(&bytes).into_owned())
+}
+
+/// The Keeper's Join settles in one round trip: the Keeper holds the Annex,
+/// marked as its own, and the Annex holds the Keeper — with no question held
+/// on the Annex, no Nudge of the joins there, and no pending row on the Keeper.
+#[tokio::test]
+async fn a_keepers_join_settles_in_one_round_trip() {
+    let annex = Verkstead::annex().await;
+    let keeper = Verkstead::asking().await;
+
+    let mut annex_page = Listening::open(&annex.workbench()).await;
+
+    let (status, said) = keep(&keeper.workbench(), annex.dir.path(), &annex.at()).await;
+    assert_eq!(status, StatusCode::OK, "POST {ANNEXES}: {said}");
+
+    // The Keeper's side: the Annex, marked as this device's, and nothing
+    // pending — the reply was the whole of the link.
+    let kept = listing(&keeper.workbench()).await;
+
+    assert_eq!(kept.members.len(), 1);
+    assert_eq!(kept.members[0].identity.device, B);
+    assert_eq!(
+        kept.members[0].identity.kept_by.as_deref(),
+        Some(A),
+        "the Annex says whose it is, and the Keeper's row for it keeps that",
+    );
+    assert_eq!(
+        kept.members[0].identity.fingerprint,
+        annex.device.fingerprint()
+    );
+    assert!(kept.pending.is_empty(), "no pending row on the Keeper");
+    assert!(asked_joins(&keeper.pool).await.unwrap().is_empty());
+
+    // The Annex's side: the Keeper, under the certificate it presented, and no
+    // question held about it.
+    let keeping = listing(&annex.workbench()).await;
+
+    assert_eq!(keeping.members.len(), 1);
+    assert_eq!(keeping.members[0].identity.device, A);
+    assert_eq!(
+        keeping.members[0].identity.fingerprint,
+        keeper.device.fingerprint()
+    );
+    assert_eq!(
+        keeping.this.kept_by.as_deref(),
+        Some(A),
+        "the Annex answers for itself as its Keeper's",
+    );
+    assert!(
+        held_joins(&annex.pool).await.unwrap().is_empty(),
+        "nothing held, so nothing for a modal or a push to be raised about",
+    );
+
+    assert_eq!(
+        annex_page.nudge().await,
+        Nudge::Devices,
+        "the Annex's pages hear the Devices list move, and not a question arrive",
+    );
+
+    // And the Keeper wrote itself into the Annex's config, current fingerprint
+    // and all, before it dialled.
+    assert_eq!(
+        Settings::in_data_dir(annex.dir.path()).config().kept_by(),
+        Some(&KeptBy::of(A, keeper.device.fingerprint())),
+    );
+}
+
+/// Any join but the Keeper's is held and asked about as before: one from a
+/// device the config does not name, and one from the Keeper's id presenting a
+/// certificate that is not the Keeper's.
+#[tokio::test]
+async fn a_join_the_annex_is_not_kept_by_is_held_as_before() {
+    let annex = Verkstead::annex().await;
+    let keeper = Verkstead::asking().await;
+
+    Settings::in_data_dir(annex.dir.path())
+        .keep_by(&KeptBy::of(A, keeper.device.fingerprint()))
+        .unwrap();
+
+    // A third device, named nowhere in the config.
+    let stranger = Verkstead::called(
+        "ffeeddccbbaa99887766554433221100",
+        Reading::stated(no_tailscale(), Platform::Linux, None, Vec::new()),
+    )
+    .await;
+
+    let (status, said) = add(&stranger.workbench(), &annex.at()).await;
+    assert_eq!(status, StatusCode::OK, "POST {ADD}: {said}");
+
+    // And the Keeper's own id under a certificate made afresh, which is the
+    // Keeper's id said by a device the config does not name.
+    let impostor = Verkstead::called(
+        A,
+        Reading::stated(no_tailscale(), Platform::Linux, None, Vec::new()),
+    )
+    .await;
+
+    assert_ne!(impostor.device.fingerprint(), keeper.device.fingerprint());
+
+    let (status, said) = add(&impostor.workbench(), &annex.at()).await;
+    assert_eq!(status, StatusCode::OK, "POST {ADD}: {said}");
+
+    assert_eq!(
+        held_joins(&annex.pool).await.unwrap().len(),
+        2,
+        "both are questions for the Annex's human",
+    );
+    assert!(
+        listing(&annex.workbench()).await.members.is_empty(),
+        "and neither is a member until somebody answers",
+    );
+    assert_eq!(listing(&stranger.workbench()).await.pending.len(), 1);
+    assert_eq!(listing(&impostor.workbench()).await.pending.len(), 1);
+}
+
+/// A Data Directory whose `device.pem` is not the certificate the address
+/// answers with is refused at the handshake, and nothing is recorded on either
+/// side.
+#[tokio::test]
+async fn a_link_whose_device_pem_is_not_the_annexs_is_refused() {
+    let annex = Verkstead::annex().await;
+    let keeper = Verkstead::asking().await;
+
+    // Some other device's directory, with a certificate of its own in it.
+    let elsewhere = tempfile::tempdir().unwrap();
+    Device::stated(elsewhere.path(), "ffeeddccbbaa99887766554433221100").unwrap();
+
+    let (status, said) = keep(&keeper.workbench(), elsewhere.path(), &annex.at()).await;
+
+    assert_eq!(status, StatusCode::BAD_GATEWAY, "{said}");
+    assert!(
+        said.contains(annex.device.fingerprint()),
+        "the refusal names the certificate that answered: {said}",
+    );
+
+    assert!(listing(&keeper.workbench()).await.members.is_empty());
+    assert!(asked_joins(&keeper.pool).await.unwrap().is_empty());
+    assert!(listing(&annex.workbench()).await.members.is_empty());
+    assert!(held_joins(&annex.pool).await.unwrap().is_empty());
+}
+
+/// An Annex that does not take the join as its Keeper's — here one whose config
+/// it never reads — holds it as a question, and the Keeper takes the question
+/// straight back and refuses the link rather than leaving a pending row.
+#[tokio::test]
+async fn a_keepers_join_held_as_a_question_is_taken_back() {
+    let unkept = Verkstead::answering().await;
+    let keeper = Verkstead::asking().await;
+
+    let (status, said) = keep(&keeper.workbench(), unkept.dir.path(), &unkept.at()).await;
+
+    assert_eq!(status, StatusCode::BAD_GATEWAY, "{said}");
+    assert!(said.contains("Keeper"), "{said}");
+
+    assert!(listing(&keeper.workbench()).await.members.is_empty());
+    assert!(asked_joins(&keeper.pool).await.unwrap().is_empty());
+    assert!(
+        held_joins(&unkept.pool).await.unwrap().is_empty(),
+        "the question was taken back",
+    );
+}
+
+/// Linking is idempotent — a Keeper runs it at every start — and follows the
+/// Keeper's certificate: run again after it changes, `kept_by` is rewritten
+/// and the join is still taken.
+#[tokio::test]
+async fn linking_again_leaves_one_row_each_and_follows_a_new_certificate() {
+    let annex = Verkstead::annex().await;
+    let keeper = Verkstead::asking().await;
+    let config = Settings::in_data_dir(annex.dir.path());
+
+    for _ in 0..2 {
+        let (status, said) = keep(&keeper.workbench(), annex.dir.path(), &annex.at()).await;
+        assert_eq!(status, StatusCode::OK, "POST {ANNEXES}: {said}");
+    }
+
+    assert_eq!(listing(&keeper.workbench()).await.members.len(), 1);
+    assert_eq!(listing(&annex.workbench()).await.members.len(), 1);
+    assert_eq!(
+        config.config().kept_by(),
+        Some(&KeptBy::of(A, keeper.device.fingerprint())),
+    );
+
+    // The same Keeper with its certificate made again, over the same store.
+    let renewed_dir = tempfile::tempdir().unwrap();
+    let renewed = Verkstead {
+        device: Device::stated(renewed_dir.path(), A).unwrap(),
+        ..keeper
+    };
+
+    assert_ne!(
+        Some(renewed.device.fingerprint()),
+        config.config().kept_by().map(KeptBy::fingerprint),
+    );
+
+    let (status, said) = keep(&renewed.workbench(), annex.dir.path(), &annex.at()).await;
+    assert_eq!(status, StatusCode::OK, "POST {ANNEXES}: {said}");
+
+    assert_eq!(
+        config.config().kept_by(),
+        Some(&KeptBy::of(A, renewed.device.fingerprint())),
+        "the pin follows the Keeper's certificate",
+    );
+
+    let keeping = listing(&annex.workbench()).await.members;
+
+    assert_eq!(keeping.len(), 1);
+    assert_eq!(
+        keeping[0].identity.fingerprint,
+        renewed.device.fingerprint()
+    );
+    assert_eq!(listing(&renewed.workbench()).await.members.len(), 1);
+}
+
+/// An identity dial that refreshes the Annex's row on the Keeper leaves the mark
+/// in place: the refresh is rebuilt from what the Annex says, and it says whose
+/// it is.
+#[tokio::test]
+async fn an_identity_dial_leaves_the_mark_in_place() {
+    let annex = Verkstead::annex().await;
+    let keeper = Verkstead::asking().await;
+
+    let (status, said) = keep(&keeper.workbench(), annex.dir.path(), &annex.at()).await;
+    assert_eq!(status, StatusCode::OK, "POST {ANNEXES}: {said}");
+
+    let row = verkstead_store::members(&keeper.pool)
+        .await
+        .unwrap()
+        .pop()
+        .unwrap();
+
+    // Dialled where it is listening: the Annex here is stated with no addresses
+    // of its own, and what is being asked is what the answer does to the row.
+    let dialled = verkstead_store::Member {
+        addresses: vec![annex.at()],
+        ..row.clone()
+    };
+
+    keeper.peers().identity(&dialled).await.unwrap();
+
+    let refreshed = verkstead_store::members(&keeper.pool)
+        .await
+        .unwrap()
+        .pop()
+        .unwrap();
+
+    assert_ne!(refreshed.last_seen, row.last_seen, "the row was refreshed");
+    assert_eq!(refreshed.kept_by.as_deref(), Some(A));
 }

@@ -49,6 +49,7 @@ const DESK: AskingDevice = {
     name: "desk",
     os: "Windows",
     addresses: ["192.168.1.9"],
+    kept_by: null,
   },
 };
 

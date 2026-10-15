@@ -64,6 +64,7 @@ fn advertising(device: &str, name: &str, fingerprint: &str) -> Linking {
             "192.168.1.31".to_owned(),
         ],
         fingerprint: fingerprint.to_owned(),
+        kept_by: None,
     }
 }
 

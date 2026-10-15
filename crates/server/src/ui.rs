@@ -46,17 +46,17 @@ use verkstead_render::{
     FileRootsView, FileStatusView, FileWrite, FileWritten, FolderListing, GrillingStarted,
     HeaderEdit, IgnoreRule, IgnoredCommentsEdit, InstallPress, LanguageCleared, LanguageEdit,
     LanguageView, Lifecycle, Locked, McpHeader, McpServer, McpServerEdit, McpServersEdit, Merging,
-    MissedOut, NewAdoption, NewCompanion, NewConversation, NewJoin, NewRank, OpenTerminal,
-    PairingView, Parked, PendingSteerView, Permitting, Process, ProcessChoice, ProcessPicked,
-    ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration, RemoteBanner, RemoteView,
-    RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice, RuleField, RuleRefused,
-    Running, RunningOn, ServeEdit, ServePress, ServerAttached, ServerField, ServerRefused,
-    ServerRemoved, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView, ShareCommented,
-    SharePublished, SharedCommit, SharedConversation, ShowArchived, ShowingArchived, SizeRefused,
-    Standing, SteerCancelled, SteerForm, SteerOpened, SteerPairingView, SteerSaved,
-    SteerSubmission, StoreView, Submitted, Subscribed, Subscription, TakenUp, TargetNamed,
-    TargetRecorded, TerminalOpened, TimelineEvent, TokenEdit, TokenSaved, TransferredTo,
-    Transferring, UnreadEntry, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
+    MissedOut, NewAdoption, NewAnnex, NewCompanion, NewConversation, NewJoin, NewRank,
+    OpenTerminal, PairingView, Parked, PendingSteerView, Permitting, Process, ProcessChoice,
+    ProcessPicked, ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration, RemoteBanner,
+    RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice, RuleField,
+    RuleRefused, Running, RunningOn, ServeEdit, ServePress, ServerAttached, ServerField,
+    ServerRefused, ServerRemoved, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView,
+    ShareCommented, SharePublished, SharedCommit, SharedConversation, ShowArchived,
+    ShowingArchived, SizeRefused, Standing, SteerCancelled, SteerForm, SteerOpened,
+    SteerPairingView, SteerSaved, SteerSubmission, StoreView, Submitted, Subscribed, Subscription,
+    TakenUp, TargetNamed, TargetRecorded, TerminalOpened, TimelineEvent, TokenEdit, TokenSaved,
+    TransferredTo, Transferring, UnreadEntry, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -781,6 +781,11 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // Dismiss on one that has run out. One route, because they are one act
         // seen at two moments — see [`crate::device::Devices::take_back`].
         .route("/api/ui/devices/joins/{request}/cancel", post(cancel_join))
+        // And linking this device's Annex, which is a join of its own kind with
+        // no button: a Keeper calls it at its start, naming the Annex's Data
+        // Directory and the address its peer listener answers at — see
+        // [`crate::device::Devices::keep`].
+        .route("/api/ui/devices/annexes", post(keep_annex))
         // And the other side of a join: the devices asking to be let into *this*
         // one's cluster, which is what the modal in every open workbench is
         // drawn from. A read of its own beside the section above rather than a
@@ -7821,6 +7826,39 @@ async fn add_found(State(state): State<AppState>, Path(device): Path<String>) ->
 
     if let Err(why) = pressed {
         tracing::info!(%device, %why, "a request to link with a device this one found was not made");
+
+        return refused(StatusCode::BAD_GATEWAY, ApiError::new(format!("{why:#}")));
+    }
+
+    moved(&state, &devices).await
+}
+
+/// `POST /api/ui/devices/annexes` — link this device's **Annex** by the
+/// **Keeper's Join** (ADR-0024).
+///
+/// **No page presses this.** A Keeper calls it at its own start, which is why it
+/// is idempotent — see [`crate::device::Devices::keep`]. It answers with the
+/// Devices section read again all the same, the way every press beside it does,
+/// so the Annex's row arrives out of the answer.
+///
+/// An Annex that could not be linked is refused in the words the link put it in:
+/// a certificate that is not the one in its `device.pem`, a Data Directory with
+/// no certificate in it, or an Annex not answering yet.
+async fn keep_annex(State(state): State<AppState>, Json(new): Json<NewAnnex>) -> HttpResponse {
+    let Some(devices) = state.devices.clone() else {
+        return unavailable("This server holds no device identity to keep an Annex with.");
+    };
+
+    if let Err(why) = devices
+        .keep(std::path::Path::new(&new.data_dir), &new.address)
+        .await
+    {
+        tracing::info!(
+            data_dir = %new.data_dir,
+            address = %new.address,
+            %why,
+            "an Annex was not linked",
+        );
 
         return refused(StatusCode::BAD_GATEWAY, ApiError::new(format!("{why:#}")));
     }

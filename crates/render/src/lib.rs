@@ -81,7 +81,7 @@ pub use files::{
     FileWrite, FileWritten, FolderEntry, FolderListing, Marked,
 };
 pub use forwarding::{ForwardSkip, ForwardStanding, ForwardView, ForwardsView};
-pub use joining::{AskingDevice, JoinHeld, JoinSettled, NewJoin, PendingJoin};
+pub use joining::{AskingDevice, JoinHeld, JoinKept, JoinSettled, NewAnnex, NewJoin, PendingJoin};
 pub use logins::{LoginClosed, LoginCode, LoginOpened, LoginState};
 pub use onboarding::{
     AccountView, Dependency, DependencyState, DependencyView, Distro, InstallPress, InstallState,

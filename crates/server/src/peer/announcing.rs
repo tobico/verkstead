@@ -134,6 +134,9 @@ pub(crate) async fn announced(
         // the introducer's, not the newcomer's — and that is what the vouching
         // is for.
         fingerprint: newcomer.fingerprint,
+
+        // And whose Annex it is, where the newcomer says it is one.
+        kept_by: newcomer.kept_by,
     };
 
     if let Err(why) = told.members.refreshed(&linking).await {

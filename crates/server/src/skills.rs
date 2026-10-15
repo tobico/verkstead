@@ -5110,6 +5110,7 @@ mod tests {
             reachable: true,
             renewing_from: None,
             acknowledged: None,
+            kept_by: None,
         }
     }
 

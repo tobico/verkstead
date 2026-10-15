@@ -66,7 +66,8 @@ use rustls::crypto::{WebPkiSupportedAlgorithms, verify_tls12_signature, verify_t
 use rustls::{ClientConfig, DigitallySignedStruct, SignatureScheme};
 use rustls_pki_types::pem::PemObject;
 use rustls_pki_types::{CertificateDer, PrivateKeyDer, ServerName, UnixTime};
-use verkstead_render::{DeviceIdentity, DiscoveredDevice, JoinHeld, JoinSettled};
+use serde::Deserialize;
+use verkstead_render::{DeviceIdentity, DiscoveredDevice, JoinHeld, JoinKept, JoinSettled};
 use verkstead_store::{HeldJoin, Linking, Member};
 
 use crate::device::{Device, fingerprint_of_der};
@@ -435,6 +436,10 @@ impl Peers {
                 // is a certificate this end has met, and the string in a payload
                 // is the far end's word for it.
                 fingerprint: member.fingerprint.clone(),
+
+                // And the mark, as the member says it of itself: a refresh is
+                // rebuilt from what it answered, and an Annex answers whose it is.
+                kept_by: identity.kept_by.clone(),
             })
             .await?;
 
@@ -761,6 +766,108 @@ impl Peers {
             Knocked::Answered(held) => held,
             Knocked::Nobody(why) => Err(why),
         }
+    }
+
+    /// The **Keeper's Join**: link this device's **Annex** at `address`, pinned
+    /// to `expecting` — the certificate read out of the Annex's own
+    /// `device.pem` (ADR-0024, *The Keeper's Join*).
+    ///
+    /// **The one join that is pinned.** [`Peers::join`] takes whatever turns up,
+    /// there being nothing yet to compare it with; a Keeper has something,
+    /// having read the Annex's certificate off the disk it owns, so a machine
+    /// answering at that address with any other certificate is refused at the
+    /// handshake and is told nothing.
+    ///
+    /// **Answered in the join's own reply** — see [`JoinKept`] — because an
+    /// Annex whose config names this device takes the join outright. One that
+    /// held it as a question instead does not: its config does not say this
+    /// device keeps it, so the question is taken straight back rather than left
+    /// for a human nobody will show it to, and the link is refused.
+    pub async fn keep(
+        &self,
+        address: &str,
+        expecting: &str,
+        saying: &DeviceIdentity,
+    ) -> Result<JoinKept> {
+        /// The two things a join post can come back as.
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Answered {
+            Kept(JoinKept),
+            Held(JoinHeld),
+        }
+
+        let met = Arc::new(Mutex::new(None));
+        let dialling = self.dialling(vec![expecting.to_owned()], &met)?;
+
+        let answered = match dialling
+            .post(reaching(address, JOIN))
+            .json(saying)
+            .send()
+            .await
+        {
+            Ok(answered) => answered,
+
+            Err(why) => {
+                if let Some(met) = met.lock().expect("nothing panics holding this").take() {
+                    bail!(
+                        "the Annex's device.pem is {expecting}, and the machine answering at \
+                         {address} presented {met} instead",
+                    );
+                }
+
+                return Err(
+                    anyhow::Error::new(why).context(format!("linking the Annex at {address}"))
+                );
+            }
+        };
+
+        let status = answered.status();
+
+        if !status.is_success() {
+            let said = answered.text().await.unwrap_or_default();
+
+            bail!(
+                "the Annex at {address} answered {status} to its Keeper's Join: {}",
+                said.trim(),
+            );
+        }
+
+        let answered: Answered = answered
+            .json()
+            .await
+            .with_context(|| format!("reading what the Annex at {address} said to the join"))?;
+
+        let kept = match answered {
+            Answered::Kept(kept) => kept,
+
+            Answered::Held(held) => {
+                if let Err(why) = self.cancel(address, &held.request, expecting).await {
+                    tracing::info!(
+                        %why,
+                        request = %held.request,
+                        "a Keeper's Join held as a question could not be taken back, which \
+                         lets go of it when its ten minutes run out",
+                    );
+                }
+
+                bail!(
+                    "the device at {address} held the join as a question for its human rather \
+                     than taking it as its Keeper's: its config.yaml does not name this device \
+                     as its Keeper",
+                );
+            }
+        };
+
+        if kept.introducer.fingerprint != expecting {
+            bail!(
+                "the Annex at {address} presented {expecting} and named {} as its certificate, \
+                 which is a device that is not the one it says it is",
+                kept.introducer.fingerprint,
+            );
+        }
+
+        Ok(kept)
     }
 
     /// The same question put to a device a discovery found, which is a **list**
@@ -1565,6 +1672,7 @@ mod tests {
             reachable: true,
             renewing_from: None,
             acknowledged: None,
+            kept_by: None,
         }
     }
 

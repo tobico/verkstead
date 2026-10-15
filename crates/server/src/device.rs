@@ -945,6 +945,94 @@ impl Devices {
         self.asked(address, held).await
     }
 
+    /// Link this device's **Annex** by the **Keeper's Join**: the Annex whose
+    /// Data Directory is `data_dir`, answering at `address` (ADR-0024, *The
+    /// Keeper's Join*).
+    ///
+    /// **Four steps, in the order the trust runs.** The Annex's certificate is
+    /// read out of its `device.pem` and fingerprinted, which is the
+    /// compare-by-eye done by the one party that can read both files. This
+    /// device's own id and *current* fingerprint are written into the Annex's
+    /// `config.yaml` as `kept_by` where it says anything else — which is what
+    /// keeps the pin good across this device's own renewals, the Annex reading
+    /// its config at every call. The join is dialled pinned to the certificate
+    /// read in the first step. And the Annex's answer — itself, marked as this
+    /// device's, and its roster — is recorded here, with no pending row: the
+    /// whole link is the one round trip.
+    ///
+    /// **Idempotent**, so a Keeper runs it at every start: nothing unchanged is
+    /// rewritten, the join is taken again, and each side's row for the other is
+    /// the same row said again.
+    ///
+    /// No page presses this — see [`crate::ui`], where it is a route with no
+    /// button, and stage 03 of the WSL roadmap, which calls it at every boot.
+    pub async fn keep(&self, data_dir: &Path, address: &str) -> Result<()> {
+        let address = address.trim();
+
+        if address.is_empty() {
+            bail!("an address the Annex answers at is one of the two things linking it takes");
+        }
+
+        let certificate = data_dir.join(CERTIFICATE_FILE);
+
+        let pem = std::fs::read_to_string(&certificate).with_context(|| {
+            format!(
+                "reading the Annex's certificate at {}",
+                certificate.display()
+            )
+        })?;
+
+        let expecting = held(&pem)
+            .with_context(|| {
+                format!(
+                    "reading the Annex's certificate at {}",
+                    certificate.display()
+                )
+            })?
+            .fingerprint;
+
+        if expecting == self.device.fingerprint() {
+            bail!(
+                "{} is this device's own Data Directory, and a device is not its own Annex",
+                data_dir.display(),
+            );
+        }
+
+        crate::settings::Settings::in_data_dir(data_dir)
+            .keep_by(&crate::settings::KeptBy::of(
+                self.device.id(),
+                self.device.fingerprint(),
+            ))
+            .with_context(|| {
+                format!(
+                    "writing this device into the config.yaml in {} as its Keeper",
+                    data_dir.display(),
+                )
+            })?;
+
+        let saying = self.reading.identity(&self.device).await;
+        let kept = self.peers.keep(address, &expecting, &saying).await?;
+
+        let annex = kept.introducer.device.clone();
+
+        let recorded = crate::peer::exchange::record(
+            &self.members,
+            self.device.id(),
+            &kept.introducer,
+            kept.members,
+        )
+        .await?;
+
+        tracing::info!(
+            device = %annex,
+            %address,
+            recorded,
+            "this device has linked its Annex by the Keeper's Join",
+        );
+
+        Ok(())
+    }
+
     /// **Add** on a **Discovered** row: ask the device that row is about, with
     /// nothing typed (ADR-0020, *Discovery*).
     ///
@@ -1211,6 +1299,7 @@ impl Devices {
                 // whole of what will prove it at this device's gate from now
                 // on: a member *is* a fingerprint.
                 fingerprint: held.fingerprint.clone(),
+                kept_by: None,
             })
             .await?;
 
@@ -1256,6 +1345,7 @@ impl Devices {
                 name: held.name.clone(),
                 os: held.os.clone(),
                 addresses: held.addresses.clone(),
+                kept_by: None,
             },
         )
         .await;
@@ -1970,7 +2060,7 @@ impl Devices {
 /// One function rather than the mapping written at each place that hands a member
 /// over, because it is one judgement and the places are two: the roster an Allow
 /// hands to a newcomer, and the announcement made to each member about it.
-fn presenting(member: &verkstead_store::Member) -> DeviceIdentity {
+pub(crate) fn presenting(member: &verkstead_store::Member) -> DeviceIdentity {
     DeviceIdentity {
         device: member.device.clone(),
         fingerprint: member
@@ -1980,6 +2070,7 @@ fn presenting(member: &verkstead_store::Member) -> DeviceIdentity {
         name: member.name.clone(),
         os: member.os.clone(),
         addresses: member.addresses.clone(),
+        kept_by: member.kept_by.clone(),
     }
 }
 

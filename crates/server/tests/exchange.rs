@@ -250,6 +250,7 @@ impl Verkstead {
             name: platform::hostname(),
             os: "Linux".to_owned(),
             addresses: vec![self.at()],
+            kept_by: None,
         }
     }
 }
@@ -451,6 +452,7 @@ async fn the_handover_carries_every_member_the_device_holds() {
                 "100.64.0.9".to_owned(),
             ],
             fingerprint: "AA:BB:CC:DD:EE:FF".to_owned(),
+            kept_by: None,
         },
     )
     .await

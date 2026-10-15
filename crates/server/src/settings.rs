@@ -527,6 +527,42 @@ impl Settings {
             .inspect_err(|error| unreadable(path, error))
             .ok()
     }
+
+    /// Write `keeper` into this `config.yaml` as `kept_by`, every other key as
+    /// it stands — which is a **Keeper** telling its **Annex** whose it is
+    /// (ADR-0024, *The Keeper's Join*). `false` is a file that already said so,
+    /// left untouched.
+    ///
+    /// Called by the Keeper on the Annex's Data Directory, which it owns, at
+    /// every link: the Annex re-reads its config on every call, so this is what
+    /// keeps the pin good across the Keeper's own certificate renewals.
+    ///
+    /// **A file that is there and will not read is refused rather than written
+    /// over.** [`Settings::config`] reads one as nothing configured, which is
+    /// right for a reading and wrong for a write: saving that nothing would
+    /// throw away whatever the file held, in the one place a human cannot see
+    /// it happen.
+    pub fn keep_by(&self, keeper: &KeptBy) -> std::io::Result<bool> {
+        let path = self.config_path();
+
+        let mut config = match std::fs::read_to_string(&path) {
+            Ok(text) => Config::read(&text).map_err(|error| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("{} does not read as a config: {error}", path.display()),
+                )
+            })?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Config::default(),
+            Err(error) => return Err(error),
+        };
+
+        if config.kept_by.as_ref() == Some(keeper) {
+            return Ok(false);
+        }
+
+        config.kept_by = Some(keeper.clone());
+        self.save_config(&config).map(|()| true)
+    }
 }
 
 /// One settings file as YAML, ready to be written.
@@ -2137,6 +2173,15 @@ pub struct KeptBy {
 }
 
 impl KeptBy {
+    /// The Keeper `device`, presenting the certificate `fingerprint` names —
+    /// which is what a Keeper writes of itself into its Annex's config.
+    pub fn of(device: &str, fingerprint: &str) -> KeptBy {
+        KeptBy {
+            device: device.to_owned(),
+            fingerprint: fingerprint.to_owned(),
+        }
+    }
+
     /// The Keeper's Device Id.
     pub fn device(&self) -> &str {
         &self.device

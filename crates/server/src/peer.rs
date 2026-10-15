@@ -358,6 +358,10 @@ pub fn router(
                     // asked it — see [`joining::asked`], which is the one place
                     // a join ends with nobody standing in front of it.
                     peers: dialling::Peers::of(device.clone(), members.clone()),
+
+                    // And where a Keeper's Join is written, it being taken
+                    // with nobody asked — see [`joining::join`].
+                    members: members.clone(),
                 }),
         )
         .merge(
@@ -686,6 +690,7 @@ impl Members {
                     name: member.name,
                     os: member.os,
                     addresses: member.addresses,
+                    kept_by: member.kept_by,
                 },
             })
             .collect())

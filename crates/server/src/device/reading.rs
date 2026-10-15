@@ -46,6 +46,7 @@ use verkstead_render::DeviceIdentity;
 use crate::device::Device;
 use crate::platform::{self, Platform};
 use crate::remote::Tailscale;
+use crate::settings::{KeptBy, Settings};
 
 /// How long the tailnet half of the addresses stands before it is read again.
 ///
@@ -112,6 +113,12 @@ pub struct Reading {
     /// hold on its own would not do, and the half that matters when the asking
     /// is somebody else's.
     held: Arc<Mutex<Option<Held>>>,
+
+    /// And where this device is told whether it is an **Annex**: its own
+    /// `config.yaml`, read at each answer for the reason everything here is —
+    /// see [`Reading::told_by`]. `None` is a reading nobody tells anything,
+    /// which is a device nobody keeps.
+    told: Option<Settings>,
 }
 
 /// The tailnet addresses as they were last read, and when.
@@ -160,6 +167,7 @@ impl Reading {
             kernel: platform::kernel_release(),
             lan: Lan::OfThisMachine,
             held: Arc::default(),
+            told: None,
         }
     }
 
@@ -181,6 +189,7 @@ impl Reading {
             kernel,
             lan: Lan::Stated(lan),
             held: Arc::default(),
+            told: None,
         }
     }
 
@@ -205,11 +214,36 @@ impl Reading {
             kernel,
             lan: Lan::Advertised(advertised),
             held: Arc::default(),
+            told: None,
         }
     }
 
+    /// The same, told by `settings` whether it is an **Annex** — which a
+    /// running server always is, over its own Data Directory.
+    ///
+    /// The one thing a reading says that is configured rather than read off the
+    /// machine, and configured by somebody else: a Keeper writes `kept_by` into
+    /// its Annex's `config.yaml`, and an Annex is told it is kept rather than
+    /// finding out (ADR-0024). Read at each answer rather than once, because the
+    /// Keeper rewrites it whenever its own certificate moves.
+    pub fn told_by(self, settings: Settings) -> Reading {
+        Reading {
+            told: Some(settings),
+            ..self
+        }
+    }
+
+    /// Whose Annex this device is, as its `config.yaml` says now — or `None`
+    /// for a device nobody keeps, which is every device but an Annex.
+    pub(crate) fn keeper(&self) -> Option<KeptBy> {
+        self.told
+            .as_ref()
+            .and_then(|settings| settings.config().kept_by().cloned())
+    }
+
     /// What `device` answers a caller who asked who it is: the id and the
-    /// fingerprint it keeps, and the three things read off the machine now.
+    /// fingerprint it keeps, the three things read off the machine now, and
+    /// whose Annex it is where it is one.
     ///
     /// Assembled here rather than in the route, because the route is the one
     /// place with nothing to say about any of this: what it knows is that a
@@ -221,6 +255,7 @@ impl Reading {
             name: self.name(),
             os: self.os(),
             addresses: self.addresses().await,
+            kept_by: self.keeper().map(|keeper| keeper.device().to_owned()),
         }
     }
 

@@ -204,7 +204,13 @@ pub(crate) async fn settled(
                 );
             }
 
-            let recorded = record(&settling, &introducer, members).await;
+            let recorded = record(
+                &settling.members,
+                settling.device.id(),
+                &introducer,
+                members,
+            )
+            .await;
 
             match recorded {
                 Ok(recorded) => tracing::info!(
@@ -265,15 +271,20 @@ pub(crate) async fn settled(
 /// sit on its own list for ever; and anything naming no device or no
 /// certificate, a member being an id and a fingerprint before it is anything
 /// else.
-async fn record(
-    settling: &Settling,
+///
+/// **Two callers, one handover**: the dial back an Allow makes, here, and the
+/// reply an **Annex** gives its **Keeper's Join**, which is the same roster said
+/// in the join's own answer — see [`crate::device::Devices::keep`].
+pub(crate) async fn record(
+    recording: &Members,
+    this: &str,
     introducer: &DeviceIdentity,
     members: Vec<DeviceIdentity>,
 ) -> Result<usize> {
     let mut recorded = 0;
 
     for identity in std::iter::once(introducer.clone()).chain(members) {
-        if identity.device == settling.device.id() {
+        if identity.device == this {
             continue;
         }
 
@@ -287,14 +298,14 @@ async fn record(
             continue;
         }
 
-        settling
-            .members
+        recording
             .refreshed(&Linking {
                 device: identity.device,
                 name: identity.name,
                 os: identity.os,
                 addresses: identity.addresses,
                 fingerprint: identity.fingerprint,
+                kept_by: identity.kept_by,
             })
             .await?;
 

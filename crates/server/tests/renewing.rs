@@ -276,6 +276,7 @@ impl Verkstead {
             name: "somewhere".to_owned(),
             os: "Linux".to_owned(),
             addresses: vec![self.at()],
+            kept_by: None,
         }
     }
 
@@ -982,6 +983,7 @@ async fn switched_off(holding: &Verkstead, device: &str) {
             os: "Linux (WSL)".to_owned(),
             addresses: vec![NOWHERE.to_owned()],
             fingerprint: "AA:BB:CC:DD:EE:FF".to_owned(),
+            kept_by: None,
         },
     )
     .await
@@ -1002,6 +1004,7 @@ async fn back_again(holding: &Verkstead, device: &Verkstead) {
             os: "Linux (WSL)".to_owned(),
             addresses: vec![device.at()],
             fingerprint: device.device.fingerprint().to_owned(),
+            kept_by: None,
         },
     )
     .await
@@ -1145,5 +1148,6 @@ fn member_at(listening: &Verkstead, device: &str) -> Member {
         reachable: true,
         renewing_from: None,
         acknowledged: None,
+        kept_by: None,
     }
 }
