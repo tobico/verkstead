@@ -194,6 +194,36 @@ Options:
           Print help (see a summary with '-h')
 ```
 
+And `verkstead preview`, which suggests a preview for the human to try the
+work with — **Suggesting a preview** below — verbatim too:
+
+```
+Suggest a preview: a title and the one-line command that tries this session's work by hand, which the human runs from the Code pane with a press.
+
+The command on stdin, one line of at most 4 KiB written for the terminal's own shell; the trailing newline a heredoc ends in is dropped. Only a building session may suggest one: a backlog task, the finish, a stage's planning, an inline run or a steered instruction. A title that already stands has its command replaced. Accepted, it prints the title as YAML — `title: Build and test` — on stdout and exits 0; refused, it exits non-zero and says why on stderr, and nothing is suggested.
+
+`--retire <title>` takes one back instead: nothing is read from stdin, and nothing is printed on stdout.
+
+Usage: verkstead preview [OPTIONS] [TITLE]
+
+Arguments:
+  [TITLE]
+          What the preview is called, such as "Build and test"
+
+Options:
+      --retire <TITLE>
+          Retire the preview with this title rather than suggest one
+
+      --server <SERVER>
+          Where the Verkstead server is: its base URL, or `pipe://<name>` for a named pipe, which is Windows' own and what a session in a container asks through
+          
+          [env: VERKSTEAD_SERVER=]
+          [default: http://127.0.0.1:8422]
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
 ## Authoring the Set
 
 One Set is one round, budgeted as above. Because the round trip is expensive,
@@ -512,6 +542,83 @@ verkstead memo --retire 42 fixed in 8f3c2a1
 Accepted, that prints nothing on stdout. A memo of another Conversation, or one
 already retired, is refused by name. The human can retire one from the
 Timeline too, and restore it.
+
+## Suggesting a preview
+
+A **preview** is a title and the one line that tries this work by hand —
+*Build and test* over the command that builds and starts it — so the human
+never has to read the transcript to find out how. It is listed in the Code
+pane above the tree, and a press opens a terminal there and types the command
+into it, as the human would have typed it.
+
+**Suggest one the moment there is anything that could be tried**, whether or
+not a manual test looks called for. The point is that it is already there
+when the human decides one is: a preview suggested at the finish is one they
+could have used three tasks ago. Enforced by nothing — a session that touched
+only documents has nothing to preview, and leaving none refuses no signal.
+
+**Only the sessions that build suggest one** — a backlog task, the finish, a
+stage's planning, an inline run, a steered instruction. Every other kind is
+refused by name.
+
+The title is the argument and the command is on stdin, a quoted heredoc the
+way a memo is written:
+
+```
+verkstead preview "Build and test" <<'SH'
+cargo build && cargo run -- serve
+SH
+```
+
+Accepted, it prints the title on stdout and exits 0:
+
+```yaml
+title: Build and test
+```
+
+**The command is one line**, of at most 4 KiB, refused empty or with a newline
+in it; the trailing newline a heredoc ends in is dropped. It is typed into an
+interactive shell **in the Conversation's own worktree**, so it is written
+from the root of the repository and **for the shell the terminal runs** —
+which is not this sandbox's, and which your prompt names. Join steps with that
+shell's own `&&` or `;`, and put anything longer in a script the branch
+carries, then make the preview the line that runs it.
+
+**A preview is for the human's hand, not a test suite.** What they watch or
+click through: *Run the server*, *Build and open the app*, *Serve the docs* —
+and *Run the tests* only where watching them run is the point.
+
+**Keep it current.** The same title suggested again replaces its command in
+place, so as the way to run the work changes, suggest it again rather than
+adding a second; and **retire one that no longer runs**, by its title:
+
+```
+verkstead preview --retire "Build and test"
+```
+
+Accepted, that prints nothing on stdout. A title that does not stand is
+refused by name. The human cannot remove one — the list is yours to keep true.
+
+Every building session is shown the previews standing, in its prompt, under
+this heading — and shown it when none stands too, over a line saying so, which
+is the cue to suggest the first:
+
+```
+# The previews standing
+
+**Build and test**
+
+    cargo build && cargo run -- serve
+
+Suggest one again under its title when its command changes, and retire one
+that no longer runs.
+
+A terminal here runs `fish`, at `/run/current-system/sw/bin/fish`: write a
+preview's command for that shell.
+```
+
+A preview stands until it is retired: through a steer and a follow-up alike,
+being true of the branch rather than of the round.
 
 ## Ending the session
 

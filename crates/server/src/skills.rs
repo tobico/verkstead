@@ -899,6 +899,73 @@ pub(crate) fn left(prompt: &str, memos: &[store::StandingMemo], retiring: bool) 
     )
 }
 
+/// The same prompt again, with the Previews standing on the Conversation
+/// listed under it, title and command, and the shell a terminal runs named
+/// (ADR-0024).
+///
+/// **Only where `building`** — the sessions that may suggest one, which are the
+/// ones that may retire a Memo: every other kind is refused `verkstead
+/// preview`, so a heading telling it to suggest one would be sending it to a
+/// refusal.
+///
+/// **And shown with none standing too**, which is where this differs from
+/// [`left`]: the heading over a line saying none stands yet is the cue to
+/// suggest the first, which is what the human asked for — a preview already
+/// there whenever they decide to try the work.
+///
+/// `shell` is what a terminal on this server opens on, read the way the
+/// terminal reads it — see [`crate::terminals::shell::of_the_server`] — since
+/// the agent cannot see it from inside its own sandbox, and the command is
+/// typed into it as it stands.
+pub(crate) fn previewed(
+    prompt: &str,
+    previews: &[store::Preview],
+    shell: &str,
+    building: bool,
+) -> String {
+    if !building {
+        return prompt.to_owned();
+    }
+
+    let listed = if previews.is_empty() {
+        "None stands yet. Suggest one with `verkstead preview` as soon as there is \
+         anything to try, whether or not a manual test looks called for, so it is \
+         there whenever the human decides one is."
+            .to_owned()
+    } else {
+        let rows: Vec<String> = previews
+            .iter()
+            .map(|preview| format!("**{}**\n\n    {}", preview.title, preview.command))
+            .collect();
+
+        format!(
+            "{}\n\nSuggest one again under its title when its command changes, and \
+             retire one that no longer runs.",
+            rows.join("\n\n"),
+        )
+    };
+
+    format!(
+        "{}\n\n# The previews standing\n\n{listed}\n\nA terminal here runs {}: write a \
+         preview's command for that shell.\n",
+        prompt.trim_end(),
+        shell_said(shell),
+    )
+}
+
+/// The shell a terminal runs, as a session is told it: by the name `comm`
+/// would give it and the path it is started at, and Windows PowerShell by its
+/// own name, which is not one its file says.
+fn shell_said(shell: &str) -> String {
+    let named = crate::terminals::busy::named(shell);
+
+    if named.eq_ignore_ascii_case("powershell.exe") {
+        format!("Windows PowerShell, at `{shell}`")
+    } else {
+        format!("`{named}`, at `{shell}`")
+    }
+}
+
 /// The same prompt again, with the companion repos the Conversation was
 /// configured with listed under it.
 ///
@@ -2064,6 +2131,34 @@ mod tests {
                 assert!(
                     !skill.contains("verkstead memo"),
                     "{name}'s session is refused a memo, so it should not mention one: {skill}"
+                );
+            }
+        }
+    }
+
+    /// The same four skills teach suggesting a preview and point at the
+    /// Guide's section for it, and no other skill names the command: their
+    /// sessions are refused it. See ADR-0024.
+    #[test]
+    fn only_the_building_skills_teach_the_preview() {
+        let teaching = [NEXT_TASK, IMPLEMENTING, NEXT_STAGE, INSTRUCTION];
+
+        for name in NAMED {
+            let skill = flowed(name);
+
+            if teaching.contains(&name) {
+                assert!(
+                    skill.contains("## Suggesting a preview")
+                        && skill.contains("verkstead preview \"Build and test\" <<'SH'")
+                        && skill.contains("verkstead preview --retire \"Build and test\"")
+                        && skill.contains("*The previews standing*")
+                        && skill.contains("The Guide's *Suggesting a preview* section"),
+                    "{name} has to teach suggesting a preview and point at the Guide: {skill}"
+                );
+            } else {
+                assert!(
+                    !skill.contains("verkstead preview"),
+                    "{name}'s session is refused a preview, so it should not mention one: {skill}"
                 );
             }
         }
@@ -4746,6 +4841,99 @@ mod tests {
             "{prompt:?}"
         );
         assert!(!prompt.contains("verkstead memo"), "{prompt:?}");
+    }
+
+    /// A Preview as the store hands it back.
+    fn preview(title: &str, command: &str) -> store::Preview {
+        store::Preview {
+            title: title.to_owned(),
+            command: command.to_owned(),
+            left_by: "the session that worked task 01".to_owned(),
+            at: "2026-10-15T09:00:00.000Z".to_owned(),
+        }
+    }
+
+    /// The Previews standing, title over command in the order the store gives
+    /// them, under the kind's own sections, and the shell a terminal runs named
+    /// by `comm`'s name and its path. See ADR-0024.
+    #[test]
+    fn a_building_prompt_lists_the_standing_previews_and_names_the_shell() {
+        let prompt = previewed(
+            &next_task(&mounted(), "# Rate limiting\n\nThe API has none.\n", None),
+            &[
+                preview("Build and test", "cargo build && cargo run -- serve"),
+                preview("Serve the docs", "mdbook serve docs"),
+            ],
+            "/run/current-system/sw/bin/fish",
+            true,
+        );
+
+        assert!(
+            prompt.ends_with(
+                "\n\n# The previews standing\n\n\
+                 **Build and test**\n\n    cargo build && cargo run -- serve\n\n\
+                 **Serve the docs**\n\n    mdbook serve docs\n\n\
+                 Suggest one again under its title when its command changes, and retire \
+                 one that no longer runs.\n\n\
+                 A terminal here runs `fish`, at `/run/current-system/sw/bin/fish`: \
+                 write a preview's command for that shell.\n"
+            ),
+            "{prompt:?}"
+        );
+        assert!(
+            prompt.find("# The Brief this started from") < prompt.find("# The previews standing"),
+            "under the kind's own sections: {prompt:?}"
+        );
+    }
+
+    /// With none standing the heading is still there, over the cue to suggest
+    /// the first — unlike the Memos', the empty heading is the hint.
+    #[test]
+    fn a_building_prompt_with_no_previews_is_told_to_suggest_one() {
+        let prompt = previewed("Read the next-task skill.\n", &[], "/bin/sh", true);
+
+        assert_eq!(
+            prompt,
+            "Read the next-task skill.\n\n# The previews standing\n\n\
+             None stands yet. Suggest one with `verkstead preview` as soon as there is \
+             anything to try, whether or not a manual test looks called for, so it is \
+             there whenever the human decides one is.\n\n\
+             A terminal here runs `sh`, at `/bin/sh`: write a preview's command for \
+             that shell.\n"
+        );
+    }
+
+    /// A session that may not suggest one is told nothing of them, with or
+    /// without any standing: it would be refused the verb.
+    #[test]
+    fn a_session_that_may_not_suggest_a_preview_has_no_heading() {
+        let prompt = "Read the grilling skill.\n";
+
+        assert_eq!(previewed(prompt, &[], "/bin/sh", false), prompt);
+        assert_eq!(
+            previewed(
+                prompt,
+                &[preview("Build and test", "make")],
+                "/bin/sh",
+                false
+            ),
+            prompt
+        );
+    }
+
+    /// Windows PowerShell is named as itself, its file's name not being one a
+    /// session would write for.
+    #[test]
+    fn a_windows_terminal_is_named_windows_powershell() {
+        let prompt = previewed("Read the next-task skill.\n", &[], "powershell.exe", true);
+
+        assert!(
+            prompt.contains(
+                "A terminal here runs Windows PowerShell, at `powershell.exe`: write a \
+                 preview's command for that shell."
+            ),
+            "{prompt:?}"
+        );
     }
 
     /// What a session is told about the companions: where each one is, what it

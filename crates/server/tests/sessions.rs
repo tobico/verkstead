@@ -39708,6 +39708,143 @@ async fn a_steered_session_is_told_the_memos_and_a_session_with_none_is_not() {
     );
 }
 
+/// The shell a terminal on this server runs, as a building session's prompt
+/// names it: by `comm`'s name and the path it is started at.
+fn the_terminals_shell_said() -> String {
+    let shell = verkstead_server::terminals::shell::of_the_server();
+    let named = verkstead_server::terminals::busy::named(&shell);
+
+    format!(
+        "A terminal here runs `{named}`, at `{shell}`: write a preview's command for that shell."
+    )
+}
+
+/// Every step of a backlog with no Preview standing is told so under the
+/// heading, over the cue to suggest one, with the terminal's shell named — and
+/// each step's done signal is accepted all the same, a session that left no
+/// Preview being one nothing refuses. See ADR-0024.
+#[tokio::test]
+async fn every_building_session_is_told_to_suggest_a_preview_when_none_stands() {
+    let spill = tempfile::tempdir().unwrap();
+    let written = spill.path().join("task-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_of_two_writing_prompts(&written),
+        PULL_REQUEST,
+    )
+    .await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
+
+    fixture
+        .until(|view| {
+            commits(view)
+                .iter()
+                .any(|commit| commit.subject.starts_with("chore: finish"))
+                .then_some(())
+        })
+        .await;
+
+    let started = prompts_by_step(&written);
+    assert_eq!(
+        started.len(),
+        3,
+        "a session per step, each signal accepted: {started:?}"
+    );
+
+    let block = format!(
+        "# The previews standing\n\n\
+         None stands yet. Suggest one with `verkstead preview` as soon as there is \
+         anything to try, whether or not a manual test looks called for, so it is \
+         there whenever the human decides one is.\n\n{}\n",
+        the_terminals_shell_said(),
+    );
+
+    for (step, prompt) in &started {
+        assert!(
+            prompt.contains(&block),
+            "{step} is shown the empty heading over the hint: {prompt:?}",
+        );
+    }
+}
+
+/// A grilling is told nothing of the Previews, being refused the verb, and a
+/// steered instruction is told the ones standing, title over command.
+#[tokio::test]
+async fn a_steered_instruction_is_told_the_previews_and_a_grilling_is_not() {
+    let fixture = grilling(
+        r#"
+        printf 'prompt was: %s\n' "$2"
+        sleep 300
+        "#,
+    )
+    .await;
+
+    let grilled = fixture.printed_after(0).await;
+
+    assert!(
+        !grilled.contains("previews standing") && !grilled.contains("verkstead preview"),
+        "a grilling has no such heading: {grilled:?}",
+    );
+
+    let pool = open_database(&fixture.database).await.unwrap();
+    verkstead_store::suggest_preview(
+        &pool,
+        fixture.id,
+        "Build and test",
+        "cargo run -- serve",
+        "the session that worked task 01",
+    )
+    .await
+    .unwrap();
+
+    let before = outputs(&fixture.view().await).len();
+
+    assert_eq!(fixture.steer().await, SteerOpened::Opened);
+    assert_eq!(
+        fixture.steer_grilling(None, false).await,
+        ConversationSteered::Steered,
+    );
+
+    let relaunched = fixture.printed_after(before).await;
+
+    assert!(
+        relaunched.contains("/verkstead/skills/grilling/SKILL.md")
+            && !relaunched.contains("previews standing"),
+        "nor does a relaunched one, with a Preview standing: {relaunched:?}",
+    );
+
+    let before = outputs(&fixture.view().await).len();
+
+    assert_eq!(fixture.steer().await, SteerOpened::Opened);
+    assert_eq!(
+        fixture
+            .steer_instructed("Note the window the count is against.\n")
+            .await,
+        ConversationSteered::Steered,
+    );
+
+    let instructed = fixture.printed_after(before).await;
+
+    assert!(
+        instructed.contains("/verkstead/skills/instruction/SKILL.md")
+            && instructed.contains(&format!(
+                "# The previews standing\n\n\
+                 **Build and test**\n\n    cargo run -- serve\n\n\
+                 Suggest one again under its title when its command changes, and retire \
+                 one that no longer runs.\n\n{}\n",
+                the_terminals_shell_said(),
+            )),
+        "a steered instruction is told the Preview standing: {instructed:?}",
+    );
+}
+
 /// Retire Memo `memo` from the session running in `fixture`, the way `verkstead
 /// memo --retire` does, with `reason` as the body.
 async fn retire_a_memo(fixture: &Grilling, memo: i64, reason: &str) -> (StatusCode, String) {

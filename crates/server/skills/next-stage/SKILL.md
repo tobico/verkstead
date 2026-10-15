@@ -214,6 +214,26 @@ being the reason:
 The Guide's *Leaving a memo for the sessions after you* section has the
 details.
 
+## Suggesting a preview
+
+A preview is a title and the one line the human runs from the Code pane to try
+this work by hand. Planning builds nothing, so this session suggests one only
+where the branch it plans on can already be tried and none stands — the task
+sessions keep it current from there:
+
+    verkstead preview "Build and test" <<'SH'
+    cargo build && cargo run -- serve
+    SH
+
+Suggest it again under the same title when the way to run the work changes,
+and retire one that no longer runs:
+
+    verkstead preview --retire "Build and test"
+
+Your prompt lists the previews standing, under *The previews standing*, and
+names the shell the terminal runs — write the command for that one, not for
+this sandbox's. The Guide's *Suggesting a preview* section has the details.
+
 ## How the questions reach them
 
 Every question goes as a Question Set through the `verkstead` CLI, and nothing

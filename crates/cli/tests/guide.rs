@@ -197,6 +197,7 @@ fn the_guide_covers_every_core_area() {
         "## Reading the Response",
         "## Waiting in the background",
         "## Leaving a memo for the sessions after you",
+        "## Suggesting a preview",
         "## Ending the session",
         "## Moving the work to another device",
     ] {
@@ -634,17 +635,93 @@ fn the_guide_says_how_to_leave_a_memo() {
     }
 }
 
+/// `verkstead preview --help` is quoted beside the memo's, and held to the
+/// binary the same way.
+#[test]
+fn the_guides_quoted_preview_contract_is_the_real_one() {
+    let guide = stdout(&run(&["guide"]));
+    let contract = section(&guide, "## The CLI contract");
+    let quoted = fenced_blocks(contract)
+        .into_iter()
+        .find(|block| block.contains("Usage: verkstead preview"))
+        .expect("the CLI contract should quote `verkstead preview --help`");
+    let real = stdout(&run(&["preview", "--help"]));
+
+    assert_eq!(
+        lines(&quoted),
+        lines(&real),
+        "the Guide quotes `verkstead preview --help` verbatim — copy the current \
+         output into the CLI contract section of crates/cli/guide/core.md"
+    );
+}
+
+/// A preview is suggested during the work, beside the memo and before the
+/// signal, and the section carries the brief's rule — suggest one the moment
+/// anything could be tried — with both invocations, the bounds, what the
+/// command is written for, and the heading a building session reads them under.
+#[test]
+fn the_guide_says_how_to_suggest_a_preview() {
+    for agent_type in ["claude", "codex", "grok", "opencode"] {
+        let guide = stdout(&run_as(agent_type, &["guide"]));
+        let preview = section(&guide, "## Suggesting a preview");
+        let flowed = preview.split_whitespace().collect::<Vec<_>>().join(" ");
+
+        assert!(
+            guide.find("## Leaving a memo").unwrap()
+                < guide.find("## Suggesting a preview").unwrap()
+                && guide.find("## Suggesting a preview").unwrap()
+                    < guide.find("## Ending the session").unwrap(),
+            "the preview section should sit between the memo's and ending the session"
+        );
+        for phrase in [
+            "Suggest one the moment there is anything that could be tried",
+            "whether or not a manual test looks called for",
+            "leaving none refuses no signal",
+            "Only the sessions that build suggest one",
+            "refused by name",
+            "verkstead preview \"Build and test\" <<'SH'",
+            "title: Build and test",
+            "4 KiB",
+            "with a newline in it",
+            "in the Conversation's own worktree",
+            "for the shell the terminal runs",
+            "not a test suite",
+            "*Run the tests* only where watching them run is the point",
+            "replaces its command in place",
+            "retire one that no longer runs",
+            "verkstead preview --retire \"Build and test\"",
+            "# The previews standing",
+            "when none stands too",
+        ] {
+            assert!(
+                flowed.contains(phrase),
+                "{agent_type}'s preview section should say {phrase:?}, got:\n{preview}"
+            );
+        }
+    }
+}
+
 /// A review's Set is a plain Question Set like every other, so the Guide teaches
 /// one grammar and only one. The block a review used to carry has left the
 /// schema, and a Guide that still described it would be teaching an agent to
 /// write something nothing reads.
+///
+/// Each key is matched as a word of its own, so that "a preview: a title" in
+/// the quoted `verkstead preview --help` is not taken for `review:`.
 #[test]
 fn the_guide_teaches_no_findings_grammar() {
     let guide = stdout(&run(&["guide"]));
 
     for phrase in ["findings:", "review:", "fix: Q", "split: Q"] {
+        let keyed = guide.match_indices(phrase).any(|(at, _)| {
+            !guide[..at]
+                .chars()
+                .next_back()
+                .is_some_and(char::is_alphanumeric)
+        });
+
         assert!(
-            !guide.contains(phrase),
+            !keyed,
             "the Guide should carry no trace of the findings grammar, and it has \
              {phrase} in:\n{guide}"
         );
@@ -798,6 +875,7 @@ fn only_the_two_asking_sections_differ_between_the_backends() {
         "## Reading the Response",
         "## Waiting in the background",
         "## Leaving a memo for the sessions after you",
+        "## Suggesting a preview",
         "## Ending the session",
         "## Moving the work to another device",
     ] {

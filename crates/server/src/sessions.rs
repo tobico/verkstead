@@ -2656,6 +2656,25 @@ impl Sessions {
             retiring,
         );
 
+        // And the Previews standing, for a building session alone — the same
+        // `retiring`, the kinds that may suggest one being the kinds that may
+        // retire a Memo — shown over a hint when none stands, and naming the
+        // shell a terminal runs, which is asked of the machine the way a
+        // terminal asks it and on the thread that may wait on it. See
+        // [`skills::previewed`].
+        let prompt = if retiring {
+            let shell = tokio::task::spawn_blocking(crate::terminals::shell::of_the_server).await?;
+
+            skills::previewed(
+                &prompt,
+                &store::standing_previews(pool, conversation.id).await?,
+                &shell,
+                retiring,
+            )
+        } else {
+            prompt
+        };
+
         // And the companion repos this Conversation was configured with, listed
         // under whatever prompt the caller built. Here rather than in each
         // builder because this is the one place every session is launched from
