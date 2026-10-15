@@ -61,7 +61,10 @@ import type {
 import { listenForNudges } from "../src/nudge";
 import { RemoteCard, RemotePane } from "../src/settings/Remote";
 import devices from "./fixtures/devices.json" with { type: "json" };
+import devicesBesideAnAnnex from "./fixtures/devices-beside-an-annex.json" with { type: "json" };
 import devicesDiscovered from "./fixtures/devices-discovered.json" with { type: "json" };
+import devicesKept from "./fixtures/devices-kept.json" with { type: "json" };
+import devicesKeeping from "./fixtures/devices-keeping.json" with { type: "json" };
 import devicesLinked from "./fixtures/devices-linked.json" with { type: "json" };
 import devicesWaiting from "./fixtures/devices-waiting.json" with { type: "json" };
 import devicesWsl from "./fixtures/devices-wsl.json" with { type: "json" };
@@ -111,6 +114,14 @@ const LINKED = devicesLinked as DevicesView;
 /// ways a pending row is drawn, and neither of them is a member — nothing has
 /// been agreed until somebody at the far end presses.
 const WAITING = devicesWaiting as DevicesView;
+
+/// And the three ways an **Annex** stands on a list (ADR-0024): on its Keeper,
+/// where it is *workbench*, this device's; on another member, where it is the
+/// Annex of *laptop*, a member there; and on the Annex itself, which is this
+/// device, kept by *laptop*, beside an ordinary Mac called *studio*.
+const KEEPING = devicesKeeping as DevicesView;
+const BESIDE_AN_ANNEX = devicesBesideAnAnnex as DevicesView;
+const KEPT = devicesKept as DevicesView;
 
 
 /// And three devices this one has *found* and is not linked to at all, which is
@@ -844,6 +855,66 @@ one on the LAN",
 
     expect(press?.textContent, "and the Unlink is drawn on it").toBe("Unlink");
     expect(press?.disabled, "and works exactly as any other's").toBe(false);
+  });
+
+  /// The row of a device, found by a word only it holds.
+  function theRowOf(text: string): HTMLLIElement {
+    return screen.getByText(text).closest("li")!;
+  }
+
+  /// An Annex on its Keeper reads *annex of this device* and offers no Unlink,
+  /// and the ordinary member beside it is drawn as it always was.
+  it("marks an Annex as this device's on its Keeper, with no Unlink", async () => {
+    mountPane(SERVING, KEEPING);
+
+    const mark = await waitFor(() => screen.getByText("annex of this device"));
+    const annex = mark.closest("li")!;
+
+    expect(annex.textContent).toContain("workbench");
+    expect(annex.querySelector("button"), "no Unlink on an Annex").toBeNull();
+
+    const press = theRowOf("laptop").querySelector("button");
+    expect(press?.textContent, "the ordinary member keeps its Unlink").toBe(
+      "Unlink",
+    );
+    expect(screen.getAllByText("Unlink").length).toBe(1);
+    expect(screen.queryAllByText(/^annex/).length, "and one mark").toBe(1);
+  });
+
+  /// And on every other member, the mark names the Keeper by the name the
+  /// cluster holds for it — and there is no Unlink on it there either.
+  it("marks an Annex with its Keeper's name on another member", async () => {
+    mountPane(SERVING, BESIDE_AN_ANNEX);
+
+    const mark = await waitFor(() => screen.getByText("annex of laptop"));
+
+    expect(mark.closest("li")?.querySelector("button")).toBeNull();
+    expect(
+      theRowOf("laptop").querySelector("button")?.textContent,
+      "the Keeper is an ordinary member here, Unlink and all",
+    ).toBe("Unlink");
+  });
+
+  /// On the Annex itself, its own row says whose it is, and its Keeper's row
+  /// offers no Unlink — the Annex refuses that press — while an ordinary member
+  /// keeps its own.
+  it("marks the Annex's own row and offers no Unlink on its Keeper", async () => {
+    mountPane(SERVING, KEPT);
+
+    const mark = await waitFor(() => screen.getByText("annex of laptop"));
+
+    expect(
+      mark.closest("li")?.textContent,
+      "on this device's own row",
+    ).toContain("this device");
+    expect(
+      theRowOf("laptop").querySelector("button"),
+      "no Unlink on the Keeper",
+    ).toBeNull();
+    expect(theRowOf("studio").querySelector("button")?.textContent).toBe(
+      "Unlink",
+    );
+    expect(screen.getAllByText("Unlink").length).toBe(1);
   });
 
   /// The case the whole of cluster mode was written for: a Windows machine and

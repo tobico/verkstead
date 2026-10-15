@@ -271,6 +271,15 @@
   color: var(--ink-soft);
 }
 
+/* And *annex of …*, on an Annex's row: whose it is, which is why it has no
+   Unlink. The same kind of thing said again — a fact about the row — so it is
+   set the way the two words above are. */
+.annex {
+  margin-inline-start: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+}
+
 /* And the row it is on, dimmed whole. What it says is that a press on this row
    would find nobody — so the name, the mark and the addresses all go quiet
    together, rather than the row growing a mark of its own to be read beside

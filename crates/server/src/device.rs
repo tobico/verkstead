@@ -638,6 +638,32 @@ pub(crate) enum Unrelayed {
     Unreadable(anyhow::Error),
 }
 
+/// Why an **Unlink** was not made — see [`Devices::unlink`], and the workbench
+/// route that turns each of these into a refusal naming the device.
+///
+/// **Two refusals and a failure.** An **Annex**'s membership is its Keeper's
+/// (ADR-0024, *The Keeper's Join*), so the press is refused on it on every
+/// device, and an Annex refuses it on its Keeper. Neither is anything going
+/// wrong: they are the relation said back, and nothing is forgotten anywhere.
+pub(crate) enum Unlinkable {
+    /// The device named is an Annex: `name` is what it is shown under, and
+    /// `keeper` its Keeper's, or *this device* on the Keeper itself.
+    Annex { name: String, keeper: String },
+
+    /// And the device named is this one's own Keeper.
+    Keeper { name: String },
+
+    /// The unlink itself failed — the membership unreadable or the row not
+    /// forgotten.
+    Failed(anyhow::Error),
+}
+
+impl From<anyhow::Error> for Unlinkable {
+    fn from(why: anyhow::Error) -> Unlinkable {
+        Unlinkable::Failed(why)
+    }
+}
+
 /// What the **Devices** section of the Remote access pane reads: this device,
 /// and every other device in its cluster (ADR-0020).
 ///
@@ -1015,6 +1041,18 @@ impl Devices {
 
         let annex = kept.introducer.device.clone();
 
+        // Who this device was linked to before the Annex's answer was written
+        // down, for the announcing below — read first for the reason an Allow
+        // reads its roster first: a member written down between the two would
+        // be told about itself.
+        let already: Vec<_> = self
+            .members
+            .rows()
+            .await?
+            .into_iter()
+            .filter(|member| member.device != annex)
+            .collect();
+
         let recorded = crate::peer::exchange::record(
             &self.members,
             self.device.id(),
@@ -1029,6 +1067,29 @@ impl Devices {
             recorded,
             "this device has linked its Annex by the Keeper's Join",
         );
+
+        // And now the rest of the cluster, the way an Allow joins a newcomer to
+        // everybody: each member this device already had is told about the
+        // Annex — marked, the mark being part of what it says about itself —
+        // and the Annex is told about each of them, over the link both ends
+        // have just proved. A member that answers nothing is owed the telling,
+        // and is told when it next answers, mark and all.
+        let Some(row) = self
+            .members
+            .rows()
+            .await?
+            .into_iter()
+            .find(|member| member.device == annex)
+        else {
+            return Ok(());
+        };
+
+        self.announce(&already, &presenting(&row)).await;
+
+        for member in &already {
+            self.announce(std::slice::from_ref(&row), &presenting(member))
+                .await;
+        }
 
         Ok(())
     }
@@ -1779,12 +1840,33 @@ impl Devices {
     /// a member is one this machine has already unlinked, and saying so twice
     /// is not a failure — the stance [`verkstead_store::forget_member`] takes,
     /// for its reason.
-    pub(crate) async fn unlink(&self, device: &str) -> Result<()> {
+    ///
+    /// **And an Annex is not unlinked, nor is an Annex's Keeper by the Annex**
+    /// (ADR-0024): the membership is the Keeper's, so the press is refused
+    /// naming the device, before anybody is told anything — see
+    /// [`Unlinkable`]. A Keeper forgetting its own Annex is a path that is not
+    /// this one.
+    pub(crate) async fn unlink(&self, device: &str) -> std::result::Result<(), Unlinkable> {
         let held = self.members.rows().await?;
 
         let Some(leaver) = held.iter().find(|member| member.device == device).cloned() else {
             return Ok(());
         };
+
+        if let Some(keeper) = &leaver.kept_by {
+            return Err(Unlinkable::Annex {
+                name: leaver.name,
+                keeper: self.called(keeper, &held),
+            });
+        }
+
+        if self
+            .reading
+            .keeper()
+            .is_some_and(|keeper| keeper.device() == device)
+        {
+            return Err(Unlinkable::Keeper { name: leaver.name });
+        }
 
         // Told while it is still a member here and this device is still one
         // there. A laptop that is not there is told nothing, and nothing waits
@@ -1850,6 +1932,19 @@ impl Devices {
         self.changeover_settled().await;
 
         Ok(())
+    }
+
+    /// What `device` is called here: *this device* where it is this one, the
+    /// name the cluster holds for it where it is a member, and its id where it
+    /// is neither — the words the Devices row draws a Keeper in.
+    fn called(&self, device: &str, held: &[verkstead_store::Member]) -> String {
+        if device == self.device.id() {
+            return "this device".to_owned();
+        }
+
+        held.iter()
+            .find(|member| member.device == device)
+            .map_or_else(|| device.to_owned(), |member| member.name.clone())
     }
 
     /// Say to `member` everything it has yet to be told, which is what a dial

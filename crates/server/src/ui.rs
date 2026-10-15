@@ -60,6 +60,7 @@ use verkstead_render::{
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
+use crate::device::Unlinkable;
 use crate::onboarding::Refusal;
 use crate::peer::workbench::OverTheLink;
 use crate::settings::{AtOnce, Cleanup, CleanupStep, Config, RuleTrouble};
@@ -7899,13 +7900,38 @@ async fn cancel_join(State(state): State<AppState>, Path(request): Path<String>)
 /// member that answers is told, and the ones that do not are owed the telling
 /// — so this answers with the section read again rather than with what some
 /// third machine made of it. See [`crate::device::Devices::unlink`].
+///
+/// **Refused by name on an Annex, and on an Annex's own Keeper** (ADR-0024):
+/// the membership is the Keeper's, and nothing is forgotten anywhere.
 async fn unlink_device(State(state): State<AppState>, Path(device): Path<String>) -> HttpResponse {
     let Some(devices) = state.devices.clone() else {
         return unavailable("This server holds no device identity to answer for.");
     };
 
-    if let Err(why) = devices.unlink(&device).await {
-        return unavailable(&format!("The device couldn't be unlinked: {why:#}."));
+    match devices.unlink(&device).await {
+        Ok(()) => {}
+
+        Err(Unlinkable::Annex { name, keeper }) => {
+            return refused(
+                StatusCode::CONFLICT,
+                ApiError::new(format!(
+                    "{name} is the annex of {keeper}, so it can't be unlinked."
+                )),
+            );
+        }
+
+        Err(Unlinkable::Keeper { name }) => {
+            return refused(
+                StatusCode::CONFLICT,
+                ApiError::new(format!(
+                    "{name} is this device's keeper, so it can't be unlinked."
+                )),
+            );
+        }
+
+        Err(Unlinkable::Failed(why)) => {
+            return unavailable(&format!("The device couldn't be unlinked: {why:#}."));
+        }
     }
 
     moved(&state, &devices).await
