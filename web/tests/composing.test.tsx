@@ -6382,6 +6382,31 @@ describe("the repositories the cluster could clone", () => {
     expect(repoParent(null)).toBe("/home/ada/src");
   });
 
+  /// A Windows member answers its paths with backslashes alone, resolved as
+  /// `\\?\C:\…`: the parent remembered is the directory the clone went in, not
+  /// `/`, which the next clone would be sent straight to and refused at.
+  it("remembers a Windows member's parent from a path with no slash in it", async () => {
+    const landed: RepoEntry = {
+      ...CLONED_THERE,
+      path: "\\\\?\\C:\\src\\verkstead",
+    };
+
+    offeringThere(
+      whenever(at("/repos/clone"), json({ Cloned: landed }), "POST"),
+    );
+    const { container } = mount("/compose");
+
+    await clonableThere(container);
+    fireEvent.click(clonables("Repo")[0]!);
+
+    const field = await waitFor(() => screen.getByLabelText(WHERE));
+    fireEvent.input(field, { target: { value: "C:\\src" } });
+    fireEvent.click(screen.getByRole("button", { name: "Clone" }));
+
+    await waitFor(() => expect(stored().repo).toBe(landed.id));
+    expect(repoParent(MEMBER.device)).toBe("\\\\?\\C:\\src");
+  });
+
   /// A refusal is the far end's own words, in front of the human, and the draft
   /// is left as it was: a clone sent straight off comes back as the card, with
   /// the reason under the parent it was sent to.

@@ -902,9 +902,20 @@ export function OpenRepo(props: {
 /// directory the repository is actually in — on that device, this being a path
 /// on it and on no other. One writer for the create and the clone, so the two
 /// never come to remember one answer two ways.
+///
+/// Cut at either separator, because a Windows server answers its paths as
+/// `\\?\C:\src\widgets` with no `/` in them — and a clone sends what is
+/// remembered straight off, with no field to see it in. A drive's root keeps
+/// its separator, `C:` alone being a directory nobody meant.
 function rememberParentOf(device: Device, path: string): void {
-  const cut = path.lastIndexOf("/");
-  setRepoParent(device, cut > 0 ? path.slice(0, cut) : "/");
+  const cut = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+  if (cut <= 0) {
+    setRepoParent(device, "/");
+    return;
+  }
+
+  const parent = path.slice(0, cut);
+  setRepoParent(device, parent.endsWith(":") ? path.slice(0, cut + 1) : parent);
 }
 
 /// What a clone is told where the member's repo it was found on names no
