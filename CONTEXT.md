@@ -70,8 +70,8 @@ end sends what git said while the device that asked applies the rule, which is
 what keeps two Verksteads one version apart from disagreeing about which
 repository the work is in. **No match is an answer** and the caller decides what
 to do without one; **a device that is not answering is refused by name** instead,
-those being two different things to say — one sends the human to **Open repo**
-and the other to the machine.
+those being two different things to say — one offers to clone the repository
+there, as a **Clonable Repo**, and the other sends the human to the machine.
 _Avoid_: project, codebase, checkout
 
 **Author**:
@@ -439,14 +439,16 @@ Verksteads one version apart cannot disagree about which repository the work is
 in. Everything else only that machine can look at, so it answers about itself:
 which harnesses are on its `PATH`, and whether it is answering at all.
 **What it holds is named rather than counted.** A repository with no match names
-the repository and points at **Open repo** on that device; a harness that is not
-there is named against the **Pairing** that wants it, in the onboarding probe's
-own words; and a device that answered nothing is *unreachable*, named. Each is a
-different errand — a repository to open over there, a harness to install over
+the repository and offers *clone it there*, cloning it on that device from the
+origin read here — or, for a repository with no origin, which is not clonable,
+points at **Open repo** on that device; a harness that is not there is named
+against the **Pairing** that wants it, in the onboarding probe's own words; and
+a device that answered nothing is *unreachable*, named. Each is a different
+errand — a repository to clone or open over there, a harness to install over
 there, or a machine to go and wake — and a count would be none of them.
 **And *unreachable* is never *no match*.** A machine that said nothing has failed
 none of the questions under it, so it is the whole of its own preflight: no match
-sends somebody to open a repository on a machine that may already have it, and a
+offers to clone a repository onto a machine that may already have it, and a
 machine that is asleep will answer perfectly well tomorrow.
 _Avoid_: check, validation, dry run, health check
 
