@@ -3125,9 +3125,10 @@ by the server's number where it has set none — a fresh attach reads the number
 again, a repaint carrying the grid and not the title.
 **Opened for a Preview** — see **Preview** — it is the same shell with the
 Preview's command typed into it once the shell is at the foreground, at once
-on Windows where there is none to read, and the server records the foreground
-group that follows as the **run**, read on a turn while the terminal lives and
-a Code pane is attached, a change being a `terminals` Nudge. While the run
+on Windows where there is none to read, and every foreground group that
+follows until the shell holds the front again is the **run** — each step of a
+chain included — read on a turn while the terminal lives and a Code pane is
+attached, a change being a `terminals` Nudge. While the run
 stands the tab is called by the Preview's title, held by the server so a
 reattach keeps it and not replaced by the shell's own; when it ends the tab is
 called as any tab is. A press on the Preview while its terminal is live is the

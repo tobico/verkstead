@@ -39096,11 +39096,12 @@ async fn a_press_on_a_preview_with_a_live_terminal_follows_what_is_in_front() {
 
     // The word is put together by the shell, so that the echo of the line
     // typed is never what the grid is found holding; and it goes on running,
-    // which is what a run is.
+    // which is what a run is — in two steps, which a shell gives a process
+    // group each, the way `cargo build && cargo run` is.
     let (status, body) = suggest_a_preview(
         &fixture,
         "Build and test",
-        "printf 'the run %s\\n' began; sleep 600",
+        "printf 'the run %s\\n' began; sleep 1 && sleep 600",
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
@@ -39128,6 +39129,18 @@ async fn a_press_on_a_preview_with_a_live_terminal_follows_what_is_in_front() {
     until_in_front(&fixture, number, |terminal| terminal.busy).await;
 
     // The run in front: refocused, and nothing typed.
+    assert_eq!(press().await, TerminalOpened::Refocused { number });
+
+    // And still the run once its first step is over and the second has taken
+    // the front: the chain is one run, refocused again rather than started
+    // over beside it.
+    pause(Duration::from_millis(2500)).await;
+    let chained = until_in_front(&fixture, number, |_| true).await;
+    assert_eq!(
+        (chained.in_front, chained.title.as_deref()),
+        (Some(InFront::Run), Some("Build and test")),
+        "the second step of the chain is the run too",
+    );
     assert_eq!(press().await, TerminalOpened::Refocused { number });
 
     // Ended, with Ctrl+C: the shell in front, followed without anybody asking,
@@ -39161,6 +39174,10 @@ async fn a_press_on_a_preview_with_a_live_terminal_follows_what_is_in_front() {
     })
     .await;
     assert_eq!(again.title.as_deref(), Some("Build and test"));
+
+    // Past the first step, so the Ctrl+C below ends the run rather than
+    // racing the chain into its second.
+    pause(Duration::from_millis(2500)).await;
 
     // And with a command of the human's own in front, a second terminal opens
     // for the preview and the first is left exactly as it is.

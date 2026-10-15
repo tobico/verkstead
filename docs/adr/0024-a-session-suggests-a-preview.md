@@ -87,13 +87,21 @@ twice over: run alone, the tab ends with the command and a failed build takes
 its output with it; run and then dropped into a shell, what the human sees is a
 wrapper's doing rather than their own.
 
-**The run is the foreground group.** After typing, the server records the first
-process group in the pty's foreground that is not the shell's, and reads it on
+**The run is the foreground, from the typing to the shell's return.** After
+typing, every process group in the pty's foreground that is not the shell's is
+the run, until the shell holds the front again — a shell gives each step of
+`cargo build && cargo run -- serve` a group of its own, so the first group
+alone would lose the run to its own second step. The shell counts as back once
+it is still in front on a reading a moment after the first that saw it, which
+a chain's pause between steps never is; and the run's groups are kept after
+it, so a run stopped and brought back with `fg` is the run again. It is read on
 a turn for as long as the terminal lives and a Code pane is attached, the way
 ports are read while a member is attached. Three states come of that reading —
 the run in front, the shell in front, something else in front — and a change
 is a `terminals` nudge. Comparing the foreground process's *name* with the
-command's first word was rejected: `npm run dev` has `node` in front.
+command's first word was rejected: `npm run dev` has `node` in front. Recording
+the first group alone as the run was built first and replaced in review, for
+the chain.
 
 **And the press is decided on the server**, which holds that reading:
 

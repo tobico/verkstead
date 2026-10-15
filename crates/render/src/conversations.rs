@@ -2961,8 +2961,10 @@ pub struct TerminalView {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum InFront {
-    /// The run: the process group the typed command started, or the command
-    /// typed and not yet started — the shell has a moment to read the line.
+    /// The run: any process group in front since the command was typed and
+    /// before the shell held the front again — each step of a chain is its
+    /// own — or the command typed and not yet started, the shell having a
+    /// moment to read the line.
     Run,
 
     /// The shell, at its prompt: the run has ended, or was never seen start.

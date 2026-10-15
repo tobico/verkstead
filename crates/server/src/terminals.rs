@@ -720,8 +720,10 @@ impl Terminals {
     ///
     /// Read where a Code pane is attached, which is somebody able to see the
     /// row and the tab follow it, and wherever the run is still to be seen
-    /// start whether or not anybody is: the group in front just after typing is
-    /// the one thing about a run that cannot be read later.
+    /// start, or has the shell back in front and not yet settled there,
+    /// whether or not anybody is: the group in front just after typing, and
+    /// whether the shell is between two steps or back for good, are the things
+    /// about a run that cannot be read later.
     fn turn(&self, conversation_id: i64, number: i64, attached: bool) -> Turn {
         let mut open = self.held();
 
@@ -805,7 +807,8 @@ enum Turn {
     Over,
 
     /// Read, or passed over with nobody looking. `moved` is what is in front
-    /// having changed, and `starting` is the run still to be seen start.
+    /// having changed, and `starting` is the run to be read quickly — still to
+    /// be seen start, or the shell not yet settled back in front.
     Read { moved: bool, starting: bool },
 }
 
@@ -1275,8 +1278,10 @@ pub(crate) async fn open(
 ///
 /// **Then the reading** — see [`run`], and [`Terminals::turn`] for when a turn
 /// reads anything. Every [`COMING_UP`] while the run is still to be seen start,
-/// so the group the command started is caught in front, and every [`READING`]
-/// after, as ports are; a `terminals` Nudge whenever what is in front moves. It
+/// so the group the command started is caught in front, and while the shell is
+/// back in front and not yet settled there, so a chain's next step is told from
+/// the run's end within [`run::SETTLING`]; and every [`READING`] otherwise, as
+/// ports are; a `terminals` Nudge whenever what is in front moves. It
 /// ends with the terminal, or with its Preview retired.
 async fn previewing(
     state: AppState,
