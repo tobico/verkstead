@@ -36,8 +36,8 @@ pub enum Lifecycle {
 
     /// Beside the ladder rather than on it: the human following up on work that
     /// is already on a pull request, in a session they steered into being.
-    /// Reachable from Done and from Wrapping, and leading back into the
-    /// wrap-up.
+    /// Reachable from Done, from Wrapping and from Closed, and leading back
+    /// into the wrap-up.
     FollowUp,
 
     /// Beside the ladder rather than on it, the way Follow-up is: a question
@@ -4569,10 +4569,10 @@ pub enum SteerTarget {
     /// one is refused by name — see [`ConversationSteered::NoFollowUpBrief`].
     ///
     /// Offered only where the record holds a pull request, as Wrapping is and
-    /// refused by the same name, and only from Done and Wrapping: what a
-    /// follow-up follows up is work that has been seen through, and a
-    /// Conversation still building has the ordinary ways of saying what to do
-    /// next.
+    /// refused by the same name, and only from Done, Wrapping and Closed: what
+    /// a follow-up follows up is work that has been seen through or stopped
+    /// over its pull request, and a Conversation still building has the
+    /// ordinary ways of saying what to do next.
     FollowUp,
 
     /// A question about this work answered without changing it: a session

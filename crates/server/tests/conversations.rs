@@ -4983,6 +4983,72 @@ async fn steering_a_finished_conversation_into_follow_up_records_the_brief() {
     );
 }
 
+/// And straight out of Closed, with nothing to pass through on the way: a
+/// Conversation closed over a pull request still has the pull request, and the
+/// branch closing kept, so there is nothing a stop in Done would add.
+///
+/// Its Worktree went with the close, so the steer checks the branch out again
+/// into one, as a steer out of Closed into anything that runs does.
+#[tokio::test]
+async fn steering_a_closed_conversation_into_follow_up_gives_it_a_worktree_back() {
+    let (elsewhere, dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, elsewhere.path(), repo_id).await;
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        store::record_pull_request(
+            &pool,
+            id,
+            repo_id,
+            &store::PullRequest {
+                number: 41,
+                title: "Rate limiting".to_owned(),
+                url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+                head: Some("rate-limiting".to_owned()),
+                base: None,
+                repo: None,
+            },
+        )
+        .await
+        .unwrap(),
+        store::Wrapping::Started,
+    );
+
+    pool.close().await;
+
+    let branch = opened(&app, id).await.branch;
+
+    assert_eq!(close(&app, id).await, ConversationClosed::Closed);
+    assert!(opened(&app, id).await.worktree.is_none());
+
+    assert_eq!(steer(&app, id).await, SteerOpened::Opened);
+    assert_eq!(
+        steer_following_up(&app, id, Some("Does it count the `429`s it sends?\n")).await,
+        ConversationSteered::Steered,
+    );
+
+    let view = opened(&app, id).await;
+
+    assert_eq!(view.state, Lifecycle::FollowUp);
+    let moves = steered(&view);
+
+    assert_eq!(
+        moves[moves.len() - 2..],
+        [
+            ("steer", Lifecycle::FollowUp),
+            ("moved", Lifecycle::FollowUp),
+        ],
+        "steered straight in, with no Done on the way",
+    );
+    assert_eq!(view.branch, branch, "on the branch closing kept");
+
+    let worktree = view.worktree.expect("the steer made one");
+
+    assert!(!worktree.missing);
+}
+
 /// A follow-up is whatever the human wrote it about, so a submit with nothing
 /// written is refused by name — and so is one on work nobody can see.
 ///

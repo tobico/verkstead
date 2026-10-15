@@ -127,8 +127,8 @@ flowchart LR
   got to. A conversation that is closed or Done is got back into by steering
   it, a steer into Grilling being what opens a new brief round (*refined
   2026-08-26, building close-and-retirements*). **Follow-up** sits beside the
-  ladder the way Closed sits off it: a steer from Done or Wrapping, on work
-  that is already on a pull request, opens a session the human asks and is
+  ladder the way Closed sits off it: a steer from Done, Wrapping or Closed, on
+  work that is already on a pull request, opens a session the human asks and is
   asked in until they are finished with it. It ends when the session runs
   `verkstead done`, which is refused until the human has ticked **Nothing
   else** on the newest round they answered (*refined 2026-09-18, building

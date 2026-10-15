@@ -381,8 +381,8 @@ export function SteerRefusal(props: {
 /// into either at all. Wrapping up and follow-up are the two that are not always
 /// offered, which is what `offered` below draws them out by: a conversation whose
 /// work is on no pull request has no wrap-up to be steered into and nothing to
-/// follow up, and following up is for work the pipeline has seen through rather
-/// than work still being built.
+/// follow up, and following up is for work the pipeline has seen through, or
+/// that was closed over its pull request, rather than work still being built.
 ///
 /// Investigating is offered from everywhere, unlike either of those: a question
 /// about the work is not a step of it, so there is nowhere the work can have got
@@ -954,15 +954,16 @@ export function Steer(props: {
       switch (offered.target) {
         case "Wrapping":
           return onAPullRequest(props.conversation);
-        // And the same pull request, plus the work having been seen through:
-        // following up is for a conversation the pipeline has finished with or
-        // is finishing with, and one still building has the ordinary ways of
-        // saying what to do next.
+        // And the same pull request, plus the work having been seen through or
+        // stopped: following up is for a conversation the pipeline has finished
+        // with, is finishing with, or was closed over, and one still building
+        // has the ordinary ways of saying what to do next.
         case "FollowUp":
           return (
             onAPullRequest(props.conversation) &&
             (props.conversation.state === "Done" ||
-              props.conversation.state === "Wrapping")
+              props.conversation.state === "Wrapping" ||
+              props.conversation.state === "Closed")
           );
         default:
           return true;

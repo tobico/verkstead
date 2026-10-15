@@ -4618,9 +4618,10 @@ than another move along it. So every refusal is about the target instead of the
 source: wrapping up and following up are offered only where the work is on a
 pull request, there being no wrap-up to steer into and nothing to follow up
 otherwise. Follow-up is the one target the source narrows as well, and by what
-the form offers rather than by a refusal on arrival — from Done and from
-Wrapping alone, because work still being built has the ordinary ways of saying
-what to do next.
+the form offers rather than by a refusal on arrival — from Done, from Wrapping
+and from Closed alone, because work still being built has the ordinary ways of
+saying what to do next, and work closed over its pull request has that pull
+request still to follow up.
 
 **The press writes a pending steer, and the form is where it is read.** A steer
 is often a great deal of text, and somewhere that blocks the workbench while it
@@ -4772,8 +4773,8 @@ Where a Conversation goes when the human wants something taken up about work
 that is already on a pull request: a session of their own, answering what they
 ask and doing what they want done about it, for as many rounds as they want.
 Not a rung of the ladder — it hangs off the wrap-up rather than following it —
-with two ways in: a **Steer**, offered from Done and from Wrapping and only
-where the record holds a pull request, and a **Tinker** Conversation, which
+with two ways in: a **Steer**, offered from Done, from Wrapping and from Closed
+and only where the record holds a pull request, and a **Tinker** Conversation, which
 starts here from its Draft on a fresh branch with nothing on a pull request yet.
 
 **The brief is what it is about**, written into the steer and required there:

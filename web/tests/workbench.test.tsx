@@ -11669,11 +11669,12 @@ describe("steering a conversation", () => {
   });
 
   /// Following up is the same rule plus one: the work has to be on a pull
-  /// request, and the pipeline has to have seen it through. A conversation still
-  /// building has the ordinary ways of saying what to do next, so the target is
+  /// request, and the pipeline has to have seen it through or been closed over
+  /// it. A conversation still building has the ordinary ways of saying what to
+  /// do next, so the target is
   /// drawn out there — and a steer is the only way into the state at all, which
   /// is why it is here rather than reachable some other way.
-  it("offers following up only from done or wrapping up on a pull request", async () => {
+  it("offers following up only from done, wrapping up or closed on a pull request", async () => {
     theGrillingSteering(
       { ready_to_stop: true, working: true, pinned: WRAPPING.pinned },
       whenever(STEERING, PRESSED, "POST"),
@@ -11709,6 +11710,22 @@ describe("steering a conversation", () => {
       "Done",
     ]);
     expect(screen.getByText(/The agent answers what you ask about the pull request/)).toBeTruthy();
+    finished.unmount();
+
+    // And straight out of Closed, without a stop in Done on the way: the pull
+    // request and the branch both outlive the close.
+    theGrillingSteering(
+      {
+        ready_to_stop: false,
+        working: false,
+        state: "Closed",
+        pinned: WRAPPING.pinned,
+      },
+      whenever(STEERING, PRESSED, "POST"),
+    );
+    const closed = mount(`/conversations/${GRILLING.id}`);
+
+    expect(targets(await openSteer(closed.container))).toContain("FollowUp");
   });
 
   /// And the brief a follow-up is opened on is required whatever the record
