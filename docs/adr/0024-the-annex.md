@@ -172,7 +172,7 @@ configures is not one Verkstead can keep.
 
 **Verkstead writes the box's flake.** Its inputs are nixpkgs on the stable
 channel the repository's own flake pins, a second nixpkgs on the unstable
-channel for the four harnesses alone, NixOS-WSL at a pinned release, the
+channel for the harnesses alone, NixOS-WSL at a pinned release, the
 `verkstead` flake at the Keeper's own release tag for the NixOS module, and
 the release binary of that same version as a locked non-flake input. The
 last of those is why nothing fetches by `nix/release.json`: the manifest is
@@ -182,10 +182,19 @@ runs the release its Keeper runs**, and a Keeper that finds the Annex pinned
 to another version re-pins and rebuilds at its own start, before it boots
 the Annex; nixpkgs and NixOS-WSL move only on **Update**.
 
+**A development build names its binary instead.** It reports the version of
+the last release and is not it, so `VERKSTEAD_ANNEX_BINARY` on the Keeper
+names a Linux binary that is copied in beside the flake and run in place of
+the release's; the flake then has no binary input at all. The module still
+comes from the release tag. An environment variable rather than a flake
+override, because what it changes is which file goes in, and the Keeper is
+what puts files in.
+
 Everything a session needs is declared in that configuration, because on
 NixOS the wizard installs nothing: bwrap, git, gh, nix, sccache, and
-`claude-code`, `codex`, `opencode` and `grok` from the unstable input where
-nixpkgs has them. **Harnesses from nixpkgs rather than the vendors'
+`claude-code`, `codex` and `opencode` from the unstable input. **No grok**:
+nixpkgs' `grok-cli` is superagent-ai's tool rather than xAI's Grok Build, and
+a vendor's installer is what this rejects. **Harnesses from nixpkgs rather than the vendors'
 installers**: a package there lags the vendor by days where Ubuntu's lagged
 by months, and Update moves them with everything else. **Building from
 source inside the box** was rejected for the toolchain and the twenty minutes
@@ -200,8 +209,12 @@ was rejected again for ADR-0014's reasons.
 **The Annex has no settings of its own.** The settings page is one device's
 own and has no device select, so nothing in the UI reaches an Annex's; its
 Keeper copies in, at every boot, everything that is about the work rather
-than the machine — the git author, the GitHub token, the Instructions, the
-MCP servers with their header values, the at-once limit and Cleanup. An MCP
+than the machine — the Instructions, the MCP servers with their header
+values, the at-once limit and Cleanup. **Not its Authors**: the Annex is a
+linked Member, so the Keeper's reach it as mirrors over the one list, token
+copies included (ADR-0025), and a copy written in as well would be one Author
+at home on two devices. It holds none of its own, and with one mirror a Repo
+registered there is that mirror's. An MCP
 server's header names are in `config.yaml` and their values in
 `secrets.yaml`, so both files are copied from: a server copied without its
 values is one declared in the Annex and refused by its far end. What stays the Annex's is what

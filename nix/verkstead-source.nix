@@ -26,6 +26,9 @@ rustPlatform.buildRustPackage {
       ../Cargo.toml
       ../Cargo.lock
       ../crates
+      # Read by the server for the stable channel the Annex it makes is on —
+      # see `crates/server/src/annex/flake.rs`.
+      ../flake.nix
     ];
   };
 

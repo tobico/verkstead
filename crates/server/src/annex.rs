@@ -18,6 +18,7 @@ use std::net::SocketAddr;
 use std::path::Path;
 use std::process::Output;
 
+pub mod flake;
 pub mod wsl;
 
 /// The port an Annex's **Peer Listener** binds, never the Keeper's 8423.

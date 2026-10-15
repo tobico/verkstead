@@ -41,7 +41,7 @@ use tower::ServiceExt;
 use verkstead_render::{
     AuthorRemoved, Cloned, Created, Registered, RepoEntry, RepoRemoved, RepoView, Repointed,
 };
-use verkstead_server::settings::Settings;
+use verkstead_server::settings::{Author, Mirrored, Settings};
 use verkstead_server::{Gh, open_database, router_asking_github, router_keeping, store};
 
 /// The device every Conversation started here is ranked by, named the way a
@@ -1726,4 +1726,32 @@ async fn a_clone_naming_no_author_is_the_one_authors() {
     };
 
     assert_eq!(repo.author.as_deref(), Some("work"));
+}
+
+/// A device with no Author of its own and one mirror — an Annex, which its
+/// Keeper gives no Author and which sees the Keeper's over the one list — has
+/// a registration naming nobody recorded as that mirror: there is still nobody
+/// else it could be (ADR-0024).
+#[tokio::test]
+async fn a_repo_registered_with_only_a_mirror_is_recorded_as_it() {
+    let src = tempfile::tempdir().unwrap();
+    let (dir, app) = workbench().await;
+
+    Settings::in_data_dir(dir.path()).holding_mirrors(vec![Mirrored::of(
+        Author::of(
+            "keepers".to_owned(),
+            None,
+            Some("Ada Lovelace".to_owned()),
+            Some("ada@work.example".to_owned()),
+        ),
+        "the-keeper".to_owned(),
+        false,
+    )]);
+
+    let repo = repository(src.path().join("verkstead"));
+
+    assert_eq!(
+        added(register(&app, &repo).await).author.as_deref(),
+        Some("keepers")
+    );
 }

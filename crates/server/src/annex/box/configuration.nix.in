@@ -1,0 +1,71 @@
+# What the Annex's box is, written whole by its Keeper beside `flake.nix` — see
+# `crates/server/src/annex/flake.rs`. Nothing here is the human's to edit.
+{
+  lib,
+  pkgs,
+  unstable,
+  binary,
+  version,
+  ...
+}:
+
+{
+  # NixOS-WSL's defaults, systemd and all.
+  wsl.enable = true;
+
+  # The Keeper's own, so the Devices row reads as the same machine rather than
+  # as NixOS's `nixos`. NixOS-WSL hands it to WSL as the distro's hostname.
+  networking.hostName = "@hostName@";
+
+  services.verkstead = {
+    enable = true;
+
+    # Ports of the Annex's own and never the Keeper's 8422 and 8423: under
+    # WSL's mirrored networking the two share a loopback and interfaces.
+    listen = "@listen@";
+    peerListen = "@peerListen@";
+
+    paths = [ "@repos@" ];
+
+    # An Annex is never advertised: its Keeper's forward is where it is
+    # reached.
+    advertising = false;
+
+    # The release binary of the Keeper's version, wrapped as the release
+    # package is — git on its `PATH`.
+    package =
+      pkgs.runCommand "verkstead-${version}"
+        {
+          nativeBuildInputs = [ pkgs.makeWrapper ];
+          meta.mainProgram = "verkstead";
+        }
+        ''
+          install -D -m755 ${binary} $out/bin/verkstead
+          wrapProgram $out/bin/verkstead --prefix PATH : ${lib.makeBinPath [ pkgs.git ]}
+        '';
+  };
+
+  # Where the Annex's Repos live, the service's own and readable from Explorer
+  # at `\\wsl$`.
+  systemd.tmpfiles.rules = [ "d @repos@ 0755 verkstead verkstead -" ];
+
+  # Everything a session needs, because on NixOS the wizard installs nothing.
+  environment.systemPackages = [
+    pkgs.bubblewrap
+    pkgs.git
+    pkgs.gh
+    pkgs.nix
+    pkgs.sccache
+    unstable.claude-code
+    unstable.codex
+    unstable.opencode
+  ];
+
+  # So the next rebuild of this flake needs nothing said on its command line.
+  nix.settings.experimental-features = [
+    "nix-command"
+    "flakes"
+  ];
+
+  system.stateVersion = "@stateVersion@";
+}
