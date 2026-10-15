@@ -38,8 +38,26 @@ use std::sync::Mutex;
 
 use anyhow::{Context, bail};
 
-use super::{ANNEX_PEER_PORT, Addresses, BOX_NAME, Backend, Inside, Networking, Probed};
+use super::{ANNEX_PEER_PORT, Addresses, BOX_NAME, Backend, Inside, Networking, Probed, Step};
 use crate::unseen::Unseen;
+
+/// What turns WSL on, each raised in a dialog of its own: the optional
+/// features and WSL itself with no distro of anybody's, and then the newest
+/// WSL over whatever that put there. The restart after them is the human's.
+///
+/// `wsl.exe` by name rather than the one a value was pointed at, because these
+/// run in an elevated PowerShell on the far side of the dialog, where the
+/// machine's own is the only one there is.
+const TURNING_ON: &[Step] = &[
+    Step {
+        line: "wsl.exe --install --no-distribution",
+        doing: "Turning on WSL…",
+    },
+    Step {
+        line: "wsl.exe --update",
+        doing: "Updating WSL…",
+    },
+];
 
 /// The `PATH` a command inside the distro is run with — see the module's docs.
 const INSIDE_PATH: &str = "PATH=/run/wrappers/bin:/run/current-system/sw/bin:/bin:/usr/bin";
@@ -217,6 +235,10 @@ impl Backend for Wsl {
                 networking: self.networking(),
             },
         }
+    }
+
+    fn turning_on(&self) -> &'static [Step] {
+        TURNING_ON
     }
 
     fn make(&self, image: &Path, disk: &Path) -> anyhow::Result<()> {

@@ -778,6 +778,11 @@ tasks: Array<TaskDocument>,
 diagrams: boolean, };
 
 /**
+ * Why a row cannot be had on this machine.
+ */
+export type Barred = "Virtualization";
+
+/**
  * The branch to come off, or `null` to go back to the default-branch rule.
  */
 export type BaseBranchChoice = { 
@@ -2326,10 +2331,10 @@ author?: string, };
  * What a row is about.
  *
  * Flat rather than a harness variant carrying an [`crate::AgentType`]: the
- * step draws seven rows with an instruction apiece, and which of them are
+ * step draws eight rows with an instruction apiece, and which of them are
  * harnesses is a fact about the objective rather than about the drawing.
  */
-export type Dependency = "Sandbox" | "Git" | "Claude" | "Codex" | "Grok" | "OpenCode" | "Gh";
+export type Dependency = "Sandbox" | "Git" | "Claude" | "Codex" | "Grok" | "OpenCode" | "Gh" | "Wsl";
 
 /**
  * And whether the machine has it.
@@ -2367,7 +2372,15 @@ trouble: string | null,
  * cannot use it — see [`Seen`]. Nothing where it is on no `PATH` at
  * all, which is a row with nothing to say beyond *install one*.
  */
-seen: Seen | null, };
+seen: Seen | null, } | { "state": "Owed", 
+/**
+ * What is still owed.
+ */
+owed: Owed, } | { "state": "Refused", 
+/**
+ * Why, which the viewer words.
+ */
+barred: Barred, };
 
 /**
  * One row of the dependencies step: a thing a session needs, and whether this
@@ -4115,6 +4128,14 @@ companion_author: string,
  * And who the Conversation's own Repo is.
  */
 author: string, };
+
+/**
+ * What a row that is part of the way there is still owed.
+ *
+ * The WSL row's alone, and its wording is the viewer's, the way [`Seen`]'s
+ * is: what is here is what the machine is.
+ */
+export type Owed = "Restart" | "Annex";
 
 /**
  * Which of a Conversation's three roles a Pairing is for.

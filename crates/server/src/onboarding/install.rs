@@ -80,6 +80,7 @@ use base64::Engine;
 use verkstead_render::{Dependency, Distro, InstallState, RunPhase, RunView};
 
 use super::{Machine, SHELL};
+use crate::annex::Probed;
 use crate::platform::Platform;
 use crate::remote::{Elevate, Raised};
 use crate::settings::Settings;
@@ -99,6 +100,7 @@ const ROWS: &[Dependency] = &[
     Dependency::Grok,
     Dependency::OpenCode,
     Dependency::Gh,
+    Dependency::Wsl,
 ];
 
 /// The program an npm harness is installed with, and the name whose absence
@@ -329,6 +331,16 @@ const NO_IMAGE: &str = "Verkstead can't say which program it's running, so it ha
 const NO_DATA_DIRECTORY: &str = "Verkstead wasn't told which data directory it keeps, so it \
                                  can't say which account to make.";
 
+/// What goes under a ticked WSL row whose firmware has virtualization off —
+/// which the row is drawn refused with, so a press only carries one here from
+/// a page that read the machine before it was so.
+const VIRTUALIZATION_OFF: &str = "Virtualization is off in this PC's firmware settings, so WSL \
+                                  can't run. Turn it on there, then restart.";
+
+/// And under one on a machine with no way of having an Annex, which is every
+/// platform but Windows: the row is never drawn there.
+const NO_ANNEX: &str = "WSL is part of Windows, and this machine has no Annex to make.";
+
 /// How often the marker is glanced at while a dialog is up — see [`STARTED`].
 const GLANCE: Duration = Duration::from_millis(200);
 
@@ -485,6 +497,10 @@ enum Chain {
     /// saying the machine has no `npm`, which is the failure in front of them
     /// said worse.
     Node,
+
+    /// And WSL: turning it on, and the update behind it, which would be
+    /// updating a WSL nobody allowed onto the machine.
+    Wsl,
 }
 
 /// How a unit is run.
@@ -502,7 +518,7 @@ enum How {
 /// A vendor's own installer: the command a ticked row runs, and where it puts
 /// what it installs.
 ///
-/// **Two of the seven rows are one of these rather than a package.** Neither
+/// **Two of the eight rows are one of these rather than a package.** Neither
 /// Claude Code nor Grok Build is carried by a distribution under a name that is
 /// really the vendor's, so what a tick runs is the script the vendor publishes —
 /// the same one the hint screen tells a human to run where Verkstead cannot run
@@ -1043,7 +1059,17 @@ fn watch(run: &Arc<Run>, marker: PathBuf, doing: String) -> (Arc<AtomicBool>, Jo
 fn plan(machine: &Machine, ticked: &[Dependency]) -> Plan {
     let distro = machine.distro();
 
-    match distro {
+    // The WSL row is the box's rather than any package manager's, so it is
+    // worked here and none of the arms below ever sees it — see [`annexing`].
+    let wsl = ticked.contains(&Dependency::Wsl);
+    let rows: Vec<Dependency> = ticked
+        .iter()
+        .copied()
+        .filter(|row| *row != Dependency::Wsl)
+        .collect();
+    let ticked = rows.as_slice();
+
+    let mut plan = match distro {
         Distro::MacOs => homebrew(machine, ticked),
         Distro::MacOsIntel => intel(machine, ticked),
         Distro::Windows => windows(machine, ticked),
@@ -1057,6 +1083,61 @@ fn plan(machine: &Machine, ticked: &[Dependency]) -> Plan {
             Some(packager) => packages(machine, ticked, packager),
             None => nothing(machine, ticked, &no_command(distro)),
         },
+    };
+
+    if wsl {
+        annexing(machine, &mut plan);
+    }
+
+    plan
+}
+
+/// What a ticked WSL row adds to `plan`, after every other row: what the probe
+/// of the box an Annex runs in says is still to do.
+///
+/// **No WSL is the backend's commands, each raised** — see
+/// [`crate::annex::Backend::turning_on`] — in one chain, so a first dialog
+/// nobody allowed fails the row in its own words rather than leaving the second
+/// to fail for want of a WSL. The row is the last command's, the way node's
+/// `winget` is nobody's: the run's bar counts rows, and one row is one step of
+/// it.
+///
+/// **A restart owed is nothing to run**: it is the human's, so the row goes on
+/// to the hint screen, which tells them. **WSL answering is nothing to run
+/// either, yet**: the Annex is made by a run of its own. And virtualization off
+/// is a row the page draws refused — one carried here anyway is the hint
+/// screen's, with the reason.
+fn annexing(machine: &Machine, plan: &mut Plan) {
+    let Some(annex) = machine.annex() else {
+        plan.beyond.push((Dependency::Wsl, NO_ANNEX.to_owned()));
+        return;
+    };
+
+    match annex.probe() {
+        Probed::NoWsl => {
+            let steps = annex.turning_on();
+
+            plan.units
+                .extend(steps.iter().enumerate().map(|(number, step)| Unit {
+                    line: step.line.to_owned(),
+                    covers: if number + 1 == steps.len() {
+                        vec![Dependency::Wsl]
+                    } else {
+                        Vec::new()
+                    },
+                    doing: step.doing.to_owned(),
+                    how: How::Raised,
+                    lands: None,
+                    chain: Some(Chain::Wsl),
+                    regrants: None,
+                }));
+        }
+
+        Probed::VirtualizationOff => plan
+            .beyond
+            .push((Dependency::Wsl, VIRTUALIZATION_OFF.to_owned())),
+
+        Probed::NeedsRestart | Probed::NoDistro | Probed::Present { .. } => {}
     }
 }
 
@@ -1386,6 +1467,8 @@ fn on_a_mac(dependency: Dependency) -> OnAMac {
         // stays current — see [`CLAUDE`], and ADR-0016's *Macs*.
         Dependency::Claude => OnAMac::Vendor(CLAUDE),
         Dependency::Grok => OnAMac::Vendor(GROK),
+
+        Dependency::Wsl => unreachable!("the WSL row is worked by `annexing`"),
     }
 }
 
@@ -1480,6 +1563,8 @@ fn on_an_intel_mac(dependency: Dependency) -> OnAnIntelMac {
 
         Dependency::Git => OnAnIntelMac::Beyond(XCODE_TOOLS),
         Dependency::Codex => OnAnIntelMac::Beyond(CODEX_ON_INTEL),
+
+        Dependency::Wsl => unreachable!("the WSL row is worked by `annexing`"),
     }
 }
 
@@ -1688,6 +1773,8 @@ fn on_windows(dependency: Dependency) -> OnWindows {
 
         Dependency::Claude => OnWindows::Vendor(CLAUDE_ON_WINDOWS),
         Dependency::Grok => OnWindows::Vendor(GROK_ON_WINDOWS),
+
+        Dependency::Wsl => unreachable!("the WSL row is worked by `annexing`"),
     }
 }
 
@@ -1778,6 +1865,8 @@ fn installs(packager: Packager, dependency: Dependency) -> Installs {
 
         Dependency::Claude => Installs::Vendor(CLAUDE),
         Dependency::Grok => Installs::Vendor(GROK),
+
+        Dependency::Wsl => unreachable!("the WSL row is worked by `annexing`"),
     }
 }
 
@@ -1849,6 +1938,7 @@ fn named(dependency: Dependency) -> &'static str {
         Dependency::Grok => "Grok Build",
         Dependency::OpenCode => "OpenCode",
         Dependency::Gh => "The GitHub CLI",
+        Dependency::Wsl => "WSL",
     }
 }
 
@@ -2114,7 +2204,8 @@ mod tests {
     /// one press.
     #[test]
     fn the_rows_are_worked_in_the_order_the_wizard_draws_them() {
-        let drawn: Vec<Dependency> = machine(Distro::Ubuntu)
+        // A Windows with a box, which is the one machine drawing every row.
+        let drawn: Vec<Dependency> = annexed(Probed::NoWsl)
             .rows()
             .iter()
             .map(|row| row.dependency)
@@ -2733,6 +2824,119 @@ mod tests {
         // of a program.
         assert_eq!(node.chain, Some(Chain::Node));
         assert_eq!(codex.chain, Some(Chain::Node));
+    }
+
+    /// A stated Windows machine whose box probes `probed`.
+    fn annexed(probed: Probed) -> Machine {
+        windows_machine(&PathBuf::new()).annexing(Some(Arc::new(crate::annex::Probing(probed))))
+    }
+
+    /// A ticked WSL row on a machine with no WSL is the box's own two
+    /// commands, each raised, in order and after every other row, standing
+    /// together — and the row is the second's.
+    #[test]
+    fn a_ticked_wsl_row_with_no_wsl_raises_turning_it_on_and_the_update() {
+        let machine = annexed(Probed::NoWsl);
+        let plan = plan(&machine, &[Dependency::Wsl, Dependency::Git]);
+
+        assert!(plan.beyond.is_empty(), "{plan:?}");
+
+        let [git, on, update] = plan.units.as_slice() else {
+            panic!("git, and the two that turn WSL on: {plan:?}");
+        };
+
+        assert_eq!(git.covers, [Dependency::Git]);
+
+        let steps = machine.annex().unwrap().turning_on();
+        assert_eq!(
+            [on.line.as_str(), update.line.as_str()],
+            [steps[0].line, steps[1].line],
+        );
+
+        assert!(on.covers.is_empty(), "one row is one step of the bar");
+        assert_eq!(update.covers, [Dependency::Wsl]);
+
+        for unit in [on, update] {
+            assert_eq!(unit.how, How::Raised, "{unit:?}");
+            assert_eq!(unit.chain, Some(Chain::Wsl), "{unit:?}");
+        }
+    }
+
+    /// And the backend's two are `wsl --install --no-distribution` and then
+    /// `wsl --update`.
+    #[test]
+    fn turning_wsl_on_is_the_install_and_then_the_update() {
+        let lines: Vec<&str> = annexed(Probed::NoWsl)
+            .annex()
+            .unwrap()
+            .turning_on()
+            .iter()
+            .map(|step| step.line)
+            .collect();
+
+        assert_eq!(
+            lines,
+            ["wsl.exe --install --no-distribution", "wsl.exe --update"]
+        );
+    }
+
+    /// A restart owed, and WSL answering with no Annex yet, are nothing for
+    /// this run to do: the first is the human's and the hint screen says so,
+    /// and the second is the Annex's own run.
+    #[test]
+    fn a_ticked_wsl_row_past_turning_it_on_raises_nothing() {
+        for probed in [Probed::NeedsRestart, Probed::NoDistro] {
+            let plan = plan(&annexed(probed), &[Dependency::Wsl]);
+
+            assert!(plan.units.is_empty(), "{probed:?}: {plan:?}");
+            assert!(plan.beyond.is_empty(), "{probed:?}: {plan:?}");
+        }
+    }
+
+    /// Virtualization off is drawn refused, so a press carrying the row
+    /// anyway raises nothing and the hint screen has the reason.
+    #[test]
+    fn a_ticked_wsl_row_with_virtualization_off_goes_beyond_with_the_reason() {
+        let plan = plan(&annexed(Probed::VirtualizationOff), &[Dependency::Wsl]);
+
+        assert!(plan.units.is_empty(), "{plan:?}");
+        assert_eq!(
+            plan.beyond,
+            [(Dependency::Wsl, VIRTUALIZATION_OFF.to_owned())]
+        );
+    }
+
+    /// And a machine with no way of having an Annex raises nothing for it,
+    /// whatever its platform.
+    #[test]
+    fn a_ticked_wsl_row_with_no_box_goes_beyond() {
+        for machine in [machine(Distro::Ubuntu), windows_machine(&PathBuf::new())] {
+            let plan = plan(&machine, &[Dependency::Wsl]);
+
+            assert!(plan.units.is_empty(), "{plan:?}");
+            assert_eq!(beyond(&plan), [Dependency::Wsl]);
+        }
+    }
+
+    /// A server with no way to raise a dialog sends the row to the hint
+    /// screen, the way it sends every other.
+    #[test]
+    fn a_ticked_wsl_row_on_a_server_that_cannot_ask_goes_beyond() {
+        let installer = Installer::raising(None);
+
+        installer
+            .start(&annexed(Probed::NoWsl), &nowhere(), &[Dependency::Wsl])
+            .unwrap();
+
+        let (run, rows) = installer.reading().expect("a press makes a run");
+
+        assert_eq!(run.phase, RunPhase::Done);
+
+        let [(Dependency::Wsl, InstallState::Failed { why })] = rows.as_slice() else {
+            panic!("the WSL row, failed: {rows:?}");
+        };
+
+        assert!(why.contains("desktop app"), "{why}");
     }
 
     /// And node stays out where the machine has `npm`, the way it does on a

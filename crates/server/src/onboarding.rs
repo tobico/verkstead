@@ -101,10 +101,11 @@ use anyhow::Result;
 use sqlx::SqlitePool;
 use tokio::sync::OnceCell;
 use verkstead_render::{
-    AccountView, Dependency, DependencyState, DependencyView, Distro, InstallState, OnboardingView,
-    PrefillView, Prefilled, RunView, Seen, Source, StepsView,
+    AccountView, Barred, Dependency, DependencyState, DependencyView, Distro, InstallState,
+    OnboardingView, Owed, PrefillView, Prefilled, RunView, Seen, Source, StepsView,
 };
 
+use crate::annex::{self, Backend};
 use crate::github::Gh;
 use crate::platform::{Environment, Platform, hostname};
 use crate::remote::Elevate;
@@ -363,6 +364,14 @@ pub struct Machine {
     /// process that cannot say what it is running, which is a machine the
     /// account cannot be made on from here.
     verkstead: Option<PathBuf>,
+
+    /// And the box an **Annex** would run in on this machine, which is what
+    /// the WSL row is probed through — see [`annex::Backend`].
+    ///
+    /// WSL on the Windows this server is running on, and nothing anywhere
+    /// else: no other platform has a backend yet. A stated machine has what
+    /// its suite stood it up with.
+    annex: Option<Arc<dyn Backend>>,
 }
 
 impl Machine {
@@ -392,6 +401,12 @@ impl Machine {
         // And which Mac this is, where it is one — the one read here that is a
         // command rather than a file or a variable.
         .arm64(sysctl(Platform::HERE))
+        // And the box an Annex would run in, on the one platform there is a
+        // way of having one.
+        .annexing(
+            (Platform::HERE == Platform::Windows)
+                .then(|| Arc::new(annex::wsl::Wsl::here()) as Arc<dyn Backend>),
+        )
     }
 
     /// A machine stated rather than read, which is what a test stands a server
@@ -462,6 +477,12 @@ impl Machine {
         }
     }
 
+    /// And the same, with `annex` as the box an Annex would run in — see
+    /// [`Machine::annex`].
+    pub fn annexing(self, annex: Option<Arc<dyn Backend>>) -> Machine {
+        Machine { annex, ..self }
+    }
+
     /// The two ways of making one, said once: a `PATH` a caller stated, or none
     /// at all for the machine that composes its own.
     #[allow(clippy::too_many_arguments)]
@@ -492,6 +513,7 @@ impl Machine {
             data_dir: None,
             verkstead: None,
             arm64: None,
+            annex: None,
         }
     }
 
@@ -538,6 +560,14 @@ impl Machine {
         self.verkstead.as_deref()
     }
 
+    /// And the box an Annex would run in, on a Windows machine that has a way
+    /// of having one — which is the whole of where the WSL row is drawn.
+    fn annex(&self) -> Option<&dyn Backend> {
+        self.annex
+            .as_deref()
+            .filter(|_| self.platform == Platform::Windows)
+    }
+
     /// And which of the wizard's nine tabs it is, which is also which package
     /// manager an install run raises — see [`install`].
     fn distro(&self) -> Distro {
@@ -562,7 +592,7 @@ impl Machine {
     }
 
     /// Every row of the dependencies step, in the order it is drawn: the
-    /// sandbox, `git`, the four harnesses, and `gh`.
+    /// sandbox, `git`, the four harnesses, `gh`, and WSL on Windows.
     ///
     /// Blocks: a `PATH` walk apiece, one `bwrap` run on Linux, and one
     /// `xcode-select` on a Mac whose `git` is Apple's.
@@ -583,6 +613,12 @@ impl Machine {
         }));
 
         rows.push(row(Dependency::Gh, self.installed(sandbox::GH)));
+
+        // And WSL last, on Windows alone: it never gates, and it is the one
+        // row a session on this machine has no use for.
+        if let Some(annex) = self.annex() {
+            rows.push(row(Dependency::Wsl, annexed(annex.probe())));
+        }
 
         rows
     }
@@ -1519,6 +1555,35 @@ fn row(dependency: Dependency, state: DependencyState) -> DependencyView {
         dependency,
         state,
         install: InstallState::Idle,
+    }
+}
+
+/// What the WSL row says, which is the probe of the box an Annex runs in read
+/// as a row.
+///
+/// **Five answers and four states.** No WSL is a row to tick, like any other
+/// absent one. WSL turned on with its restart still to come, and WSL answering
+/// with no Annex in it, are each part of the way there — see [`Owed`] — and a
+/// firmware with virtualization off is a row nothing here can do anything
+/// about. An Annex that is there is present whether it is running or not:
+/// whether it is up is the Keeper's business at its start, not the wizard's.
+fn annexed(probed: annex::Probed) -> DependencyState {
+    match probed {
+        annex::Probed::NoWsl => DependencyState::Absent {
+            trouble: None,
+            seen: None,
+        },
+        annex::Probed::NeedsRestart => DependencyState::Owed {
+            owed: Owed::Restart,
+        },
+        annex::Probed::NoDistro => DependencyState::Owed { owed: Owed::Annex },
+        annex::Probed::VirtualizationOff => DependencyState::Refused {
+            barred: Barred::Virtualization,
+        },
+        annex::Probed::Present { .. } => DependencyState::Present {
+            at: None,
+            target: None,
+        },
     }
 }
 
@@ -2524,6 +2589,85 @@ echo {token}
             "and a file with no extension is a shell script for a Unix, which \
              nothing on this platform can start",
         );
+    }
+
+    /// `machine` with a box that probes `probed`.
+    fn annexed(machine: Machine, probed: annex::Probed) -> Machine {
+        machine.annexing(Some(Arc::new(annex::Probing(probed))))
+    }
+
+    /// The WSL row is drawn on Windows, last, and nowhere else — not on a
+    /// Linux handed a box, and not on a Windows with no way of having one.
+    #[test]
+    fn the_wsl_row_is_windows_own_and_drawn_last() {
+        let dir = tempfile::tempdir().unwrap();
+        let wsl = |machine: &Machine| {
+            machine
+                .rows()
+                .iter()
+                .position(|row| row.dependency == Dependency::Wsl)
+        };
+
+        let windows = annexed(machine(Platform::Windows, dir.path()), annex::Probed::NoWsl);
+        assert_eq!(wsl(&windows), Some(windows.rows().len() - 1));
+
+        for platform in [Platform::Linux, Platform::MacOs] {
+            let elsewhere = annexed(machine(platform, dir.path()), annex::Probed::NoWsl);
+            assert_eq!(wsl(&elsewhere), None, "{platform:?}");
+        }
+
+        assert_eq!(wsl(&machine(Platform::Windows, dir.path())), None);
+    }
+
+    /// And what it says is the probe, read as a row: no WSL is a row to tick,
+    /// a restart owed and no Annex are each owed, virtualization off is
+    /// refused, and an Annex that is there is present, running or not.
+    #[test]
+    fn the_wsl_row_reads_the_probe() {
+        let dir = tempfile::tempdir().unwrap();
+        let reads = |probed| {
+            state(
+                &annexed(machine(Platform::Windows, dir.path()), probed),
+                Dependency::Wsl,
+            )
+        };
+
+        assert_eq!(
+            reads(annex::Probed::NoWsl),
+            DependencyState::Absent {
+                trouble: None,
+                seen: None,
+            },
+        );
+        assert_eq!(
+            reads(annex::Probed::NeedsRestart),
+            DependencyState::Owed {
+                owed: Owed::Restart
+            },
+        );
+        assert_eq!(
+            reads(annex::Probed::NoDistro),
+            DependencyState::Owed { owed: Owed::Annex },
+        );
+        assert_eq!(
+            reads(annex::Probed::VirtualizationOff),
+            DependencyState::Refused {
+                barred: Barred::Virtualization
+            },
+        );
+
+        for running in [false, true] {
+            assert_eq!(
+                reads(annex::Probed::Present {
+                    running,
+                    networking: annex::Networking::Nat,
+                }),
+                DependencyState::Present {
+                    at: None,
+                    target: None,
+                },
+            );
+        }
     }
 
     /// The sandbox row on a Mac ticks whatever is on that machine's `PATH`:

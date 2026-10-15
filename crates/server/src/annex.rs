@@ -100,10 +100,29 @@ pub struct Addresses {
     pub keeper_at: SocketAddr,
 }
 
+/// One command that puts what the box runs under onto this machine, run as an
+/// administrator, and what the install screen says while it runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Step {
+    /// The command, as one line of the platform's shell.
+    pub line: &'static str,
+
+    /// And the status line while it runs.
+    pub doing: &'static str,
+}
+
 /// What a Keeper asks of its Annex's box.
-pub trait Backend: Send + Sync {
+pub trait Backend: std::fmt::Debug + Send + Sync {
     /// The machine's state — see [`Probed`].
     fn probe(&self) -> Probed;
+
+    /// What turns on what the box runs under, on a machine whose probe said
+    /// [`Probed::NoWsl`]: each command raised in its own dialog, in order.
+    ///
+    /// Lines rather than a call, because what runs them is the wizard's
+    /// install run, behind the app's own dialog — see
+    /// [`crate::remote::Elevate`]. The restart after them is the human's.
+    fn turning_on(&self) -> &'static [Step];
 
     /// Import `image` as the box, its disk in `disk`.
     fn make(&self, image: &Path, disk: &Path) -> anyhow::Result<()>;
@@ -124,4 +143,49 @@ pub trait Backend: Send + Sync {
     /// The two addresses, read off the running box under `networking`, with the
     /// Keeper's own peer listener on `keeper_port`.
     fn addresses(&self, networking: Networking, keeper_port: u16) -> anyhow::Result<Addresses>;
+}
+
+/// A box that is only ever probed, answering what it was told to — what the
+/// wizard's suites stand a machine up with.
+///
+/// The probe is all the wizard asks of a box, and [`wsl`]'s own suite is
+/// where reading one off a real `wsl.exe` is proven. Everything else here
+/// refuses.
+#[cfg(test)]
+#[derive(Debug)]
+pub(crate) struct Probing(pub Probed);
+
+#[cfg(test)]
+impl Backend for Probing {
+    fn probe(&self) -> Probed {
+        self.0
+    }
+
+    fn turning_on(&self) -> &'static [Step] {
+        wsl::Wsl::here().turning_on()
+    }
+
+    fn make(&self, _: &Path, _: &Path) -> anyhow::Result<()> {
+        anyhow::bail!("a probed box is never made")
+    }
+
+    fn boot(&self) -> anyhow::Result<()> {
+        anyhow::bail!("a probed box is never booted")
+    }
+
+    fn terminate(&self) -> anyhow::Result<()> {
+        anyhow::bail!("a probed box is never terminated")
+    }
+
+    fn run(&self, _: Inside, _: &[&str]) -> anyhow::Result<Output> {
+        anyhow::bail!("nothing runs inside a probed box")
+    }
+
+    fn read(&self, _: &str) -> anyhow::Result<Vec<u8>> {
+        anyhow::bail!("nothing is read inside a probed box")
+    }
+
+    fn addresses(&self, _: Networking, _: u16) -> anyhow::Result<Addresses> {
+        anyhow::bail!("a probed box has no addresses")
+    }
 }
