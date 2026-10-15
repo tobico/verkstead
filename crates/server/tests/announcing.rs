@@ -726,6 +726,46 @@ async fn a_third_device_lists_a_keepers_annex_with_its_mark() {
     );
 }
 
+/// Linking again, as a Keeper does at every start, leaves the Keeper's own rows
+/// as they are: what the Annex holds of a member it already has is what the
+/// Annex last heard, and can be behind.
+#[tokio::test]
+async fn linking_again_keeps_the_keepers_own_rows_over_the_annexes() {
+    let a = Verkstead::answering(A).await;
+    let b = Verkstead::annex(B).await;
+    let c = Verkstead::answering(C).await;
+
+    linked(&c, &a).await;
+    kept(&a.workbench(), &b).await;
+
+    // C as the Annex holds it, out of date: a certificate it has since
+    // renewed away from, at an address it has since left.
+    verkstead_store::record_member(
+        &b.pool,
+        &Linking {
+            device: C.to_owned(),
+            name: "somewhere".to_owned(),
+            os: "Linux".to_owned(),
+            addresses: vec!["127.0.0.1:1".to_owned()],
+            fingerprint: "00:11:22".to_owned(),
+            kept_by: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    kept(&a.workbench(), &b).await;
+
+    let held = row_for(&a, C).await.identity;
+
+    assert_eq!(
+        held.fingerprint,
+        c.device.fingerprint(),
+        "the Keeper still holds C under the certificate C presents",
+    );
+    assert_eq!(held.addresses, vec![c.at()]);
+}
+
 /// A member that was away when its Keeper linked an Annex is owed the
 /// announcement, and the one it is told when it next answers carries the mark.
 #[tokio::test]

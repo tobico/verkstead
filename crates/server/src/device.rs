@@ -1098,11 +1098,24 @@ impl Devices {
             .filter(|member| member.device != annex)
             .collect();
 
+        // And of the Annex's roster, only the devices this one does not hold
+        // already. The Annex runs only while its Keeper does, so what it holds
+        // of a member is what it last heard, which can be behind what this
+        // device heard since: a member that renewed while the Annex was off is
+        // its old certificate there. Recorded over this device's own row, that
+        // would put the old fingerprint back at every start, and this device
+        // would stop talking to that member.
+        let unheard_of: Vec<_> = kept
+            .members
+            .into_iter()
+            .filter(|member| !already.iter().any(|held| held.device == member.device))
+            .collect();
+
         let recorded = crate::peer::exchange::record(
             &self.members,
             self.device.id(),
             &kept.introducer,
-            kept.members,
+            unheard_of,
         )
         .await?;
 
