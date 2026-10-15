@@ -27,7 +27,17 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use axum::Json;
+use axum::extract::State;
+use axum::extract::connect_info::ConnectInfo;
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
 use tokio::net::TcpStream;
+
+use crate::device::Device;
+use crate::device::reading::Reading;
+
+use super::{Caller, Members};
 
 /// How long the dial to the Annex is given before the connection it was for is
 /// let go of.
@@ -147,6 +157,74 @@ impl Listener {
 
             tokio::spawn(forward(caller, annex));
         }
+    }
+}
+
+/// Where an Annex asks its Keeper what to advertise: the Keeper's own addresses,
+/// each at this forward's port (ADR-0024, *advertise as told*).
+///
+/// A member's route, behind the gate like every route but the un-gated three —
+/// and answered to one member alone, the device this one keeps.
+pub const FORWARDED: &str = "/api/peer/v1/forwarded";
+
+/// What [`forwarded`] answers out of: this device, the machine it is on — its
+/// forward's port among what that reading knows — and who it is linked to.
+#[derive(Debug, Clone)]
+pub(crate) struct Forwarding {
+    pub(crate) device: Device,
+    pub(crate) reading: Reading,
+    pub(crate) members: Members,
+}
+
+/// `GET /api/peer/v1/forwarded` — this device's Annex, asking where it is to
+/// say it can be reached.
+///
+/// **Only a device keeping an Annex answers it, and only to that Annex.** The
+/// caller is through the gate, so it is a member; what is left to ask is
+/// whether its row is marked as this device's Annex. Any other member is
+/// refused — this device forwards for nobody else, and its addresses at the
+/// forward would be a place to reach somebody it is not.
+pub(crate) async fn forwarded(
+    State(forwarding): State<Forwarding>,
+    ConnectInfo(caller): ConnectInfo<Caller>,
+) -> Response {
+    let calling = match caller.fingerprint() {
+        Some(fingerprint) => forwarding.members.presenting(&fingerprint).await,
+        None => Ok(None),
+    };
+
+    let annex = match calling {
+        Ok(member) => {
+            member.filter(|member| member.kept_by.as_deref() == Some(forwarding.device.id()))
+        }
+
+        Err(why) => {
+            tracing::error!(%why, "who asked where this device forwards could not be read");
+
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "this device could not read who it is linked to\n",
+            )
+                .into_response();
+        }
+    };
+
+    if annex.is_none() {
+        return (
+            StatusCode::FORBIDDEN,
+            "this device forwards for its own Annex alone, and the caller is not it\n",
+        )
+            .into_response();
+    }
+
+    match forwarding.reading.forwarded().await {
+        Some(addresses) => Json(addresses).into_response(),
+
+        None => (
+            StatusCode::NOT_FOUND,
+            "this device has no Annex Forward to be reached through\n",
+        )
+            .into_response(),
     }
 }
 

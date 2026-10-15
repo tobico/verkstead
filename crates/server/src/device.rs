@@ -81,7 +81,7 @@ use verkstead_render::{
     AskingDevice, DeviceIdentity, DevicesView, DiscoveredDevice, JoinHeld, JoinSettled,
     RenewedCertificate,
 };
-use verkstead_store::{AskedJoin, Linking, Telling};
+use verkstead_store::{AskedJoin, Linking, Member, Telling};
 use x509_parser::certificate::X509Certificate;
 use x509_parser::prelude::FromDer;
 
@@ -1098,6 +1098,36 @@ impl Devices {
             recorded,
             "this device has linked its Annex by the Keeper's Join",
         );
+
+        // And the Annex read again at the address the join went through, now
+        // that each side holds the other. What an Annex advertises is this
+        // device's own addresses at the Annex Forward, asked of this device
+        // over a member's route — which it could not ask while the join was in
+        // flight, this device not yet holding it — so its answer to the join
+        // carried none, and the row it left is one nothing could dial. The dial
+        // writes down what the Annex says now, which is what the members below
+        // are told. A refresh that fails leaves the row as the join wrote it.
+        if let Some(row) = self
+            .members
+            .rows()
+            .await?
+            .into_iter()
+            .find(|member| member.device == annex)
+        {
+            let at = Member {
+                addresses: vec![address.to_owned()],
+                ..row
+            };
+
+            if let Err(why) = self.peers.identity(&at).await {
+                tracing::warn!(
+                    device = %annex,
+                    %why,
+                    "this device's Annex could not be read again once it was linked, so it \
+                     is held at what its answer to the join said",
+                );
+            }
+        }
 
         // And now the rest of the cluster, the way an Allow joins a newcomer to
         // everybody: each member this device already had is told about the

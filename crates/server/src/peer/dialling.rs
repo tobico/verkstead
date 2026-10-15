@@ -456,6 +456,70 @@ impl Peers {
         Ok(identity)
     }
 
+    /// Ask `keeper`, this device's **Keeper**, what this device advertises:
+    /// the Keeper's own addresses at its Annex Forward (ADR-0024, *advertise
+    /// as told*) — see [`crate::peer::annex_forward::FORWARDED`], which
+    /// answers, and [`crate::device::reading::Reading::asking_its_keeper`],
+    /// which asks.
+    ///
+    /// **A member's own call**, pinned on the Keeper's certificate and made at
+    /// the addresses this device's row for it holds, in their order — the same
+    /// walk [`Peers::identity`] makes, and the same reading of a Keeper that
+    /// answers nowhere. A Keeper this device holds no row for yet has nowhere
+    /// to be asked, which is an Annex whose Keeper's Join has not landed.
+    pub async fn forwarded_by(&self, keeper: &str) -> Result<Vec<String>> {
+        let Some(member) = self
+            .members
+            .rows()
+            .await?
+            .into_iter()
+            .find(|member| member.device == keeper)
+        else {
+            bail!("device {keeper} keeps this one, and is not yet one of its members");
+        };
+
+        let met = Arc::new(Mutex::new(None));
+        let dialling = self.dialling(accepted(&member), &met)?;
+        let mut nothing_at = Vec::new();
+
+        for address in &member.addresses {
+            let at = reaching(address, crate::peer::annex_forward::FORWARDED);
+
+            match dialling.get(&at).send().await {
+                Ok(answered) => {
+                    let status = answered.status();
+
+                    if !status.is_success() {
+                        let said = answered.text().await.unwrap_or_default();
+
+                        bail!(
+                            "device {keeper} answered {status} to being asked where it forwards \
+                             for this one: {}",
+                            said.trim(),
+                        );
+                    }
+
+                    return answered.json().await.with_context(|| {
+                        format!("reading where device {keeper} says it forwards for this one")
+                    });
+                }
+
+                Err(why) => {
+                    tracing::debug!(
+                        device = %keeper,
+                        %address,
+                        %why,
+                        "a member did not answer at one of its addresses, so the next is tried",
+                    );
+
+                    nothing_at.push(address.as_str());
+                }
+            }
+        }
+
+        Err(self.nowhere(&member, &met, &nothing_at).await)
+    }
+
     /// Tell `member` about `newcomer`, which is what an introducer does the
     /// moment its human has pressed Allow.
     ///

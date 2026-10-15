@@ -25,4 +25,4 @@ Roadmap stage: [01: The Annex and its Keeper](docs/roadmaps/wsl-annex/01-the-ann
 - [x] 02: The Keeper's Join — [details](02-the-keepers-join.md)
 - [x] 03: The mark on the roster, and Unlink refused — [details](03-the-mark-on-the-roster.md)
 - [x] 04: The Annex Forward — [details](04-the-annex-forward.md)
-- [ ] 05: Advertise as told — [details](05-advertise-as-told.md)
+- [x] 05: Advertise as told — [details](05-advertise-as-told.md)

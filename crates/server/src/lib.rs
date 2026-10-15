@@ -2608,9 +2608,15 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
     // describe one machine: what a peer reads off the identity endpoint and
     // what the Devices section of the Remote access pane draws are the same
     // answer told to two different askers. Told by this Data Directory's own
-    // config whether it is an Annex, which is part of what it answers.
-    let reading =
-        device::reading::Reading::of_this_machine(tailscale.clone()).told_by(settings.clone());
+    // config whether it is an Annex, which is part of what it answers — and,
+    // being one, asking its Keeper what to advertise rather than reading its
+    // own interfaces (ADR-0024, *advertise as told*). And knowing where its
+    // own Annex Forward landed, which is the port it tells an Annex of its own
+    // to advertise at.
+    let reading = device::reading::Reading::of_this_machine(tailscale.clone())
+        .told_by(settings.clone())
+        .asking_its_keeper(peer::dialling::Peers::of(device.clone(), members.clone()))
+        .forwarding_at(annex_forward.address().port());
 
     // And what this device says about itself on the LAN, so that a Verkstead on
     // the next desk can draw a row for it with nobody typing an address

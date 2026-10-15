@@ -301,8 +301,9 @@ impl Listener {
 /// goes the other way, inside [`members_only`] with the gate over it, and so
 /// does every call the stages after this one add — the announcement in
 /// [`announcing`], where a member names a newcomer to this one, the news in
-/// [`news`], where one tells this device something worth a phone, and the whole
-/// of the viewer's own namespace, which is what `workbench` is.
+/// [`news`], where one tells this device something worth a phone, the question
+/// in [`annex_forward`], where an Annex asks its Keeper what to advertise, and
+/// the whole of the viewer's own namespace, which is what `workbench` is.
 ///
 /// `workbench` is that namespace over this device's state, built outside for the
 /// reason `nudges` is made outside: it is the state the *other* listener answers
@@ -359,7 +360,7 @@ pub fn router(
                 .route(joining::CANCEL, post(joining::cancel))
                 .with_state(joining::Holding {
                     device: device.clone(),
-                    reading,
+                    reading: reading.clone(),
                     joins: joins.clone(),
                     nudges: nudges.clone(),
 
@@ -407,6 +408,15 @@ pub fn router(
                                 device: device.clone(),
                                 members: members.clone(),
                                 nudges: nudges.clone(),
+                            }),
+                    )
+                    .merge(
+                        Router::new()
+                            .route(annex_forward::FORWARDED, get(annex_forward::forwarded))
+                            .with_state(annex_forward::Forwarding {
+                                device: device.clone(),
+                                reading: reading.clone(),
+                                members: members.clone(),
                             }),
                     )
                     .merge(
