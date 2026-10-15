@@ -9,7 +9,8 @@
 //!
 //! **Per Conversation, and per device.** A tab is a path in a Worktree and a
 //! terminal is a number in one Conversation's register, so there is a key per
-//! Conversation; and it is the browser's storage rather than the server's
+//! Conversation — named by the device it lives on as well as its number, the
+//! way its URL is (see [`layoutKey`]); and it is the browser's storage rather than the server's
 //! record because a device's layout is a device's, exactly as the pane widths
 //! beside it are — a phone that opened Code has nothing to say about a laptop's
 //! splits. Under the same `verkstead.*` namespace as everything else this app
@@ -40,7 +41,8 @@
 
 import { createEffect, type Accessor } from "solid-js";
 
-import { forget, read, write } from "../remembered";
+import { forget, keysUnder, read, write } from "../remembered";
+import { rowKey, type Device } from "../reaching";
 import type { Tab } from "./keeping";
 import {
   group as made,
@@ -51,15 +53,58 @@ import {
 } from "./layout";
 
 /// Where one Conversation's layout lives on this device. Keyed by the
-/// Conversation, the way a Set's own draft is keyed by the Set.
-function layoutKey(conversation: number): string {
-  return `verkstead.code.${conversation}`;
+/// Conversation, the way a Set's own draft is keyed by the Set — and by the
+/// device it lives on, where it is one of a member's.
+///
+/// **The URL's own shape** (see `pathOf` in `openings.ts`): this device's own
+/// Conversation keeps the bare key, and a member's carries its Device Id
+/// ahead of the number. Every Verkstead issues a Conversation 7, so a key of
+/// the number alone was one layout and one unsaved text for two pieces of work
+/// (ADR-0025). Which is the whole of the migration as well: a bare key already
+/// written is this device's own from here on and loses nothing, and a member's
+/// Conversation that had written one starts afresh, which was the ambiguous
+/// case anyway.
+function layoutKey(conversation: number, device: Device): string {
+  return `${LAYOUT}${keyed(conversation, device)}`;
 }
 
 /// And where the text nobody has saved in it lives, which is a key of its own
 /// for the reason at the top of this file.
-function unsavedKey(conversation: number): string {
-  return `verkstead.code-unsaved.${conversation}`;
+function unsavedKey(conversation: number, device: Device): string {
+  return `${UNSAVED}${keyed(conversation, device)}`;
+}
+
+/// The two namespaces, each a key per Conversation.
+const LAYOUT = "verkstead.code.";
+const UNSAVED = "verkstead.code-unsaved.";
+
+/// What follows the namespace: the number alone for this device's own, and the
+/// device and the number for a member's.
+function keyed(conversation: number, device: Device): string {
+  return device === null ? `${conversation}` : `${device}.${conversation}`;
+}
+
+/// Which Conversations this browser is holding unsaved text for, as the rows
+/// the sidebar names them by (see `rowKey`) — read off the storage's own keys,
+/// which is what a page that has opened none of them yet knows.
+///
+/// A key whose tail is neither shape is somebody else's idea of this
+/// namespace, and names no row.
+export function holding(): Set<string> {
+  const rows = new Set<string>();
+
+  for (const key of keysUnder(UNSAVED)) {
+    const tail = key.slice(UNSAVED.length);
+    const dot = tail.lastIndexOf(".");
+    const device = dot < 0 ? null : tail.slice(0, dot);
+    const number = tail.slice(dot + 1);
+
+    if (/^\d+$/.test(number) && device !== "") {
+      rows.add(rowKey(device, Number(number)));
+    }
+  }
+
+  return rows;
 }
 
 /// One group as it is written down: what names it, what is in it, and which of
@@ -98,8 +143,11 @@ export interface Remembered {
 /// A body that will not parse, or is not the shape of one of these, is dropped
 /// on the way past — and taken away with it, the way the compose page's draft
 /// is.
-export function remembered(conversation: number): Remembered | null {
-  const body = read(layoutKey(conversation));
+export function remembered(
+  conversation: number,
+  device: Device,
+): Remembered | null {
+  const body = read(layoutKey(conversation, device));
 
   if (body === null) {
     return null;
@@ -108,7 +156,7 @@ export function remembered(conversation: number): Remembered | null {
   const held = parsed(body);
 
   if (held === null) {
-    forget(layoutKey(conversation));
+    forget(layoutKey(conversation, device));
     return null;
   }
 
@@ -120,8 +168,11 @@ export function remembered(conversation: number): Remembered | null {
 /// Empty where there is none, where what is there will not parse, or where it is
 /// not a record of strings: there is nothing to restore either way, and what is
 /// under the key is taken away.
-export function recalled(conversation: number): Record<string, string> {
-  const body = read(unsavedKey(conversation));
+export function recalled(
+  conversation: number,
+  device: Device,
+): Record<string, string> {
+  const body = read(unsavedKey(conversation, device));
 
   if (body === null) {
     return {};
@@ -130,7 +181,7 @@ export function recalled(conversation: number): Record<string, string> {
   const held = texts(body);
 
   if (held === null) {
-    forget(unsavedKey(conversation));
+    forget(unsavedKey(conversation, device));
     return {};
   }
 
@@ -197,6 +248,7 @@ export function revived(stored: Remembered): {
 /// that what they follow outlives every pane that draws it.
 export function remembering(
   conversation: number,
+  device: Device,
   held: {
     layout: Accessor<Layout>;
     active: Accessor<number>;
@@ -204,8 +256,10 @@ export function remembering(
     unsaved: () => Record<string, string>;
   },
 ): void {
-  createEffect(() => keepLayout(conversation, held.layout(), held.active()));
-  createEffect(() => keepText(conversation, held.unsaved()));
+  createEffect(() =>
+    keepLayout(layoutKey(conversation, device), held.layout(), held.active()),
+  );
+  createEffect(() => keepText(unsavedKey(conversation, device), held.unsaved()));
 }
 
 /// The layout, written down — or taken away, where there is nothing open.
@@ -213,16 +267,16 @@ export function remembering(
 /// A pane holding one empty group is a pane nobody has opened anything in, and
 /// a stored layout of one would restore as exactly what an untouched browser
 /// already gives: nothing to come back to, and a key left behind saying so.
-function keepLayout(conversation: number, layout: Layout, active: number): void {
+function keepLayout(key: string, layout: Layout, active: number): void {
   const written = writing(layout);
 
   if ("group" in written && written.group.tabs.length === 0) {
-    forget(layoutKey(conversation));
+    forget(key);
     return;
   }
 
   write(
-    layoutKey(conversation),
+    key,
     JSON.stringify({ layout: written, active } satisfies Remembered),
   );
 }
@@ -235,9 +289,7 @@ function keepLayout(conversation: number, layout: Layout, active: number): void 
 /// text of a page that has moved on since: restored, it would be put over a file
 /// it no longer describes and called the human's unsaved work. So it goes, and
 /// what comes back is the file as the disk has it.
-function keepText(conversation: number, unsaved: Record<string, string>): void {
-  const key = unsavedKey(conversation);
-
+function keepText(key: string, unsaved: Record<string, string>): void {
   if (Object.keys(unsaved).length === 0) {
     forget(key);
     return;

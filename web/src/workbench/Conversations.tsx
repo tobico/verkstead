@@ -88,7 +88,8 @@
 //! puts them where they go. See `zero.ts` for what decides that this pane is
 //! drawn at all.
 
-import { A } from "@solidjs/router";
+import { faCode } from "@fortawesome/free-solid-svg-icons";
+import { A, useNavigate } from "@solidjs/router";
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import {
   For,
@@ -119,6 +120,8 @@ import { CardActions } from "./Actions";
 import { ShowArchived } from "./Archived";
 import { Forwarding } from "./Forwarding";
 import { caughtUp, pressedRows } from "./eager";
+import { pathTo } from "./openings";
+import { holding } from "./remembering";
 import styles from "./Conversations.module.css";
 import { SPOKEN } from "./Mark";
 // The rings and the badge a card carries at its right edge. Drawn here rather
@@ -145,7 +148,37 @@ export function Conversations(props: {
   /// Open one, which is a Conversation *and* a device: the page it opens is
   /// that device's own — see `openings.ts`.
   open: (id: number, device: Device) => void;
+
+  /// Whether this browser holds text nobody has saved in a Conversation's
+  /// Code, which is half of what lights a card's code icon (ADR-0025) — the
+  /// keeping's answer, where the page has one. Where it has none, which is the
+  /// settings and the compose page, what the storage held as the sidebar was
+  /// drawn: nothing on those pages can change it.
+  unsaved?: (device: Device, id: number) => boolean;
+
+  /// And what a press on that icon does, where the page has more to do than
+  /// go to the address — the workbench walks a narrow window into the details.
+  /// Going to the Conversation's Code pane where it is not given.
+  code?: (id: number, device: Device) => void;
 }): JSX.Element {
+  const navigate = useNavigate();
+
+  /// What the storage held, for a page with no keeping to ask.
+  const stored = props.unsaved === undefined ? holding() : null;
+
+  const unsaved = (entry: ConversationEntry): boolean =>
+    props.unsaved?.(whose(entry), entry.id) ??
+    stored?.has(keyFor(entry)) ??
+    false;
+
+  const coded = (entry: ConversationEntry): void => {
+    if (props.code !== undefined) {
+      props.code(entry.id, whose(entry));
+    } else {
+      navigate(pathTo(entry.id, "code", whose(entry)));
+    }
+  };
+
   const conversations = useReading(() => ({
     queryKey: ["conversations"],
     queryFn: listConversations,
@@ -611,7 +644,9 @@ export function Conversations(props: {
                     whose(entry) === props.device
                   }
                   held={held() === keyFor(entry)}
+                  active={active(entry, unsaved(entry))}
                   open={opened}
+                  code={coded}
                   grab={grab}
                   step={step}
                   ask={ask}
@@ -700,6 +735,45 @@ const DISC = {
   unseen: "not looked at yet",
 } as const;
 
+/// What is active in a Conversation's Code pane, as the card's code icon draws
+/// it (ADR-0025): a terminal with something other than its shell in front, and
+/// a file open with text nobody has saved. Empty where neither is, which is a
+/// card with no icon.
+///
+/// The terminal half is the server's, settled over two of its turns so a shell
+/// still coming up never lights it, and true only where a terminal is live — so
+/// only where there is a Worktree. The unsaved half is this browser's, and the
+/// storage can be holding text for a Conversation that has since closed: so it
+/// counts only where the work is under way, never on a Draft or a closed card,
+/// which have no Worktree for a file to be in.
+///
+/// A standing preview lights nothing here: that is the header's icon alone
+/// (ADR-0024), and this one means *something is active*.
+type Active = ("terminal" | "unsaved")[];
+
+function active(entry: ConversationEntry, unsaved: boolean): Active {
+  const worktree = entry.state !== "Draft" && entry.state !== "Closed";
+
+  return [
+    ...(entry.terminal_busy ? (["terminal"] as const) : []),
+    ...(unsaved && worktree ? (["unsaved"] as const) : []),
+  ];
+}
+
+/// What each half says, in the card's spoken sentence and — sentence-cased,
+/// after the pane's name — in the icon's own label.
+const ACTIVE = {
+  terminal: "a terminal is running something",
+  unsaved: "a file has unsaved changes",
+} as const;
+
+/// The icon's own label: the pane it opens, and why it is drawn.
+function codeLabel(reasons: Active): string {
+  const said = reasons.map((reason) => ACTIVE[reason]).join(", and ");
+
+  return `Code. ${said.charAt(0).toUpperCase()}${said.slice(1)}.`;
+}
+
 /// And what a row whose device has stopped answering says after the name of it.
 ///
 /// The Devices section's own word for the same finding, said in the same
@@ -755,7 +829,11 @@ const UNREACHABLE = "unreachable";
 /// state is said in as well — so where the name and the state are the one word
 /// it is said once rather than twice over. Whatever is drawn on the card is
 /// what opens this label, which is the whole of what agreeing means here.
-function spoken(entry: ConversationEntry): string {
+///
+/// And last, what is active in its Code pane, where the code icon is drawn —
+/// a clause per reason, in [`ACTIVE`]'s words, so the card says why the icon
+/// is there to somebody who cannot see it.
+function spoken(entry: ConversationEntry, reasons: Active): string {
   const which = mark(entry);
   const where = entry.waiting_on_checks
     ? WAITING_ON_CHECKS
@@ -780,6 +858,7 @@ function spoken(entry: ConversationEntry): string {
     name === where ? null : where,
     entry.parked ? parked(entry.parked) : null,
     marked,
+    ...reasons.map((reason) => ACTIVE[reason]),
   ]
     .filter((part) => part !== null)
     .join(", ");
@@ -824,7 +903,12 @@ function ConversationRow(props: {
   entry: ConversationEntry;
   selected: boolean;
   held: boolean;
+  /// What is active in its Code pane, which is whether the code icon is drawn
+  /// and what it says — see [`active`].
+  active: Active;
   open: (entry: ConversationEntry) => void;
+  /// And a press on that icon, which goes to the Code pane.
+  code: (entry: ConversationEntry) => void;
   grab: (event: PointerEvent, entry: ConversationEntry) => void;
   step: (entry: ConversationEntry, by: number) => void;
   ask: (event: MouseEvent, entry: ConversationEntry) => void;
@@ -862,11 +946,16 @@ function ConversationRow(props: {
         [styles.held!]: props.held,
       }}
     >
+      {/* An article doing a button's work rather than a button, because the
+          code icon on it is a link of its own, and a link inside a button is
+          no link at all — the Timeline's openable cards are the precedent.
+          The card's role, tab stop and keys are `CardButton`'s. */}
       <CardButton
+        as="article"
         class={styles.open}
         open={props.selected}
         press={() => props.open(props.entry)}
-        aria-label={spoken(props.entry)}
+        aria-label={spoken(props.entry, props.active)}
         // What the grip's own label used to say, now that there is no second
         // control to say it in: this card can be moved, and these are the keys
         // that move it.
@@ -889,7 +978,16 @@ function ConversationRow(props: {
               opens draws the same name the same way, and the two are the one
               name said twice. Nothing here for a screen reader: the label on
               the card above already says the whole sentence. */}
-          <Truncated class={styles.title} text={titled(props.entry)} />
+          <span class={styles.titleLine}>
+            <Show when={props.active.length > 0}>
+              <CodeLink
+                entry={props.entry}
+                active={props.active}
+                code={props.code}
+              />
+            </Show>
+            <Truncated class={styles.title} text={titled(props.entry)} />
+          </span>
           <span class={styles.meta}>
             {/* Which machine the work is on, ahead of the Repo it is in — and
                 only what differs from the machine the browser opened, which is
@@ -928,6 +1026,67 @@ function ConversationRow(props: {
         </Show>
       </CardButton>
     </li>
+  );
+}
+
+/// The code icon before a card's title, drawn while something is active in
+/// that Conversation's Code pane, and a way straight there (ADR-0025).
+///
+/// **Quiet**, in the soft ink the working ring is drawn in: the accent is what
+/// the sidebar keeps for something the human may have to act on, and a build
+/// running is not that. One icon for both reasons — the one the Timeline's
+/// header opens Code with — and its own label says which.
+///
+/// **A real link**, to the Code pane's own address on the device the work is
+/// on, so it is reached by Tab and can be opened elsewhere like any link. A
+/// plain press is the page's own move instead, which on the workbench walks a
+/// narrow window into the details as the header's icon does.
+///
+/// **And the press is the icon's and not the card's**: stopped on its way up,
+/// as the memo's **Retire** and a stage's row are on the Timeline, so the card
+/// does not open the Conversation's Timeline over it. The pointer going down is
+/// stopped too, which is what keeps it from being the start of a drag — the
+/// card captures a pointer it grabs, and a release over a captured card is a
+/// click on the card rather than on the link.
+function CodeLink(props: {
+  entry: ConversationEntry;
+  active: Active;
+  code: (entry: ConversationEntry) => void;
+}): JSX.Element {
+  return (
+    <a
+      class={styles.code}
+      href={pathTo(props.entry.id, "code", whose(props.entry))}
+      aria-label={codeLabel(props.active)}
+      title={codeLabel(props.active)}
+      onPointerDown={(event) => event.stopPropagation()}
+      onClick={(event) => {
+        event.stopPropagation();
+
+        // A link asked to open somewhere else is the browser's to open.
+        if (
+          event.button !== 0 ||
+          event.metaKey ||
+          event.ctrlKey ||
+          event.shiftKey ||
+          event.altKey
+        ) {
+          return;
+        }
+
+        event.preventDefault();
+        props.code(props.entry);
+      }}
+      onKeyDown={(event) => {
+        // Enter is the link's own, and would be the card's as well on its way
+        // up; Space is the card's alone, and is no press on a link.
+        if (event.key === "Enter" || event.key === " ") {
+          event.stopPropagation();
+        }
+      }}
+    >
+      <Icon of={faCode} />
+    </a>
   );
 }
 

@@ -778,6 +778,17 @@ export function Workbench(): JSX.Element {
               selected={selected()}
               device={device()}
               open={(id, whose) => navigate(pathOf(id, whose))}
+              unsaved={code.holds}
+              code={(id, whose) => {
+                // The human picking, as the header's own Code icon is, so a
+                // Timeline that was advancing does not take the pane back
+                // off them at the next thing a session does — and a walk into
+                // the details on a narrow window, which the address alone
+                // does not make where this Conversation is already open.
+                setFollowed(null);
+                navigate(pathTo(id, "code", whose));
+                setPane("details");
+              }}
             />
           )
         }
@@ -809,7 +820,10 @@ export function Workbench(): JSX.Element {
                 conversation={conversation}
                 event={event()}
                 back={leaving()}
-                code={code.of}
+                // This device's own Conversation or a member's, as the URL
+                // says: every Verkstead issues a Conversation 7, and Code's
+                // keeping is keyed by both (ADR-0025).
+                code={(id) => code.of(id, device())}
                 maximise={
                   beside() ? { on: whole(), set: maximise } : undefined
                 }

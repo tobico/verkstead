@@ -328,6 +328,7 @@ export function rowFor(view: ConversationView): ConversationEntry {
     waiting: false,
     waiting_on_checks: false,
     waiting_to_join: false,
+    terminal_busy: false,
     parked: null,
     unseen: false,
     rank: "",

@@ -137,6 +137,31 @@ export function forget(key: string): void {
   }
 }
 
+/// Every key this browser is holding under the namespace that starts with
+/// `prefix` — or none, where the storage cannot be read at all.
+///
+/// What a reading that is about *which* keys are there asks, rather than what
+/// is under one: Code's unsaved text is a key per Conversation, and the sidebar
+/// wants to know which Conversations have one before any of them is opened.
+export function keysUnder(prefix: string): string[] {
+  try {
+    const found: string[] = [];
+
+    for (let at = 0; at < localStorage.length; at += 1) {
+      const key = localStorage.key(at);
+
+      if (key !== null && key.startsWith(prefix)) {
+        found.push(key);
+      }
+    }
+
+    return found;
+  } catch {
+    // Refused, as above: a browser that keeps nothing is holding nothing.
+    return [];
+  }
+}
+
 /// And the three settings Code's own menu carries, one key each.
 ///
 /// Namespaced like the wrap above them, and named for the editors rather than

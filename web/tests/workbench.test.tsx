@@ -1114,6 +1114,197 @@ async function cards(container: ParentNode): Promise<HTMLElement[]> {
   return [...container.querySelectorAll<HTMLElement>(`.${sidebar.conversationRow}`)];
 }
 
+/// The code icon before a card's title, drawn while something is active in that
+/// Conversation's Code pane — a terminal running something, which the server
+/// says on the row, or a file with unsaved text, which this browser holds — and
+/// a link straight to the pane (ADR-0025).
+describe("the code icon on a card", () => {
+  /// The icon on a row, where one is drawn.
+  function codeOf(row: ParentNode): HTMLAnchorElement | null {
+    return row.querySelector<HTMLAnchorElement>(`.${sidebar.code}`);
+  }
+
+  /// Text this browser holds unsaved in a Conversation's Code, under the key
+  /// the keeping writes it at — this device's own bare, a member's under its
+  /// device.
+  function unsavedIn(id: number, device: string | null = null): void {
+    localStorage.setItem(
+      device === null
+        ? `verkstead.code-unsaved.${id}`
+        : `verkstead.code-unsaved.${device}.${id}`,
+      JSON.stringify({ "/worktree/notes.md": "not saved\n" }),
+    );
+  }
+
+  /// And a window of a width, which is what decides whether the frame walks.
+  function windowIs(width: "narrow" | "wide"): void {
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: width === "wide" && query.startsWith("(min-width:"),
+      media: query,
+      onchange: null,
+      addListener() {},
+      removeListener() {},
+      addEventListener() {},
+      removeEventListener() {},
+      dispatchEvent: () => false,
+    }));
+  }
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("is drawn from the row's terminal reading, and says so", async () => {
+    theSidebar(
+      { branch: "building", state: "Implementing", terminal_busy: true },
+      { branch: "quiet", state: "Implementing" },
+    );
+    const { container } = mount();
+
+    const [building, quiet] = await cards(container);
+
+    expect(codeOf(building!)?.getAttribute("aria-label")).toBe(
+      "Code. A terminal is running something.",
+    );
+    expect(codeOf(building!)?.getAttribute("href")).toBe("/conversations/1/code");
+    expect(building!.querySelector(CARD)!.getAttribute("aria-label")).toBe(
+      "building, verkstead, Implementing, a terminal is running something",
+    );
+    expect(codeOf(quiet!)).toBeNull();
+  });
+
+  it("is drawn from text this browser holds unsaved, and from both", async () => {
+    unsavedIn(1);
+    unsavedIn(2);
+    theSidebar(
+      { branch: "editing", state: "Implementing" },
+      { branch: "both", state: "Wrapping", terminal_busy: true },
+    );
+    const { container } = mount();
+
+    const [editing, both] = await cards(container);
+
+    expect(codeOf(editing!)?.getAttribute("aria-label")).toBe(
+      "Code. A file has unsaved changes.",
+    );
+    expect(codeOf(both!)?.getAttribute("aria-label")).toBe(
+      "Code. A terminal is running something, and a file has unsaved changes.",
+    );
+    expect(both!.querySelector(CARD)!.getAttribute("aria-label")).toBe(
+      "both, verkstead, Wrapping, a terminal is running something, a file has unsaved changes",
+    );
+  });
+
+  /// The storage can be holding text for a Conversation that has no Worktree
+  /// for a file to be in — never had one, or has closed — and the icon there
+  /// would be a way into a pane that has nothing to open.
+  it("is not drawn for unsaved text on a draft or a closed card", async () => {
+    unsavedIn(1);
+    unsavedIn(2);
+    theSidebar({ state: "Draft" }, { state: "Closed" });
+    const { container } = mount();
+
+    const rows = await cards(container);
+
+    expect(rows.map(codeOf)).toEqual([null, null]);
+  });
+
+  /// The press is the icon's: it goes to the Code pane and does not open the
+  /// card's Timeline over it — and a narrow window walks into the details, as
+  /// the header's own icon does.
+  /// The sidebar with the grilling Conversation's row reading a terminal busy,
+  /// over a Code pane that has nothing open — so the press lands somewhere.
+  function busyGrilling() {
+    return withTerminals(
+      [],
+      whenever(
+        "/api/ui/conversations",
+        json(
+          SIDEBAR.map((row) =>
+            row.id === GRILLING.id ? { ...row, terminal_busy: true } : row,
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// The icon on the grilling Conversation's row.
+  async function grillingCode(container: ParentNode): Promise<HTMLElement> {
+    return drawn(container, `${sidebarRow(GRILLING.id)} .${sidebar.code}`);
+  }
+
+  it("goes to the code pane, and not to the card's timeline", async () => {
+    windowIs("narrow");
+    busyGrilling();
+    const { container, history } = mount();
+
+    const code = await grillingCode(container);
+
+    // A press as a hand makes one, within the grace: the pointer going down on
+    // the icon is no start of a drag, and the click is the link's.
+    fireEvent.pointerDown(code, { button: 0, pointerId: 1, clientX: 10, clientY: 10 });
+    fireEvent.pointerUp(window, { button: 0, pointerId: 1, clientX: 11, clientY: 10 });
+    fireEvent.click(code);
+
+    await waitFor(() =>
+      expect(history.get()).toBe(`/conversations/${GRILLING.id}/code`),
+    );
+    await waitFor(() => expect(frame(container).dataset.pane).toBe("details"));
+  });
+
+  /// And on the Conversation already open beside it, which is the case the
+  /// address alone would not walk: the selection has not changed.
+  it("walks a narrow window into the details from the open conversation", async () => {
+    windowIs("narrow");
+    busyGrilling();
+    const { container, history } = mount(`/conversations/${GRILLING.id}`);
+
+    const code = await grillingCode(container);
+    await waitFor(() => expect(frame(container).dataset.pane).toBe("middle"));
+
+    fireEvent.click(code);
+
+    await waitFor(() =>
+      expect(history.get()).toBe(`/conversations/${GRILLING.id}/code`),
+    );
+    await waitFor(() => expect(frame(container).dataset.pane).toBe("details"));
+  });
+
+  /// A member's row draws the icon from its own device's reading, links under
+  /// that device, and is lit by text held under that device's key alone — the
+  /// two Conversation 1s are two pieces of work.
+  it("links a member's row under its device, and keeps its text apart", async () => {
+    const member = "cc11dd22ee33ff4400112233aabbccdd";
+    unsavedIn(2, member);
+    theSidebar(
+      {
+        branch: "theirs",
+        state: "Implementing",
+        terminal_busy: true,
+        rank: `Zz-${member}`,
+        device: { id: member, name: "the-laptop", os: null, reachable: true },
+      },
+      {
+        id: 2,
+        branch: "edited-there",
+        state: "Implementing",
+        rank: `Zy-${member}`,
+        device: { id: member, name: "the-laptop", os: null, reachable: true },
+      },
+      { id: 2, branch: "ours", state: "Implementing" },
+    );
+    const { container } = mount();
+
+    const [theirs, edited, ours] = await cards(container);
+
+    expect(codeOf(theirs!)?.getAttribute("href")).toBe(
+      `/devices/${member}/conversations/1/code`,
+    );
+    expect(codeOf(edited!)?.getAttribute("aria-label")).toBe(
+      "Code. A file has unsaved changes.",
+    );
+    expect(codeOf(ours!)).toBeNull();
+  });
+});
+
 /// How a card says where its Conversation has got to, now that it no longer says
 /// it in words: a mark at the right edge for what is happening to it now, and
 /// the card's own treatment for a draft and for work that has stopped.
@@ -1269,7 +1460,7 @@ describe("how a card says where its conversation has got to", () => {
 
     expect(
       (await cards(container)).map((card) =>
-        card.querySelector("button")!.getAttribute("aria-label"),
+        card.querySelector(CARD)!.getAttribute("aria-label"),
       ),
     ).toEqual([
       "over, verkstead, Done, not looked at yet",
@@ -1336,7 +1527,7 @@ describe("how a card says where its conversation has got to", () => {
 
     expect(
       (await cards(container)).map((card) =>
-        card.querySelector("button")!.getAttribute("aria-label"),
+        card.querySelector(CARD)!.getAttribute("aria-label"),
       ),
     ).toEqual(["Draft, verkstead", "rate-limiting, verkstead, Draft"]);
   });
@@ -1422,7 +1613,7 @@ describe("how a card says where its conversation has got to", () => {
     const { container, history } = mount();
 
     const [card] = await cards(container);
-    fireEvent.click(card!.querySelector("button")!);
+    fireEvent.click(card!.querySelector(CARD)!);
 
     await waitFor(() => expect(history.get()).toBe("/conversations/1"));
   });
@@ -1466,7 +1657,7 @@ describe("how a card says where its conversation has got to", () => {
 
     expect(
       (await cards(container)).map((card) =>
-        card.querySelector("button")!.getAttribute("aria-label"),
+        card.querySelector(CARD)!.getAttribute("aria-label"),
       ),
     ).toEqual([
       "spinning, verkstead, Implementing, a session is running",
@@ -1787,7 +1978,7 @@ describe("the order the human puts the sidebar in", () => {
     three();
     const { container } = mount();
 
-    expect((await cards(container)).map((row) => row.querySelectorAll("button").length))
+    expect((await cards(container)).map((row) => row.querySelectorAll(`button, a, ${CARD}`).length))
       .toEqual([1, 1, 1]);
   });
 
@@ -10211,6 +10402,10 @@ describe("unarchiving a conversation", () => {
   });
 });
 
+/// The card on a sidebar row: an article doing a button's work, so that the code
+/// icon on it can be a link of its own (ADR-0025).
+const CARD = '[role="button"]';
+
 /// What a sidebar row says when it is read aloud, which is where everything the
 /// card draws in marks and paint is said in words: the branch, the repo, the
 /// state and whatever mark it is carrying.
@@ -10218,7 +10413,7 @@ describe("unarchiving a conversation", () => {
 /// Failing rather than answering where there is no such row, so that a test
 /// asking what a row says cannot pass by finding none.
 function spokenRow(container: ParentNode, id: number): string {
-  const row = container.querySelector(`${sidebarRow(id)} button`);
+  const row = container.querySelector(`${sidebarRow(id)} ${CARD}`);
   expect(
     row,
     `the sidebar should be drawing a row for conversation ${id}`,
@@ -18773,14 +18968,14 @@ describe("a wrap-up waiting on its checks", () => {
 
     const [plain, narrowed] = await cards(container);
 
-    expect(plain!.querySelector("button")!.getAttribute("aria-label")).toContain(
+    expect(plain!.querySelector(CARD)!.getAttribute("aria-label")).toContain(
       "Wrapping",
     );
     expect(
-      narrowed!.querySelector("button")!.getAttribute("aria-label"),
+      narrowed!.querySelector(CARD)!.getAttribute("aria-label"),
     ).toContain("Waiting on checks");
     expect(
-      narrowed!.querySelector("button")!.getAttribute("aria-label"),
+      narrowed!.querySelector(CARD)!.getAttribute("aria-label"),
     ).not.toContain("Wrapping");
   });
 });
@@ -18834,13 +19029,13 @@ describe("a stage waiting to join its chain", () => {
     const [working, held] = await cards(container);
 
     expect(
-      working!.querySelector("button")!.getAttribute("aria-label"),
+      working!.querySelector(CARD)!.getAttribute("aria-label"),
     ).toContain("Implementing");
-    expect(held!.querySelector("button")!.getAttribute("aria-label")).toContain(
+    expect(held!.querySelector(CARD)!.getAttribute("aria-label")).toContain(
       "Waiting to join",
     );
     expect(
-      held!.querySelector("button")!.getAttribute("aria-label"),
+      held!.querySelector(CARD)!.getAttribute("aria-label"),
     ).not.toContain("Implementing");
   });
 });
@@ -18872,7 +19067,7 @@ describe("a session sitting there without asking", () => {
     const [busy, sitting] = await cards(container);
 
     const label = (row: HTMLElement) =>
-      row.querySelector("button")!.getAttribute("aria-label")!;
+      row.querySelector(CARD)!.getAttribute("aria-label")!;
 
     expect(label(busy!)).not.toContain("idle");
     expect(label(sitting!)).toContain("idle 4 min, spoken to once");
@@ -20346,7 +20541,7 @@ describe("the selection following the end of the record", () => {
       throw new Error("the sidebar should be holding the grilling conversation");
     }
 
-    fireEvent.click(row.querySelector("button")!);
+    fireEvent.click(row.querySelector(CARD)!);
   }
 
   it("opens each event that lands on a record opened at its end", async () => {
@@ -26867,6 +27062,36 @@ describe("the code pane's groups", () => {
         ([path, init]) => String(path) === SAVING && init?.method === "POST",
       ),
     ).toHaveLength(1);
+  });
+
+  /// A file going dirty lights the sidebar's code icon on its Conversation at
+  /// once, and the save puts it out again: the keeping's reading of its own
+  /// text, the same one the device writes down (ADR-0025).
+  it("lights the sidebar's code icon while a file is dirty", async () => {
+    const { container } = await opened(
+      whenever(SAVING, json(codeWritten), "POST"),
+    );
+    const icon = () =>
+      container.querySelector(`${sidebarRow(GRILLING.id)} .${sidebar.code}`);
+
+    press(container, "Cargo.toml");
+    await waitFor(() => expect(editors(container)).toHaveLength(1));
+    expect(icon()).toBeNull();
+
+    fireEvent.input(editors(container)[0]!, {
+      target: { value: "[workspace]\nmembers = []\n" },
+    });
+
+    await waitFor(() =>
+      expect(icon()?.getAttribute("aria-label")).toBe(
+        "Code. A file has unsaved changes.",
+      ),
+    );
+
+    fireEvent.keyDown(document.body, { key: "s", ctrlKey: true });
+
+    await waitFor(() => expect(dots(container)).toHaveLength(0));
+    expect(icon()).toBeNull();
   });
 
   /// And a file pressed in the tree opens in the group last pressed into, which
