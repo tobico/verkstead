@@ -4569,10 +4569,10 @@ pub enum SteerTarget {
     /// one is refused by name — see [`ConversationSteered::NoFollowUpBrief`].
     ///
     /// Offered only where the record holds a pull request, as Wrapping is and
-    /// refused by the same name, and only from Done and Wrapping: what a
-    /// follow-up follows up is work that has been seen through, and a
-    /// Conversation still building has the ordinary ways of saying what to do
-    /// next.
+    /// refused by the same name, and only from Done, Wrapping and Closed: what
+    /// a follow-up follows up is work that has been seen through or stopped
+    /// over its pull request, and a Conversation still building has the
+    /// ordinary ways of saying what to do next.
     FollowUp,
 
     /// A question about this work answered without changing it: a session
