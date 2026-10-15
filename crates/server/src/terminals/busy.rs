@@ -251,12 +251,34 @@ mod tests {
         let (path, args) = SHELL;
         let shell = named(path);
 
+        // With the environment a terminal's shell is given, the terminal type
+        // among it — a line editor with none may never take the line typed.
         let mut terminal = Terminal::open().unwrap();
         let mut rendering = Rendering::running(path);
         rendering
             .args(args)
-            .set("PATH", std::env::var_os("PATH").unwrap_or_default());
+            .set("PATH", std::env::var_os("PATH").unwrap_or_default())
+            .set("TERM", crate::terminal::TERM);
         let _child = terminal.spawn(&rendering).unwrap();
+
+        // And what it prints is read as it arrives, as the register's relay
+        // reads it: a shell writing to a terminal nobody empties is one that
+        // may stop, and what it showed is what a failure has to say.
+        let terminal = std::sync::Arc::new(terminal);
+        let shown = std::sync::Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
+        let reading = tokio::spawn({
+            let terminal = terminal.clone();
+            let shown = shown.clone();
+
+            async move {
+                let mut buffer = [0u8; 4096];
+
+                while let Ok(read @ 1..) = terminal.read(&mut buffer).await {
+                    shown.lock().unwrap().extend_from_slice(&buffer[..read]);
+                }
+            }
+        });
+        let said = || String::from_utf8_lossy(&shown.lock().unwrap()).into_owned();
 
         let until = async |reached: &dyn Fn(Front) -> bool| {
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
@@ -270,7 +292,8 @@ mod tests {
 
                 assert!(
                     std::time::Instant::now() < deadline,
-                    "{shell}'s terminal never got there, last reading {read:?}"
+                    "{shell}'s terminal never got there, last reading {read:?}; it showed {:?}",
+                    said()
                 );
                 tokio::time::sleep(std::time::Duration::from_millis(50)).await;
             }
@@ -278,13 +301,20 @@ mod tests {
 
         until(&|read| read == Front::Shell).await;
 
+        // In front is not yet at its prompt: a shell takes the terminal before
+        // its line editor is ready, and a line typed in between may be thrown
+        // away. A second is far more than any shell here takes.
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
         terminal.write(b"sleep 30\r").await.unwrap();
         let Front::Group(group) = until(&|read| matches!(read, Front::Group(_))).await else {
             unreachable!("waited for a group");
         };
-        assert_eq!(running(group).as_deref(), Some("sleep"));
+        assert_eq!(running(group).as_deref(), Some("sleep"), "{}", said());
 
         terminal.write(b"\x03").await.unwrap();
         until(&|read| read == Front::Shell).await;
+
+        reading.abort();
     }
 }
