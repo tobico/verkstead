@@ -70,6 +70,7 @@
 //! kept_by:
 //!   device: 86f1933fecb070cbee865fbb84819d14
 //!   fingerprint: "3F:0A:…"
+//!   at: 172.24.80.1:8423
 //! ```
 //!
 //! Who a session commits as is said here for the reason the token is: it used
@@ -2170,6 +2171,15 @@ impl Author {
 pub struct KeptBy {
     device: String,
     fingerprint: String,
+
+    /// And where the Annex dials its Keeper, where the Keeper said: an address
+    /// that does not move with the Keeper's network — the Windows host's side
+    /// of WSL's NAT at the Keeper's peer port, or the loopback at it under
+    /// mirrored networking (ADR-0024, *The Keeper and its Annex reach each
+    /// other directly*). Not a half of the pair above: a Keeper that names
+    /// none is one its Annex reaches at what it advertises.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    at: Option<String>,
 }
 
 impl KeptBy {
@@ -2179,6 +2189,15 @@ impl KeptBy {
         KeptBy {
             device: device.to_owned(),
             fingerprint: fingerprint.to_owned(),
+            at: None,
+        }
+    }
+
+    /// The same, reached by its Annex at `at` — see [`KeptBy::at`].
+    pub fn reached_at(self, at: Option<&str>) -> KeptBy {
+        KeptBy {
+            at: at.map(str::to_owned),
+            ..self
         }
     }
 
@@ -2190,6 +2209,11 @@ impl KeptBy {
     /// And the fingerprint of the certificate it presents.
     pub fn fingerprint(&self) -> &str {
         &self.fingerprint
+    }
+
+    /// And where its Annex dials it directly, where it said.
+    pub fn at(&self) -> Option<&str> {
+        self.at.as_deref()
     }
 }
 
@@ -2206,6 +2230,8 @@ fn kept_written<'de, D: serde::Deserializer<'de>>(kept: D) -> Result<Option<Kept
         device: Option<String>,
         #[serde(default)]
         fingerprint: Option<String>,
+        #[serde(default)]
+        at: Option<String>,
     }
 
     let Some(written) = Option::<Written>::deserialize(kept)? else {
@@ -2219,6 +2245,7 @@ fn kept_written<'de, D: serde::Deserializer<'de>>(kept: D) -> Result<Option<Kept
         .map(|(device, fingerprint)| KeptBy {
             device,
             fingerprint,
+            at: written.at.and_then(blank_is_nothing),
         }))
 }
 
@@ -2871,8 +2898,8 @@ mod tests {
 
     use super::{
         AtOnce, AttachedServer, Author, Cleanup, CleanupStep, Config, ConflictResolution,
-        GitAuthor, HeaderValue, IgnoreRule, Languages, McpServer, Mirrored, RuleTrouble, Secrets,
-        ServerTrouble, Settings, Signature, Unauthored, trouble_among,
+        GitAuthor, HeaderValue, IgnoreRule, KeptBy, Languages, McpServer, Mirrored, RuleTrouble,
+        Secrets, ServerTrouble, Settings, Signature, Unauthored, trouble_among, yaml,
     };
 
     /// The Author the tests here write and read back, keyed `work` — any
@@ -4698,6 +4725,18 @@ mod tests {
 
         assert_eq!(kept.device(), "86f1933fecb070cbee865fbb84819d14");
         assert_eq!(kept.fingerprint(), "3F:0A");
+        assert_eq!(kept.at(), None, "where the Annex dials it is not a half");
+
+        let reached = Config::read(&format!("{KEPT}  at: 172.24.80.1:8423\n")).unwrap();
+        assert_eq!(
+            reached.kept_by().and_then(KeptBy::at),
+            Some("172.24.80.1:8423"),
+        );
+        assert_eq!(
+            Config::read(&yaml(&reached).unwrap()).unwrap().kept_by(),
+            reached.kept_by(),
+            "and it is written back as it was read",
+        );
 
         assert!(
             Config::read("kept_by:\n  device: 86f1933fecb070cbee865fbb84819d14\n")

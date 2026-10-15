@@ -10,4 +10,4 @@ Keeper's network does.
 
 ## Tasks
 
-- [ ] 01: Reach each other without the network — [details](01-reach-each-other-without-the-network.md)
+- [x] 01: Reach each other without the network — [details](01-reach-each-other-without-the-network.md)

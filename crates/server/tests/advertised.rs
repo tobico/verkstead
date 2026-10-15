@@ -19,6 +19,7 @@ use std::time::Duration;
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
+use axum::routing::get;
 use http_body_util::BodyExt;
 use sqlx::SqlitePool;
 use tokio::task::JoinHandle;
@@ -46,6 +47,13 @@ const C: &str = "ffeeddccbbaa00998877665544332211";
 const ADD: &str = "/api/ui/devices/joins";
 const ASKING: &str = "/api/ui/devices/asking";
 const ANNEXES: &str = "/api/ui/devices/annexes";
+
+/// The one route each workbench here answers a member on — see [`answering`].
+const ANSWERING: &str = "/api/ui/answering";
+
+/// An address of a network the Keeper has left: TEST-NET-1, which nothing
+/// answers at.
+const GONE: &str = "192.0.2.1";
 
 /// The port the workbench is taken to be on, which nothing here asks about.
 const PORT: u16 = 8422;
@@ -148,7 +156,7 @@ impl Verkstead {
             members.clone(),
             joins.clone(),
             nudges.clone(),
-            Router::new(),
+            answering(),
         )));
 
         Verkstead {
@@ -227,6 +235,32 @@ impl Verkstead {
     }
 }
 
+/// What each Verkstead's workbench answers a member with: one route, so that a
+/// call relayed to it is a call that got there.
+fn answering() -> Router {
+    Router::new().route(ANSWERING, get(|| async { "here" }))
+}
+
+/// A call made on `from`'s workbench and relayed to its member `to`, as a
+/// browser on `from` asks for one of `to`'s pages.
+async fn relayed(from: &Verkstead, to: &str) -> (StatusCode, String) {
+    let response = from
+        .workbench()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/ui/members/{to}/answering"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let status = response.status();
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+
+    (status, String::from_utf8_lossy(&bytes).into_owned())
+}
+
 async fn posted(app: &Router, uri: &str, body: serde_json::Value) -> (StatusCode, String) {
     let response = app
         .clone()
@@ -276,7 +310,8 @@ async fn linked(joining: &Verkstead, answering: &Verkstead) {
 }
 
 /// `keeper` links `annex` by the Keeper's Join, at the Annex's own peer
-/// listener.
+/// listener — and tells it to reach the Keeper at the Keeper's own,
+/// which is the loopback under mirrored networking.
 async fn kept(keeper: &Verkstead, annex: &Verkstead) {
     let (status, said) = posted(
         &keeper.workbench(),
@@ -284,6 +319,7 @@ async fn kept(keeper: &Verkstead, annex: &Verkstead) {
         serde_json::json!({
             "data_dir": annex.dir.path().to_str().unwrap(),
             "address": annex.at(),
+            "keeper_at": keeper.at(),
         }),
     )
     .await;
@@ -389,4 +425,136 @@ async fn an_annex_that_never_reached_its_keeper_advertises_nothing() {
     kept(&a, &b).await;
 
     assert_eq!(b.identity().await.addresses, Vec::<String>::new());
+}
+
+/// A Keeper advertising no address at all — offline, its loopback never
+/// advertised — still reaches its Annex: the identity, the announcement the
+/// link makes and a relayed workbench call all go through, as does the Annex's
+/// ask of its Keeper (ADR-0024, *The Keeper and its Annex reach each other
+/// directly*).
+#[tokio::test]
+async fn a_keeper_advertising_nothing_still_reaches_its_annex() {
+    let a = Verkstead::standing(A, Role::Keeper).await;
+    let b = Verkstead::standing(B, Role::Annex).await;
+    let c = Verkstead::standing(C, Role::Member).await;
+
+    linked(&c, &a).await;
+    a.reading.moving_to(Vec::new());
+    kept(&a, &b).await;
+
+    assert_eq!(
+        b.identity().await.addresses,
+        Vec::<String>::new(),
+        "the Annex advertises what its Keeper does, which is nothing",
+    );
+    assert!(
+        a.row_for(B).await.addresses.is_empty(),
+        "and the Keeper holds it at nothing it advertised",
+    );
+
+    let answered = a
+        .peers()
+        .identity(&a.row_for(B).await)
+        .await
+        .expect("the Keeper reaches its Annex directly");
+    assert_eq!(answered.device, B);
+
+    assert_eq!(
+        b.row_for(C).await.device,
+        C,
+        "the link told the Annex about the Keeper's other member",
+    );
+
+    let (status, said) = relayed(&a, B).await;
+    assert_eq!(
+        (status, said.as_str()),
+        (StatusCode::OK, "here"),
+        "a workbench call relayed to the Annex",
+    );
+
+    assert_eq!(
+        b.peers()
+            .forwarded_by(A)
+            .await
+            .expect("the Annex reaches its Keeper directly"),
+        Vec::<String>::new(),
+    );
+}
+
+/// A Keeper that moves networks after the link still reaches its Annex and is
+/// still reached by it, with neither restarted; the Annex advertises the new
+/// addresses at the forward from its next reading on, and a third device told
+/// about it records them — and never the Annex's own address.
+#[tokio::test]
+async fn a_keeper_and_its_annex_reach_each_other_across_a_move() {
+    let a = Verkstead::standing(A, Role::Keeper).await;
+    let b = Verkstead::standing(B, Role::Annex).await;
+    let c = Verkstead::standing(C, Role::Member).await;
+
+    // Linked on a network the Keeper is about to leave.
+    let gone = format!("{GONE}:{}", a.address.port());
+    let gone_forward = format!("{GONE}:{}", a.forward.as_ref().unwrap().1.port());
+
+    a.reading.moving_to(vec![gone.clone()]);
+    kept(&a, &b).await;
+    linked(&c, &a).await;
+
+    assert_eq!(b.identity().await.addresses, vec![gone_forward.clone()]);
+    assert_eq!(
+        c.row_for(B).await.addresses,
+        vec![gone_forward],
+        "C was handed the Annex at the Keeper's forward on that network",
+    );
+
+    // And moved, with nothing restarted.
+    a.reading.moving_to(vec![a.at()]);
+
+    a.peers()
+        .identity(&a.row_for(B).await)
+        .await
+        .expect("the Keeper reaches its Annex past the addresses it left");
+
+    let (status, said) = relayed(&a, B).await;
+    assert_eq!((status, said.as_str()), (StatusCode::OK, "here"));
+
+    assert_eq!(
+        b.peers()
+            .forwarded_by(A)
+            .await
+            .expect("the Annex reaches its Keeper past the addresses it left"),
+        vec![a.forward()],
+    );
+
+    let (status, said) = relayed(&b, A).await;
+    assert_eq!(
+        (status, said.as_str()),
+        (StatusCode::OK, "here"),
+        "a workbench call the Annex relays to its Keeper",
+    );
+
+    assert_eq!(
+        b.identity().await.addresses,
+        vec![a.forward()],
+        "the Annex advertises where its Keeper is now",
+    );
+
+    // And the Keeper linking again, as it does at every start, tells the rest
+    // of the cluster.
+    kept(&a, &b).await;
+
+    let told = c.row_for(B).await;
+    assert_eq!(told.addresses, vec![a.forward()]);
+    assert_eq!(told.direct, None);
+
+    for addresses in [&told.addresses, &b.identity().await.addresses] {
+        assert!(
+            !addresses.contains(&b.at()),
+            "the Annex's own address is its Keeper's alone: {addresses:?}",
+        );
+    }
+
+    c.peers()
+        .identity(&told)
+        .await
+        .expect("C reaches the Annex at the Keeper's new forward");
 }

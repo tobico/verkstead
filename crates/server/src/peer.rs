@@ -797,6 +797,19 @@ impl Members {
         }
     }
 
+    /// And write down where one is reached directly, which is what a Keeper
+    /// and its Annex hold each other at — see
+    /// [`verkstead_store::member_reached_at`] and [`Member::direct`].
+    pub(crate) async fn reached_at(&self, device: &str, direct: Option<&str>) -> Result<()> {
+        match &self.recorded {
+            Recorded::InTheStore(pool) => verkstead_store::member_reached_at(pool, device, direct)
+                .await
+                .with_context(|| format!("recording where device {device} is reached directly")),
+
+            Recorded::Stated(_) => Ok(()),
+        }
+    }
+
     /// Write down that `device` has yet to be told about `about` — see
     /// [`verkstead_store::owe_announcement`].
     ///

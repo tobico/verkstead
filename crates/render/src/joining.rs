@@ -121,6 +121,15 @@ pub struct JoinKept {
 pub struct NewAnnex {
     pub data_dir: String,
     pub address: String,
+
+    /// And where the Annex reaches its Keeper in turn, which does not move with
+    /// the Keeper's network: the Windows host's side of WSL's NAT at the
+    /// Keeper's peer port, or the loopback at it under mirrored networking.
+    /// Written into the Annex's `kept_by` (ADR-0024, *The Keeper and its Annex
+    /// reach each other directly*); absent, the Annex reaches its Keeper at
+    /// what the Keeper advertises.
+    #[serde(default)]
+    pub keeper_at: Option<String>,
 }
 
 /// And what it says when its human has settled the question: the dial back

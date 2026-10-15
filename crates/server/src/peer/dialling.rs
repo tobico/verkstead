@@ -40,6 +40,11 @@
 //! for the dial as a whole, which is what keeps a list whose first three
 //! addresses are gone from costing the fourth anything — see [`REACHING`].
 //!
+//! **And one address before all of them, between a Keeper and its Annex.** Each
+//! holds the other at a direct address too, which no refresh writes and no
+//! third device is told — see [`dialled_at`] (ADR-0024, *The Keeper and its
+//! Annex reach each other directly*).
+//!
 //! **What a dial that got through writes is the member itself.** The moment it
 //! answered, and the name, the OS and the addresses that machine now says it
 //! has: this end cannot read another machine's hostname for itself, so what a
@@ -292,7 +297,7 @@ impl Peers {
         let dialling = self.dialling(accepted(member), &met)?;
         let mut nothing_at = Vec::new();
 
-        for address in &member.addresses {
+        for address in dialled_at(member) {
             let at = reaching(address, IDENTITY);
 
             match dialling.get(&at).send().await {
@@ -466,8 +471,9 @@ impl Peers {
     /// which asks.
     ///
     /// **A member's own call**, pinned on the Keeper's certificate and made at
-    /// the addresses this device's row for it holds, in their order — the same
-    /// walk [`Peers::identity`] makes, and the same reading of a Keeper that
+    /// the address its `kept_by` names first and then the ones it advertised —
+    /// see [`dialled_at`] — so that a Keeper whose network moved is still
+    /// asked. The same walk [`Peers::identity`] makes, and the same reading of a Keeper that
     /// answers nowhere. A Keeper this device holds no row for yet has nowhere
     /// to be asked, which is an Annex whose Keeper's Join has not landed.
     pub async fn forwarded_by(&self, keeper: &str) -> Result<Vec<String>> {
@@ -485,7 +491,7 @@ impl Peers {
         let dialling = self.dialling(accepted(&member), &met)?;
         let mut nothing_at = Vec::new();
 
-        for address in &member.addresses {
+        for address in dialled_at(&member) {
             let at = reaching(address, crate::peer::annex_forward::FORWARDED);
 
             match dialling.get(&at).send().await {
@@ -698,7 +704,7 @@ impl Peers {
         let dialling = self.dialling(accepted(member), &met)?;
         let mut nothing_at = Vec::new();
 
-        for address in &member.addresses {
+        for address in dialled_at(member) {
             match build(&dialling, address).send().await {
                 Ok(answered) => {
                     let status = answered.status();
@@ -769,7 +775,7 @@ impl Peers {
         let (dialling, met) = self.held_for(member)?;
         let mut nothing_at = Vec::new();
 
-        for address in &member.addresses {
+        for address in dialled_at(member) {
             let mut attempt = dialling
                 .request(call.method.clone(), reaching(address, &call.onwards))
                 .headers(call.headers.clone());
@@ -1479,6 +1485,24 @@ fn accepted(member: &Member) -> Vec<String> {
     accepted
 }
 
+/// The addresses a dial to `member` works down, in order: where this device
+/// reaches it directly, where it does, and then every address it advertised.
+///
+/// **The direct one first because it is the one that does not move.** It is a
+/// Keeper's road to its Annex and an Annex's to its Keeper — see
+/// [`Member::direct`] — and what the two advertise of each other is the
+/// Keeper's own network, which a laptop changing networks or going offline
+/// takes away. Dialled first, the pair reach each other whatever that network
+/// does, and an advertised address that is the same place is not tried twice.
+fn dialled_at(member: &Member) -> impl Iterator<Item = &String> {
+    member.direct.iter().chain(
+        member
+            .addresses
+            .iter()
+            .filter(|address| member.direct.as_ref() != Some(*address)),
+    )
+}
+
 /// Where a call goes: `path` on the peer listener of whatever is at `address`.
 ///
 /// One function for all three of them — the identity read, the join and the
@@ -1740,6 +1764,7 @@ mod tests {
             renewing_from: None,
             acknowledged: None,
             kept_by: None,
+            direct: None,
         }
     }
 
@@ -1904,6 +1929,31 @@ mod tests {
         assert_eq!(
             authority("workbench.tailnet-name.ts.net:9000"),
             "workbench.tailnet-name.ts.net:9000",
+        );
+    }
+
+    /// A member held at a direct address is dialled there first, and an
+    /// advertised address that is the same place is not dialled twice.
+    #[test]
+    fn a_direct_address_is_dialled_before_the_advertised_ones() {
+        let member = Member {
+            addresses: vec![
+                "192.168.1.24:8424".to_owned(),
+                "172.24.80.2:8425".to_owned(),
+            ],
+            direct: Some("172.24.80.2:8425".to_owned()),
+            ..a_member("0011223344556677889900aabbccddee", "3A:7B")
+        };
+
+        assert_eq!(
+            dialled_at(&member).collect::<Vec<_>>(),
+            ["172.24.80.2:8425", "192.168.1.24:8424"],
+        );
+
+        let advertised = a_member("0011223344556677889900aabbccddee", "3A:7B");
+        assert_eq!(
+            dialled_at(&advertised).collect::<Vec<_>>(),
+            ["192.168.1.24"]
         );
     }
 }

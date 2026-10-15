@@ -178,7 +178,10 @@ enum Lan {
     /// running server nothing ever says otherwise; in a suite where two devices
     /// really dial each other the port is the one the operating system picked,
     /// and there is nowhere else to put it.
-    Advertised(Vec<String>),
+    ///
+    /// Shared by every clone, so a suite can move the machine under a running
+    /// server — see [`Reading::moving_to`].
+    Advertised(Arc<std::sync::RwLock<Vec<String>>>),
 }
 
 impl Reading {
@@ -244,7 +247,7 @@ impl Reading {
             tailscale,
             platform,
             kernel,
-            lan: Lan::Advertised(advertised),
+            lan: Lan::Advertised(Arc::new(std::sync::RwLock::new(advertised))),
             held: Arc::default(),
             told: None,
             asking: None,
@@ -305,6 +308,22 @@ impl Reading {
         Reading {
             forwarding_at: Some(port),
             ..self
+        }
+    }
+
+    /// Say `advertised` from now on, in place of the list this reading was
+    /// stated with — for every clone of it at once.
+    ///
+    /// For a suite moving a machine between networks under a running server:
+    /// a laptop's addresses change with nothing restarted, and what is being
+    /// asked is what the cluster makes of that. A reading of the machine's own
+    /// interfaces moves by itself, and one stated any other way is left as it
+    /// was.
+    pub fn moving_to(&self, advertised: Vec<String>) {
+        if let Lan::Advertised(standing) = &self.lan {
+            *standing
+                .write()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = advertised;
         }
     }
 
@@ -398,7 +417,10 @@ impl Reading {
         // daemon is not asked, there being nothing for its answer to be added
         // to.
         if let Lan::Advertised(advertised) = &self.lan {
-            return advertised.clone();
+            return advertised
+                .read()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone();
         }
 
         let tailnet = self.tailnet().await;

@@ -1149,5 +1149,6 @@ fn member_at(listening: &Verkstead, device: &str) -> Member {
         renewing_from: None,
         acknowledged: None,
         kept_by: None,
+        direct: None,
     }
 }

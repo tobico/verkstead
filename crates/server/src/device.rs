@@ -81,7 +81,7 @@ use verkstead_render::{
     AskingDevice, DeviceIdentity, DevicesView, DiscoveredDevice, JoinHeld, JoinSettled,
     RenewedCertificate,
 };
-use verkstead_store::{AskedJoin, Linking, Member, Telling};
+use verkstead_store::{AskedJoin, Linking, Telling};
 use x509_parser::certificate::X509Certificate;
 use x509_parser::prelude::FromDer;
 
@@ -1012,14 +1012,28 @@ impl Devices {
     /// **And then the Annex Forward**, pointed at `address` once the join has
     /// gone through it — see [`crate::peer::annex_forward`].
     ///
+    /// **And each end holds the other directly** (ADR-0024, *The Keeper and its
+    /// Annex reach each other directly*): this device holds the Annex at
+    /// `address`, the forward's own target, and `keeper_at` — where the Annex
+    /// reaches this device, which only this device's probe of the box can say —
+    /// goes into the `kept_by` the Annex records its Keeper's row from. Neither
+    /// moves with this device's network, which is what the two advertise of
+    /// each other, and neither is told to anybody else.
+    ///
     /// **Idempotent**, so a Keeper runs it at every start: nothing unchanged is
     /// rewritten, the join is taken again, and each side's row for the other is
     /// the same row said again, and the one forward is pointed again.
     ///
     /// No page presses this — see [`crate::ui`], where it is a route with no
     /// button, and stage 03 of the WSL roadmap, which calls it at every boot.
-    pub async fn keep(&self, data_dir: &Path, address: &str) -> Result<()> {
+    pub async fn keep(
+        &self,
+        data_dir: &Path,
+        address: &str,
+        keeper_at: Option<&str>,
+    ) -> Result<()> {
         let address = address.trim();
+        let keeper_at = keeper_at.map(str::trim).filter(|at| !at.is_empty());
 
         if address.is_empty() {
             bail!("an address the Annex answers at is one of the two things linking it takes");
@@ -1051,10 +1065,10 @@ impl Devices {
         }
 
         crate::settings::Settings::in_data_dir(data_dir)
-            .keep_by(&crate::settings::KeptBy::of(
-                self.device.id(),
-                self.device.fingerprint(),
-            ))
+            .keep_by(
+                &crate::settings::KeptBy::of(self.device.id(), self.device.fingerprint())
+                    .reached_at(keeper_at),
+            )
             .with_context(|| {
                 format!(
                     "writing this device into the config.yaml in {} as its Keeper",
@@ -1099,34 +1113,33 @@ impl Devices {
             "this device has linked its Annex by the Keeper's Join",
         );
 
-        // And the Annex read again at the address the join went through, now
-        // that each side holds the other. What an Annex advertises is this
-        // device's own addresses at the Annex Forward, asked of this device
-        // over a member's route — which it could not ask while the join was in
-        // flight, this device not yet holding it — so its answer to the join
-        // carried none, and the row it left is one nothing could dial. The dial
-        // writes down what the Annex says now, which is what the members below
-        // are told. A refresh that fails leaves the row as the join wrote it.
+        // And the Annex held at the address the join went through, which is
+        // the forward's target and the one road to it that does not move with
+        // this device's network — written beside the row rather than in it, so
+        // no refresh of what the Annex advertises takes it away.
+        self.members.reached_at(&annex, Some(address)).await?;
+
+        // And the Annex read again, now that each side holds the other. What an
+        // Annex advertises is this device's own addresses at the Annex Forward,
+        // asked of this device over a member's route — which it could not ask
+        // while the join was in flight, this device not yet holding it — so its
+        // answer to the join carried none. The dial writes down what the Annex
+        // says now, which is what the members below are told. A refresh that
+        // fails leaves the row as the join wrote it.
         if let Some(row) = self
             .members
             .rows()
             .await?
             .into_iter()
             .find(|member| member.device == annex)
+            && let Err(why) = self.peers.identity(&row).await
         {
-            let at = Member {
-                addresses: vec![address.to_owned()],
-                ..row
-            };
-
-            if let Err(why) = self.peers.identity(&at).await {
-                tracing::warn!(
-                    device = %annex,
-                    %why,
-                    "this device's Annex could not be read again once it was linked, so it \
-                     is held at what its answer to the join said",
-                );
-            }
+            tracing::warn!(
+                device = %annex,
+                %why,
+                "this device's Annex could not be read again once it was linked, so it \
+                 is held at what its answer to the join said",
+            );
         }
 
         // And now the rest of the cluster, the way an Allow joins a newcomer to

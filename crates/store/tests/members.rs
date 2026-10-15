@@ -13,8 +13,8 @@ use sqlx::SqlitePool;
 use verkstead_store::{
     Linking, Renewal, Telling, announcement_made, announcements_owed, announcements_owed_to,
     changeover_over, forget_every_member, forget_member, member_count, member_holding,
-    member_unreachable, members, members_yet_to_acknowledge, open_database, owe_announcement,
-    record_member, record_renewal, renewal_acknowledged,
+    member_reached_at, member_unreachable, members, members_yet_to_acknowledge, open_database,
+    owe_announcement, record_member, record_renewal, renewal_acknowledged,
 };
 
 /// The two devices these tests link to, named by the ids a cluster names them
@@ -281,6 +281,48 @@ async fn the_annex_mark_is_taken_once_and_kept() {
         Some(A),
         "and an Annex recorded again without its mark still has it",
     );
+}
+
+/// Where a member is reached directly is this device's own record: written on
+/// its own, and kept through every recording of what the member says after
+/// (ADR-0024, *The Keeper and its Annex reach each other directly*).
+#[tokio::test]
+async fn a_direct_address_outlives_every_recording() {
+    let (_dir, pool) = fresh_pool().await;
+
+    record_member(&pool, &advertising(B, "annex", B_FINGERPRINT))
+        .await
+        .unwrap();
+    assert_eq!(members(&pool).await.unwrap()[0].direct, None);
+
+    member_reached_at(&pool, B, Some("172.24.80.2:8425"))
+        .await
+        .unwrap();
+    record_member(
+        &pool,
+        &Linking {
+            addresses: Vec::new(),
+            ..advertising(B, "annex", B_FINGERPRINT)
+        },
+    )
+    .await
+    .unwrap();
+
+    let row = members(&pool).await.unwrap().remove(0);
+    assert_eq!(row.direct.as_deref(), Some("172.24.80.2:8425"));
+    assert!(
+        row.addresses.is_empty(),
+        "the advertised list is the far end's"
+    );
+
+    member_reached_at(&pool, B, None).await.unwrap();
+    assert_eq!(members(&pool).await.unwrap()[0].direct, None);
+
+    // And a device that is no member is nothing to write.
+    member_reached_at(&pool, C, Some("127.0.0.1:8423"))
+        .await
+        .unwrap();
+    assert_eq!(members(&pool).await.unwrap().len(), 1);
 }
 
 /// A member a dial found nothing at is marked, and nothing else about the row

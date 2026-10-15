@@ -58,7 +58,14 @@ Windows.
   distro in the background and never waits; once the Annex answers, the
   Keeper reads its address — the NAT address under NAT, the loopback under
   mirrored, as the probe says — points the forward at it and runs stage 01's
-  linking operation again, which is idempotent. The Keeper's shutdown
+  linking operation again, which is idempotent. **The linking operation takes
+  a second address from the probe too** (ADR-0024, *The Keeper and its Annex
+  reach each other directly*): `keeper_at`, where the Annex reaches the
+  Keeper — the Windows host's side of WSL's network at the Keeper's peer port
+  under NAT, the loopback at it under mirrored — which goes into `kept_by` as
+  `at`. The two are what the pair dial each other at whatever the Keeper's own
+  network does, so both are read afresh at every boot: a NAT gateway that
+  moved across a reboot is right again at the next link. The Keeper's shutdown
   terminates the distro. An Annex that will not boot is a Notice and a line
   on its row.
 - **The elevated step**: `wsl --install --no-distribution`, `wsl --update`,
@@ -91,6 +98,8 @@ Windows.
    - After a restart of the Keeper, Devices lists the Annex reachable within
      the boot's time and nothing was pressed — under NAT and under
      `networkingMode=mirrored` both.
+   - The link names the Annex's address and the Keeper's as the probe read
+     them, and the Annex stays reachable with the Keeper offline.
 5. **A session in the Annex** — the end-to-end proof: a Conversation drafted
    onto *Linux (WSL)* with a mirrored Profile runs under bwrap and commits.
    - The Keeper's git author is on the commit.
@@ -98,7 +107,12 @@ Windows.
 ## Re-verify at start
 
 - Assumes stage 01 landed: `kept_by`, the Keeper's Join, the forward and the
-  linking operation.
+  linking operation, which takes `data_dir`, `address` and `keeper_at` at
+  `POST /api/ui/devices/annexes`, and the direct address each end dials the
+  other at first.
+- Decide then how the probe reads the Windows host's address on WSL's NAT
+  network (the vEthernet (WSL) adapter's, or the Annex's default route
+  read from inside), and add the Keeper's peer port to it.
 - Assumes the wizard's install plan is `plan()` in
   `crates/server/src/onboarding/install.rs` with a Windows arm run through
   `Elevate::raise`, and the hint screen draws per-row instructions from

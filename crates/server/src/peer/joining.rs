@@ -629,7 +629,27 @@ async fn kept(holding: &Holding, saying: DeviceIdentity, presented: String) -> R
         kept_by: saying.kept_by,
     };
 
-    if let Err(why) = holding.members.refreshed(&keeper).await {
+    // And where this device reaches its Keeper directly, as the Keeper wrote
+    // into `kept_by` before it dialled — or nowhere but what it advertises,
+    // where it named nothing (ADR-0024, *The Keeper and its Annex reach each
+    // other directly*). Said again at every link, so a Keeper whose address on
+    // this side moved puts it right by linking again.
+    let direct = holding
+        .reading
+        .keeper()
+        .and_then(|kept| kept.at().map(str::to_owned));
+
+    let written = async {
+        holding.members.refreshed(&keeper).await?;
+
+        holding
+            .members
+            .reached_at(&keeper.device, direct.as_deref())
+            .await
+    }
+    .await;
+
+    if let Err(why) = written {
         tracing::error!(%why, "a Keeper's Join could not be written down");
 
         return unreadable("this device could not write the membership down");

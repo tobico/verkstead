@@ -513,6 +513,7 @@ fn member_at(listening: &Verkstead, device: &str) -> verkstead_store::Member {
         renewing_from: None,
         acknowledged: None,
         kept_by: None,
+        direct: None,
     }
 }
 
