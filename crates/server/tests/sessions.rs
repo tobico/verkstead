@@ -38432,6 +38432,63 @@ async fn a_terminal_runs_a_shell_in_the_conversations_worktree() {
     );
 }
 
+/// And a terminal pressed for where the Worktree has gone makes it again, the
+/// way Resume does: the record still names the directory, the directory was
+/// deleted under it, and what the human asked for is a shell in the work.
+///
+/// A worktree is derived state — see `worktrees::healthy` — so the branch is
+/// what it comes back from, and a press that refused instead would leave the
+/// Conversation's terminal saying only that the shell would not start.
+#[tokio::test]
+async fn a_terminal_makes_a_worktree_that_has_gone_again_from_its_branch() {
+    let fixture = grilling(
+        r#"
+        printf 'reading the brief\r\n'
+        while :; do sleep 0.05; done
+        "#,
+    )
+    .await;
+
+    let worktree = fixture
+        .until(|view| view.worktree.as_ref().map(|worktree| worktree.path.clone()))
+        .await;
+
+    std::fs::remove_dir_all(&worktree).unwrap();
+
+    let at = fixture.listening().await;
+
+    let opened: TerminalOpened = post(
+        &fixture.app,
+        &format!("/api/ui/conversations/{}/terminals", fixture.id),
+        &serde_json::json!({}),
+    )
+    .await;
+
+    let TerminalOpened::Opened { number } = opened else {
+        panic!(
+            "expected the worktree to be made again and a terminal opened in it, and the server said: {opened:?}"
+        );
+    };
+
+    assert!(
+        std::path::Path::new(&worktree).join(".git").exists(),
+        "the worktree at {worktree:?} should be a checkout again",
+    );
+
+    let mut watcher = Watcher::terminal(at, fixture.id, number).await;
+
+    watcher.resize(200, 40).await;
+    watcher.types("pwd\r").await;
+
+    let showing = watcher.until(|grid| grid.contains(&worktree)).await;
+
+    assert!(
+        showing.iter().any(|row| row.contains(&worktree)),
+        "the shell should be standing in the remade Worktree at {worktree:?}, \
+         and its terminal is showing: {showing:?}",
+    );
+}
+
 /// And the shell it comes up in is the server user's own, with `SHELL` naming it
 /// inside and the running server's own `verkstead` still the first one found.
 ///

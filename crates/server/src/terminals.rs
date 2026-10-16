@@ -1041,6 +1041,49 @@ pub(crate) async fn open(
         return Ok(TerminalOpened::NoProfile);
     };
 
+    // What the record names may be nowhere: a directory deleted, hollowed out,
+    // or dropped from the repository's list of worktrees — and a Conversation
+    // stays Done for as long as nobody merges its pull request. A shell has
+    // nowhere to stand in that, and the sandbox below would be refused for it
+    // with nothing on the screen saying why. So it is made again from the
+    // branch, as Resume makes it and for Resume's reason: a worktree is derived
+    // state, and nothing healthy is touched — see [`crate::worktrees::healthy`].
+    //
+    // The branch followed first, for the reason Resume follows it: a rename
+    // nothing saw would read the checkout as broken and rebuild it from a
+    // branch that is not there. See [`crate::renames`].
+    if let Some(worktree) = conversation.worktree.clone() {
+        let branch = crate::renames::follow(
+            &state.pool,
+            conversation_id,
+            &conversation.repo.path,
+            &worktree,
+            &conversation.branch,
+        )
+        .await
+        .unwrap_or_else(|| conversation.branch.clone());
+
+        let repo = conversation.repo.path.clone();
+        let at = worktree.clone();
+
+        let usable = tokio::task::spawn_blocking(move || {
+            crate::worktrees::healthy(&repo, &at, &branch)
+                || crate::worktrees::rebuild(&repo, &at, &branch)
+        })
+        .await?;
+
+        if !usable {
+            tracing::error!(
+                conversation_id,
+                worktree = %worktree.display(),
+                "the Conversation's worktree has gone and could not be made again from its \
+                 branch, so no terminal was opened"
+            );
+
+            return Ok(TerminalOpened::Refused);
+        }
+    }
+
     // And where that Profile is a member's, the account it names is on that
     // machine: a mirror of it is fetched here before the shell is built out of
     // it, exactly as a session's launch fetches one — see
