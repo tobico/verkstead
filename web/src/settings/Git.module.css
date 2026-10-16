@@ -249,7 +249,8 @@
    the fill, the weight and the padding it takes are given back here. The remove
    takes the colour of what it does, as the Clear above it does. */
 .form .remove,
-.form .add {
+.form .add,
+.form .addAuthor {
   padding: 0.35rem 0.75rem;
   font-weight: inherit;
   font-size: 0.9rem;
@@ -260,6 +261,14 @@
 
 .form .remove {
   color: var(--removed);
+}
+
+/* And the way to a second Author, under the first one's fields: off the email
+   field above it by the gap a field keeps, so it reads as an act on the
+   section rather than a part of the field. */
+.form .addAuthor {
+  display: block;
+  margin-top: 0.4rem;
 }
 
 /* The field being typed in, which is no pointer's doing: the border says which

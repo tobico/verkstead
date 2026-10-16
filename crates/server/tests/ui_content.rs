@@ -4356,6 +4356,14 @@ fn pin_written_at(json: &str, under: &str) -> String {
     );
     settings["github_token"]["at"] = "2026-08-03T09:07:11.000Z".into();
 
+    // And every Author's in the list, which is the same stamp read off the
+    // same file.
+    for author in settings["authors"].as_array_mut().into_iter().flatten() {
+        if author["github_token"].get("at").is_some() {
+            author["github_token"]["at"] = "2026-08-03T09:07:11.000Z".into();
+        }
+    }
+
     serde_json::to_string(&payload).unwrap()
 }
 

@@ -30,6 +30,17 @@
 //! own now, and the card reads as open while that pane is, which is what every
 //! other card in this app says about itself.
 //!
+//! **Every Author, one at a time.** The token and the Git Author's fields are
+//! about one Author, and a dropdown at the form's head picks which, with **Add
+//! author** at its foot behind a rule the way the Repo dropdown carries Open
+//! repo and Create repo. Drawn only once there are two to choose between, and
+//! the display name with it, it being read nowhere but in those rows: with one
+//! Author the pane reads as it did before there could be two, and the way to a
+//! second is a quiet press under the first one's fields. Switching drops what
+//! was typed and not saved, which was about the Author being left. An Author
+//! being added is a uuid minted here, saved like any other — the server makes
+//! a new Author of a uuid it does not hold. Removing one is not here yet.
+//!
 //! Both halves read the one query. They are two views of the same two files, and
 //! a read apiece would be two reads of them — the cache is what makes the second
 //! caller free.
@@ -106,8 +117,10 @@ import { PaneSticky } from "../Panes";
 import { QuietButton } from "../QuietButton";
 import { loadSettings, saveSettings } from "../api/client";
 import { useReading } from "../freshness";
-import { Picker } from "../picking";
+import { Listbox, Picker } from "../picking";
 import type {
+  Author,
+  AuthorSaved,
   ConflictResolution,
   IgnoreRule,
   IgnoredCommentsEdit,
@@ -151,32 +164,77 @@ function useGit() {
 ///
 /// Drawn in both panes: on the card it is what is configured, and in the form it
 /// is what Replace and Clear are about.
-function standing(saved: TokenSaved): JSX.Element {
+///
+/// Handed an accessor rather than the value, because the pane's is a different
+/// Author's token the moment its dropdown is switched, and a `Show` that stayed
+/// shown would otherwise keep saying the first one's.
+function standing(saved: () => TokenSaved): JSX.Element {
   return (
     <p class={styles.tokenStanding}>
-      A token ending <code class={styles.lastFour}>{saved.last_four}</code>,
-      saved <span>{utcStamp(saved.at)}</span>.
+      A token ending <code class={styles.lastFour}>{saved().last_four}</code>,
+      saved <span>{utcStamp(saved().at)}</span>.
     </p>
   );
 }
 
 /// Half an author is as broken as none: git complains by name about whichever
 /// half it has not been given.
-function authorless(told: SettingsView): boolean {
-  return told.git_author.name === "" || told.git_author.email === "";
+function authorless(author: Author | AuthorSaved): boolean {
+  return author.name === "" || author.email === "";
 }
 
-/// What the card says, in a line: who commits and which token is saved — or,
-/// where either is missing, that it is, which is the line in the warning colour.
-function summary(told: SettingsView): string {
-  const tokenless = told.github_token === null;
-  const author = authorless(told);
+/// What an Author is called in the dropdown's rows and on the card: the display
+/// name somebody gave it, or its git name where nobody did.
+///
+/// And something for an Author that has neither yet, which is the one **Add
+/// author** has just opened — a row reading as nothing would be a row nobody
+/// could find again.
+export function authorLabel(author: AuthorSaved): string {
+  return author.display_name || author.name || "New author";
+}
 
+/// What one Author is missing, in the card's words — or `null` where it has
+/// everything a session needs.
+function lacking(tokenless: boolean, author: boolean): string | null {
   if (tokenless && author) return "No GitHub token or git author";
   if (tokenless) return "No GitHub token";
   if (author) return "No git author";
 
-  return `${told.git_author.name} · token …${told.github_token!.last_four}`;
+  return null;
+}
+
+/// Whether the card is drawn in the warning colour: an Author missing either
+/// half, or no Author at all.
+function warning(told: SettingsView): boolean {
+  return told.authors.length > 1
+    ? told.authors.some(
+        (author) => author.github_token === null || authorless(author),
+      )
+    : told.github_token === null || authorless(told.git_author);
+}
+
+/// What the card says, in a line: who commits and which token is saved — or,
+/// where either is missing, that it is, which is the line in the warning colour.
+///
+/// With several Authors the warning names the Author it is about, the first
+/// that is missing anything, and the line that has nothing to warn about names
+/// every one of them. With one it is exactly what it was before there could be
+/// two: the one Author's name and token.
+function summary(told: SettingsView): string {
+  if (told.authors.length > 1) {
+    for (const author of told.authors) {
+      const missing = lacking(author.github_token === null, authorless(author));
+
+      if (missing) return `${missing} for ${authorLabel(author)}`;
+    }
+
+    return told.authors.map(authorLabel).join(", ");
+  }
+
+  return (
+    lacking(told.github_token === null, authorless(told.git_author)) ??
+    `${told.git_author.name} · token …${told.github_token!.last_four}`
+  );
 }
 
 /// What git has been told, as the card that opens it.
@@ -212,7 +270,7 @@ export function GitCard(props: {
             title={TITLE}
             open={props.open}
             press={props.press}
-            warn={told().github_token === null || authorless(told())}
+            warn={warning(told())}
             status={summary(told())}
           />
         )}
@@ -235,8 +293,18 @@ export function GitPane(props: {
   const queries = useQueryClient();
   const settings = useGit();
 
+  // Which Author the fields are about, by uuid, or `null` for the first —
+  // which is the only one there is, until somebody adds a second.
+  const [chosen, setChosen] = createSignal<string | null>(null);
+
+  // And the uuid **Add author** minted, while the Author it opened has not been
+  // saved: it is a row of the dropdown until then, and an Author in the file
+  // from the save that names it on.
+  const [adding, setAdding] = createSignal<string | null>(null);
+
   // What has been typed, or `null` while nothing has — the fields follow the
   // server until somebody touches them, the way a branch name does.
+  const [displayName, setDisplayName] = createSignal<string | null>(null);
   const [name, setName] = createSignal<string | null>(null);
   const [email, setEmail] = createSignal<string | null>(null);
 
@@ -255,7 +323,13 @@ export function GitPane(props: {
   // afterwards. Said in this pane rather than on the card, because this is where
   // the press that asked it was made and the pane is still standing to hear the
   // answer.
-  const [verified, setVerified] = createSignal<Verified | null>(null);
+  //
+  // Kept with the uuid of the Author it was about, so that switching the
+  // dropdown does not say one Author's account under another's fields.
+  const [verifiedAs, setVerifiedAs] = createSignal<{
+    id: string | null;
+    verified: Verified;
+  } | null>(null);
 
   // The ignore rules as they are being edited, or `null` while nobody has
   // touched a row — the rows follow the server until then, the way the author
@@ -270,11 +344,72 @@ export function GitPane(props: {
   const [refusals, setRefusals] = createSignal<RuleRefused[]>([]);
 
   const told = (): SettingsView | undefined => settings.data;
-  const author = () => told()?.git_author;
-  const configured = () => told()?.github_token ?? null;
 
+  /// Every Author there is to pick between: the ones the files hold, and the
+  /// one **Add author** opened on the end while it is still unsaved.
+  const authors = (): AuthorSaved[] => {
+    const saved = told()?.authors ?? [];
+    const minted = adding();
+
+    return minted === null || saved.some((one) => one.id === minted)
+      ? saved
+      : [
+          ...saved,
+          {
+            id: minted,
+            display_name: "",
+            name: "",
+            email: "",
+            github_token: null,
+          },
+        ];
+  };
+
+  /// Whether there are two to choose between, which is what draws the
+  /// dropdown — and the display name, which is only ever read in its rows.
+  const several = () => authors().length > 1;
+
+  /// The Author the fields are about: the one picked, or the first where the
+  /// pick is gone or was never made.
+  ///
+  /// With one, the first Author as the read's own single fields have it,
+  /// which is what the card is drawn from too — the pane reads exactly as it
+  /// did before there could be two. Its uuid is empty on a Verkstead with no
+  /// Author yet, which a save sends as none.
+  const author = (): AuthorSaved | undefined => {
+    if (several()) {
+      return authors().find((one) => one.id === chosen()) ?? authors()[0];
+    }
+
+    const standing = told();
+
+    return (
+      standing && {
+        ...standing.git_author,
+        id: standing.git_author.id ?? "",
+        github_token: standing.github_token,
+      }
+    );
+  };
+
+  /// Its uuid as a save names it: none, where there is no Author yet.
+  const authorId = (): string | null => author()?.id || null;
+
+  /// Whether that is the Author **Add author** opened, still unsaved.
+  const drafting = () => author() !== undefined && author()!.id === adding();
+
+  const configured = () => author()?.github_token ?? null;
+
+  const authorDisplayName = () => displayName() ?? author()?.display_name ?? "";
   const authorName = () => name() ?? author()?.name ?? "";
   const authorEmail = () => email() ?? author()?.email ?? "";
+
+  /// What GitHub said about the token last saved from here, where it was saved
+  /// under the Author the fields are about now.
+  const verified = (): Verified | null => {
+    const what = verifiedAs();
+    return what && what.id === authorId() ? what.verified : null;
+  };
 
   /// Everything in `config.yaml` this form is not about, as it stands — see
   /// [`heldConfig`], which the wizard's git step sends the same way. The
@@ -413,15 +548,45 @@ export function GitPane(props: {
   /// fields go back to following the server, which has just been told what they
   /// said.
   const spent = () => {
-    setName(null);
-    setEmail(null);
-    setToken("");
-    setReplacing(false);
+    unedited();
 
     // And the rows go back to following the server, which has just been told
     // what they said: what is drawn from here on is what was written down.
     setRules(null);
     setRefusals([]);
+  };
+
+  /// The Author fields back to following the server, and the token field
+  /// shut and empty — what a save leaves, and what a switch of the dropdown
+  /// does, so that nothing typed about one Author is sent as another's.
+  const unedited = () => {
+    setDisplayName(null);
+    setName(null);
+    setEmail(null);
+    setToken("");
+    setReplacing(false);
+  };
+
+  /// Make the fields about another Author. Whatever was typed and not saved
+  /// stays with the Author it was typed about, which is to say it goes: it
+  /// was never written down. And an Author **Add author** opened and nobody
+  /// saved goes with it, there being nothing of it anywhere but this page.
+  const pick = (id: string) => {
+    if (id === author()?.id) return;
+
+    unedited();
+    if (id !== adding()) setAdding(null);
+    setChosen(id);
+  };
+
+  /// **Add author**: the same fields over a uuid minted here, which the save
+  /// that names it makes an Author of.
+  const addAuthor = () => {
+    const id = mintedUuid();
+
+    unedited();
+    setAdding(id);
+    setChosen(id);
   };
 
   const save = useMutation(() => ({
@@ -435,8 +600,23 @@ export function GitPane(props: {
         return;
       }
 
-      setVerified(saved.verified);
+      setVerifiedAs(
+        saved.verified === null
+          ? null
+          : {
+              // A save about no Author yet made the first one, so the answer
+              // is about whichever uuid the server minted for it.
+              id: sentAbout() ?? saved.settings.git_author.id,
+              verified: saved.verified,
+            },
+      );
       spent();
+
+      // An Author that was being added is one now, where the save named it:
+      // the read below carries it, so it is no longer this page's to draw.
+      if (saved.settings.authors.some((one) => one.id === adding())) {
+        setAdding(null);
+      }
 
       // Taken from the answer rather than asked for again, which is the one
       // place this differs from the Repos and the Profiles: what a save
@@ -465,16 +645,12 @@ export function GitPane(props: {
     // left from turning down a save about their own email address.
     tidied();
 
+    const about = editing(github_token);
+    setSentAbout(about.id);
+
     save.mutate({
-      // Over the Author the fields were read from, its uuid and display
-      // name riding along as they stand: the display name is not a field here
-      // yet, and the uuid is what says which Author this save is about.
-      git_author: {
-        ...heldAuthor(told()),
-        name: authorName(),
-        email: authorEmail(),
-      },
-      github_token,
+      git_author: about,
+      github_token: drafting() && !said(github_token) ? "Keep" : github_token,
       share_on_done: sharing(),
       // And the ignore rules, which this pane is the one that owns: the whole
       // list where somebody has touched a row, and `Keep` where nobody has —
@@ -488,6 +664,36 @@ export function GitPane(props: {
       ...held(),
     });
   };
+
+  /// Whether a save says anything about the Author **Add author** opened: a
+  /// field typed in, or a token. One that says nothing writes no Author — a
+  /// row nobody filled in is no more an Author than it is a rule.
+  const said = (github_token: TokenEdit): boolean =>
+    [authorDisplayName(), authorName(), authorEmail()].some(
+      (field) => field.trim() !== "",
+    ) || github_token !== "Keep";
+
+  /// The Author a press of Save is about: the one the fields were read from,
+  /// with what they hold now, by its uuid — which is what says which Author the
+  /// save lands on, and makes a new one of a uuid the file does not hold.
+  ///
+  /// The first Author as it stands, where the fields are about an Author that
+  /// was added and never filled in: the rest of the form is still saved, and
+  /// nothing is made out of nothing.
+  const editing = (github_token: TokenEdit): Author => {
+    if (drafting() && !said(github_token)) return heldAuthor(told());
+
+    return {
+      id: authorId(),
+      display_name: authorDisplayName(),
+      name: authorName(),
+      email: authorEmail(),
+    };
+  };
+
+  /// And the uuid the last save went out about, for the answer to be kept
+  /// against — see [`verified`].
+  const [sentAbout, setSentAbout] = createSignal<string | null>(null);
 
   /// The checkbox's own save, which is its own press — see [`beside`] for what
   /// rides along with it.
@@ -541,6 +747,29 @@ export function GitPane(props: {
         </Match>
         <Match when={told()}>
           <form class={styles.form} onSubmit={submit}>
+            {/* Which Author everything down to the Git Author's fields is
+                about — drawn only once there are two to choose between, so
+                that a Verkstead with one Author reads as it did before there
+                could be two. **Add author** is at its foot, behind the rule,
+                the way the Repo dropdown carries Open repo and Create repo. */}
+            <Show when={several()}>
+              <section>
+                <h3>
+                  <label for="git-author-pick">Author</label>
+                </h3>
+
+                <Listbox
+                  id="git-author-pick"
+                  options={authors()}
+                  value={(one) => one.id}
+                  label={authorLabel}
+                  chosen={author()?.id ?? ""}
+                  pick={pick}
+                  actions={[{ label: "Add author", press: addAuthor }]}
+                />
+              </section>
+            </Show>
+
             <section>
               <h3>GitHub Token</h3>
 
@@ -550,7 +779,7 @@ export function GitPane(props: {
                   been saved here. */}
               <TokenScopes class={styles.tokenScopes} />
 
-              <Show when={configured()}>{(saved) => standing(saved())}</Show>
+              <Show when={configured()}>{(saved) => standing(saved)}</Show>
 
               {/* What GitHub said about the last token saved from here: the
                   account it authenticates as, or why nobody could be asked.
@@ -599,7 +828,7 @@ export function GitPane(props: {
                       class={styles.clear}
                       disabled={save.isPending}
                       onClick={() => {
-                        setVerified(null);
+                        setVerifiedAs(null);
                         write("Clear");
                       }}
                     >
@@ -644,6 +873,22 @@ export function GitPane(props: {
             <section>
               <h3>Git Author</h3>
 
+              {/* What the dropdown's rows call this Author, which is the
+                  only place it is read — so drawn only where they are. */}
+              <Show when={several()}>
+                <label for="author-display-name">Display name</label>
+                <input
+                  id="author-display-name"
+                  type="text"
+                  autocapitalize="words"
+                  autocorrect="off"
+                  spellcheck={false}
+                  placeholder={authorName() || "Work"}
+                  value={authorDisplayName()}
+                  onInput={(ev) => setDisplayName(ev.currentTarget.value)}
+                />
+              </Show>
+
               <label for="author-name">Name</label>
               <input
                 id="author-name"
@@ -668,6 +913,15 @@ export function GitPane(props: {
                 value={authorEmail()}
                 onInput={(ev) => setEmail(ev.currentTarget.value)}
               />
+
+              {/* With one Author, the way to a second: a quiet press under
+                  its fields rather than a dropdown with one row in it. Once
+                  there are two, it is the dropdown's own last row instead. */}
+              <Show when={!several() && authorId() !== null}>
+                <QuietButton class={styles.addAuthor} onClick={addAuthor}>
+                  Add author
+                </QuietButton>
+              </Show>
             </section>
 
             <section>
@@ -823,4 +1077,29 @@ export function GitPane(props: {
       </Switch>
     </>
   );
+}
+
+/// A fresh version-4 uuid for an Author **Add author** opens, which is what
+/// the save names it by and the server keeps it under.
+///
+/// Out of `getRandomValues` rather than `randomUUID`, which a browser gives
+/// only to a secure context — and the workbench is reached over plain HTTP on
+/// a LAN as often as on `localhost`.
+function mintedUuid(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+
+  bytes[6] = (bytes[6]! & 0x0f) | 0x40;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0"));
+
+  return [
+    hex.slice(0, 4),
+    hex.slice(4, 6),
+    hex.slice(6, 8),
+    hex.slice(8, 10),
+    hex.slice(10, 16),
+  ]
+    .map((part) => part.join(""))
+    .join("-");
 }

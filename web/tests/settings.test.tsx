@@ -41,6 +41,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "../src/App";
 import type {
+  AuthorSaved,
   ConflictResolution,
   ConversationEntry,
   ProfileEntry,
@@ -781,6 +782,7 @@ describe("replacing and clearing the token", () => {
       settings: {
         git_author: TOLD.git_author,
         github_token: null,
+        authors: TOLD.authors.map((one) => ({ ...one, github_token: null })),
         // Untouched by this form, and so untouched in what the save answers
         // with — see the sections below it for what does change these.
         languages: TOLD.languages,
@@ -1440,6 +1442,272 @@ function thePage(at = "/settings") {
     history,
   };
 }
+
+/// A second Author, under a uuid of its own and with a token of its own, and
+/// no display name — so its rows read as its git name.
+const SECOND: AuthorSaved = {
+  id: "b7e1d2c3-4a5b-4c6d-8e7f-90a1b2c3d4e5",
+  display_name: "",
+  name: "Toby Cohen",
+  email: "toby@example.com",
+  github_token: { last_four: "home", at: TOLD.github_token!.at },
+};
+
+/// And the settings with both: the first Author named *Work* for its rows,
+/// and the second on the end of the list.
+const TWO: SettingsView = {
+  ...TOLD,
+  authors: [{ ...TOLD.authors[0]!, display_name: "Work" }, SECOND],
+};
+
+/// What a uuid minted in the page looks like: a version-4 one.
+const MINTED = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+/// Pick a row of the Author dropdown, by what it reads as.
+async function pickAuthor(label: string) {
+  fireEvent.click(screen.getByRole("combobox", { name: "Author" }));
+  fireEvent.click(await waitFor(() => screen.getByRole("option", { name: label })));
+}
+
+describe("the authors", () => {
+  /// One Author is the pane as it was before there could be two: no dropdown,
+  /// no display name, and only a quiet way to a second.
+  it("draws no dropdown with one Author", async () => {
+    theSettings(TOLD);
+    mountPane();
+    await waitFor(() => screen.getByLabelText("Email"));
+
+    expect(screen.queryByRole("combobox", { name: "Author" })).toBeNull();
+    expect(screen.queryByLabelText("Display name")).toBeNull();
+    expect(
+      (screen.getByLabelText("Name") as HTMLInputElement).value,
+    ).toBe(TOLD.git_author.name);
+    screen.getByRole("button", { name: "Add author" });
+  });
+
+  /// And none with no Author at all either, where there is nothing yet to add
+  /// a second to.
+  it("offers no Add author before there is a first", async () => {
+    theSettings(UNSET);
+    mountPane();
+    await waitFor(() => screen.getByLabelText("Email"));
+
+    expect(screen.queryByRole("button", { name: "Add author" })).toBeNull();
+  });
+
+  it("draws the dropdown with both once a second is added", async () => {
+    theSettings(TOLD);
+    mountPane();
+    await waitFor(() => screen.getByLabelText("Email"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Add author" }));
+
+    const pick = await waitFor(() =>
+      screen.getByRole("combobox", { name: "Author" }),
+    );
+    expect(pick.textContent).toContain("New author");
+
+    // Empty fields over the new one, and its token field open: there is no
+    // token of its to keep.
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText("Email") as HTMLInputElement).value).toBe("");
+    screen.getByLabelText("Token");
+    screen.getByLabelText("Display name");
+
+    // And the first in the rows by its git name, nobody having named it.
+    fireEvent.click(pick);
+    screen.getByRole("option", { name: TOLD.git_author.name });
+    screen.getByRole("option", { name: "New author" });
+    screen.getByRole("option", { name: "Add author" });
+  });
+
+  it("labels each row by its display name, falling back to the git name", async () => {
+    theSettings(TWO);
+    mountPane();
+
+    const pick = await waitFor(() =>
+      screen.getByRole("combobox", { name: "Author" }),
+    );
+    expect(pick.textContent).toContain("Work");
+
+    fireEvent.click(pick);
+    screen.getByRole("option", { name: "Work" });
+    screen.getByRole("option", { name: SECOND.name });
+  });
+
+  it("fills the fields with the Author picked", async () => {
+    theSettings(TWO);
+    mountPane();
+    await waitFor(() => screen.getByRole("combobox", { name: "Author" }));
+
+    await pickAuthor(SECOND.name);
+
+    await waitFor(() =>
+      expect((screen.getByLabelText("Email") as HTMLInputElement).value).toBe(
+        SECOND.email,
+      ),
+    );
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe(
+      SECOND.name,
+    );
+    // Its display name empty, with the git name standing in as the example.
+    expect(
+      (screen.getByLabelText("Display name") as HTMLInputElement).placeholder,
+    ).toBe(SECOND.name);
+    screen.getByText(SECOND.github_token!.last_four);
+  });
+
+  /// What was typed about one Author was typed about that one: switching drops
+  /// it rather than carrying it onto the next, and switching back finds the
+  /// first as the server has it.
+  it("does not carry unsaved edits onto another Author", async () => {
+    const fetching = theSettings(TWO, json(SAVED));
+    mountPane();
+    await waitFor(() => screen.getByRole("combobox", { name: "Author" }));
+
+    fireEvent.input(screen.getByLabelText("Email"), {
+      target: { value: "half-typed@" },
+    });
+    await pickAuthor(SECOND.name);
+
+    await waitFor(() =>
+      expect((screen.getByLabelText("Email") as HTMLInputElement).value).toBe(
+        SECOND.email,
+      ),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect((sent(fetching) as { git_author: unknown }).git_author).toEqual({
+        id: SECOND.id,
+        display_name: "",
+        name: SECOND.name,
+        email: SECOND.email,
+      }),
+    );
+
+    await pickAuthor("Work");
+    await waitFor(() =>
+      expect((screen.getByLabelText("Email") as HTMLInputElement).value).toBe(
+        TOLD.git_author.email,
+      ),
+    );
+  });
+
+  /// A token saved under the second Author is sent under its uuid alone —
+  /// which is what leaves the first's where it was — and the account GitHub
+  /// verified it as is said under the second's fields and not the first's.
+  it("saves a token under the second Author and names its login", async () => {
+    const fetching = theSettings(TWO, json({
+      ...SAVED,
+      settings: TWO,
+      verified: { Account: { login: "toby", missing: [] } },
+    }));
+    mountPane();
+    await waitFor(() => screen.getByRole("combobox", { name: "Author" }));
+
+    await pickAuthor(SECOND.name);
+    fireEvent.click(await waitFor(() => screen.getByRole("button", { name: "Replace" })));
+    fireEvent.input(screen.getByLabelText("Token"), {
+      target: { value: TOKEN },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => screen.getByText(/GitHub says it's/));
+    expect(screen.getByText("toby")).toBeTruthy();
+
+    const edit = sent(fetching) as {
+      git_author: { id: string };
+      github_token: unknown;
+    };
+    expect(edit.git_author.id).toBe(SECOND.id);
+    expect(edit.github_token).toEqual({ Set: { token: TOKEN } });
+
+    // And nothing of it under the first.
+    await pickAuthor("Work");
+    await waitFor(() =>
+      expect((screen.getByLabelText("Email") as HTMLInputElement).value).toBe(
+        TOLD.git_author.email,
+      ),
+    );
+    expect(screen.queryByText(/GitHub says it's/)).toBeNull();
+  });
+
+  /// **Add author** is the same fields over a uuid minted in the page, which
+  /// the save names it by — a uuid the server does not hold, so a new Author.
+  it("saves an added Author under a fresh uuid", async () => {
+    const fetching = theSettings(TWO, json(SAVED));
+    mountPane();
+    await waitFor(() => screen.getByRole("combobox", { name: "Author" }));
+
+    await pickAuthor("Add author");
+    await waitFor(() =>
+      expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe(""),
+    );
+
+    fireEvent.input(screen.getByLabelText("Display name"), {
+      target: { value: "Client" },
+    });
+    fireEvent.input(screen.getByLabelText("Name"), {
+      target: { value: "Ada Lovelace" },
+    });
+    fireEvent.input(screen.getByLabelText("Email"), {
+      target: { value: "ada@client.example" },
+    });
+    fireEvent.input(screen.getByLabelText("Token"), {
+      target: { value: TOKEN },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => sent(fetching));
+    const edit = sent(fetching) as {
+      git_author: { id: string; display_name: string; email: string };
+      github_token: unknown;
+    };
+    expect(edit.git_author.id).toMatch(MINTED);
+    expect(TWO.authors.map((one) => one.id)).not.toContain(edit.git_author.id);
+    expect(edit.git_author.display_name).toBe("Client");
+    expect(edit.git_author.email).toBe("ada@client.example");
+    expect(edit.github_token).toEqual({ Set: { token: TOKEN } });
+  });
+
+  /// And an Author added and never filled in is nobody: the rest of the form
+  /// still saves, about the first Author as it stands.
+  it("writes no Author for one added and left blank", async () => {
+    const fetching = theSettings(TOLD, json(SAVED));
+    mountPane();
+    await waitFor(() => screen.getByLabelText("Email"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Add author" }));
+    await waitFor(() => screen.getByRole("combobox", { name: "Author" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(sent(fetching)).toMatchObject({
+        git_author: TOLD.git_author,
+        github_token: "Keep",
+      }),
+    );
+  });
+
+  /// The card: with two it names them both, and a warning names the Author it
+  /// is about.
+  it("names every Author on the card", async () => {
+    theSettings(TWO);
+    const { container } = mountCard();
+
+    expect((await theLine(container)).textContent).toBe(`Work, ${SECOND.name}`);
+  });
+
+  it("says on the card which Author is missing a token", async () => {
+    theSettings({ ...TWO, authors: [TWO.authors[0]!, { ...SECOND, github_token: null }] });
+    const { container } = mountCard();
+
+    expect((await theLine(container)).textContent).toBe(
+      `No GitHub token for ${SECOND.name}`,
+    );
+  });
+});
 
 /// The three panes of the frame, in the order they are walked through.
 function panes(container: ParentNode): HTMLElement[] {

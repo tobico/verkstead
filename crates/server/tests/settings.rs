@@ -491,6 +491,97 @@ async fn a_save_about_one_author_leaves_the_others_as_they_were() {
     assert!(secrets.contains("home: ghp_thehomeone"), "{secrets}");
 }
 
+/// **Add author**: a save naming a uuid the file does not hold is a new Author,
+/// on the end of the list, its token verified and kept under that uuid, and the
+/// first Author and its token as they were. And the read carries both, each
+/// with its own token's standing.
+#[tokio::test]
+async fn a_save_under_a_new_uuid_adds_an_author_and_the_read_carries_every_one() {
+    let (dir, app) = app().await;
+
+    hand_edit(
+        dir.path(),
+        "config.yaml",
+        "authors:\n  - id: work\n    name: Tobias Cohen\n    email: tobi@tobico.net\n",
+    );
+    hand_edit(
+        dir.path(),
+        "secrets.yaml",
+        "author_tokens:\n  work: ghp_theworkone\n",
+    );
+
+    let saved = save(
+        &app,
+        &serde_json::json!({
+            "git_author": {
+                "id": "a1b2c3d4-0000-4000-8000-000000000002",
+                "display_name": "Home",
+                "name": "Toby",
+                "email": "toby@example.com",
+            },
+            "github_token": { "Set": { "token": "ghp_thehomeone" } },
+            "languages": languages_unset(),
+            "cleanup": cleanup_unset(),
+            "at_once": at_once_unset(),
+            "conflict_resolution": "Merge",
+            "share_on_done": false,
+            "sandbox_binds": [],
+            "ignored_comments": "Keep",
+            "mcp_servers": "Keep",
+            "instructions": "",
+        }),
+    )
+    .await;
+
+    // Verified as the token typed under the new Author, which is the stub's
+    // way of naming the login.
+    assert_eq!(
+        saved.verified,
+        Some(Verified::Account {
+            login: "ghp_thehomeone".to_owned(),
+            missing: Vec::new(),
+        }),
+    );
+
+    let read = settings(&app).await;
+
+    let rows: Vec<_> = read
+        .authors
+        .iter()
+        .map(|author| {
+            (
+                author.id.as_str(),
+                author.display_name.as_str(),
+                author.name.as_str(),
+                author
+                    .github_token
+                    .as_ref()
+                    .map(|token| token.last_four.as_str()),
+            )
+        })
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            ("work", "", "Tobias Cohen", Some("kone")),
+            (
+                "a1b2c3d4-0000-4000-8000-000000000002",
+                "Home",
+                "Toby",
+                Some("eone")
+            ),
+        ],
+    );
+
+    // And the single fields are still the first Author's, which is what every
+    // other section sends back and the wizard asks for.
+    assert_eq!(read.git_author.id.as_deref(), Some("work"));
+    assert_eq!(read.github_token.unwrap().last_four, "kone");
+
+    let secrets = std::fs::read_to_string(dir.path().join("secrets.yaml")).unwrap();
+    assert!(secrets.contains("work: ghp_theworkone"), "{secrets}");
+}
+
 /// The promise the whole page rests on: a token that has gone in is never in a
 /// response body again, whichever body it is.
 #[tokio::test]

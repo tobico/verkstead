@@ -6,6 +6,7 @@
     "roadmap_stages": 3,
     "roadmap_stages_configured": false
   },
+  "authors": [],
   "cleanup": {
     "delete": {
       "days": 30,

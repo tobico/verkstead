@@ -35,7 +35,7 @@ use time::format_description::well_known::Rfc3339;
 use tokio_util::io::ReaderStream;
 use verkstead_render::{
     Adopted, AnswerAttached, AnswerAttachmentRemoved, AskingDevice, AtOnceView, Attached,
-    AttachmentRemoved, Author, BaseBranchChoice, BranchRename, BriefEdit, CheckRollup,
+    AttachmentRemoved, Author, AuthorSaved, BaseBranchChoice, BranchRename, BriefEdit, CheckRollup,
     CleanupStepView, CleanupView, CommentedOn, CompanionAdded, CompanionBaseRecorded,
     CompanionBranchRenamed, CompanionModeChoice, CompanionModeChosen, CompanionRemoved,
     CompanionView, CompileCaching, Confirming, ConflictResolution, ConversationArchived,
@@ -6784,16 +6784,39 @@ fn as_told(
         instructions: config.instructions().to_owned(),
         // And what is running, which is no file's either.
         running,
-        github_token: author
-            .and_then(|author| secrets.author_token(author.id()))
-            .map(|token| TokenSaved {
-                last_four: last_four(token),
-                at: settings
-                    .secrets_written_at()
-                    .and_then(|at| at.format(&Rfc3339).ok())
-                    .unwrap_or_default(),
-            }),
+        github_token: author.and_then(|author| token_saved(settings, &secrets, author)),
+        // And every Author with its token's standing, the first included: the
+        // Git section draws the one it is about out of this list, and offers
+        // the whole of it once there are two.
+        authors: config
+            .authors()
+            .iter()
+            .map(|author| AuthorSaved {
+                id: author.id().to_owned(),
+                display_name: author.display_name().unwrap_or_default().to_owned(),
+                name: author.name().unwrap_or_default().to_owned(),
+                email: author.email().unwrap_or_default().to_owned(),
+                github_token: token_saved(settings, &secrets, author),
+            })
+            .collect(),
     }
+}
+
+/// What can be said about an Author's token, which is everything but the
+/// token: its last four characters and when the secrets file was written — the
+/// file's, there being one file for every Author's token.
+fn token_saved(
+    settings: &crate::settings::Settings,
+    secrets: &crate::settings::Secrets,
+    author: &crate::settings::Author,
+) -> Option<TokenSaved> {
+    secrets.author_token(author.id()).map(|token| TokenSaved {
+        last_four: last_four(token),
+        at: settings
+            .secrets_written_at()
+            .and_then(|at| at.format(&Rfc3339).ok())
+            .unwrap_or_default(),
+    })
 }
 
 /// One ignore rule as the settings file holds it, out of what the page sent:

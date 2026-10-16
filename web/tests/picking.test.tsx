@@ -805,7 +805,8 @@ describe("the rows that press rather than pick", () => {
 /// Two things earn it. A row that carries a **mark** beside its words, which is
 /// the four pairing pickers and the profile form's harness type; and a list with
 /// rows at its foot that **press** rather than pick, which is the Repo's, where
-/// **Create repo** and **Open repo** stand behind the rule — an `<option>` that
+/// **Create repo** and **Open repo** stand behind the rule, and the Git
+/// section's Author dropdown, where **Add author** does — an `<option>` that
 /// acted is the bug class this whole module was written against.
 describe("where the listbox is drawn at all", () => {
   it("reads every source in the viewer", () => {
@@ -819,7 +820,7 @@ describe("where the listbox is drawn at all", () => {
   /// Read for the element rather than for the word: the browsing path field
   /// names this control in its own header, having borrowed the chrome and the
   /// keyboard off it, and naming one is not drawing one.
-  it("is drawn by the three modules whose rows have earned it", () => {
+  it("is drawn by the four modules whose rows have earned it", () => {
     const drawing = Object.entries(SOURCES)
       .filter(([path]) => path !== "../src/picking.tsx")
       .filter(([, source]) => /<Listbox\b/.test(source))
@@ -828,6 +829,7 @@ describe("where the listbox is drawn at all", () => {
 
     expect(drawing).toEqual([
       "../src/profiles/ProfileList.tsx",
+      "../src/settings/Git.tsx",
       "../src/workbench/Setup.tsx",
       "../src/workbench/Steer.tsx",
     ]);

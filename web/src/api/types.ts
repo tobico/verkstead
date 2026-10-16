@@ -650,7 +650,8 @@ label: string | null, };
 
 /**
  * Who a session's commits are by: the Author the Git section is about, which
- * is the first in `config.yaml`'s list.
+ * is whichever its dropdown picked — the first in `config.yaml`'s list, on a
+ * read and wherever there is only one.
  *
  * The names as strings rather than optionals, empty where nothing is
  * configured: the form holds them that way, and half an author is a real
@@ -661,7 +662,9 @@ export type Author = {
  * The uuid it is kept under, or `null` where there is no Author yet —
  * which is a fresh install. A save sending `null` is about the first
  * Author, and makes it under a fresh uuid where there is none and the
- * fields hold anything.
+ * fields hold anything. A save sending a uuid that is not in the list is
+ * a new Author, written on the end of it: that is **Add author**, which
+ * mints the uuid in the page.
  */
 id: string | null, 
 /**
@@ -670,6 +673,24 @@ id: string | null,
  * that does not draw it.
  */
 display_name: string, name: string, email: string, };
+
+/**
+ * One Author as the settings files hold it, with what can be said about its
+ * token beside it.
+ *
+ * Its uuid is always there, unlike [`Author`]'s: this is a read of an Author
+ * that exists, where that is also what a fresh install's save sends.
+ */
+export type AuthorSaved = { id: string, 
+/**
+ * What it is called in rows and pickers, empty where nobody named it and
+ * the git name stands in.
+ */
+display_name: string, name: string, email: string, 
+/**
+ * What can be said about its token, or `null` where it holds none.
+ */
+github_token: TokenSaved | null, };
 
 /**
  * The backlog opened: every task document of it, rendered.
@@ -5764,6 +5785,16 @@ export type SettingsView = { git_author: Author,
  * none — which is what a Verkstead nobody has told anything looks like.
  */
 github_token: TokenSaved | null, 
+/**
+ * And every Author, in the order `config.yaml` lists them — empty on a
+ * Verkstead nobody has told anything. The first of them is `git_author`
+ * above, which is the one a form about something else sends back and the
+ * wizard's git step asks for.
+ *
+ * What the Git section's dropdown offers, once there are two to choose
+ * between, and what its fields are drawn from.
+ */
+authors: Array<AuthorSaved>, 
 /**
  * And the languages a session is given build support for, one per
  * descriptor the server loaded — the ones Verkstead ships with whatever
