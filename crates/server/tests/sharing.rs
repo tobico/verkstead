@@ -256,6 +256,7 @@ async fn everything(pool: &SqlitePool) -> i64 {
     store::leave_memo(
         pool,
         id,
+        Some("The counter test flakes"),
         "The counter test flakes under parallelism.\n",
         "the session that worked task 01",
         session,

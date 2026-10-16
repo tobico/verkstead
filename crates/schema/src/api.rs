@@ -75,23 +75,64 @@ pub struct ResponseAccepted {
 /// one sent by hand, as the rule.
 pub const MAX_MEMO_BYTES: usize = 8 * 1024;
 
-/// Why a Memo's markdown is refused before it goes anywhere, or `None` where
-/// it may be left: nothing in it, or more than [`MAX_MEMO_BYTES`].
-pub fn memo_refused(markdown: &str) -> Option<String> {
-    if markdown.trim().is_empty() {
-        return Some(
-            "the memo is empty: write what the sessions after this one should know".to_owned(),
-        );
+/// What `POST …/api/v1/memos` takes: the title the session names the Memo by,
+/// and the markdown it wrote.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemoLeaving {
+    /// Empty where a body sent by hand left it out, so that it is refused for
+    /// having no title rather than for its shape.
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub markdown: String,
+}
+
+impl MemoLeaving {
+    /// The Memo as it is stored: the title trimmed before anything is checked,
+    /// and the markdown as it was written.
+    pub fn new(title: &str, markdown: &str) -> Self {
+        MemoLeaving {
+            title: title.trim().to_owned(),
+            markdown: markdown.to_owned(),
+        }
     }
 
-    (markdown.len() > MAX_MEMO_BYTES).then(|| {
-        format!(
-            "the memo is {} bytes, over the maximum of {} (8 KiB): keep it to what the next \
-             session will walk into, and leave a second memo for a second thing",
-            markdown.len(),
-            MAX_MEMO_BYTES
-        )
-    })
+    /// Why the Memo is refused before it goes anywhere, or `None` where it may
+    /// be left: an empty title, a newline in the title, nothing in the
+    /// markdown, or markdown over [`MAX_MEMO_BYTES`]. A title has no length
+    /// cap: the card cuts it to one line.
+    pub fn refused(&self) -> Option<String> {
+        if self.title.trim().is_empty() {
+            return Some(
+                "the memo has no title: name it in a handful of words for what it is about, \
+                 such as \"The limiter's test flakes\""
+                    .to_owned(),
+            );
+        }
+
+        if self.title.contains(['\n', '\r']) {
+            return Some(
+                "the memo's title has a newline in it: it is one line on the Timeline, so put \
+                 the rest in the memo"
+                    .to_owned(),
+            );
+        }
+
+        if self.markdown.trim().is_empty() {
+            return Some(
+                "the memo is empty: write what the sessions after this one should know".to_owned(),
+            );
+        }
+
+        (self.markdown.len() > MAX_MEMO_BYTES).then(|| {
+            format!(
+                "the memo is {} bytes, over the maximum of {} (8 KiB): keep it to what the next \
+                 session will walk into, and leave a second memo for a second thing",
+                self.markdown.len(),
+                MAX_MEMO_BYTES
+            )
+        })
+    }
 }
 
 /// What `POST …/api/v1/memos` returns once a Memo is on the Timeline: the

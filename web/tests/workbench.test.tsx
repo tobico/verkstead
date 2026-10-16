@@ -54,6 +54,7 @@ import type {
   FolderListing,
   GrillingStarted,
   Merging,
+  MemoEvent,
   NoticeEvent,
   InFront,
   Nudge,
@@ -79,6 +80,7 @@ import type {
   StageEntry,
   StageListEvent,
   StageState,
+  Standing,
   SteerCancelled,
   SteerOpened,
   SteerSaved,
@@ -178,6 +180,7 @@ import archivedCss from "../src/workbench/Archived.module.css?raw";
 import sidebar from "../src/workbench/Conversations.module.css";
 import sidebarCss from "../src/workbench/Conversations.module.css?raw";
 import documentPane from "../src/workbench/Document.module.css";
+import memoPane from "../src/workbench/Memo.module.css";
 // And the one module the two plan panes share: a backlog's task documents and
 // a roadmap's stage briefs are the same stack of boxed sections.
 import documents from "../src/workbench/Documents.module.css";
@@ -14175,8 +14178,8 @@ describe("a grilling that has handed over", () => {
   });
 });
 
-/// The Memos the building session left, one standing and one a later session
-/// took back — the fixture's own pair.
+/// The Memos the building session left: one standing, one a later session took
+/// back, and one from before memos had titles — the fixture's own three.
 const MEMOS = BUILDING.timeline.flatMap((entry) => ("Memo" in entry ? [entry.Memo] : []));
 
 describe("a memo a session left", () => {
@@ -14188,29 +14191,61 @@ describe("a memo a session left", () => {
     return [...container.querySelectorAll(`.${timeline.timelineEvent} > .${timeline.memo}`)];
   };
 
-  /// The card's own button with these words on it, which is a real button
-  /// standing on a card that is itself only an article in a button's role.
-  const saying = (card: Element, words: string) =>
-    [...card.querySelectorAll("button")].find((button) => button.textContent === words);
+  /// The pane's own button with these words on it.
+  const saying = (within: Element, words: string) =>
+    [...within.querySelectorAll("button")].find((button) => button.textContent === words);
 
-  it("draws as a card numbered by its event, stamped with the session that left it", async () => {
-    expect(MEMOS.map((memo) => memo.retired === null)).toEqual([true, false]);
+  /// The line at the foot of an opened memo, and the lines inside it.
+  const foot = () => details().querySelector(`.${memoPane.foot}`);
+  const lines = () => [...foot()!.querySelectorAll("p")].map((line) => line.textContent);
+
+  it("draws as a card headed Memo with the title under it, and nothing else", async () => {
+    expect(MEMOS.map((memo) => [memo.title, memo.retired === null])).toEqual([
+      ["The sessions suite flakes under parallelism", true],
+      ["Where the limit reader lives", false],
+      [null, true],
+    ]);
 
     theBuilding();
     const { container } = mount(`/conversations/${BUILDING.id}`);
 
     const [standing] = await cards(container);
 
-    expect(standing!.querySelector("h2")?.textContent).toBe(`Memo ${MEMOS[0]!.id}`);
-    expect(standing!.querySelector(`.${timeline.leftBy}`)?.textContent).toBe(
-      "the session that worked task 02",
+    expect(standing!.querySelector("h2")?.textContent).toBe("Memo");
+    expect(standing!.querySelector(`.${timeline.memoTitle}`)?.textContent).toBe(
+      "The sessions suite flakes under parallelism",
     );
-    expect(standing!.querySelector(`.${timeline.clamp}.${timeline.memoBody}`)).toBeTruthy();
+    // The head and the title are the whole card: no stamp, no body, no press
+    // and no number.
+    expect(standing!.textContent).toBe("MemoThe sessions suite flakes under parallelism");
+    expect(standing!.querySelector(".markdown")).toBeNull();
+    expect(standing!.querySelector("button")).toBeNull();
     expect(standing!.classList.contains(timeline.retired!)).toBe(false);
-    expect(standing!.querySelector(`.${timeline.retiredBy}`)).toBeNull();
   });
 
-  it("opens the whole memo in the details pane", async () => {
+  it("titles one left before titles by the first line of its body", async () => {
+    theBuilding();
+    const { container } = mount(`/conversations/${BUILDING.id}`);
+
+    const [, , untitled] = await cards(container);
+
+    expect(untitled!.querySelector(`.${timeline.memoTitle}`)?.textContent).toBe(
+      "Leave the relay's buffer alone.",
+    );
+  });
+
+  it("strikes a retired one's title through, and says nothing more", async () => {
+    theBuilding();
+    const { container } = mount(`/conversations/${BUILDING.id}`);
+
+    const [, retired] = await cards(container);
+
+    expect(retired!.classList.contains(timeline.retired!)).toBe(true);
+    expect(retired!.textContent).toBe("MemoWhere the limit reader lives");
+    expect(retired!.querySelector("button")).toBeNull();
+  });
+
+  it("opens the whole memo under its title, with who left it and when at the foot", async () => {
     theBuilding();
     const { container } = mount(`/conversations/${BUILDING.id}`);
 
@@ -14221,30 +14256,68 @@ describe("a memo a session left", () => {
     // The page opened on the record's last Memo, which is the same pane: the
     // heading changing is what says the press landed.
     await waitFor(() =>
-      expect(details().querySelector("h1")!.textContent).toBe(`Memo ${MEMOS[0]!.id}`),
+      expect(details().querySelector("h1")!.textContent).toBe(
+        "The sessions suite flakes under parallelism",
+      ),
     );
 
     const opened = await drawn(details(), `.${documentPane.document}`);
     expect(opened.innerHTML).toBe(MEMOS[0]!.html);
     expect(details().querySelector(`.${timeline.clamp}`)).toBeNull();
+
+    expect(lines()).toEqual(["Left by the session that worked task 02 on 2026-08-03"]);
+    expect(saying(foot()!, "Retire")).toBeTruthy();
+    expect(details().textContent).not.toMatch(new RegExp(`\\b${MEMOS[0]!.id}\\b`));
   });
 
-  it("draws a retired one as retired, with who took it back and why", async () => {
+  it("says under a retired one who took it back and why", async () => {
     theBuilding();
-    const { container } = mount(`/conversations/${BUILDING.id}`);
+    mount(`/conversations/${BUILDING.id}/events/${MEMOS[1]!.id}`);
 
-    const [, retired] = await cards(container);
+    await waitFor(() => expect(foot()).toBeTruthy());
 
-    expect(retired!.classList.contains(timeline.retired!)).toBe(true);
-    expect(retired!.querySelector(`.${timeline.retiredBy}`)?.textContent).toBe(
+    expect(lines()).toEqual([
+      "Left by the session that worked task 02 on 2026-08-03",
       "Retired by the session that worked task 03: moved back into the relay",
+    ]);
+    expect(saying(foot()!, "Restore")).toBeTruthy();
+  });
+
+  it("heads one left before titles by the first line of its body", async () => {
+    theBuilding();
+    mount(`/conversations/${BUILDING.id}/events/${MEMOS[2]!.id}`);
+
+    await waitFor(() =>
+      expect(details().querySelector("h1")!.textContent).toBe("Leave the relay's buffer alone."),
     );
   });
 
+  /// The session's name is a link, and pressing it is pressing that session's
+  /// card: its output pane opens in place of the memo's.
+  it("opens the session that left it from its name", async () => {
+    theBuilding();
+    const { history } = mount(`/conversations/${BUILDING.id}/events/${MEMOS[0]!.id}`);
+
+    await waitFor(() => expect(foot()).toBeTruthy());
+
+    const session = foot()!.querySelector("a")!;
+    expect(session.textContent).toBe("the session that worked task 02");
+    expect(session.getAttribute("href")).toBe(
+      `/conversations/${BUILDING.id}/events/${MEMOS[0]!.left_in}`,
+    );
+
+    fireEvent.click(session);
+
+    await waitFor(() =>
+      expect(history.get()).toBe(`/conversations/${BUILDING.id}/events/${MEMOS[0]!.left_in}`),
+    );
+    await waitFor(() => expect(foot()).toBeNull());
+  });
+
   /// Retire is one press with nothing asked first — Restore is what undoes it —
-  /// and the card turns over from what the server answered: retired by *you*,
-  /// with Restore where Retire was.
-  it("retires a standing one in one press, redrawing from the server's answer", async () => {
+  /// and the pane turns over from what the server answered: retired by *you*,
+  /// with Restore where Retire was, and the card struck through with it.
+  it("retires a standing one from its pane in one press, redrawing from the server's answer", async () => {
     const memo = MEMOS[0]!;
     const route = `/api/ui/conversations/${BUILDING.id}/memos/${memo.id}/retire`;
     const answered: MemoPressed = {
@@ -14254,43 +14327,46 @@ describe("a memo a session left", () => {
       },
     };
     const fetching = theBuilding({}, whenever(route, json(answered), "POST"));
-    const { container } = mount(`/conversations/${BUILDING.id}`);
+    const { container } = mount(`/conversations/${BUILDING.id}/events/${memo.id}`);
 
-    const [standing] = await cards(container);
-    fireEvent.click(saying(standing!, "Retire")!);
+    await waitFor(() => expect(foot()).toBeTruthy());
+    fireEvent.click(saying(foot()!, "Retire")!);
 
     await waitFor(() => expect(sent(fetching, route)).toEqual({}));
 
-    const [retired] = await waitFor(async () => {
-      const [card] = await cards(container);
-      expect(card!.classList.contains(timeline.retired!)).toBe(true);
-      return [card];
-    });
-    expect(retired!.querySelector(`.${timeline.retiredBy}`)?.textContent).toBe("Retired by you");
-    expect(saying(retired!, "Restore")).toBeTruthy();
+    await waitFor(() =>
+      expect(lines()).toEqual([
+        "Left by the session that worked task 02 on 2026-08-03",
+        "Retired by you",
+      ]),
+    );
+    expect(saying(foot()!, "Restore")).toBeTruthy();
     expect(screen.queryByRole("dialog")).toBeNull();
+
+    const [card] = await cards(container);
+    expect(card!.classList.contains(timeline.retired!)).toBe(true);
   });
 
   /// And Restore on a retired one puts it back, by its own route.
-  it("restores a retired one in one press", async () => {
+  it("restores a retired one from its pane in one press", async () => {
     const memo = MEMOS[1]!;
     const route = `/api/ui/conversations/${BUILDING.id}/memos/${memo.id}/restore`;
     const answered: MemoPressed = { Memo: { ...memo, retired: null } };
     const fetching = theBuilding({}, whenever(route, json(answered), "POST"));
-    const { container } = mount(`/conversations/${BUILDING.id}`);
+    const { container } = mount(`/conversations/${BUILDING.id}/events/${memo.id}`);
 
-    const [, retired] = await cards(container);
-
-    fireEvent.click(saying(retired!, "Restore")!);
+    await waitFor(() => expect(foot()).toBeTruthy());
+    fireEvent.click(saying(foot()!, "Restore")!);
 
     await waitFor(() => expect(sent(fetching, route)).toEqual({}));
 
-    await waitFor(async () => {
-      const [, card] = await cards(container);
-      expect(card!.classList.contains(timeline.retired!)).toBe(false);
-      expect(card!.querySelector(`.${timeline.retiredBy}`)).toBeNull();
-      expect(saying(card!, "Retire")).toBeTruthy();
+    await waitFor(() => {
+      expect(lines()).toEqual(["Left by the session that worked task 02 on 2026-08-03"]);
+      expect(saying(foot()!, "Retire")).toBeTruthy();
     });
+
+    const [, card] = await cards(container);
+    expect(card!.classList.contains(timeline.retired!)).toBe(false);
   });
 });
 
@@ -20284,9 +20360,45 @@ describe("the path a details pane stands at", () => {
 /// Which thing on a record that is, is `pathing.test.ts`: the arithmetic over a
 /// Timeline, held true against these same golden fixtures. What is asked here is
 /// what the page does with the answer.
+/// What a Set locked without an answer stands as.
+const LOCKED_UNANSWERED: Standing = { LockedUnanswered: "2026-08-03T09:09:23.000Z" };
+
+/// The grilling record with nothing on it waiting on the human: its waiting and
+/// its deferred Set both locked unanswered, the way a session that ended
+/// without an answer leaves them. A Set still waiting holds the landing — see
+/// *the landing stopping at a set still waiting* — so the end of the record is
+/// asked about over this one.
+const SETTLED: ConversationView = {
+  ...GRILLING,
+  timeline: standingAs(
+    standingAs(GRILLING.timeline, WAITING_SET.id, LOCKED_UNANSWERED),
+    DEFERRED_SET.id,
+    LOCKED_UNANSWERED,
+  ),
+};
+
+/// A record with the one Set on it standing otherwise.
+function standingAs(
+  timeline: TimelineEvent[],
+  id: number,
+  standing: Standing,
+): TimelineEvent[] {
+  return timeline.map((event) =>
+    "QuestionSet" in event && event.QuestionSet.id === id
+      ? { QuestionSet: { ...event.QuestionSet, standing } }
+      : event,
+  );
+}
+
+/// The grilling conversation's own path answered with [`SETTLED`].
+const SETTLED_GRILLING = whenever(
+  `/api/ui/conversations/${GRILLING.id}`,
+  json(SETTLED),
+);
+
 describe("landing on the end of the record", () => {
   it("opens the newest thing on the record a card is pressed on", async () => {
-    theThree();
+    theThree(SETTLED_GRILLING);
     const { container, history } = mount();
     await waitFor(() => screen.getByText(GRILLING.branch));
 
@@ -20364,7 +20476,7 @@ describe("landing on the end of the record", () => {
   /// does: entering the Conversation is the one entry it wrote, so Back leaves
   /// it rather than stepping back through the pane it landed on.
   it("lands by replacing, so back leaves the conversation", async () => {
-    theThree();
+    theThree(SETTLED_GRILLING);
     const { history } = mount();
     await waitFor(() => screen.getByText(GRILLING.branch));
 
@@ -20384,7 +20496,7 @@ describe("landing on the end of the record", () => {
   /// changes none — so the newest thing is marked open with the details a tap
   /// away, rather than the human being carried past the record they opened.
   it("lands a phone on the timeline rather than in the details", async () => {
-    theGrilling();
+    theGrilling(SETTLED_GRILLING);
     const { container, history } = mount(`/conversations/${GRILLING.id}`);
 
     await waitFor(() =>
@@ -20435,8 +20547,9 @@ describe("the timeline following its bottom", () => {
     vi.stubGlobal("scrollTo", scrolled);
 
     /// The record as the server has it, which grows under the page the way a
-    /// running session's does.
-    let record: TimelineEvent[] = GRILLING.timeline;
+    /// running session's does — with every Set on it settled, since a Set
+    /// still waiting holds the view at itself rather than at the end.
+    let record: TimelineEvent[] = SETTLED.timeline;
 
     theGrilling(
       whenever(`/api/ui/conversations/${GRILLING.id}`, () =>
@@ -20449,7 +20562,7 @@ describe("the timeline following its bottom", () => {
     const landed = scrolled.mock.calls.length;
     expect(landed).toBeGreaterThan(0);
 
-    record = [...GRILLING.timeline, LANDED];
+    record = [...SETTLED.timeline, LANDED];
     await nudged(client);
 
     await waitFor(() =>
@@ -20501,12 +20614,15 @@ describe("the selection following the end of the record", () => {
   /// What comes back lands them: it waits for the page to have read the record
   /// again and drawn what grew, so an assertion after it is about the page the
   /// re-read left rather than the page mid-flight.
+  ///
+  /// Settled, so that the end of the record is where it lands: a Set still
+  /// waiting would hold it — see the tests after these.
   function growing() {
-    let record: TimelineEvent[] = GRILLING.timeline;
+    let record: TimelineEvent[] = SETTLED.timeline;
 
     theThree(
       whenever(`/api/ui/conversations/${GRILLING.id}`, () =>
-        json({ ...GRILLING, timeline: record })(),
+        json({ ...SETTLED, timeline: record })(),
       ),
     );
 
@@ -20645,6 +20761,249 @@ describe("the selection following the end of the record", () => {
         `/conversations/${GRILLING.id}/events/${SAID.id}`,
       ),
     );
+  });
+});
+
+/// And where the landing stops short of the end: the oldest Question Set still
+/// waiting on the human. A Memo, a commit or a notice landing after a Set used
+/// to carry the selection past it and leave it unanswered behind the newest
+/// card, so the landing now holds at the Set until it is answered.
+///
+/// Read off the URL, as the advancing above is.
+describe("the landing stopping at a set still waiting", () => {
+  /// What a session leaves for the next one, landing after the Set it asked.
+  const NOTED: MemoEvent = {
+    id: 991,
+    at: "2026-08-03T09:09:23.000Z",
+    html: "<p>The suite flakes under parallelism.</p>\n",
+    left_by: "the session that worked task 01",
+    left_in: OUTPUT.id,
+    retired: null,
+    title: "The suite flakes under parallelism",
+  };
+
+  /// And a notice, the other thing a running session lands.
+  const SAID: NoticeEvent = {
+    id: 992,
+    at: "2026-08-03T09:10:02.000Z",
+    html: "<p>The session stopped.</p>\n",
+    log_in: null,
+  };
+
+  /// The grilling record with one Set waiting on it — the blocking one, the
+  /// deferred one locked unanswered — and the memo after it.
+  const ONE_WAITING: TimelineEvent[] = [
+    ...standingAs(GRILLING.timeline, DEFERRED_SET.id, LOCKED_UNANSWERED),
+    { Memo: NOTED },
+  ];
+
+  /// Where the page stands with each of them open.
+  const AT_SET = `/conversations/${GRILLING.id}/events/${WAITING_SET.id}`;
+  const AT_MEMO = `/conversations/${GRILLING.id}/events/${NOTED.id}`;
+
+  /// The grilling conversation with its record whatever `record` holds when it
+  /// is read, and both of its readable Sets answerable — which is a session
+  /// landing Events, and the human answering, as the record moves under the
+  /// page.
+  function holding(timeline: TimelineEvent[], ...answers: Parameters<typeof serving>) {
+    const held = { record: timeline };
+
+    const fetching = theGrillingSets(
+      whenever(`/api/ui/conversations/${GRILLING.id}`, () =>
+        json({ ...GRILLING, timeline: held.record })(),
+      ),
+      ...answers,
+    );
+
+    return { held, fetching };
+  }
+
+  /// The record with the waiting Set answered, which is what the server reads
+  /// back once it has been.
+  const answered = (timeline: TimelineEvent[]) =>
+    standingAs(timeline, WAITING_SET.id, ANSWERED_SET.standing);
+
+  it("lands on the set rather than the memo left after it", async () => {
+    holding(ONE_WAITING);
+    const { history } = mount(`/conversations/${GRILLING.id}`);
+
+    await waitFor(() => expect(history.get()).toBe(AT_SET));
+  });
+
+  /// And the Set it stops at is scrolled into view, since the Timeline would
+  /// otherwise be at the bottom of the record with the Set above it — which on
+  /// a phone, where the Timeline is what is on screen, is out of sight.
+  ///
+  /// jsdom does no scrolling, so what this watches is the ask, and which item
+  /// it was made of.
+  it("scrolls the set it stops at into view", async () => {
+    const into: Element[] = [];
+    Element.prototype.scrollIntoView = function (this: Element) {
+      into.push(this);
+    } as typeof Element.prototype.scrollIntoView;
+
+    try {
+      const { held } = holding(ONE_WAITING);
+      const { container, history, client } = mount(`/conversations/${GRILLING.id}`);
+      await waitFor(() => expect(history.get()).toBe(AT_SET));
+
+      /// The waiting Set's item, as the record is drawn now.
+      const row = () =>
+        [...container.querySelectorAll(`.${timeline.questionSet}`)][1]!.closest(
+          `.${timeline.timelineEvent}`,
+        );
+      await waitFor(() => expect(into).toContain(row()));
+
+      // What lands under it is followed only as far as the Set.
+      into.length = 0;
+      held.record = [...ONE_WAITING, { Notice: SAID }];
+      await nudged(client);
+      await waitFor(() =>
+        expect(
+          container.querySelectorAll(`.${timeline.timelineEvent}`),
+        ).toHaveLength(held.record.length),
+      );
+      await waitFor(() => expect(into).toContain(row()));
+
+      // Once it is answered, nothing holds the view there any more.
+      into.length = 0;
+      held.record = answered(held.record);
+      await nudged(client);
+      await waitFor(() =>
+        expect(history.get()).toBe(`/conversations/${GRILLING.id}/events/${SAID.id}`),
+      );
+      expect(into).toEqual([]);
+    } finally {
+      delete (Element.prototype as Partial<Element>).scrollIntoView;
+    }
+  });
+
+  it("moves on to the memo once the set is answered", async () => {
+    const { held } = holding(ONE_WAITING);
+    const { history, client } = mount(`/conversations/${GRILLING.id}`);
+    await waitFor(() => expect(history.get()).toBe(AT_SET));
+
+    held.record = answered(ONE_WAITING);
+    await nudged(client);
+
+    await waitFor(() => expect(history.get()).toBe(AT_MEMO));
+  });
+
+  /// Answered and locked unanswered alike are passed over like any other
+  /// Event, and the landing is the end of the record again.
+  it("lands on the end where every set is answered or locked", async () => {
+    holding([...SETTLED.timeline, { Memo: NOTED }]);
+    const { history } = mount(`/conversations/${GRILLING.id}`);
+
+    await waitFor(() => expect(history.get()).toBe(AT_MEMO));
+  });
+
+  /// Waiting whichever kind of waiting it is: a Set the session deferred holds
+  /// the selection as one it is blocked on does.
+  it("stops at a deferred set too", async () => {
+    holding([
+      ...standingAs(GRILLING.timeline, WAITING_SET.id, LOCKED_UNANSWERED),
+      { Memo: NOTED },
+    ]);
+    const { history } = mount(`/conversations/${GRILLING.id}`);
+
+    await waitFor(() =>
+      expect(history.get()).toBe(
+        `/conversations/${GRILLING.id}/events/${DEFERRED_SET.id}`,
+      ),
+    );
+  });
+
+  /// And the oldest of two: the blocking Set was asked first, so it is where
+  /// the landing stops while both wait.
+  it("stops at the oldest of the sets still waiting", async () => {
+    holding([...GRILLING.timeline, { Memo: NOTED }]);
+    const { history } = mount(`/conversations/${GRILLING.id}`);
+
+    await waitFor(() => expect(history.get()).toBe(AT_SET));
+  });
+
+  /// The pending steer is drawn after the record, so it still lands first,
+  /// waiting Set or none.
+  it("lands on the pending steer ahead of a waiting set", async () => {
+    theGrillingSteering({ timeline: ONE_WAITING });
+    const { history } = mount(`/conversations/${GRILLING.id}`);
+
+    await waitFor(() =>
+      expect(history.get()).toBe(`/conversations/${GRILLING.id}/steer`),
+    );
+  });
+
+  /// A record growing under an advancing Timeline: what lands after the Set
+  /// does not carry the selection past it, and answering it does.
+  it("holds at the set while events land after it, then moves on", async () => {
+    const { held } = holding(ONE_WAITING);
+    const { container, history, client } = mount(`/conversations/${GRILLING.id}`);
+    await waitFor(() => expect(history.get()).toBe(AT_SET));
+
+    held.record = [...ONE_WAITING, { Notice: SAID }];
+    await nudged(client);
+    await waitFor(() =>
+      expect(
+        container.querySelectorAll(`.${timeline.timelineEvent}`),
+      ).toHaveLength(held.record.length),
+    );
+    expect(history.get()).toBe(AT_SET);
+
+    held.record = answered(held.record);
+    await nudged(client);
+
+    await waitFor(() =>
+      expect(history.get()).toBe(
+        `/conversations/${GRILLING.id}/events/${SAID.id}`,
+      ),
+    );
+  });
+
+  /// The way a phone answers: a tap on the Set's card, which is a press and
+  /// ends advancing, and the answer sent from its pane — which puts the
+  /// Timeline back into advancing, so the read the answer brings carries the
+  /// selection on to the next thing rather than leaving it on the answered Set.
+  it("carries on to the next thing once the set's pane sends an answer", async () => {
+    const { held, fetching } = holding(
+      ONE_WAITING,
+      whenever(
+        `/api/ui/sets/${SHEET.id}/response`,
+        () => {
+          held.record = answered(held.record);
+          return json("Accepted" satisfies Submitted)();
+        },
+        "POST",
+      ),
+    );
+    const { container, history } = mount(`/conversations/${GRILLING.id}`);
+    await waitFor(() => expect(history.get()).toBe(AT_SET));
+
+    await drawn(container, `.${timeline.questionSet}`);
+    fireEvent.click([...container.querySelectorAll(`.${timeline.questionSet}`)][1]!);
+
+    const pane = screen.getByLabelText("Details");
+    const chosen = await waitFor(() => {
+      const radio = pane.querySelector<HTMLInputElement>(
+        'input[name="Q1-option"][value="2"]',
+      );
+      if (!radio) {
+        throw new Error("the sheet has not been drawn");
+      }
+      return radio;
+    });
+
+    fireEvent.click(chosen);
+    fireEvent.click(screen.getByRole("button", { name: "Submit" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send anyway" }));
+
+    await waitFor(() =>
+      expect(fetching).toHaveBeenCalledWith(
+        `/api/ui/sets/${SHEET.id}/response`,
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+    await waitFor(() => expect(history.get()).toBe(AT_MEMO));
   });
 });
 

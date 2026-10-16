@@ -41,6 +41,10 @@ import { PaneHead } from "./PaneHead";
 export function Asked(props: {
   asked: QuestionSetEvent | UnreadableSetEvent;
   back: () => void;
+
+  /// What sending an answer from this pane does besides answering — see
+  /// `answered` in [`Workbench`].
+  answered?: () => void;
 }): JSX.Element {
   const device = useDevice();
 
@@ -88,7 +92,7 @@ export function Asked(props: {
           // column is read at and centres it, so there is a margin for the
           // sidebar to stand in — and where the human has left the pane
           // narrower than that, the nav folds into its bar.
-          <Sheet set={set()} back={props.back} />
+          <Sheet set={set()} back={props.back} answered={props.answered} />
         )}
       </Match>
     </Switch>

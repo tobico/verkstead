@@ -207,17 +207,69 @@ describe("the end of a record", () => {
 });
 
 describe("where opening a conversation lands", () => {
-  /// The end of the record, where nobody is steering it: the last thing that
-  /// has a pane behind it, which is where the work got to.
-  it("lands on the end of the record where no steer is pending", () => {
-    expect(GRILLING.pending_steer).toBeNull();
-    expect(landing(GRILLING)).toBe(lastOpening(GRILLING.timeline));
+  /// The grilling record with every Set on it settled: the waiting two locked
+  /// unanswered, the way a session that ended without an answer leaves them.
+  const SETTLED: ConversationView = {
+    ...GRILLING,
+    timeline: GRILLING.timeline.map((event) =>
+      "QuestionSet" in event && "Waiting" in event.QuestionSet.standing
+        ? {
+            QuestionSet: {
+              ...event.QuestionSet,
+              standing: { LockedUnanswered: "2026-08-03T09:09:23.000Z" },
+            },
+          }
+        : event,
+    ),
+  };
+
+  /// The Set Events on the grilling record, in the order they were asked.
+  const sets = GRILLING.timeline.flatMap((event) =>
+    "QuestionSet" in event ? [event.QuestionSet] : [],
+  );
+
+  /// The end of the record, where nobody is steering it and nothing is waiting
+  /// on the human: the last thing that has a pane behind it, which is where the
+  /// work got to. A Set answered or locked unanswered is passed over.
+  it("lands on the end of the record where nothing waits on the human", () => {
+    expect(SETTLED.pending_steer).toBeNull();
+    expect(sets.map((set) => Object.keys(set.standing)[0])).toEqual([
+      "Answered",
+      "Waiting",
+      "Waiting",
+    ]);
+    expect(landing(SETTLED)).toBe(lastOpening(SETTLED.timeline));
+  });
+
+  /// And on the oldest Set still waiting, ahead of whatever landed after it: a
+  /// memo or a commit arriving after a Set would otherwise carry the selection
+  /// past a Set nobody has answered.
+  it("lands on the oldest set still waiting on the human", () => {
+    expect(landing(GRILLING)).toBe(sets[1]!.id);
+    expect(landing(GRILLING)).not.toBe(lastOpening(GRILLING.timeline));
+  });
+
+  /// Waiting whichever kind of waiting it is: a deferred Set holds the
+  /// selection as a blocking one does.
+  it("stops at a deferred set as it does at a blocking one", () => {
+    const deferred = sets[2]!;
+    expect(deferred.standing).toEqual({ Waiting: "deferred" });
+
+    const later: ConversationView = {
+      ...GRILLING,
+      timeline: GRILLING.timeline.filter(
+        (event) => !("QuestionSet" in event) || event.QuestionSet.id !== sets[1]!.id,
+      ),
+    };
+
+    expect(landing(later)).toBe(deferred.id);
   });
 
   /// And on the pending steer where there is one, because that is drawn after
   /// the record: it is the one item on the pane that has not happened yet, so
   /// the end of the pane is the form rather than the last event. Somebody who
-  /// left a steer half written and came back is shown what they were writing.
+  /// left a steer half written and came back is shown what they were writing —
+  /// ahead of a waiting Set as well.
   it("lands on the pending steer where one stands", () => {
     const steering: ConversationView = {
       ...GRILLING,

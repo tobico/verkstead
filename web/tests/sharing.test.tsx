@@ -259,6 +259,30 @@ describe("a shared conversation", () => {
     );
   });
 
+  /// And a Set still waiting does not hold it there, as it holds the
+  /// workbench's: nobody answers from a share, so the end of the record is
+  /// still where the work got to.
+  it("opens on the end of the record past a set still waiting", async () => {
+    const waiting = SHARED.conversation.timeline.map((event) =>
+      "QuestionSet" in event
+        ? {
+            QuestionSet: {
+              ...event.QuestionSet,
+              standing: { Waiting: "waiting" as const },
+            },
+          }
+        : event,
+    );
+    expect(waiting.some((event) => "QuestionSet" in event)).toBe(true);
+
+    render(() => <Share shared={holding(waiting)} />);
+
+    const details = await screen.findByLabelText("Details");
+    await waitFor(() =>
+      expect(details.querySelector("h1")?.textContent).toBe("Commit"),
+    );
+  });
+
   /// A brief opens as the document it is, out of the record the file carries —
   /// no fetch, because there is nowhere to fetch from.
   it("opens the brief as the document it froze as", async () => {

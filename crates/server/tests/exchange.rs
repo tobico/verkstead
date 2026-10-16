@@ -90,10 +90,12 @@ const LONG_HENCE: &str = "2099-01-01T00:00:00Z";
 /// How long a dial in this suite gives one address, rather than the two seconds
 /// a running server gives one.
 ///
-/// Spent only where a dial is meant to reach nobody, which here is the machine
-/// that answers with the wrong certificate: the handshake fails on the first
-/// address and there is no second one, so this is a patience rather than a
-/// wait.
+/// Spent only where a dial is meant to reach nobody, which here is the press
+/// whose dial back goes to an address nothing is at — see
+/// [`Verkstead::workbench_in_a_hurry`]. A dial meant to land is never given it:
+/// three hundred milliseconds is a handshake and a write on an idle machine and
+/// not on a loaded one, and a dial that runs out of it reads as a device that
+/// answered at none of its addresses.
 const PATIENCE: Duration = Duration::from_millis(300);
 
 /// A path nothing on the peer listener answers, which is what makes it the one
@@ -232,8 +234,12 @@ impl Verkstead {
 
     /// How it dials, for the questions that are about a call rather than about
     /// a press.
+    ///
+    /// With a running server's deadlines rather than [`PATIENCE`], because
+    /// every one of these dials is to a listener that is there: those meant to
+    /// fail fail at the handshake or on the answer, never on the clock.
     fn peers(&self) -> Peers {
-        Peers::of(self.device.clone(), self.members.clone()).waiting(PATIENCE)
+        Peers::of(self.device.clone(), self.members.clone())
     }
 
     /// What it says about itself, which is what a roster carries.

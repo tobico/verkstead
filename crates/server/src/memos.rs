@@ -16,7 +16,7 @@
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use verkstead_schema::{ApiError, MemoLeft, Nudge, memo_refused};
+use verkstead_schema::{ApiError, MemoLeaving, MemoLeft, Nudge};
 
 use crate::AppState;
 use crate::reply::yaml;
@@ -56,17 +56,28 @@ impl Building {
 }
 
 /// `POST /conversations/{conversation}/api/v1/memos` — the session running in
-/// this Conversation leaves the markdown in the body for the sessions after it.
+/// this Conversation leaves the [`MemoLeaving`] in the body, a title and the
+/// markdown, for the sessions after it.
 ///
-/// 200 with the new Memo's Event id. 409 where the memo is empty or over
-/// [`verkstead_schema::MAX_MEMO_BYTES`], where no session is running here, or
+/// 200 with the new Memo's Event id. 409 where the body is malformed or
+/// refused by [`MemoLeaving::refused`], where no session is running here, or
 /// where the one running is not a building one.
 pub(crate) async fn leave(
     State(state): State<AppState>,
     Path(conversation_id): Path<i64>,
-    markdown: String,
+    body: String,
 ) -> Response {
-    if let Some(why) = memo_refused(&markdown) {
+    let memo = match serde_saphyr::from_str::<MemoLeaving>(&body) {
+        Ok(asked) => MemoLeaving::new(&asked.title, &asked.markdown),
+        Err(error) => {
+            return refused(
+                conversation_id,
+                format!("the memo is not a title and its markdown in YAML: {error}"),
+            );
+        }
+    };
+
+    if let Some(why) = memo.refused() {
         return refused(conversation_id, why);
     }
 
@@ -91,11 +102,21 @@ pub(crate) async fn leave(
 
     let left_by = building.left_by();
 
-    match store::leave_memo(&state.pool, conversation_id, &markdown, &left_by, event_id).await {
+    match store::leave_memo(
+        &state.pool,
+        conversation_id,
+        Some(&memo.title),
+        &memo.markdown,
+        &left_by,
+        event_id,
+    )
+    .await
+    {
         Ok(Some(id)) => {
             tracing::info!(
                 conversation_id,
                 id,
+                title = memo.title,
                 left_by,
                 "a session left a memo for the sessions after it"
             );

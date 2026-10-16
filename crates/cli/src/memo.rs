@@ -1,10 +1,11 @@
 //! `verkstead memo`: leave what this session learned for the sessions after it
 //! on the same Conversation (ADR-0023).
 //!
-//! Markdown on stdin, the way `verkstead ask` takes its Set, and the
-//! Conversation in `VERKSTEAD_SERVER` the way every verb here has it. An empty
-//! memo and one over the maximum are refused here before anything is sent — a
-//! courtesy, since the server holds the same rule — and whether this session
+//! The title as the argument and the markdown on stdin, the way `verkstead
+//! preview` takes its command, and the Conversation in `VERKSTEAD_SERVER` the
+//! way every verb here has it. An empty or multi-line title, an empty memo and
+//! one over the maximum are refused here before anything is sent — a courtesy,
+//! since the server holds the same rule — and whether this session
 //! may leave one at all is the server's to say, because it knows what the
 //! session was sent for.
 //!
@@ -14,22 +15,24 @@
 use std::io::{Read, Write};
 
 use anyhow::{Context, Result, bail};
-use verkstead_schema::memo_refused;
+use verkstead_schema::MemoLeaving;
 
 use crate::client::Client;
 
-/// Leave the memo on stdin, and print the Event it became.
-pub fn memo(server: &str) -> Result<()> {
+/// Leave the memo on stdin under `title`, and print the Event it became.
+pub fn memo(title: &str, server: &str) -> Result<()> {
     let mut markdown = String::new();
     std::io::stdin()
         .read_to_string(&mut markdown)
         .context("reading the memo from stdin")?;
 
-    if let Some(why) = memo_refused(&markdown) {
+    let memo = MemoLeaving::new(title, &markdown);
+
+    if let Some(why) = memo.refused() {
         bail!("{why}");
     }
 
-    let left = Client::new(server)?.memo(&markdown)?;
+    let left = Client::new(server)?.memo(&memo)?;
 
     let yaml = serde_saphyr::to_string(&left).context("writing the memo's id")?;
     let mut stdout = std::io::stdout().lock();

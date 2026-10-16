@@ -7,6 +7,11 @@
 //! Event the way a Steer's record is: who left it, out of which session, and
 //! whether it has since been taken back.
 //!
+//! **Its title is on the row too**, beside who left it: the words the session
+//! named it by, and `None` for every Memo left before there were titles, which
+//! the card stands the body's first line in for rather than a migration
+//! inventing one.
+//!
 //! **Who left it is words**, computed at the moment it is left and kept as
 //! text — *the session that worked task 03*, *the finish session*. Words rather
 //! than a step, because the record says what ran and a step is a reading of the
@@ -27,6 +32,10 @@ use sqlx::SqlitePool;
 /// What a Memo's Event carries beside its markdown.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Memo {
+    /// What the session named it, trimmed and on one line. `None` for a Memo
+    /// left before there were titles.
+    pub title: Option<String>,
+
     /// The words the card and the prompt stamp it with — *the session that
     /// worked task 03*.
     pub left_by: String,
@@ -68,6 +77,7 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
         "CREATE TABLE IF NOT EXISTS memos (
              event_id        INTEGER PRIMARY KEY REFERENCES timeline_events(id),
              conversation_id INTEGER NOT NULL REFERENCES conversations(id),
+             title           TEXT,
              left_by         TEXT NOT NULL,
              left_in         INTEGER NOT NULL REFERENCES timeline_events(id),
              retired_at      TEXT,
@@ -88,10 +98,11 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
 /// `None` means there is no such Conversation, by the insert-from-select every
 /// other Event is written with. `left_in` is the Event of the session leaving
 /// it — which session that is, and whether it may leave one at all, is the
-/// caller's to have settled.
+/// caller's to have settled, as is whether `title` may be the title.
 pub async fn leave_memo(
     pool: &SqlitePool,
     conversation_id: i64,
+    title: Option<&str>,
     markdown: &str,
     left_by: &str,
     left_in: i64,
@@ -116,10 +127,12 @@ pub async fn leave_memo(
     };
 
     sqlx::query(
-        "INSERT INTO memos (event_id, conversation_id, left_by, left_in) VALUES (?, ?, ?, ?)",
+        "INSERT INTO memos (event_id, conversation_id, title, left_by, left_in)
+         VALUES (?, ?, ?, ?, ?)",
     )
     .bind(event_id)
     .bind(conversation_id)
+    .bind(title)
     .bind(left_by)
     .bind(left_in)
     .execute(&mut *tx)
@@ -142,6 +155,7 @@ pub(crate) async fn on_timeline(
 ) -> Result<HashMap<i64, Memo>> {
     type Row = (
         i64,
+        Option<String>,
         String,
         i64,
         Option<String>,
@@ -150,7 +164,7 @@ pub(crate) async fn on_timeline(
     );
 
     let rows: Vec<Row> = sqlx::query_as(
-        "SELECT event_id, left_by, left_in, retired_at, retired_by, reason
+        "SELECT event_id, title, left_by, left_in, retired_at, retired_by, reason
          FROM memos WHERE conversation_id = ?",
     )
     .bind(conversation_id)
@@ -161,7 +175,7 @@ pub(crate) async fn on_timeline(
     Ok(rows
         .into_iter()
         .map(
-            |(event_id, left_by, left_in, retired_at, retired_by, reason)| {
+            |(event_id, title, left_by, left_in, retired_at, retired_by, reason)| {
                 // Retired once both the moment and the who are there: the two are
                 // written together, and the reason is optional beside them.
                 let retired =
@@ -172,6 +186,7 @@ pub(crate) async fn on_timeline(
                 (
                     event_id,
                     Memo {
+                        title,
                         left_by,
                         left_in,
                         retired,
@@ -188,6 +203,9 @@ pub struct StandingMemo {
     /// Its Event, which is the number it is retired by.
     pub id: i64,
 
+    /// See [`Memo::title`].
+    pub title: Option<String>,
+
     /// See [`Memo::left_by`].
     pub left_by: String,
 
@@ -202,8 +220,8 @@ pub struct StandingMemo {
 /// deferred Set's Answers — a Memo is not spent by being read, and stands until
 /// something retires it.
 pub async fn standing_memos(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<StandingMemo>> {
-    let rows: Vec<(i64, String, String)> = sqlx::query_as(
-        "SELECT memos.event_id, memos.left_by, timeline_events.body
+    let rows: Vec<(i64, Option<String>, String, String)> = sqlx::query_as(
+        "SELECT memos.event_id, memos.title, memos.left_by, timeline_events.body
          FROM memos JOIN timeline_events ON timeline_events.id = memos.event_id
          WHERE memos.conversation_id = ? AND memos.retired_at IS NULL
          ORDER BY memos.event_id",
@@ -215,8 +233,9 @@ pub async fn standing_memos(pool: &SqlitePool, conversation_id: i64) -> Result<V
 
     Ok(rows
         .into_iter()
-        .map(|(id, left_by, markdown)| StandingMemo {
+        .map(|(id, title, left_by, markdown)| StandingMemo {
             id,
+            title,
             left_by,
             markdown,
         })

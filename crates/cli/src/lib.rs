@@ -149,7 +149,9 @@ enum Command {
     /// working knowledge no commit holds, such as a flaky test, a build trap,
     /// or a decision taken mid-task and why.
     ///
-    /// Markdown on stdin, of at most 8 KiB. Only a building session may leave
+    /// The title as the one argument — a handful of words naming what the memo
+    /// is about, which is what the human reads down the Timeline — and the
+    /// markdown on stdin, of at most 8 KiB. Only a building session may leave
     /// one: a backlog task, the finish, a stage's planning, an inline run or a
     /// steered instruction. Accepted, it prints the memo's id as YAML — `id: 42`
     /// — on stdout and exits 0, and every later session of the Conversation is
@@ -161,6 +163,14 @@ enum Command {
     /// the rest of the line is the reason, and no later session is shown it.
     /// Accepted, it prints nothing on stdout.
     Memo {
+        /// What the memo is called, such as "The limiter's test flakes".
+        //
+        // Not in conflict with `--retire`, whose reason is the rest of the line:
+        // the first word of that line lands here, and is put back in front of
+        // the reason below.
+        #[arg(required_unless_present = "retire")]
+        title: Option<String>,
+
         /// Retire the memo with this id rather than leave a new one.
         #[arg(long, value_name = "ID")]
         retire: Option<i64>,
@@ -310,12 +320,17 @@ impl Cli {
             Some(Command::Answers { id, server }) => answers::answers(id, &server),
             Some(Command::Done { server }) => done::done(&server),
             Some(Command::Memo {
+                title,
                 retire,
                 reason,
                 server,
-            }) => match retire {
-                Some(id) => memo::retire(id, &reason, &server),
-                None => memo::memo(&server),
+            }) => match (title, retire) {
+                (first, Some(id)) => {
+                    let reason: Vec<String> = first.into_iter().chain(reason).collect();
+                    memo::retire(id, &reason, &server)
+                }
+                (Some(title), None) => memo::memo(&title, &server),
+                (None, None) => unreachable!("clap requires a title or --retire"),
             },
             Some(Command::Preview {
                 title,

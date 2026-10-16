@@ -66,14 +66,20 @@
 //! to pick from, and only where the path names no pane already — a cold load of
 //! a details pane keeps the selection it was opened at.
 //!
-//! And it stays there. A Timeline landed on the end of its record is advancing:
+//! Except where a Question Set is still waiting on the human: then it lands on
+//! the oldest such Set and stays there until it is answered, so a Memo or a
+//! commit landing after a Set cannot carry the selection past it. See
+//! [`landing`].
+//!
+//! And it stays there. A Timeline that landed is advancing:
 //! each Event that arrives with a pane behind it is opened as it lands, so a
 //! human watching a session work is shown what it just did rather than what it
 //! had done when they opened it. There is nothing on screen to say so — the
 //! newest card is open and an open card looks like an open card — and nothing
 //! to turn on either: arriving is the whole of it, whether that was a press on
 //! the sidebar or the walk a Conversation is started with. Picking anything by
-//! hand ends it, and the next arrival begins it again.
+//! hand ends it, and the next arrival begins it again — and so does sending an
+//! answer from a Set's pane, which a phone reached by tapping the Set's card.
 //!
 //! What a Conversation *is* is not drawn there — the setup it needs is on the
 //! Brief card, where it is used — and the way on to an empty pane is not
@@ -132,6 +138,7 @@ import { Commit } from "./Commit";
 import { Composer, composing } from "./Composer";
 import { Conversations } from "./Conversations";
 import { Document } from "./Document";
+import { MemoPane } from "./Memo";
 import { Hatch } from "./Hatch";
 import { LogIn } from "./LogIn";
 import { Output } from "./Output";
@@ -415,6 +422,18 @@ export function Workbench(): JSX.Element {
     setFollowed(null);
     navigate(pathTo(selected(), opening, device()), { replace: true });
   };
+
+  /// Sending an answer from a Set's pane, which puts the Timeline back into
+  /// advancing.
+  ///
+  /// The press on the Set's card ended it, and on a phone that press is the
+  /// only way to the Set's pane — so without this, a phone that answered would
+  /// be left standing on the answered Set. The landing that follows is the one
+  /// the answer's Nudge brings, and it carries the selection on to the next
+  /// waiting Set or the end of the record. Nothing navigates here: the Set the
+  /// cache still holds is still waiting until that read arrives, so the landing
+  /// effect finds it where it already is.
+  const answered = () => setFollowed(selected());
 
   // Opening a Conversation is what walks a phone into the Timeline, and leaving
   // the workbench route walks it back out. Written as an effect on the URL
@@ -725,9 +744,10 @@ export function Workbench(): JSX.Element {
     }
   });
 
-  // A Timeline that is advancing stays at the end of its record: every Event
-  // that lands with a pane behind it is opened as it arrives, the way the
-  // landing opened the last one before it.
+  // A Timeline that is advancing stays where landing puts it: every Event that
+  // lands with a pane behind it is opened as it arrives, the way the landing
+  // opened the last one before it — unless a Set is still waiting, which holds
+  // the selection until it is answered.
   //
   // The same walk as the landing's and made the same way — the URL rewritten to
   // where the newest pane stands, with replace — because what is open is the
@@ -819,6 +839,8 @@ export function Workbench(): JSX.Element {
               <DetailsPane
                 conversation={conversation}
                 event={event()}
+                select={select}
+                answered={answered}
                 back={leaving()}
                 // This device's own Conversation or a member's, as the URL
                 // says: every Verkstead issues a Conversation 7, and Code's
@@ -909,8 +931,15 @@ function DetailsPane(props: {
   /// drawn from.
   conversation: Read;
 
-  /// What is open in it, if anything.
+  /// What is open in it, if anything, and how to open something else — which
+  /// a pane does where it links to another Event, through the same press its
+  /// card would have made.
   event: Opening | null;
+  select: (opening: Opening) => void;
+
+  /// And what sending an answer from a Set's pane does to the Timeline: puts
+  /// it back into advancing — see `answered` in [`Workbench`].
+  answered: () => void;
 
   /// The way off whatever pane is drawn, which a narrow window walks out
   /// through: where it goes and what it is called. Ordinarily the Timeline,
@@ -951,9 +980,9 @@ function DetailsPane(props: {
   /// Capture; a Question Set, whose full self is the document it was asked
   /// as; a commit, whose full self is its diff; the pull request, whose full
   /// self is what is on it at GitHub right now; a steer, whose full self is the
-  /// form the human filled to make it; and the three documents — the Brief,
-  /// the handoff and a Memo — whose full self is the markdown their card shows
-  /// three lines of. The kind travels with it, because it is what decides which pane is
+  /// form the human filled to make it; and the three documents — the Brief and
+  /// the handoff, whose full self is the markdown their card shows three lines
+  /// of, and a Memo, whose card shows only its title. The kind travels with it, because it is what decides which pane is
   /// drawn.
   ///
   /// A Brief still being drafted is here too, and nothing ever selects it: the
@@ -1101,6 +1130,7 @@ function DetailsPane(props: {
                     <Asked
                       asked={asked()}
                       back={props.back.go}
+                      answered={props.answered}
                     />
                   )}
                 </Match>
@@ -1170,14 +1200,16 @@ function DetailsPane(props: {
                     />
                   )}
                 </Match>
-                {/* A Memo is the handoff's pane, under the head its card
-                    carries. */}
+                {/* A Memo is the handoff's pane under the title its card
+                    carries, with who left it and the one act on it at the
+                    foot — and the session that left it a press away, opened
+                    the way its own card opens it. */}
                 <Match when={memoIn(open())}>
                   {(memo) => (
-                    <Document
-                      heading={`Memo ${memo().id}`}
-                      html={memo().html}
-                      empty="The session wrote nothing down."
+                    <MemoPane
+                      conversation={conversation().id}
+                      memo={memo()}
+                      open={props.select}
                       back={props.back.go}
                     />
                   )}

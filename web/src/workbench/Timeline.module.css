@@ -688,33 +688,25 @@
    the box to do. */
 .brief .briefBody,
 .handoff .handoffBody,
-.memo .memoBody,
 .steeredWith .steerBody {
   max-width: var(--measure);
 }
 
-/* A Memo is the handoff's card, with the session that left it beside the head
-   in the quiet ink a stamp is set in. A retired one stays on the record dimmed,
-   with who took it back and why under the head — it has left every later
-   prompt, and the card says so without leaving the Timeline. */
-.memo .leftBy,
-.memo .retiredBy {
-  font-size: 0.9rem;
+/* A Memo's card is its kind and its title: the title on one line under the
+   head, cut with an ellipsis where it runs on, the way a commit's subject is —
+   the whole of it heads the pane the card opens. A retired one strikes the
+   title through, which is the whole of what the card says about it. */
+.memo .memoTitle {
+  margin: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  max-width: var(--measure);
+}
+
+.memo.retired .memoTitle {
+  text-decoration: line-through;
   color: var(--ink-soft);
-}
-
-/* The one act on the card, at the far end of its head. */
-.memo .memoPress {
-  margin-left: auto;
-}
-
-.memo .retiredBy {
-  margin: 0 0 0.5rem;
-}
-
-.memo.retired .eventHead,
-.memo.retired .memoBody {
-  opacity: 0.6;
 }
 
 /* On the card, each of them is cut off at three lines with an ellipsis: enough

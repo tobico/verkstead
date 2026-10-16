@@ -15,7 +15,7 @@
 //! held at the bottom of a record that is still being written, which is what
 //! reading a running session's Transcript is.
 
-import { createEffect, onCleanup, type Accessor } from "solid-js";
+import { createEffect, onCleanup, untrack, type Accessor } from "solid-js";
 
 /// The box `target` is scrolled inside: the nearest ancestor that scrolls, or
 /// `null` where nothing between it and the top of the page does — which is the
@@ -104,6 +104,13 @@ function toBottom(box: HTMLElement | null): void {
 /// It starts pinned, which is what makes opening a running record land at its
 /// end: that is where what is being said now is.
 ///
+/// `held`, where it names something, is followed instead of the bottom: the
+/// content growing scrolls it into view (`nearest`) rather than scrolling past
+/// it to the end. Read when the content grows and not tracked, so its changing
+/// moves nothing by itself — a view whose hold ends goes to the bottom with the
+/// next growth, rather than jumping there under a human who just pressed
+/// something else.
+///
 /// The pause is the human's own scrolling and nothing else. Content arriving
 /// under a pinned view fires no scroll — the box is already at its end and this
 /// keeps it there — and this function's own scrolling is not a gesture, so
@@ -113,6 +120,7 @@ export function followBottom(
   anchor: Accessor<HTMLElement | undefined>,
   live: Accessor<boolean>,
   grew: Accessor<unknown>,
+  held?: Accessor<Element | undefined>,
 ): void {
   /// Whether the view is being held at the bottom.
   let pinned = true;
@@ -163,6 +171,12 @@ export function followBottom(
 
     const from = anchor();
     if (from === undefined || !pinned) return;
+
+    const at = untrack(() => held?.());
+    if (at !== undefined) {
+      at.scrollIntoView?.({ block: "nearest" });
+      return;
+    }
 
     toBottom(scroller(from));
   });

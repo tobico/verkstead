@@ -600,8 +600,9 @@ fn the_guides_quoted_memo_contract_is_the_real_one() {
 
 /// A memo is written during the work and the signal ends it, so its section
 /// comes before *Ending the session*, and says what a memo is for in the
-/// glossary's words, who may leave one, both invocations, what comes back,
-/// the bound, and the shape a later session reads it in.
+/// glossary's words, who may leave one, both invocations — the title and what
+/// it is for among them — what comes back, the bound, and the shape a later
+/// session reads it in.
 #[test]
 fn the_guide_says_how_to_leave_a_memo() {
     for agent_type in ["claude", "codex", "grok", "opencode"] {
@@ -619,12 +620,14 @@ fn the_guide_says_how_to_leave_a_memo() {
             "not the design**, which the Brief and the Handoff are",
             "Only the sessions that build leave one",
             "refused by name",
-            "verkstead memo <<'MD'",
+            "verkstead memo 'The transfer suite flakes' <<'MD'",
+            "what the human reads down the Timeline",
+            "refused empty or with a newline in it",
             "verkstead memo --retire 42",
             "id: 42",
             "8 KiB",
             "# What earlier sessions left for you",
-            "**Memo 42**, left by the session that worked task 03.",
+            "**The transfer suite flakes**, left by the session that worked task 03.",
             "Retire it with `verkstead memo --retire 42` once it no longer holds.",
         ] {
             assert!(

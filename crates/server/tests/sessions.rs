@@ -39509,15 +39509,19 @@ async fn closing_a_conversation_ends_its_terminals_before_the_worktree_goes() {
     );
 }
 
-/// Post `markdown` as a Memo from the session running in `fixture`, the way
-/// `verkstead memo` does, and hand back what the server answered.
-async fn leave_a_memo(fixture: &Grilling, markdown: &str) -> (StatusCode, String) {
+/// Post `markdown` as a Memo called `title` from the session running in
+/// `fixture`, the way `verkstead memo` does, and hand back what the server
+/// answered.
+async fn leave_a_memo(fixture: &Grilling, title: &str, markdown: &str) -> (StatusCode, String) {
+    let body = serde_saphyr::to_string(&verkstead_schema::MemoLeaving::new(title, markdown))
+        .expect("a memo is written as YAML");
+
     fetch(
         &fixture.app,
         Request::builder()
             .method("POST")
             .uri(format!("/conversations/{}/api/v1/memos", fixture.id))
-            .body(Body::from(markdown.to_owned()))
+            .body(Body::from(body))
             .unwrap(),
     )
     .await
@@ -39560,7 +39564,12 @@ async fn a_task_session_leaves_a_memo_stamped_with_its_task() {
         pause(Duration::from_millis(25)).await;
     }
 
-    let (status, body) = leave_a_memo(&fixture, "The limiter's test flakes under load.\n").await;
+    let (status, body) = leave_a_memo(
+        &fixture,
+        "The limiter's test flakes",
+        "The limiter's test flakes under load.\n",
+    )
+    .await;
     std::fs::write(directory.join("memo-left"), "").unwrap();
 
     assert_eq!(status, StatusCode::OK, "the memo is taken: {body}");
@@ -39574,7 +39583,16 @@ async fn a_task_session_leaves_a_memo_stamped_with_its_task() {
 
     assert_eq!(memos.len(), 1, "one memo on the Timeline: {memos:?}");
     assert_eq!(memos[0].id, id, "the one the route answered with");
+    assert_eq!(
+        memos[0].title.as_deref(),
+        Some("The limiter's test flakes"),
+        "named by its title"
+    );
     assert_eq!(memos[0].left_by, "the session that worked task 01");
+    assert_eq!(
+        memos[0].left_in, task,
+        "left out of the task session's output"
+    );
     assert!(
         memos[0].html.contains("flakes under load"),
         "{:?}",
@@ -39612,7 +39630,8 @@ async fn a_wrap_up_session_is_refused_a_memo_naming_the_kinds_that_may() {
         pause(Duration::from_millis(50)).await;
     }
 
-    let (status, body) = leave_a_memo(&fixture, "Nothing worth raising.\n").await;
+    let (status, body) =
+        leave_a_memo(&fixture, "Nothing to raise", "Nothing worth raising.\n").await;
 
     assert_eq!(status, StatusCode::CONFLICT, "refused: {body}");
     // Unfolded, because the YAML reply wraps a long line wherever it likes.
@@ -39627,13 +39646,19 @@ async fn a_wrap_up_session_is_refused_a_memo_naming_the_kinds_that_may() {
 
 /// Put a Memo on the Conversation straight through the store, left in `session`
 /// — for the tests about what a launch is told rather than about who may leave
-/// one.
-async fn a_memo_on_the_record(fixture: &Grilling, session: i64, markdown: &str) -> i64 {
+/// one. `title` is `None` for a Memo left before there were titles.
+async fn a_memo_on_the_record(
+    fixture: &Grilling,
+    session: i64,
+    title: Option<&str>,
+    markdown: &str,
+) -> i64 {
     let pool = open_database(&fixture.database).await.unwrap();
 
     verkstead_store::leave_memo(
         &pool,
         fixture.id,
+        title,
         markdown,
         "the session that worked task 01",
         session,
@@ -39661,8 +39686,15 @@ async fn the_memos_left_are_in_the_prompt_of_every_later_session() {
         .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
         .await;
 
-    let first = a_memo_on_the_record(&fixture, grilling, "The limiter's test flakes.\n").await;
-    let second = a_memo_on_the_record(&fixture, grilling, "Run clippy first.\n").await;
+    let first = a_memo_on_the_record(
+        &fixture,
+        grilling,
+        Some("The limiter's test"),
+        "The limiter's test flakes.\n",
+    )
+    .await;
+    // And one left before there were titles, which is named by its number.
+    let second = a_memo_on_the_record(&fixture, grilling, None, "Run clippy first.\n").await;
 
     let set = fixture.ask(PROPOSING).await;
     assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
@@ -39681,7 +39713,7 @@ async fn the_memos_left_are_in_the_prompt_of_every_later_session() {
 
     let block = format!(
         "# What earlier sessions left for you\n\n\
-         **Memo {first}**, left by the session that worked task 01.\n\
+         **The limiter's test**, left by the session that worked task 01.\n\
          Retire it with `verkstead memo --retire {first}` once it no longer holds.\n\n\
          The limiter's test flakes.\n\n\
          **Memo {second}**, left by the session that worked task 01.\n\
@@ -39719,8 +39751,15 @@ async fn a_steered_session_is_told_the_memos_and_a_session_with_none_is_not() {
     );
 
     let grilling = output(&fixture.view().await).unwrap().id;
-    let standing = a_memo_on_the_record(&fixture, grilling, "The limiter's test flakes.\n").await;
-    let retired = a_memo_on_the_record(&fixture, grilling, "A retired one.\n").await;
+    let standing = a_memo_on_the_record(
+        &fixture,
+        grilling,
+        Some("The limiter's test"),
+        "The limiter's test flakes.\n",
+    )
+    .await;
+    let retired =
+        a_memo_on_the_record(&fixture, grilling, Some("Retired"), "A retired one.\n").await;
 
     let pool = open_database(&fixture.database).await.unwrap();
     sqlx::query(
@@ -39744,7 +39783,7 @@ async fn a_steered_session_is_told_the_memos_and_a_session_with_none_is_not() {
 
     assert!(
         relaunched.contains("/verkstead/skills/grilling/SKILL.md")
-            && relaunched.contains(&format!("**Memo {standing}**"))
+            && relaunched.contains("**The limiter's test**")
             && relaunched.contains("The limiter's test flakes."),
         "a relaunched grilling is told the memo standing: {relaunched:?}",
     );
@@ -39771,7 +39810,7 @@ async fn a_steered_session_is_told_the_memos_and_a_session_with_none_is_not() {
 
     assert!(
         instructed.contains("/verkstead/skills/instruction/SKILL.md")
-            && instructed.contains(&format!("**Memo {standing}**")),
+            && instructed.contains("**The limiter's test**"),
         "and so is a steered instruction: {instructed:?}",
     );
     assert!(
@@ -39961,8 +40000,20 @@ async fn a_memo_a_task_session_retires_leaves_every_later_prompt() {
         .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
         .await;
 
-    let flaky = a_memo_on_the_record(&fixture, grilling, "The limiter's test flakes.\n").await;
-    let clippy = a_memo_on_the_record(&fixture, grilling, "Run clippy first.\n").await;
+    let flaky = a_memo_on_the_record(
+        &fixture,
+        grilling,
+        Some("The limiter's test"),
+        "The limiter's test flakes.\n",
+    )
+    .await;
+    let clippy = a_memo_on_the_record(
+        &fixture,
+        grilling,
+        Some("Clippy first"),
+        "Run clippy first.\n",
+    )
+    .await;
 
     let set = fixture.ask(PROPOSING).await;
     assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
@@ -40029,17 +40080,19 @@ async fn a_memo_a_task_session_retires_leaves_every_later_prompt() {
 
     let (first, _) = &started[0];
     assert!(
-        started[0].1.contains(&format!("**Memo {flaky}**")),
+        started[0].1.contains("**The limiter's test**"),
         "{first} was started before the retirement, and told it",
     );
 
     for (step, prompt) in &started[1..] {
         assert!(
-            !prompt.contains(&format!("**Memo {flaky}**")) && !prompt.contains("flakes"),
+            !prompt.contains("**The limiter's test**") && !prompt.contains("flakes"),
             "{step} is not told the retired memo: {prompt:?}",
         );
         assert!(
-            prompt.contains(&format!("**Memo {clippy}**")) && prompt.contains("Run clippy first."),
+            prompt.contains("**Clippy first**")
+                && prompt.contains(&format!("verkstead memo --retire {clippy}"))
+                && prompt.contains("Run clippy first."),
             "{step} is told the rest: {prompt:?}",
         );
     }

@@ -104,7 +104,39 @@ pub(crate) async fn apply(pool: &SqlitePool) -> Result<()> {
     fix_attempts_that_were_one_per_repository(pool).await?;
     pull_requests_that_named_no_base_branch(pool).await?;
     stages_that_never_said_which_one_they_were(pool).await?;
+    memos_left_before_there_were_titles(pool).await?;
     profiles_whose_name_was_unique_everywhere(pool).await
+}
+
+/// Give every Memo left before a session named its Memo the column that holds
+/// the title (ADR-0023, *a memo has a title*).
+///
+/// Nobody has one: the title arrives with the column, and every row this
+/// reaches was left as markdown alone. So the column's own emptiness is the
+/// whole of the rewrite and there is no `UPDATE` under it — the card stands the
+/// body's first line in for a title it was never given, rather than a title
+/// being invented here. See [`super::memos::Memo::title`].
+///
+/// Safe to run twice: what says whether there is anything to do is the column
+/// being absent, and after the first run it is there.
+async fn memos_left_before_there_were_titles(pool: &SqlitePool) -> Result<()> {
+    let there: Option<(String,)> =
+        sqlx::query_as("SELECT name FROM pragma_table_info('memos') WHERE name = ?")
+            .bind("title")
+            .fetch_optional(pool)
+            .await
+            .context("looking for whether a Memo has a title")?;
+
+    if there.is_some() {
+        return Ok(());
+    }
+
+    sqlx::query("ALTER TABLE memos ADD COLUMN title TEXT")
+        .execute(pool)
+        .await
+        .context("giving the Memos left before this a title to have")?;
+
+    Ok(())
 }
 
 /// Give every stage recorded before Verkstead wrote down *which* stage it was

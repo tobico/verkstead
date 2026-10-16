@@ -113,6 +113,12 @@ export function Answering(props: {
   /// this, so a reload draws the same row, and the × that takes one off is
   /// answered by the Set being read again.
   attachments: AttachmentView[];
+
+  /// What the page around the sheet does once an answer is sent, where it does
+  /// anything: the workbench puts its Timeline back into advancing, so the
+  /// next landing carries the selection on from the Set just answered. The
+  /// standalone sheet has no selection to carry, and passes none.
+  answered?: () => void;
 }): JSX.Element {
   // Read once rather than through a memo: the fields are the Set's own shape,
   // and rebuilding them under a human who is typing into them would throw away
@@ -196,6 +202,7 @@ export function Answering(props: {
       // is spent.
       setSettled(true);
       clearDraft(props.id);
+      props.answered?.();
 
       // And the sheet stays where it is, read back as the record of what was
       // decided rather than left behind for a list — there is no list. Which is

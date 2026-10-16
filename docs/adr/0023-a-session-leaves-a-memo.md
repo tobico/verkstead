@@ -119,3 +119,50 @@ session was sent for, and a rule the server can hold is held.
 Transfer, and *notes* is on the Handoff's avoid list. *Memo* — a thing written
 to be remembered by a later reader — is what it is, and nothing in the glossary
 uses it.
+
+## Amended: a memo has a title, and the card shows it
+
+*Amended 2026-10-16.* The card above was the handoff's: headed by the Event id,
+stamped with the session, three lines of the body, and Retire at the end of the
+head. Read down a record, a column of those was a column of numbers over the
+openings of paragraphs, and the number told the human nothing — it is the
+session's handle for retiring, never theirs.
+
+**A memo is named by its session.** `verkstead memo <title>` takes the title as
+its one argument, the way `verkstead preview <title>` already does, with the
+markdown still on stdin. A title is trimmed and refused empty or with a newline
+in it, and has no length cap: the card cuts it to one line. Memos left before
+this have none, and the card shows the body's first line in its place rather
+than a migration inventing one.
+
+**The card is the kind and the title.** Headed *Memo*, the title as its
+subtitle, and nothing else: no stamp, no body, no button. A retired one strikes
+the subtitle through and says no more; who took it back and why are in the pane.
+The number is drawn nowhere on screen.
+
+**The pane says the rest.** Headed by the title, the whole memo under it, and
+under that an understated line — who left it and when, the session's name a
+link that opens that session's own output, and *Retired by … reason* beneath it
+where retired. Retire, or Restore, stands beside that line rather than in the
+head: it is the one act on the memo, and it belongs with the words that say
+where the memo stands.
+
+**The prompt names it by the title too.** `**<title>**, left by the session that
+worked task 03.`, and the id only in the line that says how to retire it, which
+is the one place a session needs it.
+
+**And a memo after a Set no longer walks the selection past the Set.** The
+Timeline's selection followed the end of the record, so a memo landing after a
+Question Set opened the memo and left the Set unanswered behind it. The landing
+is now the pending steer, else the oldest Set still waiting — blocking,
+disconnected or deferred alike — else the end of the record; a Set locked
+unanswered is passed over, and a share lands on its end as before. Answering
+from the pane puts the Timeline back into advancing, so a phone that tapped the
+Set's card to answer it is carried on to the next thing.
+
+Considered and rejected: **the title as the markdown's first line**, which
+makes a heading the body cannot have and a memo with no heading untitled;
+**a `--title` flag**, which makes an untitled memo the default; **backfilling
+old memos** from their first line, which writes titles nobody chose; and
+**Retire in the pane head**, where it reads as chrome rather than as an act on
+what is written.

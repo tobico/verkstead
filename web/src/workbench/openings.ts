@@ -289,8 +289,9 @@ export function lastOpening(timeline: readonly TimelineEvent[]): Opening | null 
   return null;
 }
 
-/// Where opening a Conversation lands: the pending steer where one stands, and
-/// the end of the record otherwise.
+/// Where opening a Conversation lands: the pending steer where one stands, else
+/// the oldest Question Set still waiting on the human, and the end of the
+/// record otherwise.
 ///
 /// The pending steer first because it is drawn last — it is the one item on the
 /// pane that has not happened yet, so the Timeline puts it after everything
@@ -302,11 +303,34 @@ export function lastOpening(timeline: readonly TimelineEvent[]): Opening | null 
 /// landing: the press navigates to the item, and every arrival afterwards finds
 /// it for itself.
 ///
-/// A share never takes this road. It carries no pending steer — a share is the
-/// record, and this is not on it — so what a share lands on is [`lastOpening`]
-/// alone.
+/// A waiting Set before the end because a Set is the one thing on the record
+/// the work is held on: a Memo or a commit landing after it would otherwise
+/// carry the selection past a Set nobody has answered, and leave it behind the
+/// newest card. Waiting is its standing, whichever of blocking, disconnected or
+/// deferred; one answered or locked unanswered is passed over like any other
+/// Event. The oldest of them, being the first one asked.
+///
+/// A share never takes this road. It carries no pending steer, and nobody can
+/// answer a Set from it — a share is the record, and this is not on it — so
+/// what a share lands on is [`lastOpening`] alone.
 export function landing(conversation: ConversationView): Opening | null {
-  return conversation.pending_steer === null
-    ? lastOpening(conversation.timeline)
-    : "steer";
+  if (conversation.pending_steer !== null) {
+    return "steer";
+  }
+
+  return (
+    oldestWaiting(conversation.timeline) ?? lastOpening(conversation.timeline)
+  );
+}
+
+/// The first Question Set on a record still waiting on the human, or `null`
+/// where none is.
+function oldestWaiting(timeline: readonly TimelineEvent[]): Opening | null {
+  for (const event of timeline) {
+    if ("QuestionSet" in event && "Waiting" in event.QuestionSet.standing) {
+      return event.QuestionSet.id;
+    }
+  }
+
+  return null;
 }

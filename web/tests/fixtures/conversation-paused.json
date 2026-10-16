@@ -3,7 +3,7 @@
   "archived": false,
   "attachments": [],
   "base_commit": "9e6cb584eeb157fd49f0c36e00bf87783fa2bfab",
-  "blocked_on": 32,
+  "blocked_on": 33,
   "branch": "deferred-asks",
   "branch_named": true,
   "companions": [],
@@ -82,21 +82,21 @@
         "at": "2026-08-03T09:07:11.000Z",
         "frozen": true,
         "html": "<h1>Deferred asks</h1>\n<p>An ask that never idles the session that sends it.</p>\n",
-        "id": 28,
+        "id": 29,
         "markdown": "# Deferred asks\n\nAn ask that never idles the session that sends it.\n"
       }
     },
     {
       "Moved": {
         "at": "2026-08-03T09:07:11.000Z",
-        "id": 29,
+        "id": 30,
         "state": "Grilling"
       }
     },
     {
       "Moved": {
         "at": "2026-08-03T09:07:11.000Z",
-        "id": 30,
+        "id": 31,
         "state": "Implementing"
       }
     },
@@ -104,7 +104,7 @@
       "Notice": {
         "at": "2026-08-03T09:07:11.000Z",
         "html": "<p>The <strong>opus</strong> account is out of window. The session said: Usage limit reached · continuing automatically at 3pm · esc to cancel.</p>\n",
-        "id": 31,
+        "id": 32,
         "log_in": null
       }
     },
@@ -112,7 +112,7 @@
       "Notice": {
         "at": "2026-08-03T09:07:11.000Z",
         "html": "<p><strong>Implementing the work</strong> stopped.</p>\n<p>The <strong>opus</strong> account is out of window. The session said: Usage limit reached · continuing automatically at 3pm · esc to cancel.</p>\n<h3>The worktree</h3>\n<p>Git had nothing pending, or the repository would not answer.</p>\n<h3>What the last session said</h3>\n<p>It said nothing at all.</p>\n",
-        "id": 32,
+        "id": 33,
         "log_in": null
       }
     }
