@@ -59,7 +59,8 @@ and the alternative named is what was turned down.
 
 - **The first start moves the single keys into the list.** `git_author` and
   `github_token` become one Author with a fresh uuid and no display name, and
-  every registered Repo is recorded as its. Leaving the single keys in place as
+  every Repo, registered or unregistered, is recorded as its, so no Repo is
+  ever without one. Leaving the single keys in place as
   an unnamed Author was turned down in favour of one shape in the files.
 
 - **With one Author nothing on screen changes.** The pick exists and is

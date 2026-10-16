@@ -128,7 +128,8 @@ member offers the one list.
 its head picking which Author the fields are about and **Add author** at its
 foot, the way the Repo dropdown carries its two presses. The onboarding wizard
 asks for one. The first start moves a single `git_author` and `github_token`
-into the list as that one Author, and records every registered Repo as its.
+into the list as that one Author, and records every Repo as its, unregistered
+ones included, so no Repo is ever without one.
 _Avoid_: identity, persona, account (that is a Profile's), git user, committer,
 credentials (the token is one part of an Author)
 

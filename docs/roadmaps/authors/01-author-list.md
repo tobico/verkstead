@@ -31,9 +31,11 @@ needs.
   leaving the old keys as an unnamed Author was turned down.
 - **Every Repo records its Author in the store**, beside the `repos` row rather
   than as a column on it — the table is STRICT and the side-table shape is what
-  `unregistered_repos` already uses. The migration records every registered
-  Repo as the migrated Author's. Registering a Repo with one Author configured
-  records that Author silently.
+  `unregistered_repos` already uses. The migration records **every** Repo row
+  as the migrated Author's, registered or unregistered, so that no Repo is ever
+  without one: an unregistered Repo revived afterwards keeps the Author it had,
+  and there is no *no Author recorded* state for a later stage to refuse.
+  Registering a Repo with one Author configured records that Author silently.
 - **With one Author nothing on screen changes.** The Git section draws its
   author dropdown and **Add author** only once there are two to choose between;
   until then the fields are the one Author's and the page reads as today.
@@ -75,14 +77,14 @@ needs.
      was.
 
 2. **The Repo's pick, in the store.** A side table recording each Repo's Author
-   uuid; the migration writes every registered Repo against the migrated
-   Author; registering with one Author configured records it silently; the
+   uuid; the migration writes every Repo row, registered or unregistered,
+   against the migrated Author; registering with one Author configured records it silently; the
    Repo views carry the uuid.
    - A fresh registration with one Author configured is recorded as that
      Author's with nothing asked.
-   - Reviving an unregistered Repo keeps the Author it had.
-   - A Repo with no recorded Author and more than one configured is a fact the
-     view can state, for 02's refusals to act on.
+   - Reviving an unregistered Repo keeps the Author it had, one unregistered
+     before the migration included.
+   - After the migration, every row of `repos` has an Author recorded.
 
 3. **The session gets its Repo's Author.** The sandbox's surface composes the
    git configuration and `GH_TOKEN` from the Conversation's Repo's Author; the
