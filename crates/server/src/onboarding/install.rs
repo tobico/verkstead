@@ -346,6 +346,16 @@ const NO_ANNEX: &str = "WSL is part of Windows, and this machine has no Annex to
 /// with nothing to keep a box by — no served Verkstead is one.
 const NO_KEEPER: &str = "This Verkstead has no identity of its own, so it can't keep a distro.";
 
+/// And under one whose box was made by a server with nothing to start it with
+/// — one that was not served as a Keeper, which a served Windows Verkstead
+/// always is. The box is made, so the next start boots and links it.
+const NO_BOOT: &str = "The distro is made, but this Verkstead can't start it. It starts the next \
+                       time Verkstead does.";
+
+/// And under one whose box was rebuilt and then not found to start, which is a
+/// distro taken away under the run.
+const NOT_THERE: &str = "The Verkstead distro wasn't there to start. Press Next to make it again.";
+
 /// How many of a rebuild's last lines a failed one leaves as the row's reason.
 const TAIL: usize = 12;
 
@@ -514,12 +524,16 @@ enum Making {
     /// The flake, its configuration and the Annex's settings written in.
     Write,
 
-    /// And the box rebuilt onto them.
+    /// The box rebuilt onto them.
     Rebuild,
+
+    /// And the box booted and linked by the Keeper's Join, the forward up —
+    /// see [`Linking`].
+    Link,
 }
 
 /// What making the Annex works with, beside the run: the box, the Keeper it is
-/// made for, and the binary it is to run.
+/// made for, the binary it is to run, and what boots and links it once made.
 #[derive(Debug, Clone)]
 struct Annexing {
     annex: Arc<dyn Backend>,
@@ -528,6 +542,30 @@ struct Annexing {
     keeping: Option<Keeping>,
 
     binary: Binary,
+
+    /// `None` on a server that was not served as a Keeper — see [`NO_BOOT`].
+    linking: Option<Linking>,
+}
+
+/// What boots the box a run has made and links it, waited on to its end: the
+/// Keeper's own [`crate::annex::booting::Annexed::up`], so the box the run
+/// booted is the one the Keeper terminates at its stop.
+///
+/// `Ok(true)` is an Annex up and linked, `Ok(false)` no box made to the end to
+/// boot, and the error is the line its row on the Devices list carries too.
+#[derive(Clone)]
+pub(crate) struct Linking(Arc<dyn Fn() -> Result<bool, String> + Send + Sync>);
+
+impl Linking {
+    pub(crate) fn by(link: impl Fn() -> Result<bool, String> + Send + Sync + 'static) -> Linking {
+        Linking(Arc::new(link))
+    }
+}
+
+impl std::fmt::Debug for Linking {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Linking")
+    }
 }
 
 /// A run of units that stand or fall together.
@@ -643,13 +681,15 @@ impl Installer {
     ///
     /// `settings` is what a unit that lands in a directory writes `session_path`
     /// to — see [`landing`] — and, with `keeping`, what the Annex a ticked WSL
-    /// row makes is told of its Keeper.
+    /// row makes is told of its Keeper. `linking` is what boots and links that
+    /// Annex once it is made — see [`Linking`].
     pub(crate) fn start(
         &self,
         machine: &Machine,
         settings: &Settings,
         ticked: &[Dependency],
         keeping: Option<Keeping>,
+        linking: Option<Linking>,
     ) -> Result<(), Refusal> {
         let mut held = self.run.lock().expect("the install run's lock");
 
@@ -687,6 +727,7 @@ impl Installer {
             annex,
             keeping,
             binary: Binary::from_env(),
+            linking,
         });
 
         std::thread::spawn(move || {
@@ -1094,6 +1135,7 @@ fn made(
         Making::Import => annex.make(&annex.disk().join(annex.image().file)),
         Making::Write => written(annexing, settings, &run.hostname),
         Making::Rebuild => rebuilt(run, annex),
+        Making::Link => linked(annexing),
 
         // Raised, and so never here — see [`opened`].
         Making::Firewall => Ok(()),
@@ -1102,6 +1144,21 @@ fn made(
     match done {
         Ok(()) => Progress::Installed,
         Err(error) => Progress::Failed(format!("{error:#}")),
+    }
+}
+
+/// The box the run made booted and linked by the Keeper's Join, waited on —
+/// see [`Linking`]. What would not come up is the row's reason, in the words
+/// its row on the Devices list carries.
+fn linked(annexing: &Annexing) -> anyhow::Result<()> {
+    let Some(linking) = annexing.linking.as_ref() else {
+        anyhow::bail!("{NO_BOOT}");
+    };
+
+    match (linking.0)() {
+        Ok(true) => Ok(()),
+        Ok(false) => anyhow::bail!("{NOT_THERE}"),
+        Err(line) => anyhow::bail!("{line}"),
     }
 }
 
@@ -1407,8 +1464,10 @@ fn plan(machine: &Machine, ticked: &[Dependency]) -> Plan {
 /// reason.
 ///
 /// **WSL answering with no Annex is the Annex made** — see [`Making`]: the
-/// image downloaded, imported, the firewall opened, the files written and the
-/// box rebuilt, in one chain, the row the rebuild's. Every step but the
+/// image downloaded, imported, the firewall opened, the files written, the box
+/// rebuilt, and then booted and linked by the Keeper's Join, in one chain, the
+/// row the link's — so the row ticks on an Annex the device select already
+/// lists, and a first link that fails says why on it. Every step but the
 /// firewall's runs as the user, the box being theirs, and a step that finds
 /// its work done already — an image downloaded, a box imported — is a step
 /// that does nothing, so a press after a Keeper stopped part way picks the run
@@ -1459,13 +1518,14 @@ fn annexing(machine: &Machine, plan: &mut Plan) {
                     "Writing the distro's configuration…",
                 ),
                 (Making::Rebuild, How::AsTheUser, "Rebuilding the distro…"),
+                (Making::Link, How::AsTheUser, "Starting the distro…"),
             ];
 
             plan.units
                 .extend(STEPS.iter().map(|(making, how, doing)| Unit {
                     line: String::new(),
                     covers: match making {
-                        Making::Rebuild => vec![Dependency::Wsl],
+                        Making::Link => vec![Dependency::Wsl],
                         _ => Vec::new(),
                     },
                     doing: (*doing).to_owned(),
@@ -3245,9 +3305,9 @@ mod tests {
     }
 
     /// WSL answering with no Annex is the Annex made, after every other row:
-    /// downloaded, imported, the firewall opened, written and rebuilt, in that
-    /// order and standing together. The firewall alone is raised, and the row
-    /// is the rebuild's.
+    /// downloaded, imported, the firewall opened, written, rebuilt, and booted
+    /// and linked, in that order and standing together. The firewall alone is
+    /// raised, and the row is the link's.
     #[test]
     fn a_ticked_wsl_row_with_no_annex_makes_one() {
         let plan = plan(
@@ -3275,11 +3335,8 @@ mod tests {
                 (Some(Making::Import), How::AsTheUser, &[][..]),
                 (Some(Making::Firewall), How::Raised, &[][..]),
                 (Some(Making::Write), How::AsTheUser, &[][..]),
-                (
-                    Some(Making::Rebuild),
-                    How::AsTheUser,
-                    &[Dependency::Wsl][..]
-                ),
+                (Some(Making::Rebuild), How::AsTheUser, &[][..]),
+                (Some(Making::Link), How::AsTheUser, &[Dependency::Wsl][..]),
             ]
         );
 
@@ -3331,8 +3388,18 @@ mod tests {
         }
 
         /// A ticked WSL row with no Annex worked through to its end over the
-        /// box, raising through `escalation`: the run, and the row.
+        /// box, raising through `escalation`, and linked by a Keeper whose
+        /// link comes up: the run, and the row.
         fn made(&self, escalation: &dyn Elevate) -> (RunView, InstallState) {
+            self.made_by(escalation, Some(Linking::by(|| Ok(true))))
+        }
+
+        /// The same, linked by `linking`.
+        fn made_by(
+            &self,
+            escalation: &dyn Elevate,
+            linking: Option<Linking>,
+        ) -> (RunView, InstallState) {
             let plan = plan(&annexed(Probed::NoDistro), &[Dependency::Wsl]);
             let run = Arc::new(Run::of(&plan, "ada-pc"));
 
@@ -3346,6 +3413,7 @@ mod tests {
                     port: 8423,
                 }),
                 binary: Binary::Released,
+                linking,
             };
 
             work(
@@ -3561,6 +3629,80 @@ mod tests {
         assert_eq!(stubbed.wsl.calls().len(), 8, "nothing is handed over");
     }
 
+    /// The box made is booted and linked as the run's last step, once and
+    /// after it is said to be made — so the row lands on an Annex that is
+    /// linked, not one that waits for the Keeper's next start.
+    #[test]
+    fn the_annex_made_is_booted_and_linked_before_the_row_lands() {
+        use crate::annex::wsl::tests::{NO_DISTROS, utf16};
+
+        let stubbed = Stubbed::serving(IMAGE);
+        stubbed
+            .wsl
+            .answers(1, utf16(NO_DISTROS), -1)
+            .answers(3, "mirrored\n", 0);
+
+        let disk = stubbed.disk();
+        let linked = Arc::new(Mutex::new(Vec::new()));
+        let linking = Linking::by({
+            let linked = linked.clone();
+
+            move || {
+                linked.lock().unwrap().push(disk.join("made").is_file());
+                Ok(true)
+            }
+        });
+
+        let (_, row) = stubbed.made_by(&Allowing::default(), Some(linking));
+
+        assert_eq!(row, InstallState::Idle);
+        assert_eq!(*linked.lock().unwrap(), [true], "linked once, once made");
+    }
+
+    /// A first link that fails fails the row with the line the Annex's row on
+    /// the Devices list carries, and the box stays made for the next start.
+    #[test]
+    fn a_link_that_fails_fails_the_row_with_its_line() {
+        use crate::annex::wsl::tests::{NO_DISTROS, utf16};
+
+        let stubbed = Stubbed::serving(IMAGE);
+        stubbed
+            .wsl
+            .answers(1, utf16(NO_DISTROS), -1)
+            .answers(3, "mirrored\n", 0);
+
+        let (_, row) = stubbed.made_by(
+            &Allowing::default(),
+            Some(Linking::by(|| {
+                Err("The annex didn't answer: its service is failed.".to_owned())
+            })),
+        );
+
+        assert_eq!(
+            row,
+            InstallState::Failed {
+                why: "The annex didn't answer: its service is failed.".to_owned()
+            }
+        );
+        assert!(stubbed.disk().join("made").is_file());
+
+        // And a server with nothing to start it with says so.
+        let stubbed = Stubbed::serving(IMAGE);
+        stubbed
+            .wsl
+            .answers(1, utf16(NO_DISTROS), -1)
+            .answers(3, "mirrored\n", 0);
+
+        let (_, row) = stubbed.made_by(&Allowing::default(), None);
+
+        assert_eq!(
+            row,
+            InstallState::Failed {
+                why: NO_BOOT.to_owned()
+            }
+        );
+    }
+
     /// Virtualization off is drawn refused, so a press carrying the row
     /// anyway raises nothing and the hint screen has the reason.
     #[test]
@@ -3597,6 +3739,7 @@ mod tests {
                 &annexed(Probed::NoWsl),
                 &nowhere(),
                 &[Dependency::Wsl],
+                None,
                 None,
             )
             .unwrap();
@@ -3754,7 +3897,7 @@ mod tests {
         let installer = Installer::raising(None);
 
         installer
-            .start(&machine(Distro::Ubuntu), &nowhere(), TICKED, None)
+            .start(&machine(Distro::Ubuntu), &nowhere(), TICKED, None, None)
             .unwrap();
 
         let (run, rows) = installer.reading().expect("a press makes a run");

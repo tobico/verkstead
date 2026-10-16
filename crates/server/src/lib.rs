@@ -2666,6 +2666,21 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
     // once — see [`discovery::ToldToStop`].
     let mut stopping = discovery::ToldToStop::listening();
 
+    // And this device's Annex, where it can have one: a Keeper only — an Annex
+    // keeps nothing, which is what its forward being absent says — and on
+    // Windows only, the one platform with a way of having a box. Booted below,
+    // and held on the devices handle so that the wizard's install run, which
+    // makes the box, boots and links it through the same one — see
+    // [`annex::booting::Annexed::up`].
+    let annexed = (platform::Platform::HERE == platform::Platform::Windows
+        && annex_forward.is_some())
+    .then(|| {
+        Arc::new(annex::booting::Annexed::of(
+            Arc::new(annex::wsl::Wsl::here()),
+            settings.clone(),
+        ))
+    });
+
     // And this device's cluster as something to *do* things to rather than to
     // read: the Devices section's presses go through it, and so does the one thing
     // in a cluster that nobody presses at all — the announcement of a certificate
@@ -2711,6 +2726,11 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
     // And the port this start bound its peer listener on, which an Annex it
     // makes is told to dial it at — see [`device::Devices::keeping`].
     .peering_on(peer.address().port());
+
+    let devices = match &annexed {
+        Some(annexed) => devices.keeping_an_annex(annexed.clone()),
+        None => devices,
+    };
 
     // Which is where the changeover above is picked up. A start that re-issued the
     // certificate owes every member the new fingerprint, and until they hold it
@@ -2765,18 +2785,8 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
     //
     // **In a task rather than waited on**, and before the serve, for the
     // reasons the two above are: a box is most of a minute from up, and the
-    // serve never returns. A Keeper only — an Annex keeps nothing, which is
-    // what its forward being absent says — and on Windows only, the one
-    // platform with a way of having a box.
-    let annexed = (platform::Platform::HERE == platform::Platform::Windows
-        && annex_forward.is_some())
-    .then(|| {
-        Arc::new(annex::booting::Annexed::of(
-            Arc::new(annex::wsl::Wsl::here()),
-            settings.clone(),
-        ))
-    });
-
+    // serve never returns. The handle itself was made before the devices, so
+    // the install run that makes the box boots and links it the same way.
     if let Some(annexed) = &annexed {
         tokio::spawn({
             let annexed = annexed.clone();

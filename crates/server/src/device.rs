@@ -797,6 +797,13 @@ pub struct Devices {
     /// would not — held here, every clone of this handle sharing it, for the
     /// Annex's row to be drawn with. See [`Devices::annex_troubled`].
     annex_trouble: std::sync::Arc<std::sync::Mutex<Option<String>>>,
+
+    /// And the Annex it keeps, booted at its start and terminated at its stop,
+    /// where it is a Keeper with a way of having one — held here so that the
+    /// install run that makes the box boots and links it through the same
+    /// handle (see [`crate::annex::booting::Annexed::up`]). `None` everywhere
+    /// else.
+    annexed: Option<std::sync::Arc<crate::annex::booting::Annexed>>,
 }
 
 impl Devices {
@@ -825,6 +832,7 @@ impl Devices {
             annex_forward: crate::peer::annex_forward::Pointing::at_nothing(),
             peer_port: crate::peer::PEER_PORT,
             annex_trouble: std::sync::Arc::default(),
+            annexed: None,
         }
     }
 
@@ -928,6 +936,22 @@ impl Devices {
             peer_port: port,
             ..self
         }
+    }
+
+    /// The same, keeping `annexed` — see [`Devices::annexed`].
+    pub fn keeping_an_annex(
+        self,
+        annexed: std::sync::Arc<crate::annex::booting::Annexed>,
+    ) -> Devices {
+        Devices {
+            annexed: Some(annexed),
+            ..self
+        }
+    }
+
+    /// The Annex this device keeps, where it keeps one.
+    pub fn annexed(&self) -> Option<&std::sync::Arc<crate::annex::booting::Annexed>> {
+        self.annexed.as_ref()
     }
 
     /// This device as the Annex it keeps is told of it: its id and current

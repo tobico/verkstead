@@ -7512,12 +7512,11 @@ async fn onboarding_install(
     State(state): State<AppState>,
     Json(press): Json<InstallPress>,
 ) -> HttpResponse {
-    // This device as the Annex a ticked WSL row makes is told of it.
-    let keeping = state.devices.as_ref().map(crate::device::Devices::keeping);
-
+    // With this device, which the Annex a ticked WSL row makes is told of and
+    // is booted and linked by.
     match state
         .onboarding
-        .install(&state.settings, press.dependencies, keeping)
+        .install(&state.settings, press.dependencies, state.devices.as_ref())
         .await
     {
         Ok(()) => onboarding(State(state)).await,

@@ -7,6 +7,12 @@
 //! it was would be the Annex costing the Keeper the thing it is for. Where the
 //! probe finds no box made to the end, there is nothing to do.
 //!
+//! **And once more where the box is made**: the wizard's install run ends by
+//! booting and linking the box it has just rebuilt through [`Annexed::up`] —
+//! the same handle, held on [`Devices`], so the box it booted is the one the
+//! Keeper's stop terminates — and a first link that fails is the WSL row's
+//! reason there.
+//!
 //! **Four steps where there is one.** The box is booted and held up — see
 //! [`Backend::boot`] — and then, over and over until it works or the boot's
 //! time runs out, the two addresses are read off it and the link is run:
@@ -94,11 +100,23 @@ impl Annexed {
     /// What went wrong is put on `devices` for the Annex's row, and an Annex
     /// that came up takes any earlier line away.
     pub async fn started(&self, devices: &Devices) {
+        let _ = self.up(devices).await;
+    }
+
+    /// The same, saying how it went: `Ok(true)` for an Annex up and linked,
+    /// `Ok(false)` where there is no box made to the end, and the line put on
+    /// `devices` where it would not come up.
+    ///
+    /// **And the install run's last step**, the box it has just made booted and
+    /// linked by the same Keeper that terminates it at its stop — see
+    /// [`crate::onboarding::install`] — so the line is also the WSL row's
+    /// reason there.
+    pub async fn up(&self, devices: &Devices) -> Result<bool, String> {
         let annex = self.annex.clone();
         let probed = tokio::task::spawn_blocking(move || annex.probe()).await;
 
         let Ok(Probed::Present { networking, .. }) = probed else {
-            return;
+            return Ok(false);
         };
 
         let annex = self.annex.clone();
@@ -109,11 +127,9 @@ impl Annexed {
             .and_then(|booted| booted)
         {
             tracing::warn!(why = %format!("{why:#}"), "this device's Annex could not be booted");
-            devices.annex_troubled(Some(sentence(
-                "The annex couldn't be started",
-                &format!("{why:#}"),
-            )));
-            return;
+            let line = sentence("The annex couldn't be started", &format!("{why:#}"));
+            devices.annex_troubled(Some(line.clone()));
+            return Err(line);
         }
 
         self.booted.store(true, Ordering::SeqCst);
@@ -132,7 +148,7 @@ impl Annexed {
                         "this device's Annex is up and linked",
                     );
                     devices.annex_troubled(None);
-                    return;
+                    return Ok(true);
                 }
                 Err(why) => why,
             };
@@ -156,10 +172,13 @@ impl Annexed {
             "this device's Annex did not answer within the boot's time",
         );
 
-        devices.annex_troubled(Some(match said {
+        let line = match said {
             Some(service) => sentence("The annex didn't answer", &service),
             None => sentence("The annex didn't answer", &format!("{why:#}")),
-        }));
+        };
+
+        devices.annex_troubled(Some(line.clone()));
+        Err(line)
     }
 
     /// One try at the link: the Keeper's git author and GitHub token handed

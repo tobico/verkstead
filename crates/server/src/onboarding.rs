@@ -1195,17 +1195,33 @@ impl Onboarding {
     /// **And while one is going**, which is the same press twice — see
     /// [`Refusal::Going`].
     ///
-    /// `keeping` is this device as the Annex a ticked WSL row makes is told of
-    /// it, and `None` on a server with no identity to keep one by.
+    /// `devices` is this device as the Annex a ticked WSL row makes is told of
+    /// it, and what boots and links that Annex once it is made — see
+    /// [`crate::annex::booting::Annexed::up`] — and `None` on a server with no
+    /// identity to keep one by.
     pub(crate) async fn install(
         &self,
         settings: &Settings,
         ticked: Vec<Dependency>,
-        keeping: Option<annex::Keeping>,
+        devices: Option<&crate::device::Devices>,
     ) -> Result<(), Refusal> {
         if !self.wizarding() {
             return Err(Refusal::Over);
         }
+
+        let keeping = devices.map(crate::device::Devices::keeping);
+
+        // The run is a thread of its own rather than a task, so the boot and
+        // the link it ends with are waited on through this runtime.
+        let linking = devices.and_then(|devices| {
+            let annexed = devices.annexed()?.clone();
+            let devices = devices.clone();
+            let runtime = tokio::runtime::Handle::current();
+
+            Some(install::Linking::by(move || {
+                runtime.block_on(annexed.up(&devices))
+            }))
+        });
 
         // Off the runtime, being a `PATH` walk and a thread spawned. It answers
         // as soon as the run is going rather than when it is over: what is on
@@ -1219,7 +1235,7 @@ impl Onboarding {
         tokio::task::spawn_blocking(move || {
             installing
                 .installer
-                .start(&installing.machine, &settings, &ticked, keeping)
+                .start(&installing.machine, &settings, &ticked, keeping, linking)
         })
         .await
         .unwrap_or(Ok(()))
