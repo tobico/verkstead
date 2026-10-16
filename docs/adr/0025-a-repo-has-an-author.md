@@ -155,7 +155,8 @@ and the alternative named is what was turned down.
 ## What was reviewed and left
 
 The Brief asked for a review of everything else identifying that a session is
-given. Four things were found, and each was decided:
+given. Four things were found, and each was decided, and the review of the
+roadmap on 2026-10-17 found two more that the first of them only began on:
 
 - **The Claude account's email.** The `.claude.json` copy a session gets keeps
   `oauthAccount.emailAddress`, which a test asserts comes over as what says the
@@ -163,6 +164,21 @@ given. Four things were found, and each was decided:
   strips it if so; if not, it stays and is documented here as an exposure. The
   account is the Profile's, and a pseudonymous Repo can already be paired with
   a Profile of its own.
+- **Every harness login names its account**, not Claude's alone. Codex's
+  `auth.json` carries an `id_token` whose claims hold the account's email, and
+  a login cannot be stripped of what makes it a login. So whatever the probe
+  finds, a session knows whose agent account it runs under.
+- **A Profile whose memory is shared carries every Repo it worked on.** With
+  the memory switch on, the whole store is joined — Claude's whole `projects/`
+  — so a session on one Repo can read the transcripts of the same Profile's
+  sessions on another Author's Repos, with that Author's name, email and
+  `git log` in them.
+- **What follows from all three**: the Author keeps the wrong name off a commit
+  and the wrong token out of a sandbox, and the Profile is the one channel it
+  does not close. **Keeping two Authors apart takes a Profile per Author**, and
+  a Profile's memory not shared across Repos of different Authors. Nothing
+  enforces that pairing; it is said, in the **Author** term, rather than
+  refused.
 - **The operating-system username.** The home inside a sandbox is the server's
   own at the same path, so every Worktree and Build Cache path a session sees
   spells it out. Rehoming the sandbox under a neutral path would break how the

@@ -92,7 +92,11 @@ the display name beside a Repo on the Brief and on the Repos pane, are drawn
 only once there are two. A session is handed its Repo's Author and nothing of
 any other — the git configuration and the `GH_TOKEN` in its environment are
 that Author's — which is what keeps the wrong name off a commit and the wrong
-token out of an agent's reach. And everything Verkstead itself does on a Repo —
+token out of an agent's reach. **The Profile is the channel it does not
+close**: every harness login names its account, and a Profile whose memory is
+shared carries the transcripts of every Repo it worked on, so keeping two
+Authors apart takes a Profile per Author, its memory not shared across them —
+said rather than refused. And everything Verkstead itself does on a Repo —
 every `gh` call, every fetch and push of its own, the GitHub repository
 **Create repo** makes — authenticates as that Author's token, through the
 credential helper publishing already hands one to; an Author with no token
