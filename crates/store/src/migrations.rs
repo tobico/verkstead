@@ -65,7 +65,7 @@
 //! same way, for the same reason and at the same moment.
 //!
 //! [`record_the_repo_authors`] is the third of that kind: the uuid every
-//! registered Repo is recorded as is minted in `config.yaml`, which nothing
+//! Repo is recorded as is minted in `config.yaml`, which nothing
 //! here can see, so the serve hands it in once the settings files are moved.
 //!
 //! Each is written to be safe against a database that has already had it, and
@@ -914,7 +914,7 @@ pub async fn stamp_the_births(pool: &SqlitePool, device: &str) -> Result<()> {
     Ok(())
 }
 
-/// Record every registered Repo that has no Author as the Author with the uuid
+/// Record every Repo that has no Author as the Author with the uuid
 /// `author` — the one the serve's move of the single `git_author` and
 /// `github_token` into the list of Authors has just minted (ADR-0025).
 ///
@@ -924,8 +924,9 @@ pub async fn stamp_the_births(pool: &SqlitePool, device: &str) -> Result<()> {
 /// answered. An installation with no Author has nothing to record and never
 /// calls it.
 ///
-/// Registered Repos only. One taken away is history, and comes back recorded
-/// as whatever its registering again records it as.
+/// Unregistered Repos too, so that no Repo is ever without an Author: one
+/// taken away before the list existed comes back, revived, as the Author it
+/// would have had.
 ///
 /// One statement, and safe to run twice: a Repo with a row is left as it is.
 pub async fn record_the_repo_authors(pool: &SqlitePool, author: &str) -> Result<()> {
@@ -933,8 +934,7 @@ pub async fn record_the_repo_authors(pool: &SqlitePool, author: &str) -> Result<
         "INSERT INTO repo_authors (repo_id, author)
          SELECT r.id, ?
          FROM repos r
-         WHERE r.id NOT IN (SELECT repo_id FROM unregistered_repos)
-           AND NOT EXISTS (SELECT 1 FROM repo_authors a WHERE a.repo_id = r.id)",
+         WHERE NOT EXISTS (SELECT 1 FROM repo_authors a WHERE a.repo_id = r.id)",
     )
     .bind(author)
     .execute(pool)

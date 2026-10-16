@@ -2102,7 +2102,7 @@ pub async fn moving_the_single_author(
 
     store::record_the_repo_authors(pool, &id)
         .await
-        .context("recording the registered Repos as the Author the git author became")?;
+        .context("recording the Repos as the Author the git author became")?;
 
     Ok(Some(id))
 }

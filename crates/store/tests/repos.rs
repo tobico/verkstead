@@ -534,7 +534,11 @@ async fn the_repos_from_before_the_author_list_are_recorded_as_the_moved_author(
     assert_eq!(author(first.id).await.as_deref(), Some("moved"));
     assert_eq!(author(second.id).await.as_deref(), Some("moved"));
     assert_eq!(author(recorded.id).await.as_deref(), Some("kept"));
-    assert_eq!(author(gone.id).await, None, "a Repo taken away is history");
+    assert_eq!(
+        author(gone.id).await.as_deref(),
+        Some("moved"),
+        "an unregistered Repo is recorded too, so reviving it keeps an Author",
+    );
 }
 
 #[tokio::test]
