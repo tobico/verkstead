@@ -73,8 +73,9 @@ term in `CONTEXT.md`, borrowing [ADR-0020](../../adr/0020-cluster-mode.md)'s
    mirror; a Repo pointed at a mirror runs its sessions and its server-side git
    and `gh` from the copy.
    - A session on a member device under a mirrored Author carries that Author's
-     token and name, and the home device's other Authors' tokens are nowhere
-     on the member.
+     token and name, and none of the home device's other Authors' tokens is
+     anywhere in that session's sandbox — though the member holds a copy of
+     each, as the decision above says.
    - A token rotated at home is the one a session gets after the next refresh.
    - A Repo pointed at a mirror whose copy has not arrived refuses a Start
      naming the home device, and a halted step leaves a Notice.
