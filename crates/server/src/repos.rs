@@ -218,7 +218,8 @@ pub(crate) async fn create(
     let unpushed = match github {
         false => None,
         true => {
-            let gh = gh.clone();
+            // As the Author it was committed as, whose Repo it is about to be.
+            let gh = gh.as_author(authors.first().map(Author::id));
             let dir = path.clone();
             let called = name.clone();
 

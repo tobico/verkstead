@@ -17,9 +17,9 @@
 //! the home a session gets rather than under this process's. See
 //! [`Gh::extension`].
 //!
-//! It authenticates as the configured token — the one in `secrets.yaml` that
-//! every session's sandbox gets too — handed to `gh` as `GH_TOKEN` in the
-//! environment of the call. The file is read at the moment of the call rather
+//! It authenticates as the token of the Repo's Author — the one in
+//! `secrets.yaml` that every session on that Repo gets too — handed to `gh` as
+//! `GH_TOKEN` in the environment of the call. See [`Gh::as_author`]. The file is read at the moment of the call rather
 //! than held from startup, so a token saved or rotated through the settings
 //! page reaches the next `gh` without the server being restarted.
 //!
@@ -63,6 +63,11 @@ pub struct Gh {
     /// no settings behind it — a router watching nothing has no Data Directory
     /// to read one out of, and nothing on it ever asks GitHub anything.
     settings: Option<Settings>,
+
+    /// The uuid of the Author the Repo being asked about recorded, which is
+    /// whose token is read — see [`Gh::as_author`]. `None` is a Repo that
+    /// records none, which is the one Author's where there is only one.
+    author: Option<String>,
 }
 
 impl Gh {
@@ -76,6 +81,7 @@ impl Gh {
         Gh {
             program,
             settings: None,
+            author: None,
         }
     }
 
@@ -93,19 +99,33 @@ impl Gh {
         }
     }
 
+    /// And the same again, asking as the Author a Repo recorded as `recorded`
+    /// — its `author`, read off the store with the rest of it.
+    ///
+    /// Every call about a Repo is made as that Repo's Author, so a pull request
+    /// of one Author's Repo is never read with another's token. Held as the
+    /// uuid rather than the token, for [`Gh::authenticated_by`]'s reason: the
+    /// token is read at the moment of the call.
+    pub(crate) fn as_author(&self, recorded: Option<&str>) -> Gh {
+        Gh {
+            author: recorded.map(str::to_owned),
+            ..self.clone()
+        }
+    }
+
     /// The token to authenticate as, read now — `None` where none is
     /// configured, which leaves the call to whatever login the host's `gh` has.
     ///
-    /// The first Author's, which is the one an installation that never added a
-    /// second has.
+    /// The Author's this `Gh` asks as — see [`Gh::as_author`] and
+    /// [`crate::settings::Config::author_of`].
     fn token(&self) -> Option<String> {
         let settings = self.settings.as_ref()?;
         let config = settings.config();
-        let first = config.authors().first()?;
+        let author = config.author_of(self.author.as_deref())?;
 
         settings
             .secrets()
-            .author_token(first.id())
+            .author_token(author.id())
             .map(str::to_owned)
     }
 
@@ -2495,6 +2515,47 @@ mod tests {
                 .unwrap()
                 .title,
             "the-second",
+        );
+    }
+
+    /// A call about a Repo is made as that Repo's Author: the token read is the
+    /// one under the uuid the Repo recorded, and never another Author's.
+    #[test]
+    fn a_repos_pull_request_is_read_with_its_own_authors_token() {
+        let (repo, gh) = stub_saying_its_token();
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+
+        std::fs::write(
+            settings.config_path(),
+            "authors:\n  - id: work\n  - id: home\n",
+        )
+        .unwrap();
+        std::fs::write(
+            settings.secrets_path(),
+            "author_tokens:\n  work: ghp_theworkone\n  home: ghp_thehomeone\n",
+        )
+        .unwrap();
+
+        let gh = gh.authenticated_by(settings);
+
+        for (recorded, token) in [("work", "ghp_theworkone"), ("home", "ghp_thehomeone")] {
+            assert_eq!(
+                pull_request(&gh.as_author(Some(recorded)), repo.path(), "rate-limiting")
+                    .unwrap()
+                    .title,
+                token,
+                "a Repo recorded as {recorded}",
+            );
+        }
+
+        assert_eq!(
+            checks(&gh.as_author(Some("home")), repo.path(), 41)
+                .unwrap()
+                .checks[0]
+                .name,
+            "ghp_thehomeone",
+            "and every other call about it the same way",
         );
     }
 

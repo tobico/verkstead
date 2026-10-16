@@ -42,7 +42,7 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 use crate::github::{self, Gh, Trouble};
-use crate::settings::GitAuthor;
+use crate::settings::{Author, GitAuthor, Settings};
 use crate::unseen::Unseen;
 
 /// What became of a publish, in the server's own words — see
@@ -120,6 +120,40 @@ pub(crate) fn publish(
             Publishing::Refused(why)
         }
     }
+}
+
+/// [`publish`] as the Author a Conversation's Repo recorded as `recorded` —
+/// see [`crate::settings::Config::author_of`] — and answer the token it was
+/// published as beside what became of it.
+///
+/// Its token for the gist, and its name on the gist's commit. Both files are
+/// read here, at the moment of the publish, for the reason every other reader
+/// of them reads them late. The token comes back because the comments that
+/// follow a publish are left as whoever the gist belongs to.
+pub(crate) fn publish_as(
+    gh: &Gh,
+    settings: &Settings,
+    recorded: Option<&str>,
+    description: &str,
+    name: &str,
+    document: &str,
+) -> (Publishing, Option<String>) {
+    let secrets = settings.secrets();
+    let config = settings.config();
+
+    let author = config.author_of(recorded);
+    let token = author.and_then(|author| secrets.author_token(author.id()));
+
+    let published = publish(
+        gh,
+        token,
+        &author.map(Author::git_author).unwrap_or_default(),
+        description,
+        name,
+        document,
+    );
+
+    (published, token.map(str::to_owned))
 }
 
 /// What the gist holds between being made and being pushed to, which is a few
@@ -290,7 +324,8 @@ mod tests {
     const SHARE: &str = "<!doctype html>\n<script>ok()</script>\n<p>Aperçu</p>\n";
 
     /// A `gh` that answers the three calls a publish makes, and writes down
-    /// which of them it was asked for.
+    /// which of them it was asked for — and, in `tokens`, what `GH_TOKEN` each
+    /// was run with.
     ///
     /// The gist it makes is a bare repository the test made, which is the whole
     /// reason this can be proved without a network: a gist is a git remote, and
@@ -305,7 +340,8 @@ mod tests {
             "/bin/sh".to_owned(),
             "-c".to_owned(),
             format!(
-                r#"case "$*" in
+                r#"printf '%s\n' "${{GH_TOKEN-unset}}" >> "{notes}/tokens"
+                case "$*" in
                     "api -i user")
                         printf 'HTTP/2.0 200 OK\r\nX-Oauth-Scopes: %s\r\n\r\n{{"login":"tobico"}}' "${{GH_TOKEN-unset}}" ;;
                     "api -X POST /gists --input -")
@@ -386,6 +422,78 @@ mod tests {
             Some("Tobias Cohen".to_owned()),
             Some("tobi@tobico.net".to_owned()),
         )
+    }
+
+    /// A share is published as its Conversation's Repo's Author: every `gh` of
+    /// the publish runs with that Author's token, the gist's commit is by its
+    /// name, and the token handed back for the comments is the same one.
+    ///
+    /// The tokens are scope lists, for [`gh`]'s reason, each with the gist
+    /// scope and a word of its own to tell them apart by.
+    #[test]
+    fn a_share_is_published_as_the_repos_own_author() {
+        let dir = tempfile::tempdir().unwrap();
+        let remote = gist(dir.path());
+        let gh = gh(&remote, dir.path());
+
+        let data_dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(data_dir.path());
+
+        std::fs::write(
+            settings.config_path(),
+            concat!(
+                "authors:\n",
+                "  - id: work\n",
+                "    name: Tobias Cohen\n",
+                "    email: tobi@tobico.net\n",
+                "  - id: home\n",
+                "    name: Tobi at Home\n",
+                "    email: tobi@example.com\n",
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            settings.secrets_path(),
+            "author_tokens:\n  work: 'repo, gist, work'\n  home: 'repo, gist, home'\n",
+        )
+        .unwrap();
+
+        let (published, token) = publish_as(
+            &gh,
+            &settings,
+            Some("home"),
+            "A Verkstead conversation: sharing",
+            "share.html",
+            SHARE,
+        );
+
+        assert_eq!(
+            published,
+            Publishing::At("https://gist.github.com/tobico/9f1".to_owned()),
+        );
+        assert_eq!(
+            token.as_deref(),
+            Some("repo, gist, home"),
+            "what the comments are left as"
+        );
+
+        let tokens = std::fs::read_to_string(dir.path().join("tokens")).unwrap();
+        assert!(
+            tokens.lines().count() >= 2 && tokens.lines().all(|line| line == "repo, gist, home"),
+            "every gh of the publish ran as the Repo's Author: {tokens:?}"
+        );
+
+        let read = dir.path().join("read");
+        holding(&remote, dir.path(), "share.html");
+        let output = Command::new("git")
+            .args(["log", "-1", "--format=%an <%ae>"])
+            .current_dir(&read)
+            .output()
+            .unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "Tobi at Home <tobi@example.com>",
+        );
     }
 
     #[test]

@@ -112,10 +112,23 @@ pub(crate) const INSTALL: &str = "gh extension install github/gh-stack";
 pub(crate) async fn missing(state: &AppState, conversation_id: i64) -> Option<String> {
     let environment = state.sessions.session_environment(conversation_id)?;
 
+    // As the Conversation's Repo's Author, whose token the session that would
+    // run the extension is handed. A record that cannot be read is asked as
+    // nobody in particular rather than not asked: the question is whether the
+    // extension is there, and the token is only what keeps a `gh` from
+    // refusing for a reason of its own.
+    let author = match store::load_conversation(&state.pool, conversation_id).await {
+        Ok(conversation) => conversation.and_then(|conversation| conversation.repo.author),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading the Conversation to ask gh about its extension failed");
+            None
+        }
+    };
+
     // Off the runtime's threads, as every other reach for `gh` is: it is a
     // process, and running one blocks.
     let asked = tokio::task::spawn_blocking({
-        let gh = state.github.clone();
+        let gh = state.github.as_author(author.as_deref());
 
         move || gh.extension(EXTENSION, &environment)
     })
@@ -189,7 +202,7 @@ pub(crate) async fn walk(state: &AppState, repo: &store::Repo, own: i64) -> Walk
     // Off the runtime's threads, as every other reach into GitHub is: `gh` is a
     // process, and running one blocks.
     let asked = tokio::task::spawn_blocking({
-        let gh = state.github.clone();
+        let gh = state.github.as_author(repo.author.as_deref());
         let path = repo.path.clone();
 
         move || github::open_pull_requests(&gh, &path)

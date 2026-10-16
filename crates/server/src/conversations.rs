@@ -1534,11 +1534,12 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     // list makes no difference to the refusal, because a workbench with no
     // author configured is a misconfiguration to name rather than a case to work
     // around.
+    //
+    // The Repo's Author, which is who everything on its branches is by.
     let author = state
         .settings
         .config()
-        .authors()
-        .first()
+        .author_of(conversation.repo.author.as_deref())
         .and_then(Author::configured);
 
     // What the work branches from, resolved here and nowhere earlier: what the
@@ -2403,7 +2404,10 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
     // before anything that costs a git call.
     let config = state.settings.config();
 
-    let Some(author) = config.authors().first().and_then(Author::configured) else {
+    let Some(author) = config
+        .author_of(conversation.repo.author.as_deref())
+        .and_then(Author::configured)
+    else {
         return Ok(Adopted::NoGitAuthor);
     };
 
@@ -4333,7 +4337,7 @@ async fn resolve(
 
     // Off the runtime's threads: `gh` is a process, and running one blocks.
     let asked = tokio::task::spawn_blocking({
-        let gh = state.github.clone();
+        let gh = state.github.as_author(conversation.repo.author.as_deref());
         let repo = conversation.repo.path.clone();
 
         move || crate::github::pull_request_numbered(&gh, &repo, named.number)
@@ -4421,7 +4425,7 @@ async fn opened_on(
 ) -> Result<std::result::Result<Option<i64>, TakenUp>> {
     // Off the runtime's threads, as [`resolve`]'s own call is: `gh` is a process.
     let asked = tokio::task::spawn_blocking({
-        let gh = state.github.clone();
+        let gh = state.github.as_author(conversation.repo.author.as_deref());
         let repo = conversation.repo.path.clone();
         let branch = branch.to_owned();
 

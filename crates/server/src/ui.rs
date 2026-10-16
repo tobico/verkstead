@@ -2820,32 +2820,20 @@ async fn publishing(
 
     let gh = state.github.clone();
     let settings = state.settings.clone();
+    let recorded = bundle.conversation.repo.author.clone();
 
     // One blocking hop for the whole publish: a `gh`, a clone, a commit and a
     // push. Every one of them is a process, and none of them belongs on the
     // runtime's threads.
     let published = tokio::task::spawn_blocking(move || {
-        let secrets = settings.secrets();
-        let config = settings.config();
-
-        // As the first Author, which is the one an installation that never
-        // added a second has: its token for the gist and the comments, and its
-        // name on the gist's commit.
-        let author = config.authors().first();
-        let token = author.and_then(|author| secrets.author_token(author.id()));
-
-        let published = crate::publishing::publish(
+        crate::publishing::publish_as(
             &gh,
-            token,
-            &author
-                .map(crate::settings::Author::git_author)
-                .unwrap_or_default(),
+            &settings,
+            recorded.as_deref(),
             &description,
             &name,
             &file,
-        );
-
-        (published, token.map(str::to_owned))
+        )
     })
     .await;
 
@@ -4114,7 +4102,7 @@ async fn pull_request(
         }
     };
 
-    let gh = state.github.clone();
+    let gh = state.github.as_author(repo.author.as_deref());
     let number = opened.number;
 
     let asked = {

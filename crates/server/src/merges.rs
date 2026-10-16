@@ -113,7 +113,7 @@ async fn sweep(state: &AppState) {
 
     for pull_request in unfinished {
         let asked = {
-            let gh = state.github.clone();
+            let gh = state.github.as_author(pull_request.repo.author.as_deref());
             let repo = pull_request.repo.path.clone();
             let number = pull_request.number;
 

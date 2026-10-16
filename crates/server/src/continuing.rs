@@ -164,7 +164,7 @@ use std::path::{Path, PathBuf};
 use verkstead_schema::{Direction, Nudge};
 
 use crate::AppState;
-use crate::settings::{Author, Signature};
+use crate::settings::{Author, Config, Signature};
 use crate::stages::{self, Next, Stage};
 use crate::store;
 use crate::tasks::{self, Clearing};
@@ -874,22 +874,23 @@ async fn start(
     // start without one is a misconfiguration to name rather than a case to work
     // around — and naming it here, where nothing has been made, is cheaper for
     // the human than naming it after a stage has half started.
-    let Some(author) = state
-        .settings
-        .config()
-        .authors()
-        .first()
+    let config = state.settings.config();
+
+    let Some(author) = config
+        .author_of(conversation.repo.author.as_deref())
         .and_then(Author::configured)
     else {
+        let (missing, fix) = unsigned(&config, conversation.repo.author.as_deref());
+
         halting(
             state,
             brought,
             settled,
             format!(
-                "Stage {} of the `{}` roadmap was ready to start, but no git author is set, so \
-                 Verkstead can't commit on its branch. Nothing was started. Set one in settings, \
-                 then continue the roadmap.",
-                stage.label, stage.roadmap,
+                "Stage {} of the `{}` roadmap was ready to start, but {}, so Verkstead can't \
+                 commit on its branch. Nothing was started. {} in settings, then continue the \
+                 roadmap.",
+                stage.label, stage.roadmap, missing, fix,
             ),
         )
         .await;
@@ -2014,11 +2015,71 @@ async fn load(state: &AppState, conversation_id: i64) -> Option<store::Conversat
     }
 }
 
+/// What is missing that a stage cannot commit as, in the halt's words, and
+/// what to do about it: the Repo's Author named where there is more than one
+/// it could have been, and the sentence a missing git author always had where
+/// there is not.
+fn unsigned(config: &Config, recorded: Option<&str>) -> (String, &'static str) {
+    let named = config
+        .author_of(recorded)
+        .filter(|_| config.authors().len() > 1)
+        .and_then(|author| Some((author.display_name().or(author.name())?, author)));
+
+    match named {
+        Some((called, author)) => (
+            format!(
+                "its Repo's Author, {called}, has no {} set",
+                match author.name() {
+                    None => "git name",
+                    Some(_) => "email",
+                },
+            ),
+            "Set it",
+        ),
+        None => ("no git author is set".to_owned(), "Set one"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::process::{Command, Stdio};
 
     use super::*;
+
+    /// The halt names the Repo's Author and what it lacks only where there is
+    /// another Author it could have been taken for; with one, it says what a
+    /// missing git author always said.
+    #[test]
+    fn a_halt_over_the_author_names_it_only_among_several() {
+        let one = Config::read("authors:\n  - id: work\n    name: Tobias Cohen\n").unwrap();
+        assert_eq!(unsigned(&one, Some("work")).0, "no git author is set");
+        assert_eq!(unsigned(&Config::default(), None).0, "no git author is set");
+
+        let two = Config::read(concat!(
+            "authors:\n",
+            "  - id: work\n",
+            "    name: Tobias Cohen\n",
+            "  - id: home\n",
+            "    display_name: Home\n",
+            "    email: tobi@example.com\n",
+        ))
+        .unwrap();
+        assert_eq!(
+            unsigned(&two, Some("work")),
+            (
+                "its Repo's Author, Tobias Cohen, has no email set".to_owned(),
+                "Set it"
+            )
+        );
+        assert_eq!(
+            unsigned(&two, Some("home")).0,
+            "its Repo's Author, Home, has no git name set"
+        );
+        assert_eq!(
+            unsigned(&two, None),
+            ("no git author is set".to_owned(), "Set one")
+        );
+    }
 
     /// A repository with a default branch and a branch off it to be cut from —
     /// which is the shape every stage start reads, whatever it decides.

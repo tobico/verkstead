@@ -3372,6 +3372,103 @@ async fn starting_clears_the_task_list_the_base_carried() {
     );
 }
 
+/// A workbench with two Authors, its one Repo recorded as the second: `work`
+/// complete and first in the list, and `home` with whatever `home` says after
+/// its uuid.
+///
+/// Registered with nobody configured, so the registration records nothing, and
+/// then recorded as `home` the way the first start's move records every Repo
+/// with none — there being no screen yet to pick one on.
+async fn under_the_second_author(
+    home: &str,
+) -> (tempfile::TempDir, tempfile::TempDir, Router, PathBuf, i64) {
+    let elsewhere = tempfile::tempdir().unwrap();
+    let (dir, pool, app) = app_and_pool_keeping().await;
+    let repo = repository(elsewhere.path().join("verkstead"));
+
+    no_author(&dir);
+
+    let registered: Registered =
+        post(&app, "/api/ui/repos", &serde_json::json!({ "path": repo })).await;
+    assert!(matches!(registered, Registered::Added(_)));
+
+    store::record_the_repo_authors(&pool, "home").await.unwrap();
+
+    std::fs::write(
+        dir.path().join(CONFIG),
+        format!(
+            "authors:\n  - id: work\n    name: Verkstead Test\n    email: test@verkstead.invalid\n  - id: home\n{home}"
+        ),
+    )
+    .unwrap();
+
+    let repo_id = listed_repos(&app).await;
+
+    (elsewhere, dir, app, repo, repo_id)
+}
+
+/// The clearing is by the Repo's Author rather than by the first in the list:
+/// everything on a Repo's branches is committed as whoever that Repo records.
+#[tokio::test]
+async fn the_clearing_is_committed_as_the_repos_own_author() {
+    let (elsewhere, _dir, app, repo, repo_id) =
+        under_the_second_author("    name: Tobi at Home\n    email: tobi@example.com\n").await;
+    task_list(&repo, INHERITED);
+
+    let id = ready(&app, elsewhere.path(), repo_id).await;
+
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    let view = opened(&app, id).await;
+    let worktree = PathBuf::from(view.worktree.clone().expect("a start makes one").path);
+
+    assert_eq!(
+        tip(&worktree),
+        [
+            "chore: clear the task list inherited from main",
+            "Tobi at Home",
+            "tobi@example.com",
+        ],
+    );
+}
+
+/// And a Repo whose Author has no email is refused exactly as a workbench with
+/// no git author is, though another Author in the list has one: that one is not
+/// who this Repo's work is by.
+#[tokio::test]
+async fn starting_on_a_repo_whose_author_has_no_email_is_refused_by_name() {
+    let (elsewhere, _dir, app, repo, repo_id) =
+        under_the_second_author("    name: Tobi at Home\n").await;
+
+    let id = ready(&app, elsewhere.path(), repo_id).await;
+    let branch = opened(&app, id).await.branch;
+
+    assert_eq!(grill(&app, id).await, GrillingStarted::NoGitAuthor);
+
+    let view = opened(&app, id).await;
+
+    assert_eq!(view.state, Lifecycle::Draft, "the press did not happen");
+    assert_eq!(view.worktree, None);
+    assert!(!has_branch(&repo, &branch));
+}
+
+/// And the same at the other door, an adoption.
+#[tokio::test]
+async fn adopting_on_a_repo_whose_author_has_no_email_is_refused_by_name() {
+    let (elsewhere, _dir, app, repo, repo_id) =
+        under_the_second_author("    name: Tobi at Home\n").await;
+    roadmap(
+        &repo,
+        OPEN_AT_THREE,
+        &["03-implementation.md", "04-wrap-up.md"],
+    );
+
+    let id = ready_to_adopt(&app, elsewhere.path(), repo_id, "mvp").await;
+
+    assert_eq!(press_adopt(&app, id).await, Adopted::NoGitAuthor);
+    assert!(!has_branch(&repo, "roadmaps/mvp/03-implementation"));
+}
+
 /// A base carrying no list is started with nothing extra: no commit and no
 /// notice. The ordinary start is every start, and it must arrive holding
 /// exactly what its base held.

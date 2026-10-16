@@ -441,7 +441,7 @@ async fn unaddressed(
     watched: &Watched,
 ) -> Option<Vec<Comment>> {
     let asked = {
-        let gh = state.github.clone();
+        let gh = state.github.as_author(watched.repo.author.as_deref());
         let repo = watched.repo.path.clone();
         let number = watched.number;
 

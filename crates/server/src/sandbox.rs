@@ -4049,18 +4049,17 @@ impl Sandbox {
             // Read above rather than here: the volume check a Windows profile
             // needs is made before a session is rendered — see [`across_volumes`].
             home,
-            // The first Author's, which is the one an installation that never
-            // added a second has. Neither half where there is none: git's own
-            // "tell me who you are" and `gh`'s own "not logged in" are the
-            // failures worth having.
+            // The Conversation's Repo's Author's — see [`Config::author_of`] —
+            // and nothing of any other Author's: a companion contributes none
+            // of its own, a sandbox having the one environment. Neither half
+            // where there is none: git's own "tell me who you are" and `gh`'s
+            // own "not logged in" are the failures worth having.
             github_token: config
-                .authors()
-                .first()
+                .author_of(conversation.repo.author.as_deref())
                 .and_then(|author| secrets.author_token(author.id()))
                 .map(str::to_owned),
             git_author: config
-                .authors()
-                .first()
+                .author_of(conversation.repo.author.as_deref())
                 .map(Author::git_author)
                 .unwrap_or_default(),
             instructions: config.instructions().to_owned(),

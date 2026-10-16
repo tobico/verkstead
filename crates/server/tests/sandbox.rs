@@ -504,6 +504,20 @@ fi
         std::fs::write(self.settings.secrets_path(), yaml).unwrap();
     }
 
+    /// Record the Repo as the Author `author`, as the store would at its
+    /// registration, and read the Conversation back with it — which is what the
+    /// server builds every sandbox off.
+    async fn recorded_as(&mut self, author: &str) {
+        store::record_the_repo_authors(&self.pool, author)
+            .await
+            .unwrap();
+
+        self.conversation = store::load_conversation(&self.pool, self.conversation.id)
+            .await
+            .unwrap()
+            .expect("the Conversation is still there");
+    }
+
     /// And `config.yaml`, which is who those sandboxes commit as, how their
     /// shared build cache is set, and what MCP servers this installation
     /// declares.
@@ -1393,6 +1407,90 @@ async fn a_commit_made_inside_is_by_the_configured_author() {
         "the commit is by whoever config.yaml says, not by the repository's own \
          local identity and not by the host's gitconfig"
     );
+}
+
+/// Two Authors, each with an email and a token of its own — which a Repo is
+/// committed and pushed as is what it recorded.
+const TWO_AUTHORS: &str = concat!(
+    "authors:\n",
+    "  - id: work\n",
+    "    name: Tobias Cohen\n",
+    "    email: tobi@tobico.net\n",
+    "  - id: home\n",
+    "    name: Tobi\n",
+    "    email: tobi@example.com\n",
+);
+
+/// And their tokens, under their uuids.
+const TWO_TOKENS: &str = "author_tokens:\n  work: ghp_theworkone\n  home: ghp_thehomeone\n";
+
+/// What `user.email` is among the counted `GIT_CONFIG_*` pairs `environment`
+/// was handed, where it is there at all.
+fn configured_email(environment: &BTreeMap<String, String>) -> Option<&str> {
+    environment
+        .iter()
+        .find(|(name, value)| name.starts_with("GIT_CONFIG_KEY_") && *value == "user.email")
+        .and_then(|(name, _)| {
+            environment
+                .get(&name.replace("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_"))
+                .map(String::as_str)
+        })
+}
+
+/// Two Repos under two Authors are two sessions as two people: each one's
+/// environment carries its own Repo's Author's `user.email` and `GH_TOKEN`, and
+/// nothing anywhere in it is the other Author's. A Conversation Terminal is that
+/// same sandbox shelled, so it is given the same.
+#[tokio::test]
+async fn each_repo_is_its_own_authors_name_and_token_and_nothing_of_the_others() {
+    let mut at_work = grilling().await;
+    let mut at_home = grilling().await;
+
+    for fixture in [&at_work, &at_home] {
+        fixture.configure(TWO_AUTHORS);
+        fixture.configure_github_token(TWO_TOKENS);
+    }
+
+    at_work.recorded_as("work").await;
+    at_home.recorded_as("home").await;
+
+    let shell = on_the_host("bash").display().to_string();
+
+    for (fixture, own, others) in [
+        (
+            &at_work,
+            ("tobi@tobico.net", "ghp_theworkone"),
+            ("tobi@example.com", "ghp_thehomeone"),
+        ),
+        (
+            &at_home,
+            ("tobi@example.com", "ghp_thehomeone"),
+            ("tobi@tobico.net", "ghp_theworkone"),
+        ),
+    ] {
+        let session = environment(&fixture.sandbox(vec![]));
+        let terminal = environment(&fixture.sandbox(vec![]).shelled(&shell));
+
+        for (which, given) in [("session", &session), ("terminal", &terminal)] {
+            assert_eq!(
+                configured_email(given),
+                Some(own.0),
+                "the {which}'s user.email"
+            );
+            assert_eq!(
+                given.get("GH_TOKEN").map(String::as_str),
+                Some(own.1),
+                "the {which}'s GH_TOKEN"
+            );
+
+            for (name, value) in given {
+                assert!(
+                    !value.contains(others.0) && !value.contains(others.1),
+                    "the {which} on {own:?}'s Repo carries the other Author's in {name}={value}"
+                );
+            }
+        }
+    }
 }
 
 /// A Profile's login has no Repo, so it has no Author to be: an Author

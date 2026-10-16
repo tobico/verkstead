@@ -1141,6 +1141,25 @@ impl Config {
         self.authors.iter().find(|author| author.id == id)
     }
 
+    /// The Author a Repo recorded as `recorded` is committed and pushed as:
+    /// the one with that uuid, or — where the Repo records none — the one
+    /// Author configured, where there is exactly one.
+    ///
+    /// The fallback is the promise that one Author changes nothing: a Repo
+    /// registered before anybody was configured is that one Author's the way
+    /// every Repo is once there is only one to be. With more than one it is
+    /// nobody's, which is an Author still to pick — see
+    /// [`crate::repos::entry`]. A uuid no longer in the list is nobody either,
+    /// rather than whoever happens to be first: the wrong name on a commit is
+    /// the mistake an Author per Repo exists to stop.
+    pub fn author_of(&self, recorded: Option<&str>) -> Option<&Author> {
+        match (recorded, self.authors.as_slice()) {
+            (Some(id), _) => self.author(id),
+            (None, [only]) => Some(only),
+            (None, _) => None,
+        }
+    }
+
     /// And what this file says about the languages: the map an installer
     /// writes, with `rust_build_cache` read underneath it as Rust's `enabled`
     /// and `size`.
@@ -2738,6 +2757,36 @@ mod tests {
         assert_eq!(home.email(), Some("tobi@example.com"));
 
         assert!(config.author("elsewhere").is_none());
+    }
+
+    /// A Repo is its recorded Author's, and one recording none is the sole
+    /// Author's only where there is a sole Author.
+    #[test]
+    fn a_repo_is_its_recorded_author_or_the_only_one() {
+        let two = Config::read(concat!(
+            "authors:\n",
+            "  - id: work\n",
+            "    name: Tobias Cohen\n",
+            "  - id: home\n",
+            "    name: Tobi\n",
+        ))
+        .unwrap();
+
+        assert_eq!(two.author_of(Some("home")).map(Author::id), Some("home"));
+        assert_eq!(two.author_of(Some("work")).map(Author::id), Some("work"));
+        assert!(
+            two.author_of(None).is_none(),
+            "with two there is nobody to assume"
+        );
+        assert!(
+            two.author_of(Some("gone")).is_none(),
+            "an Author taken out of the list is nobody, not the first"
+        );
+
+        let one = Config::read("authors:\n  - id: work\n    name: Tobias Cohen\n").unwrap();
+        assert_eq!(one.author_of(None).map(Author::id), Some("work"));
+
+        assert!(Config::default().author_of(None).is_none());
     }
 
     #[test]
