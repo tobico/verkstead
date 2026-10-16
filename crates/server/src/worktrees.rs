@@ -41,9 +41,10 @@
 //! steer's re-checkout and a taken-up pull request hold somebody's work already,
 //! and what is in those trees is not inherited.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::mpsc;
+use std::sync::{Arc, LazyLock, Mutex, Weak, mpsc};
 use std::time::Duration;
 
 use crate::repos::git;
@@ -1107,20 +1108,19 @@ pub(crate) enum Standing {
 /// [`rebuild`] where that says no. A worktree is derived state, so nothing is
 /// lost by it, and nothing that reads as standing is touched.
 ///
-/// **One at a time, across the server.** A pane attaching and a terminal
-/// pressed a moment later both ask, and a second rebuild of one path would find
-/// the first one's checkout in its way and remove it — so the reading and the
-/// rebuild are held under one lock, and whoever comes second reads the first
-/// one's checkout as healthy. Nearly every ask is a healthy one, which is a git
-/// read or two, so the lock is held for no time on any of them.
+/// **One at a time, for each path.** A pane attaching and a terminal pressed a
+/// moment later both ask, and a second rebuild of one path would find the first
+/// one's checkout in its way and remove it — so the reading and the rebuild are
+/// held under that path's lock, and whoever comes second reads the first one's
+/// checkout as standing. A lock of the path's own rather than the server's,
+/// because a rebuild of a large repository takes a while, and a press on some
+/// other Conversation's checkout has no reason to wait on it — see [`held`].
 pub(crate) async fn standing(
     pool: &sqlx::SqlitePool,
     conversation: &store::Conversation,
     worktree: &Path,
     wanting: Wanting,
 ) -> anyhow::Result<Standing> {
-    static ONE_AT_A_TIME: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-
     if conversation.transferred.is_some() {
         return Ok(Standing::Elsewhere);
     }
@@ -1135,7 +1135,8 @@ pub(crate) async fn standing(
     .await
     .unwrap_or_else(|| conversation.branch.clone());
 
-    let _held = ONE_AT_A_TIME.lock().await;
+    let lock = held(worktree);
+    let _held = lock.lock().await;
 
     let repo = conversation.repo.path.clone();
     let worktree = worktree.to_owned();
@@ -1157,6 +1158,30 @@ pub(crate) async fn standing(
     .await?;
 
     Ok(standing)
+}
+
+/// The lock [`standing`] holds over the worktree at `path`, shared with every
+/// ask about that path still holding or waiting on it.
+///
+/// Held weakly here, so a path nobody is asking about any more is let go of
+/// rather than kept for the server's lifetime: the next ask about it makes a
+/// fresh one, and with nobody holding the old one there is nobody to race.
+fn held(path: &Path) -> Arc<tokio::sync::Mutex<()>> {
+    static HELD: LazyLock<Mutex<HashMap<PathBuf, Weak<tokio::sync::Mutex<()>>>>> =
+        LazyLock::new(|| Mutex::new(HashMap::new()));
+
+    let mut holding = HELD.lock().unwrap_or_else(|held| held.into_inner());
+
+    holding.retain(|_, lock| lock.strong_count() > 0);
+
+    if let Some(lock) = holding.get(path).and_then(Weak::upgrade) {
+        return lock;
+    }
+
+    let lock = Arc::new(tokio::sync::Mutex::new(()));
+    holding.insert(path.to_owned(), Arc::downgrade(&lock));
+
+    lock
 }
 
 /// The name `branch` has been renamed to in the worktree at `path`, or `None`
@@ -2489,5 +2514,24 @@ mod tests {
             .expect("git should be on the PATH for these tests");
 
         assert!(output.status.success(), "git {args:?} failed");
+    }
+
+    /// The lock a worktree is asked about under is that path's own: two asks
+    /// about one checkout share it, an ask about another checkout never waits
+    /// on it.
+    #[tokio::test]
+    async fn a_worktrees_lock_is_its_own_paths() {
+        let one = held(Path::new("/worktrees/a-lock-of-its-own"));
+        let again = held(Path::new("/worktrees/a-lock-of-its-own"));
+        let other = held(Path::new("/worktrees/somebody-elses"));
+
+        assert!(Arc::ptr_eq(&one, &again));
+        assert!(!Arc::ptr_eq(&one, &other));
+
+        let _holding = one.lock().await;
+        assert!(
+            other.try_lock().is_ok(),
+            "another checkout's lock should not wait on this one",
+        );
     }
 }
