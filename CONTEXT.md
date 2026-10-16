@@ -2759,6 +2759,22 @@ goes when the submit freezes it into the Steer Event or the cancel takes it
 away, and it boards no **Share**.
 _Avoid_: feed, log, history, activity stream
 
+**Landing**:
+Where the selection goes on a Timeline nobody has picked a card on: the pane
+the workbench opens when a Conversation is opened, and the pane it moves on to
+with each Event that lands while the human has picked nothing since. **The
+pending steer first**, where one stands, being the one item drawn after the
+record. **Else the oldest Question Set still waiting** — blocking, disconnected
+or deferred alike — so a Memo or a commit landing after a Set does not carry
+the selection past a Set the human has not answered; a Set answered or locked
+unanswered is passed over. **Else the end of the record**: the last Event with
+a pane behind it. A Timeline that landed is **advancing** — the landing re-run
+on every Nudge — until the human picks a card, and sending an answer from the
+Set's pane puts it back into advancing, so a phone that tapped the Set to
+answer it is carried on to the next thing. A **Share** has nobody to answer
+from it and lands on the end of its record alone.
+_Avoid_: autofollow, auto-select, follow mode, jump to latest
+
 **Event**:
 One entry in a Timeline — a Brief, agent output, a Question Set, a Handoff, a
 commit, a task list, a stage list, a PR, a Notice. Each shows a summary in the
@@ -3279,10 +3295,14 @@ _Avoid_: wait (reads as a command that blocks), pause, hold, busy, sleep
 
 **Memo**:
 Working knowledge a building session leaves for the sessions after it, by
-running `verkstead memo` with markdown on stdin: a flaky test, a build trap, a
-decision taken mid-task and why, a thing the next task will walk into. Short,
-specific, written when learned — not a running account of the work, which the
-commits are, and not the design, which the **Brief** and the **Handoff** are.
+running `verkstead memo <title>` with markdown on stdin: a flaky test, a build
+trap, a decision taken mid-task and why, a thing the next task will walk into.
+Short, specific, written when learned — not a running account of the work,
+which the commits are, and not the design, which the **Brief** and the
+**Handoff** are. **Titled by the session that leaves it**, the title being the
+command's one argument the way a **Preview**'s is: trimmed, refused empty or
+with a newline in it, and uncapped, the card cutting it to one line. A memo
+left before titles has none, and its card shows the body's first line instead.
 The one thing that carries an agent's own words from one session of a
 Conversation to the next: the **Handoff** is the grilling's and written once,
 a **Deferred Ask**'s Answers are the human's and folded once, and the harness's
@@ -3295,9 +3315,10 @@ request. The server reads what the running session was sent for off the same
 register the **Done signal** is checked against.
 
 **Read by every later session of the Conversation**, under *What earlier
-sessions left for you* in its prompt, oldest first, each stamped with the
-session that left it — *the session that worked task 03* — and, for a session
-that may retire it, carrying the line that does. Grilling relaunches and
+sessions left for you* in its prompt, oldest first, each named by its title and
+stamped with the session that left it — *the session that worked task 03* —
+and, for a session that may retire it, carrying the line that does, which is
+the one place the prompt says its id. Grilling relaunches and
 steered sessions included, and a memo is not spent by being read: shown in
 every prompt until retired, and outliving the round, a steer into Grilling
 leaving them standing. A **Stage** is a Conversation of its own and reads its
@@ -3305,14 +3326,20 @@ own. A **Carried Conversation**'s note says nothing of them, that session
 having been launched after they were left.
 
 **An Event**, one per memo, numbered by its Event id the way a Question Set is
-by its Set id: a Handoff-shaped card headed by the number and the session that
-left it, the whole memo in the details pane, and no place on a **Share**, being
-one agent talking to the next. **Retired** by a later session with
-`verkstead memo --retire <id>` and an optional reason, or by the human's press
-on the card — undone by Restore, so it asks nothing first. A retired memo
-leaves the prompt and stays on the Timeline marked retired, with who and why.
-The human cannot leave one from the Timeline; a **Steer** carries their words.
-Refused empty, and over 8 KiB. See ADR-0023.
+by its Set id, the number being the session's handle for retiring and drawn
+nowhere on screen. **The card is the kind and the title**: headed *Memo*, the
+title as its subtitle, and nothing else. **The pane says the rest**: the title
+over the whole memo, and under it an understated line — who left it and when,
+the session's name a link opening that session's own output, and who retired
+it and why beneath where retired — with Retire, or Restore, beside that line.
+No place on a **Share**, being one agent talking to the next. **Retired** by a
+later session with `verkstead memo --retire <id>` and an optional reason, or by
+the human's press in the pane — undone by Restore, so it asks nothing first. A
+retired memo leaves the prompt and stays on the Timeline, its card's subtitle
+struck through, who and why in the pane. The human cannot leave one from the
+Timeline; a **Steer** carries their words. Refused empty, and over 8 KiB. **A
+memo after a waiting Set does not walk the selection past the Set** — see
+**Landing**. See ADR-0023.
 _Avoid_: note (that is the carried Conversation's), notes, comment, annotation,
 hint, reminder
 
