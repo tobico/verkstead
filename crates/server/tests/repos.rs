@@ -957,6 +957,36 @@ async fn a_create_with_the_tick_off_asks_github_nothing() {
     );
 }
 
+/// A create under the second of two Authors runs `gh` with the second's token.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_create_on_github_under_the_second_author_pushes_with_its_token() {
+    let root = tempfile::tempdir().unwrap();
+    let (dir, notes, app) = workbench_with_gh("exit 0").await;
+    two_authors(&dir);
+    std::fs::write(
+        dir.path().join("secrets.yaml"),
+        "author_tokens:\n  work: ghp_theworkone\n  personal: ghp_thepersonalone\n",
+    )
+    .unwrap();
+
+    made(
+        post(
+            &app,
+            "/api/ui/repos/new",
+            &serde_json::json!({
+                "parent": root.path(),
+                "name": "widgets",
+                "github": true,
+                "author": "personal",
+            }),
+        )
+        .await,
+    );
+
+    assert_eq!(noted(&notes, "token"), "ghp_thepersonalone");
+}
+
 /// A GitHub failure after the local repository exists is not a failed create.
 ///
 /// The directory, the commit and the registration all stand — what is missing is
@@ -1084,20 +1114,157 @@ async fn a_repo_registered_with_no_author_is_recorded_as_nobody() {
     assert!(!registered.author_unpicked);
 }
 
-/// With two configured there is no saying which, so nothing is recorded and
-/// the view says one is still to be picked.
+/// A Repo registered while there was no Author, with two configured since,
+/// has no saying which: nothing is recorded and the view says one is still to
+/// be picked.
 #[tokio::test]
 async fn a_repo_with_no_author_among_two_is_stated_as_unpicked() {
+    let src = tempfile::tempdir().unwrap();
+    let (dir, app) = workbench().await;
+    let repo = repository(src.path().join("verkstead"));
+
+    added(register(&app, &repo).await);
+    two_authors(&dir);
+
+    let listed = listed(&app).await;
+    assert_eq!(listed[0].author, None);
+    assert!(listed[0].author_unpicked);
+}
+
+/// Ask to register a path as the Author with the uuid `author`, the way the
+/// **Open repo** card asks once there are two to pick between.
+async fn register_as(app: &Router, path: &Path, author: &str) -> Registered {
+    post(
+        app,
+        "/api/ui/repos",
+        &serde_json::json!({ "path": path, "author": author }),
+    )
+    .await
+}
+
+/// And to make one as the Author with the uuid `author`.
+async fn create_as(app: &Router, parent: &Path, name: &str, author: &str) -> Created {
+    post(
+        app,
+        "/api/ui/repos/new",
+        &serde_json::json!({ "parent": parent, "name": name, "github": false, "author": author }),
+    )
+    .await
+}
+
+/// With two Authors, a registration that picks one is recorded as the one it
+/// picked — the second as readily as the first.
+#[tokio::test]
+async fn a_repo_registered_among_two_authors_is_recorded_as_the_one_picked() {
     let src = tempfile::tempdir().unwrap();
     let (dir, app) = workbench().await;
     two_authors(&dir);
     let repo = repository(src.path().join("verkstead"));
 
-    let registered = added(register(&app, &repo).await);
+    let registered = added(register_as(&app, &repo, "personal").await);
 
-    assert_eq!(registered.author, None);
-    assert!(registered.author_unpicked);
-    assert!(listed(&app).await[0].author_unpicked);
+    assert_eq!(registered.author.as_deref(), Some("personal"));
+    assert!(!registered.author_unpicked);
+    assert_eq!(listed(&app).await, vec![registered]);
+}
+
+/// With two Authors, a registration that names none is refused by name, and
+/// so is one naming a uuid nobody configured — and neither registers anything.
+#[tokio::test]
+async fn a_registration_among_two_authors_names_one_that_is_configured() {
+    let src = tempfile::tempdir().unwrap();
+    let (dir, app) = workbench().await;
+    two_authors(&dir);
+    let repo = repository(src.path().join("verkstead"));
+
+    assert_eq!(register(&app, &repo).await, Registered::AuthorUnpicked);
+    assert_eq!(
+        register_as(&app, &repo, "nobody-of-that-uuid").await,
+        Registered::NoSuchAuthor
+    );
+    assert!(listed(&app).await.is_empty(), "nothing was registered");
+}
+
+/// A uuid nobody configured is refused with one Author too: the one there is
+/// stands in only for a registration that named nobody.
+#[tokio::test]
+async fn a_registration_naming_an_unknown_author_is_refused_with_one_configured() {
+    let src = tempfile::tempdir().unwrap();
+    let (_dir, app) = workbench_authored().await;
+    let repo = repository(src.path().join("verkstead"));
+
+    assert_eq!(
+        register_as(&app, &repo, "personal").await,
+        Registered::NoSuchAuthor
+    );
+    assert!(listed(&app).await.is_empty());
+}
+
+/// Create repo under the second of two Authors makes its first commit as that
+/// Author, and records the Repo as its.
+#[tokio::test]
+async fn a_repository_created_under_the_second_author_is_its() {
+    let root = tempfile::tempdir().unwrap();
+    let (dir, app) = workbench().await;
+    two_authors(&dir);
+
+    let repo = made(create_as(&app, root.path(), "verkstead", "personal").await);
+
+    assert_eq!(
+        git_says(
+            &root.path().join("verkstead"),
+            &["log", "-1", "--format=%an <%ae>"]
+        ),
+        "A. L. <al@home.example>"
+    );
+    assert_eq!(repo.author.as_deref(), Some("personal"));
+    assert!(!repo.author_unpicked);
+}
+
+/// And a create among two that names none, or one nobody configured, is
+/// refused by name with nothing made.
+#[tokio::test]
+async fn a_create_among_two_authors_names_one_that_is_configured() {
+    let root = tempfile::tempdir().unwrap();
+    let (dir, app) = workbench().await;
+    two_authors(&dir);
+
+    assert_eq!(
+        create(&app, root.path(), "verkstead").await,
+        Created::AuthorUnpicked
+    );
+    assert_eq!(
+        create_as(&app, root.path(), "verkstead", "nobody-of-that-uuid").await,
+        Created::NoSuchAuthor
+    );
+    assert!(!root.path().join("verkstead").exists(), "nothing was made");
+    assert!(listed(&app).await.is_empty());
+}
+
+/// A picked Author lacking an email refuses the create the way a missing git
+/// author does.
+#[tokio::test]
+async fn a_create_under_an_author_with_no_email_is_refused() {
+    let root = tempfile::tempdir().unwrap();
+    let (dir, app) = workbench().await;
+    std::fs::write(
+        dir.path().join("config.yaml"),
+        concat!(
+            "authors:\n",
+            "  - id: work\n",
+            "    name: Ada Lovelace\n",
+            "    email: ada@work.example\n",
+            "  - id: personal\n",
+            "    name: A. L.\n",
+        ),
+    )
+    .unwrap();
+
+    assert_eq!(
+        create_as(&app, root.path(), "verkstead", "personal").await,
+        Created::NoAuthor
+    );
+    assert!(!root.path().join("verkstead").exists());
 }
 
 /// A Repo registered under one Author and then a second added is still the

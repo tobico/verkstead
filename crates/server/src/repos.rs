@@ -18,7 +18,7 @@
 //! are one-liners, and what git says about a repository on this machine is what
 //! the sandboxed sessions will see later when they run it themselves. Making one
 //! is git as well: a directory, `git init` onto `main`, and a `README.md`
-//! committed as the configured author, after which it is registered through the
+//! committed as the Author picked, after which it is registered through the
 //! very call a typed path goes through — see [`create`]. And, where it was asked
 //! for, `gh` puts the same repository on GitHub and pushes to it, which is the
 //! one thing here that can fail without the create failing.
@@ -29,7 +29,7 @@ use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result};
 use sqlx::SqlitePool;
-use verkstead_render::{Created, Registered, RepoEntry, RepoRemoved, RepoView};
+use verkstead_render::{Created, Creation, Registered, RepoEntry, RepoRemoved, RepoView};
 
 use crate::github::Gh;
 use crate::resolved::{Resolved, resolve};
@@ -37,7 +37,11 @@ use crate::settings::{Author, Signature};
 use crate::store;
 use crate::unseen::Unseen;
 
-/// Register the repository at `asked`, or say why not.
+/// Register the repository at `asked` as the Author with the uuid `author`, or
+/// say why not.
+///
+/// The Author is settled first — see [`picked`] — because a refusal there is
+/// about the form rather than the repository, and asks nothing of the disk.
 ///
 /// The filesystem half runs off the runtime: resolving a path and asking git
 /// about a repository are both blocking, and a registration is rare enough that
@@ -46,8 +50,59 @@ pub(crate) async fn register(
     pool: &SqlitePool,
     authors: &[Author],
     asked: &str,
+    author: Option<&str>,
 ) -> Result<Registered> {
-    registering(pool, authors, PathBuf::from(asked)).await
+    let author = match picked(authors, author) {
+        Ok(author) => author,
+        Err(refusal) => return Ok(refusal.into()),
+    };
+
+    registering(pool, authors, author.map(Author::id), PathBuf::from(asked)).await
+}
+
+/// Which Author a Repo registered now is recorded as, out of the uuid the
+/// registration named.
+///
+/// **A uuid named is that Author or a refusal**, whatever else is configured:
+/// a form that named one the file no longer holds was drawn over a list that
+/// has since changed. **None named is the one Author** where there is exactly
+/// one — there is nobody else it could be (ADR-0025) — nobody where there is
+/// none, and a refusal where there are several, there being no saying which.
+fn picked<'a>(authors: &'a [Author], asked: Option<&str>) -> Result<Option<&'a Author>, Unpicked> {
+    match (asked, authors) {
+        (Some(id), _) => authors
+            .iter()
+            .find(|author| author.id() == id)
+            .map(Some)
+            .ok_or(Unpicked::NoSuchAuthor),
+        (None, [] | [_]) => Ok(authors.first()),
+        (None, _) => Err(Unpicked::AuthorUnpicked),
+    }
+}
+
+/// Why no Author could be settled on, which a registration and a create both
+/// answer with a word of their own.
+enum Unpicked {
+    AuthorUnpicked,
+    NoSuchAuthor,
+}
+
+impl From<Unpicked> for Registered {
+    fn from(unpicked: Unpicked) -> Registered {
+        match unpicked {
+            Unpicked::AuthorUnpicked => Registered::AuthorUnpicked,
+            Unpicked::NoSuchAuthor => Registered::NoSuchAuthor,
+        }
+    }
+}
+
+impl From<Unpicked> for Created {
+    fn from(unpicked: Unpicked) -> Created {
+        match unpicked {
+            Unpicked::AuthorUnpicked => Created::AuthorUnpicked,
+            Unpicked::NoSuchAuthor => Created::NoSuchAuthor,
+        }
+    }
 }
 
 /// The same, over a path the server is holding rather than one it was sent.
@@ -56,13 +111,14 @@ pub(crate) async fn register(
 /// stands in is one it built, so there is nothing to parse and nothing to be
 /// lost putting a path through a string on the way.
 ///
-/// **With exactly one Author configured, the Repo is recorded as its**, with
-/// nothing asked: there is nobody else it could be (ADR-0025). With none there
-/// is nothing to record, and with more than one there is no saying which, so
-/// nothing is recorded and the Repo's view says one is still to be picked. A
-/// Repo revived keeps the Author it had either way — see
-/// [`store::register_repo_as`].
-async fn registering(pool: &SqlitePool, authors: &[Author], asked: PathBuf) -> Result<Registered> {
+/// **The Repo is recorded as `author`**, already settled by [`picked`]. A Repo
+/// revived keeps the Author it had — see [`store::register_repo_as`].
+async fn registering(
+    pool: &SqlitePool,
+    authors: &[Author],
+    author: Option<&str>,
+    asked: PathBuf,
+) -> Result<Registered> {
     let facts = match tokio::task::spawn_blocking(move || inspect(&asked)).await? {
         Ok(facts) => facts,
         Err(refusal) => return Ok(refusal),
@@ -79,7 +135,7 @@ async fn registering(pool: &SqlitePool, authors: &[Author], asked: PathBuf) -> R
             &facts.path,
             &facts.name,
             &facts.default_branch,
-            sole(authors).map(Author::id),
+            author,
         )
         .await?
         {
@@ -127,15 +183,6 @@ pub(crate) fn entry(repo: store::Repo, authors: &[Author]) -> RepoEntry {
     }
 }
 
-/// The one Author configured, where there is exactly one — the Author a Repo
-/// registered now is recorded as without anybody being asked.
-fn sole(authors: &[Author]) -> Option<&Author> {
-    match authors {
-        [only] => Some(only),
-        _ => None,
-    }
-}
-
 /// Whether a Repo recorded as `author` has an Author still to pick: none is
 /// recorded, and there is more than one it could be.
 fn unpicked(author: Option<&str>, authors: &[Author]) -> bool {
@@ -152,7 +199,8 @@ fn unpicked(author: Option<&str>, authors: &[Author]) -> bool {
 /// from one, so a repository with nothing on `main` would be registered and
 /// unusable. A README is what a fresh repository conventionally holds.
 ///
-/// **It is committed as the configured author or not at all.** Said on the
+/// **It is committed as the Author picked, or not at all** — the one Author
+/// where only one is configured, and [`picked`] otherwise. Said on the
 /// command line rather than written into the new repository's config, the way
 /// [`crate::publishing`] says it: it is the same fact either way and one of them
 /// leaves a file behind. Where nobody is configured this refuses, which is where
@@ -179,18 +227,25 @@ pub(crate) async fn create(
     pool: &SqlitePool,
     authors: &[Author],
     gh: &Gh,
-    parent: &str,
-    name: &str,
-    github: bool,
+    creation: &Creation,
     at_once: usize,
 ) -> Result<Created> {
+    let Creation {
+        parent,
+        name,
+        github,
+        author,
+    } = creation;
+
+    let picked = match picked(authors, author.as_deref()) {
+        Ok(picked) => picked,
+        Err(refusal) => return Ok(refusal.into()),
+    };
+
     // Both halves or neither, which is the one shape git will take an identity
     // in — see [`Signature`], the rule everything Verkstead commits on its own
     // account is made under.
-    //
-    // The first Author, which is the one an installation that never added a
-    // second has.
-    let Some(author) = authors.first().and_then(Author::configured) else {
+    let Some(author) = picked.and_then(Author::configured) else {
         return Ok(Created::NoAuthor);
     };
 
@@ -219,7 +274,7 @@ pub(crate) async fn create(
         false => None,
         true => {
             // As the Author it was committed as, whose Repo it is about to be.
-            let gh = gh.as_author(authors.first().map(Author::id));
+            let gh = gh.as_author(picked.map(Author::id));
             let dir = path.clone();
             let called = name.clone();
 
@@ -235,7 +290,7 @@ pub(crate) async fn create(
     // Registered through the very call the form's registration goes through:
     // what was just made is a repository like any other, and a second way of
     // taking one on would be a second chance for the two to come apart.
-    let registered = registering(pool, authors, path.clone()).await?;
+    let registered = registering(pool, authors, picked.map(Author::id), path.clone()).await?;
 
     let (Registered::Added(repo) | Registered::AlreadyRegistered(repo)) = registered else {
         // A repository this call made a moment ago, with a commit on `main`,

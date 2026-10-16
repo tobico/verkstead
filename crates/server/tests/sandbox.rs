@@ -796,6 +796,45 @@ fi
 
 /// Stand one up, with no companion repos — which is the ordinary Conversation
 /// and what most of these tests are about.
+/// Register `repo` through `POST /api/ui/repos` as **Open repo** does with
+/// two Authors configured and `author` picked, and hand back its id.
+async fn opened_through_the_page(
+    pool: &sqlx::SqlitePool,
+    data_dir: &Path,
+    repo: &Path,
+    author: &str,
+) -> i64 {
+    use axum::body::Body;
+    use axum::http::{Request, header};
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
+
+    std::fs::write(data_dir.join("config.yaml"), TWO_AUTHORS).unwrap();
+    std::fs::write(data_dir.join("secrets.yaml"), TWO_TOKENS).unwrap();
+
+    let app = verkstead_server::router_keeping(pool.clone(), data_dir.to_owned());
+    let response = app
+        .oneshot(
+            Request::post("/api/ui/repos")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "path": repo, "author": author }).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+
+    match serde_json::from_slice(&body).unwrap() {
+        verkstead_render::Registered::Added(repo) => {
+            assert_eq!(repo.author.as_deref(), Some(author));
+            repo.id
+        }
+        refused => panic!("the registration was refused: {refused:?}"),
+    }
+}
+
 async fn grilling() -> Grilling {
     grilling_alongside(&[]).await
 }
@@ -808,6 +847,21 @@ async fn grilling() -> Grilling {
 /// checks them out: a read-write companion on a branch of its own, a read-only
 /// one detached at the commit its base resolved to.
 async fn grilling_alongside(companions: &[(&str, store::CompanionMode)]) -> Grilling {
+    grilling_with(companions, None).await
+}
+
+/// And one whose Repo was opened the way the Repo dropdown's **Open repo**
+/// opens one, with [`TWO_AUTHORS`] configured and `author` picked: registered
+/// through the server's own endpoint rather than straight into the store, so
+/// that what the session is handed is what the pick recorded.
+async fn grilling_opened_as(author: &str) -> Grilling {
+    grilling_with(&[], Some(author)).await
+}
+
+async fn grilling_with(
+    companions: &[(&str, store::CompanionMode)],
+    opened_as: Option<&str>,
+) -> Grilling {
     let elsewhere = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
     let home = tempfile::tempdir().unwrap();
@@ -858,10 +912,16 @@ async fn grilling_alongside(companions: &[(&str, store::CompanionMode)]) -> Gril
         .await
         .unwrap();
 
-    let repo_row = store::register_repo(&pool, &repo, "verkstead", "main")
-        .await
-        .unwrap()
-        .expect("the Repo registers");
+    let repo_row = match opened_as {
+        None => {
+            store::register_repo(&pool, &repo, "verkstead", "main")
+                .await
+                .unwrap()
+                .expect("the Repo registers")
+                .id
+        }
+        Some(author) => opened_through_the_page(&pool, state.path(), &repo, author).await,
+    };
 
     let claude_dir = elsewhere.path().join("account/.claude");
     let config_file = elsewhere.path().join("account/.claude.json");
@@ -913,7 +973,7 @@ async fn grilling_alongside(companions: &[(&str, store::CompanionMode)]) -> Gril
     .unwrap()
     .expect("the Profile saves");
 
-    let id = store::start_conversation(&pool, repo_row.id, "rate-limiting", THIS_DEVICE)
+    let id = store::start_conversation(&pool, repo_row, "rate-limiting", THIS_DEVICE)
         .await
         .unwrap()
         .expect("the Conversation starts");
@@ -1435,6 +1495,27 @@ fn configured_email(environment: &BTreeMap<String, String>) -> Option<&str> {
                 .get(&name.replace("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_"))
                 .map(String::as_str)
         })
+}
+
+/// A Repo opened under the second of two Authors runs its sessions as that
+/// Author: its `user.email` and its `GH_TOKEN`, and nothing of the first's.
+#[tokio::test]
+async fn a_repo_opened_under_the_second_author_runs_its_sessions_as_it() {
+    let fixture = grilling_opened_as("home").await;
+
+    let given = environment(&fixture.sandbox(vec![]));
+
+    assert_eq!(configured_email(&given), Some("tobi@example.com"));
+    assert_eq!(
+        given.get("GH_TOKEN").map(String::as_str),
+        Some("ghp_thehomeone")
+    );
+    for (name, value) in &given {
+        assert!(
+            !value.contains("tobi@tobico.net") && !value.contains("ghp_theworkone"),
+            "the first Author's is in {name}={value}"
+        );
+    }
 }
 
 /// Two Repos under two Authors are two sessions as two people: each one's

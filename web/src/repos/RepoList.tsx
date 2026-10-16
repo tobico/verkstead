@@ -98,6 +98,7 @@ import {
   removeRepo,
 } from "../api/client";
 import type {
+  AuthorSaved,
   Created,
   Registered,
   RepoEntry,
@@ -108,7 +109,9 @@ import { repoParent, setRepoParent } from "../remembered";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine, Note } from "../notices";
 import { keyOf, useDevice } from "../reaching";
+import { Picker } from "../picking";
 import { rowPress } from "../rows";
+import { authorLabel } from "../settings/Git";
 import { useSettings } from "../settings/PathEditor";
 import { PaneHead } from "../workbench/PaneHead";
 import styles from "./RepoList.module.css";
@@ -123,6 +126,14 @@ import { SettingsCard } from "../settings/SettingsCard";
 /// registered already is the repository somebody named.
 export type RepoRefused = Extract<Registered, string>;
 
+/// What a registration or a create that named no Author among several is told,
+/// which the card's own press never sends.
+const UNPICKED =
+  "More than one author is configured. Pick the one this repo is committed as.";
+
+/// And one that named an Author the settings no longer hold.
+const NO_SUCH_AUTHOR = "That author isn't configured any more. Pick another.";
+
 /// What each way of being refused says, once, wherever it is met.
 export const REFUSAL: Record<RepoRefused, string> = {
   NotAbsolute: "Give the repo's absolute path, starting with a slash.",
@@ -131,6 +142,8 @@ export const REFUSAL: Record<RepoRefused, string> = {
     "That isn't a git repository. Name the repository's own directory.",
   NoDefaultBranch:
     "That repository has no branch to call its default. Check one out first.",
+  AuthorUnpicked: UNPICKED,
+  NoSuchAuthor: NO_SUCH_AUTHOR,
 };
 
 /// The ways a create is answered with a sentence rather than a Repo, in the same
@@ -149,7 +162,79 @@ export const CREATE_REFUSAL: Record<CreateRefused, string> = {
   BadName: "That isn't a name a directory can have.",
   NoAuthor:
     "No git author is configured, and the first commit needs one. Set one in Settings.",
+  AuthorUnpicked: UNPICKED,
+  NoSuchAuthor: NO_SUCH_AUTHOR,
 };
+
+/// Which Author a Repo arriving through **Open repo** or **Create repo** is
+/// recorded as (ADR-0025): picked where more than one is configured, and the one
+/// there is, silently, where there is only one.
+///
+/// Read off the settings the way the create's GitHub tick is. A settings read
+/// that has not answered, or failed, offers nothing to pick between, and the
+/// press goes out naming nobody — which the server records as the one Author,
+/// or refuses by name where there are several.
+function useAuthorPick() {
+  const settings = useSettings();
+
+  /// Every Author, in the settings' order.
+  const authors = (): AuthorSaved[] => settings.data?.authors ?? [];
+
+  /// Whether there is a choice to make at all.
+  const asked = (): boolean => authors().length > 1;
+
+  // The uuid picked, or the empty string while none is.
+  const [chosen, setChosen] = createSignal("");
+
+  return {
+    authors,
+    asked,
+    chosen,
+    setChosen,
+    /// Whether the press is held for want of a pick.
+    wanting: (): boolean => asked() && chosen() === "",
+    /// What the press sends: the pick where there was one to make, and nothing
+    /// where there was not.
+    sent: (): string | undefined =>
+      asked() && chosen() !== "" ? chosen() : undefined,
+  };
+}
+
+/// The picker itself, drawn only where there are two Authors or more: with one,
+/// neither card says anything about who the repo is committed as, and reads as
+/// it did before there was a list.
+///
+/// A native dropdown, there being nothing on a row but its name — see
+/// `picking.tsx`. Each row is the display name, falling back to the git name.
+function AuthorPicker(props: {
+  pick: ReturnType<typeof useAuthorPick>;
+  /// Said when the pick moves, for the card to clear a refusal that was about
+  /// the last one.
+  moved: () => void;
+}): JSX.Element {
+  const id = createUniqueId();
+
+  return (
+    <Show when={props.pick.asked()}>
+      <label class={styles.second} for={id}>
+        Author
+      </label>
+      <Picker
+        id={id}
+        options={props.pick.authors()}
+        value={(author) => author.id}
+        label={authorLabel}
+        chosen={props.pick.chosen()}
+        pick={(author) => {
+          props.pick.setChosen(author);
+          props.moved();
+        }}
+        gone={() => props.pick.setChosen("")}
+        nothing="Select"
+      />
+    </Show>
+  );
+}
 
 /// And what each way of being refused a removal says.
 ///
@@ -482,8 +567,12 @@ export function RepoRegistration(props: {
   // path that was sent, and it stops being about the one being typed.
   const [refused, setRefused] = createSignal<RepoRefused | null>(null);
 
+  // Which Author it is recorded as, where there are several to pick between.
+  const author = useAuthorPick();
+
   const register = useMutation(() => ({
-    mutationFn: (asked: string) => registerRepo(device(), asked),
+    mutationFn: (asked: string) =>
+      registerRepo(device(), asked, author.sent()),
     onSuccess: (outcome: Registered) => {
       // A refusal, which is a bare word on the wire — the two outcomes that
       // leave a Repo registered carry it. Said where the path was typed, which
@@ -518,7 +607,7 @@ export function RepoRegistration(props: {
     ev.preventDefault();
 
     const asked = path().trim();
-    if (asked === "") {
+    if (asked === "" || author.wanting()) {
       return;
     }
 
@@ -541,10 +630,14 @@ export function RepoRegistration(props: {
         }}
       />
 
+      <AuthorPicker pick={author} moved={() => setRefused(null)} />
+
       <div class={styles.buttons}>
         <button
           type="submit"
-          disabled={register.isPending || path().trim() === ""}
+          disabled={
+            register.isPending || path().trim() === "" || author.wanting()
+          }
         >
           {props.submit}
         </button>
@@ -710,6 +803,10 @@ export function CreateRepo(props: {
   // has said what they mean to do with it.
   const [onGithub, setOnGithub] = createSignal(true);
 
+  // And which Author it is made as, where there are several to pick between:
+  // the first commit is by it, and the Repo is recorded as its.
+  const author = useAuthorPick();
+
   // And which device it is being made on, for [`RepoRegistration`]'s reason:
   // the dropdown this card was opened from may be a member's draft.
   const device = useDevice();
@@ -770,7 +867,13 @@ export function CreateRepo(props: {
 
   const create = useMutation(() => ({
     mutationFn: (asked: { parent: string; name: string; github: boolean }) =>
-      createRepo(device(), asked.parent, asked.name, asked.github),
+      createRepo(
+        device(),
+        asked.parent,
+        asked.name,
+        asked.github,
+        author.sent(),
+      ),
     onSuccess: (outcome: Created) => {
       // Four of the refusals are a bare word, which this file has the sentence
       // for; the fifth is git's own account of what it would not do, said in
@@ -830,7 +933,12 @@ export function CreateRepo(props: {
     const called = name().trim();
     // Nothing while the settings are unread, for the press's own reason: what
     // this card would ask of GitHub is not settled yet.
-    if (where === "" || called === "" || tokened() === null) {
+    if (
+      where === "" ||
+      called === "" ||
+      tokened() === null ||
+      author.wanting()
+    ) {
       return;
     }
 
@@ -899,6 +1007,8 @@ export function CreateRepo(props: {
             }}
           />
 
+          <AuthorPicker pick={author} moved={() => setRefused(null)} />
+
           {/* And the third question, asked only where there is a token to answer
             it with — see the note below, which is what stands here instead.
             Neither of them until the settings have answered: what is drawn there
@@ -943,6 +1053,7 @@ export function CreateRepo(props: {
               disabled={
                 create.isPending ||
                 tokened() === null ||
+                author.wanting() ||
                 parent().trim() === "" ||
                 name().trim() === ""
               }

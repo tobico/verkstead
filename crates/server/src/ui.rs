@@ -1119,6 +1119,7 @@ async fn register_repo(
         &state.pool,
         state.settings.config().authors(),
         &registration.path,
+        registration.author.as_deref(),
     )
     .await
     {
@@ -1134,7 +1135,7 @@ async fn register_repo(
 ///
 /// The other way a Repo arrives, and the one that ends in the same registration:
 /// a directory under the parent, `git init` onto `main`, a `README.md` committed
-/// as the configured author, the same repository on GitHub where that was asked
+/// as the Author picked, the same repository on GitHub where that was asked
 /// for, and the Repo the pane is drawn from back. See [`crate::repos::create`].
 ///
 /// Every refusal is a named outcome in the body rather than a status, the way
@@ -1155,9 +1156,7 @@ async fn create_repo(
         &state.pool,
         config.authors(),
         &state.github,
-        &creation.parent,
-        &creation.name,
-        creation.github,
+        &creation,
         // What the Repo pane this comes back with says is waiting in it, which is
         // bounded by the same setting the notice is — see [`crate::stages::waiting`].
         config.at_once().roadmap_stages(),

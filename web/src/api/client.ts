@@ -337,18 +337,22 @@ export function listDirectory(
 /// status: a path that names no repository is the server reading the path
 /// rather than failing to, and every refusal is a different sentence to put in
 /// front of the human.
+///
+/// `author` is the uuid of the Author picked, where there are several to pick
+/// between; with one, nothing is sent and the Repo is recorded as that one.
 export function registerRepo(
   device: Device,
   path: string,
+  author?: string,
 ): Promise<Registered> {
-  return post<Registered>(on(device, "/api/ui/repos"), { path });
+  return post<Registered>(on(device, "/api/ui/repos"), { path, author });
 }
 
 /// Ask Verkstead to *make* a repository under `parent` and take it on.
 ///
 /// The other way a Repo arrives, and the one that ends in the same
 /// registration: a directory of that name, `git init` onto `main`, a `README.md`
-/// committed as the configured author, and the opened Repo back.
+/// committed as the Author picked, and the opened Repo back.
 ///
 /// Two fields rather than a joined path, because the two halves are answered
 /// differently — the parent is browsed for and the name is typed — and joining
@@ -366,10 +370,11 @@ export function createRepo(
   parent: string,
   name: string,
   github: boolean,
+  author?: string,
 ): Promise<Created> {
   return post<Created>(
     on(device, "/api/ui/repos/new"),
-    { parent, name, github },
+    { parent, name, github, author },
   );
 }
 

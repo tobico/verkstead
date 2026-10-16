@@ -2148,7 +2148,7 @@ permitted: Array<string>, };
  * about to put a draft on it, and a page that had to go and read the Repo it
  * just made would be asking for something the server was already holding.
  */
-export type Created = { "Made": RepoView } | { "MadeWithoutRemote": { repo: RepoView, why: string, } } | "ParentMissing" | "AlreadyThere" | "BadName" | "NoAuthor" | { "Refused": string };
+export type Created = { "Made": RepoView } | { "MadeWithoutRemote": { repo: RepoView, why: string, } } | "ParentMissing" | "AlreadyThere" | "BadName" | "NoAuthor" | "AuthorUnpicked" | "NoSuchAuthor" | { "Refused": string };
 
 /**
  * A repository the human is asking Verkstead to *make*, said as where it is to
@@ -2186,7 +2186,13 @@ name: string,
  * the modal draws no tick at all then, and says a remote is needed before
  * the work is finished.
  */
-github: boolean, };
+github: boolean, 
+/**
+ * And the uuid of the Author it is made as: the first commit is by it, the
+ * push to GitHub is with its token, and the Repo is recorded as its. Asked
+ * and refused the way a [`Registration`]'s is.
+ */
+author?: string, };
 
 /**
  * What a row is about.
@@ -4758,17 +4764,25 @@ id: number, html: string, };
  * match its own spelling against the list afterwards would be guessing at an
  * answer this endpoint is already holding.
  */
-export type Registered = { "Added": RepoEntry } | "NotAbsolute" | "Missing" | "NotARepository" | "NoDefaultBranch" | { "AlreadyRegistered": RepoEntry };
+export type Registered = { "Added": RepoEntry } | "NotAbsolute" | "Missing" | "NotARepository" | "NoDefaultBranch" | { "AlreadyRegistered": RepoEntry } | "AuthorUnpicked" | "NoSuchAuthor";
 
 /**
  * A repository the human is asking Verkstead to take on, named by its absolute
  * path.
  *
- * A path and nothing else: the name and the default branch are read off the
- * repository rather than claimed, for the same reason the CLI derives a Set's
- * `project` and `branch` instead of trusting them.
+ * A path, and the Author it is to be recorded as: the name and the default
+ * branch are read off the repository rather than claimed, for the same reason
+ * the CLI derives a Set's `project` and `branch` instead of trusting them.
  */
-export type Registration = { path: string, };
+export type Registration = { path: string, 
+/**
+ * The uuid of the Author the Repo's work is to be done as (ADR-0025).
+ *
+ * Asked only where more than one is configured, and refused there when it
+ * is missing — see [`Registered::AuthorUnpicked`]. With one configured
+ * nothing need be sent and the Repo is recorded as that one.
+ */
+author?: string, };
 
 /**
  * Whether the human is done with the banner that points at this section.

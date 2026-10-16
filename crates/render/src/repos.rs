@@ -91,13 +91,22 @@ pub struct RepoAcross {
 /// A repository the human is asking Verkstead to take on, named by its absolute
 /// path.
 ///
-/// A path and nothing else: the name and the default branch are read off the
-/// repository rather than claimed, for the same reason the CLI derives a Set's
-/// `project` and `branch` instead of trusting them.
+/// A path, and the Author it is to be recorded as: the name and the default
+/// branch are read off the repository rather than claimed, for the same reason
+/// the CLI derives a Set's `project` and `branch` instead of trusting them.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct Registration {
     pub path: String,
+
+    /// The uuid of the Author the Repo's work is to be done as (ADR-0025).
+    ///
+    /// Asked only where more than one is configured, and refused there when it
+    /// is missing — see [`Registered::AuthorUnpicked`]. With one configured
+    /// nothing need be sent and the Repo is recorded as that one.
+    #[serde(default)]
+    #[cfg_attr(feature = "typescript", ts(optional))]
+    pub author: Option<String>,
 }
 
 /// What became of a registration.
@@ -145,6 +154,14 @@ pub enum Registered {
     /// already* and nothing else, while a dropdown that was registering one to
     /// work in has the repository it named rather than a dead end.
     AlreadyRegistered(RepoEntry),
+
+    /// More than one Author is configured and the registration named none, so
+    /// there is no saying whose work this Repo's is. Nothing is registered.
+    AuthorUnpicked,
+
+    /// The registration named an Author that is not configured — one removed
+    /// since the form was drawn, most likely. Nothing is registered.
+    NoSuchAuthor,
 }
 
 /// What became of taking one off the registry.
@@ -263,6 +280,13 @@ pub struct Creation {
     /// the modal draws no tick at all then, and says a remote is needed before
     /// the work is finished.
     pub github: bool,
+
+    /// And the uuid of the Author it is made as: the first commit is by it, the
+    /// push to GitHub is with its token, and the Repo is recorded as its. Asked
+    /// and refused the way a [`Registration`]'s is.
+    #[serde(default)]
+    #[cfg_attr(feature = "typescript", ts(optional))]
+    pub author: Option<String>,
 }
 
 /// What became of a create.
@@ -315,10 +339,18 @@ pub enum Created {
     /// name.
     BadName,
 
-    /// Nobody is configured to commit as. The first commit is this repository's
+    /// Nobody is configured to commit as, or the Author it is made as lacks a
+    /// name or an email. The first commit is this repository's
     /// own history from here on, so it is refused rather than made by a
     /// stand-in — see the settings page's **Git author**.
     NoAuthor,
+
+    /// More than one Author is configured and the create named none. Nothing
+    /// is made.
+    AuthorUnpicked,
+
+    /// The create named an Author that is not configured. Nothing is made.
+    NoSuchAuthor,
 
     /// Anything else, in git's own words where git is what failed: the directory
     /// could not be made, or `git` would not do one of the four things a fresh
