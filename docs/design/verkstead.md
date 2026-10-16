@@ -564,8 +564,8 @@ flowchart LR
     building intentional-credentials*). *Refined 2026-10-16, grilling authors*:
     the author and the token are one **Author** of several, keyed by a uuid,
     every Repo records which is its, and everything above — the environment a
-    session is handed, every `gh` call and every fetch and push of Verkstead's
-    own — reads by the Repo, so no session holds any other Author's token; one
+    session is handed, every `gh` call, every fetch and push of Verkstead's
+    own and every share it publishes — reads by the Repo, so no session holds any other Author's token; one
     list across a cluster, mirrored the way Profiles are with a copy of each
     token in every device's `secrets.yaml` —
     [ADR-0025](../adr/0025-a-repo-has-an-author.md).

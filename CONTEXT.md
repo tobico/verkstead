@@ -96,7 +96,9 @@ token out of an agent's reach. And everything Verkstead itself does on a Repo â€
 every `gh` call, every fetch and push of its own, the GitHub repository
 **Create repo** makes â€” authenticates as that Author's token, through the
 credential helper publishing already hands one to; an Author with no token
-leaves git to the host's own credentials.
+leaves git to the host's own credentials. A **Share** is published as its Repo's
+Author too, the gist and the comment linking it alike, and an Author with no
+token refuses the publish rather than lending it another's.
 **Refused rather than mixed.** Repointing a Repo is refused while a Conversation
 on it is neither Done nor Closed, the rule unregistering follows; removing an
 Author is refused while a registered Repo of this device points at it; a Repo

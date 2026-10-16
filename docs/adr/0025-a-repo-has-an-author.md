@@ -96,6 +96,14 @@ and the alternative named is what was turned down.
   An Author with no token leaves git to the host's own credentials, as today.
   Reading the Author's token for `gh` alone was turned down.
 
+- **A share is published as its Repo's Author**: the secret gist made with
+  that Author's token, the share committed into it as that Author, and the
+  comment linking it left with the same token. An Author with no token refuses
+  the publish, as no token configured does today, rather than falling back to
+  the host's login or another Author's: a pseudonymous pull request carrying a
+  link into the human's other account is the leak this decision exists to
+  stop. *Added in review, 2026-10-17: the grilling's list missed sharing.*
+
 - **Create repo makes the GitHub repository under the picked Author's token**,
   and the GitHub tick is drawn only where that Author has one.
 

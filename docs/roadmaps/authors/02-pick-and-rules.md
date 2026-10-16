@@ -8,7 +8,8 @@ every mixing the grilling refused is refused by name: repointing under a live
 Conversation, removing an Author a Repo points at, starting on a Repo whose
 Author is gone, and a Companion Repo of another Author. Every path by which
 Verkstead itself reaches GitHub on a Repo — plain git included — does so as that
-Repo's Author, and Create repo makes the GitHub repository under the picked
+Repo's Author, Create repo makes the GitHub repository under the picked
+Author, and a share of a Conversation is published and linked under its Repo's
 Author. The Brief names the Author beside the Repo. The Claude account email in
 the config copy has been probed and either stripped or documented.
 
@@ -48,6 +49,14 @@ term in `CONTEXT.md`.
 - **Create repo makes the GitHub repository under the picked Author's token**,
   and the GitHub tick is drawn only where that Author has a token. The card's
   *a remote is needed* sentence stands where the picked Author has none.
+- **A share is published as the Conversation's Repo's Author.** The secret
+  gist is made with that Author's token, the share is committed into it as that
+  Author's name and email, and the comment linking it on the pull request is
+  left with the same token — read once, as the publish reads it today, so the
+  gist and the comment cannot disagree about who made them. An Author with no
+  token refuses the publish, the refusal a publish with no token configured
+  already gives: a write under the host's login would be a file in an account
+  nobody chose, and under another Author's would be the leak itself.
 - **The Author's display name sits beside the Repo on the Brief's record**,
   drawn only while more than one Author exists, the way the Repos pane row
   draws it.
@@ -92,13 +101,19 @@ term in `CONTEXT.md`.
    - The composer's add is refused with the sentence; the same Repo under the
      same Author is admitted.
 
-5. **Server-side git as the Author.** Every fetch and push Verkstead runs on a
-   Repo goes through the credential helper with that Repo's Author's token;
-   an Author with no token leaves the host's credentials standing.
+5. **Server-side git and shares as the Author.** Every fetch and push
+   Verkstead runs on a Repo goes through the credential helper with that Repo's
+   Author's token, an Author with no token leaving the host's credentials
+   standing; and a share is published and linked as the Conversation's Repo's
+   Author, refused where that Author has no token.
    - A fetch on a Repo whose Author has a token is proven, with a stand-in
      remote, to present that token and no other.
    - A Repo whose Author has no token fetches as the host does today.
    - Create repo's `gh repo create` and first push run as the picked Author.
+   - Publishing a share of a Conversation on a Repo under the second Author
+     makes the gist, commits into it and comments its link with that Author's
+     token and name, proven with a stand-in `gh` and remote; publishing one on
+     a Repo whose Author has no token is refused as a missing token is today.
 
 6. **The Brief names the Author, and the email probe.** The Brief's record draws
    the display name beside the Repo under the two-Authors condition; the probe
@@ -118,6 +133,10 @@ term in `CONTEXT.md`.
   credential helper, and that publishing still has a `git` helper that hands a
   token through `credential.helper` on `GH_TOKEN` — the function the fetches and
   pushes move onto.
+- Assumes publishing a share still reads the one token and the one git author
+  itself, on its blocking hop, and hands both to the gist's create, commit and
+  push and the token to the comment after it — the reads that move onto the
+  Conversation's Repo's Author.
 - Assumes companions are added through one endpoint on the composer that
   already refuses the Conversation's own Repo and a Repo added twice; the
   Author check sits beside those two.
