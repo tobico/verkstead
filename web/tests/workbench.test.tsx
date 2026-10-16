@@ -20352,8 +20352,9 @@ describe("the timeline following its bottom", () => {
     vi.stubGlobal("scrollTo", scrolled);
 
     /// The record as the server has it, which grows under the page the way a
-    /// running session's does.
-    let record: TimelineEvent[] = GRILLING.timeline;
+    /// running session's does — with every Set on it settled, since a Set
+    /// still waiting holds the view at itself rather than at the end.
+    let record: TimelineEvent[] = SETTLED.timeline;
 
     theGrilling(
       whenever(`/api/ui/conversations/${GRILLING.id}`, () =>
@@ -20366,7 +20367,7 @@ describe("the timeline following its bottom", () => {
     const landed = scrolled.mock.calls.length;
     expect(landed).toBeGreaterThan(0);
 
-    record = [...GRILLING.timeline, LANDED];
+    record = [...SETTLED.timeline, LANDED];
     await nudged(client);
 
     await waitFor(() =>
@@ -20632,6 +20633,54 @@ describe("the landing stopping at a set still waiting", () => {
     const { history } = mount(`/conversations/${GRILLING.id}`);
 
     await waitFor(() => expect(history.get()).toBe(AT_SET));
+  });
+
+  /// And the Set it stops at is scrolled into view, since the Timeline would
+  /// otherwise be at the bottom of the record with the Set above it — which on
+  /// a phone, where the Timeline is what is on screen, is out of sight.
+  ///
+  /// jsdom does no scrolling, so what this watches is the ask, and which item
+  /// it was made of.
+  it("scrolls the set it stops at into view", async () => {
+    const into: Element[] = [];
+    Element.prototype.scrollIntoView = function (this: Element) {
+      into.push(this);
+    } as typeof Element.prototype.scrollIntoView;
+
+    try {
+      const { held } = holding(ONE_WAITING);
+      const { container, history, client } = mount(`/conversations/${GRILLING.id}`);
+      await waitFor(() => expect(history.get()).toBe(AT_SET));
+
+      /// The waiting Set's item, as the record is drawn now.
+      const row = () =>
+        [...container.querySelectorAll(`.${timeline.questionSet}`)][1]!.closest(
+          `.${timeline.timelineEvent}`,
+        );
+      await waitFor(() => expect(into).toContain(row()));
+
+      // What lands under it is followed only as far as the Set.
+      into.length = 0;
+      held.record = [...ONE_WAITING, { Notice: SAID }];
+      await nudged(client);
+      await waitFor(() =>
+        expect(
+          container.querySelectorAll(`.${timeline.timelineEvent}`),
+        ).toHaveLength(held.record.length),
+      );
+      await waitFor(() => expect(into).toContain(row()));
+
+      // Once it is answered, nothing holds the view there any more.
+      into.length = 0;
+      held.record = answered(held.record);
+      await nudged(client);
+      await waitFor(() =>
+        expect(history.get()).toBe(`/conversations/${GRILLING.id}/events/${SAID.id}`),
+      );
+      expect(into).toEqual([]);
+    } finally {
+      delete (Element.prototype as Partial<Element>).scrollIntoView;
+    }
   });
 
   it("moves on to the memo once the set is answered", async () => {

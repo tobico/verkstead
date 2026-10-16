@@ -500,6 +500,25 @@ export function Timeline(props: {
   /// column of the page below the first breakpoint, and the pane above it.
   let record!: HTMLOListElement;
 
+  /// Each Question Set's item, while it is drawn — for the one the selection
+  /// is held at, which the following below keeps in view. Filled as the items
+  /// are drawn rather than by an effect, so it is there whatever order the
+  /// effects after a read run in.
+  const sets = new Map<number, HTMLLIElement>();
+
+  /// Whether what is selected is a Question Set still waiting on the human —
+  /// where the workbench's landing holds the selection until the Set is
+  /// answered, so the view holds there too. Never in a share, where nobody
+  /// answers one.
+  const holding = () =>
+    !props.readOnly &&
+    props.conversation.timeline.some(
+      (event) =>
+        "QuestionSet" in event &&
+        event.QuestionSet.id === props.selected &&
+        "Waiting" in event.QuestionSet.standing,
+    );
+
   // The saved Profiles, for the one thing the record needs them for: whether
   // the account a session ran as is the only one on its backend, and so whether
   // its name is said after the model. Once for the pane rather than once per
@@ -531,11 +550,22 @@ export function Timeline(props: {
   // there is no moment at which it is right to open a record anywhere but at
   // its end. A record nothing is being added to never grows, so the following
   // has nothing to do beyond landing the view where it opened.
+  //
+  // Except while the selection is held at a Set still waiting on the human:
+  // what lands then is followed only as far as the Set, which is kept in view
+  // rather than carried out of sight above the Events landing under it — on a
+  // phone, where the Timeline is what is on screen, that is the card the
+  // selection stopped at. See [`holding`], and the item scrolled into view
+  // below.
   followBottom(
     () => record,
     () => true,
     // What growing means for a record that is only ever appended to.
     () => props.conversation.timeline.length,
+    () =>
+      holding() && typeof props.selected === "number"
+        ? sets.get(props.selected)
+        : undefined,
   );
 
   return (
@@ -701,9 +731,45 @@ export function Timeline(props: {
 
       <ol class={styles.timeline} ref={record}>
         <For each={props.conversation.timeline}>
-          {(event, index) => (
+          {(event, index) => {
+            /// The item's own box, for a waiting Set the selection is held at.
+            let item: HTMLLIElement | undefined;
+            const drawnAs = (li: HTMLLIElement) => {
+              item = li;
+              if ("QuestionSet" in event) sets.set(event.QuestionSet.id, li);
+            };
+            onCleanup(() => {
+              if ("QuestionSet" in event && sets.get(event.QuestionSet.id) === item) {
+                sets.delete(event.QuestionSet.id);
+              }
+            });
+
+            // The Set the selection is held at is scrolled into view, the way
+            // the pending steer is and for its reason: the landing selected
+            // it rather than a press, so it may be anywhere on the record —
+            // and on a phone the Timeline is what is on screen. `nearest`, so
+            // a card already in view is not moved under somebody who pressed
+            // it. Optionally, because jsdom has no scrolling of any kind.
+            //
+            // On the selection arriving at it and nothing else: the record
+            // growing under it is the following's above, which leaves a human
+            // who has scrolled away to read where they are.
+            createEffect(() => {
+              if (
+                props.readOnly ||
+                !("QuestionSet" in event) ||
+                event.QuestionSet.id !== props.selected ||
+                !("Waiting" in event.QuestionSet.standing)
+              ) {
+                return;
+              }
+
+              item?.scrollIntoView?.({ block: "nearest" });
+            });
+
+            return (
             <Show when={drawable(event)}>
-            <li class={styles.timelineEvent}>
+            <li ref={drawnAs} class={styles.timelineEvent}>
               <Switch>
                 <Match when={"Brief" in event && event.Brief}>
                   {(brief) => (
@@ -882,7 +948,8 @@ export function Timeline(props: {
               </Switch>
             </li>
             </Show>
-          )}
+            );
+          }}
         </For>
 
         {/* And the steer being written, at the end of everything that has
