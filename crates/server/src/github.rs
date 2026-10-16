@@ -95,11 +95,17 @@ impl Gh {
 
     /// The token to authenticate as, read now — `None` where none is
     /// configured, which leaves the call to whatever login the host's `gh` has.
+    ///
+    /// The first Author's, which is the one an installation that never added a
+    /// second has.
     fn token(&self) -> Option<String> {
-        self.settings
-            .as_ref()?
+        let settings = self.settings.as_ref()?;
+        let config = settings.config();
+        let first = config.authors().first()?;
+
+        settings
             .secrets()
-            .github_token()
+            .author_token(first.id())
             .map(str::to_owned)
     }
 
@@ -2421,10 +2427,13 @@ mod tests {
     }
 
     /// The settings files in a directory of their own, with `secrets.yaml`
-    /// written as the settings page would write it.
+    /// written as the settings page would write it — under the one Author,
+    /// `work`, that `config.yaml` names.
     fn configured(yaml: Option<&str>) -> (tempfile::TempDir, Settings) {
         let dir = tempfile::tempdir().unwrap();
         let settings = Settings::in_data_dir(dir.path());
+
+        std::fs::write(settings.config_path(), "authors:\n  - id: work\n").unwrap();
 
         if let Some(yaml) = yaml {
             std::fs::write(settings.secrets_path(), yaml).unwrap();
@@ -2439,7 +2448,8 @@ mod tests {
     #[test]
     fn the_configured_token_authenticates_the_views_the_checks_and_the_comments() {
         let (repo, gh) = stub_saying_its_token();
-        let (_data_dir, settings) = configured(Some("github_token: ghp_theconfiguredone\n"));
+        let (_data_dir, settings) =
+            configured(Some("author_tokens:\n  work: ghp_theconfiguredone\n"));
         let gh = gh.authenticated_by(settings);
 
         assert_eq!(
@@ -2464,7 +2474,7 @@ mod tests {
     #[test]
     fn a_token_saved_after_startup_is_what_the_next_gh_runs_as() {
         let (repo, gh) = stub_saying_its_token();
-        let (_data_dir, settings) = configured(Some("github_token: the-first\n"));
+        let (_data_dir, settings) = configured(Some("author_tokens:\n  work: the-first\n"));
         let gh = gh.authenticated_by(settings.clone());
 
         assert_eq!(
@@ -2474,7 +2484,11 @@ mod tests {
             "the-first",
         );
 
-        std::fs::write(settings.secrets_path(), "github_token: the-second\n").unwrap();
+        std::fs::write(
+            settings.secrets_path(),
+            "author_tokens:\n  work: the-second\n",
+        )
+        .unwrap();
 
         assert_eq!(
             pull_request(&gh, repo.path(), "rate-limiting")
@@ -2507,7 +2521,7 @@ mod tests {
 
         // And the three ways settings say nothing: no file, an empty one, and
         // one that will not parse.
-        for yaml in [None, Some(""), Some("github_token: [oh\n")] {
+        for yaml in [None, Some(""), Some("author_tokens: [oh\n")] {
             let (repo, gh) = stub_saying_its_token();
             let (_data_dir, settings) = configured(yaml);
             let gh = gh.authenticated_by(settings);
@@ -2553,7 +2567,7 @@ mod tests {
             "gh".to_owned(),
         ]);
 
-        let (_data_dir, settings) = configured(Some("github_token: the-saved-one\n"));
+        let (_data_dir, settings) = configured(Some("author_tokens:\n  work: the-saved-one\n"));
 
         assert_eq!(
             authenticates_as(&gh.authenticated_by(settings), "the-candidate")

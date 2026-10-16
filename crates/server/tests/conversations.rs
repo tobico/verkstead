@@ -69,7 +69,8 @@ const CONFIG: &str = "config.yaml";
 
 /// And who that author is, on every workbench here but the one that takes it
 /// away.
-const THE_AUTHOR: &str = "git_author:\n  name: Verkstead Test\n  email: test@verkstead.invalid\n";
+const THE_AUTHOR: &str =
+    "authors:\n  - id: work\n    name: Verkstead Test\n    email: test@verkstead.invalid\n";
 
 /// How many stages of one roadmap this workbench runs side by side.
 ///

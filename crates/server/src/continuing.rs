@@ -164,7 +164,7 @@ use std::path::{Path, PathBuf};
 use verkstead_schema::{Direction, Nudge};
 
 use crate::AppState;
-use crate::settings::Author;
+use crate::settings::{Author, Signature};
 use crate::stages::{self, Next, Stage};
 use crate::store;
 use crate::tasks::{self, Clearing};
@@ -874,7 +874,13 @@ async fn start(
     // start without one is a misconfiguration to name rather than a case to work
     // around — and naming it here, where nothing has been made, is cheaper for
     // the human than naming it after a stage has half started.
-    let Some(author) = Author::configured(state.settings.config().git_author()) else {
+    let Some(author) = state
+        .settings
+        .config()
+        .authors()
+        .first()
+        .and_then(Author::configured)
+    else {
         halting(
             state,
             brought,
@@ -1715,7 +1721,7 @@ fn make(planned: &[Checkout]) -> Result<(), Halted> {
 /// checkout exactly as a `worktree add` git refused unwinds them — and said to
 /// the human as [`Halted::Own`], because it is the same thing from where they
 /// are standing: a stage that made nothing, with the reason in the server's log.
-fn clearing(planned: &[Checkout], from: &str, author: &Author) -> Result<Clearing, Halted> {
+fn clearing(planned: &[Checkout], from: &str, author: &Signature) -> Result<Clearing, Halted> {
     let Some(own) = planned.first() else {
         return Ok(Clearing::Nothing);
     };

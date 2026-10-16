@@ -20,12 +20,22 @@
 
 import type {
   AtOnceEdit,
+  Author,
   CleanupEdit,
   CleanupStepEdit,
   CleanupStepView,
   LanguageEdit,
   SettingsView,
 } from "../api/types";
+
+/// The Author a form that is not about it sends back, as it stands: its uuid
+/// with it, so that the save lands on the Author it was read from.
+///
+/// Blank fields under no uuid where the read has not landed or there is no
+/// Author yet — which a save writes no Author for, there being nothing in it.
+export function heldAuthor(told: SettingsView | undefined): Author {
+  return told?.git_author ?? { id: null, display_name: "", name: "", email: "" };
+}
 
 /// Everything in `config.yaml` a form about the credentials is not about, as it
 /// stands — ready to be spread into that form's save.

@@ -451,11 +451,11 @@ fn clearing_the_github_token_leaves_the_key_where_it_was() {
         .save_secrets(
             &settings
                 .secrets()
-                .with_token(Some("ghp_something".to_owned())),
+                .with_author_token("work", Some("ghp_something".to_owned())),
         )
         .unwrap();
     settings
-        .save_secrets(&settings.secrets().with_token(None))
+        .save_secrets(&settings.secrets().with_author_token("work", None))
         .unwrap();
 
     assert_eq!(

@@ -49,6 +49,10 @@ const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
 /// session inside is told to put its Question Sets to.
 const LISTENING: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8422);
 
+/// The one Author a test's sessions commit as, keyed `work`.
+const THE_AUTHOR: &str =
+    "authors:\n  - id: work\n    name: Tobias Cohen\n    email: tobi@tobico.net\n";
+
 /// What the settings page's Instructions card was given, as `config.yaml` holds
 /// it — and what every root's global instructions file holds, byte for byte.
 const THE_INSTRUCTIONS: &str = "Say what you changed.\n\n- And why.\n";
@@ -1363,7 +1367,7 @@ async fn the_system_comes_in_read_only_and_the_hosts_gitconfig_not_at_all() {
 #[tokio::test]
 async fn a_commit_made_inside_is_by_the_configured_author() {
     let fixture = grilling().await;
-    fixture.configure("git_author:\n  name: Tobias Cohen\n  email: tobi@tobico.net\n");
+    fixture.configure(THE_AUTHOR);
 
     let reported = probe(
         &fixture.sandbox(vec![]),
@@ -1389,6 +1393,56 @@ async fn a_commit_made_inside_is_by_the_configured_author() {
         "the commit is by whoever config.yaml says, not by the repository's own \
          local identity and not by the host's gitconfig"
     );
+}
+
+/// A Profile's login has no Repo, so it has no Author to be: an Author
+/// configured reaches it as neither `user.name` and `user.email` among the
+/// counted pairs nor a `GH_TOKEN`. It commits nothing, and an agent signing in
+/// has no business holding anybody's token.
+#[tokio::test]
+async fn a_logins_sandbox_is_given_no_author_and_no_token() {
+    let fixture = grilling().await;
+    fixture.configure(THE_AUTHOR);
+    fixture.configure_github_token("author_tokens:\n  work: ghp_thetoken\n");
+
+    let login = Sandbox::for_login(
+        &fixture.profile,
+        &Homes::on(
+            Platform::HERE,
+            fixture.home.path().to_owned(),
+            fixture.state.path(),
+        ),
+        &fixture.skills,
+        &fixture.verkstead,
+        &fixture.settings.secrets(),
+    )
+    .expect("a Profile's login has a sandbox to run in");
+
+    let reported = probe(
+        &login,
+        r#"
+        keys=""
+        i=0
+        while [ "$i" -lt "${GIT_CONFIG_COUNT-0}" ]; do
+            eval "keys=\"$keys \$GIT_CONFIG_KEY_$i\""
+            i=$((i + 1))
+        done
+        say keys "$keys"
+        say token "${GH_TOKEN-unset}"
+        "#,
+    );
+
+    assert!(
+        !reported["keys"].contains("user."),
+        "no author among the counted pairs: {:?}",
+        reported["keys"]
+    );
+    assert!(
+        reported["keys"].contains("credential."),
+        "the pairs were read at all: {:?}",
+        reported["keys"]
+    );
+    assert_eq!(reported["token"], "unset");
 }
 
 /// And with nobody configured, git's own refusal stands. No author is invented
@@ -1448,7 +1502,8 @@ async fn no_author_configured_is_git_asking_to_be_told_who_you_are() {
 #[tokio::test]
 async fn an_ssh_github_remote_resolves_to_https_and_the_token_is_what_pushes_it() {
     let fixture = grilling().await;
-    fixture.configure_github_token("github_token: ghp_theconfiguredone\n");
+    fixture.configure("authors:\n  - id: work\n");
+    fixture.configure_github_token("author_tokens:\n  work: ghp_theconfiguredone\n");
 
     let reported = probe(
         &fixture.sandbox(vec![]),
@@ -2405,7 +2460,8 @@ fn made(sandbox: &Sandbox) -> Closing {
 #[tokio::test]
 async fn the_configured_token_is_in_the_environment_and_the_hosts_gh_login_is_not_inside() {
     let fixture = grilling().await;
-    fixture.configure_github_token("github_token: ghp_theconfiguredone\n");
+    fixture.configure("authors:\n  - id: work\n");
+    fixture.configure_github_token("author_tokens:\n  work: ghp_theconfiguredone\n");
     let sandbox = fixture.sandbox(vec![]);
 
     let reported = probe(
@@ -2441,8 +2497,9 @@ async fn the_configured_token_is_in_the_environment_and_the_hosts_gh_login_is_no
 /// for itself that it is not logged in.
 #[tokio::test]
 async fn no_token_configured_is_a_session_that_starts_with_no_gh_token() {
-    for configured in [None, Some(""), Some("github_token: [oh\n")] {
+    for configured in [None, Some(""), Some("author_tokens: [oh\n")] {
         let fixture = grilling().await;
+        fixture.configure("authors:\n  - id: work\n");
 
         if let Some(yaml) = configured {
             fixture.configure_github_token(yaml);
@@ -5238,7 +5295,7 @@ async fn the_extra_binds_sandbox_configuration_asks_for_are_there_and_writable()
 #[tokio::test]
 async fn a_read_only_companion_is_there_to_read_and_a_commit_from_it_is_refused() {
     let fixture = grilling_alongside(&[("askance", store::CompanionMode::ReadOnly)]).await;
-    fixture.configure("git_author:\n  name: Tobias Cohen\n  email: tobi@tobico.net\n");
+    fixture.configure(THE_AUTHOR);
 
     let companion = fixture.companion_worktree("askance").to_owned();
 
@@ -5313,7 +5370,7 @@ async fn a_read_only_companion_is_there_to_read_and_a_commit_from_it_is_refused(
 #[tokio::test]
 async fn a_read_write_companion_takes_a_commit_on_its_own_branch() {
     let fixture = grilling_alongside(&[("askance", store::CompanionMode::ReadWrite)]).await;
-    fixture.configure("git_author:\n  name: Tobias Cohen\n  email: tobi@tobico.net\n");
+    fixture.configure(THE_AUTHOR);
 
     let companion = fixture.companion_worktree("askance").to_owned();
 
@@ -6022,8 +6079,8 @@ async fn the_compile_server_holds_the_worktrees_and_none_of_the_data_directory()
 
     // The four things it must not reach, really on disk so that their absence
     // inside is the bind rather than the fixture.
-    fixture.configure("git_author:\n  name: Tobias Cohen\n");
-    fixture.configure_github_token("github_token: ghp_thetoken\n");
+    fixture.configure("authors:\n  - id: work\n    name: Tobias Cohen\n");
+    fixture.configure_github_token("author_tokens:\n  work: ghp_thetoken\n");
     std::fs::write(fixture.state.path().join("verkstead.db"), "the database\n").unwrap();
     fixture.attach("wireframe.png", b"PNG");
 

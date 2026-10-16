@@ -55,7 +55,7 @@ use crate::boundaries;
 
 use crate::handoffs::Handoffs;
 use crate::repos::git;
-use crate::settings::Author;
+use crate::settings::{Author, Signature};
 use crate::skills;
 use crate::stages::Startable;
 use crate::store;
@@ -1534,7 +1534,12 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     // list makes no difference to the refusal, because a workbench with no
     // author configured is a misconfiguration to name rather than a case to work
     // around.
-    let author = Author::configured(state.settings.config().git_author());
+    let author = state
+        .settings
+        .config()
+        .authors()
+        .first()
+        .and_then(Author::configured);
 
     // What the work branches from, resolved here and nowhere earlier: what the
     // human picked is a branch, and what they meant by picking it is wherever it
@@ -2243,7 +2248,7 @@ fn unmake(made: &[Checkout]) {
 /// human in those words too — [`Unmade::Own`] — because it is the same thing
 /// from where they are standing: a press that made nothing, with the reason in
 /// the server's log.
-fn clearing(planned: &[Checkout], base: &str, author: &Author) -> Result<Clearing, Unmade> {
+fn clearing(planned: &[Checkout], base: &str, author: &Signature) -> Result<Clearing, Unmade> {
     // The Conversation's own is the first of the list, every list being built
     // that way. A list with nothing in it is no start at all, and there is
     // nothing to clear in one.
@@ -2398,7 +2403,7 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
     // before anything that costs a git call.
     let config = state.settings.config();
 
-    let Some(author) = Author::configured(config.git_author()) else {
+    let Some(author) = config.authors().first().and_then(Author::configured) else {
         return Ok(Adopted::NoGitAuthor);
     };
 
@@ -2723,7 +2728,7 @@ async fn alongside(
     commit: &str,
     named: &str,
     stacks_on: Option<&str>,
-    author: &Author,
+    author: &Signature,
 ) {
     let branch = stage.branch();
 

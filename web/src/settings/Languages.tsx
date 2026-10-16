@@ -180,6 +180,7 @@ import { settledAge, utcStamp } from "../set/when";
 import { Empty, ErrorLine } from "../notices";
 import {
   heldAtOnce,
+  heldAuthor,
   heldCleanup,
   heldInstructions,
   heldLanguages,
@@ -653,7 +654,7 @@ export function BuildCaches(): JSX.Element {
 
   const save = useMutation(() => ({
     mutationFn: ({ edit }: Asked) => {
-      const author = told()?.git_author ?? { name: "", email: "" };
+      const author = heldAuthor(told());
 
       return saveSettings({
         git_author: author,

@@ -33,7 +33,7 @@ use verkstead_render::{Created, Registered, RepoEntry, RepoRemoved, RepoView};
 
 use crate::github::Gh;
 use crate::resolved::{Resolved, resolve};
-use crate::settings::{Author, GitAuthor};
+use crate::settings::{Author, Signature};
 use crate::store;
 use crate::unseen::Unseen;
 
@@ -137,7 +137,7 @@ pub(crate) fn entry(repo: store::Repo) -> RepoEntry {
 /// rare enough that the thread it borrows costs nothing.
 pub(crate) async fn create(
     pool: &SqlitePool,
-    author: &GitAuthor,
+    author: Option<&Author>,
     gh: &Gh,
     parent: &str,
     name: &str,
@@ -145,9 +145,9 @@ pub(crate) async fn create(
     at_once: usize,
 ) -> Result<Created> {
     // Both halves or neither, which is the one shape git will take an identity
-    // in — see [`Author`], the rule everything Verkstead commits on its own
+    // in — see [`Signature`], the rule everything Verkstead commits on its own
     // account is made under.
-    let Some(author) = Author::configured(author) else {
+    let Some(author) = author.and_then(Author::configured) else {
         return Ok(Created::NoAuthor);
     };
 
@@ -252,7 +252,7 @@ impl From<Unmade> for Created {
 ///
 /// Blocking from end to end. What comes back is the resolved path the directory
 /// really has, which is what the registration is then asked about.
-fn make(parent: &Path, name: &str, author: &Author) -> Result<PathBuf, Unmade> {
+fn make(parent: &Path, name: &str, author: &Signature) -> Result<PathBuf, Unmade> {
     let parent = match resolve(parent) {
         Resolved::At(parent) => parent,
         // One sentence where a registration tells the two apart: either way
@@ -306,7 +306,7 @@ fn make(parent: &Path, name: &str, author: &Author) -> Result<PathBuf, Unmade> {
 }
 
 /// A repository inside `path`, with `name`'s README on its first commit.
-fn filled(path: &Path, name: &str, author: &Author) -> Result<(), String> {
+fn filled(path: &Path, name: &str, author: &Signature) -> Result<(), String> {
     // `--initial-branch` rather than whatever this machine's `init.defaultBranch`
     // happens to say: what is registered is a repository working from `main`,
     // wherever it was made. It wants git 2.28, which is the floor the packaged

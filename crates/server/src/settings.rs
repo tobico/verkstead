@@ -12,7 +12,8 @@
 //! with anything secret in it:
 //!
 //! ```yaml
-//! github_token: ghp_...
+//! author_tokens:
+//!   3f2c9a4e-8d1b-4c7a-9e2f-5b6d7c8e9f01: ghp_...
 //! mcp_headers:
 //!   docs:
 //!     Authorization: Bearer ...
@@ -21,9 +22,11 @@
 //! and `config.yaml` is the one that could be read over anybody's shoulder:
 //!
 //! ```yaml
-//! git_author:
-//!   name: Tobias Cohen
-//!   email: tobi@tobico.net
+//! authors:
+//!   - id: 3f2c9a4e-8d1b-4c7a-9e2f-5b6d7c8e9f01
+//!     display_name: Work
+//!     name: Tobias Cohen
+//!     email: tobi@tobico.net
 //! rust_build_cache:
 //!   enabled: true
 //!   size: 30G
@@ -72,6 +75,13 @@
 //! read at the moment they are needed rather than held from startup, so
 //! anything saved through the settings page applies to the next session without
 //! a restart, and a running session keeps what it started with.
+//!
+//! **There may be more than one of them**, which is what `authors` is: a list
+//! of [`Author`]s, each keyed by a uuid, with its token in the other file under
+//! that uuid (ADR-0025). The uuid is what a Repo records, so the display name is
+//! free to change. An installation from before the list wrote one `git_author`
+//! and one `github_token`, and the first start moves them into it as one Author
+//! — see [`Settings::moving_the_single_author`] — so the files have one shape.
 //!
 //! **Nothing here is ever an error.** A file that is not there, one that is
 //! empty, and one nothing can parse all come back as nothing configured: the
@@ -270,7 +280,7 @@ impl Settings {
     /// leave a machine whose sessions cannot start with nothing on the settings
     /// page to say why. What a caller hands in is the whole of what the file
     /// will hold, which is why the two ways of building one are both `with_` on
-    /// the secrets already there — see [`Secrets::with_token`].
+    /// the secrets already there — see [`Secrets::with_author_token`].
     pub fn save_secrets(&self, secrets: &Secrets) -> std::io::Result<()> {
         let text = match secrets.anything_set() {
             true => yaml(secrets)?,
@@ -285,6 +295,86 @@ impl Settings {
     /// owner cannot read back would be an odd thing to insist on.
     pub fn save_config(&self, config: &Config) -> std::io::Result<()> {
         write_atomically(&self.config_path(), &yaml(config)?, ORDINARY_MODE)
+    }
+
+    /// Move the one `git_author` and `github_token` an installation from before
+    /// the Author list wrote into that list, as one Author with a fresh uuid and
+    /// no display name — and say which uuid that was, or `None` where nothing
+    /// was moved.
+    ///
+    /// Run once at the serve, before anything reads an Author: after it the two
+    /// files have one shape, the old keys being read and never written (see the
+    /// `git_author` and `github_token` fields). Every other key in both files
+    /// is read and written back as any save writes it.
+    ///
+    /// **Two writes, ordered so that stopping between them loses nothing.**
+    /// `config.yaml` first, with the Author in it; then the token moved under
+    /// its uuid. A start that stopped after the first finds a list and a
+    /// `github_token` still standing, and the second half alone is what it
+    /// does: the token goes to the first Author where that Author has none.
+    ///
+    /// **A file nothing can parse is left alone**, with the word in the log
+    /// reading it always gives: it is the human's to fix, and a migration that
+    /// rewrote it from nothing would throw away whatever they meant. A file
+    /// that cannot be *written* is the one error, and a start should stop on
+    /// it — the Data Directory is not one Verkstead can work in.
+    pub fn moving_the_single_author(&self) -> std::io::Result<Option<String>> {
+        let Some(mut config) = Self::parsed(&self.config_path(), Config::read) else {
+            return Ok(None);
+        };
+        let Some(secrets) = Self::parsed(&self.secrets_path(), Secrets::read) else {
+            return Ok(None);
+        };
+
+        let single = &config.git_author;
+        let said = single.name.is_some() || single.email.is_some();
+        let mut minted = None;
+
+        if config.authors.is_empty() && (said || secrets.github_token.is_some()) {
+            let id = minted_uuid()?;
+
+            config.authors.push(Author::of(
+                id.clone(),
+                None,
+                single.name.clone(),
+                single.email.clone(),
+            ));
+            self.save_config(&config)?;
+
+            minted = Some(id);
+        } else if said {
+            // A list *and* the old key, which is a hand-edit: the list is what
+            // is read, so the old key is only taken out of the file.
+            self.save_config(&config)?;
+        }
+
+        if let Some(token) = secrets.github_token.clone() {
+            let secrets = match config.authors.first() {
+                Some(first) if secrets.author_token(first.id()).is_none() => {
+                    secrets.with_author_token(first.id(), Some(token))
+                }
+                _ => secrets,
+            };
+
+            self.save_secrets(&secrets)?;
+        }
+
+        Ok(minted)
+    }
+
+    /// What the settings file at `path` says read by `read`, nothing written
+    /// counting as the empty file — or `None` where it will not parse.
+    fn parsed<T: Default>(
+        path: &Path,
+        read: fn(&str) -> Result<T, serde_saphyr::Error>,
+    ) -> Option<T> {
+        let Some(text) = text_of(path) else {
+            return Some(T::default());
+        };
+
+        read(&text)
+            .inspect_err(|error| unreadable(path, error))
+            .ok()
     }
 }
 
@@ -438,19 +528,32 @@ fn unreadable(path: &Path, error: &serde_saphyr::Error) {
 /// MCP servers are spoken to with are the settings page's again, from another
 /// section of it. None of them may take another away, which is why there is no
 /// constructor here that says what the whole file is — only
-/// [`Secrets::with_token`], [`Secrets::with_session_account_password`] and
-/// [`Secrets::with_mcp_headers`], each of which is the secrets that are already
-/// there with one of them replaced.
+/// [`Secrets::with_author_token`], [`Secrets::with_session_account_password`]
+/// and [`Secrets::with_mcp_headers`], each of which is the secrets that are
+/// already there with one of them replaced.
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct Secrets {
-    /// The GitHub token every session and every host-side `gh` authenticates
-    /// with, or `None` where none is configured.
+    /// The one GitHub token an installation from before the Author list wrote,
+    /// or `None` — which is every file written since.
     ///
-    /// Left out of what is written rather than written as `null`: the file this
-    /// produces is one the human may open, and a key with nothing under it
-    /// reads as a setting that went wrong rather than as one nobody has made.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// **Read and never written**, the way `rust_build_cache` is in the other
+    /// file: it is what the first start moves under the uuid of the Author it
+    /// mints — see [`Settings::moving_the_single_author`] — and nothing else
+    /// reads it, so any write after that leaves it out of the file.
+    #[serde(default, skip_serializing)]
     github_token: Option<String>,
+
+    /// The GitHub token of each Author, by the Author's uuid: what a session on
+    /// a Repo of that Author is given as `GH_TOKEN`, and what a host-side `gh`
+    /// about such a Repo authenticates as. Empty where no Author holds one.
+    ///
+    /// Keyed by the uuid the way `mcp_headers` below is keyed by a server's
+    /// name, and for its reason: the Author itself is in `config.yaml`, which
+    /// is what says which Authors there are, and this holds the one part of it
+    /// that may not be read back. An Author with no token simply has nothing
+    /// here. Sorted, so that what a save writes is the same file twice over.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    author_tokens: BTreeMap<String, String>,
 
     /// And the password of the local account a Windows session runs as, or
     /// `None` on a machine where the elevated verb has not been run — which is
@@ -509,6 +612,13 @@ impl Secrets {
 
         Ok(Secrets {
             github_token: secrets.github_token.and_then(blank_is_nothing),
+            // A token emptied by hand is an Author with none, as a header
+            // emptied by hand is a header nothing is sent in.
+            author_tokens: secrets
+                .author_tokens
+                .into_iter()
+                .filter_map(|(id, token)| Some((id, blank_is_nothing(token)?)))
+                .collect(),
             session_account_password: secrets.session_account_password.and_then(blank_is_nothing),
             // And the headers with the blanks taken out of them: a value
             // somebody emptied by hand is a header nothing is sent in, and a
@@ -520,20 +630,27 @@ impl Secrets {
         })
     }
 
-    /// These secrets with the GitHub token replaced: `token` as it was typed,
-    /// or `None` where the human cleared it.
+    /// These secrets with the GitHub token of the Author `id` replaced: `token`
+    /// as it was typed, or `None` where the human cleared it.
     ///
     /// On the secrets that are already there rather than on nothing, because
     /// what a save writes is the whole file — see
-    /// [`Settings::save_secrets`] — and the other secret in it is not the
-    /// settings page's to take away.
+    /// [`Settings::save_secrets`] — and every other secret in it, another
+    /// Author's token included, is not this save's to take away.
     ///
     /// Whitespace is nothing, as it is on the way in — see [`blank_is_nothing`].
     /// A token pasted with the newline that came with it is the ordinary case,
     /// and one that was only spaces is a cleared field spelled another way.
-    pub fn with_token(&self, token: Option<String>) -> Secrets {
+    pub fn with_author_token(&self, id: &str, token: Option<String>) -> Secrets {
+        let mut author_tokens = self.author_tokens.clone();
+
+        match token.and_then(blank_is_nothing) {
+            Some(token) => author_tokens.insert(id.to_owned(), token),
+            None => author_tokens.remove(id),
+        };
+
         Secrets {
-            github_token: token.and_then(blank_is_nothing),
+            author_tokens,
             ..self.clone()
         }
     }
@@ -604,9 +721,9 @@ impl Secrets {
         }
     }
 
-    /// The configured GitHub token, or `None` where there is none.
-    pub fn github_token(&self) -> Option<&str> {
-        self.github_token.as_deref()
+    /// The GitHub token of the Author `id`, or `None` where it holds none.
+    pub fn author_token(&self, id: &str) -> Option<&str> {
+        self.author_tokens.get(id).map(String::as_str)
     }
 
     /// And the session account's password, or `None` where the elevated verb
@@ -636,13 +753,15 @@ impl Secrets {
     /// Every field, said once: a secret added to this struct and left out of
     /// here would be a secret that a save quietly threw away.
     fn anything_set(&self) -> bool {
+        // Bar the one that is never written — see the `github_token` field.
         let Secrets {
-            github_token,
+            github_token: _,
+            author_tokens,
             session_account_password,
             mcp_headers,
         } = self;
 
-        github_token.is_some() || session_account_password.is_some() || !mcp_headers.is_empty()
+        !author_tokens.is_empty() || session_account_password.is_some() || !mcp_headers.is_empty()
     }
 }
 
@@ -652,9 +771,29 @@ impl Secrets {
 /// Unknown keys are ignored for the reason [`Secrets`]'s are.
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct Config {
-    /// Who a session commits as.
-    #[serde(default)]
+    /// The one author an installation from before the Author list wrote, or
+    /// nobody — which is every file written since.
+    ///
+    /// **Read and never written**, for the reason `github_token` is in the
+    /// other file: it is what the first start moves into `authors` below — see
+    /// [`Settings::moving_the_single_author`].
+    #[serde(default, skip_serializing)]
     git_author: GitAuthor,
+
+    /// Who a Repo's work is committed and pushed as: every [`Author`] there is,
+    /// in the order they were written down, each keyed by a uuid — and their
+    /// tokens in the other file under it.
+    ///
+    /// Read the way the declared servers below are: an absent key, an absent
+    /// file and one nothing can parse all mean no Authors, which is a session
+    /// with no `user.name` and git's own "tell me who you are". An entry with
+    /// no uuid is one nothing could refer to, and is dropped as it is read.
+    #[serde(
+        default,
+        deserialize_with = "authors_written",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    authors: Vec<Author>,
 
     /// And how the shared Rust build cache is set: whether sessions get one at
     /// all, and how big its compiled half may grow — see [`crate::build_cache`].
@@ -874,6 +1013,9 @@ impl Config {
                 name: config.git_author.name.and_then(blank_is_nothing),
                 email: config.git_author.email.and_then(blank_is_nothing),
             },
+            // With the blanks taken out of each and the ones with no uuid
+            // dropped — see [`authors_kept`].
+            authors: authors_kept(config.authors),
             rust_build_cache: RustBuildCache {
                 enabled: config.rust_build_cache.enabled,
                 size: config.rust_build_cache.size.and_then(blank_is_nothing),
@@ -911,7 +1053,7 @@ impl Config {
     /// caller could leave a section out of.
     #[allow(clippy::too_many_arguments)]
     pub fn of(
-        git_author: GitAuthor,
+        author: Option<Author>,
         languages: Languages,
         cleanup: Cleanup,
         at_once: AtOnce,
@@ -923,7 +1065,12 @@ impl Config {
         instructions: String,
     ) -> Config {
         Config {
-            git_author,
+            git_author: GitAuthor::default(),
+            // The one Author the page drew, where it drew one. Every other
+            // Author the file holds is laid underneath it by
+            // [`Config::keeping_what_the_page_never_drew`], the way an
+            // installer's descriptor keys are.
+            authors: author.into_iter().collect(),
             // And nothing for the key the map replaced: the two keys the page
             // draws of Rust are in `languages` below now, so writing this one
             // as well would leave a second opinion about them in the file. A
@@ -958,7 +1105,7 @@ impl Config {
             // And nothing at all for the key the page has no field for. What
             // keeps a save from taking it away is [`Config::keeping_session_path`],
             // said at the endpoint over what the file already holds — the same
-            // shape [`Secrets::with_token`] keeps for the password beside the
+            // shape [`Secrets::with_author_token`] keeps for the password beside the
             // token, and for the same reason: a page told about one thing has no
             // business rewriting another.
             session_path: Vec::new(),
@@ -980,9 +1127,18 @@ impl Config {
         }
     }
 
-    /// Who a session commits as, which may be nobody.
-    pub fn git_author(&self) -> &GitAuthor {
-        &self.git_author
+    /// Every Author there is, in the order they were written down — empty
+    /// where nobody has said who anything is committed as.
+    ///
+    /// The first of them is the one Author an installation that never added a
+    /// second has, and the one the wizard and the Git section are about.
+    pub fn authors(&self) -> &[Author] {
+        &self.authors
+    }
+
+    /// And the Author whose uuid is `id`, or `None` where there is none.
+    pub fn author(&self, id: &str) -> Option<&Author> {
+        self.authors.iter().find(|author| author.id == id)
     }
 
     /// And what this file says about the languages: the map an installer
@@ -1059,7 +1215,7 @@ impl Config {
     ///
     /// What a save from that page goes through, because one request writes the
     /// whole of `config.yaml` and the page is not the only thing that writes
-    /// it. Two of them:
+    /// it. Three of them:
     ///
     /// - `session_path`, which the page has no field for at all — an install
     ///   writes it and a hand-edit changes it, and a config built out of what
@@ -1076,9 +1232,26 @@ impl Config {
     ///   furthest case of the same rule — it goes back as the text it was
     ///   written in, that being the whole of what is left of it once it did not
     ///   load, and it is still what the installer is about to go and fix.
+    /// - every Author but the one the Git section is about, which the page
+    ///   sends alone.
     pub fn keeping_what_the_page_never_drew(mut self, kept: &Config) -> Config {
         self.session_path = kept.session_path.clone();
         self.languages = kept.languages.under_the_page(&self.languages);
+
+        // And every Author the page did not draw, the one it did written over
+        // its own entry where the file already has it and on the end where it
+        // is new: the Git section is about one Author at a time, so a save
+        // built out of what it sent would take every other one away.
+        let drawn = std::mem::take(&mut self.authors);
+
+        self.authors = kept.authors.clone();
+
+        for author in drawn {
+            match self.authors.iter_mut().find(|kept| kept.id == author.id) {
+                Some(kept) => *kept = author,
+                None => self.authors.push(author),
+            }
+        }
 
         self
     }
@@ -1466,7 +1639,8 @@ fn limit_typed(places: String) -> Option<usize> {
         .filter(|places| *places >= 1)
 }
 
-/// The name and the email address a session's commits are by.
+/// The name and the email address a session's commits are by: an
+/// [`Author`]'s git half, which is what a sandbox and a publish are handed.
 ///
 /// Two halves, each on its own: a human who has filled in one and not the other
 /// gets the one they filled in, and git says what is still missing. Nothing here
@@ -1502,6 +1676,86 @@ impl GitAuthor {
     }
 }
 
+/// Who a Repo's work is committed and pushed as: a git name, an email and —
+/// in the other file, under the uuid — a GitHub token (ADR-0025).
+///
+/// **Keyed by a uuid** rather than by a name, because the uuid is what a Repo
+/// records and what every device of a cluster agrees on, so the display name is
+/// free to change. The display name is for rows and pickers, and falls back to
+/// the git name where nobody typed one. No signing key: Verkstead hands a
+/// session none, and an Author is not where that starts.
+///
+/// Either half of the git name and email may be missing, for the reason
+/// [`GitAuthor`]'s may.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+pub struct Author {
+    /// Read as an empty string where an entry has none, and that entry dropped
+    /// — see [`authors_kept`].
+    #[serde(default)]
+    id: String,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    display_name: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    email: Option<String>,
+}
+
+impl Author {
+    /// The Author a settings page has just been told about, every blank half
+    /// nobody — see [`blank_is_nothing`].
+    pub fn of(
+        id: String,
+        display_name: Option<String>,
+        name: Option<String>,
+        email: Option<String>,
+    ) -> Author {
+        Author {
+            id,
+            display_name: display_name.and_then(blank_is_nothing),
+            name: name.and_then(blank_is_nothing),
+            email: email.and_then(blank_is_nothing),
+        }
+    }
+
+    /// The uuid a Repo records, and its token is kept under.
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    /// What it was named for the rows it is drawn in, where anybody named it.
+    pub fn display_name(&self) -> Option<&str> {
+        self.display_name.as_deref()
+    }
+
+    /// What `user.name` is inside a sandbox of one of its Repos.
+    pub fn name(&self) -> Option<&str> {
+        self.name.as_deref()
+    }
+
+    /// And what `user.email` is.
+    pub fn email(&self) -> Option<&str> {
+        self.email.as_deref()
+    }
+
+    /// Its git half, which is what a sandbox and a publish are handed.
+    pub fn git_author(&self) -> GitAuthor {
+        GitAuthor {
+            name: self.name.clone(),
+            email: self.email.clone(),
+        }
+    }
+
+    /// Its name and email as a [`Signature`], or `None` where either half is
+    /// missing.
+    pub(crate) fn configured(&self) -> Option<Signature> {
+        Signature::configured(&self.git_author())
+    }
+}
+
 /// A [`GitAuthor`] with both halves filled in, which is the only shape git will
 /// take one in.
 ///
@@ -1514,21 +1768,22 @@ impl GitAuthor {
 /// inherited from its base — see [`crate::tasks::clear`].
 ///
 /// Here beside [`GitAuthor`] rather than in either of them, because it is the
-/// same identity under the same rule and one rule wants one place to live.
+/// same name under the same rule and one rule wants one place to live. Asked
+/// of an [`Author`] as [`Author::configured`].
 #[derive(Clone)]
-pub(crate) struct Author {
+pub(crate) struct Signature {
     name: String,
     email: String,
 }
 
-impl Author {
+impl Signature {
     /// The configured author, or `None` where either half of it is missing.
-    pub(crate) fn configured(author: &GitAuthor) -> Option<Author> {
+    pub(crate) fn configured(author: &GitAuthor) -> Option<Signature> {
         let (Some(name), Some(email)) = (author.name(), author.email()) else {
             return None;
         };
 
-        Some(Author {
+        Some(Signature {
             name: name.to_owned(),
             email: email.to_owned(),
         })
@@ -1983,6 +2238,60 @@ pub enum ServerTrouble {
 /// `-` is YAML's null, and a `Vec<McpServer>` reading one would refuse the whole
 /// file — which under this module's own rule would throw the author and the
 /// build cache away over a half-deleted line.
+fn authors_written<'de, D: serde::Deserializer<'de>>(authors: D) -> Result<Vec<Author>, D::Error> {
+    Ok(Vec::<Option<Author>>::deserialize(authors)?
+        .into_iter()
+        .flatten()
+        .collect())
+}
+
+/// A written list of Authors with the blanks taken out of each and the ones
+/// with no uuid dropped: an entry nothing could refer to is not an Author a
+/// Repo could record, so it fails the safe way, as a declaration with no name
+/// does. The uuid is trimmed and otherwise kept exactly as it was written — it
+/// is what the tokens in the other file are keyed by.
+fn authors_kept(authors: Vec<Author>) -> Vec<Author> {
+    authors
+        .into_iter()
+        .filter_map(|author| {
+            let id = blank_is_nothing(author.id)?;
+
+            Some(Author::of(
+                id,
+                author.display_name,
+                author.name,
+                author.email,
+            ))
+        })
+        .collect()
+}
+
+/// A fresh version-4 uuid, out of sixteen bytes from the operating system's
+/// own generator: what a new Author is keyed by, and a session's name — see
+/// [`crate::sessions`].
+pub(crate) fn minted_uuid() -> std::io::Result<String> {
+    let mut bytes = [0u8; 16];
+    getrandom::fill(&mut bytes).map_err(std::io::Error::other)?;
+
+    // Version 4 in the high nibble of the seventh byte and the variant in the
+    // top bits of the ninth, which is the difference between sixteen random
+    // bytes and a UUID something else will accept as one.
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+
+    let mut uuid = String::with_capacity(36);
+
+    for (at, byte) in bytes.iter().enumerate() {
+        if matches!(at, 4 | 6 | 8 | 10) {
+            uuid.push('-');
+        }
+
+        uuid.push_str(&format!("{byte:02x}"));
+    }
+
+    Ok(uuid)
+}
+
 fn servers_written<'de, D: serde::Deserializer<'de>>(
     servers: D,
 ) -> Result<Vec<McpServer>, D::Error> {
@@ -2097,23 +2406,30 @@ mod tests {
     use super::{
         AtOnce, AttachedServer, Author, Cleanup, CleanupStep, Config, ConflictResolution,
         GitAuthor, HeaderValue, IgnoreRule, Languages, McpServer, RuleTrouble, Secrets,
-        ServerTrouble, Settings, trouble_among,
+        ServerTrouble, Settings, Signature, trouble_among,
     };
+
+    /// The Author the tests here write and read back, keyed `work` — any
+    /// string is a uuid to the files, and this one reads.
+    fn author(name: Option<String>, email: Option<String>) -> Option<Author> {
+        Some(Author::of("work".to_owned(), None, name, email))
+    }
 
     #[test]
     fn the_token_is_what_the_file_says() {
-        let secrets = Secrets::read("github_token: ghp_thetoken\n").unwrap();
+        let secrets = Secrets::read("author_tokens:\n  work: ghp_thetoken\n").unwrap();
 
-        assert_eq!(secrets.github_token(), Some("ghp_thetoken"));
+        assert_eq!(secrets.author_token("work"), Some("ghp_thetoken"));
     }
 
     #[test]
     fn the_session_accounts_password_is_read_beside_the_token() {
-        let secrets =
-            Secrets::read("github_token: ghp_thetoken\nsession_account_password: Vk1-hunter2\n")
-                .unwrap();
+        let secrets = Secrets::read(
+            "author_tokens:\n  work: ghp_thetoken\nsession_account_password: Vk1-hunter2\n",
+        )
+        .unwrap();
 
-        assert_eq!(secrets.github_token(), Some("ghp_thetoken"));
+        assert_eq!(secrets.author_token("work"), Some("ghp_thetoken"));
         assert_eq!(secrets.session_account_password(), Some("Vk1-hunter2"));
     }
 
@@ -2145,17 +2461,17 @@ mod tests {
             .save_secrets(
                 &settings
                     .secrets()
-                    .with_token(Some("ghp_thetoken".to_owned())),
+                    .with_author_token("work", Some("ghp_thetoken".to_owned())),
             )
             .unwrap();
 
         // And now somebody tidies up the token they had finished with, which is
         // what used to empty this file.
         settings
-            .save_secrets(&settings.secrets().with_token(None))
+            .save_secrets(&settings.secrets().with_author_token("work", None))
             .unwrap();
 
-        assert_eq!(settings.secrets().github_token(), None);
+        assert_eq!(settings.secrets().author_token("work"), None);
         assert_eq!(
             settings.secrets().session_account_password(),
             Some("Vk1-hunter2"),
@@ -2169,7 +2485,7 @@ mod tests {
     #[test]
     fn the_header_values_are_read_under_the_server_that_declared_them() {
         let secrets = Secrets::read(concat!(
-            "github_token: ghp_thetoken\n",
+            "author_tokens:\n  work: ghp_thetoken\n",
             "mcp_headers:\n",
             "  docs:\n",
             "    Authorization: Bearer sk-averysecretkey\n",
@@ -2184,7 +2500,7 @@ mod tests {
         assert_eq!(secrets.mcp_header("docs", "X-Tenant"), Some("verkstead"));
         assert_eq!(secrets.mcp_header("docs", "X-Nothing"), None);
         assert_eq!(secrets.mcp_header("tickets", "Authorization"), None);
-        assert_eq!(secrets.github_token(), Some("ghp_thetoken"));
+        assert_eq!(secrets.author_token("work"), Some("ghp_thetoken"));
     }
 
     /// And a value somebody emptied by hand is a header nothing is sent in,
@@ -2250,7 +2566,7 @@ mod tests {
     #[test]
     fn writing_the_headers_leaves_the_token_and_the_password_where_they_are() {
         let kept = Secrets::read(concat!(
-            "github_token: ghp_thetoken\n",
+            "author_tokens:\n  work: ghp_thetoken\n",
             "session_account_password: Vk1-hunter2\n",
         ))
         .unwrap();
@@ -2263,11 +2579,11 @@ mod tests {
             )],
         )]);
 
-        assert_eq!(written.github_token(), Some("ghp_thetoken"));
+        assert_eq!(written.author_token("work"), Some("ghp_thetoken"));
         assert_eq!(written.session_account_password(), Some("Vk1-hunter2"));
 
         // And the other way about.
-        let cleared = written.with_token(None);
+        let cleared = written.with_author_token("work", None);
 
         assert_eq!(
             cleared.mcp_header("docs", "Authorization"),
@@ -2314,16 +2630,19 @@ mod tests {
 
     #[test]
     fn a_key_this_version_never_heard_of_is_not_the_end_of_the_file() {
-        let secrets = Secrets::read("github_token: ghp_thetoken\nsomething_later: yes\n").unwrap();
+        let secrets =
+            Secrets::read("author_tokens:\n  work: ghp_thetoken\nsomething_later: yes\n").unwrap();
 
-        assert_eq!(secrets.github_token(), Some("ghp_thetoken"));
+        assert_eq!(secrets.author_token("work"), Some("ghp_thetoken"));
     }
 
     #[test]
     fn an_empty_file_configures_nothing_and_is_not_a_failure() {
-        assert_eq!(Secrets::read("").unwrap().github_token(), None);
+        assert_eq!(Secrets::read("").unwrap().author_token("work"), None);
         assert_eq!(
-            Secrets::read("\n# nothing yet\n").unwrap().github_token(),
+            Secrets::read("\n# nothing yet\n")
+                .unwrap()
+                .author_token("work"),
             None
         );
     }
@@ -2331,18 +2650,22 @@ mod tests {
     #[test]
     fn a_blank_token_is_no_token() {
         assert_eq!(
-            Secrets::read("github_token: ''\n").unwrap().github_token(),
+            Secrets::read("author_tokens:\n  work: ''\n")
+                .unwrap()
+                .author_token("work"),
             None
         );
         assert_eq!(
-            Secrets::read("github_token:\n").unwrap().github_token(),
+            Secrets::read("github_token:\n")
+                .unwrap()
+                .author_token("work"),
             None
         );
     }
 
     #[test]
     fn nothing_that_will_parse_is_a_failure_to_report() {
-        assert!(Secrets::read("github_token: [oh\n").is_err());
+        assert!(Secrets::read("author_tokens:\n  work: [oh\n").is_err());
     }
 
     #[test]
@@ -2350,7 +2673,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
 
         assert_eq!(
-            Settings::in_data_dir(dir.path()).secrets().github_token(),
+            Settings::in_data_dir(dir.path())
+                .secrets()
+                .author_token("work"),
             None
         );
     }
@@ -2360,12 +2685,20 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let settings = Settings::in_data_dir(dir.path());
 
-        std::fs::write(settings.secrets_path(), "github_token: the-first\n").unwrap();
-        assert_eq!(settings.secrets().github_token(), Some("the-first"));
+        std::fs::write(
+            settings.secrets_path(),
+            "author_tokens:\n  work: the-first\n",
+        )
+        .unwrap();
+        assert_eq!(settings.secrets().author_token("work"), Some("the-first"));
 
         // A rotation, which is what the settings page will do to this file.
-        std::fs::write(settings.secrets_path(), "github_token: the-second\n").unwrap();
-        assert_eq!(settings.secrets().github_token(), Some("the-second"));
+        std::fs::write(
+            settings.secrets_path(),
+            "author_tokens:\n  work: the-second\n",
+        )
+        .unwrap();
+        assert_eq!(settings.secrets().author_token("work"), Some("the-second"));
     }
 
     #[test]
@@ -2373,30 +2706,75 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let settings = Settings::in_data_dir(dir.path());
 
-        std::fs::write(settings.secrets_path(), "github_token: [oh\n").unwrap();
+        std::fs::write(settings.secrets_path(), "author_tokens:\n  work: [oh\n").unwrap();
 
-        assert_eq!(settings.secrets().github_token(), None);
+        assert_eq!(settings.secrets().author_token("work"), None);
     }
 
     #[test]
-    fn the_author_is_what_the_config_file_says() {
-        let config =
-            Config::read("git_author:\n  name: Tobias Cohen\n  email: tobi@tobico.net\n").unwrap();
+    fn the_authors_are_what_the_config_file_says() {
+        let config = Config::read(concat!(
+            "authors:\n",
+            "  - id: work\n",
+            "    display_name: Work\n",
+            "    name: Tobias Cohen\n",
+            "    email: tobi@tobico.net\n",
+            "  - id: home\n",
+            "    name: Tobi\n",
+            "    email: tobi@example.com\n",
+        ))
+        .unwrap();
 
-        assert_eq!(config.git_author().name(), Some("Tobias Cohen"));
-        assert_eq!(config.git_author().email(), Some("tobi@tobico.net"));
+        let ids: Vec<_> = config.authors().iter().map(Author::id).collect();
+        assert_eq!(ids, ["work", "home"], "every Author, in the order written");
+
+        let work = config.author("work").unwrap();
+        assert_eq!(work.display_name(), Some("Work"));
+        assert_eq!(work.name(), Some("Tobias Cohen"));
+        assert_eq!(work.email(), Some("tobi@tobico.net"));
+
+        let home = config.author("home").unwrap();
+        assert_eq!(home.display_name(), None, "nobody named this one");
+        assert_eq!(home.email(), Some("tobi@example.com"));
+
+        assert!(config.author("elsewhere").is_none());
     }
 
     #[test]
     fn half_an_author_is_the_half_that_was_filled_in() {
-        let config = Config::read("git_author:\n  name: Tobias Cohen\n  email: ''\n").unwrap();
+        let config =
+            Config::read("authors:\n  - id: work\n    name: Tobias Cohen\n    email: ''\n")
+                .unwrap();
 
-        assert_eq!(config.git_author().name(), Some("Tobias Cohen"));
+        let author = config.author("work").unwrap();
+        assert_eq!(author.name(), Some("Tobias Cohen"));
         assert_eq!(
-            config.git_author().email(),
+            author.email(),
             None,
             "an empty address is one the human cleared, and git says so for itself"
         );
+        assert!(
+            author.configured().is_none(),
+            "and nothing can commit as half of one"
+        );
+    }
+
+    /// An Author is keyed by its uuid, so an entry without one is one no Repo
+    /// could ever record — dropped as it is read, the rest of the list kept.
+    #[test]
+    fn an_author_with_no_uuid_is_no_author() {
+        let config = Config::read(concat!(
+            "authors:\n",
+            "  - name: Nobody\n",
+            "  - id: '  '\n",
+            "    name: Nobody either\n",
+            "  - id: work\n",
+            "    name: Tobias Cohen\n",
+        ))
+        .unwrap();
+
+        let ids: Vec<_> = config.authors().iter().map(Author::id).collect();
+        assert_eq!(ids, ["work"]);
     }
 
     /// How many stages of one roadmap run at once is the human's number, and what
@@ -2486,7 +2864,7 @@ mod tests {
 
         settings
             .save_config(&Config::of(
-                GitAuthor::default(),
+                None,
                 Languages::default(),
                 Cleanup::default(),
                 AtOnce::of(Some("1".to_owned()), Some("2".to_owned())),
@@ -2519,7 +2897,7 @@ mod tests {
         // down: the field standing empty is how the human asks for it.
         settings
             .save_config(&Config::of(
-                GitAuthor::default(),
+                None,
                 Languages::default(),
                 Cleanup::default(),
                 AtOnce::of(Some(String::new()), Some(String::new())),
@@ -2698,7 +3076,7 @@ mod tests {
 
         settings
             .save_config(&Config::of(
-                GitAuthor::default(),
+                None,
                 Languages::default(),
                 Cleanup::default(),
                 AtOnce::default(),
@@ -2718,7 +3096,7 @@ mod tests {
 
         settings
             .save_config(&Config::of(
-                GitAuthor::default(),
+                None,
                 Languages::default(),
                 Cleanup::default(),
                 AtOnce::default(),
@@ -2799,7 +3177,7 @@ mod tests {
 
         settings
             .save_config(&Config::of(
-                GitAuthor::default(),
+                None,
                 Languages::default(),
                 Cleanup::default(),
                 AtOnce::default(),
@@ -2816,7 +3194,7 @@ mod tests {
 
         settings
             .save_config(&Config::of(
-                GitAuthor::default(),
+                None,
                 Languages::default(),
                 Cleanup::default(),
                 AtOnce::default(),
@@ -2936,7 +3314,7 @@ mod tests {
 
         settings
             .save_config(&Config::of(
-                GitAuthor::default(),
+                None,
                 Languages::default(),
                 Cleanup::of(
                     CleanupStep::of(false, Some("14".to_owned())),
@@ -2975,7 +3353,7 @@ mod tests {
 
         settings
             .save_config(&Config::of(
-                GitAuthor::default(),
+                None,
                 Languages::default(),
                 Cleanup::of(
                     CleanupStep::of(true, Some(String::new())),
@@ -3012,20 +3390,19 @@ mod tests {
     #[test]
     fn a_config_file_still_carrying_a_share_viewer_url_is_read_past_it() {
         let config = Config::read(
-            "share_viewer_url: https://ada.github.io/shares/\ngit_author:\n  name: Tobias Cohen\n",
+            "share_viewer_url: https://ada.github.io/shares/\nauthors:\n  - id: work\n    name: Tobias Cohen\n",
         )
         .unwrap();
 
-        assert_eq!(config.git_author().name(), Some("Tobias Cohen"));
+        assert_eq!(config.author("work").unwrap().name(), Some("Tobias Cohen"));
     }
 
     #[test]
     fn a_config_file_that_says_nothing_configures_nobody() {
-        for text in ["", "\n# nothing yet\n", "git_author:\n"] {
+        for text in ["", "\n# nothing yet\n", "authors:\n", "authors: []\n"] {
             let config = Config::read(text).unwrap();
 
-            assert_eq!(config.git_author().name(), None, "for {text:?}");
-            assert_eq!(config.git_author().email(), None, "for {text:?}");
+            assert!(config.authors().is_empty(), "for {text:?}");
         }
     }
 
@@ -3034,11 +3411,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let settings = Settings::in_data_dir(dir.path());
 
-        assert!(Config::read("git_author: [oh\n").is_err());
+        assert!(Config::read("authors: [oh\n").is_err());
 
-        std::fs::write(settings.config_path(), "git_author: [oh\n").unwrap();
+        std::fs::write(settings.config_path(), "authors: [oh\n").unwrap();
 
-        assert_eq!(settings.config().git_author().name(), None);
+        assert!(settings.config().authors().is_empty());
     }
 
     #[test]
@@ -3046,23 +3423,35 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let settings = Settings::in_data_dir(dir.path());
 
-        std::fs::write(settings.secrets_path(), "github_token: ghp_thetoken\n").unwrap();
+        std::fs::write(
+            settings.secrets_path(),
+            "author_tokens:\n  work: ghp_thetoken\n",
+        )
+        .unwrap();
 
-        assert_eq!(settings.secrets().github_token(), Some("ghp_thetoken"));
         assert_eq!(
-            settings.config().git_author().name(),
-            None,
-            "a token configured is not an author configured"
+            settings.secrets().author_token("work"),
+            Some("ghp_thetoken")
+        );
+        assert!(
+            settings.config().authors().is_empty(),
+            "a token kept is not an author configured"
         );
 
         std::fs::write(
             settings.config_path(),
-            "git_author:\n  name: Tobias Cohen\n",
+            "authors:\n  - id: work\n    name: Tobias Cohen\n",
         )
         .unwrap();
 
-        assert_eq!(settings.config().git_author().name(), Some("Tobias Cohen"));
-        assert_eq!(settings.secrets().github_token(), Some("ghp_thetoken"));
+        assert_eq!(
+            settings.config().author("work").unwrap().name(),
+            Some("Tobias Cohen")
+        );
+        assert_eq!(
+            settings.secrets().author_token("work"),
+            Some("ghp_thetoken")
+        );
     }
 
     #[test]
@@ -3074,11 +3463,14 @@ mod tests {
             .save_secrets(
                 &settings
                     .secrets()
-                    .with_token(Some("ghp_thetoken".to_owned())),
+                    .with_author_token("work", Some("ghp_thetoken".to_owned())),
             )
             .unwrap();
 
-        assert_eq!(settings.secrets().github_token(), Some("ghp_thetoken"));
+        assert_eq!(
+            settings.secrets().author_token("work"),
+            Some("ghp_thetoken")
+        );
     }
 
     /// On the platforms where a file has a mode to be written at — see
@@ -3096,7 +3488,7 @@ mod tests {
             .save_secrets(
                 &settings
                     .secrets()
-                    .with_token(Some("ghp_thetoken".to_owned())),
+                    .with_author_token("work", Some("ghp_thetoken".to_owned())),
             )
             .unwrap();
 
@@ -3120,7 +3512,7 @@ mod tests {
         // A `secrets.yaml` written by hand, at whatever mode the human's umask
         // gave it — which is the ordinary way one exists before there is a
         // settings page to write it.
-        std::fs::write(settings.secrets_path(), "github_token: by-hand\n").unwrap();
+        std::fs::write(settings.secrets_path(), "author_tokens:\n  work: by-hand\n").unwrap();
         std::fs::set_permissions(
             settings.secrets_path(),
             std::fs::Permissions::from_mode(0o644),
@@ -3131,7 +3523,7 @@ mod tests {
             .save_secrets(
                 &settings
                     .secrets()
-                    .with_token(Some("ghp_thetoken".to_owned())),
+                    .with_author_token("work", Some("ghp_thetoken".to_owned())),
             )
             .unwrap();
 
@@ -3152,14 +3544,14 @@ mod tests {
             .save_secrets(
                 &settings
                     .secrets()
-                    .with_token(Some("ghp_thetoken".to_owned())),
+                    .with_author_token("work", Some("ghp_thetoken".to_owned())),
             )
             .unwrap();
         settings
-            .save_secrets(&settings.secrets().with_token(None))
+            .save_secrets(&settings.secrets().with_author_token("work", None))
             .unwrap();
 
-        assert_eq!(settings.secrets().github_token(), None);
+        assert_eq!(settings.secrets().author_token("work"), None);
         assert_eq!(
             std::fs::read_to_string(settings.secrets_path()).unwrap(),
             "",
@@ -3173,10 +3565,14 @@ mod tests {
         let settings = Settings::in_data_dir(dir.path());
 
         settings
-            .save_secrets(&settings.secrets().with_token(Some("   \n".to_owned())))
+            .save_secrets(
+                &settings
+                    .secrets()
+                    .with_author_token("work", Some("   \n".to_owned())),
+            )
             .unwrap();
 
-        assert_eq!(settings.secrets().github_token(), None);
+        assert_eq!(settings.secrets().author_token("work"), None);
     }
 
     #[test]
@@ -3188,11 +3584,14 @@ mod tests {
             .save_secrets(
                 &settings
                     .secrets()
-                    .with_token(Some(" ghp_thetoken\n".to_owned())),
+                    .with_author_token("work", Some(" ghp_thetoken\n".to_owned())),
             )
             .unwrap();
 
-        assert_eq!(settings.secrets().github_token(), Some("ghp_thetoken"));
+        assert_eq!(
+            settings.secrets().author_token("work"),
+            Some("ghp_thetoken")
+        );
     }
 
     #[test]
@@ -3202,7 +3601,7 @@ mod tests {
 
         settings
             .save_config(&Config::of(
-                GitAuthor::of(
+                author(
                     Some("Tobias Cohen".to_owned()),
                     Some("tobi@tobico.net".to_owned()),
                 ),
@@ -3220,8 +3619,11 @@ mod tests {
 
         let config = settings.config();
 
-        assert_eq!(config.git_author().name(), Some("Tobias Cohen"));
-        assert_eq!(config.git_author().email(), Some("tobi@tobico.net"));
+        assert_eq!(config.author("work").unwrap().name(), Some("Tobias Cohen"));
+        assert_eq!(
+            config.author("work").unwrap().email(),
+            Some("tobi@tobico.net")
+        );
     }
 
     /// And the key goes when the file is next written: a save serializes the
@@ -3240,7 +3642,7 @@ mod tests {
 
         settings
             .save_config(&Config::of(
-                GitAuthor::default(),
+                None,
                 Languages::default(),
                 Cleanup::default(),
                 AtOnce::default(),
@@ -3270,7 +3672,7 @@ mod tests {
 
         settings
             .save_config(&Config::of(
-                GitAuthor::of(
+                author(
                     Some("Cohen, Tobias: #1".to_owned()),
                     Some("tobi@tobico.net".to_owned()),
                 ),
@@ -3287,7 +3689,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            settings.config().git_author().name(),
+            settings.config().author("work").unwrap().name(),
             Some("Cohen, Tobias: #1"),
         );
     }
@@ -3299,7 +3701,7 @@ mod tests {
 
         settings
             .save_config(&Config::of(
-                GitAuthor::of(Some("Tobias Cohen".to_owned()), Some(String::new())),
+                author(Some("Tobias Cohen".to_owned()), Some(String::new())),
                 Languages::default(),
                 Cleanup::default(),
                 AtOnce::default(),
@@ -3314,8 +3716,8 @@ mod tests {
 
         let config = settings.config();
 
-        assert_eq!(config.git_author().name(), Some("Tobias Cohen"));
-        assert_eq!(config.git_author().email(), None);
+        assert_eq!(config.author("work").unwrap().name(), Some("Tobias Cohen"));
+        assert_eq!(config.author("work").unwrap().email(), None);
     }
 
     /// And the shape git will take is both halves or nobody — the reading
@@ -3325,15 +3727,16 @@ mod tests {
         let name = Some("Ada Lovelace".to_owned());
         let email = Some("ada@example.com".to_owned());
 
-        let both = Author::configured(&GitAuthor::of(name.clone(), email.clone()))
+        let both = Author::of("work".to_owned(), None, name.clone(), email.clone())
+            .configured()
             .expect("both halves are there");
 
         assert_eq!(both.name(), "Ada Lovelace");
         assert_eq!(both.email(), "ada@example.com");
 
-        assert!(Author::configured(&GitAuthor::of(name, None)).is_none());
-        assert!(Author::configured(&GitAuthor::of(None, email)).is_none());
-        assert!(Author::configured(&GitAuthor::default()).is_none());
+        assert!(Signature::configured(&GitAuthor::of(name, None)).is_none());
+        assert!(Signature::configured(&GitAuthor::of(None, email)).is_none());
+        assert!(Signature::configured(&GitAuthor::default()).is_none());
     }
 
     #[test]
@@ -3347,7 +3750,7 @@ mod tests {
             .save_secrets(
                 &settings
                     .secrets()
-                    .with_token(Some("ghp_thetoken".to_owned())),
+                    .with_author_token("work", Some("ghp_thetoken".to_owned())),
             )
             .unwrap();
 
@@ -3365,12 +3768,12 @@ mod tests {
             .save_secrets(
                 &settings
                     .secrets()
-                    .with_token(Some("ghp_thetoken".to_owned())),
+                    .with_author_token("work", Some("ghp_thetoken".to_owned())),
             )
             .unwrap();
         settings
             .save_config(&Config::of(
-                GitAuthor::of(Some("Tobias Cohen".to_owned()), None),
+                author(Some("Tobias Cohen".to_owned()), None),
                 Languages::default(),
                 Cleanup::default(),
                 AtOnce::default(),
@@ -3383,8 +3786,14 @@ mod tests {
             ))
             .unwrap();
 
-        assert_eq!(settings.secrets().github_token(), Some("ghp_thetoken"));
-        assert_eq!(settings.config().git_author().name(), Some("Tobias Cohen"));
+        assert_eq!(
+            settings.secrets().author_token("work"),
+            Some("ghp_thetoken")
+        );
+        assert_eq!(
+            settings.config().author("work").unwrap().name(),
+            Some("Tobias Cohen")
+        );
     }
 
     /// Nothing is left beside the file a save was about: the temporary it went
@@ -3399,12 +3808,12 @@ mod tests {
             .save_secrets(
                 &settings
                     .secrets()
-                    .with_token(Some("ghp_thetoken".to_owned())),
+                    .with_author_token("work", Some("ghp_thetoken".to_owned())),
             )
             .unwrap();
         settings
             .save_config(&Config::of(
-                GitAuthor::of(Some("Tobias Cohen".to_owned()), None),
+                author(Some("Tobias Cohen".to_owned()), None),
                 Languages::default(),
                 Cleanup::default(),
                 AtOnce::default(),
@@ -3470,7 +3879,7 @@ mod tests {
 
         settings
             .save_config(&Config::of(
-                GitAuthor::default(),
+                None,
                 Languages::default(),
                 Cleanup::default(),
                 AtOnce::default(),
@@ -3492,7 +3901,7 @@ mod tests {
         // which is how the last one is deleted.
         settings
             .save_config(&Config::of(
-                GitAuthor::default(),
+                None,
                 Languages::default(),
                 Cleanup::default(),
                 AtOnce::default(),
@@ -3577,7 +3986,7 @@ mod tests {
             .unwrap();
 
         let page = Config::of(
-            GitAuthor::of(Some("Ada".to_owned()), Some("ada@example.com".to_owned())),
+            author(Some("Ada".to_owned()), Some("ada@example.com".to_owned())),
             Languages::default(),
             Cleanup::default(),
             AtOnce::default(),
@@ -3600,7 +4009,7 @@ mod tests {
              either",
         );
         assert_eq!(
-            settings.config().git_author().name(),
+            settings.config().author("work").unwrap().name(),
             Some("Ada"),
             "and what the page did send is what the file holds",
         );
@@ -3675,7 +4084,7 @@ mod tests {
         .unwrap();
 
         let page = Config::of(
-            GitAuthor::of(Some("Ada".to_owned()), Some("ada@example.com".to_owned())),
+            author(Some("Ada".to_owned()), Some("ada@example.com".to_owned())),
             Languages::default(),
             Cleanup::default(),
             AtOnce::default(),
@@ -3735,7 +4144,7 @@ mod tests {
         .unwrap();
 
         let page = Config::of(
-            GitAuthor::default(),
+            None,
             crate::languages::Languages::of_page([
                 (crate::languages::RUST.to_owned(), false, String::new()),
                 ("gleam".to_owned(), true, String::new()),
@@ -3881,7 +4290,7 @@ mod tests {
     /// save.
     fn config_saying(instructions: &str) -> Config {
         Config::of(
-            GitAuthor::default(),
+            None,
             Languages::default(),
             Cleanup::default(),
             AtOnce::default(),
@@ -3958,7 +4367,7 @@ mod tests {
 
         settings
             .save_config(&Config::of(
-                GitAuthor::default(),
+                None,
                 Languages::default(),
                 Cleanup::default(),
                 AtOnce::default(),
@@ -4138,7 +4547,7 @@ mod tests {
 
         settings
             .save_config(&Config::of(
-                GitAuthor::default(),
+                None,
                 Languages::default(),
                 Cleanup::default(),
                 AtOnce::default(),
@@ -4336,5 +4745,288 @@ mod tests {
                 .is_empty(),
             "and an installation that declares none declares none"
         );
+    }
+
+    /// What an installation from before the Author list wrote: one author, one
+    /// token, and every other key either file can hold.
+    const SINGLE_CONFIG: &str = concat!(
+        "git_author:\n",
+        "  name: Tobias Cohen\n",
+        "  email: tobi@tobico.net\n",
+        "rust_build_cache:\n",
+        "  enabled: true\n",
+        "  size: 30G\n",
+        "languages:\n",
+        "  dotnet:\n",
+        "    enabled: false\n",
+        "  conda:\n",
+        "    label: conda\n",
+        "    env:\n",
+        "      CONDA_PKGS_DIRS: \"{stores}/conda\"\n",
+        "cleanup:\n",
+        "  trim:\n",
+        "    enabled: true\n",
+        "    days: 3\n",
+        "at_once:\n",
+        "  roadmap_stages: 2\n",
+        "conflict_resolution: rebase\n",
+        "share_on_done: true\n",
+        "sandbox_binds:\n",
+        "  - /var/cache/verkstead-node\n",
+        "session_path:\n",
+        "  - /home/you/.local/bin\n",
+        "ignored_comments:\n",
+        "  - author: coderabbitai\n",
+        "    body: billing\n",
+        "mcp_servers:\n",
+        "  - name: docs\n",
+        "    url: https://mcp.example.com/docs\n",
+        "    headers:\n",
+        "      - Authorization\n",
+        "instructions: |\n",
+        "  Prefer the smallest change that does the job.\n",
+    );
+
+    const SINGLE_SECRETS: &str = concat!(
+        "github_token: ghp_thetoken\n",
+        "session_account_password: Vk1-hunter2\n",
+        "mcp_headers:\n",
+        "  docs:\n",
+        "    Authorization: Bearer sk-averysecretkey\n",
+    );
+
+    /// The first start makes the one author and the one token a one-Author
+    /// list, the token under that Author's fresh uuid — and the old keys are
+    /// gone from both files, with every other key as it was.
+    #[test]
+    fn the_single_author_and_token_become_a_one_author_list() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+
+        std::fs::write(settings.config_path(), SINGLE_CONFIG).unwrap();
+        std::fs::write(settings.secrets_path(), SINGLE_SECRETS).unwrap();
+
+        let before = super::yaml(&Config::read(SINGLE_CONFIG).unwrap()).unwrap();
+
+        let id = settings
+            .moving_the_single_author()
+            .unwrap()
+            .expect("an Author was minted");
+
+        assert_eq!(id.len(), 36, "a uuid: {id}");
+
+        let config = settings.config();
+        let ids: Vec<_> = config.authors().iter().map(Author::id).collect();
+        assert_eq!(ids, [id.as_str()], "one Author, under the uuid said");
+
+        let author = config.author(&id).unwrap();
+        assert_eq!(author.name(), Some("Tobias Cohen"));
+        assert_eq!(author.email(), Some("tobi@tobico.net"));
+        assert_eq!(author.display_name(), None, "nobody has named it");
+
+        let secrets = settings.secrets();
+        assert_eq!(secrets.author_token(&id), Some("ghp_thetoken"));
+        assert_eq!(secrets.session_account_password(), Some("Vk1-hunter2"));
+        assert_eq!(
+            secrets.mcp_header("docs", "Authorization"),
+            Some("Bearer sk-averysecretkey")
+        );
+
+        let config_text = std::fs::read_to_string(settings.config_path()).unwrap();
+        let secrets_text = std::fs::read_to_string(settings.secrets_path()).unwrap();
+        assert!(!config_text.contains("git_author"), "{config_text}");
+        assert!(!secrets_text.contains("github_token"), "{secrets_text}");
+
+        // Every other key reads back exactly as it was read before the move —
+        // the descriptor keys and the key the page never draws included.
+        let after = super::yaml(&Config {
+            authors: Vec::new(),
+            ..config
+        })
+        .unwrap();
+        assert_eq!(after, before);
+        assert!(config_text.contains("session_path"), "{config_text}");
+        assert!(config_text.contains("CONDA_PKGS_DIRS"), "{config_text}");
+    }
+
+    /// And once is once: the second start finds the list and moves nothing.
+    #[test]
+    fn a_second_start_moves_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+
+        std::fs::write(settings.config_path(), SINGLE_CONFIG).unwrap();
+        std::fs::write(settings.secrets_path(), SINGLE_SECRETS).unwrap();
+
+        settings.moving_the_single_author().unwrap().unwrap();
+
+        let config = std::fs::read_to_string(settings.config_path()).unwrap();
+        let secrets = std::fs::read_to_string(settings.secrets_path()).unwrap();
+
+        assert_eq!(settings.moving_the_single_author().unwrap(), None);
+        assert_eq!(
+            std::fs::read_to_string(settings.config_path()).unwrap(),
+            config
+        );
+        assert_eq!(
+            std::fs::read_to_string(settings.secrets_path()).unwrap(),
+            secrets
+        );
+    }
+
+    /// A start that stopped between the two writes finds the list written and
+    /// the token not yet moved, and moves it to the first Author.
+    #[test]
+    fn a_token_left_behind_by_a_start_that_stopped_goes_to_the_first_author() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+
+        std::fs::write(
+            settings.config_path(),
+            "authors:\n  - id: work\n    name: Tobias Cohen\n",
+        )
+        .unwrap();
+        std::fs::write(settings.secrets_path(), "github_token: ghp_thetoken\n").unwrap();
+
+        assert_eq!(settings.moving_the_single_author().unwrap(), None);
+        assert_eq!(
+            settings.secrets().author_token("work"),
+            Some("ghp_thetoken")
+        );
+        assert!(
+            !std::fs::read_to_string(settings.secrets_path())
+                .unwrap()
+                .contains("github_token")
+        );
+    }
+
+    /// A token with no author is still an Author's: the token alone is moved,
+    /// under an Author with nothing else to it yet.
+    #[test]
+    fn a_token_alone_becomes_an_author_holding_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+
+        std::fs::write(settings.secrets_path(), "github_token: ghp_thetoken\n").unwrap();
+
+        let id = settings.moving_the_single_author().unwrap().unwrap();
+
+        assert_eq!(settings.secrets().author_token(&id), Some("ghp_thetoken"));
+        assert_eq!(settings.config().author(&id).unwrap().name(), None);
+    }
+
+    /// Nothing written is nothing to move, and nothing is written for it.
+    #[test]
+    fn an_installation_that_said_nothing_moves_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+
+        assert_eq!(settings.moving_the_single_author().unwrap(), None);
+        assert!(!settings.config_path().exists());
+        assert!(!settings.secrets_path().exists());
+    }
+
+    /// And a file nothing can parse is the human's to fix: neither file is
+    /// rewritten over it.
+    #[test]
+    fn a_file_nothing_can_parse_is_left_where_it_is() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+
+        std::fs::write(settings.config_path(), "git_author: [oh\n").unwrap();
+        std::fs::write(settings.secrets_path(), "github_token: ghp_thetoken\n").unwrap();
+
+        assert_eq!(settings.moving_the_single_author().unwrap(), None);
+        assert_eq!(
+            std::fs::read_to_string(settings.config_path()).unwrap(),
+            "git_author: [oh\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(settings.secrets_path()).unwrap(),
+            "github_token: ghp_thetoken\n"
+        );
+    }
+
+    /// A token saved under one uuid leaves every other secret as it was:
+    /// another Author's token, the session account's password, the headers.
+    #[test]
+    fn saving_one_authors_token_leaves_every_other_secret_as_it_was() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+
+        std::fs::write(
+            settings.secrets_path(),
+            concat!(
+                "author_tokens:\n",
+                "  work: ghp_theworkone\n",
+                "  home: ghp_thehomeone\n",
+                "session_account_password: Vk1-hunter2\n",
+                "mcp_headers:\n",
+                "  docs:\n",
+                "    Authorization: Bearer sk-averysecretkey\n",
+            ),
+        )
+        .unwrap();
+
+        settings
+            .save_secrets(
+                &settings
+                    .secrets()
+                    .with_author_token("work", Some("ghp_anewone".to_owned())),
+            )
+            .unwrap();
+
+        let secrets = settings.secrets();
+        assert_eq!(secrets.author_token("work"), Some("ghp_anewone"));
+        assert_eq!(secrets.author_token("home"), Some("ghp_thehomeone"));
+        assert_eq!(secrets.session_account_password(), Some("Vk1-hunter2"));
+        assert_eq!(
+            secrets.mcp_header("docs", "Authorization"),
+            Some("Bearer sk-averysecretkey")
+        );
+
+        settings
+            .save_secrets(&settings.secrets().with_author_token("work", None))
+            .unwrap();
+
+        let secrets = settings.secrets();
+        assert_eq!(secrets.author_token("work"), None);
+        assert_eq!(secrets.author_token("home"), Some("ghp_thehomeone"));
+    }
+
+    /// The Git section sends the one Author it is about, so a save keeps every
+    /// other Author in the file and writes the one it drew over its own entry.
+    #[test]
+    fn a_save_from_the_settings_page_keeps_the_authors_it_did_not_draw() {
+        let kept = Config::read(concat!(
+            "authors:\n",
+            "  - id: work\n",
+            "    name: Tobias Cohen\n",
+            "  - id: home\n",
+            "    name: Tobi\n",
+        ))
+        .unwrap();
+
+        let page = Config::of(
+            author(
+                Some("T. Cohen".to_owned()),
+                Some("tobi@tobico.net".to_owned()),
+            ),
+            Languages::default(),
+            Cleanup::default(),
+            AtOnce::default(),
+            ConflictResolution::Merge,
+            false,
+            vec![],
+            vec![],
+            vec![],
+            String::new(),
+        )
+        .keeping_what_the_page_never_drew(&kept);
+
+        let ids: Vec<_> = page.authors().iter().map(Author::id).collect();
+        assert_eq!(ids, ["work", "home"], "in the order they were, none lost");
+        assert_eq!(page.author("work").unwrap().name(), Some("T. Cohen"));
+        assert_eq!(page.author("home").unwrap().name(), Some("Tobi"));
     }
 }

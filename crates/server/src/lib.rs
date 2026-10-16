@@ -2262,6 +2262,19 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
     // what says whether there is a directory to make.
     let settings = settings::Settings::in_data_dir(&data_dir);
 
+    // And the one author and the one token an installation from before the
+    // Author list wrote, moved into that list as one Author — here, before
+    // anything below reads an Author, so that from the first session on the
+    // files have one shape (ADR-0025). A file nothing can parse is left for the
+    // human to fix; one that cannot be written is a Data Directory this start
+    // cannot work in. See [`settings::Settings::moving_the_single_author`].
+    if let Some(id) = settings
+        .moving_the_single_author()
+        .context("moving the one git author and GitHub token into the list of Authors")?
+    {
+        tracing::info!(author = %id, "the one git author and GitHub token are now an Author");
+    }
+
     // And the shared build cache, which is resolved for the reason the binds
     // above are and *made* here, which they never are — see
     // [`build_cache::BuildCache::resolve`] for why this one directory is

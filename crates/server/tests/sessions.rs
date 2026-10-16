@@ -8261,7 +8261,8 @@ fn configure(fixture: &Grilling, more: &str) {
 
 /// Who every session in these tests commits as, which is the whole of what a
 /// bench's `config.yaml` says until a test writes something else into it.
-const THE_AUTHOR: &str = "git_author:\n  name: Verkstead Test\n  email: test@verkstead.invalid\n";
+const THE_AUTHOR: &str =
+    "authors:\n  - id: work\n    name: Verkstead Test\n    email: test@verkstead.invalid\n";
 
 /// What Verkstead has written down about whether this Conversation's own pull
 /// request merges, which is the reading a card is drawn off long after anything

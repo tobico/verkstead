@@ -601,11 +601,12 @@ async fn workbench_authored() -> (tempfile::TempDir, Router) {
     (dir, app)
 }
 
-/// Say who Verkstead commits as, in the file the settings page writes.
+/// Say who Verkstead commits as, in the file the settings page writes: one
+/// Author, keyed `work`.
 fn author(dir: &tempfile::TempDir, name: &str, email: &str) {
     std::fs::write(
         dir.path().join("config.yaml"),
-        format!("git_author:\n  name: \"{name}\"\n  email: \"{email}\"\n"),
+        format!("authors:\n  - id: work\n    name: \"{name}\"\n    email: \"{email}\"\n"),
     )
     .unwrap();
 }
@@ -768,7 +769,11 @@ async fn nothing_is_made_without_an_author() {
 
     // Half an author is no author: git wants both, and the answer is about the
     // settings page rather than about git.
-    std::fs::write(dir.path().join("config.yaml"), "git_author:\n  name: Ada\n").unwrap();
+    std::fs::write(
+        dir.path().join("config.yaml"),
+        "authors:\n  - id: work\n    name: Ada\n",
+    )
+    .unwrap();
     assert_eq!(
         create(&app, root.path(), "verkstead").await,
         Created::NoAuthor
@@ -844,7 +849,7 @@ async fn workbench_with_gh(answering: &str) -> (tempfile::TempDir, tempfile::Tem
     author(&dir, "Ada Lovelace", "ada@example.com");
     std::fs::write(
         dir.path().join("secrets.yaml"),
-        "github_token: ghp_thetokenthatwassaved\n",
+        "author_tokens:\n  work: ghp_thetokenthatwassaved\n",
     )
     .unwrap();
 

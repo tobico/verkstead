@@ -20,7 +20,9 @@
   },
   "conflict_resolution": "Merge",
   "git_author": {
+    "display_name": "",
     "email": "",
+    "id": null,
     "name": ""
   },
   "github_token": null,

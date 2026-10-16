@@ -341,7 +341,7 @@ async fn a_mirror(pool: &SqlitePool) -> i64 {
 fn an_author(dir: &Path) {
     std::fs::write(
         dir.join("config.yaml"),
-        "git_author:\n  name: Tobias Cohen\n  email: tobi@tobico.net\n",
+        "authors:\n  - id: work\n    name: Tobias Cohen\n    email: tobi@tobico.net\n",
     )
     .unwrap();
 }

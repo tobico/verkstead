@@ -649,13 +649,27 @@ origin: AttachmentOrigin,
 label: string | null, };
 
 /**
- * Who a session's commits are by.
+ * Who a session's commits are by: the Author the Git section is about, which
+ * is the first in `config.yaml`'s list.
  *
- * Two strings rather than two optionals, empty where nothing is configured:
- * the form holds them that way, and half an author is a real state — a name
- * with no address is what git complains about by name.
+ * The names as strings rather than optionals, empty where nothing is
+ * configured: the form holds them that way, and half an author is a real
+ * state — a name with no address is what git complains about by name.
  */
-export type Author = { name: string, email: string, };
+export type Author = { 
+/**
+ * The uuid it is kept under, or `null` where there is no Author yet —
+ * which is a fresh install. A save sending `null` is about the first
+ * Author, and makes it under a fresh uuid where there is none and the
+ * fields hold anything.
+ */
+id: string | null, 
+/**
+ * What it is called in rows and pickers, empty where nobody named it and
+ * the git name stands in. Sent back as it came on a save from a section
+ * that does not draw it.
+ */
+display_name: string, name: string, email: string, };
 
 /**
  * The backlog opened: every task document of it, rendered.
@@ -5558,7 +5572,12 @@ attachments: Array<AttachmentView>, };
  * one — and the token's half is an action rather than a value, because most
  * saves are not about the token at all.
  */
-export type SettingsEdit = { git_author: Author, github_token: TokenEdit, 
+export type SettingsEdit = { git_author: Author, 
+/**
+ * What is to become of the token of the Author `git_author` is about —
+ * the one it names, or the one a `null` uuid makes.
+ */
+github_token: TokenEdit, 
 /**
  * The languages as the page has just left them, as values rather than as
  * an action: there is nothing secret about a switch or a size, so a save
@@ -5722,7 +5741,7 @@ tried: Array<ServerTried>, };
  */
 export type SettingsView = { git_author: Author, 
 /**
- * What can be said about the configured token, or `null` where there is
+ * What can be said about that Author's token, or `null` where it holds
  * none — which is what a Verkstead nobody has told anything looks like.
  */
 github_token: TokenSaved | null, 
@@ -7017,7 +7036,7 @@ export type TimelineEvent = { "Brief": BriefEvent } | { "Moved": MovedEvent } | 
 export type TokenEdit = "Keep" | { "Set": { token: string, } } | "Clear";
 
 /**
- * Everything about the configured token that is not the token.
+ * Everything about the Author's token that is not the token.
  */
 export type TokenSaved = { 
 /**

@@ -132,7 +132,7 @@ use ts_rs::TS;
 pub struct SettingsView {
     pub git_author: Author,
 
-    /// What can be said about the configured token, or `null` where there is
+    /// What can be said about that Author's token, or `null` where it holds
     /// none — which is what a Verkstead nobody has told anything looks like.
     pub github_token: Option<TokenSaved>,
 
@@ -692,19 +692,31 @@ pub struct AtOnceEdit {
     pub conversations: String,
 }
 
-/// Who a session's commits are by.
+/// Who a session's commits are by: the Author the Git section is about, which
+/// is the first in `config.yaml`'s list.
 ///
-/// Two strings rather than two optionals, empty where nothing is configured:
-/// the form holds them that way, and half an author is a real state — a name
-/// with no address is what git complains about by name.
+/// The names as strings rather than optionals, empty where nothing is
+/// configured: the form holds them that way, and half an author is a real
+/// state — a name with no address is what git complains about by name.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct Author {
+    /// The uuid it is kept under, or `null` where there is no Author yet —
+    /// which is a fresh install. A save sending `null` is about the first
+    /// Author, and makes it under a fresh uuid where there is none and the
+    /// fields hold anything.
+    pub id: Option<String>,
+
+    /// What it is called in rows and pickers, empty where nobody named it and
+    /// the git name stands in. Sent back as it came on a save from a section
+    /// that does not draw it.
+    pub display_name: String,
+
     pub name: String,
     pub email: String,
 }
 
-/// Everything about the configured token that is not the token.
+/// Everything about the Author's token that is not the token.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct TokenSaved {
@@ -728,6 +740,9 @@ pub struct TokenSaved {
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct SettingsEdit {
     pub git_author: Author,
+
+    /// What is to become of the token of the Author `git_author` is about —
+    /// the one it names, or the one a `null` uuid makes.
     pub github_token: TokenEdit,
 
     /// The languages as the page has just left them, as values rather than as

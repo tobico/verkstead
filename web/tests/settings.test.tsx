@@ -299,7 +299,7 @@ describe("what is not configured", () => {
   });
 
   it("warns that there is no git author", async () => {
-    theSettings({ ...TOLD, git_author: { name: "", email: "" } });
+    theSettings({ ...TOLD, git_author: { ...TOLD.git_author, name: "", email: "" } });
     const { container } = mountCard();
 
     const status = await theLine(container);
@@ -324,7 +324,7 @@ describe("what is not configured", () => {
   /// half it has not been given — so the card warns rather than naming the half
   /// there is, which is a name commits would still fail under.
   it("warns about an author with only half of one", async () => {
-    theSettings({ ...TOLD, git_author: { name: "Ada Lovelace", email: "" } });
+    theSettings({ ...TOLD, git_author: { ...TOLD.git_author, name: "Ada Lovelace", email: "" } });
     const { container } = mountCard();
 
     const status = await theLine(container);
@@ -521,7 +521,7 @@ describe("saving", () => {
     await waitFor(() =>
       expect(sent(fetching)).toEqual({
         git_author: {
-          name: TOLD.git_author.name,
+          ...TOLD.git_author,
           email: "ada@analytical.engine",
         },
         github_token: "Keep",
@@ -553,7 +553,11 @@ describe("saving", () => {
     const rewritten: SettingsSaved = {
       settings: {
         ...SAVED.settings,
-        git_author: { name: "Augusta Ada King", email: "ada@example.com" },
+        git_author: {
+          ...SAVED.settings.git_author,
+          name: "Augusta Ada King",
+          email: "ada@example.com",
+        },
       },
       verified: null,
       refused: [],

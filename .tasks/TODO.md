@@ -17,7 +17,7 @@ Roadmap stage: [01: The author list](docs/roadmaps/authors/01-author-list.md)
 
 ## Tasks
 
-- [ ] 01: One Author, end to end — [details](01-one-author-end-to-end.md)
+- [x] 01: One Author, end to end — [details](01-one-author-end-to-end.md)
 - [ ] 02: Every Repo records its Author — [details](02-every-repo-records-its-author.md)
 - [ ] 03: The session gets its Repo's Author — [details](03-the-session-gets-its-repos-author.md)
 - [ ] 04: The Git section's switcher and Add author — [details](04-the-git-sections-switcher.md)

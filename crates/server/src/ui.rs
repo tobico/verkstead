@@ -61,7 +61,7 @@ use verkstead_schema::{ApiError, Nudge, Response};
 
 use crate::onboarding::Refusal;
 use crate::peer::workbench::OverTheLink;
-use crate::settings::{AtOnce, Cleanup, CleanupStep, Config, GitAuthor, RuleTrouble};
+use crate::settings::{AtOnce, Cleanup, CleanupStep, Config, RuleTrouble};
 use crate::{AppState, store};
 
 /// The viewer's routes, over the state the agent API is already holding: a
@@ -1139,18 +1139,20 @@ async fn create_repo(
     State(state): State<AppState>,
     Json(creation): Json<Creation>,
 ) -> HttpResponse {
-    let author = state.settings.config();
+    let config = state.settings.config();
 
     match crate::repos::create(
         &state.pool,
-        author.git_author(),
+        // The first Author, which is the one an installation that never added
+        // a second has.
+        config.authors().first(),
         &state.github,
         &creation.parent,
         &creation.name,
         creation.github,
         // What the Repo pane this comes back with says is waiting in it, which is
         // bounded by the same setting the notice is — see [`crate::stages::waiting`].
-        author.at_once().roadmap_stages(),
+        config.at_once().roadmap_stages(),
     )
     .await
     {
@@ -2822,16 +2824,24 @@ async fn publishing(
         let secrets = settings.secrets();
         let config = settings.config();
 
+        // As the first Author, which is the one an installation that never
+        // added a second has: its token for the gist and the comments, and its
+        // name on the gist's commit.
+        let author = config.authors().first();
+        let token = author.and_then(|author| secrets.author_token(author.id()));
+
         let published = crate::publishing::publish(
             &gh,
-            secrets.github_token(),
-            config.git_author(),
+            token,
+            &author
+                .map(crate::settings::Author::git_author)
+                .unwrap_or_default(),
             &description,
             &name,
             &file,
         );
 
-        (published, secrets.github_token().map(str::to_owned))
+        (published, token.map(str::to_owned))
     })
     .await;
 
@@ -6268,9 +6278,40 @@ async fn save_settings(
             ));
         }
 
+        // Which Author the Git section's fields are about: the one whose uuid
+        // the page sent, or — where it sent none, which is a page drawn before
+        // there was one — the first there is. Made now under a fresh uuid where
+        // there is none at all and the page said anything about it, which is
+        // the first save of a fresh install; where it said nothing, as every
+        // other section's save of a fresh install says nothing, there is still
+        // no Author and nothing is written for one.
+        let drawn = edit.git_author;
+        let said = [&drawn.display_name, &drawn.name, &drawn.email]
+            .iter()
+            .any(|field| !field.trim().is_empty())
+            || matches!(&edit.github_token, TokenEdit::Set { token } if !token.trim().is_empty());
+        let id = match drawn.id.or_else(|| {
+            settings
+                .config()
+                .authors()
+                .first()
+                .map(|first| first.id().to_owned())
+        }) {
+            Some(id) => Some(id),
+            None if said => Some(crate::settings::minted_uuid()?),
+            None => None,
+        };
+
         settings.save_config(
             &Config::of(
-                GitAuthor::of(Some(edit.git_author.name), Some(edit.git_author.email)),
+                id.clone().map(|id| {
+                    crate::settings::Author::of(
+                        id,
+                        Some(drawn.display_name),
+                        Some(drawn.name),
+                        Some(drawn.email),
+                    )
+                }),
                 // The two keys the page writes, per language it drew: the
                 // switch as it stands, and the size as it was typed with an
                 // empty field meaning nothing configured — clearing it is how
@@ -6358,10 +6399,14 @@ async fn save_settings(
             writing = true;
         }
 
-        let verifying = match &edit.github_token {
-            TokenEdit::Keep => None,
-            TokenEdit::Set { token } => {
-                secrets = secrets.with_token(Some(token.clone()));
+        // Under the uuid of the Author the fields were about, which leaves
+        // every other Author's token where it was. No uuid is no Author, and
+        // nothing to keep a token under: the save said nothing that would make
+        // one, so the token's half said nothing either.
+        let verifying = match (&edit.github_token, &id) {
+            (TokenEdit::Keep, _) | (_, None) => None,
+            (TokenEdit::Set { token }, Some(id)) => {
+                secrets = secrets.with_author_token(id, Some(token.clone()));
                 writing = true;
 
                 // Read back off the secrets that are to be written rather than
@@ -6369,10 +6414,10 @@ async fn save_settings(
                 // nothing configured, and verifying what was typed would
                 // announce an account for a token no session will ever be
                 // given.
-                secrets.github_token().map(str::to_owned)
+                secrets.author_token(id).map(str::to_owned)
             }
-            TokenEdit::Clear => {
-                secrets = secrets.with_token(None);
+            (TokenEdit::Clear, Some(id)) => {
+                secrets = secrets.with_author_token(id, None);
                 writing = true;
 
                 None
@@ -6650,14 +6695,27 @@ fn as_told(
 ) -> SettingsView {
     let secrets = settings.secrets();
     let config = settings.config();
-    let author = config.git_author();
+    // The first Author, which is the one the Git section is about — and blank
+    // fields under no uuid where there is none yet.
+    let author = config.authors().first();
     let cleanup = config.cleanup();
     let at_once = config.at_once();
 
     SettingsView {
         git_author: Author {
-            name: author.name().unwrap_or_default().to_owned(),
-            email: author.email().unwrap_or_default().to_owned(),
+            id: author.map(|author| author.id().to_owned()),
+            display_name: author
+                .and_then(|author| author.display_name())
+                .unwrap_or_default()
+                .to_owned(),
+            name: author
+                .and_then(|author| author.name())
+                .unwrap_or_default()
+                .to_owned(),
+            email: author
+                .and_then(|author| author.email())
+                .unwrap_or_default()
+                .to_owned(),
         },
         // Every descriptor this installation loaded, in the order they were
         // written: the ones embedded in the binary with what `config.yaml` says
@@ -6738,13 +6796,15 @@ fn as_told(
         instructions: config.instructions().to_owned(),
         // And what is running, which is no file's either.
         running,
-        github_token: secrets.github_token().map(|token| TokenSaved {
-            last_four: last_four(token),
-            at: settings
-                .secrets_written_at()
-                .and_then(|at| at.format(&Rfc3339).ok())
-                .unwrap_or_default(),
-        }),
+        github_token: author
+            .and_then(|author| secrets.author_token(author.id()))
+            .map(|token| TokenSaved {
+                last_four: last_four(token),
+                at: settings
+                    .secrets_written_at()
+                    .and_then(|at| at.format(&Rfc3339).ok())
+                    .unwrap_or_default(),
+            }),
     }
 }
 

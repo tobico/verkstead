@@ -137,7 +137,7 @@ async fn save_author(app: &Router, name: &str, email: &str) -> SettingsSaved {
     save(
         app,
         &serde_json::json!({
-            "git_author": { "name": name, "email": email },
+            "git_author": { "display_name": "", "name": name, "email": email },
             "github_token": "Keep",
             "languages": languages_unset(),
             "cleanup": cleanup_unset(),
@@ -159,7 +159,7 @@ async fn save_token(app: &Router, token: &str) -> SettingsSaved {
     save(
         app,
         &serde_json::json!({
-            "git_author": { "name": "", "email": "" },
+            "git_author": { "display_name": "", "name": "", "email": "" },
             "github_token": { "Set": { "token": token } },
             "languages": languages_unset(),
             "cleanup": cleanup_unset(),
@@ -179,7 +179,7 @@ async fn clear_token(app: &Router) -> SettingsSaved {
     save(
         app,
         &serde_json::json!({
-            "git_author": { "name": "", "email": "" },
+            "git_author": { "display_name": "", "name": "", "email": "" },
             "github_token": "Clear",
             "languages": languages_unset(),
             "cleanup": cleanup_unset(),
@@ -265,7 +265,7 @@ async fn save_at_once(app: &Router, roadmap_stages: &str, conversations: &str) -
     save(
         app,
         &serde_json::json!({
-            "git_author": { "name": "", "email": "" },
+            "git_author": { "display_name": "", "name": "", "email": "" },
             "github_token": "Keep",
             "languages": languages_unset(),
             "cleanup": cleanup_unset(),
@@ -290,7 +290,7 @@ async fn save_cleanup(app: &Router, trim: (bool, &str), delete: (bool, &str)) ->
     save(
         app,
         &serde_json::json!({
-            "git_author": { "name": "", "email": "" },
+            "git_author": { "display_name": "", "name": "", "email": "" },
             "github_token": "Keep",
             "languages": languages_unset(),
             "cleanup": {
@@ -406,6 +406,91 @@ async fn the_author_goes_in_and_comes_back() {
     assert_eq!(settings.git_author.email, "tobi@tobico.net");
 }
 
+/// The Git section is about one Author, kept under a uuid: the first save of a
+/// fresh install makes it, and every save after is about that same one — a
+/// page drawn before there was one included — rather than a second.
+#[tokio::test]
+async fn the_first_save_makes_the_one_author_and_every_save_after_is_about_it() {
+    let (dir, app) = app().await;
+
+    assert_eq!(settings(&app).await.git_author.id, None, "no Author yet");
+
+    // A save from a section that is not about the author makes none.
+    save_author(&app, "", "").await;
+    assert_eq!(settings(&app).await.git_author.id, None);
+
+    let made = save_token(&app, "ghp_thetoken").await;
+    let id = made
+        .settings
+        .git_author
+        .id
+        .expect("the token made an Author");
+
+    let saved = save_author(&app, "Tobias Cohen", "tobi@tobico.net").await;
+    assert_eq!(saved.settings.git_author.id.as_deref(), Some(id.as_str()));
+    assert_eq!(saved.settings.git_author.name, "Tobias Cohen");
+    assert!(saved.settings.github_token.is_some(), "under the same uuid");
+
+    let config = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
+    assert_eq!(config.matches("- id:").count(), 1, "one Author: {config}");
+
+    let secrets = std::fs::read_to_string(dir.path().join("secrets.yaml")).unwrap();
+    assert!(
+        secrets.contains(&format!("{id}: ghp_thetoken")),
+        "{secrets}"
+    );
+}
+
+/// And a save names its Author by uuid: what it writes lands on that one, and
+/// every other Author in the file is left exactly as it was.
+#[tokio::test]
+async fn a_save_about_one_author_leaves_the_others_as_they_were() {
+    let (dir, app) = app_asking(SAYS_AN_ACCOUNT).await;
+
+    hand_edit(
+        dir.path(),
+        "config.yaml",
+        "authors:\n  - id: work\n    name: Work\n  - id: home\n    name: Home\n",
+    );
+    hand_edit(
+        dir.path(),
+        "secrets.yaml",
+        "author_tokens:\n  work: ghp_theworkone\n  home: ghp_thehomeone\n",
+    );
+
+    let saved = save(
+        &app,
+        &serde_json::json!({
+            "git_author": { "id": "work", "display_name": "", "name": "Tobias Cohen", "email": "tobi@tobico.net" },
+            "github_token": { "Set": { "token": "ghp_anewone" } },
+            "languages": languages_unset(),
+            "cleanup": cleanup_unset(),
+            "at_once": at_once_unset(),
+            "conflict_resolution": "Merge",
+            "share_on_done": false,
+            "sandbox_binds": [],
+            "ignored_comments": "Keep",
+            "mcp_servers": "Keep",
+            "instructions": "",
+        }),
+    )
+    .await;
+
+    assert!(
+        matches!(saved.verified, Some(Verified::Account { .. })),
+        "the token typed was verified: {:?}",
+        saved.verified
+    );
+
+    let config = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
+    assert!(config.contains("name: Home"), "{config}");
+    assert!(config.contains("name: Tobias Cohen"), "{config}");
+
+    let secrets = std::fs::read_to_string(dir.path().join("secrets.yaml")).unwrap();
+    assert!(secrets.contains("work: ghp_anewone"), "{secrets}");
+    assert!(secrets.contains("home: ghp_thehomeone"), "{secrets}");
+}
+
 /// The promise the whole page rests on: a token that has gone in is never in a
 /// response body again, whichever body it is.
 #[tokio::test]
@@ -417,7 +502,7 @@ async fn the_token_appears_in_no_answer_this_endpoint_gives() {
     let saving = save_body(
         &app,
         &serde_json::json!({
-            "git_author": { "name": "Tobias Cohen", "email": "tobi@tobico.net" },
+            "git_author": { "display_name": "", "name": "Tobias Cohen", "email": "tobi@tobico.net" },
             "github_token": { "Set": { "token": "ghp_averysecrettoken" } },
             "languages": languages_unset(),
             "cleanup": cleanup_unset(),
@@ -610,11 +695,15 @@ async fn a_hand_edit_to_either_file_is_what_the_next_read_says() {
     save_token(&app, "ghp_thefirsttoken").await;
     save_author(&app, "Tobias Cohen", "tobi@tobico.net").await;
 
-    hand_edit(dir.path(), "secrets.yaml", "github_token: by-hand-abcd\n");
+    hand_edit(
+        dir.path(),
+        "secrets.yaml",
+        "author_tokens:\n  by-hand: by-hand-abcd\n",
+    );
     hand_edit(
         dir.path(),
         "config.yaml",
-        "git_author:\n  name: By Hand\n  email: hand@tobico.net\n",
+        "authors:\n  - id: by-hand\n    name: By Hand\n    email: hand@tobico.net\n",
     );
 
     let settings = settings(&app).await;
@@ -646,7 +735,7 @@ async fn a_save_carrying_the_binds_as_they_stand_leaves_them() {
     save(
         &app,
         &serde_json::json!({
-            "git_author": { "name": "Tobias Cohen", "email": "tobi@tobico.net" },
+            "git_author": { "display_name": "", "name": "Tobias Cohen", "email": "tobi@tobico.net" },
             "github_token": "Keep",
             "languages": languages_unset(),
             "cleanup": cleanup_unset(),
@@ -745,7 +834,7 @@ async fn save_languages(app: &Router, languages: serde_json::Value) -> SettingsS
     save(
         app,
         &serde_json::json!({
-            "git_author": { "name": "", "email": "" },
+            "git_author": { "display_name": "", "name": "", "email": "" },
             "github_token": "Keep",
             "languages": languages,
             "cleanup": cleanup_unset(),
@@ -1054,7 +1143,7 @@ async fn a_languages_switch_and_size_go_in_and_come_back() {
     let saved = save(
         &app,
         &serde_json::json!({
-            "git_author": { "name": "", "email": "" },
+            "git_author": { "display_name": "", "name": "", "email": "" },
             "github_token": "Keep",
             "languages": rust(false, "5G"),
             "cleanup": cleanup_unset(),
@@ -1204,7 +1293,7 @@ async fn an_entry_that_would_not_load_says_so_on_the_page_and_stays_in_the_file(
     save(
         &app,
         &serde_json::json!({
-            "git_author": { "name": "", "email": "" },
+            "git_author": { "display_name": "", "name": "", "email": "" },
             "github_token": "Keep",
             "languages": [
                 { "name": "rust", "enabled": true, "size": "" },
@@ -1258,7 +1347,7 @@ async fn a_save_carries_the_old_key_into_the_map_and_writes_it_away() {
     let saved = save(
         &app,
         &serde_json::json!({
-            "git_author": { "name": "", "email": "" },
+            "git_author": { "display_name": "", "name": "", "email": "" },
             "github_token": "Keep",
             "languages": rust(false, "5G"),
             "cleanup": cleanup_unset(),
@@ -1397,7 +1486,7 @@ async fn a_save_carrying_the_cleanup_as_it_stands_leaves_it() {
     let saved = save(
         &app,
         &serde_json::json!({
-            "git_author": { "name": "", "email": "" },
+            "git_author": { "display_name": "", "name": "", "email": "" },
             "github_token": "Keep",
             "languages": rust(true, "5G"),
             "cleanup": {
@@ -1527,7 +1616,7 @@ async fn a_save_carrying_the_limit_as_it_stands_leaves_it() {
     let saved = save(
         &app,
         &serde_json::json!({
-            "git_author": { "name": "", "email": "" },
+            "git_author": { "display_name": "", "name": "", "email": "" },
             "github_token": "Keep",
             "languages": rust(true, "5G"),
             "cleanup": cleanup_unset(),
@@ -1603,7 +1692,7 @@ async fn how_a_conflict_is_resolved_goes_in_and_comes_back() {
     let saved = save(
         &app,
         &serde_json::json!({
-            "git_author": { "name": "", "email": "" },
+            "git_author": { "display_name": "", "name": "", "email": "" },
             "github_token": "Keep",
             "languages": languages_unset(),
             "cleanup": cleanup_unset(),
@@ -1641,7 +1730,7 @@ async fn how_a_conflict_is_resolved_goes_in_and_comes_back() {
     save(
         &app,
         &serde_json::json!({
-            "git_author": { "name": "", "email": "" },
+            "git_author": { "display_name": "", "name": "", "email": "" },
             "github_token": "Keep",
             "languages": languages_unset(),
             "cleanup": cleanup_unset(),
@@ -1685,7 +1774,7 @@ async fn sharing_on_done_goes_in_and_comes_back() {
     let saved = save(
         &app,
         &serde_json::json!({
-            "git_author": { "name": "", "email": "" },
+            "git_author": { "display_name": "", "name": "", "email": "" },
             "github_token": "Keep",
             "languages": languages_unset(),
             "cleanup": cleanup_unset(),
@@ -1728,7 +1817,7 @@ async fn a_save_carrying_the_switch_as_it_stands_leaves_it() {
     save(
         &app,
         &serde_json::json!({
-            "git_author": { "name": "", "email": "" },
+            "git_author": { "display_name": "", "name": "", "email": "" },
             "github_token": "Keep",
             "languages": languages_unset(),
             "cleanup": cleanup_unset(),
@@ -1748,7 +1837,7 @@ async fn a_save_carrying_the_switch_as_it_stands_leaves_it() {
     let saved = save(
         &app,
         &serde_json::json!({
-            "git_author": { "name": "", "email": "" },
+            "git_author": { "display_name": "", "name": "", "email": "" },
             "github_token": "Keep",
             "languages": rust(true, "5G"),
             "cleanup": cleanup_unset(),
@@ -1849,7 +1938,7 @@ async fn a_save_carrying_the_instructions_as_they_stand_leaves_them() {
     let saved = save(
         &app,
         &serde_json::json!({
-            "git_author": { "name": "", "email": "" },
+            "git_author": { "display_name": "", "name": "", "email": "" },
             "github_token": "Keep",
             "languages": rust(true, "5G"),
             "cleanup": cleanup_unset(),
@@ -1924,7 +2013,7 @@ async fn a_save_leaves_an_installers_own_descriptor_exactly_as_the_file_had_it()
     save(
         &app,
         &serde_json::json!({
-            "git_author": { "name": "Ada", "email": "ada@example.com" },
+            "git_author": { "display_name": "", "name": "Ada", "email": "ada@example.com" },
             "github_token": "Keep",
             "languages": as_the_page_saves(&told),
             "cleanup": cleanup_unset(),
@@ -1975,7 +2064,7 @@ async fn save_instructions(app: &Router, instructions: &str) -> SettingsSaved {
     save(
         app,
         &serde_json::json!({
-            "git_author": { "name": "", "email": "" },
+            "git_author": { "display_name": "", "name": "", "email": "" },
             "github_token": "Keep",
             "languages": languages_unset(),
             "cleanup": cleanup_unset(),
@@ -2018,7 +2107,7 @@ async fn a_size_cleared_is_the_default_again_and_not_a_size_of_nothing() {
     save(
         &app,
         &serde_json::json!({
-            "git_author": { "name": "", "email": "" },
+            "git_author": { "display_name": "", "name": "", "email": "" },
             "github_token": "Keep",
             "languages": rust(true, "5G"),
             "cleanup": cleanup_unset(),
@@ -2036,7 +2125,7 @@ async fn a_size_cleared_is_the_default_again_and_not_a_size_of_nothing() {
     let saved = save(
         &app,
         &serde_json::json!({
-            "git_author": { "name": "", "email": "" },
+            "git_author": { "display_name": "", "name": "", "email": "" },
             "github_token": "Keep",
             "languages": rust(true, "  "),
             "cleanup": cleanup_unset(),
@@ -2089,7 +2178,7 @@ async fn save_paths(app: &Router, binds: &[&str]) -> SettingsSaved {
     save(
         app,
         &serde_json::json!({
-            "git_author": { "name": "", "email": "" },
+            "git_author": { "display_name": "", "name": "", "email": "" },
             "github_token": "Keep",
             "languages": languages_unset(),
             "cleanup": cleanup_unset(),
@@ -2320,7 +2409,7 @@ async fn save_rules(app: &Router, rules: serde_json::Value) -> SettingsSaved {
     save(
         app,
         &serde_json::json!({
-            "git_author": { "name": "", "email": "" },
+            "git_author": { "display_name": "", "name": "", "email": "" },
             "github_token": "Keep",
             "languages": languages_unset(),
             "cleanup": cleanup_unset(),
@@ -2485,7 +2574,7 @@ async fn a_refused_save_writes_nothing_at_all() {
     let saved = save(
         &app,
         &serde_json::json!({
-            "git_author": { "name": "Tobias Cohen", "email": "tobi@tobico.net" },
+            "git_author": { "display_name": "", "name": "Tobias Cohen", "email": "tobi@tobico.net" },
             "github_token": { "Set": { "token": "ghp_thetoken" } },
             "languages": languages_unset(),
             "cleanup": cleanup_unset(),
@@ -2603,7 +2692,7 @@ async fn save_servers(app: &Router, servers: serde_json::Value) -> SettingsSaved
     save(
         app,
         &serde_json::json!({
-            "git_author": { "name": "", "email": "" },
+            "git_author": { "display_name": "", "name": "", "email": "" },
             "github_token": "Keep",
             "languages": languages_unset(),
             "cleanup": cleanup_unset(),
@@ -2857,7 +2946,7 @@ async fn a_save_refused_over_a_name_writes_nothing_at_all() {
     let saved = save(
         &app,
         &serde_json::json!({
-            "git_author": { "name": "Tobias Cohen", "email": "tobi@tobico.net" },
+            "git_author": { "display_name": "", "name": "Tobias Cohen", "email": "tobi@tobico.net" },
             "github_token": { "Set": { "token": "ghp_thetoken" } },
             "languages": languages_unset(),
             "cleanup": cleanup_unset(),
@@ -3068,7 +3157,7 @@ async fn a_header_value_appears_in_no_answer_this_endpoint_gives() {
     let saving = save_body(
         &app,
         &serde_json::json!({
-            "git_author": { "name": "", "email": "" },
+            "git_author": { "display_name": "", "name": "", "email": "" },
             "github_token": "Keep",
             "languages": languages_unset(),
             "cleanup": cleanup_unset(),
@@ -3823,7 +3912,7 @@ mod trying {
         let saving = super::save_body(
             &app,
             &serde_json::json!({
-                "git_author": { "name": "", "email": "" },
+                "git_author": { "display_name": "", "name": "", "email": "" },
                 "github_token": "Keep",
                 "languages": super::languages_unset(),
                 "cleanup": super::cleanup_unset(),

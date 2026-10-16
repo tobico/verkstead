@@ -123,7 +123,7 @@ import type {
 import { Empty, ErrorLine, Note } from "../notices";
 import { utcStamp } from "../set/when";
 import { PaneHead } from "../workbench/PaneHead";
-import { heldConfig } from "./held";
+import { heldAuthor, heldConfig } from "./held";
 import { TokenScopes } from "./scopes";
 import styles from "./Git.module.css";
 import { SettingsCard } from "./SettingsCard";
@@ -306,7 +306,7 @@ export function GitPane(props: {
     share_on_done: boolean;
     conflict_resolution: ConflictResolution;
   }): SettingsEdit => ({
-    git_author: told()?.git_author ?? { name: "", email: "" },
+    git_author: heldAuthor(told()),
     // Untouched, for the reason a blank field is a `Keep`.
     github_token: "Keep",
     // And the rules left exactly where they are: neither control is the form's
@@ -466,7 +466,14 @@ export function GitPane(props: {
     tidied();
 
     save.mutate({
-      git_author: { name: authorName(), email: authorEmail() },
+      // Over the Author the fields were read from, its uuid and display
+      // name riding along as they stand: the display name is not a field here
+      // yet, and the uuid is what says which Author this save is about.
+      git_author: {
+        ...heldAuthor(told()),
+        name: authorName(),
+        email: authorEmail(),
+      },
       github_token,
       share_on_done: sharing(),
       // And the ignore rules, which this pane is the one that owns: the whole

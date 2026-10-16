@@ -336,7 +336,6 @@ impl Agents {
             &self.skills,
             self.verkstead.as_ref()?,
             &self.settings.secrets(),
-            &self.settings.config(),
         )?;
 
         let mut argv = match &self.agent {
@@ -3971,26 +3970,7 @@ async fn idling_on(pool: &SqlitePool, conversation_id: i64) -> Vec<skills::Carri
 /// its Timeline Event records no name, and what it said is read back off the
 /// Capture — the same as for every agent that keeps no log at all.
 fn session_name() -> Option<String> {
-    let mut bytes = [0u8; 16];
-    getrandom::fill(&mut bytes).ok()?;
-
-    // Version 4 in the high nibble of the seventh byte and the variant in the
-    // top bits of the ninth, which is the difference between sixteen random
-    // bytes and a UUID something else will accept as one.
-    bytes[6] = (bytes[6] & 0x0f) | 0x40;
-    bytes[8] = (bytes[8] & 0x3f) | 0x80;
-
-    let mut name = String::with_capacity(36);
-
-    for (at, byte) in bytes.iter().enumerate() {
-        if matches!(at, 4 | 6 | 8 | 10) {
-            name.push('-');
-        }
-
-        name.push_str(&format!("{byte:02x}"));
-    }
-
-    Some(name)
+    crate::settings::minted_uuid().ok()
 }
 
 /// Where a running session's output goes: the Timeline Event it is written into,

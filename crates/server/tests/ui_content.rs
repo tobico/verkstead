@@ -3221,18 +3221,25 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     std::fs::write(
         told_dir.path().join("config.yaml"),
         "languages:\n  gleam:\n    label: Gleam\n    size: 8G\n    detect:\n      \
-         - gleam.toml\n    env:\n      GLEAM_CACHE: \"{cache}/gleam\"\n",
+         - gleam.toml\n    env:\n      GLEAM_CACHE: \"{cache}/gleam\"\n\
+         authors:\n  - id: 3f2c9a4e-8d1b-4c7a-9e2f-5b6d7c8e9f01\n",
     )
     .unwrap();
 
-    // And of one that has been told both. The token goes in through the endpoint
+    // And of one that has been told both — about the one Author, which is
+    // there already so that its uuid is pinned rather than minted. The token goes in through the endpoint
     // rather than into the file, because writing it is what stamps `secrets.yaml`
     // — and the stamp is a clock's answer, so it is pinned like every other.
     let saved = post(
         &app,
         "/api/ui/settings",
         &serde_json::json!({
-            "git_author": { "name": "Ada Lovelace", "email": "ada@example.com" },
+            "git_author": {
+                "id": "3f2c9a4e-8d1b-4c7a-9e2f-5b6d7c8e9f01",
+                "display_name": "",
+                "name": "Ada Lovelace",
+                "email": "ada@example.com",
+            },
             "github_token": { "Set": { "token": "ghp_0123456789abcdef" } },
             // Every language the page was given, which is how it saves: the
             // switch and the size of each, and the size of **every** one of them
