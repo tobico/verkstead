@@ -809,7 +809,13 @@ something with nothing to show — a move, a manual task (*revised 2026-09-23,
 building steer-timeline-item*: a steer that carried no document was one of these
 too, and is not now — every steer opens, drawing the form it settled; and where
 a pending steer stands the landing is on that instead, the item the timeline
-draws past the end of the record). It is the page's rather than the card's — the
+draws past the end of the record; *revised 2026-10-16, building
+memo-card-title*: and where no steer is pending but a Question Set is still
+waiting on the human — blocking, disconnected or deferred alike — the landing is
+on the oldest such Set rather than the end, so a memo or a commit landing after
+a Set cannot carry the selection past one nobody has answered, and the timeline
+keeps that Set in view rather than following past it to the bottom; a share,
+where nobody answers, still lands on its end). It is the page's rather than the card's — the
 sidebar has no timeline to pick from — and it happens only where the path names
 no pane already: a cold load of a details pane keeps its own selection. The
 timeline follows its bottom the way a running session's output does — pinned
@@ -828,7 +834,12 @@ or drafted with, both of them a navigation naming no pane. Picking anything by
 hand ends it — every card on the record, every pinned card, the share button —
 because somebody who has said what they want to be looking at should not have it
 taken off them by the next thing a session does. The next arrival begins it
-again. A cold load of a details pane never begins it: a kept link is a request
+again, and so does sending an answer from a Set's pane (*revised 2026-10-16,
+building memo-card-title*): a phone reaches a Set's pane only by tapping its
+card, so without it a phone that answered would be left on the answered Set
+rather than carried on to the next waiting one or the end. A Timeline still
+waiting on a Set advances only as far as that Set, and stays there until it is
+answered. A cold load of a details pane never begins it: a kept link is a request
 to be shown that one thing.
 
 What a Conversation needs settling before it runs — repo, branch, base commit,
