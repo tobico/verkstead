@@ -158,6 +158,7 @@ use crate::screen::Live;
 use crate::sessions::CHUNK;
 use crate::store;
 use crate::terminal::{Child, Terminal};
+use crate::worktrees::Standing;
 
 /// How that shell is started on the platforms whose shell wants telling.
 ///
@@ -1046,41 +1047,28 @@ pub(crate) async fn open(
     // stays Done for as long as nobody merges its pull request. A shell has
     // nowhere to stand in that, and the sandbox below would be refused for it
     // with nothing on the screen saying why. So it is made again from the
-    // branch, as Resume makes it and for Resume's reason: a worktree is derived
-    // state, and nothing healthy is touched — see [`crate::worktrees::healthy`].
-    //
-    // The branch followed first, for the reason Resume follows it: a rename
-    // nothing saw would read the checkout as broken and rebuild it from a
-    // branch that is not there. See [`crate::renames`].
+    // branch, as Resume makes it and for Resume's reason — see
+    // [`crate::worktrees::standing`].
     if let Some(worktree) = conversation.worktree.clone() {
-        let branch = crate::renames::follow(
-            &state.pool,
-            conversation_id,
-            &conversation.repo.path,
-            &worktree,
-            &conversation.branch,
-        )
-        .await
-        .unwrap_or_else(|| conversation.branch.clone());
+        match crate::worktrees::standing(&state.pool, &conversation, &worktree).await? {
+            Standing::Healthy | Standing::Elsewhere => {}
 
-        let repo = conversation.repo.path.clone();
-        let at = worktree.clone();
+            // And the tree beside it is told, which drew the Worktree as it was
+            // a moment ago: nothing there.
+            Standing::Remade => state.nudges.announce(Nudge::Files {
+                conversation: conversation_id,
+            }),
 
-        let usable = tokio::task::spawn_blocking(move || {
-            crate::worktrees::healthy(&repo, &at, &branch)
-                || crate::worktrees::rebuild(&repo, &at, &branch)
-        })
-        .await?;
+            Standing::Gone => {
+                tracing::error!(
+                    conversation_id,
+                    worktree = %worktree.display(),
+                    "the Conversation's worktree has gone and could not be made again from its \
+                     branch, so no terminal was opened"
+                );
 
-        if !usable {
-            tracing::error!(
-                conversation_id,
-                worktree = %worktree.display(),
-                "the Conversation's worktree has gone and could not be made again from its \
-                 branch, so no terminal was opened"
-            );
-
-            return Ok(TerminalOpened::WorktreeGone);
+                return Ok(TerminalOpened::WorktreeGone);
+            }
         }
     }
 

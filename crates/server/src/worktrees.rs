@@ -1054,6 +1054,80 @@ pub(crate) fn healthy(repo: &Path, path: &Path, branch: &str) -> bool {
     head(path).is_some_and(|head| head == format!("refs/heads/{branch}"))
 }
 
+/// What became of asking that a Conversation's own Worktree be there to work in
+/// — see [`standing`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Standing {
+    /// It was there and healthy, and nothing was touched.
+    Healthy,
+
+    /// Nothing was asked: this copy is a tombstone, the work is on another
+    /// device, and nothing writes to one — see [`store::Conversation::transferred`].
+    Elsewhere,
+
+    /// It had gone, and was made again from its branch just now.
+    Remade,
+
+    /// It had gone, and could not be made again — the branch gone with it, or
+    /// git refusing.
+    Gone,
+}
+
+/// The Conversation's own Worktree at `worktree`, made again from its branch
+/// where it has gone — for a press that has nowhere to work without it, a
+/// terminal's or a Code pane's.
+///
+/// What Resume does, by the same reading: the branch followed through a rename
+/// first, so a rename nothing saw is not read as a breakage, then
+/// [`healthy`], then [`rebuild`] where that says no. A worktree is derived
+/// state, so nothing is lost by it, and nothing healthy is touched.
+///
+/// **One at a time, across the server.** A pane attaching and a terminal
+/// pressed a moment later both ask, and a second rebuild of one path would find
+/// the first one's checkout in its way and remove it — so the reading and the
+/// rebuild are held under one lock, and whoever comes second reads the first
+/// one's checkout as healthy. Nearly every ask is a healthy one, which is a git
+/// read or two, so the lock is held for no time on any of them.
+pub(crate) async fn standing(
+    pool: &sqlx::SqlitePool,
+    conversation: &store::Conversation,
+    worktree: &Path,
+) -> anyhow::Result<Standing> {
+    static ONE_AT_A_TIME: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+    if conversation.transferred.is_some() {
+        return Ok(Standing::Elsewhere);
+    }
+
+    let branch = crate::renames::follow(
+        pool,
+        conversation.id,
+        &conversation.repo.path,
+        worktree,
+        &conversation.branch,
+    )
+    .await
+    .unwrap_or_else(|| conversation.branch.clone());
+
+    let _held = ONE_AT_A_TIME.lock().await;
+
+    let repo = conversation.repo.path.clone();
+    let worktree = worktree.to_owned();
+
+    let standing = tokio::task::spawn_blocking(move || {
+        if healthy(&repo, &worktree, &branch) {
+            Standing::Healthy
+        } else if rebuild(&repo, &worktree, &branch) {
+            Standing::Remade
+        } else {
+            Standing::Gone
+        }
+    })
+    .await?;
+
+    Ok(standing)
+}
+
 /// The name `branch` has been renamed to in the worktree at `path`, or `None`
 /// where nothing there is a rename.
 ///
