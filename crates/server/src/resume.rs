@@ -306,47 +306,21 @@ async fn recompute(
         return Ok(Resumed::NowhereToWork);
     };
 
-    // The branch first, which may not be called what the record says: a session
-    // renames the branch it is working on where the name it was given was
-    // Verkstead's own, and the sweep that ordinarily follows the rename runs
-    // only while a session does. So a server that came up over a rename it never
-    // saw would read the checkout below as broken and try to rebuild it from a
-    // branch that is not there. See [`crate::renames`], which does nothing at
-    // all where nothing was renamed — which is nearly every press.
-    let branch = crate::renames::follow(
-        &state.pool,
-        conversation_id,
-        &conversation.repo.path,
-        &worktree,
-        &conversation.branch,
-    )
-    .await
-    .unwrap_or_else(|| conversation.branch.clone());
-
     // What the record names, though, may be nowhere: a directory deleted,
     // hollowed out, or dropped from the repository's list of worktrees. Which is
     // a Conversation stuck for good under a button whose whole job is to unstick
-    // one, so Resume makes it again from the branch rather than refusing on it.
-    // Nothing is lost by that — a worktree is derived state — and nothing
-    // healthy is touched, uncommitted changes and all. See
-    // [`crate::worktrees::healthy`].
+    // one, so Resume makes it again from the branch rather than refusing on it —
+    // the branch followed through a rename first, a rename nothing saw being a
+    // checkout read as broken. Nothing is lost by that — a worktree is derived
+    // state — and nothing healthy is touched, uncommitted changes and all. See
+    // [`crate::worktrees::standing`].
     //
-    // Off the runtime's threads: a checkout of a large repository is not a quick
-    // call, and every part of this blocks. Under the registration taken above,
-    // because a Conversation being rebuilt is a Conversation being driven — a
-    // sweep that found it undriven meanwhile would stop it all over again.
-    let usable = tokio::task::spawn_blocking({
-        let repo = conversation.repo.path.clone();
-        let worktree = worktree.clone();
+    // Under the registration taken above, because a Conversation being rebuilt
+    // is a Conversation being driven — a sweep that found it undriven meanwhile
+    // would stop it all over again.
+    let standing = crate::worktrees::standing(&state.pool, conversation, &worktree).await?;
 
-        move || {
-            crate::worktrees::healthy(&repo, &worktree, &branch)
-                || crate::worktrees::rebuild(&repo, &worktree, &branch)
-        }
-    })
-    .await?;
-
-    if !usable {
+    if standing == crate::worktrees::Standing::Gone {
         return Ok(Resumed::WorktreeRefused);
     }
 
