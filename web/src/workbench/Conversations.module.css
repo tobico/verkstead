@@ -159,6 +159,38 @@
   font-weight: 600;
 }
 
+/* The line the name stands on, with the code icon before it where something is
+   active in the Conversation's Code pane. `min-width: 0` for the reason the
+   column above has it: the name is what gives way, never the icon. */
+.conversationRow .titleLine {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+/* That icon, which is a link to the pane (ADR-0025). Quiet, in the soft ink the
+   working ring is drawn in: the accent is what the sidebar keeps for something
+   the human may have to act on. Sized against the name it stands beside, and a
+   step darker under the hand so the one target inside a target says it is one. */
+.conversationRow .code {
+  display: inline-flex;
+  flex: none;
+  color: var(--ink-soft);
+  border-radius: 0.2rem;
+}
+
+.conversationRow .code svg {
+  width: 1em;
+  height: 1em;
+}
+
+@media (hover: hover) {
+  .conversationRow .code:hover {
+    color: var(--ink);
+  }
+}
+
 .conversationRow .meta {
   display: flex;
   flex-wrap: wrap;

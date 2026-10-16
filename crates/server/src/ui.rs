@@ -1296,6 +1296,12 @@ async fn conversations(
     // per row, over an answer that cannot meaningfully change between them.
     let held = state.joins.all_waiting();
 
+    // And which have something running in a terminal, which is the register's
+    // settled reading rather than one taken now: the turn that writes it is
+    // what holds it back until it has read the same thing twice — see
+    // [`crate::terminals::Terminals::busy`].
+    let terminal_busy = state.terminals.busy();
+
     let rows: Vec<ConversationEntry> = conversations
         .into_iter()
         .map(|conversation| {
@@ -1325,6 +1331,9 @@ async fn conversations(
                 // done and whose finish is held until the chain below it settles
                 // — see [`crate::joins`].
                 waiting_to_join: held.contains(&conversation.id),
+                // And whether one of its terminals has something running in
+                // it, which the card's code icon draws (ADR-0025).
+                terminal_busy: terminal_busy.contains(&conversation.id),
                 // And the rescue's own reading of the session, paired with
                 // `working` for the reason `idle` above is: the two reads are a
                 // moment apart, and a row saying a session that has gone is

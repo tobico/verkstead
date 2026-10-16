@@ -1356,6 +1356,25 @@ waiting_on_checks: boolean,
  */
 waiting_to_join: boolean, 
 /**
+ * Whether something other than its shell is running in one of this
+ * Conversation's terminals — a build, a server, an editor — as the card's
+ * code icon draws it (ADR-0025).
+ *
+ * The busy reading a tab's × asks, taken on a turn every two seconds while
+ * any terminal is live and held until two turns running agree before it
+ * is `true`, so a shell still coming up does not light it; `false` on the
+ * first turn that reads it quiet. Always `false` where there is no
+ * terminal, and so where there is no Worktree. On Windows, which cannot
+ * read a foreground, every live terminal reads as running.
+ *
+ * The other half of what lights the icon — a file open in Code with text
+ * nobody has saved — is the browser's own and is not on this row.
+ *
+ * Defaulted where it is missing, which is a member running a release from
+ * before there was one: its rows still merge, and say nothing is running.
+ */
+terminal_busy: boolean, 
+/**
  * The session on this row having gone quiet without asking — see
  * [`Parked`] — or `null` where it has not.
  *

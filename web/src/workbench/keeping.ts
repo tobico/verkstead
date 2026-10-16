@@ -55,6 +55,7 @@
 //! it — see `Code.tsx`.
 
 import {
+  createMemo,
   createSignal,
   getOwner,
   runWithOwner,
@@ -63,9 +64,16 @@ import {
 } from "solid-js";
 
 import type { FileReading, FolderListing } from "../api/types";
+import { rowKey, type Device } from "../reaching";
 import { load, type Model } from "./editing";
 import { group as made, type Group, type Layout } from "./layout";
-import { recalled, remembered, remembering, revived } from "./remembering";
+import {
+  holding,
+  recalled,
+  remembered,
+  remembering,
+  revived,
+} from "./remembering";
 
 /// One tab of a group: a terminal by the number the server issued it, or a
 /// file by its path.
@@ -238,6 +246,11 @@ export interface Kept {
   /// server issues, counting the other way, because a refused open was never
   /// given one — there is no shell for it to name.
   refuse: () => number;
+
+  /// Whether any file here has text the disk has not got — the same text the
+  /// device writes down, so what the sidebar's code icon says and what a
+  /// reload would bring back are the one idea (ADR-0025).
+  unsaved: Accessor<boolean>;
 }
 
 /// What a page keeps of Code, over every Conversation it has drawn it for.
@@ -245,17 +258,37 @@ export interface Keeping {
   /// One Conversation's, made the first time it is asked for. A Conversation
   /// nobody has opened Code on keeps nothing, and the first opening is where
   /// its tabs start out empty.
-  of: (conversation: number) => Kept;
+  ///
+  /// Named by the device it lives on as well as its number, because every
+  /// Verkstead issues a Conversation 7 — see `rowKey`.
+  of: (conversation: number, device: Device) => Kept;
 
   /// Whether anything kept anywhere in here has text nobody has saved, which is
   /// the whole of what the warning on the way out of the page asks.
   unsaved: () => boolean;
+
+  /// And whether one Conversation has, which is what the sidebar's code icon
+  /// asks of each row (ADR-0025): its keeping's own answer where this page has
+  /// opened Code on it, and what the browser's storage held when the page
+  /// loaded where it has not.
+  holds: (device: Device, conversation: number) => boolean;
 }
 
 /// A page's keeping, made where the page is — above the frame that swaps the
 /// details pane, so that the swap does not reach it.
 export function keeping(): Keeping {
-  const kept = new Map<number, Kept>();
+  const kept = new Map<string, Kept>();
+
+  /// Which Conversations the storage had unsaved text for when the page
+  /// loaded, which is the answer for every one this page has not opened Code
+  /// on — nothing but the keeping writes that text, so nothing else can move
+  /// it while the page stands.
+  const stored = holding();
+
+  /// And a count of the keepings made, which is what makes [`holds`] follow
+  /// one into being: the map is not a signal, and a row read before its
+  /// Conversation was opened has to hear that it now has a keeping to ask.
+  const [made, setMade] = createSignal(0);
 
   /// Whose the effects that write a keeping down belong to: this page, rather
   /// than whatever happened to be drawing when the keeping was first asked for.
@@ -267,17 +300,19 @@ export function keeping(): Keeping {
   /// is the page's own, and lasts as long as the keeping does.
   const page = getOwner();
 
-  const of = (conversation: number): Kept => {
-    const already = kept.get(conversation);
+  const of = (conversation: number, device: Device): Kept => {
+    const key = rowKey(device, conversation);
+    const already = kept.get(key);
 
     if (already !== undefined) {
       return already;
     }
 
-    const make = (): Kept => opened(conversation);
+    const make = (): Kept => opened(conversation, device);
     const held = page === null ? make() : runWithOwner(page, make)!;
 
-    kept.set(conversation, held);
+    kept.set(key, held);
+    setMade((count) => count + 1);
 
     return held;
   };
@@ -287,7 +322,16 @@ export function keeping(): Keeping {
       Object.keys(one.buffers()).some((path) => dirty(one, path)),
     );
 
-  return { of, unsaved };
+  const holds = (device: Device, conversation: number): boolean => {
+    made();
+
+    const key = rowKey(device, conversation);
+    const one = kept.get(key);
+
+    return one === undefined ? stored.has(key) : one.unsaved();
+  };
+
+  return { of, unsaved, holds };
 }
 
 /// One Conversation's, as this device last left it — and with nothing open in
@@ -298,10 +342,10 @@ export function keeping(): Keeping {
 /// does not is the readings: the pane reads every restored file afresh and puts
 /// the human's text over the top of it, so a file that moved while the page was
 /// away is dirty against what is really there.
-function opened(conversation: number): Kept {
+function opened(conversation: number, device: Device): Kept {
   /// What this device was last holding, where it was holding anything: the tree
   /// with its groups made again, and which of them was active.
-  const restored = remembered(conversation);
+  const restored = remembered(conversation, device);
   const came = restored === null ? null : revived(restored);
 
   /// And the text it had typed into each file and not saved, by path.
@@ -309,7 +353,7 @@ function opened(conversation: number): Kept {
   /// Each entry stands until there is a buffer to answer for that file — which
   /// is what the read restoring the tab makes — or until the file is let go of,
   /// and is what the device goes on holding in the meantime.
-  const recalling = recalled(conversation);
+  const recalling = recalled(conversation, device);
 
   /// What the next group is called. Counted up and never reused, so a group
   /// closed and another opened are two groups rather than one name meaning two
@@ -450,6 +494,7 @@ function opened(conversation: number): Kept {
     saving: new Set<string>(),
     askedAt: new Map<number, number>(),
     refuse: () => (refusals -= 1),
+    unsaved: () => holding(),
   };
 
   // And from here it writes itself down as it moves, which is what a reload
@@ -464,26 +509,27 @@ function opened(conversation: number): Kept {
   // as it came until one of them arrives, so a second reload before any of that
   // lands — or a read that never lands at all — comes back to the same text
   // rather than to a key this page emptied while it was getting ready.
-  remembering(conversation, {
-    layout,
-    active,
-    unsaved: () => {
-      const live = kept.buffers();
+  const unsaved = (): Record<string, string> => {
+    const live = kept.buffers();
 
-      return {
-        ...Object.fromEntries(
-          Object.entries(recalling).filter(
-            ([path]) => live[path] === undefined,
-          ),
-        ),
-        ...Object.fromEntries(
-          Object.keys(live)
-            .filter((path) => dirty(kept, path))
-            .map((path) => [path, live[path]!.text()]),
-        ),
-      };
-    },
-  });
+    return {
+      ...Object.fromEntries(
+        Object.entries(recalling).filter(([path]) => live[path] === undefined),
+      ),
+      ...Object.fromEntries(
+        Object.keys(live)
+          .filter((path) => dirty(kept, path))
+          .map((path) => [path, live[path]!.text()]),
+      ),
+    };
+  };
+
+  remembering(conversation, device, { layout, active, unsaved });
+
+  // And whether any of that is there at all, which is what the sidebar's code
+  // icon follows — the text written down and the icon off the one reading, so
+  // the icon goes the moment the key does.
+  const holding = createMemo(() => Object.keys(unsaved()).length > 0);
 
   return kept;
 }

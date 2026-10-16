@@ -3152,8 +3152,17 @@ pane (it is a tab of Code now)
 The Conversation's editor: a details pane at `/code`, opened by the code icon
 beside Share on the Timeline's header, for trying the agent's work and
 finishing it by hand without leaving the workbench — and that icon takes the
-accent while any **Preview** stands on the Conversation, the header icon alone,
-so the Timeline says there is something to try. Down one side, a **Previews**
+accent while any **Preview** stands on the Conversation, so the Timeline says
+there is something to try. The sidebar's card draws the same icon before its
+title, in the soft ink and never for a Preview, while something is **active** in
+the pane: a Terminal whose foreground is not its shell, or a file open with
+text nobody has saved. The Terminal half is the server's, read on a turn every
+two seconds while any Terminal is live, lit only once two turns running read it
+busy and out on the first that does not, a flip being a `conversation` Nudge;
+on Windows, which reads no foreground, every live Terminal lights it. The
+unsaved half is the device's, and counts only where the Conversation is neither
+a Draft nor Closed. A press on the icon opens that Conversation's Code pane, on
+whichever device it lives on, and does not open the card. See ADR-0025. Down one side, a **Previews**
 box above the tree where any stand and no box where none do: a row per
 Preview, the title with a play icon at its right that becomes the terminal
 icon while its run stands, the whole row the press, lit as a row of the tree
@@ -3178,7 +3187,9 @@ in it — Ctrl+W and Ctrl+Tab are the window's and are not taken, and neither
 is any key a terminal grid already had. The Worktree moving reaches the pane
 as a `files` Nudge from a watcher the server runs while a Code pane is
 attached. What is open — the groups, the tabs, the unsaved text — is the
-device's, kept per Conversation in the browser and back after a reload; so is
+device's, kept per Conversation in the browser — keyed by the device it lives
+on as well as its number, a member's Conversation 7 being another piece of work
+than this device's — and back after a reload; so is
 the **maximise** toggle in the header, which hides the sidebar and the
 Timeline on a window wide enough to have drawn them.
 **Reads and writes are the server's own, outside the Sandbox**, bounded by the
