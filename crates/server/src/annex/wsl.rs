@@ -586,11 +586,13 @@ fn unanswered(installed: bool, facts: Facts) -> Probed {
 
     // The feature turned on with no hypervisor running yet is a restart owed;
     // with one running, the restart has happened and WSL is still not there.
-    if !installed && !(facts.platform == Some(Feature::Enabled) && !facts.hypervisor) {
-        return Probed::NoWsl;
-    }
+    let restart_owed = facts.platform == Some(Feature::Enabled) && !facts.hypervisor;
 
-    Probed::NeedsRestart
+    if installed || restart_owed {
+        Probed::NeedsRestart
+    } else {
+        Probed::NoWsl
+    }
 }
 
 /// The three facts about Windows the probe reads where WSL is not answering.
