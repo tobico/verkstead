@@ -2028,7 +2028,7 @@ fn unsigned(config: &Config, recorded: Option<&str>) -> (String, &'static str) {
     match named {
         Some((called, author)) => (
             format!(
-                "its Repo's Author, {called}, has no {} set",
+                "its repo's author, {called}, has no {} set",
                 match author.name() {
                     None => "git name",
                     Some(_) => "email",
@@ -2067,13 +2067,13 @@ mod tests {
         assert_eq!(
             unsigned(&two, Some("work")),
             (
-                "its Repo's Author, Tobias Cohen, has no email set".to_owned(),
+                "its repo's author, Tobias Cohen, has no email set".to_owned(),
                 "Set it"
             )
         );
         assert_eq!(
             unsigned(&two, Some("home")).0,
-            "its Repo's Author, Home, has no git name set"
+            "its repo's author, Home, has no git name set"
         );
         assert_eq!(
             unsigned(&two, None),
