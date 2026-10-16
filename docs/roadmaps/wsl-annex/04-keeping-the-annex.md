@@ -31,9 +31,9 @@ Demonstrable end to end on Windows.
   because a rebuild restarts the Annex's server and every session with it.
   Writing it down to run once idle was the alternative and was not taken.
 - **The Annex has no settings of its own.** Everything about the work rather
-  than the machine is the Keeper's, copied at every boot: git author and
-  GitHub token from stage 03, and now Instructions, MCP servers, the at-once
-  limit and Cleanup. An MCP server's header names are in `config.yaml` and
+  than the machine is the Keeper's, copied at every boot: Instructions, MCP
+  servers, the at-once limit and Cleanup. Its Authors are not copied — they
+  reach the Annex as mirrors (ADR-0025). An MCP server's header names are in `config.yaml` and
   their values in `secrets.yaml` (`mcp_headers`), so the copy reads both: a
   server arriving without its values is declared in the Annex and refused by
   its far end. Its Repos, Members and sandbox binds stay its own.
@@ -59,7 +59,7 @@ Demonstrable end to end on Windows.
    - Update with a session running is refused naming the Conversation.
 4. **The settings copied at boot** — Instructions, MCP servers, at-once and
    Cleanup written into the Annex's config before each boot, and the MCP
-   servers' header values into its `secrets.yaml` beside the GitHub token.
+   servers' header values into its `secrets.yaml`.
    - A change on the Keeper's Instructions pane reaches the next session in
      the Annex after a restart.
    - An MCP server declared on the Keeper with an auth header is reached
