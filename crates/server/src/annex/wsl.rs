@@ -31,15 +31,28 @@
 //! firmware's virtualization as *off* — it has taken it — so a machine with
 //! Hyper-V on is never read as one with virtualization off; see [`Facts`].
 
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Output, Stdio};
+use std::process::{Child, Command, ExitStatus, Output, Stdio};
 use std::sync::Mutex;
 
 use anyhow::{Context, bail};
 
-use super::{ANNEX_PEER_PORT, Addresses, BOX_NAME, Backend, Inside, Networking, Probed, Step};
+use super::{
+    ANNEX_PEER_PORT, Addresses, BOX_NAME, Backend, Image, Inside, Networking, Probed, Step,
+};
 use crate::unseen::Unseen;
+
+/// The file in the disk's directory that says the distro was made to the end —
+/// see [`Backend::made`]. Beside the disk rather than inside the distro, so the
+/// probe that reads it on every poll of the wizard boots nothing.
+const MADE: &str = "made";
+
+/// The NixOS-WSL image, at the release the flake pins its module at — see
+/// [`super::flake::NIXOS_WSL`].
+const RELEASES: &str = "https://github.com/nix-community/NixOS-WSL/releases/download";
+const IMAGE: &str = "nixos.wsl";
 
 /// What turns WSL on, each raised in a dialog of its own: the optional
 /// features and WSL itself with no distro of anybody's, and then the newest
@@ -94,6 +107,12 @@ pub struct Wsl {
     /// The PowerShell the three facts are read through.
     powershell: PathBuf,
 
+    /// Where the distro's disk is kept: `%LOCALAPPDATA%\Verkstead\wsl`.
+    disk: PathBuf,
+
+    /// Where NixOS-WSL's releases are downloaded from: GitHub, but for a suite.
+    releases: String,
+
     /// What keeps the distro up after [`Backend::boot`]: WSL stops a distro a
     /// few seconds after the last process started through `wsl.exe` ends, so a
     /// booted one is one with a process of the Keeper's held in it.
@@ -108,11 +127,37 @@ impl Wsl {
 
     /// One running the `wsl` and `powershell` it is told to — a suite's stubs.
     pub fn at(wsl: impl Into<PathBuf>, powershell: impl Into<PathBuf>) -> Wsl {
+        let local = std::env::var_os("LOCALAPPDATA").map_or_else(std::env::temp_dir, PathBuf::from);
+
         Wsl {
             wsl: wsl.into(),
             powershell: powershell.into(),
+            disk: local.join("Verkstead").join("wsl"),
+            releases: RELEASES.to_owned(),
             held: Mutex::new(None),
         }
+    }
+
+    /// The same, keeping the distro's disk in `disk` — a suite's own directory.
+    pub fn on(self, disk: impl Into<PathBuf>) -> Wsl {
+        Wsl {
+            disk: disk.into(),
+            ..self
+        }
+    }
+
+    /// The same, downloading the image's releases from `releases` — a suite's
+    /// own server.
+    pub fn downloading_from(self, releases: impl Into<String>) -> Wsl {
+        Wsl {
+            releases: releases.into(),
+            ..self
+        }
+    }
+
+    /// The name of the firewall rule that lets the distro reach `port`.
+    fn rule(port: u16) -> String {
+        format!("Verkstead-Annex-{port}")
     }
 
     /// `wsl.exe` with `arguments`, run to its end.
@@ -229,11 +274,11 @@ impl Backend for Wsl {
         };
 
         match listed_state(&listed) {
-            None => Probed::NoDistro,
-            Some(running) => Probed::Present {
+            Some(running) if self.disk.join(MADE).is_file() => Probed::Present {
                 running,
                 networking: self.networking(),
             },
+            Some(_) | None => Probed::NoDistro,
         }
     }
 
@@ -241,14 +286,76 @@ impl Backend for Wsl {
         TURNING_ON
     }
 
-    fn make(&self, image: &Path, disk: &Path) -> anyhow::Result<()> {
-        std::fs::create_dir_all(disk)
-            .with_context(|| format!("Verkstead couldn't make {}", disk.display()))?;
+    fn image(&self) -> Image {
+        let release = format!("{}/{}", self.releases, super::flake::NIXOS_WSL);
 
-        let disk = disk.to_string_lossy();
+        Image {
+            url: format!("{release}/{IMAGE}"),
+            checksum: format!("{release}/{IMAGE}.sha256"),
+            file: IMAGE,
+            name: "NixOS-WSL",
+        }
+    }
+
+    fn disk(&self) -> &Path {
+        &self.disk
+    }
+
+    fn make(&self, image: &Path) -> anyhow::Result<()> {
+        let listed = self.wsl(&["--list", "--verbose"]);
+
+        if matches!(&listed, Ok(said) if listed_state(&said.text).is_some()) {
+            return Ok(());
+        }
+
+        std::fs::create_dir_all(&self.disk)
+            .with_context(|| format!("Verkstead couldn't make {}", self.disk.display()))?;
+
+        let disk = self.disk.to_string_lossy();
         let image = image.to_string_lossy();
 
         self.must(&["--import", BOX_NAME, &disk, &image, "--version", "2"])
+    }
+
+    fn made(&self) -> anyhow::Result<()> {
+        let made = self.disk.join(MADE);
+
+        std::fs::write(&made, super::flake::VERSION)
+            .with_context(|| format!("Verkstead couldn't write {}", made.display()))
+    }
+
+    fn opening(&self, port: u16) -> Option<String> {
+        if self.networking() == Networking::Mirrored {
+            return None;
+        }
+
+        let rule = Self::rule(port);
+
+        let asked = Command::new(&self.powershell)
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                &format!(
+                    "if (Get-NetFirewallRule -Name '{rule}' -ErrorAction SilentlyContinue) \
+                     {{ 'present' }}"
+                ),
+            ])
+            .unseen()
+            .stdin(Stdio::null())
+            .output();
+
+        if matches!(&asked, Ok(asked) if decoded(&asked.stdout).trim() == "present") {
+            return None;
+        }
+
+        // The adapter by its prefix: it is `vEthernet (WSL)` on one WSL and
+        // `vEthernet (WSL (Hyper-V firewall))` on a newer one.
+        Some(format!(
+            "New-NetFirewallRule -Name '{rule}' -DisplayName 'Verkstead Annex' \
+             -Direction Inbound -Action Allow -Protocol TCP -LocalPort {port} \
+             -InterfaceAlias 'vEthernet (WSL*' | Out-Null"
+        ))
     }
 
     fn boot(&self) -> anyhow::Result<()> {
@@ -294,6 +401,101 @@ impl Backend for Wsl {
             .stdin(Stdio::null())
             .output()
             .with_context(|| format!("Verkstead couldn't run {}", self.wsl.display()))
+    }
+
+    fn follow(
+        &self,
+        who: Inside,
+        argv: &[&str],
+        line: &mut dyn FnMut(&str),
+    ) -> anyhow::Result<ExitStatus> {
+        let mut child = self
+            .command(&Self::inside(who, argv))
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .with_context(|| format!("Verkstead couldn't run {}", self.wsl.display()))?;
+
+        // Both streams onto one channel, a thread reading each, so a line is
+        // handed on in the order the two were printed in near enough.
+        let (lines, said) = std::sync::mpsc::channel::<String>();
+
+        let readers: Vec<_> = [
+            child
+                .stdout
+                .take()
+                .map(|out| Box::new(out) as Box<dyn Read + Send>),
+            child
+                .stderr
+                .take()
+                .map(|err| Box::new(err) as Box<dyn Read + Send>),
+        ]
+        .into_iter()
+        .flatten()
+        .map(|stream| {
+            let lines = lines.clone();
+
+            std::thread::spawn(move || {
+                for read in BufReader::new(stream).split(b'\n') {
+                    let Ok(read) = read else { break };
+                    let _ = lines.send(String::from_utf8_lossy(&read).trim_end().to_owned());
+                }
+            })
+        })
+        .collect();
+
+        drop(lines);
+
+        for said in said {
+            line(&said);
+        }
+
+        for reader in readers {
+            let _ = reader.join();
+        }
+
+        child
+            .wait()
+            .with_context(|| format!("Verkstead couldn't run {}", self.wsl.display()))
+    }
+
+    fn write(&self, path: &str, bytes: &[u8], mode: u32) -> anyhow::Result<()> {
+        let mode = format!("{mode:o}");
+
+        let mut child = self
+            .command(&Self::inside(
+                Inside::Root,
+                &["install", "-D", "-m", &mode, "/dev/stdin", path],
+            ))
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .with_context(|| format!("Verkstead couldn't run {}", self.wsl.display()))?;
+
+        // From a thread, and whatever it comes to: a program that stopped
+        // reading has said why on its standard error, and its status is the
+        // verdict rather than the broken pipe this would see.
+        let mut stdin = child.stdin.take().expect("stdin is piped");
+        let bytes = bytes.to_vec();
+        let feeding = std::thread::spawn(move || {
+            let _ = stdin.write_all(&bytes);
+        });
+
+        let ran = child
+            .wait_with_output()
+            .with_context(|| format!("Verkstead couldn't run {}", self.wsl.display()))?;
+        let _ = feeding.join();
+
+        if !ran.status.success() {
+            bail!(
+                "Verkstead couldn't write {path} in the {BOX_NAME} distro: {}",
+                Said::of(&ran).why()
+            );
+        }
+
+        Ok(())
     }
 
     fn read(&self, path: &str) -> anyhow::Result<Vec<u8>> {
@@ -512,7 +714,7 @@ fn decoded(bytes: &[u8]) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::time::{Duration, Instant};
 
@@ -536,14 +738,19 @@ mod tests {
         Enable \"Virtual Machine Platform\" by running: wsl.exe --install --no-distribution\r\n\
         For information please visit https://aka.ms/enablevirtualization\r\n";
 
-    /// What a WSL that answers says for `--status`.
-    const ANSWERING_STATUS: &str = "Default Version: 2\r\n";
+    /// What a WSL that answers says for `--status`, as WSL 3.0.3 on that same
+    /// machine really printed it once it was on: the WSL 1 lines are about the
+    /// optional component `--install --no-distribution` leaves off.
+    const ANSWERING_STATUS: &str = "Default Version: 2\r\n\
+        WSL1 is not supported with your current machine configuration.\r\n\
+        Please enable the \"Windows Subsystem for Linux\" optional component to use WSL1.\r\n";
 
     /// What it lists with no distro at all, ending with -1.
-    const NO_DISTROS: &str = "Windows Subsystem for Linux has no installed distributions.\r\n\
+    pub(crate) const NO_DISTROS: &str = "Windows Subsystem for Linux has no installed distributions.\r\n\
         You can resolve this by installing a distribution with the instructions below:\r\n";
 
-    /// What it lists with the human's own distro beside Verkstead's.
+    /// What it lists with the human's own distro beside Verkstead's, in the
+    /// layout WSL 3.0.3 really lists in.
     fn listed(state: &str) -> String {
         format!(
             "  NAME         STATE           VERSION\r\n\
@@ -560,13 +767,13 @@ mod tests {
     /// **A shell script on Unix and a batch file on Windows**, so the suite runs
     /// on both: it is a program run by name either way, which is what the
     /// backend does with the real one.
-    struct Stub {
-        dir: tempfile::TempDir,
-        program: PathBuf,
+    pub(crate) struct Stub {
+        pub(crate) dir: tempfile::TempDir,
+        pub(crate) program: PathBuf,
     }
 
     impl Stub {
-        fn new() -> Stub {
+        pub(crate) fn new() -> Stub {
             let dir = tempfile::tempdir().unwrap();
 
             #[cfg(unix)]
@@ -615,14 +822,14 @@ mod tests {
         }
 
         /// The `n`th call prints `out` and ends with `code`.
-        fn answers(&self, n: usize, out: impl AsRef<[u8]>, code: i32) -> &Stub {
+        pub(crate) fn answers(&self, n: usize, out: impl AsRef<[u8]>, code: i32) -> &Stub {
             std::fs::write(self.dir.path().join(format!("out{n}")), out).unwrap();
             std::fs::write(self.dir.path().join(format!("code{n}")), code.to_string()).unwrap();
             self
         }
 
         /// Every call's arguments, in order.
-        fn calls(&self) -> Vec<Vec<String>> {
+        pub(crate) fn calls(&self) -> Vec<Vec<String>> {
             let written =
                 std::fs::read_to_string(self.dir.path().join("calls")).unwrap_or_default();
 
@@ -679,20 +886,33 @@ mod tests {
     }
 
     /// `text` as `wsl.exe` prints it by default.
-    fn utf16(text: &str) -> Vec<u8> {
+    pub(crate) fn utf16(text: &str) -> Vec<u8> {
         text.encode_utf16().flat_map(u16::to_le_bytes).collect()
     }
 
-    /// A backend over a stub `wsl` and a stub PowerShell.
+    /// A backend over a stub `wsl` and a stub PowerShell, its disk in the
+    /// `wsl` stub's directory.
     fn stubbed() -> (Wsl, Stub, Stub) {
         let wsl = Stub::new();
         let powershell = Stub::new();
 
-        (Wsl::at(&wsl.program, &powershell.program), wsl, powershell)
+        let backend = Wsl::at(&wsl.program, &powershell.program).on(wsl.dir.path().join("disk"));
+
+        (backend, wsl, powershell)
+    }
+
+    /// The same, with a distro that was made to the end.
+    fn made() -> (Wsl, Stub, Stub) {
+        let (backend, wsl, powershell) = stubbed();
+
+        std::fs::create_dir_all(backend.disk()).unwrap();
+        backend.made().unwrap();
+
+        (backend, wsl, powershell)
     }
 
     /// The arguments a command inside is run with, after the user.
-    fn inside(user: &str, argv: &[&str]) -> Vec<String> {
+    pub(crate) fn inside(user: &str, argv: &[&str]) -> Vec<String> {
         let mut arguments = vec![
             "-d",
             "Verkstead",
@@ -706,7 +926,7 @@ mod tests {
         arguments.into_iter().map(str::to_owned).collect()
     }
 
-    fn strings(arguments: &[&str]) -> Vec<String> {
+    pub(crate) fn strings(arguments: &[&str]) -> Vec<String> {
         arguments
             .iter()
             .map(|argument| argument.to_string())
@@ -812,7 +1032,7 @@ mod tests {
 
     /// The distro listed in `state`, with `wslinfo` inside saying `mode`.
     fn present(state: &str, mode: &str) -> (Probed, Vec<Vec<String>>) {
-        let (backend, wsl, _powershell) = stubbed();
+        let (backend, wsl, _powershell) = made();
         wsl.answers(1, utf16(ANSWERING_STATUS), 0)
             .answers(2, utf16(&listed(state)), 0)
             .answers(3, format!("{mode}\n"), 0);
@@ -842,7 +1062,7 @@ mod tests {
 
     #[test]
     fn a_wslinfo_that_does_not_know_the_question_is_nat() {
-        let (backend, wsl, _powershell) = stubbed();
+        let (backend, wsl, _powershell) = made();
         wsl.answers(1, utf16(ANSWERING_STATUS), 0)
             .answers(2, utf16(&listed("Running")), 0)
             .answers(3, "wslinfo: unknown option\n", 1);
@@ -858,7 +1078,7 @@ mod tests {
 
     #[test]
     fn a_list_in_utf8_reads_as_one_in_utf16_does() {
-        let (backend, wsl, _powershell) = stubbed();
+        let (backend, wsl, _powershell) = made();
         wsl.answers(1, ANSWERING_STATUS, 0)
             .answers(2, listed("Running"), 0)
             .answers(3, "mirrored\n", 0);
@@ -920,38 +1140,204 @@ mod tests {
     #[test]
     fn make_imports_the_image_with_its_disk_in_the_directory() {
         let (backend, wsl, _powershell) = stubbed();
-        wsl.answers(1, utf16("The operation completed successfully.\r\n"), 0);
+        wsl.answers(1, utf16(NO_DISTROS), -1).answers(
+            2,
+            utf16("The operation completed successfully.\r\n"),
+            0,
+        );
 
-        let disk = wsl.dir.path().join("wsl");
+        let disk = backend.disk().to_owned();
         let image = wsl.dir.path().join("nixos.wsl");
-        backend.make(&image, &disk).unwrap();
+        backend.make(&image).unwrap();
 
         assert!(disk.is_dir(), "the disk's directory is made");
         assert_eq!(
             wsl.calls(),
-            vec![strings(&[
-                "--import",
-                "Verkstead",
-                &disk.to_string_lossy(),
-                &image.to_string_lossy(),
-                "--version",
-                "2",
-            ])]
+            vec![
+                strings(&["--list", "--verbose"]),
+                strings(&[
+                    "--import",
+                    "Verkstead",
+                    &disk.to_string_lossy(),
+                    &image.to_string_lossy(),
+                    "--version",
+                    "2",
+                ])
+            ]
+        );
+    }
+
+    /// A distro already there is one a run stopped part way through imported,
+    /// and making it again is leaving it as it is.
+    #[test]
+    fn make_leaves_a_distro_that_is_already_there() {
+        let (backend, wsl, _powershell) = stubbed();
+        wsl.answers(1, utf16(&listed("Stopped")), 0);
+
+        backend.make(&wsl.dir.path().join("nixos.wsl")).unwrap();
+
+        assert_eq!(wsl.calls(), vec![strings(&["--list", "--verbose"])]);
+    }
+
+    /// And one that is there but was never made to the end is no Annex yet,
+    /// read without booting it.
+    #[test]
+    fn a_distro_never_made_to_the_end_is_none() {
+        let (backend, wsl, _powershell) = stubbed();
+        wsl.answers(1, utf16(ANSWERING_STATUS), 0)
+            .answers(2, utf16(&listed("Stopped")), 0);
+
+        assert_eq!(backend.probe(), Probed::NoDistro);
+        assert_eq!(wsl.calls().len(), 2, "nothing is run inside");
+
+        std::fs::create_dir_all(backend.disk()).unwrap();
+        backend.made().unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(backend.disk().join(MADE)).unwrap(),
+            super::super::flake::VERSION
+        );
+    }
+
+    #[test]
+    fn the_image_is_nixos_wsl_at_the_pinned_release() {
+        let image = Wsl::here().image();
+
+        assert_eq!(
+            image.url,
+            format!(
+                "https://github.com/nix-community/NixOS-WSL/releases/download/{}/nixos.wsl",
+                super::super::flake::NIXOS_WSL
+            )
+        );
+        assert_eq!(image.checksum, format!("{}.sha256", image.url));
+        assert_eq!(image.file, "nixos.wsl");
+    }
+
+    /// The firewall is opened under NAT where the rule is not there yet, and
+    /// left alone under mirrored networking or where it is.
+    #[test]
+    fn the_firewall_is_opened_once_and_only_under_nat() {
+        let (backend, wsl, powershell) = stubbed();
+        wsl.answers(1, "nat\n", 0);
+
+        let opening = backend.opening(8423).expect("a rule to add");
+
+        assert!(
+            opening.starts_with("New-NetFirewallRule -Name 'Verkstead-Annex-8423' "),
+            "{opening}"
+        );
+        assert!(opening.contains("-LocalPort 8423"), "{opening}");
+        assert!(
+            opening.contains("-InterfaceAlias 'vEthernet (WSL*'"),
+            "{opening}"
+        );
+        assert_eq!(
+            wsl.calls(),
+            vec![inside("root", &["wslinfo", "--networking-mode"])]
+        );
+        assert!(
+            powershell.calls()[0]
+                .iter()
+                .any(|argument| argument
+                    .contains("Get-NetFirewallRule -Name 'Verkstead-Annex-8423'")),
+            "{:?}",
+            powershell.calls()
+        );
+
+        let (backend, wsl, powershell) = stubbed();
+        wsl.answers(1, "nat\n", 0);
+        powershell.answers(1, "present\r\n", 0);
+
+        assert_eq!(backend.opening(8423), None, "the rule is there");
+
+        let (backend, wsl, powershell) = stubbed();
+        wsl.answers(1, "mirrored\n", 0);
+
+        assert_eq!(backend.opening(8423), None, "mirrored has no adapter");
+        assert!(powershell.calls().is_empty(), "the firewall is not asked");
+    }
+
+    #[test]
+    fn write_installs_what_it_is_handed_as_root() {
+        let (backend, wsl, _powershell) = stubbed();
+
+        backend
+            .write(
+                "/var/lib/verkstead/secrets.yaml",
+                b"github_token: x\n",
+                0o600,
+            )
+            .unwrap();
+
+        assert_eq!(
+            wsl.calls(),
+            vec![inside(
+                "root",
+                &[
+                    "install",
+                    "-D",
+                    "-m",
+                    "600",
+                    "/dev/stdin",
+                    "/var/lib/verkstead/secrets.yaml"
+                ]
+            )]
+        );
+    }
+
+    #[test]
+    fn a_refused_write_says_what_it_was_told() {
+        let (backend, wsl, _powershell) = stubbed();
+        wsl.answers(
+            1,
+            "install: cannot create directory: Read-only file system\n",
+            1,
+        );
+
+        let refused = backend
+            .write("/etc/nixos/flake.nix", b"{ }", 0o644)
+            .unwrap_err();
+
+        assert!(
+            refused.to_string().contains("Read-only file system"),
+            "{refused}"
+        );
+    }
+
+    #[test]
+    fn follow_hands_on_every_line_and_ends_with_the_status() {
+        let (backend, wsl, _powershell) = stubbed();
+        wsl.answers(1, "building the system configuration...\nactivating\n", 4);
+
+        let mut lines = Vec::new();
+        let status = backend
+            .follow(Inside::Root, &["nixos-rebuild", "switch"], &mut |line| {
+                lines.push(line.to_owned())
+            })
+            .unwrap();
+
+        assert_eq!(status.code(), Some(4));
+        assert_eq!(
+            lines,
+            ["building the system configuration...", "activating"]
+        );
+        assert_eq!(
+            wsl.calls(),
+            vec![inside("root", &["nixos-rebuild", "switch"])]
         );
     }
 
     #[test]
     fn a_refused_import_says_what_wsl_said() {
         let (backend, wsl, _powershell) = stubbed();
-        wsl.answers(
-            1,
+        wsl.answers(1, utf16(NO_DISTROS), -1).answers(
+            2,
             utf16("A distribution with the supplied name already exists.\r\n"),
             -1,
         );
 
-        let refused = backend
-            .make(&wsl.dir.path().join("image"), &wsl.dir.path().join("wsl"))
-            .unwrap_err();
+        let refused = backend.make(&wsl.dir.path().join("image")).unwrap_err();
 
         assert_eq!(
             refused.to_string(),

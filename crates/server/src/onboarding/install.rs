@@ -80,7 +80,8 @@ use base64::Engine;
 use verkstead_render::{Dependency, Distro, InstallState, RunPhase, RunView};
 
 use super::{Machine, SHELL};
-use crate::annex::Probed;
+use crate::annex::flake::{self, Binary};
+use crate::annex::{Backend, Inside, Keeping, Probed, image};
 use crate::platform::Platform;
 use crate::remote::{Elevate, Raised};
 use crate::settings::Settings;
@@ -341,6 +342,18 @@ const VIRTUALIZATION_OFF: &str = "Virtualization is off in this PC's firmware se
 /// platform but Windows: the row is never drawn there.
 const NO_ANNEX: &str = "WSL is part of Windows, and this machine has no Annex to make.";
 
+/// And under one on a server with no identity of its own, which is a server
+/// with nothing to keep a box by — no served Verkstead is one.
+const NO_KEEPER: &str = "This Verkstead has no identity of its own, so it can't keep a distro.";
+
+/// How many of a rebuild's last lines a failed one leaves as the row's reason.
+const TAIL: usize = 12;
+
+/// Where the files the box is made of go in it — see
+/// [`crate::annex::flake::Written`].
+const NIXOS: &str = "/etc/nixos";
+const STATE: &str = "/var/lib/verkstead";
+
 /// How often the marker is glanced at while a dialog is up — see [`STARTED`].
 const GLANCE: Duration = Duration::from_millis(200);
 
@@ -474,6 +487,47 @@ struct Unit {
     /// [`crate::pipe::granted`], which is what makes a session started a minute
     /// later able to ask without anything having restarted.
     regrants: Option<String>,
+
+    /// And the step of making the Annex it is, where it is one: worked here
+    /// against the box rather than run as a line — see [`Making`].
+    making: Option<Making>,
+}
+
+/// One step of making the Annex, in the order a run takes them.
+///
+/// **Calls rather than lines.** Each is a download, a `wsl.exe` or a command
+/// inside the box that this process runs and watches — the status line is how
+/// far the download has got, and then what the rebuild last printed — so the
+/// unit's own line is empty, and only the firewall rule is ever raised.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Making {
+    /// The image, into the disk's directory, checked.
+    Download,
+
+    /// It imported as the box.
+    Import,
+
+    /// The Keeper's firewall opened to the box, raised — and nothing, where it
+    /// is open already or the box shares the Keeper's network.
+    Firewall,
+
+    /// The flake, its configuration and the Annex's settings written in.
+    Write,
+
+    /// And the box rebuilt onto them.
+    Rebuild,
+}
+
+/// What making the Annex works with, beside the run: the box, the Keeper it is
+/// made for, and the binary it is to run.
+#[derive(Debug, Clone)]
+struct Annexing {
+    annex: Arc<dyn Backend>,
+
+    /// `None` on a server with no identity — see [`NO_KEEPER`].
+    keeping: Option<Keeping>,
+
+    binary: Binary,
 }
 
 /// A run of units that stand or fall together.
@@ -588,12 +642,14 @@ impl Installer {
     /// thread's.
     ///
     /// `settings` is what a unit that lands in a directory writes `session_path`
-    /// to — see [`landing`].
+    /// to — see [`landing`] — and, with `keeping`, what the Annex a ticked WSL
+    /// row makes is told of its Keeper.
     pub(crate) fn start(
         &self,
         machine: &Machine,
         settings: &Settings,
         ticked: &[Dependency],
+        keeping: Option<Keeping>,
     ) -> Result<(), Refusal> {
         let mut held = self.run.lock().expect("the install run's lock");
 
@@ -627,8 +683,22 @@ impl Installer {
 
         let user = AsTheUser::of(machine);
         let settings = settings.clone();
+        let annexing = machine.annex.clone().map(|annex| Annexing {
+            annex,
+            keeping,
+            binary: Binary::from_env(),
+        });
 
-        std::thread::spawn(move || work(&run, &plan, escalation.as_ref(), &settings, &user));
+        std::thread::spawn(move || {
+            work(
+                &run,
+                &plan,
+                escalation.as_ref(),
+                &settings,
+                &user,
+                annexing.as_ref(),
+            )
+        });
 
         Ok(())
     }
@@ -826,6 +896,7 @@ fn work(
     escalation: &dyn Elevate,
     settings: &Settings,
     user: &AsTheUser,
+    annexing: Option<&Annexing>,
 ) {
     // The one directory a run makes, and it goes when the run does: what is in
     // it is the marker each raised unit touches, which is how the status line
@@ -860,17 +931,31 @@ fn work(
             continue;
         }
 
-        let landed = match unit.how {
-            How::Raised => {
-                let marker = marking
-                    .as_ref()
-                    .map(|dir| dir.path().join(format!("{STARTED}-{number}")));
+        let marker = marking
+            .as_ref()
+            .map(|dir| dir.path().join(format!("{STARTED}-{number}")));
 
+        let landed = match (unit.making, unit.how) {
+            (Some(Making::Firewall), _) => opened(
+                run,
+                plan.platform,
+                unit,
+                marker.as_deref(),
+                escalation,
+                annexing,
+            ),
+
+            (Some(making), _) => {
+                run.running(unit);
+                made(run, making, annexing, settings)
+            }
+
+            (None, How::Raised) => {
                 run.asking(unit);
                 raised(run, plan.platform, unit, marker.as_deref(), escalation)
             }
 
-            How::AsTheUser => {
+            (None, How::AsTheUser) => {
                 run.running(unit);
                 as_the_user(&unit.line, user)
             }
@@ -938,6 +1023,220 @@ fn as_the_user(line: &str, user: &AsTheUser) -> Progress {
         Ok(told) => Progress::Failed(first_line(&told.stderr)),
         Err(error) => Progress::Failed(error.to_string()),
     }
+}
+
+/// The Keeper's firewall opened to the box, raised — where the box says there is
+/// anything to open.
+///
+/// **Asked of the box after the import**, never planned ahead of it: the
+/// adapter the rule is on is there only once the WSL machine has run, and
+/// whether the box shares the Keeper's network at all is the box's to say. A
+/// rule already there and a network shared are nothing to raise, so a machine
+/// that needs neither never sees a second dialog.
+fn opened(
+    run: &Arc<Run>,
+    platform: Platform,
+    unit: &Unit,
+    marker: Option<&Path>,
+    escalation: &dyn Elevate,
+    annexing: Option<&Annexing>,
+) -> Progress {
+    let Some(annexing) = annexing else {
+        return Progress::Failed(NO_ANNEX.to_owned());
+    };
+
+    let Some(keeping) = annexing.keeping.as_ref() else {
+        return Progress::Failed(NO_KEEPER.to_owned());
+    };
+
+    run.running(unit);
+
+    match annexing.annex.opening(keeping.port) {
+        None => Progress::Installed,
+        Some(line) => {
+            let unit = Unit {
+                line,
+                ..unit.clone()
+            };
+
+            run.asking(&unit);
+            raised(run, platform, &unit, marker, escalation)
+        }
+    }
+}
+
+/// One step of making the Annex, worked against the box — see [`Making`].
+///
+/// What it failed with is the row's reason as it stands, every cause under it
+/// said: a download that stopped part way is worth saying why.
+fn made(
+    run: &Arc<Run>,
+    making: Making,
+    annexing: Option<&Annexing>,
+    settings: &Settings,
+) -> Progress {
+    let Some(annexing) = annexing else {
+        return Progress::Failed(NO_ANNEX.to_owned());
+    };
+
+    let annex = annexing.annex.as_ref();
+
+    let done = match making {
+        Making::Download => {
+            let image = annex.image();
+
+            image::fetched(&image, annex.disk(), &mut |so_far, whole| {
+                run.installing(&downloading(image.name, so_far, whole))
+            })
+            .map(drop)
+        }
+
+        Making::Import => annex.make(&annex.disk().join(annex.image().file)),
+        Making::Write => written(annexing, settings, &run.hostname),
+        Making::Rebuild => rebuilt(run, annex),
+
+        // Raised, and so never here — see [`opened`].
+        Making::Firewall => Ok(()),
+    };
+
+    match done {
+        Ok(()) => Progress::Installed,
+        Err(error) => Progress::Failed(format!("{error:#}")),
+    }
+}
+
+/// What the status line says while the image downloads.
+fn downloading(name: &str, so_far: u64, whole: Option<u64>) -> String {
+    const MB: u64 = 1_000_000;
+
+    match whole {
+        Some(whole) => format!("Downloading {name}… {} of {} MB", so_far / MB, whole / MB),
+        None => format!("Downloading {name}… {} MB", so_far / MB),
+    }
+}
+
+/// The flake, its configuration and the Annex's two settings files, written
+/// into the box as its root — and the binary beside the flake, where this is a
+/// development build that names one (see [`Binary::Copied`]).
+///
+/// **Through the box rather than through `\\wsl$`**, so what is written is the
+/// box's root's and not this machine's user's. The two settings files go to
+/// the module's Data Directory before its service user exists, and the
+/// rebuild's service start is what hands them over — see [`rebuilt`].
+fn written(annexing: &Annexing, settings: &Settings, hostname: &str) -> anyhow::Result<()> {
+    let Some(keeping) = annexing.keeping.as_ref() else {
+        anyhow::bail!("{NO_KEEPER}");
+    };
+
+    let config = settings.config();
+    let secrets = settings.secrets();
+
+    let files = flake::written(
+        &flake::Keeper {
+            hostname,
+            kept_by: &keeping.kept_by,
+            git_author: config.git_author(),
+            github_token: secrets.github_token(),
+        },
+        &annexing.binary,
+    )?;
+
+    let annex = annexing.annex.as_ref();
+
+    annex.write(&format!("{NIXOS}/flake.nix"), files.flake.as_bytes(), 0o644)?;
+    annex.write(
+        &format!("{NIXOS}/configuration.nix"),
+        files.configuration.as_bytes(),
+        0o644,
+    )?;
+
+    if let Binary::Copied(binary) = &annexing.binary {
+        let bytes = std::fs::read(binary).map_err(|error| {
+            anyhow::anyhow!(
+                "Verkstead couldn't read {}, which {} names: {error}",
+                binary.display(),
+                flake::ANNEX_BINARY,
+            )
+        })?;
+
+        annex.write(&format!("{NIXOS}/{}", flake::COPIED_BINARY), &bytes, 0o755)?;
+    }
+
+    annex.write(
+        &format!("{STATE}/config.yaml"),
+        files.config.as_bytes(),
+        0o640,
+    )?;
+    annex.write(
+        &format!("{STATE}/secrets.yaml"),
+        files.secrets.as_bytes(),
+        0o600,
+    )?;
+
+    Ok(())
+}
+
+/// The box rebuilt onto what [`written`] put in it, each line it prints moving
+/// the status line on, and the box then said to be made.
+///
+/// **Flakes said on the command line**, because the configuration that turns
+/// them on is the one being switched to: the image's own `nix` may not have
+/// them on for this first rebuild.
+///
+/// **And the Data Directory handed to the service user** once the rebuild has
+/// made one: systemd hands over a `StateDirectory` it finds owned by somebody
+/// else when the service starts, and this says so outright rather than
+/// leaving `secrets.yaml` to that.
+///
+/// A rebuild that failed leaves its last lines as the reason — what `nix` says
+/// about a build that failed is at the end, and it is what anybody would look
+/// for.
+fn rebuilt(run: &Arc<Run>, annex: &dyn Backend) -> anyhow::Result<()> {
+    let flake = format!("{NIXOS}#{}", flake::CONFIGURATION);
+    let mut tail = std::collections::VecDeque::with_capacity(TAIL);
+
+    let status = annex.follow(
+        Inside::Root,
+        &[
+            "NIX_CONFIG=experimental-features = nix-command flakes",
+            "nixos-rebuild",
+            "switch",
+            "--flake",
+            &flake,
+        ],
+        &mut |line| {
+            let line = line.trim();
+
+            if line.is_empty() {
+                return;
+            }
+
+            run.installing(line);
+
+            if tail.len() == TAIL {
+                tail.pop_front();
+            }
+            tail.push_back(line.to_owned());
+        },
+    )?;
+
+    if !status.success() {
+        match tail.is_empty() {
+            true => anyhow::bail!("nixos-rebuild failed and said nothing."),
+            false => anyhow::bail!("{}", Vec::from(tail).join("\n")),
+        }
+    }
+
+    let handed = annex.run(Inside::Root, &["chown", "-R", "verkstead:verkstead", STATE])?;
+
+    if !handed.status.success() {
+        anyhow::bail!(
+            "Verkstead couldn't hand {STATE} to the service: {}",
+            first_line(&handed.stderr)
+        );
+    }
+
+    annex.made()
 }
 
 /// The directory `unit` installed into goes on `session_path`, where it really
@@ -1103,10 +1402,17 @@ fn plan(machine: &Machine, ticked: &[Dependency]) -> Plan {
 /// it.
 ///
 /// **A restart owed is nothing to run**: it is the human's, so the row goes on
-/// to the hint screen, which tells them. **WSL answering is nothing to run
-/// either, yet**: the Annex is made by a run of its own. And virtualization off
-/// is a row the page draws refused — one carried here anyway is the hint
-/// screen's, with the reason.
+/// to the hint screen, which tells them. And virtualization off is a row the
+/// page draws refused — one carried here anyway is the hint screen's, with the
+/// reason.
+///
+/// **WSL answering with no Annex is the Annex made** — see [`Making`]: the
+/// image downloaded, imported, the firewall opened, the files written and the
+/// box rebuilt, in one chain, the row the rebuild's. Every step but the
+/// firewall's runs as the user, the box being theirs, and a step that finds
+/// its work done already — an image downloaded, a box imported — is a step
+/// that does nothing, so a press after a Keeper stopped part way picks the run
+/// up where it was.
 fn annexing(machine: &Machine, plan: &mut Plan) {
     let Some(annex) = machine.annex() else {
         plan.beyond.push((Dependency::Wsl, NO_ANNEX.to_owned()));
@@ -1130,6 +1436,44 @@ fn annexing(machine: &Machine, plan: &mut Plan) {
                     lands: None,
                     chain: Some(Chain::Wsl),
                     regrants: None,
+                    making: None,
+                }));
+        }
+
+        Probed::NoDistro => {
+            const STEPS: &[(Making, How, &str)] = &[
+                (Making::Download, How::AsTheUser, "Downloading NixOS-WSL…"),
+                (
+                    Making::Import,
+                    How::AsTheUser,
+                    "Importing the Verkstead distro…",
+                ),
+                (
+                    Making::Firewall,
+                    How::Raised,
+                    "Opening the firewall to the distro…",
+                ),
+                (
+                    Making::Write,
+                    How::AsTheUser,
+                    "Writing the distro's configuration…",
+                ),
+                (Making::Rebuild, How::AsTheUser, "Rebuilding the distro…"),
+            ];
+
+            plan.units
+                .extend(STEPS.iter().map(|(making, how, doing)| Unit {
+                    line: String::new(),
+                    covers: match making {
+                        Making::Rebuild => vec![Dependency::Wsl],
+                        _ => Vec::new(),
+                    },
+                    doing: (*doing).to_owned(),
+                    how: *how,
+                    lands: None,
+                    chain: Some(Chain::Wsl),
+                    regrants: None,
+                    making: Some(*making),
                 }));
         }
 
@@ -1137,7 +1481,7 @@ fn annexing(machine: &Machine, plan: &mut Plan) {
             .beyond
             .push((Dependency::Wsl, VIRTUALIZATION_OFF.to_owned())),
 
-        Probed::NeedsRestart | Probed::NoDistro | Probed::Present { .. } => {}
+        Probed::NeedsRestart | Probed::Present { .. } => {}
     }
 }
 
@@ -1220,6 +1564,7 @@ fn packages(machine: &Machine, ticked: &[Dependency], packager: Packager) -> Pla
         lands: None,
         chain: None,
         regrants: None,
+        making: None,
     });
 
     // And the vendors' own installers after it, one unit apiece and none of them
@@ -1257,6 +1602,7 @@ fn vendors_own(row: Dependency, vendor: Vendor, lands: PathBuf) -> Unit {
         lands: Some(lands),
         chain: None,
         regrants: None,
+        making: None,
     }
 }
 
@@ -1370,6 +1716,7 @@ fn getting(machine: &Machine, ticked: &[Dependency]) -> Getting {
             lands: None,
             chain: Some(Chain::Homebrew),
             regrants: None,
+            making: None,
         },
         Unit {
             line: HOMEBREW.to_owned(),
@@ -1379,6 +1726,7 @@ fn getting(machine: &Machine, ticked: &[Dependency]) -> Getting {
             lands: None,
             chain: Some(Chain::Homebrew),
             regrants: None,
+            making: None,
         },
     ])
 }
@@ -1413,6 +1761,7 @@ impl Brew {
             lands: None,
             chain: Some(Chain::Homebrew),
             regrants: None,
+            making: None,
         }
     }
 }
@@ -1586,6 +1935,7 @@ fn ghs_release(home: &Path) -> Unit {
         lands: Some(home.join(LOCAL_BIN)),
         chain: None,
         regrants: None,
+        making: None,
     }
 }
 
@@ -1639,6 +1989,7 @@ fn windows(machine: &Machine, ticked: &[Dependency]) -> Plan {
                     lands: None,
                     chain: Some(Chain::Node),
                     regrants: None,
+                    making: None,
                 });
             }
 
@@ -1692,6 +2043,7 @@ fn winget(covers: Vec<Dependency>, id: &str, chain: Option<Chain>) -> Unit {
         lands: None,
         chain,
         regrants: None,
+        making: None,
     }
 }
 
@@ -1731,6 +2083,7 @@ fn the_account(machine: &Machine) -> Result<Unit, String> {
         lands: None,
         chain: None,
         regrants: Some(account),
+        making: None,
     })
 }
 
@@ -2543,6 +2896,7 @@ mod tests {
                 home: None,
                 path: OsString::from(dir.path().as_os_str()),
             },
+            None,
         );
 
         let (view, rows) = run.reading();
@@ -2880,17 +3234,331 @@ mod tests {
         );
     }
 
-    /// A restart owed, and WSL answering with no Annex yet, are nothing for
-    /// this run to do: the first is the human's and the hint screen says so,
-    /// and the second is the Annex's own run.
+    /// A restart owed is nothing for this run to do: it is the human's, and the
+    /// hint screen says so.
     #[test]
-    fn a_ticked_wsl_row_past_turning_it_on_raises_nothing() {
-        for probed in [Probed::NeedsRestart, Probed::NoDistro] {
-            let plan = plan(&annexed(probed), &[Dependency::Wsl]);
+    fn a_ticked_wsl_row_owing_a_restart_raises_nothing() {
+        let plan = plan(&annexed(Probed::NeedsRestart), &[Dependency::Wsl]);
 
-            assert!(plan.units.is_empty(), "{probed:?}: {plan:?}");
-            assert!(plan.beyond.is_empty(), "{probed:?}: {plan:?}");
+        assert!(plan.units.is_empty(), "{plan:?}");
+        assert!(plan.beyond.is_empty(), "{plan:?}");
+    }
+
+    /// WSL answering with no Annex is the Annex made, after every other row:
+    /// downloaded, imported, the firewall opened, written and rebuilt, in that
+    /// order and standing together. The firewall alone is raised, and the row
+    /// is the rebuild's.
+    #[test]
+    fn a_ticked_wsl_row_with_no_annex_makes_one() {
+        let plan = plan(
+            &annexed(Probed::NoDistro),
+            &[Dependency::Wsl, Dependency::Git],
+        );
+
+        assert!(plan.beyond.is_empty(), "{plan:?}");
+
+        let [git, making @ ..] = plan.units.as_slice() else {
+            panic!("git, and the Annex made: {plan:?}");
+        };
+
+        assert_eq!(git.covers, [Dependency::Git]);
+
+        let steps: Vec<(Option<Making>, How, &[Dependency])> = making
+            .iter()
+            .map(|unit| (unit.making, unit.how, unit.covers.as_slice()))
+            .collect();
+
+        assert_eq!(
+            steps,
+            [
+                (Some(Making::Download), How::AsTheUser, &[][..]),
+                (Some(Making::Import), How::AsTheUser, &[][..]),
+                (Some(Making::Firewall), How::Raised, &[][..]),
+                (Some(Making::Write), How::AsTheUser, &[][..]),
+                (
+                    Some(Making::Rebuild),
+                    How::AsTheUser,
+                    &[Dependency::Wsl][..]
+                ),
+            ]
+        );
+
+        for unit in making {
+            assert_eq!(unit.chain, Some(Chain::Wsl), "{unit:?}");
         }
+    }
+
+    /// The image a suite's box downloads, and the Keeper it is made for.
+    const IMAGE: &[u8] = b"a NixOS-WSL image, near enough";
+
+    /// A box over task 01's stub `wsl.exe` and stub PowerShell, its image
+    /// served from this suite's own server.
+    struct Stubbed {
+        wsl: crate::annex::wsl::tests::Stub,
+        powershell: crate::annex::wsl::tests::Stub,
+        annex: Arc<crate::annex::wsl::Wsl>,
+        _serving: crate::annex::image::serving::Serving,
+    }
+
+    impl Stubbed {
+        /// Serving `image` as the release's, whose checksum is [`IMAGE`]'s.
+        fn serving(image: &[u8]) -> Stubbed {
+            use crate::annex::image::serving::{Serving, summed};
+
+            let wsl = crate::annex::wsl::tests::Stub::new();
+            let powershell = crate::annex::wsl::tests::Stub::new();
+
+            let serving = Serving::of(&[
+                (&format!("{}/nixos.wsl", flake::NIXOS_WSL), image.to_vec()),
+                (
+                    &format!("{}/nixos.wsl.sha256", flake::NIXOS_WSL),
+                    summed(IMAGE, "nixos.wsl"),
+                ),
+            ]);
+
+            let annex = Arc::new(
+                crate::annex::wsl::Wsl::at(&wsl.program, &powershell.program)
+                    .on(wsl.dir.path().join("disk"))
+                    .downloading_from(serving.base.clone()),
+            );
+
+            Stubbed {
+                wsl,
+                powershell,
+                annex,
+                _serving: serving,
+            }
+        }
+
+        /// A ticked WSL row with no Annex worked through to its end over the
+        /// box, raising through `escalation`: the run, and the row.
+        fn made(&self, escalation: &dyn Elevate) -> (RunView, InstallState) {
+            let plan = plan(&annexed(Probed::NoDistro), &[Dependency::Wsl]);
+            let run = Arc::new(Run::of(&plan, "ada-pc"));
+
+            let annexing = Annexing {
+                annex: self.annex.clone(),
+                keeping: Some(Keeping {
+                    kept_by: crate::settings::KeptBy::of(
+                        "86f1933fecb070cbee865fbb84819d14",
+                        "3F:0A:9C",
+                    ),
+                    port: 8423,
+                }),
+                binary: Binary::Released,
+            };
+
+            work(
+                &run,
+                &plan,
+                escalation,
+                &nowhere(),
+                &as_nobody(),
+                Some(&annexing),
+            );
+
+            let (view, rows) = run.reading();
+            let [(Dependency::Wsl, row)] = rows.as_slice() else {
+                panic!("the WSL row: {rows:?}");
+            };
+
+            (view, row.clone())
+        }
+
+        fn disk(&self) -> PathBuf {
+            self.wsl.dir.path().join("disk")
+        }
+    }
+
+    /// An escalation that allows everything, and writes down what it raised.
+    #[derive(Debug, Default)]
+    struct Allowing {
+        raised: Mutex<Vec<Vec<String>>>,
+    }
+
+    impl Elevate for Allowing {
+        fn raise(&self, command: &[String]) -> Raised {
+            self.raised.lock().unwrap().push(command.to_vec());
+            Raised::Done
+        }
+    }
+
+    /// The commands a write of each of the four files is, in order.
+    fn writes() -> Vec<Vec<String>> {
+        use crate::annex::wsl::tests::inside;
+
+        [
+            ("644", "/etc/nixos/flake.nix"),
+            ("644", "/etc/nixos/configuration.nix"),
+            ("640", "/var/lib/verkstead/config.yaml"),
+            ("600", "/var/lib/verkstead/secrets.yaml"),
+        ]
+        .iter()
+        .map(|(mode, path)| inside("root", &["install", "-D", "-m", mode, "/dev/stdin", path]))
+        .collect()
+    }
+
+    /// The whole of it over the stub: the image downloaded and checked, the
+    /// box imported, the firewall rule raised, the four files written as root,
+    /// the box rebuilt with flakes said, its Data Directory handed over, and
+    /// the box said to be made — and the row lands.
+    #[test]
+    fn the_annex_is_made_over_the_stub_and_the_row_lands() {
+        use crate::annex::wsl::tests::{NO_DISTROS, inside, strings, utf16};
+
+        let stubbed = Stubbed::serving(IMAGE);
+        stubbed
+            .wsl
+            .answers(1, utf16(NO_DISTROS), -1)
+            .answers(2, utf16("The operation completed successfully.\r\n"), 0)
+            .answers(3, "nat\n", 0)
+            .answers(8, "building the system configuration...\nactivating\n", 0);
+
+        let allowing = Allowing::default();
+        let (view, row) = stubbed.made(&allowing);
+
+        assert_eq!(view.phase, RunPhase::Done);
+        assert_eq!(row, InstallState::Idle, "{view:?}");
+
+        let disk = stubbed.disk();
+        assert_eq!(std::fs::read(disk.join("nixos.wsl")).unwrap(), IMAGE);
+        assert!(disk.join("made").is_file(), "the box is said to be made");
+
+        let mut expected = vec![
+            strings(&["--list", "--verbose"]),
+            strings(&[
+                "--import",
+                "Verkstead",
+                &disk.to_string_lossy(),
+                &disk.join("nixos.wsl").to_string_lossy(),
+                "--version",
+                "2",
+            ]),
+            inside("root", &["wslinfo", "--networking-mode"]),
+        ];
+        expected.extend(writes());
+        expected.push(inside(
+            "root",
+            &[
+                "NIX_CONFIG=experimental-features = nix-command flakes",
+                "nixos-rebuild",
+                "switch",
+                "--flake",
+                "/etc/nixos#verkstead",
+            ],
+        ));
+        expected.push(inside(
+            "root",
+            &["chown", "-R", "verkstead:verkstead", "/var/lib/verkstead"],
+        ));
+        assert_eq!(stubbed.wsl.calls(), expected);
+
+        // The firewall asked about, and then the rule raised.
+        assert_eq!(stubbed.powershell.calls().len(), 1);
+
+        let raised = allowing.raised.lock().unwrap();
+        let [command] = raised.as_slice() else {
+            panic!("the firewall rule alone is raised: {raised:?}");
+        };
+        let script = decoded(command.last().unwrap());
+        assert!(
+            script.contains("New-NetFirewallRule -Name 'Verkstead-Annex-8423'"),
+            "{script}"
+        );
+    }
+
+    /// Under mirrored networking there is no adapter to open, so nothing is
+    /// raised at all.
+    #[test]
+    fn under_mirrored_networking_the_annex_is_made_with_no_dialog() {
+        use crate::annex::wsl::tests::{NO_DISTROS, utf16};
+
+        let stubbed = Stubbed::serving(IMAGE);
+        stubbed
+            .wsl
+            .answers(1, utf16(NO_DISTROS), -1)
+            .answers(3, "mirrored\n", 0);
+
+        let allowing = Allowing::default();
+        let (_, row) = stubbed.made(&allowing);
+
+        assert_eq!(row, InstallState::Idle);
+        assert!(allowing.raised.lock().unwrap().is_empty());
+        assert!(stubbed.powershell.calls().is_empty());
+    }
+
+    /// An image that does not match the release's checksum fails the row with
+    /// the reason, and nothing is imported.
+    #[test]
+    fn an_image_that_fails_its_checksum_fails_the_row() {
+        let stubbed = Stubbed::serving(b"something else entirely");
+
+        let (view, row) = stubbed.made(&Allowing::default());
+
+        assert_eq!(view.phase, RunPhase::Done);
+        let InstallState::Failed { why } = row else {
+            panic!("the row failed: {row:?}");
+        };
+        assert!(why.contains("didn't match its checksum"), "{why}");
+        assert!(stubbed.wsl.calls().is_empty(), "nothing is imported");
+    }
+
+    /// An import WSL refuses fails the row in WSL's own words, and nothing
+    /// after it runs.
+    #[test]
+    fn a_failed_import_fails_the_row_with_what_wsl_said() {
+        use crate::annex::wsl::tests::{NO_DISTROS, utf16};
+
+        let stubbed = Stubbed::serving(IMAGE);
+        stubbed.wsl.answers(1, utf16(NO_DISTROS), -1).answers(
+            2,
+            utf16("The system cannot find the file specified.\r\n"),
+            -1,
+        );
+
+        let allowing = Allowing::default();
+        let (_, row) = stubbed.made(&allowing);
+
+        assert_eq!(
+            row,
+            InstallState::Failed {
+                why: "The system cannot find the file specified.".to_owned()
+            }
+        );
+        assert_eq!(stubbed.wsl.calls().len(), 2);
+        assert!(allowing.raised.lock().unwrap().is_empty());
+    }
+
+    /// A rebuild that fails leaves its last lines as the row's reason, and the
+    /// box is not said to be made.
+    #[test]
+    fn a_failed_rebuild_fails_the_row_with_its_last_lines() {
+        use crate::annex::wsl::tests::{NO_DISTROS, utf16};
+
+        let stubbed = Stubbed::serving(IMAGE);
+        stubbed
+            .wsl
+            .answers(1, utf16(NO_DISTROS), -1)
+            .answers(3, "mirrored\n", 0)
+            .answers(
+                8,
+                "building the system configuration...\n\
+                 error: builder for '/nix/store/abc-verkstead.drv' failed with exit code 1\n",
+                1,
+            );
+
+        let (_, row) = stubbed.made(&Allowing::default());
+
+        assert_eq!(
+            row,
+            InstallState::Failed {
+                why: "building the system configuration...\n\
+                      error: builder for '/nix/store/abc-verkstead.drv' failed with exit code 1"
+                    .to_owned()
+            }
+        );
+        assert!(!stubbed.disk().join("made").exists());
+        assert_eq!(stubbed.wsl.calls().len(), 8, "nothing is handed over");
     }
 
     /// Virtualization off is drawn refused, so a press carrying the row
@@ -2925,7 +3593,12 @@ mod tests {
         let installer = Installer::raising(None);
 
         installer
-            .start(&annexed(Probed::NoWsl), &nowhere(), &[Dependency::Wsl])
+            .start(
+                &annexed(Probed::NoWsl),
+                &nowhere(),
+                &[Dependency::Wsl],
+                None,
+            )
             .unwrap();
 
         let (run, rows) = installer.reading().expect("a press makes a run");
@@ -3081,7 +3754,7 @@ mod tests {
         let installer = Installer::raising(None);
 
         installer
-            .start(&machine(Distro::Ubuntu), &nowhere(), TICKED)
+            .start(&machine(Distro::Ubuntu), &nowhere(), TICKED, None)
             .unwrap();
 
         let (run, rows) = installer.reading().expect("a press makes a run");
@@ -3121,7 +3794,7 @@ mod tests {
             cancel: run.clone(),
         };
 
-        work(&run, &plan, &escalation, &nowhere(), &as_nobody());
+        work(&run, &plan, &escalation, &nowhere(), &as_nobody(), None);
 
         assert_eq!(
             escalation.raised.lock().unwrap().len(),
@@ -3163,7 +3836,7 @@ mod tests {
         let plan = plan(&machine(Distro::Ubuntu), TICKED);
         let run = Arc::new(Run::of(&plan, "a-machine"));
 
-        work(&run, &plan, &Refusing, &nowhere(), &as_nobody());
+        work(&run, &plan, &Refusing, &nowhere(), &as_nobody(), None);
 
         let (view, rows) = run.reading();
 
@@ -3212,6 +3885,7 @@ mod tests {
             lands: None,
             chain: None,
             regrants: None,
+            making: None,
         }
     }
 

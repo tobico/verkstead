@@ -2707,7 +2707,10 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
     .probing(discovery::Probe::of_this_tailnet(tailscale))
     // And the Annex Forward's handle, which linking an Annex points — see
     // [`device::Devices::keep`].
-    .forwarding_for_the_annex(annex_pointing.clone());
+    .forwarding_for_the_annex(annex_pointing.clone())
+    // And the port this start bound its peer listener on, which an Annex it
+    // makes is told to dial it at — see [`device::Devices::keeping`].
+    .peering_on(peer.address().port());
 
     // Which is where the changeover above is picked up. A start that re-issued the
     // certificate owes every member the new fingerprint, and until they hold it

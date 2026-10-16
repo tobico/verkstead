@@ -1194,10 +1194,14 @@ impl Onboarding {
     ///
     /// **And while one is going**, which is the same press twice — see
     /// [`Refusal::Going`].
+    ///
+    /// `keeping` is this device as the Annex a ticked WSL row makes is told of
+    /// it, and `None` on a server with no identity to keep one by.
     pub(crate) async fn install(
         &self,
         settings: &Settings,
         ticked: Vec<Dependency>,
+        keeping: Option<annex::Keeping>,
     ) -> Result<(), Refusal> {
         if !self.wizarding() {
             return Err(Refusal::Over);
@@ -1215,7 +1219,7 @@ impl Onboarding {
         tokio::task::spawn_blocking(move || {
             installing
                 .installer
-                .start(&installing.machine, &settings, &ticked)
+                .start(&installing.machine, &settings, &ticked, keeping)
         })
         .await
         .unwrap_or(Ok(()))

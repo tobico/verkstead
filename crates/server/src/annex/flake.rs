@@ -49,7 +49,7 @@ pub const ANNEX_BINARY: &str = "VERKSTEAD_ANNEX_BINARY";
 pub const REPOS: &str = "/srv/repos";
 
 /// The Keeper's own version, which the box is pinned to.
-const VERSION: &str = env!("CARGO_PKG_VERSION");
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// The system the box is, and the release asset built for it.
 const SYSTEM: &str = "x86_64-linux";

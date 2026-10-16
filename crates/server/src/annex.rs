@@ -16,9 +16,10 @@
 
 use std::net::SocketAddr;
 use std::path::Path;
-use std::process::Output;
+use std::process::{ExitStatus, Output};
 
 pub mod flake;
+pub mod image;
 pub mod wsl;
 
 /// The port an Annex's **Peer Listener** binds, never the Keeper's 8423.
@@ -52,10 +53,13 @@ pub enum Probed {
     /// is turned on there.
     VirtualizationOff,
 
-    /// It answers, and there is no box of Verkstead's own in it.
+    /// It answers, and there is no box of Verkstead's own in it — or one that
+    /// was imported and never finished being made, which a Keeper stopped part
+    /// way through the install run leaves: a box for the next run to pick up
+    /// rather than one to boot. See [`Backend::made`].
     NoDistro,
 
-    /// The box is there.
+    /// The box is there, and was made to the end.
     Present {
         /// Whether it is up at this moment.
         running: bool,
@@ -112,6 +116,31 @@ pub struct Step {
     pub doing: &'static str,
 }
 
+/// What the Keeper is, as far as making its Annex goes: who the Annex is kept
+/// by, and the port of the Keeper's own peer listener, which the box dials.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Keeping {
+    pub kept_by: crate::settings::KeptBy,
+    pub port: u16,
+}
+
+/// Where the image a box is made from is downloaded, and what it is checked
+/// against.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Image {
+    /// The image itself.
+    pub url: String,
+
+    /// A file holding its SHA-256, the way `sha256sum` prints one.
+    pub checksum: String,
+
+    /// What it is called once it is in [`Backend::disk`].
+    pub file: &'static str,
+
+    /// And what the status line calls it while it downloads.
+    pub name: &'static str,
+}
+
 /// What a Keeper asks of its Annex's box.
 pub trait Backend: std::fmt::Debug + Send + Sync {
     /// The machine's state — see [`Probed`].
@@ -125,8 +154,27 @@ pub trait Backend: std::fmt::Debug + Send + Sync {
     /// [`crate::remote::Elevate`]. The restart after them is the human's.
     fn turning_on(&self) -> &'static [Step];
 
-    /// Import `image` as the box, its disk in `disk`.
-    fn make(&self, image: &Path, disk: &Path) -> anyhow::Result<()>;
+    /// The image the box is made from.
+    fn image(&self) -> Image;
+
+    /// The directory of the Keeper's machine the box's disk is kept in, and
+    /// its image downloaded into.
+    fn disk(&self) -> &Path;
+
+    /// Import `image` as the box, its disk in [`Backend::disk`]. A box that is
+    /// already there is left as it is, which is what a run picked up after a
+    /// Keeper stopped part way through it finds.
+    fn make(&self, image: &Path) -> anyhow::Result<()>;
+
+    /// Say the box was made to the end: written and rebuilt. Until this, a box
+    /// that is there probes as [`Probed::NoDistro`].
+    fn made(&self) -> anyhow::Result<()>;
+
+    /// The command that lets the box reach its Keeper's peer listener on
+    /// `port` through the Keeper's firewall, to be raised as an administrator
+    /// — or nothing, where nothing stands between them or the rule is already
+    /// there.
+    fn opening(&self, port: u16) -> Option<String>;
 
     /// Start the box and keep it up until [`Backend::terminate`].
     fn boot(&self) -> anyhow::Result<()>;
@@ -137,6 +185,19 @@ pub trait Backend: std::fmt::Debug + Send + Sync {
     /// Run `argv` inside the box as `who`, to its end. A command that ran and
     /// failed is an `Ok` with its status; an `Err` is one that could not be run.
     fn run(&self, who: Inside, argv: &[&str]) -> anyhow::Result<Output>;
+
+    /// The same, handing every line it prints on either stream to `line` as it
+    /// prints it — which is how a rebuild minutes long is watched.
+    fn follow(
+        &self,
+        who: Inside,
+        argv: &[&str],
+        line: &mut dyn FnMut(&str),
+    ) -> anyhow::Result<ExitStatus>;
+
+    /// Put `bytes` at `path` inside the box as its root, with `mode`, making
+    /// the directories above it.
+    fn write(&self, path: &str, bytes: &[u8], mode: u32) -> anyhow::Result<()>;
 
     /// The bytes of the file at `path` inside the box.
     fn read(&self, path: &str) -> anyhow::Result<Vec<u8>>;
@@ -166,8 +227,24 @@ impl Backend for Probing {
         wsl::Wsl::here().turning_on()
     }
 
-    fn make(&self, _: &Path, _: &Path) -> anyhow::Result<()> {
+    fn image(&self) -> Image {
+        wsl::Wsl::here().image()
+    }
+
+    fn disk(&self) -> &Path {
+        Path::new("nowhere")
+    }
+
+    fn make(&self, _: &Path) -> anyhow::Result<()> {
         anyhow::bail!("a probed box is never made")
+    }
+
+    fn made(&self) -> anyhow::Result<()> {
+        anyhow::bail!("a probed box is never made")
+    }
+
+    fn opening(&self, _: u16) -> Option<String> {
+        None
     }
 
     fn boot(&self) -> anyhow::Result<()> {
@@ -180,6 +257,14 @@ impl Backend for Probing {
 
     fn run(&self, _: Inside, _: &[&str]) -> anyhow::Result<Output> {
         anyhow::bail!("nothing runs inside a probed box")
+    }
+
+    fn follow(&self, _: Inside, _: &[&str], _: &mut dyn FnMut(&str)) -> anyhow::Result<ExitStatus> {
+        anyhow::bail!("nothing runs inside a probed box")
+    }
+
+    fn write(&self, _: &str, _: &[u8], _: u32) -> anyhow::Result<()> {
+        anyhow::bail!("nothing is written inside a probed box")
     }
 
     fn read(&self, _: &str) -> anyhow::Result<Vec<u8>> {

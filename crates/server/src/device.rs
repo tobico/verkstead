@@ -745,6 +745,11 @@ pub struct Devices {
     /// [`crate::peer::annex_forward`]. Pointed nowhere unless a start said
     /// otherwise, see [`Devices::forwarding_for_the_annex`].
     annex_forward: crate::peer::annex_forward::Pointing,
+
+    /// And the port its own **Peer Listener** is on, which is what an Annex it
+    /// keeps dials it at. The default port unless a start said otherwise, see
+    /// [`Devices::peering_on`].
+    peer_port: u16,
 }
 
 impl Devices {
@@ -771,6 +776,7 @@ impl Devices {
             peers,
             forwarding_on: crate::forwarding::LOOPBACKS.to_vec(),
             annex_forward: crate::peer::annex_forward::Pointing::at_nothing(),
+            peer_port: crate::peer::PEER_PORT,
         }
     }
 
@@ -865,6 +871,24 @@ impl Devices {
         Devices {
             annex_forward,
             ..self
+        }
+    }
+
+    /// The same, its peer listener on `port` — the one a start bound.
+    pub fn peering_on(self, port: u16) -> Devices {
+        Devices {
+            peer_port: port,
+            ..self
+        }
+    }
+
+    /// This device as the Annex it keeps is told of it: its id and current
+    /// fingerprint, and the port its peer listener is on — see
+    /// [`crate::annex::Keeping`].
+    pub fn keeping(&self) -> crate::annex::Keeping {
+        crate::annex::Keeping {
+            kept_by: crate::settings::KeptBy::of(self.device.id(), self.device.fingerprint()),
+            port: self.peer_port,
         }
     }
 

@@ -45,6 +45,18 @@
         '';
   };
 
+  # WSL 2.9.8 and later generate a unit that runs `/bin/true`, which NixOS-WSL
+  # 2605.7.2's `/bin` lacks, so it fails and with it every `nixos-rebuild
+  # switch`. NixOS-WSL#1101 adds it to `/bin`; until a release carries that,
+  # the unit is pointed at coreutils'. Harmless once one does.
+  systemd.services.wsl-mnt-guard = {
+    overrideStrategy = "asDropin";
+    serviceConfig.ExecStart = [
+      ""
+      "${pkgs.coreutils}/bin/true"
+    ];
+  };
+
   # Where the Annex's Repos live, the service's own and readable from Explorer
   # at `\\wsl$`.
   systemd.tmpfiles.rules = [ "d @repos@ 0755 verkstead verkstead -" ];
