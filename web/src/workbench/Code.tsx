@@ -512,6 +512,8 @@ export const TERMINAL_REFUSAL: Record<
   NoWorktree: "This conversation has no worktree to open a terminal in.",
   NoProfile:
     "This conversation has no agent profile settled, so there's no account to run a shell under.",
+  WorktreeGone:
+    "This conversation's worktree has gone and couldn't be made again from its branch.",
   Refused: "The shell wouldn't start. The server's log says why.",
   NoSuchPreview: "This preview is no longer here.",
 };

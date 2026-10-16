@@ -107,21 +107,6 @@ pub(crate) async fn resolve(state: &AppState, conversation_id: i64) -> anyhow::R
         return Ok(Resolved::NowhereToWork);
     };
 
-    // The branch first, which may not be called what the record says — see
-    // [`crate::renames`], and [`crate::resume`], which reads it here for the
-    // same reason: the sweep that follows a rename runs only while a session
-    // does, so a rename nothing saw would have the checkout below read as broken
-    // and rebuilt from a branch that is not there.
-    let branch = crate::renames::follow(
-        &state.pool,
-        conversation_id,
-        &conversation.repo.path,
-        &worktree,
-        &conversation.branch,
-    )
-    .await
-    .unwrap_or_else(|| conversation.branch.clone());
-
     // And then the checkout itself, because this press is the one way into a
     // wrap-up that starts work in a Worktree nothing has touched for weeks. A
     // Conversation stays Done for as long as nobody merges its pull request, and
@@ -132,29 +117,25 @@ pub(crate) async fn resolve(state: &AppState, conversation_id: i64) -> anyhow::R
     //
     // So it is made again from the branch, exactly as Resume makes it and for
     // Resume's reason: a worktree is derived state. Nothing healthy is touched,
-    // uncommitted changes and all — see [`crate::worktrees::healthy`], which is
-    // what answers on nearly every press and costs a git read.
+    // uncommitted changes and all — see [`crate::worktrees::standing`], which
+    // follows a rename first and costs a git read on nearly every press.
     //
     // The Conversation's own alone, as Resume rebuilds its own alone: a
     // companion whose directory has gone is a sandbox no session of any kind
     // could be built for, and that is the same everywhere rather than this
     // press's to answer.
     //
-    // Off the runtime's threads, a checkout of a large repository being no quick
-    // call, and under the registration taken above, a Conversation being rebuilt
-    // being a Conversation being driven.
-    let usable = tokio::task::spawn_blocking({
-        let repo = conversation.repo.path.clone();
-        let worktree = worktree.clone();
-
-        move || {
-            crate::worktrees::healthy(&repo, &worktree, &branch)
-                || crate::worktrees::rebuild(&repo, &worktree, &branch)
-        }
-    })
+    // Under the registration taken above, a Conversation being rebuilt being a
+    // Conversation being driven.
+    let standing = crate::worktrees::standing(
+        &state.pool,
+        &conversation,
+        &worktree,
+        crate::worktrees::Wanting::OnItsBranch,
+    )
     .await?;
 
-    if !usable {
+    if standing == crate::worktrees::Standing::Gone {
         return Ok(Resolved::WorktreeRefused);
     }
 

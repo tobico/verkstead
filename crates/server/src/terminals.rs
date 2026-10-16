@@ -163,6 +163,7 @@ use crate::screen::Live;
 use crate::sessions::CHUNK;
 use crate::store;
 use crate::terminal::{Child, Terminal};
+use crate::worktrees::{Standing, Wanting};
 
 /// How that shell is started on the platforms whose shell wants telling.
 ///
@@ -1141,6 +1142,44 @@ pub(crate) async fn open(
     let Some(pairing) = paired else {
         return Ok(TerminalOpened::NoProfile);
     };
+
+    // What the record names may be nowhere: a directory deleted, hollowed out,
+    // or dropped from the repository's list of worktrees — and a Conversation
+    // stays Done for as long as nobody merges its pull request. A shell has
+    // nowhere to stand in that, and the sandbox below would be refused for it
+    // with nothing on the screen saying why. So it is made again from the
+    // branch, as Resume makes it and for Resume's reason — see
+    // [`crate::worktrees::standing`].
+    //
+    // **Only where it is not there at all**, though, which is less than Resume
+    // asks: a terminal is pressed while a session may be mid-rebase, or while
+    // the human is part-way through one by hand in the terminal beside it, and
+    // a checkout off its branch is where that work is. See
+    // [`Wanting::Readable`].
+    if let Some(worktree) = conversation.worktree.clone() {
+        match crate::worktrees::standing(&state.pool, &conversation, &worktree, Wanting::Readable)
+            .await?
+        {
+            Standing::Healthy | Standing::Elsewhere => {}
+
+            // And the tree beside it is told, which drew the Worktree as it was
+            // a moment ago: nothing there.
+            Standing::Remade => state.nudges.announce(Nudge::Files {
+                conversation: conversation_id,
+            }),
+
+            Standing::Gone => {
+                tracing::error!(
+                    conversation_id,
+                    worktree = %worktree.display(),
+                    "the Conversation's worktree has gone and could not be made again from its \
+                     branch, so no terminal was opened"
+                );
+
+                return Ok(TerminalOpened::WorktreeGone);
+            }
+        }
+    }
 
     // And where that Profile is a member's, the account it names is on that
     // machine: a mirror of it is fetched here before the shell is built out of

@@ -706,3 +706,30 @@ async fn a_folder_taken_away_and_made_again_is_watched_again() {
 
     drop(pane);
 }
+
+/// A Code pane drawn over a Worktree that has gone from disk makes it again from
+/// the branch, as a terminal pressed over it does — and says so to the page,
+/// whose tree was read while there was nothing there.
+#[tokio::test]
+async fn a_pane_drawn_over_a_worktree_that_has_gone_makes_it_again() {
+    let (dir, pool, app, at) = fresh_app().await;
+    let (conversation, worktree) = grilling(&pool, dir.path()).await;
+
+    std::fs::remove_dir_all(&worktree).unwrap();
+
+    let mut page = Listening::open(&app).await;
+    let pane = Pane::drawn(at, conversation).await;
+
+    assert_eq!(page.nudge().await, Nudge::Files { conversation });
+    assert!(
+        worktree.join("README.md").exists(),
+        "the worktree at {} should be a checkout of its branch again",
+        worktree.display(),
+    );
+    assert_eq!(
+        git(&worktree, &["branch", "--show-current"]).trim(),
+        "following"
+    );
+
+    drop(pane);
+}

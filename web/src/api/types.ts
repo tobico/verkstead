@@ -6960,7 +6960,7 @@ export type TerminalClosed = "Closed" | "Busy";
  * that could not be opened is one the pane has to say something about rather
  * than one that quietly never appears.
  */
-export type TerminalOpened = { "Opened": { number: number, } } | { "Refocused": { number: number, } } | { "Retyped": { number: number, } } | "NoSuchConversation" | "NoWorktree" | "NoProfile" | "Refused" | "NoSuchPreview";
+export type TerminalOpened = { "Opened": { number: number, } } | { "Refocused": { number: number, } } | { "Retyped": { number: number, } } | "NoSuchConversation" | "NoWorktree" | "NoProfile" | "WorktreeGone" | "Refused" | "NoSuchPreview";
 
 /**
  * One of them: which terminal, and the TCP ports something inside it is

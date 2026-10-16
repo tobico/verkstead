@@ -41,9 +41,10 @@
 //! steer's re-checkout and a taken-up pull request hold somebody's work already,
 //! and what is in those trees is not inherited.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::mpsc;
+use std::sync::{Arc, LazyLock, Mutex, Weak, mpsc};
 use std::time::Duration;
 
 use crate::repos::git;
@@ -1038,6 +1039,18 @@ pub(crate) fn on_branch(worktree: &Path) -> Option<String> {
 /// reasons of its own leaves the worktree alone. Which is why the repository
 /// half is asked as *does this say otherwise* rather than *does this agree*.
 pub(crate) fn healthy(repo: &Path, path: &Path, branch: &str) -> bool {
+    readable(repo, path) && head(path).is_some_and(|head| head == format!("refs/heads/{branch}"))
+}
+
+/// Whether git still reads the directory at `path` as one of `repo`'s
+/// worktrees, whatever is checked out in it.
+///
+/// [`healthy`] without the branch: a checkout mid-rebase, detached at a commit,
+/// or switched to another branch is still somewhere to work, and it is where
+/// somebody's uncommitted changes are. What fails this is a checkout that is
+/// not there to stand in at all — deleted, hollowed out, or dropped from the
+/// repository's list of worktrees.
+fn readable(repo: &Path, path: &Path) -> bool {
     // Git answering inside the directory, and where its object database is.
     let Some(inside) = common_git_dir(path) else {
         return false;
@@ -1047,11 +1060,128 @@ pub(crate) fn healthy(repo: &Path, path: &Path, branch: &str) -> bool {
     // repository being no place to do this Conversation's work. Only where the
     // Repo itself reads: git saying nothing about it is a repository Verkstead
     // cannot see rather than a worktree that is wrong.
-    if common_git_dir(repo).is_some_and(|ours| ours != inside) {
-        return false;
+    common_git_dir(repo).is_none_or(|ours| ours == inside)
+}
+
+/// How much of a Conversation's own Worktree a press needs standing before it
+/// goes on — and so what [`standing`] makes it again over.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Wanting {
+    /// Checked out on its branch, which is what a session is started in: Resume's
+    /// and Resolve conflicts' press, on a Conversation nothing is running in.
+    /// Anything else is made again — see [`healthy`].
+    OnItsBranch,
+
+    /// Somewhere git reads, whatever is checked out there: a terminal's or a
+    /// Code pane's press, which come while a session may be mid-rebase or the
+    /// human mid-way through something by hand in another terminal. Only a
+    /// checkout that is not there at all is made again — see [`readable`] — so
+    /// nothing anybody is working in is ever taken away under them.
+    Readable,
+}
+
+/// What became of asking that a Conversation's own Worktree be there to work in
+/// — see [`standing`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Standing {
+    /// It was standing as the press wanted it, and nothing was touched.
+    Healthy,
+
+    /// Nothing was asked: this copy is a tombstone, the work is on another
+    /// device, and nothing writes to one — see [`store::Conversation::transferred`].
+    Elsewhere,
+
+    /// It had gone, and was made again from its branch just now.
+    Remade,
+
+    /// It had gone, and could not be made again — the branch gone with it, or
+    /// git refusing.
+    Gone,
+}
+
+/// The Conversation's own Worktree at `worktree`, made again from its branch
+/// where it is not standing as `wanting` needs it — for a press that has
+/// nowhere to work without it.
+///
+/// The branch followed through a rename first, so a rename nothing saw is not
+/// read as a breakage, then [`healthy`] or [`readable`] as `wanting` says, then
+/// [`rebuild`] where that says no. A worktree is derived state, so nothing is
+/// lost by it, and nothing that reads as standing is touched.
+///
+/// **One at a time, for each path.** A pane attaching and a terminal pressed a
+/// moment later both ask, and a second rebuild of one path would find the first
+/// one's checkout in its way and remove it — so the reading and the rebuild are
+/// held under that path's lock, and whoever comes second reads the first one's
+/// checkout as standing. A lock of the path's own rather than the server's,
+/// because a rebuild of a large repository takes a while, and a press on some
+/// other Conversation's checkout has no reason to wait on it — see [`held`].
+pub(crate) async fn standing(
+    pool: &sqlx::SqlitePool,
+    conversation: &store::Conversation,
+    worktree: &Path,
+    wanting: Wanting,
+) -> anyhow::Result<Standing> {
+    if conversation.transferred.is_some() {
+        return Ok(Standing::Elsewhere);
     }
 
-    head(path).is_some_and(|head| head == format!("refs/heads/{branch}"))
+    let branch = crate::renames::follow(
+        pool,
+        conversation.id,
+        &conversation.repo.path,
+        worktree,
+        &conversation.branch,
+    )
+    .await
+    .unwrap_or_else(|| conversation.branch.clone());
+
+    let lock = held(worktree);
+    let _held = lock.lock().await;
+
+    let repo = conversation.repo.path.clone();
+    let worktree = worktree.to_owned();
+
+    let standing = tokio::task::spawn_blocking(move || {
+        let standing = match wanting {
+            Wanting::OnItsBranch => healthy(&repo, &worktree, &branch),
+            Wanting::Readable => readable(&repo, &worktree),
+        };
+
+        if standing {
+            Standing::Healthy
+        } else if rebuild(&repo, &worktree, &branch) {
+            Standing::Remade
+        } else {
+            Standing::Gone
+        }
+    })
+    .await?;
+
+    Ok(standing)
+}
+
+/// The lock [`standing`] holds over the worktree at `path`, shared with every
+/// ask about that path still holding or waiting on it.
+///
+/// Held weakly here, so a path nobody is asking about any more is let go of
+/// rather than kept for the server's lifetime: the next ask about it makes a
+/// fresh one, and with nobody holding the old one there is nobody to race.
+fn held(path: &Path) -> Arc<tokio::sync::Mutex<()>> {
+    static HELD: LazyLock<Mutex<HashMap<PathBuf, Weak<tokio::sync::Mutex<()>>>>> =
+        LazyLock::new(|| Mutex::new(HashMap::new()));
+
+    let mut holding = HELD.lock().unwrap_or_else(|held| held.into_inner());
+
+    holding.retain(|_, lock| lock.strong_count() > 0);
+
+    if let Some(lock) = holding.get(path).and_then(Weak::upgrade) {
+        return lock;
+    }
+
+    let lock = Arc::new(tokio::sync::Mutex::new(()));
+    holding.insert(path.to_owned(), Arc::downgrade(&lock));
+
+    lock
 }
 
 /// The name `branch` has been renamed to in the worktree at `path`, or `None`
@@ -2384,5 +2514,24 @@ mod tests {
             .expect("git should be on the PATH for these tests");
 
         assert!(output.status.success(), "git {args:?} failed");
+    }
+
+    /// The lock a worktree is asked about under is that path's own: two asks
+    /// about one checkout share it, an ask about another checkout never waits
+    /// on it.
+    #[tokio::test]
+    async fn a_worktrees_lock_is_its_own_paths() {
+        let one = held(Path::new("/worktrees/a-lock-of-its-own"));
+        let again = held(Path::new("/worktrees/a-lock-of-its-own"));
+        let other = held(Path::new("/worktrees/somebody-elses"));
+
+        assert!(Arc::ptr_eq(&one, &again));
+        assert!(!Arc::ptr_eq(&one, &other));
+
+        let _holding = one.lock().await;
+        assert!(
+            other.try_lock().is_ok(),
+            "another checkout's lock should not wait on this one",
+        );
     }
 }

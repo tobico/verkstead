@@ -96,6 +96,7 @@ use verkstead_schema::Nudge;
 use crate::AppState;
 use crate::nudge::Nudges;
 use crate::store;
+use crate::worktrees::{Standing, Wanting};
 
 /// How long the last pane going is given to come back before its watcher is
 /// stopped.
@@ -969,6 +970,13 @@ const MOST_MOVED: usize = 4096;
 /// attaches and the watcher watches nothing — which is the same answer a
 /// checkout removed under an open pane gets, and there is nothing for a human
 /// to do about either.
+///
+/// **One whose Worktree directory has gone is made again first**, as a terminal
+/// pressed over it is — see [`crate::worktrees::standing`]. A pane opened on a
+/// Conversation is somebody come to look at the work, and a tree of nothing is
+/// no answer to that while the branch it came from is still there. The tree was
+/// read before the socket opened, so a Worktree made again is announced as
+/// moved, and the pane reads it again.
 pub(crate) async fn attach(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -997,16 +1005,56 @@ pub(crate) async fn attach(
         .map(|root| PathBuf::from(root.path))
         .collect();
 
-    pane.on_upgrade(move |socket| attached(socket, state, id, roots))
+    pane.on_upgrade(move |socket| attached(socket, state, conversation, roots))
 }
 
 /// Hold that attachment for as long as the socket is open.
 async fn attached(
     mut socket: WebSocket,
     state: AppState,
-    conversation_id: i64,
+    conversation: store::Conversation,
     roots: Vec<PathBuf>,
 ) {
+    let conversation_id = conversation.id;
+
+    // After the upgrade rather than before it: a checkout of a large repository
+    // is not a quick call, and the pane has nothing to wait on it for. Before
+    // the watcher, so the walk it starts with is a walk of the checkout made.
+    //
+    // **Only where the directory is not there at all.** Every attach would
+    // otherwise spend a few git reads ahead of its watcher, and a file written
+    // in that moment is one the page never hears about. A checkout hollowed out
+    // or dropped from git's list is still a directory to watch, and the
+    // terminal pressed in it is what makes that one again.
+    if let Some(worktree) = conversation
+        .worktree
+        .as_ref()
+        .filter(|worktree| !worktree.exists())
+    {
+        match crate::worktrees::standing(&state.pool, &conversation, worktree, Wanting::Readable)
+            .await
+        {
+            Ok(Standing::Healthy | Standing::Elsewhere) => {}
+
+            Ok(Standing::Remade) => state.nudges.announce(Nudge::Files {
+                conversation: conversation_id,
+            }),
+
+            Ok(Standing::Gone) => tracing::warn!(
+                conversation_id,
+                worktree = %worktree.display(),
+                "a Code pane attached over a worktree that has gone and could not be made again \
+                 from its branch, so its tree is empty"
+            ),
+
+            Err(error) => tracing::error!(
+                error = ?error,
+                conversation_id,
+                "asking whether a Code pane's worktree is there failed"
+            ),
+        }
+    }
+
     let _attached = state
         .watchers
         .attach(conversation_id, roots, state.nudges.clone());
