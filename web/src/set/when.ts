@@ -1,10 +1,11 @@
-//! The one date the viewer is handed raw.
+//! The dates the viewer is handed raw.
 //!
 //! Everywhere else a time reaches the browser already said in words, because the
 //! server has the clock and the calendar — see `crates/render/src/when.rs`. A
 //! Set's own standing is the exception: the stamp travels with the Response it
 //! belongs to, so the wording happens here instead, in the same words and to the
-//! same rules.
+//! same rules. A Memo's is the other: the day it was left, said under it in its
+//! pane.
 
 /// How many days a settling stays relative before it is said as a date: a week,
 /// past which counting days stops meaning anything to a reader. The same week
@@ -29,10 +30,7 @@ export function settledAge(settledAt: string, now: number): string {
 
   const seconds = Math.floor((now - when.getTime()) / 1000);
   if (seconds >= FRESH_DAYS * 24 * 60 * 60) {
-    return (
-      `${when.getUTCFullYear()}-${two(when.getUTCMonth() + 1)}` +
-      `-${two(when.getUTCDate())}`
-    );
+    return plainDate(settledAt);
   }
 
   if (seconds < 60) {
@@ -50,6 +48,24 @@ export function settledAge(settledAt: string, now: number): string {
   }
 
   return `${Math.floor(hours / 24)}d ago`;
+}
+
+/// The day a stamp fell on, in UTC — the plain date a settling past its week
+/// is said as, and the form the workbench says any date in.
+///
+/// A timestamp that will not parse is handed back as it was stored, for the
+/// reason the two beside it give.
+export function plainDate(stamp: string): string {
+  const when = new Date(stamp);
+
+  if (Number.isNaN(when.getTime())) {
+    return stamp.trim();
+  }
+
+  return (
+    `${when.getUTCFullYear()}-${two(when.getUTCMonth() + 1)}` +
+    `-${two(when.getUTCDate())}`
+  );
 }
 
 /// A stamp said exactly, to the minute and in UTC — the tooltip behind the

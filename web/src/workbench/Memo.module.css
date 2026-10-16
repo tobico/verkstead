@@ -1,0 +1,29 @@
+/* A Memo, opened — see `Memo.tsx`. The document is `Document.module.css`'s;
+   what is here is the foot under it. */
+
+/* Who left it and when, in the quiet ink a stamp is set in, with the one act
+   on the memo at the far end of the line. Set off from the document by a rule,
+   at the width the document is read at, so the foot reads as the document's
+   own rather than as something else on the pane. Wrapping, so a narrow pane
+   puts the press under the words rather than squeezing both. */
+.foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+  max-width: var(--measure);
+  margin-top: 1.5rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--edge);
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+.lines p {
+  margin: 0;
+}
+
+.lines .retiredBy {
+  margin-top: 0.25rem;
+}

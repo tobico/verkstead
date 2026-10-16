@@ -132,6 +132,7 @@ import { Commit } from "./Commit";
 import { Composer, composing } from "./Composer";
 import { Conversations } from "./Conversations";
 import { Document } from "./Document";
+import { MemoPane } from "./Memo";
 import { Hatch } from "./Hatch";
 import { LogIn } from "./LogIn";
 import { Output } from "./Output";
@@ -808,6 +809,7 @@ export function Workbench(): JSX.Element {
               <DetailsPane
                 conversation={conversation}
                 event={event()}
+                select={select}
                 back={leaving()}
                 code={code.of}
                 maximise={
@@ -895,8 +897,11 @@ function DetailsPane(props: {
   /// drawn from.
   conversation: Read;
 
-  /// What is open in it, if anything.
+  /// What is open in it, if anything, and how to open something else — which
+  /// a pane does where it links to another Event, through the same press its
+  /// card would have made.
   event: Opening | null;
+  select: (opening: Opening) => void;
 
   /// The way off whatever pane is drawn, which a narrow window walks out
   /// through: where it goes and what it is called. Ordinarily the Timeline,
@@ -937,9 +942,9 @@ function DetailsPane(props: {
   /// Capture; a Question Set, whose full self is the document it was asked
   /// as; a commit, whose full self is its diff; the pull request, whose full
   /// self is what is on it at GitHub right now; a steer, whose full self is the
-  /// form the human filled to make it; and the three documents — the Brief,
-  /// the handoff and a Memo — whose full self is the markdown their card shows
-  /// three lines of. The kind travels with it, because it is what decides which pane is
+  /// form the human filled to make it; and the three documents — the Brief and
+  /// the handoff, whose full self is the markdown their card shows three lines
+  /// of, and a Memo, whose card shows only its title. The kind travels with it, because it is what decides which pane is
   /// drawn.
   ///
   /// A Brief still being drafted is here too, and nothing ever selects it: the
@@ -1156,14 +1161,16 @@ function DetailsPane(props: {
                     />
                   )}
                 </Match>
-                {/* A Memo is the handoff's pane, under the head its card
-                    carries. */}
+                {/* A Memo is the handoff's pane under the title its card
+                    carries, with who left it and the one act on it at the
+                    foot — and the session that left it a press away, opened
+                    the way its own card opens it. */}
                 <Match when={memoIn(open())}>
                   {(memo) => (
-                    <Document
-                      heading={`Memo ${memo().id}`}
-                      html={memo().html}
-                      empty="The session wrote nothing down."
+                    <MemoPane
+                      conversation={conversation().id}
+                      memo={memo()}
+                      open={props.select}
                       back={props.back.go}
                     />
                   )}

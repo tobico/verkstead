@@ -2533,8 +2533,8 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     }
 
     // And the session that worked a task on it, with the Memos it left for the
-    // sessions after it: one still standing, and one a later session has taken
-    // back. The second is retired straight in rather than through
+    // sessions after it: one still standing, one a later session has taken
+    // back, and one from before titles. The second is retired straight in rather than through
     // `retire_memo`, so its moment is a fixed one and the fixture does not move
     // with the clock.
     let session = store::start_capture(&pool, directing, Some("task-02"), None)
@@ -2573,6 +2573,20 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         retired,
     )
     .await;
+    // And one left before memos had titles, whose card shows its body's first
+    // line in the title's place.
+    store::leave_memo(
+        &pool,
+        directing,
+        None,
+        "Leave the relay's buffer alone.\n\n\
+         Its size is what the limit reader was tuned against.\n",
+        "the session that worked task 02",
+        session,
+    )
+    .await
+    .unwrap()
+    .unwrap();
 
     // And a fifth, whose direction was a task list: the breaking-down session
     // has written `.tasks/` into its worktree, and Verkstead reads it back as

@@ -280,6 +280,17 @@
         },
         "title": "Where the limit reader lives"
       }
+    },
+    {
+      "Memo": {
+        "at": "2026-08-03T09:07:11.000Z",
+        "html": "<p>Leave the relay's buffer alone.</p>\n<p>Its size is what the limit reader was tuned against.</p>\n",
+        "id": 22,
+        "left_by": "the session that worked task 02",
+        "left_in": 19,
+        "retired": null,
+        "title": null
+      }
     }
   ],
   "transferred": null,

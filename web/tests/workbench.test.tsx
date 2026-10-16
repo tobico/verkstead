@@ -178,6 +178,7 @@ import archivedCss from "../src/workbench/Archived.module.css?raw";
 import sidebar from "../src/workbench/Conversations.module.css";
 import sidebarCss from "../src/workbench/Conversations.module.css?raw";
 import documentPane from "../src/workbench/Document.module.css";
+import memoPane from "../src/workbench/Memo.module.css";
 // And the one module the two plan panes share: a backlog's task documents and
 // a roadmap's stage briefs are the same stack of boxed sections.
 import documents from "../src/workbench/Documents.module.css";
@@ -13980,8 +13981,8 @@ describe("a grilling that has handed over", () => {
   });
 });
 
-/// The Memos the building session left, one standing and one a later session
-/// took back — the fixture's own pair.
+/// The Memos the building session left: one standing, one a later session took
+/// back, and one from before memos had titles — the fixture's own three.
 const MEMOS = BUILDING.timeline.flatMap((entry) => ("Memo" in entry ? [entry.Memo] : []));
 
 describe("a memo a session left", () => {
@@ -13993,29 +13994,61 @@ describe("a memo a session left", () => {
     return [...container.querySelectorAll(`.${timeline.timelineEvent} > .${timeline.memo}`)];
   };
 
-  /// The card's own button with these words on it, which is a real button
-  /// standing on a card that is itself only an article in a button's role.
-  const saying = (card: Element, words: string) =>
-    [...card.querySelectorAll("button")].find((button) => button.textContent === words);
+  /// The pane's own button with these words on it.
+  const saying = (within: Element, words: string) =>
+    [...within.querySelectorAll("button")].find((button) => button.textContent === words);
 
-  it("draws as a card numbered by its event, stamped with the session that left it", async () => {
-    expect(MEMOS.map((memo) => memo.retired === null)).toEqual([true, false]);
+  /// The line at the foot of an opened memo, and the lines inside it.
+  const foot = () => details().querySelector(`.${memoPane.foot}`);
+  const lines = () => [...foot()!.querySelectorAll("p")].map((line) => line.textContent);
+
+  it("draws as a card headed Memo with the title under it, and nothing else", async () => {
+    expect(MEMOS.map((memo) => [memo.title, memo.retired === null])).toEqual([
+      ["The sessions suite flakes under parallelism", true],
+      ["Where the limit reader lives", false],
+      [null, true],
+    ]);
 
     theBuilding();
     const { container } = mount(`/conversations/${BUILDING.id}`);
 
     const [standing] = await cards(container);
 
-    expect(standing!.querySelector("h2")?.textContent).toBe(`Memo ${MEMOS[0]!.id}`);
-    expect(standing!.querySelector(`.${timeline.leftBy}`)?.textContent).toBe(
-      "the session that worked task 02",
+    expect(standing!.querySelector("h2")?.textContent).toBe("Memo");
+    expect(standing!.querySelector(`.${timeline.memoTitle}`)?.textContent).toBe(
+      "The sessions suite flakes under parallelism",
     );
-    expect(standing!.querySelector(`.${timeline.clamp}.${timeline.memoBody}`)).toBeTruthy();
+    // The head and the title are the whole card: no stamp, no body, no press
+    // and no number.
+    expect(standing!.textContent).toBe("MemoThe sessions suite flakes under parallelism");
+    expect(standing!.querySelector(".markdown")).toBeNull();
+    expect(standing!.querySelector("button")).toBeNull();
     expect(standing!.classList.contains(timeline.retired!)).toBe(false);
-    expect(standing!.querySelector(`.${timeline.retiredBy}`)).toBeNull();
   });
 
-  it("opens the whole memo in the details pane", async () => {
+  it("titles one left before titles by the first line of its body", async () => {
+    theBuilding();
+    const { container } = mount(`/conversations/${BUILDING.id}`);
+
+    const [, , untitled] = await cards(container);
+
+    expect(untitled!.querySelector(`.${timeline.memoTitle}`)?.textContent).toBe(
+      "Leave the relay's buffer alone.",
+    );
+  });
+
+  it("strikes a retired one's title through, and says nothing more", async () => {
+    theBuilding();
+    const { container } = mount(`/conversations/${BUILDING.id}`);
+
+    const [, retired] = await cards(container);
+
+    expect(retired!.classList.contains(timeline.retired!)).toBe(true);
+    expect(retired!.textContent).toBe("MemoWhere the limit reader lives");
+    expect(retired!.querySelector("button")).toBeNull();
+  });
+
+  it("opens the whole memo under its title, with who left it and when at the foot", async () => {
     theBuilding();
     const { container } = mount(`/conversations/${BUILDING.id}`);
 
@@ -14026,30 +14059,68 @@ describe("a memo a session left", () => {
     // The page opened on the record's last Memo, which is the same pane: the
     // heading changing is what says the press landed.
     await waitFor(() =>
-      expect(details().querySelector("h1")!.textContent).toBe(`Memo ${MEMOS[0]!.id}`),
+      expect(details().querySelector("h1")!.textContent).toBe(
+        "The sessions suite flakes under parallelism",
+      ),
     );
 
     const opened = await drawn(details(), `.${documentPane.document}`);
     expect(opened.innerHTML).toBe(MEMOS[0]!.html);
     expect(details().querySelector(`.${timeline.clamp}`)).toBeNull();
+
+    expect(lines()).toEqual(["Left by the session that worked task 02 on 2026-08-03"]);
+    expect(saying(foot()!, "Retire")).toBeTruthy();
+    expect(details().textContent).not.toMatch(new RegExp(`\\b${MEMOS[0]!.id}\\b`));
   });
 
-  it("draws a retired one as retired, with who took it back and why", async () => {
+  it("says under a retired one who took it back and why", async () => {
     theBuilding();
-    const { container } = mount(`/conversations/${BUILDING.id}`);
+    mount(`/conversations/${BUILDING.id}/events/${MEMOS[1]!.id}`);
 
-    const [, retired] = await cards(container);
+    await waitFor(() => expect(foot()).toBeTruthy());
 
-    expect(retired!.classList.contains(timeline.retired!)).toBe(true);
-    expect(retired!.querySelector(`.${timeline.retiredBy}`)?.textContent).toBe(
+    expect(lines()).toEqual([
+      "Left by the session that worked task 02 on 2026-08-03",
       "Retired by the session that worked task 03: moved back into the relay",
+    ]);
+    expect(saying(foot()!, "Restore")).toBeTruthy();
+  });
+
+  it("heads one left before titles by the first line of its body", async () => {
+    theBuilding();
+    mount(`/conversations/${BUILDING.id}/events/${MEMOS[2]!.id}`);
+
+    await waitFor(() =>
+      expect(details().querySelector("h1")!.textContent).toBe("Leave the relay's buffer alone."),
     );
   });
 
+  /// The session's name is a link, and pressing it is pressing that session's
+  /// card: its output pane opens in place of the memo's.
+  it("opens the session that left it from its name", async () => {
+    theBuilding();
+    const { history } = mount(`/conversations/${BUILDING.id}/events/${MEMOS[0]!.id}`);
+
+    await waitFor(() => expect(foot()).toBeTruthy());
+
+    const session = foot()!.querySelector("a")!;
+    expect(session.textContent).toBe("the session that worked task 02");
+    expect(session.getAttribute("href")).toBe(
+      `/conversations/${BUILDING.id}/events/${MEMOS[0]!.left_in}`,
+    );
+
+    fireEvent.click(session);
+
+    await waitFor(() =>
+      expect(history.get()).toBe(`/conversations/${BUILDING.id}/events/${MEMOS[0]!.left_in}`),
+    );
+    await waitFor(() => expect(foot()).toBeNull());
+  });
+
   /// Retire is one press with nothing asked first — Restore is what undoes it —
-  /// and the card turns over from what the server answered: retired by *you*,
-  /// with Restore where Retire was.
-  it("retires a standing one in one press, redrawing from the server's answer", async () => {
+  /// and the pane turns over from what the server answered: retired by *you*,
+  /// with Restore where Retire was, and the card struck through with it.
+  it("retires a standing one from its pane in one press, redrawing from the server's answer", async () => {
     const memo = MEMOS[0]!;
     const route = `/api/ui/conversations/${BUILDING.id}/memos/${memo.id}/retire`;
     const answered: MemoPressed = {
@@ -14059,43 +14130,46 @@ describe("a memo a session left", () => {
       },
     };
     const fetching = theBuilding({}, whenever(route, json(answered), "POST"));
-    const { container } = mount(`/conversations/${BUILDING.id}`);
+    const { container } = mount(`/conversations/${BUILDING.id}/events/${memo.id}`);
 
-    const [standing] = await cards(container);
-    fireEvent.click(saying(standing!, "Retire")!);
+    await waitFor(() => expect(foot()).toBeTruthy());
+    fireEvent.click(saying(foot()!, "Retire")!);
 
     await waitFor(() => expect(sent(fetching, route)).toEqual({}));
 
-    const [retired] = await waitFor(async () => {
-      const [card] = await cards(container);
-      expect(card!.classList.contains(timeline.retired!)).toBe(true);
-      return [card];
-    });
-    expect(retired!.querySelector(`.${timeline.retiredBy}`)?.textContent).toBe("Retired by you");
-    expect(saying(retired!, "Restore")).toBeTruthy();
+    await waitFor(() =>
+      expect(lines()).toEqual([
+        "Left by the session that worked task 02 on 2026-08-03",
+        "Retired by you",
+      ]),
+    );
+    expect(saying(foot()!, "Restore")).toBeTruthy();
     expect(screen.queryByRole("dialog")).toBeNull();
+
+    const [card] = await cards(container);
+    expect(card!.classList.contains(timeline.retired!)).toBe(true);
   });
 
   /// And Restore on a retired one puts it back, by its own route.
-  it("restores a retired one in one press", async () => {
+  it("restores a retired one from its pane in one press", async () => {
     const memo = MEMOS[1]!;
     const route = `/api/ui/conversations/${BUILDING.id}/memos/${memo.id}/restore`;
     const answered: MemoPressed = { Memo: { ...memo, retired: null } };
     const fetching = theBuilding({}, whenever(route, json(answered), "POST"));
-    const { container } = mount(`/conversations/${BUILDING.id}`);
+    const { container } = mount(`/conversations/${BUILDING.id}/events/${memo.id}`);
 
-    const [, retired] = await cards(container);
-
-    fireEvent.click(saying(retired!, "Restore")!);
+    await waitFor(() => expect(foot()).toBeTruthy());
+    fireEvent.click(saying(foot()!, "Restore")!);
 
     await waitFor(() => expect(sent(fetching, route)).toEqual({}));
 
-    await waitFor(async () => {
-      const [, card] = await cards(container);
-      expect(card!.classList.contains(timeline.retired!)).toBe(false);
-      expect(card!.querySelector(`.${timeline.retiredBy}`)).toBeNull();
-      expect(saying(card!, "Retire")).toBeTruthy();
+    await waitFor(() => {
+      expect(lines()).toEqual(["Left by the session that worked task 02 on 2026-08-03"]);
+      expect(saying(foot()!, "Retire")).toBeTruthy();
     });
+
+    const [, card] = await cards(container);
+    expect(card!.classList.contains(timeline.retired!)).toBe(false);
   });
 });
 
