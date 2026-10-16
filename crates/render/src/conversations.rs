@@ -3060,6 +3060,12 @@ pub enum TerminalOpened {
     /// role has none.
     NoProfile,
 
+    /// The Worktree the record names has gone from disk, and could not be made
+    /// again from the branch — the branch gone with it, or git refusing. A
+    /// Worktree that has merely gone is made again on the press rather than
+    /// refused over, so this is the case nothing here could put right.
+    WorktreeGone,
+
     /// It would not start: no Sandbox could be built for the Conversation, or
     /// the shell inside it would not run. The reason is in the server's log —
     /// this is the one refusal with nothing for the human to correct.

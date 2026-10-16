@@ -38489,6 +38489,55 @@ async fn a_terminal_makes_a_worktree_that_has_gone_again_from_its_branch() {
     );
 }
 
+/// And where the branch has gone with it there is nothing to make the Worktree
+/// again from, which is said as that rather than as a shell that would not
+/// start: the human has something to go and look for.
+#[tokio::test]
+async fn a_terminal_over_a_worktree_with_no_branch_left_says_so() {
+    let fixture = grilling(
+        r#"
+        printf 'reading the brief\r\n'
+        while :; do sleep 0.05; done
+        "#,
+    )
+    .await;
+
+    let worktree = fixture
+        .until(|view| view.worktree.as_ref().map(|worktree| worktree.path.clone()))
+        .await;
+
+    let asked = |args: &[&str]| {
+        let out = std::process::Command::new("git")
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {args:?}: {out:?}");
+        String::from_utf8(out.stdout).unwrap().trim().to_owned()
+    };
+
+    let common = asked(&[
+        "-C",
+        &worktree,
+        "rev-parse",
+        "--path-format=absolute",
+        "--git-common-dir",
+    ]);
+    let branch = asked(&["-C", &worktree, "branch", "--show-current"]);
+
+    std::fs::remove_dir_all(&worktree).unwrap();
+    asked(&["--git-dir", &common, "worktree", "prune"]);
+    asked(&["--git-dir", &common, "branch", "-D", &branch]);
+
+    let opened: TerminalOpened = post(
+        &fixture.app,
+        &format!("/api/ui/conversations/{}/terminals", fixture.id),
+        &serde_json::json!({}),
+    )
+    .await;
+
+    assert_eq!(opened, TerminalOpened::WorktreeGone);
+}
+
 /// And the shell it comes up in is the server user's own, with `SHELL` naming it
 /// inside and the running server's own `verkstead` still the first one found.
 ///

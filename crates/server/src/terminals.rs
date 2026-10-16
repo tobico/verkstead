@@ -1080,7 +1080,7 @@ pub(crate) async fn open(
                  branch, so no terminal was opened"
             );
 
-            return Ok(TerminalOpened::Refused);
+            return Ok(TerminalOpened::WorktreeGone);
         }
     }
 

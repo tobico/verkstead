@@ -21444,6 +21444,7 @@ describe("a conversation's terminal in the code pane", () => {
     );
     expect(TERMINAL_REFUSAL.NoWorktree).toContain("worktree");
     expect(TERMINAL_REFUSAL.NoProfile).toContain("profile");
+    expect(TERMINAL_REFUSAL.WorktreeGone).toContain("branch");
   });
 });
 
