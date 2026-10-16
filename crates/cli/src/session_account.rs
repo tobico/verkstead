@@ -11,10 +11,17 @@
 //!
 //! **What they print is what happened**, one line per thing that was there to
 //! do something about. A verb run twice says the account was already there
-//! rather than failing, and a removal says which of the account, its profile
-//! directory and its password it actually found — a machine that has run
-//! sessions and then had Verkstead taken off it should look as it did, and
-//! saying what was removed is how somebody checks.
+//! rather than failing, and a removal says how many of the entries its records
+//! named came off, and which of the account, its profile directory and its
+//! password it actually found — a machine that has run sessions and then had
+//! Verkstead taken off it should look as it did, and saying what was removed is
+//! how somebody checks.
+//!
+//! **And a removal says what it is doing while it does it**, one line on stderr
+//! before each entry comes off: Windows walks the whole tree under a directory
+//! to take an entry off it, which can be seconds a directory and minutes in
+//! all, and a terminal that says nothing for minutes is one somebody presses
+//! Ctrl-C in.
 //!
 //! Windows' own. There is no such account on the other platforms and no such
 //! verb: their sessions are a namespace and a policy, and neither is anybody's
@@ -22,9 +29,10 @@
 
 use std::path::PathBuf;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use clap::{Args, Subcommand};
 use verkstead_server::sandbox::account::machine::{self, Made};
+use verkstead_server::sandbox::account::removing;
 
 /// Which of the two this is.
 #[derive(Debug, Subcommand)]
@@ -36,11 +44,30 @@ pub enum What {
     /// says so rather than failing.
     Create(Which),
 
-    /// Delete the account, its profile directory and its password.
+    /// Take every entry naming the account off your directories, then delete
+    /// the account, its profile directory and its password.
     ///
-    /// Needs an elevated terminal too. Nothing here is a failure for not having
-    /// been there, so this is also how a half-finished install is tidied up.
-    Remove(Which),
+    /// Needs an elevated terminal too, and Verkstead quit first. Every record
+    /// under the Data Directory is read, and each entry it names comes off by
+    /// the SID the record holds, so this also repairs a machine whose account
+    /// is already gone. If a grant or a refusal will not come off, the paths
+    /// are named and nothing else is deleted; run it again once they are put
+    /// right, or pass `--force`. Nothing here is a failure for not having been
+    /// there, so this is also how a half-finished install is tidied up.
+    Remove(Removing),
+}
+
+/// Whose account to remove, and whether to go on past an entry that would not
+/// come off.
+#[derive(Debug, Args)]
+pub struct Removing {
+    #[command(flatten)]
+    which: Which,
+
+    /// Delete the account even where a grant or a refusal naming it would not
+    /// come off. The paths are still named, and the verb exits zero.
+    #[arg(long)]
+    force: bool,
 }
 
 /// Whose account, which is to say which Data Directory's.
@@ -77,7 +104,7 @@ impl Which {
 pub fn session_account(what: What) -> Result<()> {
     match what {
         What::Create(which) => create(&which),
-        What::Remove(which) => remove(&which),
+        What::Remove(removing) => remove(&removing),
     }
 }
 
@@ -111,9 +138,26 @@ fn create(which: &Which) -> Result<()> {
     Ok(())
 }
 
-fn remove(which: &Which) -> Result<()> {
-    let data_dir = which.directory()?;
-    let (name, removed) = machine::remove(&data_dir)?;
+fn remove(removing: &Removing) -> Result<()> {
+    let data_dir = removing.which.directory()?;
+
+    let (name, removed) = machine::remove(&data_dir, removing.force, &mut |at, of, path| {
+        eprintln!("{}", removing::announced(at, of, path));
+    })?;
+
+    for kept in removed.entries.kept_lines() {
+        eprintln!("{kept}");
+    }
+
+    // Stopped after the entries, with the account, its profile and its
+    // password left where they were: what is worth saying is how many came
+    // off, and the paths above are what is to be put right.
+    if removed.held_back {
+        println!("entries   = {}", removed.entries.entries());
+        println!("records   = {}", removed.entries.records());
+
+        bail!("{}", removed.entries.held_back());
+    }
 
     println!(
         "account   = {name} {}",
@@ -135,6 +179,8 @@ fn remove(which: &Which) -> Result<()> {
             "there was none in the secrets file",
         ),
     );
+    println!("entries   = {}", removed.entries.entries());
+    println!("records   = {}", removed.entries.records());
 
     Ok(())
 }

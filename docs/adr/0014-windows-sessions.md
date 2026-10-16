@@ -42,6 +42,15 @@ starts, which took a running session's root away when a terminal opened beside
 it. A launch into a profile or a root something is running in is given it as it
 stands. See *Amended: fresh, except under something still running*.
 
+Amended (2026-10-16): **removing the account reads every record.** *What says
+nothing about a Conversation stands for the installation* called removing the
+account the last moment there is a SID to name an entry by. It is not: every
+record holds its SID as text and an entry comes off by that with the account
+gone. What is true is that nothing reads the records after an uninstall, so
+`session-account remove` now takes off every entry every record names, and
+stops short of deleting the account when a grant will not come off. See
+*Amended: removing the account reads every record*.
+
 The order is the terminal first. A Windows session runs **unsandboxed** from
 the moment the terminal works until the container lands, and the workbench says
 so on every one — above **Start work** on the composer, beside the terminal on
@@ -494,7 +503,11 @@ with it.
 Conversations' and under a name no Conversation can have, so the sweep never
 sees it. Nothing reads it but `session-account remove`: an entry no boundary
 takes off would otherwise outlive every record there is, and removing the
-account is the last moment at which there is a SID to name one by. What stands
+account is the last time anything will read the record. *(Corrected
+2026-10-16: this said removing the account is the last moment at which there is
+a SID to name one by. The record holds the SID as text and the entries come off
+by it after the account has gone, so it is not; see* Amended: removing the
+account reads every record*.)* What stands
 cannot be worked out again afterwards — it is a description's answer at the
 moment it was written, the `PATH` a session was given and the drives its
 Worktrees were on — which is the same reason a Conversation's entries are
@@ -651,6 +664,49 @@ second Conversation starting at the same moment waits for them. Sessions start
 one at a time on a machine with one human at it, and the alternative — a
 profile deleted from under a running session — is the one this decision is
 about.
+
+## Amended: removing the account reads every record
+
+(2026-10-16) `session-account remove` took off the entries in the
+installation's own record and deleted the account. It never read the
+Conversations' records, whose entries a close or the sweep a server starts with
+takes off, and neither runs after an uninstall. So every grant a Conversation
+still open at the uninstall held was left on the human's directories naming a
+SID nothing resolved any more: on the machine that found it, read-write on the
+Agent Profile's account directory and on a Repo's git directory. And it said
+nothing for minutes and then printed three lines of success whatever had
+happened.
+
+**It reads every record, and takes each entry off by the SID that record
+holds**: the installation's own, every Conversation's and the Compile Server's,
+whichever identity each names. Nothing about that needs the account to be
+there, because a SID that resolves to nobody parses all the same. So a machine
+already left with entries naming a deleted account is put right by running the
+verb again; no second verb lists them.
+
+**A grant or a refusal that will not come off stops it** before the profile or
+the account is deleted, naming every such path, and the verb exits non-zero;
+`--force` deletes the account regardless, names the paths still, and exits
+zero. A step that will not come off stops nothing, a record naming every step a
+description asked for whether or not the machine took it. An entry whose
+directory has gone counts as off.
+
+**It says what it is doing**: a line on stderr before each entry, with where it
+is in the whole, and on stdout how many came off out of how many there were,
+and how many Conversations' records still held entries. It does not ask the
+store which of those Conversations were open; the README says to quit
+Verkstead first, and that an open Conversation's grants stand until it closes.
+
+**And the installation's record keeps every identity it stood for.** An
+account deleted by hand and made again is a new SID, and the record used to be
+replaced whole for it, leaving the old SID's entries with no record of them. It
+now keeps the earlier identities beside the current one, in the same file, and
+only the removal reads them: a session start walking those trees is what the
+amendment above brought down from minutes.
+
+The local account database issues a new account's RID from a counter that only
+climbs, so an entry left naming a deleted account is untidy rather than a grant
+waiting for the next account made.
 
 ## What stays as it was
 

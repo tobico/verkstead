@@ -134,6 +134,7 @@ pub(crate) fn wrote(data_dir: &Path, remembered: &Remembered) -> io::Result<()> 
 
         entries: remembered.entries.iter().map(Line::of).collect(),
         cut: remembered.cut.clone(),
+        earlier: Vec::new(),
     };
 
     let body = serde_json::to_string_pretty(&written).map_err(io::Error::other)?;
@@ -297,9 +298,10 @@ fn standing_record(data_dir: &Path) -> PathBuf {
 /// because nothing does: an entry no boundary takes off is one that would
 /// otherwise outlive every record there is, and the account it names is
 /// removable by a verb of Verkstead's own. So the machine keeps one list of
-/// what it has standing, and [`super::super::account::machine::remove`] reads
-/// it — the one moment anything takes a standing entry off, and the last
-/// moment there is a SID to name it by.
+/// what it has standing, and [`super::super::account::removing`] reads it when
+/// the account is taken away — the one moment anything takes a standing entry
+/// off. The SID is written down as text, so that moment can come after the
+/// account has gone as well as before.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Standing {
     /// What the account is called, for the log as the entries come off.
@@ -309,6 +311,33 @@ pub(crate) struct Standing {
     pub(crate) sid: String,
 
     /// Those entries, in the order they were first written.
+    pub(crate) entries: Vec<Entry>,
+
+    /// And every identity this record stood for before the one above, each
+    /// with the entries written for it.
+    ///
+    /// **Kept rather than dropped**, because an account deleted by hand and
+    /// made again is a new SID with the old one's entries still on the human's
+    /// directories: a record that forgot them would leave them there for good,
+    /// naming an identity nothing on the machine can resolve. Nothing at a
+    /// session start reads these — walking those trees is what a start was
+    /// brought down from minutes by not doing — so the removal is the one thing
+    /// that takes them off.
+    pub(crate) earlier: Vec<Identity>,
+}
+
+/// One identity the installation's record once stood for, and what it had
+/// standing then.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Identity {
+    /// What the account was called.
+    pub(crate) account: String,
+
+    /// The SID it was, which is what its entries name and what they come off
+    /// by.
+    pub(crate) sid: String,
+
+    /// And the entries written for it.
     pub(crate) entries: Vec<Entry>,
 }
 
@@ -322,12 +351,13 @@ pub(crate) struct Standing {
 /// nothing had stepped through before — and each of them is an entry standing
 /// on the machine from the moment it is written.
 ///
-/// **Except where the identity has changed**, in which case what is there is
-/// somebody else's and is replaced whole. Entries naming an account this
-/// machine no longer has are not this record's to carry: they grant nobody
-/// anything, and a list that mixed two identities would have
-/// [`super::super::account::machine::remove`] taking off entries for a SID it
-/// is not removing.
+/// **And where the identity has changed, the one it was is kept beside it.**
+/// An account made again is a new SID, and the entries the old one had standing
+/// are still on the human's directories; the record moves them into
+/// [`Standing::earlier`] rather than letting them go, so that removing the
+/// account takes those off too. An identity already there is not said twice:
+/// one the record goes back to is taken out of that list and carries on with
+/// what it had, and one leaving it again is joined to what it left before.
 pub(crate) fn standing_wrote(
     data_dir: &Path,
     account: &str,
@@ -340,10 +370,40 @@ pub(crate) fn standing_wrote(
 
     let mut standing = match standing_read(data_dir) {
         Some(standing) if standing.sid == sid => standing,
-        _ => Standing {
+        Some(Standing {
+            account: was,
+            sid: was_sid,
+            entries: had,
+            mut earlier,
+        }) => {
+            // The identity this record goes back to, if it ever stood for it,
+            // carries on with what it had rather than starting again.
+            let back = earlier
+                .iter()
+                .position(|identity| identity.sid == sid)
+                .map(|at| earlier.remove(at));
+
+            set_aside(
+                &mut earlier,
+                Identity {
+                    account: was,
+                    sid: was_sid,
+                    entries: had,
+                },
+            );
+
+            Standing {
+                account: account.to_owned(),
+                sid: sid.to_owned(),
+                entries: back.map(|back| back.entries).unwrap_or_default(),
+                earlier,
+            }
+        }
+        None => Standing {
             account: account.to_owned(),
             sid: sid.to_owned(),
             entries: Vec::new(),
+            earlier: Vec::new(),
         },
     };
 
@@ -362,6 +422,8 @@ pub(crate) fn standing_wrote(
         // step, and a refusal is a Conversation's own by definition — one
         // covered the account's own skills from that Conversation's session.
         cut: Vec::new(),
+
+        earlier: standing.earlier.iter().map(Earlier::of).collect(),
     };
 
     let body = serde_json::to_string_pretty(&written).map_err(io::Error::other)?;
@@ -373,15 +435,30 @@ pub(crate) fn standing_wrote(
     )
 }
 
+/// `identity` added to `earlier`, joined to what is already there under its SID
+/// rather than said a second time.
+fn set_aside(earlier: &mut Vec<Identity>, identity: Identity) {
+    match earlier.iter_mut().find(|there| there.sid == identity.sid) {
+        Some(there) => {
+            for entry in identity.entries {
+                if !there.entries.contains(&entry) {
+                    there.entries.push(entry);
+                }
+            }
+        }
+        None => earlier.push(identity),
+    }
+}
+
 /// What this machine has standing, or nothing where it has never written one.
 pub(crate) fn standing_read(data_dir: &Path) -> Option<Standing> {
-    let path = standing_record(data_dir);
-    let remembered = at(&path, 0)?;
+    let written = written_at(&standing_record(data_dir))?;
 
     Some(Standing {
-        account: remembered.account,
-        sid: remembered.sid,
-        entries: remembered.entries,
+        account: written.account,
+        sid: written.sid,
+        entries: written.entries.iter().map(Line::entry).collect(),
+        earlier: written.earlier.iter().map(Earlier::identity).collect(),
     })
 }
 
@@ -404,6 +481,22 @@ pub(crate) fn standing_forget(data_dir: &Path) {
 
 /// One record read off `path`, or nothing with the reason in the log.
 fn at(path: &Path, conversation: i64) -> Option<Remembered> {
+    let written = written_at(path)?;
+
+    Some(Remembered {
+        conversation,
+        account: written.account,
+        sid: written.sid,
+
+        entries: written.entries.iter().map(Line::entry).collect(),
+        cut: written.cut,
+    })
+}
+
+/// And the same record as the disk spells it, which is what the installation's
+/// own is read as: it carries [`Written::earlier`], which no Conversation's
+/// does.
+fn written_at(path: &Path) -> Option<Written> {
     let body = match std::fs::read(path) {
         Ok(body) => body,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return None,
@@ -432,14 +525,7 @@ fn at(path: &Path, conversation: i64) -> Option<Remembered> {
         }
     };
 
-    Some(Remembered {
-        conversation,
-        account: written.account,
-        sid: written.sid,
-
-        entries: written.entries.iter().map(Line::entry).collect(),
-        cut: written.cut,
-    })
+    Some(written)
 }
 
 /// A record as it is written down — see this module's own documentation for why
@@ -466,6 +552,46 @@ struct Written {
     /// sweep is for.
     #[serde(default)]
     cut: Vec<PathBuf>,
+
+    /// The identities the installation's own record stood for before this one
+    /// — see [`Standing::earlier`]. Never in a Conversation's, and left out of
+    /// the file wherever it is empty, so a record without one is spelled as it
+    /// always was.
+    ///
+    /// Missing from a record an older build wrote, and nothing there rather
+    /// than a record that will not read; and a record this build wrote, read by
+    /// an older one, has this field passed over, which is serde's own default
+    /// for a field a shape does not name.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    earlier: Vec<Earlier>,
+}
+
+/// One earlier identity as it is written down.
+#[derive(Debug, Serialize, Deserialize)]
+struct Earlier {
+    account: String,
+    sid: String,
+    entries: Vec<Line>,
+}
+
+impl Earlier {
+    /// One identity as it is written down.
+    fn of(identity: &Identity) -> Earlier {
+        Earlier {
+            account: identity.account.clone(),
+            sid: identity.sid.clone(),
+            entries: identity.entries.iter().map(Line::of).collect(),
+        }
+    }
+
+    /// And as it is read back.
+    fn identity(&self) -> Identity {
+        Identity {
+            account: self.account.clone(),
+            sid: self.sid.clone(),
+            entries: self.entries.iter().map(Line::entry).collect(),
+        }
+    }
 }
 
 /// And one entry in it.
@@ -625,11 +751,12 @@ mod tests {
         );
     }
 
-    /// A record written for one identity is not added to for another: an
-    /// account made again is a new SID, and the entries the old one left are
-    /// not this one's to carry or to take off.
+    /// A record written for one identity is not added to for another, and is
+    /// not dropped for it either: an account made again is a new SID, and the
+    /// entries the old one left are kept beside the new one's, under the SID
+    /// they name, for removing the account to take off.
     #[test]
-    fn what_stood_for_another_identity_is_replaced_rather_than_joined() {
+    fn what_stood_for_another_identity_is_kept_beside_the_new_one() {
         let held = tempfile::tempdir().unwrap();
 
         let step = |path: &str| Entry {
@@ -656,6 +783,106 @@ mod tests {
 
         assert_eq!(standing.sid, "S-1-5-21-1-1-1-1002");
         assert_eq!(standing.entries, vec![step(r"D:\")]);
+        assert_eq!(
+            standing.earlier,
+            vec![Identity {
+                account: "vk-old".to_owned(),
+                sid: "S-1-5-21-1-1-1-1001".to_owned(),
+                entries: vec![step(r"C:\Users")],
+            }],
+            "and the identity it stood for before is read back whole beside it",
+        );
+
+        assert_eq!(
+            left_behind(held.path()),
+            Vec::<Remembered>::new(),
+            "and the record is still one file the sweep passes over by name",
+        );
+    }
+
+    /// An identity is never in the list twice: going back to one carries on
+    /// with what it had, and leaving it again joins what it left the first time.
+    #[test]
+    fn an_identity_the_record_goes_back_to_is_not_said_twice() {
+        let held = tempfile::tempdir().unwrap();
+
+        let step = |path: &str| Entry {
+            path: PathBuf::from(path),
+            wanted: Wanted::Stepped,
+        };
+
+        let (one, two) = ("S-1-5-21-1-1-1-1001", "S-1-5-21-1-1-1-1002");
+
+        standing_wrote(held.path(), "vk-a", one, &[step(r"C:\Users")]).unwrap();
+        standing_wrote(held.path(), "vk-a", two, &[step(r"D:\")]).unwrap();
+        standing_wrote(held.path(), "vk-a", one, &[step(r"E:\")]).unwrap();
+
+        let standing = standing_read(held.path()).unwrap();
+
+        assert_eq!(standing.sid, one);
+        assert_eq!(
+            standing.entries,
+            vec![step(r"C:\Users"), step(r"E:\")],
+            "the identity gone back to carries on with what it had standing",
+        );
+        assert_eq!(
+            standing
+                .earlier
+                .iter()
+                .map(|identity| identity.sid.as_str())
+                .collect::<Vec<_>>(),
+            vec![two],
+            "and is no longer among the earlier ones",
+        );
+
+        standing_wrote(held.path(), "vk-a", two, &[step(r"F:\")]).unwrap();
+
+        let standing = standing_read(held.path()).unwrap();
+
+        assert_eq!(standing.sid, two);
+        assert_eq!(standing.entries, vec![step(r"D:\"), step(r"F:\")]);
+        assert_eq!(
+            standing.earlier,
+            vec![Identity {
+                account: "vk-a".to_owned(),
+                sid: one.to_owned(),
+                entries: vec![step(r"C:\Users"), step(r"E:\")],
+            }],
+        );
+    }
+
+    /// A record an older build wrote, with no earlier identities in it, reads
+    /// as one with none; and a record without any is spelled as it always was,
+    /// so an older build reads this one's.
+    #[test]
+    fn a_standing_record_without_earlier_identities_reads_both_ways() {
+        let held = tempfile::tempdir().unwrap();
+
+        std::fs::create_dir_all(directory(held.path())).unwrap();
+        std::fs::write(
+            standing_record(held.path()),
+            r#"{
+              "account": "vk-0123456789ab",
+              "sid": "S-1-5-21-1-1-1-1001",
+              "entries": [ { "path": "C:\\Users", "wanted": "stepped" } ],
+              "cut": []
+            }"#,
+        )
+        .unwrap();
+
+        let standing = standing_read(held.path()).expect("a record an older build wrote");
+
+        assert_eq!(standing.earlier, Vec::new());
+        assert_eq!(standing.entries.len(), 1);
+
+        standing_wrote(held.path(), "vk-0123456789ab", "S-1-5-21-1-1-1-1001", &[]).unwrap();
+
+        assert!(
+            !std::fs::read_to_string(standing_record(held.path()))
+                .unwrap()
+                .contains("earlier"),
+            "and a record with nothing earlier in it does not say so",
+        );
     }
 
     /// And a record that has gone is nothing, which is what a sweep finds after

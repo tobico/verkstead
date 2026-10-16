@@ -120,6 +120,7 @@ use windows_sys::Win32::Storage::FileSystem::{
     DELETE, FILE_GENERIC_EXECUTE, FILE_GENERIC_READ, FILE_GENERIC_WRITE,
 };
 
+use super::super::account::removing::Came;
 use super::super::starting::wide;
 use super::super::surface::Reach;
 use super::lists::{ALLOWED, Found, INHERITED, STEP, THE_SID, inherited, mask, whose};
@@ -531,8 +532,59 @@ fn took(began: std::time::Instant, entries: usize, what: &str) {
 /// thing, so a grant of this session's still standing up there is one more
 /// thing for a copy to be told from.
 pub(crate) fn strip(entries: &[Entry], cut: &[PathBuf], sid: &str) {
-    let Ok(sid) = Sid::of(sid) else {
-        return;
+    stripped(entries, cut, sid, &mut |_| {});
+}
+
+/// The same taking off, saying what came of each entry, with `before` told of
+/// each one as it is reached.
+///
+/// **What removing the account reads**, where a boundary ending reads nothing:
+/// the removal is a verb a person is watching, and it has to say how many came
+/// off and which did not — see [`super::super::account::removing`]. `before`
+/// is called for every entry, in the order they are tried, before anything is
+/// asked of the machine about it, so a directory Windows is walking for
+/// seconds has a line in front of it rather than after it.
+///
+/// **An entry whose path is not there came off**, as far as this says: a
+/// closed Worktree's directory goes and its entry with it, and there is
+/// nothing on the machine left to take.
+pub(crate) fn stripped<'a>(
+    entries: &'a [Entry],
+    cut: &[PathBuf],
+    sid: &str,
+    before: &mut dyn FnMut(&Entry),
+) -> Vec<(&'a Entry, Came)> {
+    let mut came = Vec::with_capacity(entries.len());
+
+    // A SID that will not parse is one no entry can be taken off for, which is
+    // every entry still on the machine kept, and said so — rather than the
+    // silence it used to be, which a removal would have counted as nothing
+    // there at all.
+    let sid = match Sid::of(sid) {
+        Ok(sid) => sid,
+        Err(error) => {
+            tracing::warn!(
+                error = ?error,
+                sid,
+                "a record names an identity that is not a SID, so none of its entries can be \
+                 taken off",
+            );
+
+            for entry in grants_first(entries) {
+                before(entry);
+
+                came.push((
+                    entry,
+                    if entry.path.exists() {
+                        Came::Kept(format!("the record's SID {sid} would not read: {error}"))
+                    } else {
+                        Came::NotThere
+                    },
+                ));
+            }
+
+            return came;
+        }
     };
 
     let _one = one_at_a_time();
@@ -540,7 +592,11 @@ pub(crate) fn strip(entries: &[Entry], cut: &[PathBuf], sid: &str) {
     let mut walked = 0usize;
 
     for entry in grants_first(entries) {
+        before(entry);
+
         if !entry.path.exists() {
+            came.push((entry, Came::NotThere));
+
             continue;
         }
 
@@ -555,35 +611,39 @@ pub(crate) fn strip(entries: &[Entry], cut: &[PathBuf], sid: &str) {
             Wanted::Refused => restored(&sid, &entry.path, cut.contains(&entry.path)),
         };
 
-        if let Err(error) = taken {
-            // **A step is the one entry whose failing to come off is ordinary**,
-            // because a record says every step a description asked for rather
-            // than the ones the machine took — see
-            // [`super::super::entries::Entries::wrote`], which writes the
+        match taken {
+            Ok(()) => came.push((entry, Came::Off)),
+            Err(error) => {
+                // **A step is the one entry whose failing to come off is
+                // ordinary**, because a record says every step a description
+                // asked for rather than the ones the machine took — see
+                // [`super::super::entries::Entries::wrote`], which writes the
+                // record before a word of it is written. So an ancestor
+                // Verkstead could not write is one it now cannot take back,
+                // and there was never anything there to take: that is a line
+                // for somebody reading the log on purpose rather than a
+                // warning. One left alone for being walked through already
+                // never gets this far — see [`revoked`], which finds nothing
+                // of the account's on it and writes nothing.
+                if entry.wanted == Wanted::Stepped {
+                    tracing::debug!(
+                        error = ?error,
+                        path = %entry.path.display(),
+                        "a step through a directory on the way to a session's own would not \
+                         come off, which is what a directory that would not take one in the \
+                         first place answers",
+                    );
+                } else {
+                    tracing::warn!(
+                        error = ?error,
+                        path = %entry.path.display(),
+                        "an access-control entry written for a session's identity could not be \
+                         taken off again, so it is left on a directory naming an identity that \
+                         has gone"
+                    );
+                }
 
-            // record before a word of it is written. So an ancestor Verkstead
-            // could not write is one it now cannot take back, and there was
-            // never anything there to take: that is a line for somebody
-            // reading the log on purpose rather than a warning. One left alone
-            // for being walked through already never gets this far — see
-            // [`revoked`], which finds nothing of the account's on it and
-            // writes nothing.
-            if entry.wanted == Wanted::Stepped {
-                tracing::debug!(
-                    error = ?error,
-                    path = %entry.path.display(),
-                    "a step through a directory on the way to a session's own would not come \
-                     off, which is what a directory that would not take one in the first place \
-                     answers",
-                );
-            } else {
-                tracing::warn!(
-                    error = ?error,
-                    path = %entry.path.display(),
-                    "an access-control entry written for a session's identity could not be \
-                     taken off again, so it is left on a directory naming an identity that has \
-                     gone"
-                );
+                came.push((entry, Came::Kept(error.to_string())));
             }
         }
 
@@ -592,6 +652,8 @@ pub(crate) fn strip(entries: &[Entry], cut: &[PathBuf], sid: &str) {
     }
 
     took(began, walked, "taken off");
+
+    came
 }
 
 /// `entries` with every refusal in front of every grant, each half in the order
@@ -1820,6 +1882,192 @@ mod tests {
         );
 
         strip(&entries, &cut, NOBODY);
+    }
+
+    /// A second identity that names nobody, for an account made again under a
+    /// new SID: the one the installation's record stood for before [`NOBODY`].
+    const NOBODY_BEFORE: &str = "S-1-15-2-1-1-1-1-1-1-1-1-1-2";
+
+    /// Whether `path`'s own list holds an entry for `sid`, rather than one it
+    /// takes from above.
+    fn names(path: &Path, sid: &str) -> bool {
+        let sid = Sid::of(sid).expect("an identity that names nobody");
+
+        listed(path)
+            .iter()
+            .any(|ace| whose(ace).is_some_and(|theirs| sid.is(theirs)) && !inherited(ace))
+    }
+
+    /// **Removing the account takes every entry every record names off, by the
+    /// SID that record holds**: a Conversation's, the Compile Server's, the
+    /// installation's own, and an identity the installation stood for before
+    /// the account was made again — and forgets every record once it has.
+    ///
+    /// Written for identities that name nobody, which is the case the removal
+    /// exists for rather than a stand-in for it: entries left behind by an
+    /// account that has gone name a SID nothing resolves, and they come off by
+    /// the text the record holds.
+    #[test]
+    fn removing_the_account_takes_off_every_entry_every_record_names() {
+        use super::super::remembering::{self, Remembered};
+        use crate::sandbox::entries::NOBODYS;
+
+        let data_dir = tempfile::tempdir().expect("a Data Directory to keep records in");
+        let held = tempfile::tempdir().expect("a directory to lay entries out in");
+
+        let at = |name: &str| {
+            let path = held.path().join(name);
+            std::fs::create_dir_all(&path).unwrap();
+            path
+        };
+
+        let worktree = at("worktree");
+        let claude = at("claude");
+        let tools = at("tools");
+        let old_tools = at("old-tools");
+        let compiling = at("compiling");
+
+        let granted = |path: &Path, reach: Reach| Entry {
+            path: path.to_owned(),
+            wanted: Wanted::Granted(reach),
+        };
+
+        let conversation = vec![
+            granted(&worktree, Reach::ReadWrite),
+            granted(&claude, Reach::ReadWrite),
+            // Gone with the Worktree it was in, which counts as off.
+            granted(&held.path().join("closed-worktree"), Reach::ReadWrite),
+        ];
+        let compile_server = vec![granted(&compiling, Reach::ReadWrite)];
+        let before = vec![granted(&old_tools, Reach::ReadOnly)];
+        let standing = vec![granted(&tools, Reach::ReadOnly)];
+
+        for (entries, sid) in [
+            (&conversation, NOBODY),
+            (&compile_server, NOBODY),
+            (&before, NOBODY_BEFORE),
+            (&standing, NOBODY),
+        ] {
+            write(entries, sid, &[]).expect("entries on directories this test made");
+        }
+
+        for (conversation, entries) in [(7, &conversation), (NOBODYS, &compile_server)] {
+            remembering::wrote(
+                data_dir.path(),
+                &Remembered {
+                    conversation,
+                    account: "vk-gone".to_owned(),
+                    sid: NOBODY.to_owned(),
+                    entries: entries.clone(),
+                    cut: Vec::new(),
+                },
+            )
+            .unwrap();
+        }
+
+        remembering::standing_wrote(data_dir.path(), "vk-gone", NOBODY_BEFORE, &before).unwrap();
+        remembering::standing_wrote(data_dir.path(), "vk-gone", NOBODY, &standing).unwrap();
+
+        assert!(
+            names(&claude, NOBODY) && names(&old_tools, NOBODY_BEFORE),
+            "the entries should be on the directories before the removal, or a test that could \
+             not see one would pass against a removal that took nothing off",
+        );
+
+        let mut announced = Vec::new();
+        let tally = super::super::removing::taken_off(data_dir.path(), &mut |at, of, path| {
+            announced.push((at, of, path.to_owned()));
+        });
+
+        assert_eq!(tally.entries(), "6 of 6 taken off", "{tally:?}");
+        assert_eq!(tally.kept, Vec::new());
+        assert_eq!(
+            tally.conversations, 1,
+            "one Conversation's record held entries, and the Compile Server's is no \
+             Conversation's",
+        );
+        assert_eq!(
+            announced
+                .iter()
+                .map(|(at, of, _)| (*at, *of))
+                .collect::<Vec<_>>(),
+            (1..=6).map(|at| (at, 6)).collect::<Vec<_>>(),
+            "every entry announced, in order, with the whole beside it",
+        );
+
+        for (path, sid) in [
+            (&worktree, NOBODY),
+            (&claude, NOBODY),
+            (&compiling, NOBODY),
+            (&tools, NOBODY),
+            (&old_tools, NOBODY_BEFORE),
+        ] {
+            assert!(
+                !names(path, sid),
+                "{} should hold nothing for {sid} once the account is removed, and its list \
+                 says: {}",
+                path.display(),
+                said_plainly(path),
+            );
+        }
+
+        assert_eq!(remembering::left_behind(data_dir.path()), Vec::new());
+        assert_eq!(remembering::standing_read(data_dir.path()), None);
+    }
+
+    /// **A grant that would not come off is named, and its record is kept**, so
+    /// the removal stops and a run after it has the record to try again from.
+    ///
+    /// A record whose SID will not read is the one way an unelevated suite can
+    /// make an entry that will not come off: every path it names is still
+    /// there, and nothing can be taken off for an identity nobody can spell.
+    #[test]
+    fn a_record_whose_entries_would_not_come_off_stops_the_removal_and_is_kept() {
+        use super::super::remembering::{self, Remembered};
+        use crate::sandbox::account::removing::Kind;
+
+        let data_dir = tempfile::tempdir().expect("a Data Directory to keep records in");
+        let held = tempfile::tempdir().expect("a directory a record names");
+
+        remembering::wrote(
+            data_dir.path(),
+            &Remembered {
+                conversation: 7,
+                account: "vk-gone".to_owned(),
+                sid: "not a SID".to_owned(),
+                entries: vec![
+                    Entry {
+                        path: held.path().to_owned(),
+                        wanted: Wanted::Granted(Reach::ReadWrite),
+                    },
+                    Entry {
+                        path: held.path().join("not-there"),
+                        wanted: Wanted::Granted(Reach::ReadOnly),
+                    },
+                ],
+                cut: Vec::new(),
+            },
+        )
+        .unwrap();
+
+        let tally = super::super::removing::taken_off(data_dir.path(), &mut |_, _, _| {});
+
+        assert_eq!(tally.entries(), "1 of 2 taken off", "{tally:?}");
+        assert_eq!(tally.kept.len(), 1);
+        assert_eq!(tally.kept[0].path, held.path());
+        assert_eq!(tally.kept[0].kind, Kind::Grant);
+        assert!(tally.stops());
+        assert!(!tally.goes_on(false));
+        assert!(tally.goes_on(true));
+
+        assert_eq!(
+            remembering::left_behind(data_dir.path())
+                .iter()
+                .map(|remembered| remembered.conversation)
+                .collect::<Vec<_>>(),
+            vec![7],
+            "and the record is still there for the run after this one",
+        );
     }
 
     /// What one path's list says, entry by entry.

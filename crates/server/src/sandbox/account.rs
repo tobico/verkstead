@@ -61,6 +61,11 @@
 #[cfg(windows)]
 pub mod machine;
 
+// What taking the account away came to, counted: every platform's, because it
+// is arithmetic over what came of each entry, and only the taking off is a
+// call.
+pub mod removing;
+
 use std::fmt;
 use std::path::Path;
 
