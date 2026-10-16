@@ -39017,9 +39017,12 @@ async fn the_sidebar_row_says_whether_a_terminal_is_running_something() {
 
     let mut page = Listening::open(&fixture.app).await;
 
+    // Timed from before the command is typed rather than from its first tick,
+    // which comes after the terminal already reads busy: from here, however
+    // long the command takes to start, no turn can have read it running yet.
+    let started = Instant::now();
     watcher.types(&ticking_away(&ticks)).await;
     until_ticking(&ticks).await;
-    let started = Instant::now();
 
     fixture
         .row_until(|row| row.terminal_busy.then_some(()))
