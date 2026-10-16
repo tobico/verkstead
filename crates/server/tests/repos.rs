@@ -1131,6 +1131,57 @@ async fn a_repo_with_no_author_among_two_is_stated_as_unpicked() {
     assert!(listed[0].author_unpicked);
 }
 
+/// The same Repo, with the first Author made since and a second added on the
+/// Git section, is the first's: the save that adds the second records it as
+/// the one it was committing as all along, rather than leaving it to pick.
+#[tokio::test]
+async fn adding_a_second_author_keeps_a_repo_that_recorded_none_as_the_first() {
+    let src = tempfile::tempdir().unwrap();
+    let (dir, app) = workbench().await;
+    let repo = repository(src.path().join("verkstead"));
+
+    added(register(&app, &repo).await);
+
+    std::fs::write(
+        dir.path().join("config.yaml"),
+        "authors:\n  - id: work\n    name: Ada Lovelace\n    email: ada@work.example\n",
+    )
+    .unwrap();
+
+    // **Add author**, as the Git section sends it: the fields over a uuid the
+    // page minted, and every other section as it stands.
+    let _: serde_json::Value = post(
+        &app,
+        "/api/ui/settings",
+        &serde_json::json!({
+            "git_author": {
+                "id": "a1b2c3d4-0000-4000-8000-000000000002",
+                "display_name": "Home",
+                "name": "A. L.",
+                "email": "al@home.example",
+            },
+            "github_token": "Keep",
+            "languages": [{ "name": "rust", "enabled": true, "size": "" }],
+            "cleanup": {
+                "trim": { "enabled": true, "days": "" },
+                "delete": { "enabled": false, "days": "" },
+            },
+            "at_once": { "roadmap_stages": "", "conversations": "" },
+            "conflict_resolution": "Merge",
+            "share_on_done": false,
+            "sandbox_binds": [],
+            "ignored_comments": "Keep",
+            "mcp_servers": "Keep",
+            "instructions": "",
+        }),
+    )
+    .await;
+
+    let listed = listed(&app).await;
+    assert_eq!(listed[0].author.as_deref(), Some("work"));
+    assert!(!listed[0].author_unpicked);
+}
+
 /// Ask to register a path as the Author with the uuid `author`, the way the
 /// **Open repo** card asks once there are two to pick between.
 async fn register_as(app: &Router, path: &Path, author: &str) -> Registered {

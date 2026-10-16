@@ -6151,6 +6151,14 @@ async fn save_settings(
     State(state): State<AppState>,
     Json(edit): Json<SettingsEdit>,
 ) -> HttpResponse {
+    // A save that adds an Author beside the only one there is ends the one
+    // Author's standing for every Repo that records none, so they are recorded
+    // as it first — see [`recording_the_only_author`].
+    if let Err(error) = recording_the_only_author(&state, edit.git_author.id.as_deref()).await {
+        tracing::error!(error = ?error, "recording the Repos as the only Author failed");
+        return unavailable("The settings couldn't be saved.");
+    }
+
     let settings = state.settings.clone();
     let gh = state.github.clone();
 
@@ -6799,6 +6807,35 @@ fn as_told(
             })
             .collect(),
     }
+}
+
+/// Record every Repo that records no Author as the one Author configured, where
+/// the save about to be made adds a second — `drawn` being the uuid the Git
+/// section sent, which is a new Author where the file does not hold it.
+///
+/// With one Author, a Repo recording none is that one's — see
+/// [`crate::settings::Config::author_of`] — and a Repo registered while there
+/// was no Author at all is the ordinary way to have one. A second Author ends
+/// that, and the Repo would go from committing as the first to having nobody to
+/// commit as, which is the change ADR-0025 says adding an Author never makes.
+/// So what the fallback said is written down while it still holds: the
+/// statement the first start's move records with, safe to run twice.
+///
+/// Before the save rather than after it, so that no Repo is ever read with two
+/// Authors configured and none recorded. A save refused afterwards leaves the
+/// rows standing, which says nothing the one Author's fallback did not already.
+async fn recording_the_only_author(state: &AppState, drawn: Option<&str>) -> anyhow::Result<()> {
+    let config = state.settings.config();
+
+    let (Some(drawn), [only]) = (drawn, config.authors()) else {
+        return Ok(());
+    };
+
+    if drawn == only.id() {
+        return Ok(());
+    }
+
+    store::record_the_repo_authors(&state.pool, only.id()).await
 }
 
 /// What can be said about an Author's token, which is everything but the
