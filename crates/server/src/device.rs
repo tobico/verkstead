@@ -997,15 +997,26 @@ impl Devices {
     /// cluster that looked dissolved.
     ///
     /// **And the Annex's row carries what its box last said**, where it would
-    /// not come up at this start — see [`Devices::annex_troubled`].
+    /// not come up at this start — see [`Devices::annex_troubled`]. Where there
+    /// is no row to carry it, an Annex that has never been linked, it is said
+    /// beside this device's own instead.
     pub(crate) async fn listing(&self) -> Result<DevicesView> {
         let mut members = self.members.listed().await?;
 
-        if let Some(trouble) = self.annex_trouble() {
+        let mut annex_trouble = self.annex_trouble();
+
+        if let Some(trouble) = annex_trouble.take() {
+            let mut carried = false;
+
             for member in &mut members {
                 if member.identity.kept_by.as_deref() == Some(self.device.id()) {
                     member.trouble = Some(trouble.clone());
+                    carried = true;
                 }
+            }
+
+            if !carried {
+                annex_trouble = Some(trouble);
             }
         }
 
@@ -1013,6 +1024,7 @@ impl Devices {
             this: self.reading.identity(&self.device).await,
             members,
             pending: self.joins.pending(OffsetDateTime::now_utc()).await?,
+            annex_trouble,
         })
     }
 

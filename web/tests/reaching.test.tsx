@@ -483,6 +483,7 @@ const KEEPING: DevicesView = {
     },
   ],
   pending: [],
+  annex_trouble: null,
 };
 
 /// The two setup controls that once went to this device whatever page they
@@ -611,6 +612,7 @@ describe("the merged sidebar", () => {
       },
     ],
     pending: [],
+    annex_trouble: null,
   };
 
   /// The member's Conversation under the id it shares with this device's first
@@ -1034,6 +1036,7 @@ describe("a device with no cluster", () => {
     },
     members: [],
     pending: [],
+    annex_trouble: null,
   };
 
   function alone() {

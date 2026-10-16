@@ -1865,6 +1865,45 @@ async fn an_annex_that_never_answers_is_a_line_on_its_row() {
              verkstead: the peer listener could not be bound."
         ),
     );
+    assert_eq!(kept.annex_trouble, None, "said once, on the Annex's row");
+}
+
+/// An Annex that has never been linked has no row to carry the line, so it is
+/// said beside this device's own instead — never only in the log.
+#[tokio::test]
+async fn an_annex_never_linked_that_never_answers_is_said_beside_this_device() {
+    let annex = made_annex().await;
+    let keeper = Verkstead::asking().await;
+
+    let nobody = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let nowhere = nobody.local_addr().unwrap();
+    drop(nobody);
+
+    let failing = Boxed {
+        annex_at: nowhere,
+        service: "failed",
+        ..Boxed::of(&annex, KEEPER_AT)
+    };
+
+    let devices = keeper.devices().waiting(PATIENCE);
+    let came_up = Annexed::of(Arc::new(failing), keeper.settings())
+        .waiting(Duration::from_secs(1))
+        .up(&devices)
+        .await;
+
+    let line = "The annex didn't answer: its service is failed. \
+                verkstead: the peer listener could not be bound.";
+    assert_eq!(
+        came_up,
+        Err(line.to_owned()),
+        "and the install run's reason"
+    );
+
+    let app = router_answering_devices_telling(keeper.pool.clone(), devices, keeper.nudges.clone());
+    let kept = listing(&app).await;
+
+    assert!(kept.members.is_empty(), "no row was ever made");
+    assert_eq!(kept.annex_trouble.as_deref(), Some(line));
 }
 
 /// A machine with no box made to the end has nothing booted at the start, and

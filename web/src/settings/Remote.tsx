@@ -890,6 +890,7 @@ function List(props: {
       <Row
         of={props.of.this}
         here
+        trouble={props.of.annex_trouble}
         keeper={keeperOf(props.of, props.of.this)}
       />
 
@@ -960,7 +961,8 @@ function Row(props: {
   here?: boolean;
   unreachable?: boolean;
   /// And why its box would not come up, on a Keeper's row for its own Annex
-  /// that would not — drawn under the addresses, as the server said it.
+  /// that would not — drawn under the addresses, as the server said it. On
+  /// the Keeper's own row where the Annex has no row yet to carry it.
   trouble?: string | null;
   /// Whose Annex this is, where it is one — see [`keeperOf`].
   keeper?: string | null;

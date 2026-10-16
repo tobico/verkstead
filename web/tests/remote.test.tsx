@@ -903,6 +903,25 @@ one on the LAN",
     expect(theRowOf("laptop").textContent).not.toContain(why);
   });
 
+  /// And one that has never been linked has no row to carry it, so it is said
+  /// under this device's own.
+  it("draws why an Annex never linked would not come up under this device", async () => {
+    const why = "The annex didn't answer: its service is failed.";
+
+    mountPane(SERVING, {
+      ...KEEPING,
+      members: KEEPING.members.filter(
+        (member) => member.identity.kept_by === null,
+      ),
+      annex_trouble: why,
+    });
+
+    const here = await waitFor(() => theRowOf("this device"));
+
+    expect(here.textContent).toContain(why);
+    expect(theRowOf("laptop").textContent).not.toContain(why);
+  });
+
   /// And on every other member, the mark names the Keeper by the name the
   /// cluster holds for it — and there is no Unlink on it there either.
   it("marks an Annex with its Keeper's name on another member", async () => {

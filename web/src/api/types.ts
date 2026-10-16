@@ -2536,7 +2536,15 @@ members: Array<LinkedDevice>,
  * whose ten minutes ran out a second ago reads expired on this answer and
  * waiting on the one before it, and both are true when they are given.
  */
-pending: Array<PendingJoin>, };
+pending: Array<PendingJoin>, 
+/**
+ * And why this device's **Annex** would not come up at this start, where
+ * there is no row of the Annex's in `members` to carry it — an Annex that
+ * has never been linked. Drawn under this device's own row. Where the
+ * Annex has a row, the line is on it instead — see
+ * [`LinkedDevice::trouble`] — and this is `None`.
+ */
+annex_trouble: string | null, };
 
 /**
  * The Diff as the browser receives it: the HTML the server rendered, and the
