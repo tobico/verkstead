@@ -29,7 +29,9 @@ use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result};
 use sqlx::SqlitePool;
-use verkstead_render::{Created, Creation, Registered, RepoEntry, RepoRemoved, RepoView};
+use verkstead_render::{
+    Created, Creation, Registered, RepoEntry, RepoRemoved, RepoView, Repointed,
+};
 
 use crate::github::Gh;
 use crate::resolved::{Resolved, resolve};
@@ -655,6 +657,31 @@ pub(crate) async fn remove(pool: &SqlitePool, id: i64) -> Result<RepoRemoved> {
         store::Unregistering::Unregistered => RepoRemoved::Removed,
         store::Unregistering::NoSuchRepo => RepoRemoved::NoSuchRepo,
         store::Unregistering::InUse => RepoRemoved::InUse,
+    })
+}
+
+/// Point a Repo at the Author with the uuid `author`, from its row on the Repos
+/// pane, if nothing live has it in it.
+///
+/// **The uuid is one configured or a refusal**, read off `authors` at the
+/// moment of the press, for [`picked`]'s reason. The rest is the store's — see
+/// [`store::repoint_repo`], which refuses under live work on the Repo and
+/// beside it. Nothing is handed to a session already running: the sandbox
+/// reads the Author at launch, so the next one is the new Author's.
+pub(crate) async fn repoint(
+    pool: &SqlitePool,
+    authors: &[Author],
+    id: i64,
+    author: &str,
+) -> Result<Repointed> {
+    if !authors.iter().any(|configured| configured.id() == author) {
+        return Ok(Repointed::NoSuchAuthor);
+    }
+
+    Ok(match store::repoint_repo(pool, id, author).await? {
+        store::Repointing::Repointed(repo) => Repointed::Repointed(entry(repo, authors)),
+        store::Repointing::NoSuchRepo => Repointed::NoSuchRepo,
+        store::Repointing::InUse { on, beside } => Repointed::InUse { on, beside },
     })
 }
 

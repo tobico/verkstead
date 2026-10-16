@@ -5017,6 +5017,24 @@ finished: number,
 roadmaps: Array<AbandonedRoadmap>, };
 
 /**
+ * What became of pointing a Repo at another Author.
+ *
+ * Refused while work that is neither Done nor Closed has the Repo in it, the
+ * rule unregistering follows and for the reason ADR-0025 gives: a branch half
+ * committed as one Author would carry on as another.
+ */
+export type Repointed = { "Repointed": RepoEntry } | "NoSuchRepo" | "NoSuchAuthor" | { "InUse": { on: Array<string>, beside: Array<string>, } };
+
+/**
+ * A Repo pointed at another Author, from its row on the Repos pane.
+ */
+export type Repointing = { 
+/**
+ * The uuid of the Author its work is to be done as from now on.
+ */
+author: string, };
+
+/**
  * The **Resolve conflicts** press as the page receives it: when, and nothing
  * else.
  *

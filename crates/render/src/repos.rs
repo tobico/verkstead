@@ -192,6 +192,42 @@ pub enum RepoRemoved {
     InUse,
 }
 
+/// A Repo pointed at another Author, from its row on the Repos pane.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct Repointing {
+    /// The uuid of the Author its work is to be done as from now on.
+    pub author: String,
+}
+
+/// What became of pointing a Repo at another Author.
+///
+/// Refused while work that is neither Done nor Closed has the Repo in it, the
+/// rule unregistering follows and for the reason ADR-0025 gives: a branch half
+/// committed as one Author would carry on as another.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum Repointed {
+    /// Recorded, and the row as it now reads. The next session on it commits
+    /// and pushes as the new Author.
+    Repointed(RepoEntry),
+
+    /// There is no registered Repo with that id.
+    NoSuchRepo,
+
+    /// The Author named is not configured — one removed since the pane was
+    /// drawn, most likely. Nothing is recorded.
+    NoSuchAuthor,
+
+    /// Live work has it in it, named by branch: the Conversations on it in
+    /// `on`, and the ones holding it as a Companion Repo in `beside`, each
+    /// oldest first. At least one of them is not empty.
+    InUse {
+        on: Vec<String>,
+        beside: Vec<String>,
+    },
+}
+
 /// One registered Repo, whole: the row, and everything a reading of the
 /// repository itself adds to it.
 ///

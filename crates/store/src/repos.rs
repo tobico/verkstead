@@ -279,6 +279,107 @@ pub async fn unregister_repo(pool: &SqlitePool, id: i64) -> Result<Unregistering
     Ok(Unregistering::Unregistered)
 }
 
+/// What became of pointing a Repo at another Author.
+///
+/// Refused for the reason [`Unregistering::InUse`] is, and read the same way:
+/// a branch half committed as one Author would carry on as another, so the
+/// Author does not change under work that is neither Done nor Closed
+/// (ADR-0025). Named rather than counted, because the refusal is put in front
+/// of somebody who has to go and finish that work.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Repointing {
+    /// Recorded. The next session on it is the new Author's.
+    Repointed(Repo),
+
+    /// There is no registered Repo with that id, one taken away included.
+    NoSuchRepo,
+
+    /// Work that is neither Done nor Closed has this Repo in it: the branches
+    /// of the Conversations on it, and of the ones holding it as a Companion
+    /// Repo, each oldest first. One of the two is never empty.
+    InUse {
+        on: Vec<String>,
+        beside: Vec<String>,
+    },
+}
+
+/// Record the Repo `id` as the Author with the uuid `author`, if no live work
+/// has it in it.
+///
+/// **Live work beside it refuses too**, not only work on it: a Companion Repo
+/// is committed in by the Conversation that admitted it, and that admission was
+/// made against the Author it had. What counts as live is
+/// [`super::work_on_repo`]'s reading, by way of [`super::Lifecycle::read`].
+///
+/// One transaction, the look and the write together, so a Conversation started
+/// on the Repo between the two cannot find itself under an Author it was not
+/// started as. Whether `author` is configured is not the store's to know, and
+/// is asked above it.
+pub async fn repoint_repo(pool: &SqlitePool, id: i64, author: &str) -> Result<Repointing> {
+    let mut tx = super::writing(pool, "repointing a Repo").await?;
+
+    let row: Option<RepoRow> = sqlx::query_as(
+        "SELECT id, path, name, default_branch, author
+         FROM repos LEFT JOIN repo_authors ON repo_authors.repo_id = repos.id
+         WHERE id = ? AND id NOT IN (SELECT repo_id FROM unregistered_repos)",
+    )
+    .bind(id)
+    .fetch_optional(&mut *tx)
+    .await
+    .with_context(|| format!("reading the registered Repo {id}"))?;
+
+    let Some(row) = row else {
+        return Ok(Repointing::NoSuchRepo);
+    };
+
+    let rows: Vec<(String, String, bool)> = sqlx::query_as(
+        "SELECT COALESCE(c.named_branch, c.branch), c.state, c.repo_id = ?
+         FROM conversations c
+         WHERE c.repo_id = ?
+            OR c.id IN (SELECT conversation_id FROM companions WHERE repo_id = ?)
+         ORDER BY c.id",
+    )
+    .bind(id)
+    .bind(id)
+    .bind(id)
+    .fetch_all(&mut *tx)
+    .await
+    .with_context(|| format!("reading the work the Repo {id} is in"))?;
+
+    let (mut on, mut beside) = (Vec::new(), Vec::new());
+
+    for (branch, state, own) in rows {
+        match super::Lifecycle::read(&state)? {
+            super::Lifecycle::Done | super::Lifecycle::Closed => {}
+            _ if own => on.push(branch),
+            _ => beside.push(branch),
+        }
+    }
+
+    if !on.is_empty() || !beside.is_empty() {
+        return Ok(Repointing::InUse { on, beside });
+    }
+
+    sqlx::query(
+        "INSERT INTO repo_authors (repo_id, author) VALUES (?, ?)
+         ON CONFLICT (repo_id) DO UPDATE SET author = excluded.author",
+    )
+    .bind(id)
+    .bind(author)
+    .execute(&mut *tx)
+    .await
+    .with_context(|| format!("recording the Author of the Repo {id}"))?;
+
+    tx.commit()
+        .await
+        .with_context(|| format!("repointing the Repo {id}"))?;
+
+    Ok(Repointing::Repointed(Repo {
+        author: Some(author.to_owned()),
+        ..repo_of(row)
+    }))
+}
+
 /// Every registered Repo, by name.
 ///
 /// Alphabetical rather than newest first, unlike the Set lists: a Repo is not

@@ -96,6 +96,7 @@ pub use push::{PushKey, RelayedNews, Subscribed, Subscription, Unsubscribe};
 pub use remote::{RemoteBanner, RemoteView, ServeEdit, ServePress, ServeView};
 pub use repos::{
     Created, Creation, Registered, Registration, RepoAcross, RepoEntry, RepoRemoved, RepoView,
+    Repointed, Repointing,
 };
 pub use settings::{
     AtOnceEdit, AtOnceView, Author, AuthorSaved, BindEntry, CleanupEdit, CleanupStepEdit,

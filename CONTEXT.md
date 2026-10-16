@@ -104,7 +104,8 @@ leaves git to the host's own credentials. A **Share** is published as its Repo's
 Author too, the gist and the comment linking it alike, and an Author with no
 token refuses the publish rather than lending it another's.
 **Refused rather than mixed.** Repointing a Repo is refused while a Conversation
-on it is neither Done nor Closed, the rule unregistering follows; removing an
+on it, or one holding it as a **Companion Repo**, is neither Done nor Closed —
+the rule unregistering follows — naming each one; removing an
 Author is refused while a registered Repo of this device points at it; a Repo
 whose Author is gone from `config.yaml` refuses a start by name and halts with a
 **Notice** where nobody pressed; and a **Companion Repo** of another Author is

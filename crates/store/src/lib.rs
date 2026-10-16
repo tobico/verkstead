@@ -173,8 +173,9 @@ pub use push::{
     store_subscription, vapid_keys,
 };
 pub use repos::{
-    ConflictResolution, Repo, Unregistering, load_repo, recorded_repos, register_repo,
-    register_repo_as, registered_repo, registered_repo_at, registered_repos, unregister_repo,
+    ConflictResolution, Repo, Repointing, Unregistering, load_repo, recorded_repos, register_repo,
+    register_repo_as, registered_repo, registered_repo_at, registered_repos, repoint_repo,
+    unregister_repo,
 };
 pub use session_endings::{Ended, end_session, session_ending};
 pub use session_names::{continued_as, found_as, session_id, session_ids};

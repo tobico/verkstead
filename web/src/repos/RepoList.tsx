@@ -29,7 +29,13 @@
 //! side by side, and the one press it offers cannot be taken back, so the row
 //! carries what tells them apart.
 //!
-//! So the one thing there is to *do* to a Repo is take it off the registry,
+//! **And which Author it is, once there are two.** Each row then carries the
+//! Author its work is committed and pushed as, in a dropdown that changes it
+//! (ADR-0025) — refused, in words under the row, while a conversation on the
+//! repo or holding it as a companion is still going, naming each one. With one
+//! Author the row says nothing about it.
+//!
+//! Beyond that, the one thing there is to *do* to a Repo is take it off the registry,
 //! which is an unregistering rather than a delete: Verkstead stops offering the
 //! repository, the directory is left where it is, and every Conversation ever
 //! worked in it goes on saying so. **It is asked about once before it happens**
@@ -96,6 +102,7 @@ import {
   listRepos,
   registerRepo,
   removeRepo,
+  repointRepo,
 } from "../api/client";
 import type {
   AuthorSaved,
@@ -104,6 +111,7 @@ import type {
   RepoEntry,
   RepoRemoved,
   RepoView,
+  Repointed,
 } from "../api/types";
 import { repoParent, setRepoParent } from "../remembered";
 import { useReading } from "../freshness";
@@ -250,6 +258,62 @@ export const REPO_REMOVAL_REFUSAL: Record<RepoRemoved, string> = {
     "A conversation that's still going is on it. Finish or close that conversation first.",
 };
 
+/// What a repoint refused under live work names: the branches of the
+/// conversations on the repo, and of the ones holding it as a companion.
+type Live = Extract<Repointed, { InUse: unknown }>["InUse"];
+
+/// A pick made on one row: the Repo, and the uuid it is to be pointed at.
+type Repointing = { repo: RepoEntry; author: string };
+
+/// And what each bare refusal of one says.
+const REPOINT_REFUSAL: Record<Extract<Repointed, string>, string> = {
+  NoSuchRepo: "That repo is off the registry already.",
+  NoSuchAuthor: NO_SUCH_AUTHOR,
+};
+
+/// Names in a sentence, with the serial comma: `a`, `a and b`, `a, b, and c`.
+function named(branches: string[]): JSX.Element {
+  return (
+    <For each={branches}>
+      {(branch, at) => (
+        <>
+          {at() === 0
+            ? ""
+            : at() === branches.length - 1
+              ? branches.length === 2
+                ? " and "
+                : ", and "
+              : ", "}
+          <code>{branch}</code>
+        </>
+      )}
+    </For>
+  );
+}
+
+/// The refusal of a repoint under live work, naming the work: the author a
+/// branch is half committed as would change under it (ADR-0025).
+function LiveWork(props: { live: Live }): JSX.Element {
+  const many = (): number => props.live.on.length + props.live.beside.length;
+  const going = (branches: string[]): string =>
+    branches.length === 1 ? "is" : "are";
+
+  return (
+    <>
+      <Show when={props.live.on.length > 0}>
+        {named(props.live.on)} {going(props.live.on)} still going on this
+        repo.{" "}
+      </Show>
+      <Show when={props.live.beside.length > 0}>
+        {named(props.live.beside)} {going(props.live.beside)} still going with
+        this repo as a companion.{" "}
+      </Show>
+      Finish or close {many() === 1 ? "it" : "them"} before changing the
+      author.
+    </>
+  );
+}
+
 /// The Repos as they stand, read once for the card and the pane that draw them.
 ///
 /// Read when the page opens, like the Profiles above them: nothing here changes
@@ -346,8 +410,34 @@ export function ReposPane(props: {
   // something about the conversation it named.
   const [refused, setRefused] = createSignal<{
     repo: number;
-    said: string;
+    said: string | Live;
   } | null>(null);
+
+  // Who the Repos can be, read off the settings the way the Open repo card's
+  // pick is: with one Author or none, no row says anything about it.
+  const settings = useSettings();
+  const authors = (): AuthorSaved[] => settings.data?.authors ?? [];
+  const asked = (): boolean => authors().length > 1;
+
+  const repoint = useMutation(() => ({
+    mutationFn: (pick: Repointing) => repointRepo(pick.repo.id, pick.author),
+    onSuccess: (outcome: Repointed, pick: Repointing) => {
+      // The list redraws either way: a repoint is the row changing, and a
+      // refusal is about work that has moved on since the list was read.
+      void queries.invalidateQueries({ queryKey: ["repos"] });
+
+      if (typeof outcome === "string") {
+        setRefused({ repo: pick.repo.id, said: REPOINT_REFUSAL[outcome] });
+      } else if ("InUse" in outcome) {
+        setRefused({ repo: pick.repo.id, said: outcome.InUse });
+      }
+    },
+    onError: (error: Error, pick: Repointing) =>
+      setRefused({
+        repo: pick.repo.id,
+        said: `The repo's author couldn't be changed. ${error.message}`,
+      }),
+  }));
 
   const remove = useMutation(() => ({
     mutationFn: (repo: RepoEntry) => removeRepo(repo.id),
@@ -442,14 +532,35 @@ export function ReposPane(props: {
                       </button>
                     </div>
 
+                    {/* Who the Repo's work is committed and pushed as, and
+                        where that is changed (ADR-0025) — drawn only once
+                        there are two Authors to be. */}
+                    <Show when={asked()}>
+                      <RowAuthor
+                        repo={repo}
+                        authors={authors()}
+                        disabled={repoint.isPending}
+                        pick={(author) => {
+                          setRefused(null);
+                          repoint.mutate({ repo, author });
+                        }}
+                      />
+                    </Show>
+
                     {/* Refused rather than taken out from under the work going
                         on in it, and said under the row the press was made on:
                         the name above it is what says which Repo this is
                         about. */}
-                    <Show when={refused()?.repo === repo.id}>
-                      <ErrorLine class={styles.failure}>
-                        {refused()?.said}
-                      </ErrorLine>
+                    <Show when={refused()?.repo === repo.id ? refused() : null}>
+                      {(said) => (
+                        <ErrorLine class={styles.failure}>
+                          {typeof said().said === "string" ? (
+                            (said().said as string)
+                          ) : (
+                            <LiveWork live={said().said as Live} />
+                          )}
+                        </ErrorLine>
+                      )}
                     </Show>
                   </li>
                 )}
@@ -467,6 +578,55 @@ export function ReposPane(props: {
         remove={confirmed}
       />
     </>
+  );
+}
+
+/// One row's Author: a dropdown of every one configured, showing the Repo's
+/// own, and a line under it where there is none to show — one still to be
+/// picked, or one `config.yaml` no longer holds.
+///
+/// A pick is sent at once, the Git section's switcher's way, and the dropdown
+/// goes on saying what the server holds until the list is read again.
+function RowAuthor(props: {
+  repo: RepoEntry;
+  authors: AuthorSaved[];
+  disabled: boolean;
+  pick: (author: string) => void;
+}): JSX.Element {
+  const id = createUniqueId();
+
+  const gone = (): boolean =>
+    props.repo.author !== null &&
+    !props.authors.some(({ id }) => id === props.repo.author);
+
+  return (
+    <div class={styles.author}>
+      <label for={id}>Author</label>
+      <Picker
+        id={id}
+        options={props.authors}
+        value={(author) => author.id}
+        label={authorLabel}
+        chosen={props.repo.author ?? ""}
+        disabled={props.disabled}
+        pick={(author) => {
+          if (author !== props.repo.author) {
+            props.pick(author);
+          }
+        }}
+        nothing="Select"
+      />
+      <Show when={props.repo.author_unpicked}>
+        <Note class={styles.authorNote}>
+          No author is picked for this repo yet.
+        </Note>
+      </Show>
+      <Show when={gone()}>
+        <Note class={styles.authorNote}>
+          This repo's author isn't configured any more. Pick another.
+        </Note>
+      </Show>
+    </div>
   );
 }
 

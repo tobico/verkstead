@@ -14,9 +14,9 @@ use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Adding, Lifecycle, Unregistering, add_companion, load_repo, open_database,
+    Adding, Lifecycle, Repointing, Unregistering, add_companion, load_repo, open_database,
     record_the_repo_authors, recorded_repos, register_repo, register_repo_as, registered_repo,
-    registered_repos, set_state, start_adoption, start_conversation, unregister_repo,
+    registered_repos, repoint_repo, set_state, start_adoption, start_conversation, unregister_repo,
 };
 
 /// The device every Conversation started here is ranked by, named the way a
@@ -571,5 +571,134 @@ async fn the_author_is_still_there_after_the_database_is_reopened() {
             .author
             .as_deref(),
         Some("work")
+    );
+}
+
+/// A Repo with no live work in it is pointed at another Author, replacing the
+/// one it had — and every read of it says so after.
+#[tokio::test]
+async fn an_idle_repo_is_repointed() {
+    let (_dir, pool) = fresh_pool().await;
+
+    let repo = register_repo_as(
+        &pool,
+        Path::new("/watched/verkstead"),
+        "verkstead",
+        "main",
+        Some("work"),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    let going = start_conversation(&pool, repo.id, "rate-limiting", THIS_DEVICE)
+        .await
+        .unwrap()
+        .unwrap();
+    set_state(&pool, going, Lifecycle::Done).await.unwrap();
+
+    let Repointing::Repointed(repointed) = repoint_repo(&pool, repo.id, "home").await.unwrap()
+    else {
+        panic!("the repoint was refused");
+    };
+
+    assert_eq!(repointed.author.as_deref(), Some("home"));
+    assert_eq!(load_repo(&pool, repo.id).await.unwrap(), Some(repointed));
+}
+
+/// Live work on the Repo refuses it, naming each branch, and live work holding
+/// it as a Companion Repo refuses it too — named apart, the two being different
+/// sentences. What is over refuses nothing.
+#[tokio::test]
+async fn a_repo_in_live_work_is_not_repointed() {
+    let (_dir, pool) = fresh_pool().await;
+
+    let own = register_repo_as(
+        &pool,
+        Path::new("/watched/verkstead"),
+        "verkstead",
+        "main",
+        Some("work"),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let beside = register_repo_as(
+        &pool,
+        Path::new("/watched/askance"),
+        "askance",
+        "main",
+        Some("work"),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    let on = start_conversation(&pool, own.id, "rate-limiting", THIS_DEVICE)
+        .await
+        .unwrap()
+        .unwrap();
+    let finished = start_conversation(&pool, own.id, "old-work", THIS_DEVICE)
+        .await
+        .unwrap()
+        .unwrap();
+    set_state(&pool, finished, Lifecycle::Closed).await.unwrap();
+
+    assert_eq!(
+        add_companion(&pool, on, beside.id).await.unwrap(),
+        Adding::Added,
+    );
+
+    assert_eq!(
+        repoint_repo(&pool, own.id, "home").await.unwrap(),
+        Repointing::InUse {
+            on: vec!["rate-limiting".to_owned()],
+            beside: vec![],
+        },
+    );
+    assert_eq!(
+        repoint_repo(&pool, beside.id, "home").await.unwrap(),
+        Repointing::InUse {
+            on: vec![],
+            beside: vec!["rate-limiting".to_owned()],
+        },
+    );
+    assert_eq!(
+        load_repo(&pool, beside.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .author
+            .as_deref(),
+        Some("work"),
+        "nothing was recorded",
+    );
+
+    set_state(&pool, on, Lifecycle::Done).await.unwrap();
+
+    assert!(matches!(
+        repoint_repo(&pool, beside.id, "home").await.unwrap(),
+        Repointing::Repointed(_),
+    ));
+}
+
+/// And a Repo nobody has registered, or one taken away, is nothing to repoint.
+#[tokio::test]
+async fn an_unregistered_repo_is_not_repointed() {
+    let (_dir, pool) = fresh_pool().await;
+
+    let repo = register_repo(&pool, Path::new("/watched/verkstead"), "verkstead", "main")
+        .await
+        .unwrap()
+        .unwrap();
+    unregister_repo(&pool, repo.id).await.unwrap();
+
+    assert_eq!(
+        repoint_repo(&pool, repo.id, "home").await.unwrap(),
+        Repointing::NoSuchRepo,
+    );
+    assert_eq!(
+        repoint_repo(&pool, 404, "home").await.unwrap(),
+        Repointing::NoSuchRepo,
     );
 }

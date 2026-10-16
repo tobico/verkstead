@@ -39,7 +39,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
 import type { JSX } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { DirectoryListing, RepoEntry } from "../src/api/types";
+import type {
+  DirectoryListing,
+  RepoEntry,
+  SettingsView,
+} from "../src/api/types";
 import card from "../src/CardButton.module.css";
 import {
   OpenRepo,
@@ -59,9 +63,16 @@ import {
   rows as offered,
   tap,
 } from "./fields";
-import { json, serving, whenever, type Answer } from "./serving";
+import {
+  askedFor,
+  json,
+  serving,
+  whenever,
+  type Answer,
+} from "./serving";
 import repos from "./fixtures/repos.json" with { type: "json" };
 import listing from "./fixtures/directories.json" with { type: "json" };
+import told from "./fixtures/settings.json" with { type: "json" };
 
 const REPOS = repos as RepoEntry[];
 const FIRST = REPOS[0]!;
@@ -495,6 +506,169 @@ describe("removing a repo", () => {
 /// The registration, which has left the settings: it is asked from the Repo
 /// dropdown, over the **Open repo** modal, and nothing on the settings page
 /// registers a repository at all.
+/// The settings as the fixture has them: one Author.
+const ONE_AUTHOR = told as SettingsView;
+const WORK = ONE_AUTHOR.authors[0]!;
+
+/// And a second, with a display name, which is what its rows read as.
+const HOME: SettingsView["authors"][number] = {
+  id: "9b1e7c2d-4a5f-4e8b-8c3d-2f1a0e9d8c7b",
+  display_name: "Home",
+  name: "A. L.",
+  email: "al@home.example",
+  github_token: null,
+};
+
+const TWO_AUTHORS: SettingsView = {
+  ...ONE_AUTHOR,
+  authors: [WORK, HOME],
+};
+
+/// The fixture's Repos, the first recorded as `WORK`, the second as `author`.
+function recorded(second: string | null): RepoEntry[] {
+  return [
+    { ...REPOS[0]!, author: WORK.id },
+    { ...REPOS[1]!, author: second, author_unpicked: second === null },
+  ];
+}
+
+/// One row's Author dropdown, where it is drawn.
+function authorOf(name: string): HTMLSelectElement | null {
+  return theRow(name).querySelector<HTMLSelectElement>("select");
+}
+
+/// The repoint of one Repo, answered however the test says.
+function repointing(repo: RepoEntry, answer: () => Promise<Response>) {
+  return whenever(`/api/ui/repos/${repo.id}/author`, answer, "POST");
+}
+
+describe("the author of a repo", () => {
+  it("is not drawn with one author configured", async () => {
+    const fetching = serving(
+      whenever("/api/ui/repos", json(recorded(WORK.id))),
+      whenever("/api/ui/settings", json(ONE_AUTHOR)),
+    );
+    mountPane();
+
+    await waitFor(() => screen.getByText(FIRST.name));
+    // Read the settings before saying nothing is drawn off them.
+    await waitFor(() =>
+      expect(askedFor(fetching, "/api/ui/settings")).toBeGreaterThan(0),
+    );
+    await new Promise((settle) => setTimeout(settle, 0));
+
+    expect(authorOf(FIRST.name)).toBeNull();
+    expect(screen.queryByLabelText("Author")).toBeNull();
+    expect(theRow(FIRST.name).textContent).toBe(
+      `${FIRST.name}${FIRST.path}Remove`,
+    );
+  });
+
+  it("shows each repo's author by name once there are two", async () => {
+    serving(
+      whenever("/api/ui/repos", json(recorded(HOME.id))),
+      whenever("/api/ui/settings", json(TWO_AUTHORS)),
+    );
+    mountPane();
+
+    await waitFor(() => expect(authorOf(FIRST.name)).not.toBeNull());
+
+    const first = authorOf(FIRST.name)!;
+    expect(first.selectedOptions[0]!.textContent).toBe("Ada Lovelace");
+    expect(authorOf(REPOS[1]!.name)!.selectedOptions[0]!.textContent).toBe(
+      "Home",
+    );
+    expect([...first.options].map((option) => option.textContent)).toEqual([
+      "Ada Lovelace",
+      "Home",
+    ]);
+  });
+
+  it("says so where a repo has none picked, or one that is gone", async () => {
+    serving(
+      whenever("/api/ui/repos", json(recorded(null))),
+      whenever("/api/ui/settings", json(TWO_AUTHORS)),
+    );
+    const { unmount } = mountPane();
+
+    await waitFor(() =>
+      screen.getByText("No author is picked for this repo yet."),
+    );
+    expect(
+      theRow(REPOS[1]!.name).textContent!.includes("No author is picked"),
+    ).toBe(true);
+    unmount();
+
+    serving(
+      whenever("/api/ui/repos", json(recorded("a-uuid-nobody-holds"))),
+      whenever("/api/ui/settings", json(TWO_AUTHORS)),
+    );
+    mountPane();
+
+    await waitFor(() =>
+      screen.getByText(
+        "This repo's author isn't configured any more. Pick another.",
+      ),
+    );
+  });
+
+  it("asks the server to repoint it and reads the list again", async () => {
+    const fetching = serving(
+      whenever("/api/ui/repos", json(recorded(HOME.id))),
+      whenever("/api/ui/settings", json(TWO_AUTHORS)),
+      repointing(
+        FIRST,
+        json({ Repointed: { ...FIRST, author: HOME.id } }),
+      ),
+    );
+    const { queries } = mountPane();
+    const invalidated = vi.spyOn(queries, "invalidateQueries");
+
+    await waitFor(() => expect(authorOf(FIRST.name)).not.toBeNull());
+    fireEvent.change(authorOf(FIRST.name)!, { target: { value: HOME.id } });
+
+    await waitFor(() =>
+      expect(invalidated).toHaveBeenCalledWith({ queryKey: ["repos"] }),
+    );
+    const sent = fetching.mock.calls.find(
+      ([path]) => String(path) === `/api/ui/repos/${FIRST.id}/author`,
+    );
+    expect(JSON.parse(String(sent![1]!.body))).toEqual({ author: HOME.id });
+  });
+
+  it("names the live work a refused repoint is about, under its row", async () => {
+    serving(
+      whenever("/api/ui/repos", json(recorded(HOME.id))),
+      whenever("/api/ui/settings", json(TWO_AUTHORS)),
+      repointing(
+        FIRST,
+        json({ InUse: { on: ["rate-limiting"], beside: ["docs-pass"] } }),
+      ),
+    );
+    mountPane();
+
+    await waitFor(() => expect(authorOf(FIRST.name)).not.toBeNull());
+    fireEvent.change(authorOf(FIRST.name)!, { target: { value: HOME.id } });
+
+    const failure = await waitFor(() => {
+      const line = theRow(FIRST.name).querySelector(`.${styles.failure}`);
+      expect(line).not.toBeNull();
+      return line!;
+    });
+    expect(failure.textContent).toBe(
+      "rate-limiting is still going on this repo. docs-pass is still going " +
+        "with this repo as a companion. Finish or close them before changing " +
+        "the author.",
+    );
+    expect(
+      [...failure.querySelectorAll("code")].map((code) => code.textContent),
+    ).toEqual(["rate-limiting", "docs-pass"]);
+    expect(
+      theRow(REPOS[1]!.name).querySelector(`.${styles.failure}`),
+    ).toBeNull();
+  });
+});
+
 describe("the registration the dropdown draws", () => {
   /// Every way the server can turn a path away, each said in its own words: a
   /// refusal the human cannot tell from another is a refusal they cannot act

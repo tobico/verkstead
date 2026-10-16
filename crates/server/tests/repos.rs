@@ -38,7 +38,7 @@ use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
-use verkstead_render::{Created, Registered, RepoEntry, RepoRemoved, RepoView};
+use verkstead_render::{Created, Registered, RepoEntry, RepoRemoved, RepoView, Repointed};
 use verkstead_server::settings::Settings;
 use verkstead_server::{Gh, open_database, router_asking_github, router_keeping, store};
 
@@ -1462,4 +1462,119 @@ async fn the_repos_from_before_the_list_are_recorded_as_the_author_the_start_mov
             .unwrap(),
         None
     );
+}
+
+/// Ask for a Repo to be pointed at the Author with the uuid `author`, as its
+/// row on the Repos pane does.
+async fn repoint(app: &Router, id: i64, author: &str) -> Repointed {
+    post(
+        app,
+        &format!("/api/ui/repos/{id}/author"),
+        &serde_json::json!({ "author": author }),
+    )
+    .await
+}
+
+/// A Repo nothing live is in is pointed at the other Author, and the list reads
+/// it as that Author's from then on.
+#[tokio::test]
+async fn an_idle_repo_is_repointed_to_the_other_author() {
+    let src = tempfile::tempdir().unwrap();
+    let (dir, pool, app) = workbench_and_pool().await;
+    two_authors(&dir);
+    let repo = repository(src.path().join("verkstead"));
+
+    let registered = added(register_as(&app, &repo, "work").await);
+
+    // Work that is over is no reason to keep the Author it was done as.
+    let over = store::start_conversation(&pool, registered.id, "rate-limiting", THIS_DEVICE)
+        .await
+        .unwrap()
+        .unwrap();
+    store::set_state(&pool, over, store::Lifecycle::Done)
+        .await
+        .unwrap();
+
+    let Repointed::Repointed(repointed) = repoint(&app, registered.id, "personal").await else {
+        panic!("the repoint was refused");
+    };
+
+    assert_eq!(repointed.author.as_deref(), Some("personal"));
+    assert_eq!(listed(&app).await, vec![repointed]);
+}
+
+/// A live Conversation on the Repo refuses the repoint, naming its branch, and
+/// so does one holding it as a Companion Repo — and the Author stands.
+#[tokio::test]
+async fn a_repo_in_live_work_is_refused_a_repoint_naming_the_work() {
+    let src = tempfile::tempdir().unwrap();
+    let (dir, pool, app) = workbench_and_pool().await;
+    two_authors(&dir);
+
+    let own = added(register_as(&app, &repository(src.path().join("verkstead")), "work").await);
+    let beside = added(register_as(&app, &repository(src.path().join("askance")), "work").await);
+
+    let going = store::start_conversation(&pool, own.id, "rate-limiting", THIS_DEVICE)
+        .await
+        .unwrap()
+        .unwrap();
+    store::add_companion(&pool, going, beside.id).await.unwrap();
+
+    assert_eq!(
+        repoint(&app, own.id, "personal").await,
+        Repointed::InUse {
+            on: vec!["rate-limiting".to_owned()],
+            beside: vec![],
+        },
+    );
+    assert_eq!(
+        repoint(&app, beside.id, "personal").await,
+        Repointed::InUse {
+            on: vec![],
+            beside: vec!["rate-limiting".to_owned()],
+        },
+    );
+    assert!(
+        listed(&app)
+            .await
+            .iter()
+            .all(|repo| repo.author.as_deref() == Some("work")),
+        "nothing was repointed",
+    );
+
+    store::set_state(&pool, going, store::Lifecycle::Closed)
+        .await
+        .unwrap();
+
+    assert!(matches!(
+        repoint(&app, own.id, "personal").await,
+        Repointed::Repointed(_)
+    ));
+}
+
+/// A uuid nobody configured is refused before anything is asked of the Repo,
+/// and an id nothing is registered under is a named outcome too.
+#[tokio::test]
+async fn a_repoint_names_a_configured_author_and_a_registered_repo() {
+    let src = tempfile::tempdir().unwrap();
+    let (dir, app) = workbench().await;
+    two_authors(&dir);
+    let registered =
+        added(register_as(&app, &repository(src.path().join("verkstead")), "work").await);
+
+    assert_eq!(
+        repoint(&app, registered.id, "nobody").await,
+        Repointed::NoSuchAuthor
+    );
+    assert_eq!(repoint(&app, 404, "personal").await, Repointed::NoSuchRepo);
+    assert_eq!(
+        post::<Repointed>(
+            &app,
+            "/api/ui/repos/not-a-number/author",
+            &serde_json::json!({ "author": "personal" }),
+        )
+        .await,
+        Repointed::NoSuchRepo
+    );
+    assert_eq!(listed(&app).await[0].author.as_deref(), Some("work"));
 }

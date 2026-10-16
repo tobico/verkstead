@@ -121,6 +121,9 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // under the Profile: what comes back is a named outcome, and a refusal
         // is an answer rather than a status.
         .route("/api/ui/repos/{id}/remove", post(remove_repo))
+        // And which Author it is, the one thing about a Repo the pane changes
+        // rather than takes away — refused the same way, under live work.
+        .route("/api/ui/repos/{id}/author", post(repoint_repo))
         .route(
             "/api/ui/conversations",
             get(conversations).post(start_conversation),
@@ -1189,6 +1192,36 @@ async fn remove_repo(State(state): State<AppState>, Path(id): Path<String>) -> H
         Err(error) => {
             tracing::error!(error = ?error, repo_id = id, "removing a Repo failed");
             unavailable("The repo couldn't be removed.")
+        }
+    }
+}
+
+/// `POST /api/ui/repos/{id}/author` — point one at another Author.
+///
+/// Every refusal is a named outcome in the body, the removal's way: live work
+/// in the Repo is a reason the pane puts in words, naming that work. An id that
+/// is not a number is the answer an id nothing is registered under gets.
+async fn repoint_repo(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(repointing): Json<verkstead_render::Repointing>,
+) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(verkstead_render::Repointed::NoSuchRepo).into_response();
+    };
+
+    match crate::repos::repoint(
+        &state.pool,
+        state.settings.config().authors(),
+        id,
+        &repointing.author,
+    )
+    .await
+    {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, repo_id = id, "repointing a Repo failed");
+            unavailable("The repo's author couldn't be changed.")
         }
     }
 }

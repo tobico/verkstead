@@ -32,13 +32,13 @@ use crate::{
     PortsView, PrefillView, Preflight, ProcessChoice, ProcessPicked, ProfileChoice, ProfileChosen,
     ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails, PushKey,
     Registered, Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoPairingsView,
-    RepoRemoved, RepoSwitched, RepoView, Resolved, Resumed, RoadmapPane, RoleChoice, Screen,
-    ServeEdit, ServePress, ServerAttached, ServerRemoved, SetReading, SettingsEdit, SettingsSaved,
-    SettingsView, ShareCommented, SharePublished, SharedConversation, ShowArchived,
-    ShowingArchived, Shown, Started, SteerCancelled, SteerForm, SteerOpened, SteerSaved,
-    SteerSubmission, Submitted, Subscribed, Subscription, TakenUp, TargetNamed, TargetRecorded,
-    TerminalClosed, TerminalOpened, TerminalsView, TranscriptView, Transferring, Unsubscribe,
-    UpdateNotice, Watching,
+    RepoRemoved, RepoSwitched, RepoView, Repointed, Repointing, Resolved, Resumed, RoadmapPane,
+    RoleChoice, Screen, ServeEdit, ServePress, ServerAttached, ServerRemoved, SetReading,
+    SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedConversation,
+    ShowArchived, ShowingArchived, Shown, Started, SteerCancelled, SteerForm, SteerOpened,
+    SteerSaved, SteerSubmission, Submitted, Subscribed, Subscription, TakenUp, TargetNamed,
+    TargetRecorded, TerminalClosed, TerminalOpened, TerminalsView, TranscriptView, Transferring,
+    Unsubscribe, UpdateNotice, Watching,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -72,6 +72,8 @@ fn the_viewers_types_are_written_from_these() {
     Registration::export_all(&config).unwrap();
     Registered::export_all(&config).unwrap();
     RepoRemoved::export_all(&config).unwrap();
+    Repointing::export_all(&config).unwrap();
+    Repointed::export_all(&config).unwrap();
 
     // And making one, which is the other way a Repo arrives: a parent and a name
     // in, and the whole opened Repo or the reason there is none back.

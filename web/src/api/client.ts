@@ -89,6 +89,8 @@ import type {
   RepoEntry,
   RepoPairingsView,
   RepoRemoved,
+  Repointed,
+  Repointing,
   RepoSwitched,
   Resolved,
   Response as Decided,
@@ -387,6 +389,16 @@ export function createRepo(
 /// with live work on it is refused for a reason worth saying, and not a failure.
 export function removeRepo(id: number): Promise<RepoRemoved> {
   return post<RepoRemoved>(`/api/ui/repos/${id}/remove`);
+}
+
+/// Point one at another Author, by the uuid the settings list it under.
+///
+/// The outcome is the answer's body, the removal's way: live work in the Repo
+/// refuses it for a reason worth saying, naming that work.
+export function repointRepo(id: number, author: string): Promise<Repointed> {
+  return post<Repointed>(`/api/ui/repos/${id}/author`, {
+    author,
+  } satisfies Repointing);
 }
 
 /// The registered Repos holding roadmaps nothing is driving.

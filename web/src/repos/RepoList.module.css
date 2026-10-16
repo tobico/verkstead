@@ -97,6 +97,28 @@
   }
 }
 
+/* Who a Repo's work is done as, under its row once there are two Authors:
+   the label and the dropdown on one line, and the line saying there is none to
+   show under them where there is not. */
+.author {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.5rem;
+  margin-top: 0.35rem;
+  font-size: 0.9rem;
+}
+
+.author select {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.authorNote {
+  flex-basis: 100%;
+  margin: 0;
+}
+
 .repo .failure {
   margin: 0.35rem 0 0;
   font-size: 0.9rem;

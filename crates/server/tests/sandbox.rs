@@ -1518,6 +1518,71 @@ async fn a_repo_opened_under_the_second_author_runs_its_sessions_as_it() {
     }
 }
 
+/// A Repo repointed on the Repos pane, once nothing live is in it, runs the
+/// next session on it as the new Author: its `user.email` and its `GH_TOKEN`,
+/// and nothing of the one it was opened as.
+#[tokio::test]
+async fn a_repo_repointed_runs_its_next_session_as_the_new_author() {
+    use axum::body::Body;
+    use axum::http::{Request, header};
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
+
+    let mut fixture = grilling_opened_as("work").await;
+
+    // The grilling is live, which refuses a repoint — so it is put over first,
+    // and the session built after stands in for the next one on the Repo.
+    store::set_state(
+        &fixture.pool,
+        fixture.conversation.id,
+        store::Lifecycle::Done,
+    )
+    .await
+    .unwrap();
+
+    let app =
+        verkstead_server::router_keeping(fixture.pool.clone(), fixture.state.path().to_owned());
+    let response = app
+        .oneshot(
+            Request::post(format!(
+                "/api/ui/repos/{}/author",
+                fixture.conversation.repo.id
+            ))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                serde_json::json!({ "author": "home" }).to_string(),
+            ))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let outcome: verkstead_render::Repointed = serde_json::from_slice(&body).unwrap();
+    assert!(
+        matches!(outcome, verkstead_render::Repointed::Repointed(_)),
+        "the repoint was refused: {outcome:?}"
+    );
+
+    fixture.conversation = store::load_conversation(&fixture.pool, fixture.conversation.id)
+        .await
+        .unwrap()
+        .expect("the Conversation is still there");
+
+    let given = environment(&fixture.sandbox(vec![]));
+
+    assert_eq!(configured_email(&given), Some("tobi@example.com"));
+    assert_eq!(
+        given.get("GH_TOKEN").map(String::as_str),
+        Some("ghp_thehomeone")
+    );
+    for (name, value) in &given {
+        assert!(
+            !value.contains("tobi@tobico.net") && !value.contains("ghp_theworkone"),
+            "the old Author's is in {name}={value}"
+        );
+    }
+}
+
 /// Two Repos under two Authors are two sessions as two people: each one's
 /// environment carries its own Repo's Author's `user.email` and `GH_TOKEN`, and
 /// nothing anywhere in it is the other Author's. A Conversation Terminal is that
