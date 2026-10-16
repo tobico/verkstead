@@ -1038,6 +1038,18 @@ pub(crate) fn on_branch(worktree: &Path) -> Option<String> {
 /// reasons of its own leaves the worktree alone. Which is why the repository
 /// half is asked as *does this say otherwise* rather than *does this agree*.
 pub(crate) fn healthy(repo: &Path, path: &Path, branch: &str) -> bool {
+    readable(repo, path) && head(path).is_some_and(|head| head == format!("refs/heads/{branch}"))
+}
+
+/// Whether git still reads the directory at `path` as one of `repo`'s
+/// worktrees, whatever is checked out in it.
+///
+/// [`healthy`] without the branch: a checkout mid-rebase, detached at a commit,
+/// or switched to another branch is still somewhere to work, and it is where
+/// somebody's uncommitted changes are. What fails this is a checkout that is
+/// not there to stand in at all — deleted, hollowed out, or dropped from the
+/// repository's list of worktrees.
+fn readable(repo: &Path, path: &Path) -> bool {
     // Git answering inside the directory, and where its object database is.
     let Some(inside) = common_git_dir(path) else {
         return false;
@@ -1047,18 +1059,31 @@ pub(crate) fn healthy(repo: &Path, path: &Path, branch: &str) -> bool {
     // repository being no place to do this Conversation's work. Only where the
     // Repo itself reads: git saying nothing about it is a repository Verkstead
     // cannot see rather than a worktree that is wrong.
-    if common_git_dir(repo).is_some_and(|ours| ours != inside) {
-        return false;
-    }
+    common_git_dir(repo).is_none_or(|ours| ours == inside)
+}
 
-    head(path).is_some_and(|head| head == format!("refs/heads/{branch}"))
+/// How much of a Conversation's own Worktree a press needs standing before it
+/// goes on — and so what [`standing`] makes it again over.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Wanting {
+    /// Checked out on its branch, which is what a session is started in: Resume's
+    /// and Resolve conflicts' press, on a Conversation nothing is running in.
+    /// Anything else is made again — see [`healthy`].
+    OnItsBranch,
+
+    /// Somewhere git reads, whatever is checked out there: a terminal's or a
+    /// Code pane's press, which come while a session may be mid-rebase or the
+    /// human mid-way through something by hand in another terminal. Only a
+    /// checkout that is not there at all is made again — see [`readable`] — so
+    /// nothing anybody is working in is ever taken away under them.
+    Readable,
 }
 
 /// What became of asking that a Conversation's own Worktree be there to work in
 /// — see [`standing`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Standing {
-    /// It was there and healthy, and nothing was touched.
+    /// It was standing as the press wanted it, and nothing was touched.
     Healthy,
 
     /// Nothing was asked: this copy is a tombstone, the work is on another
@@ -1074,13 +1099,13 @@ pub(crate) enum Standing {
 }
 
 /// The Conversation's own Worktree at `worktree`, made again from its branch
-/// where it has gone — for a press that has nowhere to work without it, a
-/// terminal's or a Code pane's.
+/// where it is not standing as `wanting` needs it — for a press that has
+/// nowhere to work without it.
 ///
-/// What Resume does, by the same reading: the branch followed through a rename
-/// first, so a rename nothing saw is not read as a breakage, then
-/// [`healthy`], then [`rebuild`] where that says no. A worktree is derived
-/// state, so nothing is lost by it, and nothing healthy is touched.
+/// The branch followed through a rename first, so a rename nothing saw is not
+/// read as a breakage, then [`healthy`] or [`readable`] as `wanting` says, then
+/// [`rebuild`] where that says no. A worktree is derived state, so nothing is
+/// lost by it, and nothing that reads as standing is touched.
 ///
 /// **One at a time, across the server.** A pane attaching and a terminal
 /// pressed a moment later both ask, and a second rebuild of one path would find
@@ -1092,6 +1117,7 @@ pub(crate) async fn standing(
     pool: &sqlx::SqlitePool,
     conversation: &store::Conversation,
     worktree: &Path,
+    wanting: Wanting,
 ) -> anyhow::Result<Standing> {
     static ONE_AT_A_TIME: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
@@ -1115,7 +1141,12 @@ pub(crate) async fn standing(
     let worktree = worktree.to_owned();
 
     let standing = tokio::task::spawn_blocking(move || {
-        if healthy(&repo, &worktree, &branch) {
+        let standing = match wanting {
+            Wanting::OnItsBranch => healthy(&repo, &worktree, &branch),
+            Wanting::Readable => readable(&repo, &worktree),
+        };
+
+        if standing {
             Standing::Healthy
         } else if rebuild(&repo, &worktree, &branch) {
             Standing::Remade

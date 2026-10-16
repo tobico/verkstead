@@ -127,7 +127,13 @@ pub(crate) async fn resolve(state: &AppState, conversation_id: i64) -> anyhow::R
     //
     // Under the registration taken above, a Conversation being rebuilt being a
     // Conversation being driven.
-    let standing = crate::worktrees::standing(&state.pool, &conversation, &worktree).await?;
+    let standing = crate::worktrees::standing(
+        &state.pool,
+        &conversation,
+        &worktree,
+        crate::worktrees::Wanting::OnItsBranch,
+    )
+    .await?;
 
     if standing == crate::worktrees::Standing::Gone {
         return Ok(Resolved::WorktreeRefused);

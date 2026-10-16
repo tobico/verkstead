@@ -318,7 +318,13 @@ async fn recompute(
     // Under the registration taken above, because a Conversation being rebuilt
     // is a Conversation being driven — a sweep that found it undriven meanwhile
     // would stop it all over again.
-    let standing = crate::worktrees::standing(&state.pool, conversation, &worktree).await?;
+    let standing = crate::worktrees::standing(
+        &state.pool,
+        conversation,
+        &worktree,
+        crate::worktrees::Wanting::OnItsBranch,
+    )
+    .await?;
 
     if standing == crate::worktrees::Standing::Gone {
         return Ok(Resumed::WorktreeRefused);

@@ -38489,6 +38489,91 @@ async fn a_terminal_makes_a_worktree_that_has_gone_again_from_its_branch() {
     );
 }
 
+/// But a checkout that is merely off its branch is somebody's work, and a
+/// terminal pressed over it opens in it as it stands: a rebase stopped on a
+/// conflict has a detached HEAD, and the human resolving it by hand is exactly
+/// who presses for a second terminal.
+#[tokio::test]
+async fn a_terminal_leaves_a_worktree_mid_rebase_as_it_stands() {
+    let fixture = grilling(
+        r#"
+        printf 'reading the brief\r\n'
+        while :; do sleep 0.05; done
+        "#,
+    )
+    .await;
+
+    let worktree = fixture
+        .until(|view| view.worktree.as_ref().map(|worktree| worktree.path.clone()))
+        .await;
+
+    let git = |args: &[&str]| {
+        std::process::Command::new("git")
+            .args([
+                "-c",
+                "user.name=Verkstead",
+                "-c",
+                "user.email=verkstead@example.com",
+            ])
+            .args(["-C", &worktree])
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    let asked = |args: &[&str]| {
+        let out = git(args);
+        assert!(out.status.success(), "git {args:?}: {out:?}");
+        String::from_utf8(out.stdout).unwrap().trim().to_owned()
+    };
+
+    let branch = asked(&["branch", "--show-current"]);
+    let clash = std::path::Path::new(&worktree).join("clash.txt");
+
+    asked(&["switch", "-c", "elsewhere"]);
+    std::fs::write(&clash, "theirs\n").unwrap();
+    asked(&["add", "clash.txt"]);
+    asked(&["commit", "-m", "theirs"]);
+
+    asked(&["switch", &branch]);
+    std::fs::write(&clash, "ours\n").unwrap();
+    asked(&["add", "clash.txt"]);
+    asked(&["commit", "-m", "ours"]);
+
+    assert!(
+        !git(&["rebase", "elsewhere"]).status.success(),
+        "the rebase should have stopped on its conflict",
+    );
+
+    let unsaved = std::path::Path::new(&worktree).join("unsaved.txt");
+    std::fs::write(&unsaved, "nobody committed this\n").unwrap();
+
+    let opened: TerminalOpened = post(
+        &fixture.app,
+        &format!("/api/ui/conversations/{}/terminals", fixture.id),
+        &serde_json::json!({}),
+    )
+    .await;
+
+    assert!(
+        matches!(opened, TerminalOpened::Opened { .. }),
+        "expected a terminal opened in the checkout as it stands, and the server said: {opened:?}",
+    );
+    assert!(
+        unsaved.exists(),
+        "the uncommitted file in {worktree:?} should still be there",
+    );
+    assert!(
+        std::path::Path::new(&asked(&[
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-path",
+            "rebase-merge"
+        ]))
+        .exists(),
+        "the rebase in {worktree:?} should still be in progress",
+    );
+}
+
 /// And where the branch has gone with it there is nothing to make the Worktree
 /// again from, which is said as that rather than as a shell that would not
 /// start: the human has something to go and look for.

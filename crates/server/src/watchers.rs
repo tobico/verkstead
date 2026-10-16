@@ -96,7 +96,7 @@ use verkstead_schema::Nudge;
 use crate::AppState;
 use crate::nudge::Nudges;
 use crate::store;
-use crate::worktrees::Standing;
+use crate::worktrees::{Standing, Wanting};
 
 /// How long the last pane going is given to come back before its watcher is
 /// stopped.
@@ -1031,7 +1031,9 @@ async fn attached(
         .as_ref()
         .filter(|worktree| !worktree.exists())
     {
-        match crate::worktrees::standing(&state.pool, &conversation, worktree).await {
+        match crate::worktrees::standing(&state.pool, &conversation, worktree, Wanting::Readable)
+            .await
+        {
             Ok(Standing::Healthy | Standing::Elsewhere) => {}
 
             Ok(Standing::Remade) => state.nudges.announce(Nudge::Files {

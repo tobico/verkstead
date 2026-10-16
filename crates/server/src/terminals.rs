@@ -158,7 +158,7 @@ use crate::screen::Live;
 use crate::sessions::CHUNK;
 use crate::store;
 use crate::terminal::{Child, Terminal};
-use crate::worktrees::Standing;
+use crate::worktrees::{Standing, Wanting};
 
 /// How that shell is started on the platforms whose shell wants telling.
 ///
@@ -1049,8 +1049,16 @@ pub(crate) async fn open(
     // with nothing on the screen saying why. So it is made again from the
     // branch, as Resume makes it and for Resume's reason — see
     // [`crate::worktrees::standing`].
+    //
+    // **Only where it is not there at all**, though, which is less than Resume
+    // asks: a terminal is pressed while a session may be mid-rebase, or while
+    // the human is part-way through one by hand in the terminal beside it, and
+    // a checkout off its branch is where that work is. See
+    // [`Wanting::Readable`].
     if let Some(worktree) = conversation.worktree.clone() {
-        match crate::worktrees::standing(&state.pool, &conversation, &worktree).await? {
+        match crate::worktrees::standing(&state.pool, &conversation, &worktree, Wanting::Readable)
+            .await?
+        {
             Standing::Healthy | Standing::Elsewhere => {}
 
             // And the tree beside it is told, which drew the Worktree as it was
