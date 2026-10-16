@@ -561,7 +561,14 @@ flowchart LR
     the host `gh` so the answer names the account it authenticates as, or says
     in words why nobody could be asked. The save lands either way: a token is
     pasted once out of a page that will not show it again (*refined 2026-08-23,
-    building intentional-credentials*).
+    building intentional-credentials*). *Refined 2026-10-16, grilling authors*:
+    the author and the token are one **Author** of several, keyed by a uuid,
+    every Repo records which is its, and everything above — the environment a
+    session is handed, every `gh` call and every fetch and push of Verkstead's
+    own — reads by the Repo, so no session holds any other Author's token; one
+    list across a cluster, mirrored the way Profiles are with a copy of each
+    token in every device's `secrets.yaml` —
+    [ADR-0025](../adr/0025-a-repo-has-an-author.md).
   - **A shared Rust build cache, on by default** (*settled 2026-08-29, grilling
     shared-rust-build-cache*): one directory the server resolves at startup —
     `--build-cache-dir`, `VERKSTEAD_BUILD_CACHE_DIR`, else
@@ -1187,6 +1194,10 @@ Timeline events:
   With either setting missing the page says
   so and says what it costs: sessions that cannot reach GitHub, commits that
   fail asking who the author is.
+  *Refined 2026-10-16, grilling authors*: the section keeps that shape and
+  gains a dropdown at its head picking which **Author** the fields are about,
+  with **Add author** at its foot, drawn only once there are two
+  ([ADR-0025](../adr/0025-a-repo-has-an-author.md)).
   Under the Git section are the Agent Profiles and the Repos, which had pages of
   their own until they were folded in here — all of it is settled once and then
   left alone, and `/profiles` and `/repos` are no such page now rather than
