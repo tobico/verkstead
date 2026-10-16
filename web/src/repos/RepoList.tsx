@@ -191,6 +191,9 @@ function useAuthorPick() {
     asked,
     chosen,
     setChosen,
+    /// The Author picked, where one is.
+    picked: (): AuthorSaved | undefined =>
+      authors().find(({ id }) => id === chosen()),
     /// Whether the press is held for want of a pick.
     wanting: (): boolean => asked() && chosen() === "",
     /// What the press sends: the pick where there was one to make, and nothing
@@ -796,15 +799,34 @@ export function CreateRepo(props: {
   // an answer like any other: false, which is the true one — a token nothing
   // can read is a token nothing can make a repository as — and the local
   // repository is still worth making, which a card held shut would not be.
-  const tokened = (): boolean | null =>
-    settings.isPending ? null : settings.data?.github_token != null;
+  //
+  // **The picked Author's token, where there are several.** The repository is
+  // made on GitHub as the Author it is made as or not at all, so the question
+  // is whether *that one* holds a token — and it is not settled until one is
+  // picked, which draws neither the tick nor the note in the meantime. With one
+  // Author it is the settings' own token, which is that Author's.
+  const tokened = (): boolean | null => {
+    if (settings.isPending) {
+      return null;
+    }
+
+    if (!author.asked()) {
+      return settings.data?.github_token != null;
+    }
+
+    const picked = author.picked();
+
+    return picked === undefined ? null : picked.github_token != null;
+  };
 
   // And whether it is ticked, which starts on: somebody who has saved a token
-  // has said what they mean to do with it.
+  // has said what they mean to do with it. On again with every new pick, the
+  // tick being drawn afresh for the Author picked.
   const [onGithub, setOnGithub] = createSignal(true);
 
   // And which Author it is made as, where there are several to pick between:
-  // the first commit is by it, and the Repo is recorded as its.
+  // the first commit is by it, the Repo is recorded as its, and the GitHub
+  // repository is made with its token.
   const author = useAuthorPick();
 
   // And which device it is being made on, for [`RepoRegistration`]'s reason:
@@ -1007,7 +1029,13 @@ export function CreateRepo(props: {
             }}
           />
 
-          <AuthorPicker pick={author} moved={() => setRefused(null)} />
+          <AuthorPicker
+            pick={author}
+            moved={() => {
+              setRefused(null);
+              setOnGithub(true);
+            }}
+          />
 
           {/* And the third question, asked only where there is a token to answer
             it with — see the note below, which is what stands here instead.
@@ -1036,9 +1064,11 @@ export function CreateRepo(props: {
             is one that will stop halfway through the first conversation. */}
           <Show when={tokened() === false}>
             <Note class={styles.remote}>
-              No GitHub token is saved, so this repo is made here only. It needs
-              a remote, or a token saved in Settings, before the work on it can
-              be finished.
+              {author.asked()
+                ? `${authorLabel(author.picked()!)} has no GitHub token saved`
+                : "No GitHub token is saved"}
+              , so this repo is made here only. It needs a remote, or a token
+              saved in Settings, before the work on it can be finished.
             </Note>
           </Show>
 

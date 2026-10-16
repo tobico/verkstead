@@ -129,6 +129,16 @@ impl Gh {
             .map(str::to_owned)
     }
 
+    /// Whether there is a token to authenticate as at all — which, where there
+    /// is none, would leave a call to the host's own login.
+    ///
+    /// What a write asks before it is made: a read under the host's login is a
+    /// read, and a repository made under it is one in an account nobody chose.
+    /// See [`crate::repos::create`].
+    pub(crate) fn tokened(&self) -> bool {
+        self.token().is_some()
+    }
+
     /// Run it inside `repo` and take its stdout, or say why there is none.
     ///
     /// Blocking, like everything that shells out. The callers are on

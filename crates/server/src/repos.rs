@@ -215,6 +215,10 @@ fn unpicked(author: Option<&str>, authors: &[Author]) -> bool {
 /// nothing to push before it, and before the registration, so that what is read
 /// back is a Repo with its remote on it.
 ///
+/// **Only as an Author with a token.** Where the one it is made as has none, no
+/// `gh` is run at all — it would fall back to the host's own login, a repository
+/// in an account nobody picked — and the answer is the one below, saying so.
+///
 /// A GitHub failure there is **not** a failed create. The directory, the commit
 /// and the registration all stand, and what is missing is a remote that can be
 /// added afterwards — so the answer carries the Repo *and* what failed rather
@@ -275,15 +279,24 @@ pub(crate) async fn create(
         true => {
             // As the Author it was committed as, whose Repo it is about to be.
             let gh = gh.as_author(picked.map(Author::id));
+
             let dir = path.clone();
             let called = name.clone();
 
-            tokio::task::spawn_blocking(move || {
-                crate::github::create_repository(&gh, &dir, &called)
-            })
-            .await?
-            .err()
-            .map(|trouble| trouble.why())
+            // And not at all where that Author has no token: `gh` would fall
+            // back to the host's own login and make the repository in an
+            // account nobody picked. Made here only, and said why — the shape a
+            // GitHub that would not finish already has.
+            if gh.tokened() {
+                tokio::task::spawn_blocking(move || {
+                    crate::github::create_repository(&gh, &dir, &called)
+                })
+                .await?
+                .err()
+                .map(|trouble| trouble.why())
+            } else {
+                Some(untokened(authors, picked))
+            }
         }
     };
 
@@ -319,6 +332,20 @@ pub(crate) async fn create(
         },
         None => Created::Refused("The repo was registered but couldn't be read back.".to_owned()),
     })
+}
+
+/// Why a create asked onto GitHub was made here only, where the Author it was
+/// made as has no token: named where there are several to tell apart, and not
+/// where the one there is is the only one it could be.
+fn untokened(authors: &[Author], picked: Option<&Author>) -> String {
+    let named = picked
+        .filter(|_| authors.len() > 1)
+        .and_then(|author| author.display_name().or(author.name()));
+
+    match named {
+        Some(named) => format!("{named} has no GitHub token saved, so it wasn't made on GitHub."),
+        None => "No GitHub token is saved, so it wasn't made on GitHub.".to_owned(),
+    }
 }
 
 /// What the filesystem half can refuse with, which is every outcome of a create

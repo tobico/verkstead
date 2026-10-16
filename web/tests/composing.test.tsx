@@ -3908,8 +3908,12 @@ describe("making a repo from the Repo dropdown", () => {
 
     await waitFor(() => expect(screen.getByLabelText(WHERE)).toBeTruthy());
 
+    // With two Authors neither stands until one is picked, and the pick being
+    // drawn is what says the settings have answered.
     if (settled) {
-      await waitFor(() => expect(tick() ?? noRemote()).toBeTruthy());
+      await waitFor(() =>
+        expect(tick() ?? noRemote() ?? authorPick()).toBeTruthy(),
+      );
     }
   }
 
@@ -4146,6 +4150,68 @@ describe("making a repo from the Repo dropdown", () => {
 
     await waitFor(() => screen.getByText(/needs a remote/i));
     expect(tick()).toBeNull();
+  });
+
+  /// With two Authors the tick follows the one picked: the repository is made
+  /// on GitHub with that Author's token or not at all, so an Author with none
+  /// draws the sentence, one with a token draws the tick, on — and nothing is
+  /// said about GitHub before a pick.
+  it("draws the tick for the author picked, where it has a token", async () => {
+    const fetching = creating(
+      json({ Made: MADE }),
+      json({ ...TWO_AUTHORS, github_token: TOKENED.github_token }),
+    );
+    const { container } = mount("/compose");
+    const first = TOKENED.authors[0]!.id;
+
+    await composing(container);
+    await createRepoModal();
+
+    expect(tick()).toBeNull();
+    expect(noRemote()).toBeNull();
+
+    fireEvent.change(authorPick()!, { target: { value: SECOND.id } });
+    await waitFor(() =>
+      screen.getByText(/^A\. L\. has no GitHub token saved.*needs a remote/),
+    );
+    expect(tick()).toBeNull();
+
+    // Taken off under one Author, and on again for the next.
+    fireEvent.change(authorPick()!, { target: { value: first } });
+    await waitFor(() => expect(tick()?.checked).toBe(true));
+    expect(noRemote()).toBeNull();
+    fireEvent.click(tick()!);
+    expect(tick()!.checked).toBe(false);
+
+    fireEvent.change(authorPick()!, { target: { value: SECOND.id } });
+    await waitFor(() => expect(noRemote()).toBeTruthy());
+    expect(tick()).toBeNull();
+
+    fireEvent.change(authorPick()!, { target: { value: first } });
+    await waitFor(() => expect(tick()?.checked).toBe(true));
+
+    make("/home/ada/src", "widgets");
+    await waitFor(() =>
+      expect(sent(fetching, "/api/ui/repos/new")).toEqual({
+        parent: "/home/ada/src",
+        name: "widgets",
+        github: true,
+        author: first,
+      }),
+    );
+  });
+
+  /// And with one Author the note reads as it always has, naming nobody.
+  it("names no author in the note with one author", async () => {
+    creating(json({ Made: MADE }));
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await createRepoModal();
+
+    await waitFor(() =>
+      screen.getByText(/^No GitHub token is saved, so this repo is made here/),
+    );
   });
 
   /// And says neither of those things until it has been told which it is.

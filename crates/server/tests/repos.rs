@@ -987,6 +987,45 @@ async fn a_create_on_github_under_the_second_author_pushes_with_its_token() {
     assert_eq!(noted(&notes, "token"), "ghp_thepersonalone");
 }
 
+/// A create asked onto GitHub under an Author with no token is made here and
+/// registered, and `gh` is never run: it would fall back to the host's own
+/// login, and make the repository in an account nobody picked.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_create_on_github_under_an_author_with_no_token_runs_no_gh() {
+    let root = tempfile::tempdir().unwrap();
+    let (dir, notes, app) = workbench_with_gh("exit 0").await;
+    two_authors(&dir);
+    // The work one has a token and the personal one has none.
+
+    let outcome = post(
+        &app,
+        "/api/ui/repos/new",
+        &serde_json::json!({
+            "parent": root.path(),
+            "name": "widgets",
+            "github": true,
+            "author": "personal",
+        }),
+    )
+    .await;
+
+    let Created::MadeWithoutRemote { repo, why } = outcome else {
+        panic!("the create did not answer with both halves: {outcome:?}");
+    };
+
+    assert_eq!(
+        why,
+        "A. L. has no GitHub token saved, so it wasn't made on GitHub."
+    );
+    assert!(
+        !notes.path().join("asked").exists(),
+        "`gh` was never run for an Author with nothing to run it as",
+    );
+    assert_eq!(repo.author.as_deref(), Some("personal"));
+    assert_eq!(listed(&app).await.len(), 1, "and it is on the registry");
+}
+
 /// A GitHub failure after the local repository exists is not a failed create.
 ///
 /// The directory, the commit and the registration all stand — what is missing is
@@ -1041,6 +1080,12 @@ async fn a_machine_with_no_gh_leaves_the_local_repository_registered_too() {
     let dir = tempfile::tempdir().unwrap();
 
     author(&dir, "Ada Lovelace", "ada@example.com");
+    // A token to run it as, or there would be nothing to run it for.
+    std::fs::write(
+        dir.path().join("secrets.yaml"),
+        "author_tokens:\n  work: ghp_thetokenthatwassaved\n",
+    )
+    .unwrap();
 
     let pool = open_database(&dir.path().join("verkstead.db"))
         .await
@@ -1048,10 +1093,11 @@ async fn a_machine_with_no_gh_leaves_the_local_repository_registered_too() {
     let data_dir = dir.path().to_owned();
     let app = router_asking_github(
         pool,
-        data_dir,
+        data_dir.clone(),
         Gh::running(vec![
             dir.path().join("there-is-no-gh-here").display().to_string(),
-        ]),
+        ])
+        .authenticated_by(Settings::in_data_dir(&data_dir)),
     );
 
     let outcome = create_on_github(&app, root.path(), "widgets").await;
