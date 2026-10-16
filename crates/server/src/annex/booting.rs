@@ -17,6 +17,11 @@
 //! up the dial finds nothing, and the first one that gets through is the
 //! answer.
 //!
+//! **And the Keeper's git author and GitHub token handed in first**, at every
+//! start rather than at make alone: the Annex's sessions commit as the Keeper
+//! and authenticate as it, so a change on the Keeper reaches them the next
+//! time the two start together — see [`InTheBox::commit_as`].
+//!
 //! **A box that will not come up is a line on its row**, held on the
 //! [`Devices`] handle and drawn under the Annex's row on the Devices list, and
 //! in the log. The Keeper carries on either way, and the row reads
@@ -36,7 +41,7 @@ use anyhow::{Context, bail};
 
 use super::{Backend, DATA_DIR, Inside, Probed};
 use crate::device::{AnnexData, CERTIFICATE_FILE, Devices};
-use crate::settings::{Config, KeptBy};
+use crate::settings::{Config, GitAuthor, KeptBy, Secrets, Settings};
 
 /// How long a box has to come up and be linked: the boot, the service's start,
 /// and the first dial that gets through. A cold WSL VM and a NixOS boot under
@@ -55,6 +60,10 @@ const SERVICE: &str = "verkstead";
 pub struct Annexed {
     annex: Arc<dyn Backend>,
 
+    /// The Keeper's own settings, whose git author and GitHub token are handed
+    /// to the Annex at every start — see [`InTheBox::commit_as`].
+    keeper: Settings,
+
     /// How long the box has to come up — [`BOOT_TIME`], but for a suite.
     patience: Duration,
 
@@ -64,10 +73,12 @@ pub struct Annexed {
 }
 
 impl Annexed {
-    /// The Annex whose box is `annex`.
-    pub fn of(annex: Arc<dyn Backend>) -> Annexed {
+    /// The Annex whose box is `annex`, kept by the device whose settings are
+    /// `keeper`.
+    pub fn of(annex: Arc<dyn Backend>, keeper: Settings) -> Annexed {
         Annexed {
             annex,
+            keeper,
             patience: BOOT_TIME,
             booted: AtomicBool::new(false),
         }
@@ -151,14 +162,25 @@ impl Annexed {
         }));
     }
 
-    /// One try at the link: the two addresses read off the box, and the
-    /// Keeper's Join run with them.
+    /// One try at the link: the Keeper's git author and GitHub token handed
+    /// in, the two addresses read off the box, and the Keeper's Join run with
+    /// them.
     async fn link(
         &self,
         devices: &Devices,
         networking: super::Networking,
         port: u16,
     ) -> anyhow::Result<super::Addresses> {
+        let in_the_box = InTheBox(self.annex.clone());
+        let keeper = self.keeper.clone();
+        tokio::task::spawn_blocking(move || {
+            in_the_box.commit_as(
+                keeper.config().git_author(),
+                keeper.secrets().github_token(),
+            )
+        })
+        .await??;
+
         let annex = self.annex.clone();
         let addresses =
             tokio::task::spawn_blocking(move || annex.addresses(networking, port)).await??;
@@ -269,6 +291,63 @@ impl InTheBox {
     fn config(&self) -> String {
         format!("{DATA_DIR}/config.yaml")
     }
+
+    fn secrets(&self) -> String {
+        format!("{DATA_DIR}/secrets.yaml")
+    }
+
+    /// The Annex's sessions committing as `author` and authenticating with
+    /// `token`, which are the Keeper's (ADR-0024): written into its
+    /// `config.yaml` and `secrets.yaml` where they say otherwise, every other
+    /// key as it stands.
+    ///
+    /// **At every start rather than at make alone**, so a git author or token
+    /// changed on the Keeper reaches the Annex the next time the two start
+    /// together. A file that says so already is not written at all.
+    pub fn commit_as(&self, author: &GitAuthor, token: Option<&str>) -> anyhow::Result<()> {
+        let path = self.config();
+        let text = self.0.read(&path)?;
+
+        let mut config = Config::read(&String::from_utf8_lossy(&text))
+            .with_context(|| format!("{path} does not read as a config"))?;
+
+        if config.commit_as(author) {
+            self.handed(&path, config.text()?.as_bytes(), 0o640)?;
+        }
+
+        let path = self.secrets();
+        let text = self.0.read(&path)?;
+
+        let secrets = Secrets::read(&String::from_utf8_lossy(&text))
+            .with_context(|| format!("{path} does not read as secrets"))?;
+
+        if secrets.github_token() != token {
+            let secrets = secrets.with_token(token.map(str::to_owned));
+            self.handed(&path, secrets.text()?.as_bytes(), 0o600)?;
+        }
+
+        Ok(())
+    }
+
+    /// `bytes` written at `path` and handed to the service user — see the
+    /// type's docs for why.
+    fn handed(&self, path: &str, bytes: &[u8], mode: u32) -> anyhow::Result<()> {
+        self.0.write(path, bytes, mode)?;
+
+        let handed = self.0.run(
+            Inside::Root,
+            &["chown", &format!("{SERVICE}:{SERVICE}"), path],
+        )?;
+
+        if !handed.status.success() {
+            bail!(
+                "Verkstead couldn't hand {path} to the service: {}",
+                String::from_utf8_lossy(&handed.stderr).trim()
+            );
+        }
+
+        Ok(())
+    }
 }
 
 impl AnnexData for InTheBox {
@@ -293,21 +372,7 @@ impl AnnexData for InTheBox {
             return Ok(());
         }
 
-        self.0.write(&path, config.text()?.as_bytes(), 0o640)?;
-
-        let handed = self.0.run(
-            Inside::Root,
-            &["chown", &format!("{SERVICE}:{SERVICE}"), &path],
-        )?;
-
-        if !handed.status.success() {
-            bail!(
-                "Verkstead couldn't hand {path} to the service: {}",
-                String::from_utf8_lossy(&handed.stderr).trim()
-            );
-        }
-
-        Ok(())
+        self.handed(&path, config.text()?.as_bytes(), 0o640)
     }
 }
 

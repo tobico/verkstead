@@ -48,6 +48,7 @@ import menu from "../src/Menu.module.css";
 import pill from "../src/Attaching.module.css";
 import composer from "../src/workbench/Composer.module.css";
 import sidebar from "../src/workbench/Conversations.module.css";
+import annexMark from "../src/AnnexMark.module.css";
 import setup from "../src/workbench/Setup.module.css";
 import { ADOPT_REFUSAL } from "../src/workbench/Adoption";
 import {
@@ -276,6 +277,18 @@ const remembering = (
 /// reachable laptop, and a WSL that did not answer the last dial.
 const MEMBER = LINKED.members[0]!.identity;
 const AWAY = LINKED.members[1]!.identity;
+
+/// And the same cluster with the WSL as this device's **Annex** — which is what
+/// a WSL beside its Keeper is once Verkstead has made it: the Keeper's own
+/// hostname, *Linux (WSL)*, and `kept_by` naming this device.
+const ANNEXED: DevicesView = {
+  ...LINKED,
+  members: LINKED.members.map((member) =>
+    member.identity.device === AWAY.device
+      ? { ...member, identity: { ...AWAY, kept_by: LINKED.this.device } }
+      : member,
+  ),
+};
 
 /// And the Agent Profiles a device in a cluster answers: two of its own, and a
 /// mirror of a member's account with the machine it is at home on.
@@ -1127,6 +1140,40 @@ describe("the device the compose page is drafting onto", () => {
       mark(MEMBER.os),
       mark(AWAY.os),
     ]);
+  });
+
+  /// An **Annex** carries its Keeper's hostname, so the WSL here is the
+  /// fixture's *workbench* twice over until something says which is which:
+  /// the Annex mark the Devices list draws, and its OS word after it. The name
+  /// is still the whole of what the row is called.
+  it("draws an Annex with its mark and its OS word after the name", async () => {
+    theCluster(whenever("/api/ui/devices", json(ANNEXED)));
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await drawn(container, `.${setup.deviceSelect}`);
+    await waitFor(() => expect(showing("Device")).toBe(LINKED.this.name));
+
+    expect(rows("Device")).toEqual([
+      LINKED.this.name,
+      MEMBER.name,
+      AWAY.name,
+    ]);
+
+    const [here, laptop, annex] = offered("Device");
+
+    expect(annex!.querySelector(`.${annexMark.annex}`)?.textContent).toBe(
+      "annex of this device",
+    );
+    expect(annex!.querySelector(`.${setup.deviceOs}`)?.textContent).toBe(
+      "Linux (WSL)",
+    );
+
+    // And nothing after the name on a row that is nobody's Annex.
+    for (const row of [here!, laptop!]) {
+      expect(row.querySelector(`.${annexMark.annex}`)).toBeNull();
+      expect(row.querySelector(`.${setup.deviceOs}`)).toBeNull();
+    }
   });
 
   /// And the pairing pickers are cluster-wide, which is the other list a
@@ -4617,6 +4664,49 @@ describe("the two repo rows on the picked device", () => {
     );
     expect(askedFor(fetching, listingAt(null, MEMBER.device))).toBe(1);
     expect(askedFor(fetching, listingAt("/home/ada/src"))).toBe(0);
+  });
+
+  /// The member as this device's **Annex**, whose repositories have a place of
+  /// their own: `/srv/repos`, the one path the box Verkstead made declares.
+  const MEMBER_ANNEXED: DevicesView = {
+    ...LINKED,
+    members: LINKED.members.map((member) =>
+      member.identity.device === MEMBER.device
+        ? {
+            ...member,
+            identity: {
+              ...MEMBER,
+              os: "Linux (WSL)",
+              kept_by: LINKED.this.device,
+            },
+          }
+        : member,
+    ),
+  };
+
+  it("starts an Annex at /srv/repos where nothing has been made on it", async () => {
+    setRepoParent(null, "/home/ada/src");
+
+    theirs(whenever("/api/ui/devices", json(MEMBER_ANNEXED)));
+    const { container } = mount("/compose");
+
+    await draftingOnTheMember(container);
+    await createCard(THEIRS);
+
+    expect(held(WHERE)).toBe("/srv/repos");
+  });
+
+  /// And what the human remembered there wins, as it does on every device.
+  it("opens an Annex where the last repo there went, over /srv/repos", async () => {
+    setRepoParent(MEMBER.device, "/home/verkstead/code");
+
+    theirs(whenever("/api/ui/devices", json(MEMBER_ANNEXED)));
+    const { container } = mount("/compose");
+
+    await draftingOnTheMember(container);
+    await createCard(THEIRS);
+
+    expect(held(WHERE)).toBe("/home/verkstead/code");
   });
 
   /// A refusal from over there is the far end's own outcome, said in the words

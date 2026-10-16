@@ -188,6 +188,7 @@ import {
 
 import { faChevronDown, faHourglassHalf } from "@fortawesome/free-solid-svg-icons";
 
+import { AnnexMark, keeperOf } from "../AnnexMark";
 import { Check } from "../Check";
 import { Copy } from "../Copy";
 import { Icon } from "../Icon";
@@ -922,25 +923,7 @@ function List(props: {
   );
 }
 
-/// What an **Annex**'s row says whose it is: its Keeper's name as the cluster
-/// holds it, or *this device* on the Keeper itself — `null` on every row that
-/// is not an Annex's.
-///
-/// A Keeper this list holds no row for — a cluster still settling — leaves the
-/// row reading *annex* alone rather than naming a device by its id.
-function keeperOf(list: DevicesView, of: DeviceIdentity): string | null {
-  const keeper = of.kept_by;
-
-  if (keeper === null) return null;
-  if (keeper === list.this.device) return "this device";
-
-  return (
-    list.members.find((member) => member.identity.device === keeper)?.identity
-      .name ?? ""
-  );
-}
-
-/// And whether a member's row is offered an Unlink: not an Annex's, and not
+/// Whether a member's row is offered an Unlink: not an Annex's, and not
 /// the Keeper's on its own Annex.
 function unlinkable(list: DevicesView, of: DeviceIdentity): boolean {
   return of.kept_by === null && of.device !== list.this.kept_by;
@@ -1002,9 +985,7 @@ function Row(props: {
           </Show>
           <Show when={props.keeper != null}>
             {" "}
-            <span class={styles.annex}>
-              {props.keeper ? `annex of ${props.keeper}` : "annex"}
-            </span>
+            <AnnexMark keeper={props.keeper!} class={styles.annex} />
           </Show>
           <Show when={props.unreachable}>
             {" "}

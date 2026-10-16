@@ -70,13 +70,14 @@ import {
   type JSX,
 } from "solid-js";
 
+import { AnnexMark, keeperOf } from "../AnnexMark";
 import { HarnessMark } from "../HarnessMark";
 import { Check } from "../Check";
 import { Icon } from "../Icon";
 import { Menu } from "../Menu";
 import { Switch as Toggle } from "../Switch";
 import { DEFAULT_PROFILE, type AgentType } from "../agents";
-import { deviceShown, osIcon, useDevices } from "../devices";
+import { deviceShown, osIcon, useDevices, useRepoParent } from "../devices";
 import {
   addCompanion,
   chooseGrillingPairing,
@@ -127,7 +128,6 @@ import { Empty, ErrorLine, Note } from "../notices";
 import * as pairing from "../pairing";
 import { Listbox, Picker, type Action, type Clonable } from "../picking";
 import { Moving } from "./Moving";
-import { repoParent } from "../remembered";
 import { keyOf, useDevice } from "../reaching";
 import type { Device } from "../reaching";
 import { CloneRepo, CreateRepo, OpenRepo, useCloning } from "../repos/RepoList";
@@ -634,6 +634,23 @@ export function DeviceSelect(props: {
     return props.chosen ?? view.this.device;
   };
 
+  /// What an **Annex**'s row says after its name: the Annex mark, and its OS
+  /// word as a quiet second word. An Annex carries its Keeper's hostname, so
+  /// without these the two rows would read as one machine twice. Nothing on
+  /// any other row, whose name and mark have always been the whole of it.
+  const annexed = (device: DeviceIdentity): JSX.Element | undefined => {
+    const view = devices.data;
+    const keeper = view === undefined ? null : keeperOf(view, device);
+    if (keeper === null) return undefined;
+
+    return (
+      <>
+        <AnnexMark keeper={keeper} />
+        <span class={styles.deviceOs}>{device.os}</span>
+      </>
+    );
+  };
+
   // And the correction, which runs whether or not the control is drawn: a pick
   // this browser is holding for a device that has left the cluster is a page
   // pointed at a machine nothing can reach, and taking the select away — which
@@ -667,6 +684,7 @@ export function DeviceSelect(props: {
           value={(device) => device.device}
           label={(device) => device.name}
           icon={(device) => osIcon(device.os)}
+          after={annexed}
           nothing={props.nothing}
           chosen={showing()}
           disabled={props.disabled}
@@ -955,6 +973,7 @@ function repoRows(pick: (repoId: number) => void): {
   modal: () => JSX.Element;
 } {
   const device = useDevice();
+  const parentOf = useRepoParent();
 
   // Which card is up, or `null` while none is. One signal rather than one per
   // card, because they are cards over one page opened from the same shut
@@ -982,7 +1001,7 @@ function repoRows(pick: (repoId: number) => void): {
   const [out, setOut] = createSignal<ClonableRepo | null>(null);
 
   const clone = (repo: ClonableRepo) => {
-    const parent = repoParent(device());
+    const parent = parentOf(device());
 
     if (parent === "") {
       setOpening({ clone: repo, refused: null });

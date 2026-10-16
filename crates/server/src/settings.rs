@@ -785,7 +785,7 @@ impl Secrets {
     /// An empty file is not a parse failure and must not be logged as one: it is
     /// what a settings page leaves behind after the token is cleared, and it says
     /// exactly what a missing file says.
-    fn read(text: &str) -> Result<Secrets, serde_saphyr::Error> {
+    pub(crate) fn read(text: &str) -> Result<Secrets, serde_saphyr::Error> {
         if text.trim().is_empty() {
             return Ok(Secrets::default());
         }
@@ -1585,6 +1585,19 @@ impl Config {
         true
     }
 
+    /// The same config with `author` as its `git_author` — what a Keeper hands
+    /// its Annex at every start, so a change on the Keeper reaches the Annex's
+    /// sessions at its next (see [`crate::annex::booting`]). `false` is a
+    /// config that said so already, left as it was.
+    pub fn commit_as(&mut self, author: &GitAuthor) -> bool {
+        if &self.git_author == author {
+            return false;
+        }
+
+        self.git_author = author.clone();
+        true
+    }
+
     /// The same config with the keys the settings page never drew as they
     /// already stand.
     ///
@@ -2025,7 +2038,7 @@ fn limit_typed(places: String) -> Option<usize> {
 /// gets the one they filled in, and git says what is still missing. Nothing here
 /// substitutes a default — a commit by `verkstead@localhost` is worse than a
 /// commit that would not be made, because it is the one nobody notices.
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
 pub struct GitAuthor {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     name: Option<String>,

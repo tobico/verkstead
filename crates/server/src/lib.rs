@@ -2771,9 +2771,10 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
     let annexed = (platform::Platform::HERE == platform::Platform::Windows
         && annex_forward.is_some())
     .then(|| {
-        Arc::new(annex::booting::Annexed::of(Arc::new(
-            annex::wsl::Wsl::here(),
-        )))
+        Arc::new(annex::booting::Annexed::of(
+            Arc::new(annex::wsl::Wsl::here()),
+            settings.clone(),
+        ))
     });
 
     if let Some(annexed) = &annexed {

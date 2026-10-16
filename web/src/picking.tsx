@@ -411,6 +411,16 @@ export function Listbox<T>(
     /// buttons holding both.
     says?: (option: T) => string;
 
+    /// What follows a row's words on the same line, where a row has something
+    /// quieter to add to its name — the device select's, where an **Annex**
+    /// carries its Keeper's hostname and so reads as its Keeper does until its
+    /// mark and its OS word are drawn after it.
+    ///
+    /// **Outside the words**, in the rows and on the closed control alike: the
+    /// row is still called by its name, and the name is what the closed control
+    /// cuts where it runs long.
+    after?: (option: T) => JSX.Element | undefined;
+
     /// The control's own label, drawn inside the handle rather than above it.
     ///
     /// For the composer's setup row, where a trigger is a dimmed label over its
@@ -593,6 +603,7 @@ export function Listbox<T>(
               mark={props.mark}
               icon={props.icon}
               label={props.closed ?? props.label}
+              after={props.after}
             />
           </Show>
         </span>
@@ -663,6 +674,7 @@ export function Listbox<T>(
                     icon={props.icon}
                     label={props.label}
                     says={props.says}
+                    after={props.after}
                     row={rowId(index())}
                   />
                 </div>
@@ -781,12 +793,16 @@ export function Listbox<T>(
 /// And the sentence under the words, where a row is handed one — see
 /// [`Listbox`]'s `says`. Only the rows hand it in, so the closed control drawn
 /// out of this same component stays the one line it always was.
+///
+/// And what follows the words, where a row has any — see [`Listbox`]'s
+/// `after`.
 function Reading<T>(props: {
   of: T;
   mark?: (option: T) => AgentType | null;
   icon?: (option: T) => IconDefinition | undefined;
   label: (option: T) => string;
   says?: (option: T) => string;
+  after?: (option: T) => JSX.Element | undefined;
   /// The row's id, which the words' and the sentence's are made off for the
   /// row's `aria-labelledby` and `aria-describedby` to name.
   row?: string;
@@ -818,6 +834,7 @@ function Reading<T>(props: {
           </span>
         )}
       </Show>
+      {props.after?.(props.of)}
     </>
   );
 }

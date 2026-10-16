@@ -60,11 +60,10 @@ import type {
   Transferring,
 } from "../api/types";
 import { UNREACHABLE, harnessAbsentOn } from "../broken";
-import { useDevices } from "../devices";
+import { useDevices, useRepoParent } from "../devices";
 import { useReading } from "../freshness";
 import { ErrorLine } from "../notices";
 import { Reaching, keyOf, useDevice, type Device } from "../reaching";
-import { repoParent } from "../remembered";
 import { CloneRepo, useCloning } from "../repos/RepoList";
 import { DeviceSelect, useConversationTicks } from "./Setup";
 import styles from "./Transfer.module.css";
@@ -191,6 +190,7 @@ function CloneThere(props: {
   cloned: () => void;
 }): JSX.Element {
   const device = useDevice();
+  const parentOf = useRepoParent();
   const cloning = useCloning();
 
   /// The parent card while it is up — for a device nothing is remembered on,
@@ -201,7 +201,7 @@ function CloneThere(props: {
   );
 
   const clone = () => {
-    const parent = repoParent(device());
+    const parent = parentOf(device());
 
     if (parent === "") {
       setAsking({ refused: null });

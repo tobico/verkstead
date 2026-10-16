@@ -22,4 +22,4 @@ Roadmap stage: [03: Making the Annex](docs/roadmaps/wsl-annex/03-making-the-anne
 - [x] 03: The flake and config Verkstead writes — [details](03-the-flake-and-config-verkstead-writes.md)
 - [x] 04: Making the Annex on the install screen — [details](04-making-the-annex-on-the-install-screen.md)
 - [x] 05: Boot, link and terminate with the Keeper — [details](05-boot-link-and-terminate-with-the-keeper.md)
-- [ ] 06: A session in the Annex — [details](06-a-session-in-the-annex.md)
+- [x] 06: A session in the Annex — [details](06-a-session-in-the-annex.md)
