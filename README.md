@@ -62,8 +62,8 @@ access-control entries it wrote on your directories, takes each one off with a
 line saying which, and then deletes the account, the `C:\Users` directory
 Windows made for it the first time a session ran, and its password out of the
 secrets file. A machine that has run Verkstead and then had it taken off should
-look as it did, and the `entries = 6 of 6 taken off` line it ends with is how
-you check. A grant that will not come off is named, and then nothing else is
+look as it did, and the `entries = 6 of 6 taken off` line it prints is how you
+check. A grant that will not come off is named, and then nothing else is
 deleted, so the path can be put right and the command run again; `--force`
 deletes the account regardless, still naming the paths. Run again on a machine
 whose account is already gone, it takes off whatever entries the records still
