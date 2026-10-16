@@ -42,8 +42,12 @@ use crate::unseen::Unseen;
 /// The filesystem half runs off the runtime: resolving a path and asking git
 /// about a repository are both blocking, and a registration is rare enough that
 /// the thread it borrows costs nothing.
-pub(crate) async fn register(pool: &SqlitePool, asked: &str) -> Result<Registered> {
-    registering(pool, PathBuf::from(asked)).await
+pub(crate) async fn register(
+    pool: &SqlitePool,
+    authors: &[Author],
+    asked: &str,
+) -> Result<Registered> {
+    registering(pool, authors, PathBuf::from(asked)).await
 }
 
 /// The same, over a path the server is holding rather than one it was sent.
@@ -51,7 +55,14 @@ pub(crate) async fn register(pool: &SqlitePool, asked: &str) -> Result<Registere
 /// What a create registers what it has just made through: the directory it
 /// stands in is one it built, so there is nothing to parse and nothing to be
 /// lost putting a path through a string on the way.
-async fn registering(pool: &SqlitePool, asked: PathBuf) -> Result<Registered> {
+///
+/// **With exactly one Author configured, the Repo is recorded as its**, with
+/// nothing asked: there is nobody else it could be (ADR-0025). With none there
+/// is nothing to record, and with more than one there is no saying which, so
+/// nothing is recorded and the Repo's view says one is still to be picked. A
+/// Repo revived keeps the Author it had either way — see
+/// [`store::register_repo_as`].
+async fn registering(pool: &SqlitePool, authors: &[Author], asked: PathBuf) -> Result<Registered> {
     let facts = match tokio::task::spawn_blocking(move || inspect(&asked)).await? {
         Ok(facts) => facts,
         Err(refusal) => return Ok(refusal),
@@ -63,8 +74,16 @@ async fn registering(pool: &SqlitePool, asked: PathBuf) -> Result<Registered> {
     // path was taken: it is asked after the write rather than before it, so
     // nothing here looks first.
     Ok(
-        match store::register_repo(pool, &facts.path, &facts.name, &facts.default_branch).await? {
-            Some(repo) => Registered::Added(entry(repo)),
+        match store::register_repo_as(
+            pool,
+            &facts.path,
+            &facts.name,
+            &facts.default_branch,
+            sole(authors).map(Author::id),
+        )
+        .await?
+        {
+            Some(repo) => Registered::Added(entry(repo, authors)),
             None => {
                 let held = store::registered_repo_at(pool, &facts.path)
                     .await?
@@ -80,7 +99,7 @@ async fn registering(pool: &SqlitePool, asked: PathBuf) -> Result<Registered> {
                         )
                     })?;
 
-                Registered::AlreadyRegistered(entry(held))
+                Registered::AlreadyRegistered(entry(held, authors))
             }
         },
     )
@@ -91,7 +110,11 @@ async fn registering(pool: &SqlitePool, asked: PathBuf) -> Result<Registered> {
 /// Here rather than in the router, because the registration hands one back now
 /// and the list is not the only place a Repo crosses the wire — two spellings of
 /// the same row would be two things to keep in step.
-pub(crate) fn entry(repo: store::Repo) -> RepoEntry {
+///
+/// `authors` is every Author configured, read by the caller at the moment of
+/// the request: it is what says whether a Repo with none recorded has one
+/// still to pick.
+pub(crate) fn entry(repo: store::Repo, authors: &[Author]) -> RepoEntry {
     RepoEntry {
         id: repo.id,
         name: repo.name,
@@ -99,7 +122,24 @@ pub(crate) fn entry(repo: store::Repo) -> RepoEntry {
         // registered — so nothing is lost putting it back on the wire.
         path: repo.path.to_string_lossy().into_owned(),
         default_branch: repo.default_branch,
+        author_unpicked: unpicked(repo.author.as_deref(), authors),
+        author: repo.author,
     }
+}
+
+/// The one Author configured, where there is exactly one — the Author a Repo
+/// registered now is recorded as without anybody being asked.
+fn sole(authors: &[Author]) -> Option<&Author> {
+    match authors {
+        [only] => Some(only),
+        _ => None,
+    }
+}
+
+/// Whether a Repo recorded as `author` has an Author still to pick: none is
+/// recorded, and there is more than one it could be.
+fn unpicked(author: Option<&str>, authors: &[Author]) -> bool {
+    author.is_none() && authors.len() > 1
 }
 
 /// Make a repository called `name` under `parent`, register it, and hand back
@@ -137,7 +177,7 @@ pub(crate) fn entry(repo: store::Repo) -> RepoEntry {
 /// rare enough that the thread it borrows costs nothing.
 pub(crate) async fn create(
     pool: &SqlitePool,
-    author: Option<&Author>,
+    authors: &[Author],
     gh: &Gh,
     parent: &str,
     name: &str,
@@ -147,7 +187,10 @@ pub(crate) async fn create(
     // Both halves or neither, which is the one shape git will take an identity
     // in — see [`Signature`], the rule everything Verkstead commits on its own
     // account is made under.
-    let Some(author) = author.and_then(Author::configured) else {
+    //
+    // The first Author, which is the one an installation that never added a
+    // second has.
+    let Some(author) = authors.first().and_then(Author::configured) else {
         return Ok(Created::NoAuthor);
     };
 
@@ -191,7 +234,7 @@ pub(crate) async fn create(
     // Registered through the very call the form's registration goes through:
     // what was just made is a repository like any other, and a second way of
     // taking one on would be a second chance for the two to come apart.
-    let registered = registering(pool, path.clone()).await?;
+    let registered = registering(pool, authors, path.clone()).await?;
 
     let (Registered::Added(repo) | Registered::AlreadyRegistered(repo)) = registered else {
         // A repository this call made a moment ago, with a commit on `main`,
@@ -213,7 +256,7 @@ pub(crate) async fn create(
     // The whole opened Repo rather than the row it was registered as — see
     // [`Created::Made`]. `None` is a Repo taken off the registry between the two
     // reads, which is nothing that happens to somebody making one.
-    Ok(match opened(pool, repo.id, at_once).await? {
+    Ok(match opened(pool, authors, repo.id, at_once).await? {
         Some(repo) => match unpushed {
             Some(why) => Created::MadeWithoutRemote { repo, why },
             None => Created::Made(repo),
@@ -476,7 +519,12 @@ pub(crate) async fn branches(pool: &SqlitePool, id: i64) -> Result<Option<Vec<St
 /// branches move without Verkstead hearing about it and a roadmap somebody picks
 /// up stops being abandoned the moment they do, so both are asked afresh — a
 /// kept copy would be a second opinion that went wrong on somebody else's push.
-async fn opened(pool: &SqlitePool, id: i64, at_once: usize) -> Result<Option<RepoView>> {
+async fn opened(
+    pool: &SqlitePool,
+    authors: &[Author],
+    id: i64,
+    at_once: usize,
+) -> Result<Option<RepoView>> {
     let Some(repo) = store::registered_repo(pool, id).await? else {
         return Ok(None);
     };
@@ -504,6 +552,8 @@ async fn opened(pool: &SqlitePool, id: i64, at_once: usize) -> Result<Option<Rep
         // registered — so nothing is lost putting it back on the wire.
         path: repo.path.to_string_lossy().into_owned(),
         default_branch: repo.default_branch,
+        author_unpicked: unpicked(repo.author.as_deref(), authors),
+        author: repo.author,
         branches,
         live: work.live,
         finished: work.finished,

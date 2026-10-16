@@ -1036,7 +1036,11 @@ async fn repos(State(state): State<AppState>) -> HttpResponse {
         }
     };
 
-    let rows: Vec<RepoEntry> = repos.into_iter().map(crate::repos::entry).collect();
+    let config = state.settings.config();
+    let rows: Vec<RepoEntry> = repos
+        .into_iter()
+        .map(|repo| crate::repos::entry(repo, config.authors()))
+        .collect();
 
     Json(rows).into_response()
 }
@@ -1111,7 +1115,13 @@ async fn register_repo(
     State(state): State<AppState>,
     Json(registration): Json<Registration>,
 ) -> HttpResponse {
-    match crate::repos::register(&state.pool, &registration.path).await {
+    match crate::repos::register(
+        &state.pool,
+        state.settings.config().authors(),
+        &registration.path,
+    )
+    .await
+    {
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, "registering a Repo failed");
@@ -1143,9 +1153,7 @@ async fn create_repo(
 
     match crate::repos::create(
         &state.pool,
-        // The first Author, which is the one an installation that never added
-        // a second has.
-        config.authors().first(),
+        config.authors(),
         &state.github,
         &creation.parent,
         &creation.name,
@@ -1831,10 +1839,13 @@ pub(crate) async fn conversation_view(
     // And each companion's, which is the same look at the filesystem: a
     // Conversation with three companions has four checkouts, and every one of
     // them is a directory somebody could have deleted.
+    // And who each of them can be done as, which is what says whether one
+    // with no Author recorded has one still to pick.
+    let config = state.settings.config();
     let mut companions = Vec::new();
 
     for reading in conversation.companions {
-        match companion(reading).await {
+        match companion(reading, config.authors()).await {
             Ok(companion) => companions.push(companion),
             Err(error) => {
                 tracing::error!(error = ?error, conversation_id = id, "reading a companion worktree failed");
@@ -2242,14 +2253,7 @@ pub(crate) async fn conversation_view(
 
     let view = ConversationView {
         id: conversation.id,
-        repo: RepoEntry {
-            id: conversation.repo.id,
-            name: conversation.repo.name,
-            // Stored as UTF-8 in the first place — a path that is not cannot be
-            // registered — so nothing is lost putting it back on the wire.
-            path: conversation.repo.path.to_string_lossy().into_owned(),
-            default_branch: conversation.repo.default_branch,
-        },
+        repo: crate::repos::entry(conversation.repo, config.authors()),
         process: process(conversation.process),
         branch: conversation.branch,
         branch_named: conversation.branch_named,
@@ -5669,18 +5673,14 @@ fn moved_profiles(state: &AppState, moved: bool) {
 /// there is not something a database knows, and a companion deleted by hand
 /// should read as a Conversation with a problem rather than as an obscure
 /// failure from whatever next works in it.
-async fn companion(companion: store::Companion) -> Result<CompanionView, anyhow::Error> {
+async fn companion(
+    companion: store::Companion,
+    authors: &[crate::settings::Author],
+) -> Result<CompanionView, anyhow::Error> {
     let worktree = crate::conversations::worktree(companion.worktree).await?;
 
     Ok(CompanionView {
-        repo: RepoEntry {
-            id: companion.repo.id,
-            name: companion.repo.name,
-            // Stored as UTF-8 in the first place — a path that is not cannot be
-            // registered — so nothing is lost putting it back on the wire.
-            path: companion.repo.path.to_string_lossy().into_owned(),
-            default_branch: companion.repo.default_branch,
-        },
+        repo: crate::repos::entry(companion.repo, authors),
         mode: crate::steering::reaching(companion.mode),
         base_ref: companion.base_ref,
         branch: companion.branch,

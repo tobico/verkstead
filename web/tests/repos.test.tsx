@@ -297,8 +297,8 @@ describe("the pane it opens", () => {
   /// would be a press somebody could only get right by luck.
   it("tells two repos of one name apart", async () => {
     const twins: RepoEntry[] = [
-      { id: 3, name: "api", path: "/srv/repos/api", default_branch: "main" },
-      { id: 4, name: "api", path: "/work/api", default_branch: "main" },
+      { id: 3, name: "api", path: "/srv/repos/api", default_branch: "main", author: null, author_unpicked: false },
+      { id: 4, name: "api", path: "/work/api", default_branch: "main", author: null, author_unpicked: false },
     ];
     serving(whenever("/api/ui/repos", json(twins)));
     const { container } = mountPane();

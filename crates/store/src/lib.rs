@@ -147,7 +147,7 @@ pub use memos::{
     Memo, Retirement, Retiring, StandingMemo, leave_memo, memo_of, restore_memo, retire_memo,
     standing_memos,
 };
-pub use migrations::{rank_the_conversations, stamp_the_births};
+pub use migrations::{rank_the_conversations, record_the_repo_authors, stamp_the_births};
 pub use pairings::{RepoPairings, last_started_pairings, remembered_pairings};
 pub use pauses::Pause;
 pub use pending_steers::{
@@ -174,7 +174,7 @@ pub use push::{
 };
 pub use repos::{
     ConflictResolution, Repo, Unregistering, load_repo, recorded_repos, register_repo,
-    registered_repo, registered_repo_at, registered_repos, unregister_repo,
+    register_repo_as, registered_repo, registered_repo_at, registered_repos, unregister_repo,
 };
 pub use session_endings::{Ended, end_session, session_ending};
 pub use session_names::{continued_as, found_as, session_id, session_ids};

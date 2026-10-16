@@ -4850,7 +4850,18 @@ repo: string | null, diff: DiffView, };
  * typed to register it: that is the directory Verkstead will actually work in,
  * so it is the one worth showing.
  */
-export type RepoEntry = { id: number, name: string, path: string, default_branch: string, };
+export type RepoEntry = { id: number, name: string, path: string, default_branch: string, 
+/**
+ * The uuid of the Author its work is done as, or nothing where none is
+ * recorded (ADR-0025).
+ */
+author: string | null, 
+/**
+ * No Author is recorded and more than one is configured, so there is no
+ * saying which this Repo's work is done as. With one Author or none there
+ * is nothing to choose between, so this is never said of those.
+ */
+author_unpicked: boolean, };
 
 /**
  * What a Repo was last grilled with, as a Conversation started on it would
@@ -4939,6 +4950,14 @@ path: string,
  * And what a Conversation branches from unless it is told otherwise.
  */
 default_branch: string, 
+/**
+ * The uuid of the Author it is recorded as, as [`RepoEntry::author`].
+ */
+author: string | null, 
+/**
+ * Whether one is still to be picked, as [`RepoEntry::author_unpicked`].
+ */
+author_unpicked: boolean, 
 /**
  * Every branch the repository has, local and remote-tracking both — the
  * same reading the base dropdown is filled from.

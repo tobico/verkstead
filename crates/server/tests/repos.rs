@@ -18,6 +18,12 @@
 //! than of the checks underneath it: a browser that skipped the form, or a
 //! `curl` that never saw one, meets the same answers.
 //!
+//! And which Author each Repo is recorded as (ADR-0025): the one Author
+//! configured, silently, at registering and at a create; nobody where there is
+//! no Author or more than one, which the view says is still to be picked; the
+//! Author it had, for a Repo registered again; and, at the first start of an
+//! installation from before the list, the Author its one git author became.
+//!
 //! Where a repository *is* is not one of the refusals. Anywhere the server can
 //! read is somewhere a Repo can be registered from, whatever the installation
 //! was started with.
@@ -33,9 +39,6 @@ use serde::de::DeserializeOwned;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_render::{Created, Registered, RepoEntry, RepoRemoved, RepoView};
-// Only the shell stand-in below authenticates as a saved token, and that is
-// off Windows with the shell it needs.
-#[cfg(unix)]
 use verkstead_server::settings::Settings;
 use verkstead_server::{Gh, open_database, router_asking_github, router_keeping, store};
 
@@ -1033,4 +1036,166 @@ async fn a_machine_with_no_gh_leaves_the_local_repository_registered_too() {
     );
     assert_eq!(listed(&app).await.len(), 1);
     assert_eq!(listed(&app).await[0].id, repo.id);
+}
+
+/// Two Authors configured, `work` and `personal`, neither with a display name.
+fn two_authors(dir: &tempfile::TempDir) {
+    std::fs::write(
+        dir.path().join("config.yaml"),
+        concat!(
+            "authors:\n",
+            "  - id: work\n",
+            "    name: Ada Lovelace\n",
+            "    email: ada@work.example\n",
+            "  - id: personal\n",
+            "    name: A. L.\n",
+            "    email: al@home.example\n",
+        ),
+    )
+    .unwrap();
+}
+
+/// With one Author configured, a Repo registered is recorded as its with
+/// nothing asked — and the list and the registration both say so.
+#[tokio::test]
+async fn a_repo_registered_with_one_author_is_recorded_as_its() {
+    let src = tempfile::tempdir().unwrap();
+    let (_dir, app) = workbench_authored().await;
+    let repo = repository(src.path().join("verkstead"));
+
+    let registered = added(register(&app, &repo).await);
+
+    assert_eq!(registered.author.as_deref(), Some("work"));
+    assert!(!registered.author_unpicked);
+    assert_eq!(listed(&app).await, vec![registered]);
+}
+
+/// With none configured there is nobody to record, and nothing to pick
+/// between either.
+#[tokio::test]
+async fn a_repo_registered_with_no_author_is_recorded_as_nobody() {
+    let src = tempfile::tempdir().unwrap();
+    let (_dir, app) = workbench().await;
+    let repo = repository(src.path().join("verkstead"));
+
+    let registered = added(register(&app, &repo).await);
+
+    assert_eq!(registered.author, None);
+    assert!(!registered.author_unpicked);
+}
+
+/// With two configured there is no saying which, so nothing is recorded and
+/// the view says one is still to be picked.
+#[tokio::test]
+async fn a_repo_with_no_author_among_two_is_stated_as_unpicked() {
+    let src = tempfile::tempdir().unwrap();
+    let (dir, app) = workbench().await;
+    two_authors(&dir);
+    let repo = repository(src.path().join("verkstead"));
+
+    let registered = added(register(&app, &repo).await);
+
+    assert_eq!(registered.author, None);
+    assert!(registered.author_unpicked);
+    assert!(listed(&app).await[0].author_unpicked);
+}
+
+/// A Repo registered under one Author and then a second added is still the
+/// first's: adding an Author changes nothing about a Repo already registered.
+#[tokio::test]
+async fn adding_a_second_author_leaves_a_registered_repo_as_it_was() {
+    let src = tempfile::tempdir().unwrap();
+    let (dir, app) = workbench_authored().await;
+    let repo = repository(src.path().join("verkstead"));
+
+    added(register(&app, &repo).await);
+    two_authors(&dir);
+
+    let listed = listed(&app).await;
+    assert_eq!(listed[0].author.as_deref(), Some("work"));
+    assert!(!listed[0].author_unpicked);
+}
+
+/// Taken away and registered again, a Repo comes back as the Author it had —
+/// even where another is the one configured by then.
+#[tokio::test]
+async fn a_repo_registered_again_keeps_the_author_it_had() {
+    let src = tempfile::tempdir().unwrap();
+    let (dir, app) = workbench_authored().await;
+    let repo = repository(src.path().join("verkstead"));
+
+    let first = added(register(&app, &repo).await);
+    assert_eq!(remove(&app, first.id).await, RepoRemoved::Removed);
+
+    std::fs::write(
+        dir.path().join("config.yaml"),
+        "authors:\n  - id: personal\n    name: A. L.\n    email: al@home.example\n",
+    )
+    .unwrap();
+
+    let again = added(register(&app, &repo).await);
+
+    assert_eq!(again.id, first.id);
+    assert_eq!(again.author.as_deref(), Some("work"));
+}
+
+/// A created repository is registered the way a typed path is, so it is
+/// recorded as the one Author too.
+#[tokio::test]
+async fn a_created_repository_is_recorded_as_the_one_author() {
+    let root = tempfile::tempdir().unwrap();
+    let (_dir, app) = workbench_authored().await;
+
+    let repo = made(create(&app, root.path(), "verkstead").await);
+
+    assert_eq!(repo.author.as_deref(), Some("work"));
+    assert!(!repo.author_unpicked);
+}
+
+/// The first start of an installation from before the list makes its one git
+/// author an Author, and records every Repo it had registered as that Author.
+#[tokio::test]
+async fn the_repos_from_before_the_list_are_recorded_as_the_author_the_start_moved() {
+    let src = tempfile::tempdir().unwrap();
+    let (dir, pool, app) = workbench_and_pool().await;
+
+    // Registered before there was an Author to record — which is what every
+    // Repo of such an installation is.
+    let first = added(register(&app, &repository(src.path().join("verkstead"))).await);
+    let second = added(register(&app, &repository(src.path().join("askance"))).await);
+    assert_eq!(first.author, None);
+
+    std::fs::write(
+        dir.path().join("config.yaml"),
+        "git_author:\n  name: Ada Lovelace\n  email: ada@example.com\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("secrets.yaml"),
+        "github_token: ghp_thetoken\n",
+    )
+    .unwrap();
+
+    let settings = Settings::in_data_dir(dir.path());
+    let id = verkstead_server::moving_the_single_author(&settings, &pool)
+        .await
+        .unwrap()
+        .expect("the one git author was moved into the list");
+
+    let listed = listed(&app).await;
+    assert_eq!(listed.len(), 2);
+    for repo in &listed {
+        assert_eq!(repo.author.as_deref(), Some(id.as_str()), "{}", repo.name);
+        assert!(!repo.author_unpicked);
+    }
+    assert!(listed.iter().any(|repo| repo.id == first.id));
+    assert!(listed.iter().any(|repo| repo.id == second.id));
+
+    // And the second start moves nothing and records nothing.
+    assert_eq!(
+        verkstead_server::moving_the_single_author(&settings, &pool)
+            .await
+            .unwrap(),
+        None
+    );
 }

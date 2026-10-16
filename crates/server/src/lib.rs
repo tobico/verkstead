@@ -2081,6 +2081,32 @@ impl StartedBy {
     }
 }
 
+/// Move an installation's one `git_author` and `github_token` into the list
+/// of Authors, and record every Repo it registered as that Author (ADR-0025):
+/// what a start does before anything reads an Author or answers a route.
+///
+/// The uuid minted, where anything was moved — the second start finds the
+/// list and moves nothing, and records nothing either. See
+/// [`settings::Settings::moving_the_single_author`] and
+/// [`store::record_the_repo_authors`].
+pub async fn moving_the_single_author(
+    settings: &settings::Settings,
+    pool: &SqlitePool,
+) -> Result<Option<String>> {
+    let Some(id) = settings
+        .moving_the_single_author()
+        .context("moving the one git author and GitHub token into the list of Authors")?
+    else {
+        return Ok(None);
+    };
+
+    store::record_the_repo_authors(pool, &id)
+        .await
+        .context("recording the registered Repos as the Author the git author became")?;
+
+    Ok(Some(id))
+}
+
 /// Take the address, open the database, and serve until the process is stopped.
 ///
 /// **The socket is taken before anything is made.** Everything below makes
@@ -2268,10 +2294,14 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
     // files have one shape (ADR-0025). A file nothing can parse is left for the
     // human to fix; one that cannot be written is a Data Directory this start
     // cannot work in. See [`settings::Settings::moving_the_single_author`].
-    if let Some(id) = settings
-        .moving_the_single_author()
-        .context("moving the one git author and GitHub token into the list of Authors")?
-    {
+    //
+    // And every Repo that installation registered is recorded as that Author,
+    // which is what it has been committing as all along — here because the uuid
+    // was only minted a moment ago, in a file the store's own open cannot see,
+    // and before the routes for the reason the rankings above are: a Repo list
+    // answered ahead of it would be one with Repos nobody had said were whose.
+    // See [`store::record_the_repo_authors`].
+    if let Some(id) = moving_the_single_author(&settings, &pool).await? {
         tracing::info!(author = %id, "the one git author and GitHub token are now an Author");
     }
 

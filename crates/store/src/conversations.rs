@@ -2442,6 +2442,7 @@ pub async fn load_conversation(pool: &SqlitePool, id: i64) -> Result<Option<Conv
         String,
         String,
         String,
+        Option<String>,
     );
 
     let row: Option<Row> = sqlx::query_as(
@@ -2452,7 +2453,8 @@ pub async fn load_conversation(pool: &SqlitePool, id: i64) -> Result<Option<Conv
                 c.base_commit, c.base_ref, c.state,
                 c.grilling_profile_id, c.implementation_profile_id,
                 c.review_profile_id,
-                r.id, r.path, r.name, r.default_branch
+                r.id, r.path, r.name, r.default_branch,
+                (SELECT author FROM repo_authors WHERE repo_id = r.id)
          FROM conversations c
          JOIN repos r ON r.id = c.repo_id
          WHERE c.id = ?",
@@ -2478,6 +2480,7 @@ pub async fn load_conversation(pool: &SqlitePool, id: i64) -> Result<Option<Conv
         repo_path,
         repo_name,
         default_branch,
+        repo_author,
     )) = row
     else {
         return Ok(None);
@@ -2491,6 +2494,7 @@ pub async fn load_conversation(pool: &SqlitePool, id: i64) -> Result<Option<Conv
             path: std::path::PathBuf::from(repo_path),
             name: repo_name,
             default_branch,
+            author: repo_author,
         },
         branch,
         branch_named,

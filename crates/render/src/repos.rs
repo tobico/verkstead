@@ -35,6 +35,17 @@ pub struct RepoEntry {
     pub name: String,
     pub path: String,
     pub default_branch: String,
+
+    /// The uuid of the Author its work is done as, or nothing where none is
+    /// recorded (ADR-0025).
+    #[serde(default)]
+    pub author: Option<String>,
+
+    /// No Author is recorded and more than one is configured, so there is no
+    /// saying which this Repo's work is done as. With one Author or none there
+    /// is nothing to choose between, so this is never said of those.
+    #[serde(default)]
+    pub author_unpicked: bool,
 }
 
 /// One registered Repo as a member across the link is told of it: the row, and
@@ -193,6 +204,12 @@ pub struct RepoView {
 
     /// And what a Conversation branches from unless it is told otherwise.
     pub default_branch: String,
+
+    /// The uuid of the Author it is recorded as, as [`RepoEntry::author`].
+    pub author: Option<String>,
+
+    /// Whether one is still to be picked, as [`RepoEntry::author_unpicked`].
+    pub author_unpicked: bool,
 
     /// Every branch the repository has, local and remote-tracking both — the
     /// same reading the base dropdown is filled from.

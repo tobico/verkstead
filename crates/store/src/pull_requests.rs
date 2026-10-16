@@ -796,6 +796,7 @@ pub async fn pull_requests(
         String,
         String,
         String,
+        Option<String>,
         i64,
         i64,
         String,
@@ -805,7 +806,8 @@ pub async fn pull_requests(
     );
 
     let rows: Vec<Row> = sqlx::query_as(
-        "SELECT r.id, r.path, r.name, r.default_branch, r.id <> v.repo_id,
+        "SELECT r.id, r.path, r.name, r.default_branch,
+                (SELECT author FROM repo_authors WHERE repo_id = r.id), r.id <> v.repo_id,
                 p.number, p.title, p.url, p.head_branch, p.base_branch
          FROM pull_requests p
          JOIN conversations v ON v.id = p.conversation_id
@@ -821,12 +823,13 @@ pub async fn pull_requests(
     Ok(rows
         .into_iter()
         .map(
-            |(id, path, name, default_branch, beside, number, title, url, head, base)| {
+            |(id, path, name, default_branch, author, beside, number, title, url, head, base)| {
                 let repo = Repo {
                     id,
                     path: std::path::PathBuf::from(path),
                     name,
                     default_branch,
+                    author,
                 };
 
                 // The label the pinned card draws, which is the Repo's name only
@@ -976,8 +979,9 @@ pub async fn pull_request_repo(
     conversation_id: i64,
     event_id: i64,
 ) -> Result<Option<Repo>> {
-    let row: Option<(i64, String, String, String)> = sqlx::query_as(
-        "SELECT r.id, r.path, r.name, r.default_branch
+    let row: Option<(i64, String, String, String, Option<String>)> = sqlx::query_as(
+        "SELECT r.id, r.path, r.name, r.default_branch,
+                (SELECT author FROM repo_authors WHERE repo_id = r.id)
          FROM pull_requests p
          JOIN repos r ON r.id = p.repo_id
          WHERE p.event_id = ? AND p.conversation_id = ?",
@@ -988,11 +992,12 @@ pub async fn pull_request_repo(
     .await
     .with_context(|| format!("reading the repository of the pull request of Event {event_id}"))?;
 
-    Ok(row.map(|(id, path, name, default_branch)| Repo {
+    Ok(row.map(|(id, path, name, default_branch, author)| Repo {
         id,
         path: std::path::PathBuf::from(path),
         name,
         default_branch,
+        author,
     }))
 }
 
@@ -1601,10 +1606,11 @@ pub async fn standing(
 pub async fn unfinished_pull_requests(pool: &SqlitePool) -> Result<Vec<Unfinished>> {
     /// The columns in the order the query below selects them: the Conversation,
     /// the Repo to ask in, and the number to ask about.
-    type Row = (i64, i64, String, String, String, i64);
+    type Row = (i64, i64, String, String, String, Option<String>, i64);
 
     let rows: Vec<Row> = sqlx::query_as(
-        "SELECT p.conversation_id, r.id, r.path, r.name, r.default_branch, p.number
+        "SELECT p.conversation_id, r.id, r.path, r.name, r.default_branch,
+                (SELECT author FROM repo_authors WHERE repo_id = r.id), p.number
          FROM pull_requests p
          JOIN conversations v ON v.id = p.conversation_id
          JOIN repos r ON r.id = p.repo_id
@@ -1625,13 +1631,14 @@ pub async fn unfinished_pull_requests(pool: &SqlitePool) -> Result<Vec<Unfinishe
     Ok(rows
         .into_iter()
         .map(
-            |(conversation_id, id, path, name, default_branch, number)| Unfinished {
+            |(conversation_id, id, path, name, default_branch, author, number)| Unfinished {
                 conversation_id,
                 repo: Repo {
                     id,
                     path: std::path::PathBuf::from(path),
                     name,
                     default_branch,
+                    author,
                 },
                 number,
             },

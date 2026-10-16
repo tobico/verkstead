@@ -56,6 +56,12 @@ pub struct Repo {
 
     /// The branch a Conversation branches from unless it says otherwise.
     pub default_branch: String,
+
+    /// The uuid of the Author its work is done as, or nothing where none was
+    /// ever recorded (ADR-0025). Only the uuid: whether it names an Author
+    /// that `config.yaml` still holds is the server's question, since the
+    /// store knows nothing of that file.
+    pub author: Option<String>,
 }
 
 /// The tables the registrations live in.
@@ -91,6 +97,20 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     .await
     .context("creating the unregistered_repos table")?;
 
+    // And which Author each of them is, by uuid, one row apiece — beside the
+    // registrations rather than a column on them, for the reason the flag above
+    // is. Unregistering takes nothing out of it: the association is history,
+    // and the same path registered again comes back as the Author it was.
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS repo_authors (
+             repo_id INTEGER PRIMARY KEY REFERENCES repos(id),
+             author  TEXT NOT NULL
+         ) STRICT",
+    )
+    .execute(pool)
+    .await
+    .context("creating the repo_authors table")?;
+
     // And the table one Repo's own resolution was kept in, which is dropped
     // here rather than created. Beside the creates because this is where the
     // schema is settled: an install that had saved an override would otherwise
@@ -122,6 +142,25 @@ pub async fn register_repo(
     path: &Path,
     name: &str,
     default_branch: &str,
+) -> Result<Option<Repo>> {
+    register_repo_as(pool, path, name, default_branch, None).await
+}
+
+/// [`register_repo`], recording the Repo as the Author with the uuid `author`.
+///
+/// **An Author already recorded is kept.** A revived Repo comes back as the
+/// Author it had rather than the one this registration names, because the
+/// association outlives the unregistering as history. `None` records nothing,
+/// and leaves one already recorded where it is too.
+///
+/// One transaction with the registration, so that a Repo is never on the list
+/// for a moment without the Author it was registered as.
+pub async fn register_repo_as(
+    pool: &SqlitePool,
+    path: &Path,
+    name: &str,
+    default_branch: &str,
+    author: Option<&str>,
 ) -> Result<Option<Repo>> {
     let stored = text(path)?;
 
@@ -155,6 +194,25 @@ pub async fn register_repo(
         .await
         .with_context(|| format!("reviving the Repo at {}", path.display()))?;
 
+    if let Some(author) = author {
+        sqlx::query(
+            "INSERT INTO repo_authors (repo_id, author) VALUES (?, ?)
+             ON CONFLICT (repo_id) DO NOTHING",
+        )
+        .bind(id)
+        .bind(author)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("recording the Author of the Repo at {}", path.display()))?;
+    }
+
+    let (author,): (Option<String>,) =
+        sqlx::query_as("SELECT (SELECT author FROM repo_authors WHERE repo_id = ?)")
+            .bind(id)
+            .fetch_one(&mut *tx)
+            .await
+            .with_context(|| format!("reading the Author of the Repo at {}", path.display()))?;
+
     tx.commit()
         .await
         .with_context(|| format!("registering the Repo at {}", path.display()))?;
@@ -164,6 +222,7 @@ pub async fn register_repo(
         path: path.to_owned(),
         name: name.to_owned(),
         default_branch: default_branch.to_owned(),
+        author,
     }))
 }
 
@@ -232,9 +291,9 @@ pub async fn unregister_repo(pool: &SqlitePool, id: i64) -> Result<Unregistering
 /// offer. What is already on one resolves it by id and finds it; see
 /// [`load_repo`].
 pub async fn registered_repos(pool: &SqlitePool) -> Result<Vec<Repo>> {
-    let rows: Vec<(i64, String, String, String)> = sqlx::query_as(
-        "SELECT id, path, name, default_branch
-         FROM repos
+    let rows: Vec<RepoRow> = sqlx::query_as(
+        "SELECT id, path, name, default_branch, author
+         FROM repos LEFT JOIN repo_authors ON repo_authors.repo_id = repos.id
          WHERE id NOT IN (SELECT repo_id FROM unregistered_repos)
          ORDER BY name, id",
     )
@@ -242,15 +301,7 @@ pub async fn registered_repos(pool: &SqlitePool) -> Result<Vec<Repo>> {
     .await
     .context("listing the registered Repos")?;
 
-    Ok(rows
-        .into_iter()
-        .map(|(id, path, name, default_branch)| Repo {
-            id,
-            path: PathBuf::from(path),
-            name,
-            default_branch,
-        })
-        .collect())
+    Ok(rows.into_iter().map(repo_of).collect())
 }
 
 /// One Repo, by id, whether or not it is still on the registry.
@@ -267,9 +318,9 @@ pub async fn registered_repos(pool: &SqlitePool) -> Result<Vec<Repo>> {
 /// Repo — that question is [`registered_repo`]'s, and the two stand apart so
 /// that neither has to guess which of them a caller meant.
 pub async fn load_repo(pool: &SqlitePool, id: i64) -> Result<Option<Repo>> {
-    let row: Option<(i64, String, String, String)> = sqlx::query_as(
-        "SELECT id, path, name, default_branch
-         FROM repos
+    let row: Option<RepoRow> = sqlx::query_as(
+        "SELECT id, path, name, default_branch, author
+         FROM repos LEFT JOIN repo_authors ON repo_authors.repo_id = repos.id
          WHERE id = ?",
     )
     .bind(id)
@@ -277,12 +328,7 @@ pub async fn load_repo(pool: &SqlitePool, id: i64) -> Result<Option<Repo>> {
     .await
     .with_context(|| format!("reading the Repo {id}"))?;
 
-    Ok(row.map(|(id, path, name, default_branch)| Repo {
-        id,
-        path: PathBuf::from(path),
-        name,
-        default_branch,
-    }))
+    Ok(row.map(repo_of))
 }
 
 /// One Repo that is on the registry, by id.
@@ -298,9 +344,9 @@ pub async fn load_repo(pool: &SqlitePool, id: i64) -> Result<Option<Repo>> {
 /// wrong one — which is exactly how a Repo that had been taken away came to open
 /// its own pane and be started on.
 pub async fn registered_repo(pool: &SqlitePool, id: i64) -> Result<Option<Repo>> {
-    let row: Option<(i64, String, String, String)> = sqlx::query_as(
-        "SELECT id, path, name, default_branch
-         FROM repos
+    let row: Option<RepoRow> = sqlx::query_as(
+        "SELECT id, path, name, default_branch, author
+         FROM repos LEFT JOIN repo_authors ON repo_authors.repo_id = repos.id
          WHERE id = ? AND id NOT IN (SELECT repo_id FROM unregistered_repos)",
     )
     .bind(id)
@@ -308,12 +354,7 @@ pub async fn registered_repo(pool: &SqlitePool, id: i64) -> Result<Option<Repo>>
     .await
     .with_context(|| format!("reading the registered Repo {id}"))?;
 
-    Ok(row.map(|(id, path, name, default_branch)| Repo {
-        id,
-        path: PathBuf::from(path),
-        name,
-        default_branch,
-    }))
+    Ok(row.map(repo_of))
 }
 
 /// One Repo that is on the registry, by the path it is recorded under.
@@ -330,9 +371,9 @@ pub async fn registered_repo(pool: &SqlitePool, id: i64) -> Result<Option<Repo>>
 pub async fn registered_repo_at(pool: &SqlitePool, path: &Path) -> Result<Option<Repo>> {
     let stored = text(path)?;
 
-    let row: Option<(i64, String, String, String)> = sqlx::query_as(
-        "SELECT id, path, name, default_branch
-         FROM repos
+    let row: Option<RepoRow> = sqlx::query_as(
+        "SELECT id, path, name, default_branch, author
+         FROM repos LEFT JOIN repo_authors ON repo_authors.repo_id = repos.id
          WHERE path = ? AND id NOT IN (SELECT repo_id FROM unregistered_repos)",
     )
     .bind(stored)
@@ -340,12 +381,20 @@ pub async fn registered_repo_at(pool: &SqlitePool, path: &Path) -> Result<Option
     .await
     .with_context(|| format!("reading the registered Repo at {}", path.display()))?;
 
-    Ok(row.map(|(id, path, name, default_branch)| Repo {
+    Ok(row.map(repo_of))
+}
+
+/// One row of the Repo reads above, as SQLite hands it back.
+type RepoRow = (i64, String, String, String, Option<String>);
+
+fn repo_of((id, path, name, default_branch, author): RepoRow) -> Repo {
+    Repo {
         id,
         path: PathBuf::from(path),
         name,
         default_branch,
-    }))
+        author,
+    }
 }
 
 /// A path as SQLite can hold it, which is UTF-8 or nothing.

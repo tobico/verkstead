@@ -28,6 +28,8 @@
       "branch": "",
       "mode": "ReadWrite",
       "repo": {
+        "author": null,
+        "author_unpicked": false,
         "default_branch": "trunk",
         "id": 2,
         "name": "askance",
@@ -96,6 +98,8 @@
   "ready_to_resume": true,
   "ready_to_stop": true,
   "repo": {
+    "author": null,
+    "author_unpicked": false,
     "default_branch": "main",
     "id": 1,
     "name": "verkstead",

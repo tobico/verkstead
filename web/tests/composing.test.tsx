@@ -3664,6 +3664,8 @@ describe("registering a repo from the Repo dropdown", () => {
     name: "widgets",
     path: "/srv/repos/widgets",
     default_branch: "main",
+    author: null,
+    author_unpicked: false,
   };
 
   /// The workbench with the registration answered however the test says.
@@ -4156,6 +4158,8 @@ describe("the two repo rows on the picked device", () => {
     name: "widgets-over-there",
     path: "/mnt/code/widgets",
     default_branch: "main",
+    author: null,
+    author_unpicked: false,
   };
 
   /// And one a create made there, in the same place and for the same reason.

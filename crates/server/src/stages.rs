@@ -2957,6 +2957,7 @@ Turns this askance clone into Verkstead.
                 path: self.path().to_owned(),
                 name: "verkstead".to_owned(),
                 default_branch: "main".to_owned(),
+                author: None,
             }
         }
         /// The stage lists this worktree comes back with, with a record holding
@@ -6865,6 +6866,7 @@ Turns this askance clone into Verkstead.
             path: repo.path().to_owned(),
             name: "verkstead".to_owned(),
             default_branch: "main".to_owned(),
+            author: None,
         })
         .expect("two of its roadmaps have a stage to start");
 
@@ -6996,6 +6998,7 @@ Turns this askance clone into Verkstead.
                 path: repo.path().to_owned(),
                 name: "verkstead".to_owned(),
                 default_branch: "main".to_owned(),
+                author: None,
             }),
             None,
         );
@@ -7052,6 +7055,7 @@ Turns this askance clone into Verkstead.
             path: repo.path().to_owned(),
             name: "verkstead".to_owned(),
             default_branch: "main".to_owned(),
+            author: None,
         })
         .expect("origin holds a roadmap with a stage left to start");
 
@@ -7079,6 +7083,7 @@ Turns this askance clone into Verkstead.
                 path: repo.path().to_owned(),
                 name: "verkstead".to_owned(),
                 default_branch: "trunk".to_owned(),
+                author: None,
             }),
             None,
         );

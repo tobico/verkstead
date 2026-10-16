@@ -1718,6 +1718,7 @@ mod tests {
                 path: std::path::PathBuf::from("/watched/askance"),
                 name: "askance".to_owned(),
                 default_branch: "main".to_owned(),
+                author: None,
             },
             number: 7,
             head: Some("rate-limiting".to_owned()),
