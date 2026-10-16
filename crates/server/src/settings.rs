@@ -552,11 +552,10 @@ impl Settings {
             Err(error) => return Err(error),
         };
 
-        if config.kept_by.as_ref() == Some(keeper) {
+        if !config.keep_by(keeper) {
             return Ok(false);
         }
 
-        config.kept_by = Some(keeper.clone());
         self.save_config(&config).map(|()| true)
     }
 }
@@ -1571,6 +1570,19 @@ impl Config {
     /// keeps — which is every Verkstead but an Annex.
     pub fn kept_by(&self) -> Option<&KeptBy> {
         self.kept_by.as_ref()
+    }
+
+    /// The same config with `keeper` as its `kept_by` — see
+    /// [`Settings::keep_by`], and [`crate::annex::booting::InTheBox`], which writes one
+    /// into a box rather than a directory. `false` is a config that said so
+    /// already, left as it was.
+    pub fn keep_by(&mut self, keeper: &KeptBy) -> bool {
+        if self.kept_by.as_ref() == Some(keeper) {
+            return false;
+        }
+
+        self.kept_by = Some(keeper.clone());
+        true
     }
 
     /// The same config with the keys the settings page never drew as they

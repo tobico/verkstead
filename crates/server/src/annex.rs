@@ -18,6 +18,7 @@ use std::net::SocketAddr;
 use std::path::Path;
 use std::process::{ExitStatus, Output};
 
+pub mod booting;
 pub mod flake;
 pub mod image;
 pub mod wsl;
@@ -32,6 +33,11 @@ pub const ANNEX_PEER_PORT: u16 = 8425;
 /// The port an Annex's workbench binds on its own loopback, never the Keeper's
 /// 8422, for the same reason.
 pub const ANNEX_WORKBENCH_PORT: u16 = 8426;
+
+/// Where the Annex's Data Directory is inside its box: the NixOS module's
+/// `StateDirectory`, which its `config.yaml`, `secrets.yaml` and `device.pem`
+/// are in.
+pub const DATA_DIR: &str = "/var/lib/verkstead";
 
 /// What the Annex's box is called wherever its backend names one: the distro
 /// under WSL. Verkstead's own, and never one the human has.

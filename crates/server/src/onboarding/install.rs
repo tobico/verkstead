@@ -352,7 +352,7 @@ const TAIL: usize = 12;
 /// Where the files the box is made of go in it — see
 /// [`crate::annex::flake::Written`].
 const NIXOS: &str = "/etc/nixos";
-const STATE: &str = "/var/lib/verkstead";
+const STATE: &str = crate::annex::DATA_DIR;
 
 /// How often the marker is glanced at while a dialog is up — see [`STARTED`].
 const GLANCE: Duration = Duration::from_millis(200);

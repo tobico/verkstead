@@ -526,6 +526,7 @@ describe("the merged sidebar", () => {
           kept_by: null,
         },
         reachable: true,
+        trouble: null,
       },
     ],
     pending: [],

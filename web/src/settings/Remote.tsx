@@ -897,6 +897,7 @@ function List(props: {
           <Row
             of={member.identity}
             unreachable={!member.reachable}
+            trouble={member.trouble}
             keeper={keeperOf(props.of, member.identity)}
             unlink={
               unlinkable(props.of, member.identity)
@@ -975,6 +976,9 @@ function Row(props: {
   of: DeviceIdentity;
   here?: boolean;
   unreachable?: boolean;
+  /// And why its box would not come up, on a Keeper's row for its own Annex
+  /// that would not — drawn under the addresses, as the server said it.
+  trouble?: string | null;
   /// Whose Annex this is, where it is one — see [`keeperOf`].
   keeper?: string | null;
   /// What a press asks about, where this row has one to press.
@@ -1010,6 +1014,10 @@ function Row(props: {
 
         <Show when={props.of.addresses.length > 0}>
           <p class={styles.addresses}>{props.of.addresses.join(", ")}</p>
+        </Show>
+
+        <Show when={props.trouble}>
+          {(trouble) => <p class={styles.trouble}>{trouble()}</p>}
         </Show>
       </div>
 

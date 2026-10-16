@@ -2758,6 +2758,33 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
     // through a session's relay loop.
     push::hold_the_cluster(&pool, &devices);
 
+    // And this device's Annex booted and linked again, where it has one: a
+    // Keeper's start boots the box and runs the Keeper's Join with the two
+    // addresses read off it, and its stop terminates it (ADR-0024) — see
+    // [`annex::booting`].
+    //
+    // **In a task rather than waited on**, and before the serve, for the
+    // reasons the two above are: a box is most of a minute from up, and the
+    // serve never returns. A Keeper only — an Annex keeps nothing, which is
+    // what its forward being absent says — and on Windows only, the one
+    // platform with a way of having a box.
+    let annexed = (platform::Platform::HERE == platform::Platform::Windows
+        && annex_forward.is_some())
+    .then(|| {
+        Arc::new(annex::booting::Annexed::of(Arc::new(
+            annex::wsl::Wsl::here(),
+        )))
+    });
+
+    if let Some(annexed) = &annexed {
+        tokio::spawn({
+            let annexed = annexed.clone();
+            let devices = devices.clone();
+
+            async move { annexed.started(&devices).await }
+        });
+    }
+
     let Routers {
         workbench: app,
         over_the_link,
@@ -2832,7 +2859,7 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
             served = axum::serve(pipe, app) => served.context("serving Verkstead over its named pipe"),
             served = peer.serving(peers) => served,
             served = peer::annex_forward::serving(annex_forward, annex_pointing) => served,
-            signal = stopping.told() => stopped(signal, &advertisement).await,
+            signal = stopping.told() => stopped(signal, &advertisement, annexed.as_deref()).await,
         }
     }
 
@@ -2844,22 +2871,32 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
             served = axum::serve(listener, app) => served.context("serving Verkstead"),
             served = peer.serving(peers) => served,
             served = peer::annex_forward::serving(annex_forward, annex_pointing) => served,
-            signal = stopping.told() => stopped(signal, &advertisement).await,
+            signal = stopping.told() => stopped(signal, &advertisement, annexed.as_deref()).await,
         }
     }
 }
 
-/// The ordered stop: the advertisement withdrawn, and then this server ending
-/// the way it always did.
+/// The ordered stop: this device's Annex terminated, the advertisement
+/// withdrawn, and then this server ending the way it always did.
 ///
-/// **The one thing this process does on its way out, and the only reason it has
-/// a way out at all.** A row on another machine's **Discovered** list runs out
-/// on its own TTL, which is what covers a killed server and a lid that shut —
-/// this is what makes a restart tidy rather than what makes a stale row
-/// impossible. Nothing else is drained, stopped or closed in order: no request
-/// waits, no session is asked to finish, and the listeners go with the process.
-async fn stopped(signal: &str, advertisement: &discovery::Advertisement) -> Result<()> {
+/// **The two things this process does on its way out, and the only reason it
+/// has a way out at all.** A row on another machine's **Discovered** list runs
+/// out on its own TTL, which is what covers a killed server and a lid that shut
+/// — this is what makes a restart tidy rather than what makes a stale row
+/// impossible. An Annex's box is the same: a killed Keeper's goes on WSL's idle
+/// timeout (see [`annex::booting`]), and this stops it at once. Nothing else is
+/// drained, stopped or closed in order: no request waits, no session is asked
+/// to finish, and the listeners go with the process.
+async fn stopped(
+    signal: &str,
+    advertisement: &discovery::Advertisement,
+    annexed: Option<&annex::booting::Annexed>,
+) -> Result<()> {
     tracing::info!(signal, "verkstead has been asked to stop");
+
+    if let Some(annexed) = annexed {
+        annexed.stopped().await;
+    }
 
     advertisement.withdrawn().await;
 

@@ -116,7 +116,13 @@ pub struct Wsl {
     /// What keeps the distro up after [`Backend::boot`]: WSL stops a distro a
     /// few seconds after the last process started through `wsl.exe` ends, so a
     /// booted one is one with a process of the Keeper's held in it.
-    held: Mutex<Option<Child>>,
+    ///
+    /// **In a Job that kills it when this process goes**, however it goes —
+    /// see [`crate::sandbox::outliving::held`]. The desktop app ends its
+    /// sidecar with `TerminateProcess`, which runs nothing on the way out, so
+    /// that is what stops the distro then: the `wsl.exe` holding it dies with
+    /// the Keeper, and WSL's idle timeout does the rest.
+    held: Mutex<Option<(Child, crate::sandbox::outliving::Held)>>,
 }
 
 impl Wsl {
@@ -364,7 +370,7 @@ impl Backend for Wsl {
             .lock()
             .expect("the held process is never poisoned");
 
-        if let Some(child) = held.as_mut()
+        if let Some((child, _)) = held.as_mut()
             && matches!(child.try_wait(), Ok(None))
         {
             return Ok(());
@@ -378,12 +384,14 @@ impl Backend for Wsl {
             .spawn()
             .with_context(|| format!("Verkstead couldn't run {}", self.wsl.display()))?;
 
-        *held = Some(child);
+        let job = crate::sandbox::outliving::held(crate::platform::Platform::HERE, &child);
+
+        *held = Some((child, job));
         Ok(())
     }
 
     fn terminate(&self) -> anyhow::Result<()> {
-        if let Some(mut child) = self
+        if let Some((mut child, _)) = self
             .held
             .lock()
             .expect("the held process is never poisoned")

@@ -881,6 +881,28 @@ one on the LAN",
     expect(screen.queryAllByText(/^annex/).length, "and one mark").toBe(1);
   });
 
+  /// An Annex whose box would not come up at this start carries why under its
+  /// row, which reads *unreachable* beside it.
+  it("draws why an Annex would not come up under its row", async () => {
+    const why = "The annex didn't answer: its service is failed.";
+
+    mountPane(SERVING, {
+      ...KEEPING,
+      members: KEEPING.members.map((member) =>
+        member.identity.kept_by === null
+          ? member
+          : { ...member, reachable: false, trouble: why },
+      ),
+    });
+
+    const mark = await waitFor(() => screen.getByText("annex of this device"));
+    const annex = mark.closest("li")!;
+
+    expect(annex.textContent).toContain(why);
+    expect(annex.textContent).toContain("unreachable");
+    expect(theRowOf("laptop").textContent).not.toContain(why);
+  });
+
   /// And on every other member, the mark names the Keeper by the name the
   /// cluster holds for it — and there is no Unlink on it there either.
   it("marks an Annex with its Keeper's name on another member", async () => {

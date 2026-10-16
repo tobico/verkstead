@@ -7855,7 +7855,7 @@ async fn keep_annex(State(state): State<AppState>, Json(new): Json<NewAnnex>) ->
 
     if let Err(why) = devices
         .keep(
-            std::path::Path::new(&new.data_dir),
+            std::sync::Arc::new(std::path::PathBuf::from(&new.data_dir)),
             &new.address,
             new.keeper_at.as_deref(),
         )

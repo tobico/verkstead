@@ -3568,7 +3568,17 @@ identity: DeviceIdentity,
  * dimmed, reading *unreachable* — it stays on the list, with everything
  * about it, and an Unlink on it still works.
  */
-reachable: boolean, };
+reachable: boolean, 
+/**
+ * And, on a Keeper's row for its own **Annex**, why the box it runs in
+ * would not come up at this start: it would not boot, answer or link.
+ * Drawn under the row, which reads *unreachable* beside it until the
+ * Annex answers (ADR-0024).
+ *
+ * The Keeper's own finding, like the flag above, and only a Keeper has
+ * one: `None` on every other row, and on an Annex that came up.
+ */
+trouble: string | null, };
 
 /**
  * What a Set still waiting on the human says about itself: whether an agent is
