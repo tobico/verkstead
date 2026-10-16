@@ -68,7 +68,10 @@ term in `CONTEXT.md`.
 
 ## Proposed tasks (provisional)
 
-1. **The picker on Open repo and Create repo.** Both cards carry an Author
+1. **The picker on Open repo and Create repo.** *(The picker itself, the
+   record of the pick and Create repo's first commit as it were brought forward
+   into 01's planning; what is left here is the GitHub tick and `gh repo create`
+   under the picked Author.)* Both cards carry an Author
    picker where more than one exists, the registration and the create record
    it, and the Create card's GitHub tick follows the picked Author's token.
    - With two Authors, Open repo cannot land without a pick, and the Repo
