@@ -2316,8 +2316,8 @@ pub struct HandoffEvent {
     pub html: String,
 }
 
-/// A Memo as the page receives it: what the session wrote, who it was, and
-/// whether it has been taken back since.
+/// A Memo as the page receives it: what the session named it and wrote, who it
+/// was, and whether it has been taken back since.
 ///
 /// HTML alone, like the handoff and for its reason: nobody edits it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -2328,12 +2328,20 @@ pub struct MemoEvent {
     /// When it was left, RFC 3339.
     pub at: String,
 
+    /// What the session named it, on one line. `None` for a Memo left before
+    /// there were titles, whose card shows the body's first line instead.
+    pub title: Option<String>,
+
     /// Rendered and sanitized by the server on the way out, as every piece of
     /// agent markdown on this wire is.
     pub html: String,
 
     /// The words the card is stamped with — *the session that worked task 03*.
     pub left_by: String,
+
+    /// The Event of the session's own output it was left out of, on the same
+    /// Timeline, so the pane can open that session.
+    pub left_in: i64,
 
     /// `None` while it still stands, and is still in every later prompt.
     pub retired: Option<MemoRetirement>,
@@ -3627,11 +3635,15 @@ pub fn handoff_event(id: i64, at: String, markdown: &str) -> TimelineEvent {
 pub fn memo_event(
     id: i64,
     at: String,
+    title: Option<String>,
     markdown: &str,
     left_by: String,
+    left_in: i64,
     retired: Option<MemoRetirement>,
 ) -> TimelineEvent {
-    TimelineEvent::Memo(memo_card(id, at, markdown, left_by, retired))
+    TimelineEvent::Memo(memo_card(
+        id, at, title, markdown, left_by, left_in, retired,
+    ))
 }
 
 /// The same Memo as the card alone, for a press on one that answers with what
@@ -3639,15 +3651,19 @@ pub fn memo_event(
 pub fn memo_card(
     id: i64,
     at: String,
+    title: Option<String>,
     markdown: &str,
     left_by: String,
+    left_in: i64,
     retired: Option<MemoRetirement>,
 ) -> MemoEvent {
     MemoEvent {
         id,
         at,
+        title,
         html: crate::markdown::to_html(markdown),
         left_by,
+        left_in,
         retired,
     }
 }

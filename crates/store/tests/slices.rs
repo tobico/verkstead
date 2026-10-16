@@ -206,7 +206,7 @@ async fn a_preview_crosses_with_its_command_and_stamp() {
     assert_eq!(there, here, "and it crossed as it stood");
 }
 
-/// A Memo crosses with its stamp, and the session it names is the one that
+/// A Memo crosses with its title and its stamp, and the session it names is the one that
 /// landed over there rather than whichever Event happens to hold that number.
 #[tokio::test]
 async fn a_memo_crosses_stamped_and_naming_the_session_that_left_it() {
@@ -216,6 +216,11 @@ async fn a_memo_crosses_stamped_and_naming_the_session_that_left_it() {
     let (there, left_there) = memo(&moved.there.pool, moved.to).await;
 
     assert_eq!(there, here, "the markdown crossed as it was written");
+    assert_eq!(
+        left_there.title,
+        Some("The sessions suite flakes".to_owned()),
+        "its title with it"
+    );
     assert_eq!(
         left_there.left_by, left_here.left_by,
         "and its stamp with it"

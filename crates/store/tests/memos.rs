@@ -13,6 +13,9 @@ use verkstead_store::{
 /// cluster names one (ADR-0020, *Ranks*).
 const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
 
+/// What the session named it.
+const TITLE: &str = "The sessions suite flakes";
+
 /// What the session wrote.
 const MARKDOWN: &str = "The sessions suite flakes under parallelism.\n";
 
@@ -68,6 +71,7 @@ async fn a_memo_left_reads_back_as_its_own_kind_with_its_stamp() {
     let memo = leave_memo(
         &pool,
         id,
+        Some(TITLE),
         MARKDOWN,
         "the session that worked task 03",
         session,
@@ -82,6 +86,7 @@ async fn a_memo_left_reads_back_as_its_own_kind_with_its_stamp() {
             memo,
             MARKDOWN.to_owned(),
             Memo {
+                title: Some(TITLE.to_owned()),
                 left_by: "the session that worked task 03".to_owned(),
                 left_in: session,
                 retired: None,
@@ -96,10 +101,17 @@ async fn a_retired_memo_reads_back_retired_with_who_and_why() {
     let (_dir, pool) = fresh_pool().await;
     let (id, session) = worked(&pool, "rate-limiting").await;
 
-    let memo = leave_memo(&pool, id, MARKDOWN, "the finish session", session)
-        .await
-        .unwrap()
-        .unwrap();
+    let memo = leave_memo(
+        &pool,
+        id,
+        Some(TITLE),
+        MARKDOWN,
+        "the finish session",
+        session,
+    )
+    .await
+    .unwrap()
+    .unwrap();
 
     // Written straight in, so the read is asked about apart from the retiring.
     sqlx::query(
@@ -132,18 +144,32 @@ async fn a_memo_belongs_to_the_conversation_it_was_left_on() {
     let (one, session) = worked(&pool, "rate-limiting").await;
     let (other, _) = worked(&pool, "deferred-asks").await;
 
-    leave_memo(&pool, one, MARKDOWN, "the inline session", session)
-        .await
-        .unwrap()
-        .unwrap();
+    leave_memo(
+        &pool,
+        one,
+        Some(TITLE),
+        MARKDOWN,
+        "the inline session",
+        session,
+    )
+    .await
+    .unwrap()
+    .unwrap();
 
     assert_eq!(on_the_timeline(&pool, other).await, vec![]);
     assert_eq!(on_the_timeline(&pool, one).await.len(), 1);
 
     assert_eq!(
-        leave_memo(&pool, 9_999, MARKDOWN, "the inline session", session)
-            .await
-            .unwrap(),
+        leave_memo(
+            &pool,
+            9_999,
+            Some(TITLE),
+            MARKDOWN,
+            "the inline session",
+            session
+        )
+        .await
+        .unwrap(),
         None,
         "no Conversation, no Memo",
     );
@@ -160,6 +186,7 @@ async fn a_retired_memo_leaves_the_standing_list_and_keeps_its_card() {
     let first = leave_memo(
         &pool,
         id,
+        Some(TITLE),
         MARKDOWN,
         "the session that worked task 03",
         session,
@@ -170,6 +197,7 @@ async fn a_retired_memo_leaves_the_standing_list_and_keeps_its_card() {
     let second = leave_memo(
         &pool,
         id,
+        Some(TITLE),
         "Run clippy first.\n",
         "the finish session",
         session,
@@ -216,10 +244,17 @@ async fn a_memo_already_retired_or_of_another_conversation_is_refused() {
     let (one, session) = worked(&pool, "rate-limiting").await;
     let (other, _) = worked(&pool, "deferred-asks").await;
 
-    let memo = leave_memo(&pool, one, MARKDOWN, "the inline session", session)
-        .await
-        .unwrap()
-        .unwrap();
+    let memo = leave_memo(
+        &pool,
+        one,
+        Some(TITLE),
+        MARKDOWN,
+        "the inline session",
+        session,
+    )
+    .await
+    .unwrap()
+    .unwrap();
 
     assert_eq!(
         retire_memo(&pool, other, memo, "the inline session", None)
@@ -255,10 +290,17 @@ async fn a_restored_memo_stands_again() {
     let (id, session) = worked(&pool, "rate-limiting").await;
     let (other, _) = worked(&pool, "deferred-asks").await;
 
-    let memo = leave_memo(&pool, id, MARKDOWN, "the inline session", session)
-        .await
-        .unwrap()
-        .unwrap();
+    let memo = leave_memo(
+        &pool,
+        id,
+        Some(TITLE),
+        MARKDOWN,
+        "the inline session",
+        session,
+    )
+    .await
+    .unwrap()
+    .unwrap();
 
     retire_memo(&pool, id, memo, "you", Some("wrong"))
         .await
@@ -273,4 +315,67 @@ async fn a_restored_memo_stands_again() {
     assert_eq!(read.retired, None);
     assert_eq!(standing_memos(&pool, id).await.unwrap().len(), 1);
     assert_eq!(memo_of(&pool, other, memo).await.unwrap(), None);
+}
+
+/// A Memo left before there were titles reads back with none, in the Timeline
+/// and in the standing list alike — nothing invents one.
+#[tokio::test]
+async fn a_memo_left_with_no_title_reads_back_with_none() {
+    let (_dir, pool) = fresh_pool().await;
+    let (id, session) = worked(&pool, "rate-limiting").await;
+
+    leave_memo(&pool, id, None, MARKDOWN, "the inline session", session)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let [(_, _, read)] = <[_; 1]>::try_from(on_the_timeline(&pool, id).await).unwrap();
+    assert_eq!(read.title, None);
+
+    let [standing] = <[_; 1]>::try_from(standing_memos(&pool, id).await.unwrap()).unwrap();
+    assert_eq!(standing.title, None);
+}
+
+/// A database whose memos table was made before there were titles gains the
+/// column when it is next opened, and its Memos read back with none.
+#[tokio::test]
+async fn a_database_from_before_titles_gains_the_column() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("verkstead.db");
+
+    let pool = open_database(&path).await.unwrap();
+    let (id, session) = worked(&pool, "rate-limiting").await;
+    leave_memo(&pool, id, None, MARKDOWN, "the inline session", session)
+        .await
+        .unwrap()
+        .unwrap();
+    sqlx::query("ALTER TABLE memos DROP COLUMN title")
+        .execute(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+
+    let pool = open_database(&path).await.unwrap();
+
+    let [(_, markdown, read)] = <[_; 1]>::try_from(on_the_timeline(&pool, id).await).unwrap();
+    assert_eq!(markdown, MARKDOWN);
+    assert_eq!(read.title, None);
+
+    let left = leave_memo(
+        &pool,
+        id,
+        Some(TITLE),
+        MARKDOWN,
+        "the inline session",
+        session,
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let standing = standing_memos(&pool, id).await.unwrap();
+    assert_eq!(
+        standing.iter().find(|memo| memo.id == left).unwrap().title,
+        Some(TITLE.to_owned()),
+        "and a Memo left since holds its title",
+    );
 }

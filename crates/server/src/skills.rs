@@ -854,9 +854,10 @@ pub(crate) fn folded(prompt: &str, answers: &str) -> String {
 /// reads documents, then what earlier sessions left, then the facts of the
 /// machine.
 ///
-/// Each Memo says who left it, then its markdown as it was written. Nothing is
-/// marked delivered: the list is read off the record at every launch, and a
-/// Memo is not spent by being read.
+/// Each Memo is named by its title and says who left it, then its markdown as
+/// it was written; the id is in the retire line alone. Nothing is marked
+/// delivered: the list is read off the record at every launch, and a Memo is
+/// not spent by being read.
 ///
 /// **And how it is retired, where `retiring` says the session may** — a
 /// building one, the kinds [`crate::memos::Building`] lists. Every other
@@ -883,10 +884,17 @@ pub(crate) fn left(prompt: &str, memos: &[store::StandingMemo], retiring: bool) 
                 String::new()
             };
 
+            // Named by its title, the id being only the retire line's; a
+            // Memo left before there were titles has nothing else to be
+            // called.
+            let named = match &memo.title {
+                Some(title) => title.clone(),
+                None => format!("Memo {}", memo.id),
+            };
+
             format!(
-                "**Memo {id}**, left by {left_by}.{retire}\n\n{}",
+                "**{named}**, left by {left_by}.{retire}\n\n{}",
                 memo.markdown.trim_end(),
-                id = memo.id,
                 left_by = memo.left_by,
             )
         })
@@ -2109,7 +2117,8 @@ mod tests {
     }
 
     /// The four skills whose sessions may leave a memo teach it, both
-    /// invocations of it, and no other skill names the command: their sessions
+    /// invocations of it — the titled one, and what a title is for — and no
+    /// other skill names the command: their sessions
     /// are refused it, and a skill that mentioned it would be sending them to a
     /// refusal. See ADR-0023.
     #[test]
@@ -2122,7 +2131,8 @@ mod tests {
             if teaching.contains(&name) {
                 assert!(
                     skill.contains("## Leaving a memo for the sessions after you")
-                        && skill.contains("verkstead memo <<'MD'")
+                        && skill.contains("verkstead memo 'The transfer suite flakes' <<'MD'")
+                        && skill.contains("what the human reads down the Timeline")
                         && skill.contains("verkstead memo --retire 42")
                         && skill.contains("*What earlier sessions left for you*"),
                     "{name} has to teach leaving a memo and retiring one: {skill}"
@@ -4769,11 +4779,13 @@ mod tests {
     const COMMIT: &str = "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7";
 
     /// Every standing Memo under one heading, oldest first, each in the shape
-    /// the Guide quotes: who left it, how to retire it, then the markdown.
+    /// the Guide quotes: its title and who left it, how to retire it — the one
+    /// place its id is said — then the markdown.
     #[test]
     fn the_standing_memos_are_listed_oldest_first_under_one_heading() {
-        let memo = |id: i64, left_by: &str, markdown: &str| store::StandingMemo {
+        let memo = |id: i64, title: &str, left_by: &str, markdown: &str| store::StandingMemo {
             id,
+            title: Some(title.to_owned()),
             left_by: left_by.to_owned(),
             markdown: markdown.to_owned(),
         };
@@ -4783,10 +4795,16 @@ mod tests {
             &[
                 memo(
                     42,
+                    "The limiter's test flakes",
                     "the session that worked task 03",
                     "The limiter's test flakes under load.\n",
                 ),
-                memo(57, "the finish session", "Run clippy before pushing.\n"),
+                memo(
+                    57,
+                    "Clippy before pushing",
+                    "the finish session",
+                    "Run clippy before pushing.\n",
+                ),
             ],
             true,
         );
@@ -4794,19 +4812,48 @@ mod tests {
         assert!(
             prompt.contains(
                 "# What earlier sessions left for you\n\n\
-                 **Memo 42**, left by the session that worked task 03.\n\
+                 **The limiter's test flakes**, left by the session that worked task 03.\n\
                  Retire it with `verkstead memo --retire 42` once it no longer holds.\n\n\
                  The limiter's test flakes under load.\n\n\
-                 **Memo 57**, left by the finish session.\n\
+                 **Clippy before pushing**, left by the finish session.\n\
                  Retire it with `verkstead memo --retire 57` once it no longer holds.\n\n\
                  Run clippy before pushing.\n"
             ),
             "{prompt:?}"
         );
         assert!(
+            !prompt.contains("**Memo 42**") && !prompt.contains("**Memo 57**"),
+            "a titled memo is not named by its number: {prompt:?}"
+        );
+        assert!(
             prompt.find("# The Brief this started from")
                 < prompt.find("# What earlier sessions left for you"),
             "under the kind's own sections: {prompt:?}"
+        );
+    }
+
+    /// A Memo left before there were titles is named by its number, there being
+    /// nothing else to call it.
+    #[test]
+    fn an_untitled_memo_is_named_by_its_number() {
+        let prompt = left(
+            "Read the next-task skill.\n",
+            &[store::StandingMemo {
+                id: 42,
+                title: None,
+                left_by: "the session that worked task 03".to_owned(),
+                markdown: "The limiter's test flakes under load.\n".to_owned(),
+            }],
+            true,
+        );
+
+        assert!(
+            prompt.contains(
+                "**Memo 42**, left by the session that worked task 03.\n\
+                 Retire it with `verkstead memo --retire 42` once it no longer holds.\n\n\
+                 The limiter's test flakes under load.\n"
+            ),
+            "{prompt:?}"
         );
     }
 
@@ -4826,6 +4873,7 @@ mod tests {
             "Read the grilling skill.\n",
             &[store::StandingMemo {
                 id: 42,
+                title: Some("The limiter's test flakes".to_owned()),
                 left_by: "the session that worked task 03".to_owned(),
                 markdown: "The limiter's test flakes under load.\n".to_owned(),
             }],
@@ -4835,7 +4883,7 @@ mod tests {
         assert!(
             prompt.contains(
                 "# What earlier sessions left for you\n\n\
-                 **Memo 42**, left by the session that worked task 03.\n\n\
+                 **The limiter's test flakes**, left by the session that worked task 03.\n\n\
                  The limiter's test flakes under load.\n"
             ),
             "{prompt:?}"

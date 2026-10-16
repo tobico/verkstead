@@ -288,6 +288,7 @@ pub async fn owning(pool: &SqlitePool, branch: &str) -> Worked {
     leave_memo(
         pool,
         id,
+        Some("The sessions suite flakes"),
         "The sessions suite flakes under parallelism.\n",
         "the session that worked task 03",
         event,

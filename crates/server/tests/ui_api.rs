@@ -1012,6 +1012,7 @@ async fn retire_on_a_memos_card_takes_it_out_of_the_prompt_and_restore_puts_it_b
     let memo = store::leave_memo(
         &pool,
         ASKING_FROM,
+        Some("The limiter's test flakes"),
         "The limiter's test flakes under load.\n",
         "the session that worked task 02",
         session,
@@ -1031,6 +1032,12 @@ async fn retire_on_a_memos_card_takes_it_out_of_the_prompt_and_restore_puts_it_b
         panic!("the card comes back: {retired:?}");
     };
     assert_eq!(card.id, memo);
+    assert_eq!(
+        card.title.as_deref(),
+        Some("The limiter's test flakes"),
+        "the card the press answers with carries the title",
+    );
+    assert_eq!(card.left_in, session, "and the session it was left out of");
     let retirement = card.retired.expect("retired");
     assert_eq!(retirement.by, "you");
     assert_eq!(retirement.reason, None);
@@ -1086,6 +1093,7 @@ async fn a_press_on_a_retired_memo_keeps_its_stamp_and_one_that_is_no_memo_says_
     let memo = store::leave_memo(
         &pool,
         ASKING_FROM,
+        Some("Clippy first"),
         "Run clippy first.\n",
         "the session that worked task 02",
         session,

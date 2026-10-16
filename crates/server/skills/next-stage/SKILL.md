@@ -197,17 +197,20 @@ The sessions that work this stage's tasks start with none of the context this
 planning gathered, and a memo is what carries the working knowledge the task
 files do not hold. So leave one when you learn something the next session would otherwise find again
 or miss — a flaky suite, a trap in the build, a shape you settled that the
-task did not ask about — markdown on stdin:
+task did not ask about — with a title as the one argument and the markdown on stdin:
 
-    verkstead memo <<'MD'
+    verkstead memo 'The transfer suite flakes' <<'MD'
     The transfer suite's locked-Set test fails on main too; run it alone first.
     MD
 
-Leave none for what the commit message already says or what the backlog is
-about to say. Every later session of this Conversation is shown the memos
-still standing, under *What earlier sessions left for you* in its prompt, each
-with its number; retire one you find no longer holds, the rest of the line
-being the reason:
+The title is what the human reads down the Timeline, where the memo shows
+nothing else: a handful of words naming what it is about, on one line.
+
+Leave none for what the commit message already says or what the backlog is about
+to say. Every later session of this Conversation is shown the memos still
+standing, under *What earlier sessions left for you* in its prompt, each named
+by its title over the line that retires it; retire one you find no longer holds,
+by the number that line names, the rest of the line being the reason:
 
     verkstead memo --retire 42 fixed in 8f3c2a1
 

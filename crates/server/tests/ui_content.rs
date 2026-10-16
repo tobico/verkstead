@@ -2543,6 +2543,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     store::leave_memo(
         &pool,
         directing,
+        Some("The sessions suite flakes under parallelism"),
         "The sessions suite flakes under parallelism: run it with\n\
          `--test-threads=4` before blaming the change.\n",
         "the session that worked task 02",
@@ -2554,6 +2555,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     let retired = store::leave_memo(
         &pool,
         directing,
+        Some("Where the limit reader lives"),
         "The limit reader lives in `crates/server/src/limits.rs`, not in the\n\
          relay the task file names.\n",
         "the session that worked task 02",

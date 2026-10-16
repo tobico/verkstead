@@ -12,7 +12,8 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
 use verkstead_schema::{
-    ApiError, MemoLeft, PreviewLeft, PreviewSuggestion, QuestionSet, Response, SetCreated,
+    ApiError, MemoLeaving, MemoLeft, PreviewLeft, PreviewSuggestion, QuestionSet, Response,
+    SetCreated,
 };
 
 /// How long the server is asked to hold each wait open. Its own ceiling is a
@@ -228,17 +229,19 @@ impl Client {
         }
     }
 
-    /// Leave `markdown` as a Memo for the sessions after this one, and hand back
-    /// the Event it became.
+    /// Leave `memo` for the sessions after this one, and hand back the Event it
+    /// became.
     ///
     /// No retry, for [`Client::done`]'s reason: a refusal is a session that may
     /// not leave one or a memo to put right, and a retry that landed twice would
     /// put the same memo in every later prompt twice.
-    pub fn memo(&self, markdown: &str) -> Result<MemoLeft> {
+    pub fn memo(&self, memo: &MemoLeaving) -> Result<MemoLeft> {
+        let body = serde_saphyr::to_string(memo).context("writing the memo")?;
+
         let mut reply = self
             .agent
             .post(format!("{}/api/v1/memos", self.base))
-            .send(markdown)
+            .send(&body)
             .with_context(|| format!("leaving a memo with {}", self.said))?;
 
         let status = reply.status().as_u16();

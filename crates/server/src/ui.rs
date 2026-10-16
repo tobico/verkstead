@@ -4165,8 +4165,8 @@ async fn save_brief(
     }
 }
 
-/// A Memo as its card on the page, with who left it and whether it has been
-/// taken back since.
+/// A Memo as its card on the page, with its title, who left it and out of
+/// which session, and whether it has been taken back since.
 fn memo_card(
     id: i64,
     at: String,
@@ -4176,8 +4176,10 @@ fn memo_card(
     verkstead_render::memo_card(
         id,
         at,
+        memo.title,
         markdown,
         memo.left_by,
+        memo.left_in,
         memo.retired
             .map(|retired| verkstead_render::MemoRetirement {
                 by: retired.by,

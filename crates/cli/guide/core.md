@@ -170,13 +170,16 @@ And `verkstead memo`, which leaves a memo for the sessions after this one —
 ```
 Leave a memo for the sessions after this one on the same Conversation: working knowledge no commit holds, such as a flaky test, a build trap, or a decision taken mid-task and why.
 
-Markdown on stdin, of at most 8 KiB. Only a building session may leave one: a backlog task, the finish, a stage's planning, an inline run or a steered instruction. Accepted, it prints the memo's id as YAML — `id: 42` — on stdout and exits 0, and every later session of the Conversation is shown it in its prompt; refused, it exits non-zero and says why on stderr, and nothing is left.
+The title as the one argument — a handful of words naming what the memo is about, which is what the human reads down the Timeline — and the markdown on stdin, of at most 8 KiB. Only a building session may leave one: a backlog task, the finish, a stage's planning, an inline run or a steered instruction. Accepted, it prints the memo's id as YAML — `id: 42` — on stdout and exits 0, and every later session of the Conversation is shown it in its prompt; refused, it exits non-zero and says why on stderr, and nothing is left.
 
 `--retire <id> [reason]` takes one back instead, by the number the prompt names it by, once it no longer holds: nothing is read from stdin, the rest of the line is the reason, and no later session is shown it. Accepted, it prints nothing on stdout.
 
-Usage: verkstead memo [OPTIONS] [REASON]...
+Usage: verkstead memo [OPTIONS] [TITLE] [REASON]...
 
 Arguments:
+  [TITLE]
+          What the memo is called, such as "The limiter's test flakes"
+
   [REASON]...
           Why it is retired, with `--retire`: the rest of the line
 
@@ -499,14 +502,20 @@ and **not the design**, which the Brief and the Handoff are.
 stage's planning, an inline run, a steered instruction. Every other kind is
 refused by name, the refusal saying which may.
 
-Markdown on stdin, a quoted heredoc the way an ask is written:
+**A title as the one argument**, the way a preview takes its own, and the
+markdown on stdin, a quoted heredoc the way an ask is written:
 
 ```
-verkstead memo <<'MD'
+verkstead memo 'The transfer suite flakes' <<'MD'
 The sessions suite fails `transfer_round_trip` one run in five on main too —
 re-run it alone before blaming the change.
 MD
 ```
+
+The title is what the human reads down the Timeline, where the memo's card
+shows it and nothing else: a handful of words naming what the memo is about,
+the way a commit's subject names a commit. It is trimmed, and refused empty or
+with a newline in it; the rest belongs in the markdown.
 
 Accepted, it prints the memo's id on stdout and exits 0:
 
@@ -514,7 +523,7 @@ Accepted, it prints the memo's id on stdout and exits 0:
 id: 42
 ```
 
-A memo is refused empty and **over 8 KiB**; refused, it exits non-zero, says
+A memo is refused with no title, empty and **over 8 KiB**; refused, it exits non-zero, says
 why on stderr, and nothing is left.
 
 Every later session of the Conversation is shown every memo still standing, in
@@ -525,15 +534,19 @@ for a session that may:
 ```
 # What earlier sessions left for you
 
-**Memo 42**, left by the session that worked task 03.
+**The transfer suite flakes**, left by the session that worked task 03.
 Retire it with `verkstead memo --retire 42` once it no longer holds.
 
 <the memo's markdown, as written>
 ```
 
+Each is named by its title, and the retire line is the one place its id is
+said. A memo left before there were titles is named by its number instead —
+`**Memo 42**` — there being nothing else to call it.
+
 A memo is not spent by being read: it is in every prompt until it is retired.
-So **retire one you find no longer holds**, by the number the prompt names it
-by, the rest of the line being the reason:
+So **retire one you find no longer holds**, by the number its retire line
+names, the rest of the line being the reason:
 
 ```
 verkstead memo --retire 42 fixed in 8f3c2a1

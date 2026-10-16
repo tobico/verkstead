@@ -261,7 +261,9 @@
         "html": "<p>The sessions suite flakes under parallelism: run it with\n<code>--test-threads=4</code> before blaming the change.</p>\n",
         "id": 20,
         "left_by": "the session that worked task 02",
-        "retired": null
+        "left_in": 19,
+        "retired": null,
+        "title": "The sessions suite flakes under parallelism"
       }
     },
     {
@@ -270,11 +272,13 @@
         "html": "<p>The limit reader lives in <code>crates/server/src/limits.rs</code>, not in the\nrelay the task file names.</p>\n",
         "id": 21,
         "left_by": "the session that worked task 02",
+        "left_in": 19,
         "retired": {
           "at": "2026-08-03T09:07:11.000Z",
           "by": "the session that worked task 03",
           "reason": "moved back into the relay"
-        }
+        },
+        "title": "Where the limit reader lives"
       }
     }
   ],

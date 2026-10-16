@@ -3534,8 +3534,8 @@ export type McpServerEdit = { name: string, url: string, headers: Array<McpHeade
 export type McpServersEdit = "Keep" | { "Set": { servers: Array<McpServerEdit>, } };
 
 /**
- * A Memo as the page receives it: what the session wrote, who it was, and
- * whether it has been taken back since.
+ * A Memo as the page receives it: what the session named it and wrote, who it
+ * was, and whether it has been taken back since.
  *
  * HTML alone, like the handoff and for its reason: nobody edits it.
  */
@@ -3545,6 +3545,11 @@ export type MemoEvent = { id: number,
  */
 at: string, 
 /**
+ * What the session named it, on one line. `None` for a Memo left before
+ * there were titles, whose card shows the body's first line instead.
+ */
+title: string | null, 
+/**
  * Rendered and sanitized by the server on the way out, as every piece of
  * agent markdown on this wire is.
  */
@@ -3553,6 +3558,11 @@ html: string,
  * The words the card is stamped with — *the session that worked task 03*.
  */
 left_by: string, 
+/**
+ * The Event of the session's own output it was left out of, on the same
+ * Timeline, so the pane can open that session.
+ */
+left_in: number, 
 /**
  * `None` while it still stands, and is still in every later prompt.
  */
