@@ -54,6 +54,7 @@ import type {
   FolderListing,
   GrillingStarted,
   Merging,
+  MemoEvent,
   NoticeEvent,
   InFront,
   Nudge,
@@ -79,6 +80,7 @@ import type {
   StageEntry,
   StageListEvent,
   StageState,
+  Standing,
   SteerCancelled,
   SteerOpened,
   SteerSaved,
@@ -20163,9 +20165,45 @@ describe("the path a details pane stands at", () => {
 /// Which thing on a record that is, is `pathing.test.ts`: the arithmetic over a
 /// Timeline, held true against these same golden fixtures. What is asked here is
 /// what the page does with the answer.
+/// What a Set locked without an answer stands as.
+const LOCKED_UNANSWERED: Standing = { LockedUnanswered: "2026-08-03T09:09:23.000Z" };
+
+/// The grilling record with nothing on it waiting on the human: its waiting and
+/// its deferred Set both locked unanswered, the way a session that ended
+/// without an answer leaves them. A Set still waiting holds the landing — see
+/// *the landing stopping at a set still waiting* — so the end of the record is
+/// asked about over this one.
+const SETTLED: ConversationView = {
+  ...GRILLING,
+  timeline: standingAs(
+    standingAs(GRILLING.timeline, WAITING_SET.id, LOCKED_UNANSWERED),
+    DEFERRED_SET.id,
+    LOCKED_UNANSWERED,
+  ),
+};
+
+/// A record with the one Set on it standing otherwise.
+function standingAs(
+  timeline: TimelineEvent[],
+  id: number,
+  standing: Standing,
+): TimelineEvent[] {
+  return timeline.map((event) =>
+    "QuestionSet" in event && event.QuestionSet.id === id
+      ? { QuestionSet: { ...event.QuestionSet, standing } }
+      : event,
+  );
+}
+
+/// The grilling conversation's own path answered with [`SETTLED`].
+const SETTLED_GRILLING = whenever(
+  `/api/ui/conversations/${GRILLING.id}`,
+  json(SETTLED),
+);
+
 describe("landing on the end of the record", () => {
   it("opens the newest thing on the record a card is pressed on", async () => {
-    theThree();
+    theThree(SETTLED_GRILLING);
     const { container, history } = mount();
     await waitFor(() => screen.getByText(GRILLING.branch));
 
@@ -20243,7 +20281,7 @@ describe("landing on the end of the record", () => {
   /// does: entering the Conversation is the one entry it wrote, so Back leaves
   /// it rather than stepping back through the pane it landed on.
   it("lands by replacing, so back leaves the conversation", async () => {
-    theThree();
+    theThree(SETTLED_GRILLING);
     const { history } = mount();
     await waitFor(() => screen.getByText(GRILLING.branch));
 
@@ -20263,7 +20301,7 @@ describe("landing on the end of the record", () => {
   /// changes none — so the newest thing is marked open with the details a tap
   /// away, rather than the human being carried past the record they opened.
   it("lands a phone on the timeline rather than in the details", async () => {
-    theGrilling();
+    theGrilling(SETTLED_GRILLING);
     const { container, history } = mount(`/conversations/${GRILLING.id}`);
 
     await waitFor(() =>
@@ -20380,12 +20418,15 @@ describe("the selection following the end of the record", () => {
   /// What comes back lands them: it waits for the page to have read the record
   /// again and drawn what grew, so an assertion after it is about the page the
   /// re-read left rather than the page mid-flight.
+  ///
+  /// Settled, so that the end of the record is where it lands: a Set still
+  /// waiting would hold it — see the tests after these.
   function growing() {
-    let record: TimelineEvent[] = GRILLING.timeline;
+    let record: TimelineEvent[] = SETTLED.timeline;
 
     theThree(
       whenever(`/api/ui/conversations/${GRILLING.id}`, () =>
-        json({ ...GRILLING, timeline: record })(),
+        json({ ...SETTLED, timeline: record })(),
       ),
     );
 
@@ -20524,6 +20565,201 @@ describe("the selection following the end of the record", () => {
         `/conversations/${GRILLING.id}/events/${SAID.id}`,
       ),
     );
+  });
+});
+
+/// And where the landing stops short of the end: the oldest Question Set still
+/// waiting on the human. A Memo, a commit or a notice landing after a Set used
+/// to carry the selection past it and leave it unanswered behind the newest
+/// card, so the landing now holds at the Set until it is answered.
+///
+/// Read off the URL, as the advancing above is.
+describe("the landing stopping at a set still waiting", () => {
+  /// What a session leaves for the next one, landing after the Set it asked.
+  const NOTED: MemoEvent = {
+    id: 991,
+    at: "2026-08-03T09:09:23.000Z",
+    html: "<p>The suite flakes under parallelism.</p>\n",
+    left_by: "the session that worked task 01",
+    left_in: OUTPUT.id,
+    retired: null,
+    title: "The suite flakes under parallelism",
+  };
+
+  /// And a notice, the other thing a running session lands.
+  const SAID: NoticeEvent = {
+    id: 992,
+    at: "2026-08-03T09:10:02.000Z",
+    html: "<p>The session stopped.</p>\n",
+    log_in: null,
+  };
+
+  /// The grilling record with one Set waiting on it — the blocking one, the
+  /// deferred one locked unanswered — and the memo after it.
+  const ONE_WAITING: TimelineEvent[] = [
+    ...standingAs(GRILLING.timeline, DEFERRED_SET.id, LOCKED_UNANSWERED),
+    { Memo: NOTED },
+  ];
+
+  /// Where the page stands with each of them open.
+  const AT_SET = `/conversations/${GRILLING.id}/events/${WAITING_SET.id}`;
+  const AT_MEMO = `/conversations/${GRILLING.id}/events/${NOTED.id}`;
+
+  /// The grilling conversation with its record whatever `record` holds when it
+  /// is read, and both of its readable Sets answerable — which is a session
+  /// landing Events, and the human answering, as the record moves under the
+  /// page.
+  function holding(timeline: TimelineEvent[], ...answers: Parameters<typeof serving>) {
+    const held = { record: timeline };
+
+    const fetching = theGrillingSets(
+      whenever(`/api/ui/conversations/${GRILLING.id}`, () =>
+        json({ ...GRILLING, timeline: held.record })(),
+      ),
+      ...answers,
+    );
+
+    return { held, fetching };
+  }
+
+  /// The record with the waiting Set answered, which is what the server reads
+  /// back once it has been.
+  const answered = (timeline: TimelineEvent[]) =>
+    standingAs(timeline, WAITING_SET.id, ANSWERED_SET.standing);
+
+  it("lands on the set rather than the memo left after it", async () => {
+    holding(ONE_WAITING);
+    const { history } = mount(`/conversations/${GRILLING.id}`);
+
+    await waitFor(() => expect(history.get()).toBe(AT_SET));
+  });
+
+  it("moves on to the memo once the set is answered", async () => {
+    const { held } = holding(ONE_WAITING);
+    const { history, client } = mount(`/conversations/${GRILLING.id}`);
+    await waitFor(() => expect(history.get()).toBe(AT_SET));
+
+    held.record = answered(ONE_WAITING);
+    await nudged(client);
+
+    await waitFor(() => expect(history.get()).toBe(AT_MEMO));
+  });
+
+  /// Answered and locked unanswered alike are passed over like any other
+  /// Event, and the landing is the end of the record again.
+  it("lands on the end where every set is answered or locked", async () => {
+    holding([...SETTLED.timeline, { Memo: NOTED }]);
+    const { history } = mount(`/conversations/${GRILLING.id}`);
+
+    await waitFor(() => expect(history.get()).toBe(AT_MEMO));
+  });
+
+  /// Waiting whichever kind of waiting it is: a Set the session deferred holds
+  /// the selection as one it is blocked on does.
+  it("stops at a deferred set too", async () => {
+    holding([
+      ...standingAs(GRILLING.timeline, WAITING_SET.id, LOCKED_UNANSWERED),
+      { Memo: NOTED },
+    ]);
+    const { history } = mount(`/conversations/${GRILLING.id}`);
+
+    await waitFor(() =>
+      expect(history.get()).toBe(
+        `/conversations/${GRILLING.id}/events/${DEFERRED_SET.id}`,
+      ),
+    );
+  });
+
+  /// And the oldest of two: the blocking Set was asked first, so it is where
+  /// the landing stops while both wait.
+  it("stops at the oldest of the sets still waiting", async () => {
+    holding([...GRILLING.timeline, { Memo: NOTED }]);
+    const { history } = mount(`/conversations/${GRILLING.id}`);
+
+    await waitFor(() => expect(history.get()).toBe(AT_SET));
+  });
+
+  /// The pending steer is drawn after the record, so it still lands first,
+  /// waiting Set or none.
+  it("lands on the pending steer ahead of a waiting set", async () => {
+    theGrillingSteering({ timeline: ONE_WAITING });
+    const { history } = mount(`/conversations/${GRILLING.id}`);
+
+    await waitFor(() =>
+      expect(history.get()).toBe(`/conversations/${GRILLING.id}/steer`),
+    );
+  });
+
+  /// A record growing under an advancing Timeline: what lands after the Set
+  /// does not carry the selection past it, and answering it does.
+  it("holds at the set while events land after it, then moves on", async () => {
+    const { held } = holding(ONE_WAITING);
+    const { container, history, client } = mount(`/conversations/${GRILLING.id}`);
+    await waitFor(() => expect(history.get()).toBe(AT_SET));
+
+    held.record = [...ONE_WAITING, { Notice: SAID }];
+    await nudged(client);
+    await waitFor(() =>
+      expect(
+        container.querySelectorAll(`.${timeline.timelineEvent}`),
+      ).toHaveLength(held.record.length),
+    );
+    expect(history.get()).toBe(AT_SET);
+
+    held.record = answered(held.record);
+    await nudged(client);
+
+    await waitFor(() =>
+      expect(history.get()).toBe(
+        `/conversations/${GRILLING.id}/events/${SAID.id}`,
+      ),
+    );
+  });
+
+  /// The way a phone answers: a tap on the Set's card, which is a press and
+  /// ends advancing, and the answer sent from its pane — which puts the
+  /// Timeline back into advancing, so the read the answer brings carries the
+  /// selection on to the next thing rather than leaving it on the answered Set.
+  it("carries on to the next thing once the set's pane sends an answer", async () => {
+    const { held, fetching } = holding(
+      ONE_WAITING,
+      whenever(
+        `/api/ui/sets/${SHEET.id}/response`,
+        () => {
+          held.record = answered(held.record);
+          return json("Accepted" satisfies Submitted)();
+        },
+        "POST",
+      ),
+    );
+    const { container, history } = mount(`/conversations/${GRILLING.id}`);
+    await waitFor(() => expect(history.get()).toBe(AT_SET));
+
+    await drawn(container, `.${timeline.questionSet}`);
+    fireEvent.click([...container.querySelectorAll(`.${timeline.questionSet}`)][1]!);
+
+    const pane = screen.getByLabelText("Details");
+    const chosen = await waitFor(() => {
+      const radio = pane.querySelector<HTMLInputElement>(
+        'input[name="Q1-option"][value="2"]',
+      );
+      if (!radio) {
+        throw new Error("the sheet has not been drawn");
+      }
+      return radio;
+    });
+
+    fireEvent.click(chosen);
+    fireEvent.click(screen.getByRole("button", { name: "Submit" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send anyway" }));
+
+    await waitFor(() =>
+      expect(fetching).toHaveBeenCalledWith(
+        `/api/ui/sets/${SHEET.id}/response`,
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+    await waitFor(() => expect(history.get()).toBe(AT_MEMO));
   });
 });
 

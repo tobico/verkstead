@@ -19,4 +19,4 @@ shows it*, and the terms are **Memo** and **Landing** in CONTEXT.md.
 
 - [x] 01: A memo has a title — [details](01-a-memo-has-a-title.md)
 - [x] 02: The card and the pane — [details](02-the-card-and-the-pane.md)
-- [ ] 03: The selection stops at a waiting Set — [details](03-the-selection-stops-at-a-waiting-set.md)
+- [x] 03: The selection stops at a waiting Set — [details](03-the-selection-stops-at-a-waiting-set.md)

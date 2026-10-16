@@ -66,14 +66,20 @@
 //! to pick from, and only where the path names no pane already — a cold load of
 //! a details pane keeps the selection it was opened at.
 //!
-//! And it stays there. A Timeline landed on the end of its record is advancing:
+//! Except where a Question Set is still waiting on the human: then it lands on
+//! the oldest such Set and stays there until it is answered, so a Memo or a
+//! commit landing after a Set cannot carry the selection past it. See
+//! [`landing`].
+//!
+//! And it stays there. A Timeline that landed is advancing:
 //! each Event that arrives with a pane behind it is opened as it lands, so a
 //! human watching a session work is shown what it just did rather than what it
 //! had done when they opened it. There is nothing on screen to say so — the
 //! newest card is open and an open card looks like an open card — and nothing
 //! to turn on either: arriving is the whole of it, whether that was a press on
 //! the sidebar or the walk a Conversation is started with. Picking anything by
-//! hand ends it, and the next arrival begins it again.
+//! hand ends it, and the next arrival begins it again — and so does sending an
+//! answer from a Set's pane, which a phone reached by tapping the Set's card.
 //!
 //! What a Conversation *is* is not drawn there — the setup it needs is on the
 //! Brief card, where it is used — and the way on to an empty pane is not
@@ -417,6 +423,18 @@ export function Workbench(): JSX.Element {
     navigate(pathTo(selected(), opening, device()), { replace: true });
   };
 
+  /// Sending an answer from a Set's pane, which puts the Timeline back into
+  /// advancing.
+  ///
+  /// The press on the Set's card ended it, and on a phone that press is the
+  /// only way to the Set's pane — so without this, a phone that answered would
+  /// be left standing on the answered Set. The landing that follows is the one
+  /// the answer's Nudge brings, and it carries the selection on to the next
+  /// waiting Set or the end of the record. Nothing navigates here: the Set the
+  /// cache still holds is still waiting until that read arrives, so the landing
+  /// effect finds it where it already is.
+  const answered = () => setFollowed(selected());
+
   // Opening a Conversation is what walks a phone into the Timeline, and leaving
   // the workbench route walks it back out. Written as an effect on the URL
   // rather than done in the click handler, because Back is a way of changing the
@@ -726,9 +744,10 @@ export function Workbench(): JSX.Element {
     }
   });
 
-  // A Timeline that is advancing stays at the end of its record: every Event
-  // that lands with a pane behind it is opened as it arrives, the way the
-  // landing opened the last one before it.
+  // A Timeline that is advancing stays where landing puts it: every Event that
+  // lands with a pane behind it is opened as it arrives, the way the landing
+  // opened the last one before it — unless a Set is still waiting, which holds
+  // the selection until it is answered.
   //
   // The same walk as the landing's and made the same way — the URL rewritten to
   // where the newest pane stands, with replace — because what is open is the
@@ -810,6 +829,7 @@ export function Workbench(): JSX.Element {
                 conversation={conversation}
                 event={event()}
                 select={select}
+                answered={answered}
                 back={leaving()}
                 code={code.of}
                 maximise={
@@ -902,6 +922,10 @@ function DetailsPane(props: {
   /// card would have made.
   event: Opening | null;
   select: (opening: Opening) => void;
+
+  /// And what sending an answer from a Set's pane does to the Timeline: puts
+  /// it back into advancing — see `answered` in [`Workbench`].
+  answered: () => void;
 
   /// The way off whatever pane is drawn, which a narrow window walks out
   /// through: where it goes and what it is called. Ordinarily the Timeline,
@@ -1092,6 +1116,7 @@ function DetailsPane(props: {
                     <Asked
                       asked={asked()}
                       back={props.back.go}
+                      answered={props.answered}
                     />
                   )}
                 </Match>

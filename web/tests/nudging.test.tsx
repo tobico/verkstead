@@ -166,6 +166,14 @@ const ALREADY_THERE = ASKED.title;
 /// answer left in the sequence goes to whichever of them asked first.
 const SET = `/api/ui/sets/${ASKED.set_id}`;
 
+/// And answered alongside the rest for every page that opens the Conversation
+/// at its own path: the landing opens that waiting Set, so its pane reads it.
+/// A read with no answer would go on retrying on the query client the whole
+/// file shares, and the next test to open the Set would be left waiting on it.
+/// The two tests about the Set hold the path to answers of their own, after
+/// this one.
+BESIDE.push(whenever(SET, json(readingOf(WAITING))));
+
 /// The Set the stream is there to be immediate about — put to the human while
 /// they are looking straight at the Timeline it lands on.
 const ARRIVAL: QuestionSetEvent = {

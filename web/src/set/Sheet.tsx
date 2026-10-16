@@ -82,6 +82,9 @@ export function Sheet(props: {
   set: SetView;
   back?: () => void;
   readOnly?: boolean;
+
+  /// Handed on to [`Answering`]: what the page does once an answer is sent.
+  answered?: () => void;
 }): JSX.Element {
   // The renderer, named by a Set that has a Diagram on it to draw and by no
   // other: mermaid is megabytes, so a Set without one loads none of them. What a
@@ -263,6 +266,7 @@ export function Sheet(props: {
             proposal={props.set.proposal}
             ending={props.set.ending}
             attachments={props.set.attachments}
+            answered={props.answered}
           />
         }
       >
