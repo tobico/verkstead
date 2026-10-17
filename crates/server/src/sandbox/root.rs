@@ -313,6 +313,30 @@ const OAUTH: &str = "oauth";
 /// Of the account's `.claude.json`, the key its per-path entries are under.
 const PROJECTS_CONFIG: &str = "projects";
 
+/// Of the account's `.claude.json`, the key the signed-in account's profile is
+/// under — what says the account is signed in.
+const OAUTH_ACCOUNT: &str = "oauthAccount";
+
+/// And of that profile, the keys that name the human, which a copy never
+/// carries: the email, the two names and the organization's name.
+///
+/// **Probed against Claude Code 2.1.283**, with a copy missing each of them in
+/// turn and all four together: every one launched, said it was signed in and
+/// ran a turn. What that version does next is fetch the profile again and
+/// write the email and the organization's name back into the copy, the names
+/// staying out — so the strip keeps the two names away from a session, and
+/// the other two only until its first turn. See ADR-0025's *What was reviewed
+/// and left*.
+///
+/// What is left — the account's uuid, its billing and its limits — names an
+/// account rather than a person.
+const NAMING: [&str; 4] = [
+    "emailAddress",
+    "displayName",
+    "fullName",
+    "organizationName",
+];
+
 /// What a `projects` entry says to have the trust dialog answered.
 const TRUSTED: &str = "hasTrustDialogAccepted";
 
@@ -1144,7 +1168,8 @@ pub(crate) fn mirrored_of(agent_type: crate::store::AgentType) -> Vec<PathBuf> {
 /// repository the human has run claude in — their paths, their history and what
 /// they were last asked — and none of it is this session's; a root seeds the
 /// trust it needs for the Repo and the Worktree it is about to run in, on the
-/// device it is running on. What is left is what says the account is signed in.
+/// device it is running on. What is left is what says the account is signed in,
+/// with what names the human taken out of it — see [`NAMING`].
 ///
 /// Blocking: one read per path.
 pub(crate) fn mirrored(account: &crate::store::Account) -> Vec<(PathBuf, Option<Vec<u8>>)> {
@@ -1197,7 +1222,8 @@ pub(crate) fn mirrored(account: &crate::store::Account) -> Vec<(PathBuf, Option<
 }
 
 /// The `.claude.json` a mirror of an account holds: the account's own with its
-/// MCP servers and its `projects` entries taken out.
+/// MCP servers, its `projects` entries and what names the human in its
+/// `oauthAccount` taken out — the last for [`NAMING`]'s reason.
 ///
 /// [`config`]'s counterpart for a file that is about to cross a link rather than
 /// go into a root: the servers come out for that one's reason — they are the
@@ -1218,8 +1244,19 @@ fn mirrored_config(account: Option<&[u8]>) -> Vec<u8> {
 
     copy.remove(MCP_SERVERS);
     copy.remove(PROJECTS_CONFIG);
+    unnamed(&mut copy);
 
     written(&serde_json::Value::Object(copy))
+}
+
+/// Take what names the human out of a copy's `oauthAccount` — see [`NAMING`].
+/// A copy with no profile, or one that is not an object, is left as it is.
+fn unnamed(copy: &mut Object) {
+    if let Some(serde_json::Value::Object(profile)) = copy.get_mut(OAUTH_ACCOUNT) {
+        for key in NAMING {
+            profile.remove(key);
+        }
+    }
 }
 
 /// The `opencode.json` an OpenCode root is given, out of the account's own
@@ -1514,7 +1551,8 @@ type Object = serde_json::Map<String, serde_json::Value>;
 /// is one to read.
 ///
 /// **Without the account's `mcpServers`**, at the top level and under each
-/// `projects` entry.
+/// `projects` entry, **and without what names the human** in its
+/// `oauthAccount` — see [`NAMING`].
 ///
 /// **And with `servers` written under it instead**, one entry per MCP server
 /// the Conversation attached that the settings still declare, each
@@ -1549,6 +1587,7 @@ fn config(account: Option<&[u8]>, trusted: &[String], servers: &[AttachedServer]
     };
 
     copy.remove(MCP_SERVERS);
+    unnamed(&mut copy);
 
     // Verkstead's own in their place, where the Conversation has any. Written
     // after the removal rather than over it, so that what the account had
@@ -1615,7 +1654,8 @@ fn config(account: Option<&[u8]>, trusted: &[String], servers: &[AttachedServer]
 /// A key the session removed is removed. `mcpServers` is neither written nor
 /// removed, at either level, and an entry written back keeps the account's own.
 /// The trust the copy was seeded with reaches the account only in an entry the
-/// session changed.
+/// session changed. And an `oauthAccount` written back keeps the account's own
+/// of what names the human, where the session's has none — see [`NAMING`].
 ///
 /// **Nothing is written where nothing differs**, so a session that changed
 /// nothing leaves the account's file byte for byte as it was. Where something
@@ -1683,8 +1723,27 @@ fn merge(baseline: &Object, now: &Object, account: &mut Object) -> bool {
 
         changed = true;
 
-        match now.get(key) {
-            Some(value) => account.insert(key.to_owned(), value.clone()),
+        let mut value = now.get(key).cloned();
+
+        // The names the copy was given without, kept as the account has them
+        // where the session did not fetch them back: a copy that never had
+        // them did not take them away.
+        if key == OAUTH_ACCOUNT {
+            if let (
+                Some(serde_json::Value::Object(profile)),
+                Some(serde_json::Value::Object(own)),
+            ) = (&mut value, account.get(key))
+            {
+                for name in NAMING {
+                    if let (false, Some(kept)) = (profile.contains_key(name), own.get(name)) {
+                        profile.insert(name.to_owned(), kept.clone());
+                    }
+                }
+            }
+        }
+
+        match value {
+            Some(value) => account.insert(key.to_owned(), value),
             None => account.remove(key),
         };
     }
@@ -2239,6 +2298,68 @@ mod tests {
                     "/untouched": { "allowedTools": ["changed by the account"] },
                 },
             })
+        );
+    }
+
+    /// The copy a session is given names nobody: of the account's
+    /// `oauthAccount`, what names the human is taken out and the rest is left.
+    #[test]
+    fn the_copy_leaves_out_what_names_the_human() {
+        let account = serde_json::json!({
+            "oauthAccount": {
+                "accountUuid": "8c1e…",
+                "billingType": "stripe_subscription",
+                "emailAddress": "you@example.com",
+                "displayName": "You",
+                "fullName": "You Yourself",
+                "organizationName": "Your Employer",
+            },
+        });
+
+        assert_eq!(
+            read(&config(Some(account.to_string().as_bytes()), &[], &[]))["oauthAccount"],
+            serde_json::json!({
+                "accountUuid": "8c1e…",
+                "billingType": "stripe_subscription",
+            }),
+        );
+    }
+
+    /// A session's `oauthAccount` goes back keeping what the copy left out:
+    /// Claude Code 2.1.283 fetches the email and the organization back into
+    /// the copy on its first turn, but neither name, and the account's own are
+    /// not taken away by that.
+    #[test]
+    fn an_account_merged_back_keeps_the_names_the_copy_left_out() {
+        let (changed, merged) = merging(
+            serde_json::json!({ "oauthAccount": { "accountUuid": "8c1e…" } }),
+            serde_json::json!({ "oauthAccount": {
+                "accountUuid": "8c1e…",
+                "emailAddress": "you@example.com",
+                "organizationName": "Your Employer",
+                "profileFetchedAt": 2,
+            }}),
+            serde_json::json!({ "oauthAccount": {
+                "accountUuid": "8c1e…",
+                "emailAddress": "you@example.com",
+                "displayName": "You",
+                "fullName": "You Yourself",
+                "organizationName": "Your Employer",
+                "profileFetchedAt": 1,
+            }}),
+        );
+
+        assert!(changed);
+        assert_eq!(
+            merged,
+            serde_json::json!({ "oauthAccount": {
+                "accountUuid": "8c1e…",
+                "emailAddress": "you@example.com",
+                "displayName": "You",
+                "fullName": "You Yourself",
+                "organizationName": "Your Employer",
+                "profileFetchedAt": 2,
+            }}),
         );
     }
 
@@ -3173,7 +3294,13 @@ mod tests {
         std::fs::write(
             &config_file,
             serde_json::json!({
-                "oauthAccount": { "emailAddress": "you@example.com" },
+                "oauthAccount": {
+                    "accountUuid": "8c1e…",
+                    "emailAddress": "you@example.com",
+                    "displayName": "You",
+                    "fullName": "You Yourself",
+                    "organizationName": "Your Employer",
+                },
                 "mcpServers": { "theirs": { "command": "serve" } },
                 "projects": {
                     "/home/you/src/secrets": {
@@ -3242,8 +3369,9 @@ mod tests {
 
         assert_eq!(
             config["oauthAccount"],
-            serde_json::json!({ "emailAddress": "you@example.com" }),
-            "what says the account is signed in comes over",
+            serde_json::json!({ "accountUuid": "8c1e…" }),
+            "what says the account is signed in comes over, and none of what \
+             names the human: Claude Code 2.1.283 runs a turn without them",
         );
         assert!(
             config.get("mcpServers").is_none() && config.get("projects").is_none(),

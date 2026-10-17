@@ -159,12 +159,23 @@ The Brief asked for a review of everything else identifying that a session is
 given. Four things were found, and each was decided, and the review of the
 roadmap on 2026-10-17 found two more that the first of them only began on:
 
-- **The Claude account's email.** The `.claude.json` copy a session gets keeps
-  `oauthAccount.emailAddress`, which a test asserts comes over as what says the
-  account is signed in. Stage 02 probes whether Claude runs without it and
-  strips it if so; if not, it stays and is documented here as an exposure. The
-  account is the Profile's, and a pseudonymous Repo can already be paired with
-  a Profile of its own.
+- **The Claude account's email.** The `.claude.json` copy a session gets kept
+  `oauthAccount.emailAddress`, which a test asserted came over as what says the
+  account is signed in, and beside it `displayName`, `fullName` and
+  `organizationName`, each of which names the human as well. *Probed in stage
+  02, 2026-10-17, against Claude Code 2.1.283*: with a copy missing each of the
+  four in turn, and all four together, Claude launched, `claude auth status`
+  said it was signed in, and a one-line prompt ran a turn. **So all four are
+  stripped from the copy**, and from the `.claude.json` a mirror of the account
+  holds; what is left — the account's uuid, its billing and its limits — names
+  an account rather than a person. **The strip is partial in effect**: on its
+  first turn 2.1.283 fetches the profile again with the login and writes
+  `emailAddress` and `organizationName` back into the copy, though neither
+  name. The two names stay out of a session; the email and the organization
+  reach it a turn later, as the login it holds could fetch them anyway, and
+  what goes back to the account as the session ends keeps the account's own
+  names where the copy had none. The account is the Profile's, and a
+  pseudonymous Repo can already be paired with a Profile of its own.
 - **Every harness login names its account**, not Claude's alone. Codex's
   `auth.json` carries an `id_token` whose claims hold the account's email, and
   a login cannot be stripped of what makes it a login. So whatever the probe
