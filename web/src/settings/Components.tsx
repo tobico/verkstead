@@ -26,6 +26,12 @@
 //! wizard's components over the wizard's reading rather than copies of them, so
 //! there is one of each. A run already going, from this pane or another
 //! device's, is drawn rather than started again.
+//!
+//! **Update is the box's inputs moved** — both nixpkgs and Verkstead, never
+//! NixOS-WSL — and the box rebuilt and linked again on the server, the row
+//! reading *updating* until it is. It is refused while a session runs in the
+//! Annex, because the rebuild restarts every one of them, and the refusal names
+//! the Conversation. A rebuild that failed is the row's trouble line.
 
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import {
@@ -45,10 +51,12 @@ import {
   installAnnex,
   loadComponents,
   loadOnboarding,
+  updateAnnex,
 } from "../api/client";
 import type {
   AnnexComponent,
   AnnexState,
+  ComponentsView,
   DependencyView,
   OnboardingView,
 } from "../api/types";
@@ -84,6 +92,9 @@ const STATE: Record<AnnexState, string> = {
   Updating: "updating",
 };
 
+/// The states in which there is a box to update.
+const BOXED: AnnexState[] = ["Running", "Stopped", "Updating"];
+
 /// And what is owed before there can be one, in the wizard row's words — or
 /// nothing for a state that owes the human nothing.
 function owed(state: AnnexState): string | null {
@@ -98,11 +109,18 @@ function owed(state: AnnexState): string | null {
 ///
 /// A read of its own: none of it is a setting, and none of it is the cluster.
 /// Re-read on the `devices` Nudge, which is what the Keeper's start says once
-/// its Annex is linked — the moment the release the box runs is known.
+/// its Annex is linked — the moment the release the box runs is known — and
+/// with the wizard's run cadence while the row reads *updating*, a rebuild that
+/// fails before any link saying nothing to the Nudge.
 export function useComponents() {
   return useReading(() => ({
     queryKey: ["components"],
     queryFn: loadComponents,
+    refetchInterval: (query) => {
+      const reading = query.state.data as ComponentsView | undefined;
+
+      return reading?.annex?.state === "Updating" ? RUNNING : false;
+    },
     freshness: { reconcile: "state" },
   }));
 }
@@ -222,6 +240,18 @@ export function ComponentsPane(props: {
     },
   }));
 
+  // Update: answered with the row reading *updating*, which is then polled
+  // until it reads otherwise — or refused, naming the Conversation a session
+  // runs on in the Annex.
+  const update = useMutation(() => ({
+    mutationFn: updateAnnex,
+    onSuccess: (reading: ComponentsView) => {
+      setRefused(null);
+      queries.setQueryData(["components"], reading);
+    },
+    onError: (error: Error) => setRefused(error.message),
+  }));
+
   const stop = useMutation(() => ({
     mutationFn: cancelInstall,
     onSuccess: (reading: OnboardingView) =>
@@ -286,7 +316,8 @@ export function ComponentsPane(props: {
               <Annex
                 of={annex}
                 install={() => start.mutate()}
-                pressing={start.isPending}
+                update={() => update.mutate()}
+                pressing={start.isPending || update.isPending}
                 refused={refused()}
               />
             </ul>
@@ -299,10 +330,11 @@ export function ComponentsPane(props: {
 
 /// The Annex's row: its name and state, the release and the disk under them
 /// where there is anything to say of either, what is owed or went wrong, and
-/// Install where there is no box.
+/// Install where there is no box or Update where there is one.
 function Annex(props: {
   of: AnnexComponent;
   install: () => void;
+  update: () => void;
   pressing: boolean;
   refused: string | null;
 }): JSX.Element {
@@ -330,11 +362,24 @@ function Annex(props: {
         <Show when={props.of.state === "NotInstalled"}>
           <button
             type="button"
-            class={styles.install}
+            class={styles.press}
             disabled={props.pressing}
             onClick={() => props.install()}
           >
             Install
+          </button>
+        </Show>
+
+        {/* Wherever there is a box, and held down while it is being
+            updated: a second press would read the one already going. */}
+        <Show when={BOXED.includes(props.of.state)}>
+          <button
+            type="button"
+            class={styles.press}
+            disabled={props.pressing || props.of.state === "Updating"}
+            onClick={() => props.update()}
+          >
+            Update
           </button>
         </Show>
       </div>

@@ -219,6 +219,21 @@ pub fn verksteads(binary: &Binary) -> &'static [&'static str] {
     }
 }
 
+/// The inputs **Update** moves in a flake [`system`] wrote for `binary`: both
+/// nixpkgs, and the Verkstead inputs with them — every input but `nixos-wsl`,
+/// which is pinned at the tag [`NIXOS_WSL`] names and moves with a release.
+pub fn updated(binary: &Binary) -> &'static [&'static str] {
+    match binary {
+        Binary::Released => &[
+            "nixpkgs",
+            "nixpkgs-unstable",
+            "verkstead",
+            "verkstead-binary",
+        ],
+        Binary::Copied(_) => &["nixpkgs", "nixpkgs-unstable", "verkstead"],
+    }
+}
+
 /// The release a flake this module wrote pins the box to: its `verkstead`
 /// input's tag, without the `v` — `0.42.0`, say — or `None` in a flake that
 /// names no release.
@@ -382,6 +397,37 @@ mod tests {
             flake.contains(&format!("\"github:tobico/verkstead/v{VERSION}\"")),
             "the release tag still supplies the module: {flake}"
         );
+    }
+
+    /// Update moves every input the written flake declares but `nixos-wsl`,
+    /// for either binary — so an input a later template adds is one it moves
+    /// too, or this says so.
+    #[test]
+    fn update_moves_every_input_but_nixos_wsl() {
+        for binary in [Binary::Released, Binary::Copied("/tmp/verkstead".into())] {
+            let flake = written_for("winvm", &binary).flake;
+
+            let (_, inputs) = flake.split_once("inputs = {").unwrap();
+            let (inputs, _) = inputs.split_once("\n  };").unwrap();
+
+            // An input is a line at the block's own depth that names one.
+            let mut declared: Vec<&str> = inputs
+                .lines()
+                .filter(|line| line.starts_with("    ") && !line.starts_with("     "))
+                .filter_map(|line| {
+                    let name = line.trim().split(['.', ' ']).next()?;
+                    name.starts_with(|c: char| c.is_ascii_alphabetic())
+                        .then_some(name)
+                })
+                .filter(|name| *name != "nixos-wsl")
+                .collect();
+            declared.sort_unstable();
+
+            let mut moved = updated(&binary).to_vec();
+            moved.sort_unstable();
+
+            assert_eq!(moved, declared, "{binary:?}: {flake}");
+        }
     }
 
     #[test]

@@ -2005,6 +2005,16 @@ export function installAnnex(): Promise<OnboardingView> {
   return post<OnboardingView>("/api/ui/components/install");
 }
 
+/// **Update** on the Components pane's Annex row: every input of the box but
+/// NixOS-WSL moved, and the box rebuilt and linked again in the background.
+///
+/// Answered with the Components reading, the row reading *updating* — and
+/// refused while a session runs in the Annex, the line naming the
+/// Conversation.
+export function updateAnnex(): Promise<ComponentsView> {
+  return post<ComponentsView>("/api/ui/components/update");
+}
+
 /// What this device is forwarding: every port of a member's terminal held on
 /// this machine's own `localhost`, and every one it could not hold.
 ///

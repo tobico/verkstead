@@ -31,6 +31,11 @@
 //! box on its old release with the line on its row, and the next start tries
 //! again — see [`super::pinning`].
 //!
+//! **And updated on the human's press**, which is the same rebuild moving
+//! both nixpkgs with the Verkstead inputs, then the same link again, because
+//! the rebuild restarted the Annex's server — refused while a session runs
+//! there, naming the Conversation. See [`Annexed::update`].
+//!
 //! **And the release its flake pins read back once it is up**, and held for
 //! the Components row: what the box runs is said of a stopped one too, and
 //! nothing is booted to say it — see [`Annexed::reading`].
@@ -86,9 +91,13 @@ pub struct Annexed {
     /// terminate at the stop.
     booted: AtomicBool,
 
-    /// Whether the box is being re-pinned and rebuilt at this moment, which the
-    /// Components row reads as *updating*.
+    /// Whether the box is being re-pinned and rebuilt at this moment, or
+    /// updated and linked again, which the Components row reads as *updating*.
     updating: AtomicBool,
+
+    /// Held by a press of Update while it is refused or started, so that two
+    /// presses are one after the other — see [`Annexed::update`].
+    pressing: tokio::sync::Mutex<()>,
 
     /// The release the box is pinned to, read off its flake when this start
     /// booted it and held from then on — so the Components row says it of a
@@ -106,6 +115,7 @@ impl Annexed {
             binary: Binary::Released,
             booted: AtomicBool::new(false),
             updating: AtomicBool::new(false),
+            pressing: tokio::sync::Mutex::new(()),
             pinned: Mutex::new(None),
         }
     }
@@ -173,6 +183,19 @@ impl Annexed {
 
         self.read_pinned().await;
 
+        self.linked(devices, networking, repinning).await
+    }
+
+    /// The box, up, linked over and over until it answers or the boot's time
+    /// runs out — `Ok(true)` once it has, with `held` put on its row, and
+    /// otherwise the line said there. The tail of [`Annexed::up`], and of an
+    /// Update, whose rebuild restarted the Annex's server.
+    async fn linked(
+        &self,
+        devices: &Devices,
+        networking: super::Networking,
+        held: Option<String>,
+    ) -> Result<bool, String> {
         let port = devices.keeping().port;
         let started = tokio::time::Instant::now();
 
@@ -186,7 +209,7 @@ impl Annexed {
                         keeper_at = %addresses.keeper_at,
                         "this device's Annex is up and linked",
                     );
-                    devices.annex_troubled(repinning);
+                    devices.annex_troubled(held);
                     return Ok(true);
                 }
                 Err(why) => why,
@@ -250,32 +273,43 @@ impl Annexed {
         );
 
         self.updating.store(true, Ordering::SeqCst);
+        let repinned = self.rebuilt(system, pinning::repinned).await;
+        self.updating.store(false, Ordering::SeqCst);
 
+        repinned
+    }
+
+    /// The box rebuilt onto `system` by `how` — [`pinning::repinned`] or
+    /// [`pinning::updated`] — and `None` where it was, or the line for the
+    /// Annex's row where it was not. Whoever calls it says *updating* around
+    /// it, for as long as it is theirs to say.
+    ///
+    /// The rebuild's last lines go to the log, and the last of them to the
+    /// row: what `nix` says about a build that failed is at the end.
+    async fn rebuilt(&self, system: flake::System, how: Rebuild) -> Option<String> {
         let annex = self.annex.clone();
         let binary = self.binary.clone();
-        let repinned = tokio::task::spawn_blocking(move || {
-            pinning::repinned(annex.as_ref(), &system, &binary, &mut |line| {
+        let rebuilt = tokio::task::spawn_blocking(move || {
+            how(annex.as_ref(), &system, &binary, &mut |line| {
                 tracing::debug!(line, "the Annex's rebuild");
             })
         })
         .await;
 
-        self.updating.store(false, Ordering::SeqCst);
-
-        match repinned
+        match rebuilt
             .map_err(anyhow::Error::from)
-            .and_then(|repinned| repinned)
+            .and_then(|rebuilt| rebuilt)
         {
             Ok(()) => {
                 tracing::info!(
                     release = flake::VERSION,
-                    "this device's Annex is pinned to this release"
+                    "this device's Annex is pinned to this release and rebuilt"
                 );
                 None
             }
             Err(why) => {
                 let why = format!("{why:#}");
-                tracing::warn!(%why, "this device's Annex could not be pinned to this release, and runs the one it ran");
+                tracing::warn!(%why, "this device's Annex could not be rebuilt, and runs what it ran");
 
                 let last = why.lines().rfind(|line| !line.trim().is_empty());
                 Some(sentence(
@@ -284,6 +318,68 @@ impl Annexed {
                 ))
             }
         }
+    }
+
+    /// **Update** on the Components row: the box's inputs moved — every one
+    /// but `nixos-wsl` — and it rebuilt and linked again, in the background,
+    /// with the row reading *updating* until it is linked (ADR-0024).
+    ///
+    /// **Refused while a session runs in the Annex**, the line naming the
+    /// Conversation, because the rebuild restarts the Annex's server and every
+    /// session with it — see [`running_there`]. What is running is asked of the
+    /// Annex at the press rather than taken off the merged list, which could be
+    /// a refresh behind, and an Annex that cannot be asked refuses rather than
+    /// guesses.
+    ///
+    /// **One at a time**, and none beside the re-pin at the start: a press
+    /// while either is going is taken, and the row goes on reading the one
+    /// there is. Presses are put through one by one, so a second one waits for
+    /// the first to have been refused or started.
+    pub async fn update(self: Arc<Self>, devices: Devices) -> Result<(), String> {
+        let _pressed = self.pressing.lock().await;
+
+        if self.updating.load(Ordering::SeqCst) {
+            return Ok(());
+        }
+
+        let annex = self.annex.clone();
+        let probed = tokio::task::spawn_blocking(move || annex.probe()).await;
+
+        if !matches!(probed, Ok(Probed::Present { .. })) {
+            return Err("There's no annex on this machine to update.".to_owned());
+        }
+
+        running_there(&devices).await?;
+
+        self.updating.store(true, Ordering::SeqCst);
+
+        let this = self.clone();
+        tokio::spawn(async move {
+            this.updated(&devices).await;
+            this.updating.store(false, Ordering::SeqCst);
+        });
+
+        Ok(())
+    }
+
+    /// The Update itself, once it has been taken — see [`Annexed::update`].
+    /// The release read again afterwards, a rebuilt box being pinned to this
+    /// Keeper's, and the line of a failed rebuild kept on the row through the
+    /// link that follows: the Annex answers on what it ran before.
+    async fn updated(&self, devices: &Devices) {
+        tracing::info!("this device's Annex is being updated");
+
+        let system = flake::system(&crate::platform::hostname(), &self.binary);
+        let trouble = self.rebuilt(system, pinning::updated).await;
+
+        self.read_pinned().await;
+
+        let annex = self.annex.clone();
+        let networking = tokio::task::spawn_blocking(move || annex.networking())
+            .await
+            .unwrap_or(super::Networking::Nat);
+
+        let _ = self.linked(devices, networking, trouble).await;
     }
 
     /// Read the release the box's flake pins and hold it, for the Components
@@ -381,6 +477,83 @@ impl Annexed {
             Err(why) => tracing::warn!(%why, "this device's Annex could not be stopped"),
         }
     }
+}
+
+/// A rebuild of the box onto a system, running a binary — the re-pin's or the
+/// Update's, which differ in the inputs they move.
+type Rebuild =
+    fn(&dyn Backend, &flake::System, &Binary, &mut dyn FnMut(&str)) -> anyhow::Result<()>;
+
+/// Where the Annex's own Conversations are read, over the Relay: the sidebar's
+/// list, which over the Peer Listener is that device's rows alone, with the
+/// archived ones in it too — see [`crate::ui::conversations`].
+const ITS_CONVERSATIONS: &str = "/api/ui/conversations?archived=true";
+
+/// What [`running_there`] reads of each row of the Annex's list: the three
+/// fields of a [`verkstead_render::ConversationEntry`] that say whether a
+/// session runs on it and what it is called, and nothing else of it.
+#[derive(Debug, serde::Deserialize)]
+struct Running {
+    branch: String,
+    branch_named: bool,
+    working: bool,
+}
+
+/// `Ok` where no session is running in this Keeper's Annex, asked of the Annex
+/// now; and otherwise the refusal, naming the Conversation one is running on,
+/// or the first of them and how many more. An Annex that is not linked, cannot
+/// be reached or answers what cannot be read is a refusal of its own: nothing
+/// is known about what it is running.
+async fn running_there(devices: &Devices) -> Result<(), String> {
+    const UNASKED: &str = "The annex couldn't be asked what it's running, so it wasn't updated.";
+
+    let held = devices
+        .membership()
+        .rows()
+        .await
+        .map_err(|_| UNASKED.to_owned())?;
+
+    let Some(annex) = held
+        .iter()
+        .find(|member| member.kept_by.as_deref() == Some(devices.id()))
+    else {
+        return Err(UNASKED.to_owned());
+    };
+
+    let said = crate::relaying::read_of(
+        devices,
+        &annex.device,
+        ITS_CONVERSATIONS.to_owned(),
+        "Conversations",
+        crate::merging::MOST_A_LIST_IS,
+    )
+    .await
+    .ok_or_else(|| UNASKED.to_owned())?;
+
+    let rows: Vec<Running> = serde_json::from_slice(&said).map_err(|_| UNASKED.to_owned())?;
+
+    let mut working = rows.iter().filter(|row| row.working);
+
+    let Some(first) = working.next() else {
+        return Ok(());
+    };
+
+    let named = match first.branch_named {
+        true => first.branch.clone(),
+        false => "a draft".to_owned(),
+    };
+
+    Err(match working.count() {
+        0 => format!("The annex can't be updated while a session runs on {named}. Stop it first."),
+        1 => format!(
+            "The annex can't be updated while sessions run on {named} and 1 more conversation. \
+             Stop them first."
+        ),
+        more => format!(
+            "The annex can't be updated while sessions run on {named} and {more} more \
+             conversations. Stop them first."
+        ),
+    })
 }
 
 /// The line the Annex's row carries: `what`, and the first line of `why` as a

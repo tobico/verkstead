@@ -95,11 +95,12 @@ pub fn put(annex: &dyn Backend, system: &System, binary: &Binary) -> anyhow::Res
     Ok(())
 }
 
-/// The lock moved for the Verkstead inputs of a flake written for `binary`,
-/// and for nothing else — see [`flake::verksteads`].
-pub fn relocked(annex: &dyn Backend, binary: &Binary) -> anyhow::Result<()> {
+/// The lock moved for `inputs` and for nothing else: the Verkstead inputs at a
+/// re-pin — see [`flake::verksteads`] — and all but `nixos-wsl` at an Update —
+/// see [`flake::updated`].
+pub fn relocked(annex: &dyn Backend, inputs: &[&str]) -> anyhow::Result<()> {
     let mut argv = vec![FLAKES, "nix", "flake", "update", "--flake", flake::NIXOS];
-    argv.extend_from_slice(flake::verksteads(binary));
+    argv.extend_from_slice(inputs);
 
     let ran = annex.run(Inside::Root, &argv)?;
 
@@ -163,6 +164,30 @@ pub fn repinned(
     binary: &Binary,
     line: &mut dyn FnMut(&str),
 ) -> anyhow::Result<()> {
+    rebuilt_moving(annex, system, binary, flake::verksteads(binary), line)
+}
+
+/// The box **updated**: pinned to `system` as [`repinned`] pins it, with
+/// every input of the lock moved but `nixos-wsl` rather than the Verkstead
+/// inputs alone — see [`flake::updated`]. What failed is put back the same
+/// way.
+pub fn updated(
+    annex: &dyn Backend,
+    system: &System,
+    binary: &Binary,
+    line: &mut dyn FnMut(&str),
+) -> anyhow::Result<()> {
+    rebuilt_moving(annex, system, binary, flake::updated(binary), line)
+}
+
+/// The two above, which differ in the inputs they move and nothing else.
+fn rebuilt_moving(
+    annex: &dyn Backend,
+    system: &System,
+    binary: &Binary,
+    inputs: &[&str],
+    line: &mut dyn FnMut(&str),
+) -> anyhow::Result<()> {
     let before: Vec<(&str, Vec<u8>)> = [
         flake::IN_THE_BOX,
         flake::CONFIGURATION_IN_THE_BOX,
@@ -173,7 +198,7 @@ pub fn repinned(
     .collect();
 
     let done = put(annex, system, binary)
-        .and_then(|()| relocked(annex, binary))
+        .and_then(|()| relocked(annex, inputs))
         .and_then(|()| rebuilt(annex, line));
 
     let Err(why) = done else {
@@ -327,6 +352,39 @@ mod tests {
         assert_eq!(
             lines,
             ["building the system configuration...", "activating"]
+        );
+    }
+
+    /// An Update writes the same files and rebuilds the same way, moving both
+    /// nixpkgs with the Verkstead inputs, and `nixos-wsl` not at all.
+    #[test]
+    fn an_update_relocks_every_input_but_nixos_wsl() {
+        let (backend, wsl, _powershell) = stubbed();
+        wsl.answers(1, OLD_FLAKE, 0)
+            .answers(2, OLD_CONFIGURATION, 0)
+            .answers(3, OLD_LOCK, 0);
+
+        updated(
+            &backend,
+            &system(&Binary::Released),
+            &Binary::Released,
+            &mut |_| {},
+        )
+        .unwrap();
+
+        assert_eq!(
+            wsl.calls()[3..],
+            [
+                write("644", "/etc/nixos/flake.nix"),
+                write("644", "/etc/nixos/configuration.nix"),
+                relock(&[
+                    "nixpkgs",
+                    "nixpkgs-unstable",
+                    "verkstead",
+                    "verkstead-binary"
+                ]),
+                rebuild(),
+            ]
         );
     }
 

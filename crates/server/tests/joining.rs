@@ -189,6 +189,11 @@ impl Verkstead {
     /// `config.yaml` whether it is somebody's **Annex**, which is what a Keeper
     /// links it by writing.
     async fn annex() -> Verkstead {
+        Verkstead::annex_serving(Router::new()).await
+    }
+
+    /// The same, serving `workbench` to its members over the link.
+    async fn annex_serving(workbench: Router) -> Verkstead {
         let mut annex = Verkstead::called(
             B,
             Reading::stated(no_tailscale(), Platform::HERE, None, Vec::new()),
@@ -200,12 +205,21 @@ impl Verkstead {
             .clone()
             .told_by(Settings::in_data_dir(annex.dir.path()));
 
-        annex.answer();
+        annex.answer_with(workbench);
         annex
     }
 
     /// Stand the peer listener up, serving what a Verkstead serves.
     fn answer(&mut self) {
+        // And none of the workbench over the link: what these suites ask
+        // about is the link itself — see `tests/relayed.rs`, which is the
+        // suite about what a member reaches through one.
+        self.answer_with(Router::new());
+    }
+
+    /// The same, serving `workbench` to its members over the link — what a
+    /// Keeper reads its Annex's Conversations out of.
+    fn answer_with(&mut self, workbench: Router) {
         let listener = peer::Listener::bound("127.0.0.1:0".parse().unwrap(), &self.device)
             .expect("the loopback on a port the machine picked is free");
 
@@ -217,10 +231,7 @@ impl Verkstead {
             self.members.clone(),
             self.joins.clone(),
             self.nudges.clone(),
-            // And none of the workbench over the link: what these suites ask
-            // about is the link itself — see `tests/relayed.rs`, which is the
-            // suite about what a member reaches through one.
-            Router::new(),
+            workbench,
         )));
     }
 
@@ -1702,8 +1713,35 @@ const OLD_FLAKE: &str = "{
 }
 ";
 
-/// And the lock beside it, whose nixpkgs a re-pin leaves where it is.
-const LOCK: &str = "{ \"nodes\": { \"nixpkgs\": { \"locked\": { \"rev\": \"0b4defa2\" } } } }\n";
+/// And the lock beside it, every input the flake declares at a revision of its
+/// own: a re-pin moves the Verkstead two, and an Update every one but
+/// `nixos-wsl`.
+const LOCK: &str = r#"{
+  "nodes": {
+    "nixos-wsl": { "locked": { "rev": "5e1c2a90" } },
+    "nixpkgs": { "locked": { "rev": "0b4defa2" } },
+    "nixpkgs-unstable": { "locked": { "rev": "9d7e31c4" } },
+    "verkstead": { "locked": { "rev": "a1b2c3d4" } },
+    "verkstead-binary": { "locked": { "rev": "e5f6a7b8" } }
+  }
+}
+"#;
+
+/// The revision `lock` holds for `input`.
+fn rev(lock: &str, input: &str) -> String {
+    let lock: serde_json::Value = serde_json::from_str(lock).unwrap();
+
+    lock["nodes"][input]["locked"]["rev"]
+        .as_str()
+        .unwrap()
+        .to_owned()
+}
+
+/// The revision of `input` in [`LOCK`] once `nix flake update` has moved it,
+/// as the box's `nix` moves it.
+fn moved(input: &str) -> String {
+    format!("{}-moved", rev(LOCK, input))
+}
 
 /// A program that ran to its end, having said `out`.
 fn ran(out: &str) -> std::process::Output {
@@ -1768,6 +1806,26 @@ impl annex::Backend for Boxed {
 
     fn run(&self, _: annex::Inside, argv: &[&str]) -> anyhow::Result<std::process::Output> {
         self.ran.lock().unwrap().push(argv.join(" "));
+
+        // `nix flake update --flake /etc/nixos <input>…` moves each input it
+        // names in the lock, and nothing else.
+        if let Some(at) = argv.windows(2).position(|pair| pair == ["flake", "update"]) {
+            let mut nixos = self.nixos.lock().unwrap();
+            let lock = &nixos[annex::flake::LOCK_IN_THE_BOX];
+            let mut lock: serde_json::Value = serde_json::from_slice(lock).unwrap();
+
+            for input in &argv[at + 4..] {
+                let rev = &mut lock["nodes"][*input]["locked"]["rev"];
+                *rev = format!("{}-moved", rev.as_str().unwrap()).into();
+            }
+
+            nixos.insert(
+                annex::flake::LOCK_IN_THE_BOX.to_owned(),
+                serde_json::to_vec_pretty(&lock).unwrap(),
+            );
+
+            return Ok(ran(""));
+        }
 
         Ok(match argv[0] {
             "systemctl" => ran(self.service),
@@ -1842,7 +1900,12 @@ impl annex::Backend for Boxed {
 /// An Annex as the install run leaves one: a `config.yaml` and a
 /// `secrets.yaml` written in, which are what the link rewrites.
 async fn made_annex() -> Verkstead {
-    let annex = Verkstead::annex().await;
+    made_annex_serving(Router::new()).await
+}
+
+/// The same, serving `workbench` to its Keeper over the link.
+async fn made_annex_serving(workbench: Router) -> Verkstead {
+    let annex = Verkstead::annex_serving(workbench).await;
 
     let settings = Settings::in_data_dir(annex.dir.path());
     settings.save_config(&Config::default()).unwrap();
@@ -1975,11 +2038,13 @@ async fn a_keeper_one_release_ahead_repins_its_annex_before_linking_it() {
             .as_deref(),
         Some(system.configuration.as_str())
     );
-    assert_eq!(
-        boxed.nixos(annex::flake::LOCK_IN_THE_BOX).as_deref(),
-        Some(LOCK),
-        "nothing but nix touches the lock"
-    );
+    let lock = boxed.nixos(annex::flake::LOCK_IN_THE_BOX).unwrap();
+    for input in ["verkstead", "verkstead-binary"] {
+        assert_eq!(rev(&lock, input), moved(input), "{input} moved");
+    }
+    for input in ["nixpkgs", "nixpkgs-unstable", "nixos-wsl"] {
+        assert_eq!(rev(&lock, input), rev(LOCK, input), "{input} where it was");
+    }
 
     assert_eq!(
         *boxed.read_while_rebuilt.lock().unwrap(),
@@ -2034,6 +2099,289 @@ async fn a_failed_repin_leaves_its_line_on_the_row_and_the_old_release() {
     let app = router_answering_devices_telling(keeper.pool.clone(), devices, keeper.nudges.clone());
     let kept = listing(&app).await;
     assert_eq!(kept.members.len(), 1, "linked on the release it ran");
+    assert_eq!(kept.members[0].trouble.as_deref(), Some(line));
+}
+
+// Update on the Components row (ADR-0024): every input but `nixos-wsl` moved
+// and the box rebuilt and linked again, refused while a session runs there.
+
+/// Where the Components pane presses Update.
+const UPDATE: &str = "/api/ui/components/update";
+
+/// An Annex's workbench as its Keeper reads it over the link: its sidebar
+/// list, one row per `(branch, branch_named, working)`, and nothing else.
+fn its_conversations(rows: &[(&str, bool, bool)]) -> Router {
+    let rows: Vec<serde_json::Value> = rows
+        .iter()
+        .map(|(branch, branch_named, working)| {
+            serde_json::json!({
+                "branch": branch,
+                "branch_named": branch_named,
+                "working": working,
+            })
+        })
+        .collect();
+
+    Router::new().route(
+        "/api/ui/conversations",
+        axum::routing::get(move || {
+            let rows = rows.clone();
+            async move { axum::Json(rows) }
+        }),
+    )
+}
+
+/// A Keeper whose Annex is over `boxed`, started — booted, pinned and linked
+/// — with the handle its workbench presses Update through.
+async fn kept_and_started(keeper: &Verkstead, boxed: &Arc<Boxed>) -> (Arc<Annexed>, Devices) {
+    let annexed = Arc::new(Annexed::of(boxed.clone()));
+    boxed.under.set(Arc::downgrade(&annexed)).unwrap();
+
+    let devices = keeper.devices().keeping_an_annex(annexed.clone());
+    annexed.started(&devices).await;
+
+    (annexed, devices)
+}
+
+/// Press Update through `devices`' workbench, and hand back what it answered.
+async fn press_update(keeper: &Verkstead, devices: &Devices) -> (StatusCode, String) {
+    let app = router_answering_devices_telling(
+        keeper.pool.clone(),
+        devices.clone(),
+        keeper.nudges.clone(),
+    );
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(UPDATE)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let status = response.status();
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+
+    (status, String::from_utf8_lossy(&bytes).into_owned())
+}
+
+/// Wait out the Update going in the background, which is over once the row
+/// no longer reads *updating*.
+async fn update_over(annexed: &Annexed) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+
+    while annexed.reading(None).state == verkstead_render::AnnexState::Updating {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the Update never ended"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+/// Update with a session running in the Annex is refused with a line naming
+/// its Conversation, and nothing is written, relocked or rebuilt.
+#[tokio::test]
+async fn update_with_a_session_running_in_the_annex_is_refused_naming_it() {
+    let annex = made_annex_serving(its_conversations(&[
+        ("old-work", true, false),
+        ("solid-viewer", true, true),
+    ]))
+    .await;
+    let keeper = Verkstead::asking().await;
+    let boxed = Arc::new(Boxed::of(&annex, KEEPER_AT));
+
+    let (annexed, devices) = kept_and_started(&keeper, &boxed).await;
+    let before = boxed.ran();
+
+    let (status, said) = press_update(&keeper, &devices).await;
+
+    assert_eq!(status, StatusCode::CONFLICT, "{said}");
+    assert!(
+        said.contains(
+            "The annex can't be updated while a session runs on solid-viewer. Stop it first."
+        ),
+        "{said}"
+    );
+    assert_eq!(boxed.ran(), before, "nothing run in the box");
+    assert_eq!(
+        boxed.nixos(annex::flake::LOCK_IN_THE_BOX).as_deref(),
+        Some(LOCK)
+    );
+    assert_ne!(
+        annexed.reading(None).state,
+        verkstead_render::AnnexState::Updating
+    );
+}
+
+/// And with several, the first is named and the rest counted.
+#[tokio::test]
+async fn update_with_sessions_running_names_the_first_and_counts_the_rest() {
+    let annex = made_annex_serving(its_conversations(&[
+        ("solid-viewer", true, true),
+        ("draft", false, true),
+        ("pwa-and-push", true, true),
+    ]))
+    .await;
+    let keeper = Verkstead::asking().await;
+    let boxed = Arc::new(Boxed::of(&annex, KEEPER_AT));
+
+    let (_annexed, devices) = kept_and_started(&keeper, &boxed).await;
+    let (status, said) = press_update(&keeper, &devices).await;
+
+    assert_eq!(status, StatusCode::CONFLICT, "{said}");
+    assert!(
+        said.contains(
+            "The annex can't be updated while sessions run on solid-viewer and 2 more \
+             conversations. Stop them first."
+        ),
+        "{said}"
+    );
+}
+
+/// An Annex that cannot be asked what it is running — never linked here — is
+/// refused rather than guessed about.
+#[tokio::test]
+async fn update_on_an_annex_that_cannot_be_asked_is_refused() {
+    let annex = made_annex().await;
+    let keeper = Verkstead::asking().await;
+    let boxed = Arc::new(Boxed::of(&annex, KEEPER_AT));
+
+    let annexed = Arc::new(Annexed::of(boxed.clone()));
+    let devices = keeper.devices().keeping_an_annex(annexed);
+
+    let (status, said) = press_update(&keeper, &devices).await;
+
+    assert_eq!(status, StatusCode::CONFLICT, "{said}");
+    assert!(
+        said.contains("The annex couldn't be asked what it's running, so it wasn't updated."),
+        "{said}"
+    );
+    assert!(boxed.ran().is_empty(), "nothing run in the box");
+}
+
+/// Update on an idle Annex moves both nixpkgs with the Verkstead inputs and
+/// leaves `nixos-wsl` where it was, rebuilds with the row reading *updating*,
+/// and links the Annex again once it is back — the rebuild having restarted
+/// its server.
+#[tokio::test]
+async fn update_on_an_idle_annex_moves_every_input_but_nixos_wsl_and_links_it_again() {
+    let annex = made_annex_serving(its_conversations(&[("old-work", true, false)])).await;
+    let keeper = Verkstead::asking().await;
+    let boxed = Arc::new(Boxed::of(&annex, KEEPER_AT));
+
+    let (annexed, devices) = kept_and_started(&keeper, &boxed).await;
+    assert_eq!(
+        boxed.ran(),
+        ["addresses"],
+        "pinned already, so linked alone"
+    );
+
+    let (status, said) = press_update(&keeper, &devices).await;
+
+    assert_eq!(status, StatusCode::OK, "{said}");
+    let reading: verkstead_render::ComponentsView = serde_json::from_str(&said).unwrap();
+    assert_eq!(
+        reading.annex.unwrap().state,
+        verkstead_render::AnnexState::Updating,
+        "the press is answered with the row reading updating"
+    );
+
+    update_over(&annexed).await;
+
+    let flakes = "NIX_CONFIG=experimental-features = nix-command flakes";
+    assert_eq!(
+        boxed.ran(),
+        [
+            "addresses".to_owned(),
+            format!(
+                "{flakes} nix flake update --flake /etc/nixos \
+                 nixpkgs nixpkgs-unstable verkstead verkstead-binary"
+            ),
+            format!("{flakes} nixos-rebuild switch --flake /etc/nixos#verkstead"),
+            "addresses".to_owned(),
+        ],
+        "relocked, rebuilt, and linked again"
+    );
+
+    let lock = boxed.nixos(annex::flake::LOCK_IN_THE_BOX).unwrap();
+    for input in [
+        "nixpkgs",
+        "nixpkgs-unstable",
+        "verkstead",
+        "verkstead-binary",
+    ] {
+        assert_eq!(rev(&lock, input), moved(input), "{input} moved");
+    }
+    assert_eq!(
+        rev(&lock, "nixos-wsl"),
+        rev(LOCK, "nixos-wsl"),
+        "nixos-wsl where it was"
+    );
+
+    assert_eq!(
+        *boxed.read_while_rebuilt.lock().unwrap(),
+        [verkstead_render::AnnexState::Updating]
+    );
+
+    let reading = annexed.reading(devices.annex_trouble());
+    assert_eq!(reading.state, verkstead_render::AnnexState::Stopped);
+    assert_eq!(reading.version.as_deref(), Some(annex::flake::VERSION));
+    assert_eq!(reading.trouble, None);
+
+    let kept = listing(&keeper.workbench()).await;
+    assert_eq!(kept.members.len(), 1, "one row, linked again");
+    assert!(kept.members[0].reachable);
+}
+
+/// An Update whose rebuild fails leaves its line on the row and the box on
+/// what it ran before, its files put back — and the Annex linked again on it.
+#[tokio::test]
+async fn a_failed_update_leaves_its_line_on_the_row_and_the_annex_answering() {
+    let annex = made_annex_serving(its_conversations(&[])).await;
+    let keeper = Verkstead::asking().await;
+    let boxed = Arc::new(Boxed {
+        rebuild: (
+            "building the system configuration...\n\
+             error: builder for '/nix/store/abc-verkstead.drv' failed with exit code 1\n",
+            false,
+        ),
+        ..Boxed::of(&annex, KEEPER_AT)
+    });
+    let pinned = boxed.nixos(annex::flake::IN_THE_BOX);
+
+    let (annexed, devices) = kept_and_started(&keeper, &boxed).await;
+
+    let (status, said) = press_update(&keeper, &devices).await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+
+    update_over(&annexed).await;
+
+    assert_eq!(boxed.nixos(annex::flake::IN_THE_BOX), pinned);
+    assert_eq!(
+        boxed.nixos(annex::flake::LOCK_IN_THE_BOX).as_deref(),
+        Some(LOCK),
+        "the lock it had, put back"
+    );
+    assert_eq!(
+        boxed.ran().last().map(String::as_str),
+        Some("addresses"),
+        "linked again after the rebuild that failed"
+    );
+
+    let line = "The annex couldn't be updated: error: builder for \
+                '/nix/store/abc-verkstead.drv' failed with exit code 1.";
+
+    let reading = annexed.reading(devices.annex_trouble());
+    assert_eq!(reading.trouble.as_deref(), Some(line));
+    assert_eq!(reading.version.as_deref(), Some(annex::flake::VERSION));
+
+    let app = router_answering_devices_telling(keeper.pool.clone(), devices, keeper.nudges.clone());
+    let kept = listing(&app).await;
+    assert_eq!(kept.members.len(), 1);
     assert_eq!(kept.members[0].trouble.as_deref(), Some(line));
 }
 

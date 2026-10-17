@@ -343,3 +343,116 @@ describe("Install", () => {
     expect(screen.queryByText("Install")).toBeNull();
   });
 });
+
+describe("Update", () => {
+  /// Long enough for the row's two-second read while *updating* to have come
+  /// round.
+  const AFTER_A_POLL = 4_000;
+
+  function mounted() {
+    const queries = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+
+    return render(() => (
+      <QueryClientProvider client={queries}>
+        <ComponentsPane back={vi.fn()} />
+      </QueryClientProvider>
+    ));
+  }
+
+  const STOPPED = annex({ state: "Stopped", trouble: null });
+
+  /// Offered wherever there is a box, and not where there is none.
+  it("is offered on a box, and not where there is none", async () => {
+    pane(STOPPED);
+
+    const row = await theRow();
+    expect(row.querySelector("button")?.textContent).toBe("Update");
+  });
+
+  it("is held down while the box is being updated", async () => {
+    pane(annex({ state: "Updating", trouble: null }));
+
+    const button = (await theRow()).querySelector("button")!;
+    expect(button.textContent).toBe("Update");
+    expect(button.disabled).toBe(true);
+  });
+
+  /// The press reads *updating* at once, and the row is read again while it
+  /// does, until it reads what the box came back as.
+  it("reads updating until the box is back", async () => {
+    let stage: "idle" | "updating" | "back" = "idle";
+
+    const fetching = serving(
+      whenever("/api/ui/components", () =>
+        json(
+          stage === "back"
+            ? annex({ state: "Stopped", trouble: null, version: "1.0.0" })
+            : stage === "updating"
+              ? annex({ state: "Updating", trouble: null })
+              : STOPPED,
+        )(),
+      ),
+      whenever("/api/ui/onboarding", json(wizard(null, wslRow("Present")))),
+      whenever(
+        "/api/ui/components/update",
+        () => {
+          stage = "updating";
+          return json(annex({ state: "Updating", trouble: null }))();
+        },
+        "POST",
+      ),
+    );
+
+    mounted();
+
+    fireEvent.click(await waitFor(() => screen.getByText("Update")));
+
+    await waitFor(() => expect(screen.getByText("updating")).toBeTruthy());
+    expect(
+      fetching.mock.calls.some(
+        ([path, init]) =>
+          String(path) === "/api/ui/components/update" && init?.method === "POST",
+      ),
+    ).toBe(true);
+
+    stage = "back";
+
+    await waitFor(
+      () => expect(screen.getByText("Verkstead 1.0.0 · 12.9 GB")).toBeTruthy(),
+      { timeout: AFTER_A_POLL },
+    );
+    expect(screen.getByText("stopped")).toBeTruthy();
+  });
+
+  /// A press refused while a session runs in the Annex says so under the
+  /// row, naming the Conversation, and the row stands as it was.
+  it("says the refusal naming the Conversation", async () => {
+    const refusal =
+      "The annex can't be updated while a session runs on solid-viewer. Stop it first.";
+
+    serving(
+      whenever("/api/ui/components", json(STOPPED)),
+      whenever("/api/ui/onboarding", json(wizard(null, wslRow("Present")))),
+      whenever("/api/ui/components/update", json({ error: refusal }, 409), "POST"),
+    );
+
+    mounted();
+
+    fireEvent.click(await waitFor(() => screen.getByText("Update")));
+
+    await waitFor(() => expect(screen.getByText(refusal)).toBeTruthy());
+    expect(screen.getByText("stopped")).toBeTruthy();
+  });
+
+  /// A rebuild that failed is the row's trouble line.
+  it("draws a failed rebuild's line on the row", async () => {
+    const line =
+      "The annex couldn't be updated: error: builder for '/nix/store/abc-verkstead.drv' failed with exit code 1.";
+
+    pane(annex({ state: "Running", trouble: line }));
+
+    expect((await theRow()).textContent).toContain(line);
+  });
+});

@@ -762,6 +762,7 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // because what the pane draws while it goes is the wizard's own install
         // and hint screens — and it is stopped by the wizard's own cancel.
         .route("/api/ui/components/install", post(install_annex))
+        .route("/api/ui/components/update", post(update_annex))
         // And the ports of members' terminals this device is holding on its own
         // `localhost`, which the sidebar's foot counts: this device's own
         // reading, held back from the link — see [`crate::forwarding`].
@@ -7788,6 +7789,35 @@ async fn install_annex(State(state): State<AppState>) -> HttpResponse {
             StatusCode::CONFLICT,
             ApiError::new("An install is already running."),
         ),
+    }
+}
+
+/// `POST /api/ui/components/update` — **Update** on the Components pane's
+/// Annex row: the box's inputs moved, every one but `nixos-wsl`, and the box
+/// rebuilt and linked again in the background (ADR-0024). Answered with the
+/// Components reading, which reads *updating* from here until it is linked.
+///
+/// **Refused while a session runs in the Annex**, naming the Conversation —
+/// see [`crate::annex::booting::Annexed::update`]. A press while an Update or
+/// the start's re-pin is going is taken, and reads the one there is.
+async fn update_annex(State(state): State<AppState>) -> HttpResponse {
+    let Some(devices) = state.devices.clone() else {
+        return refused(
+            StatusCode::NOT_FOUND,
+            ApiError::new("There's no annex on this machine to update."),
+        );
+    };
+
+    let Some(annexed) = devices.annexed().cloned() else {
+        return refused(
+            StatusCode::NOT_FOUND,
+            ApiError::new("There's no annex on this machine to update."),
+        );
+    };
+
+    match annexed.update(devices).await {
+        Ok(()) => components(State(state)).await,
+        Err(why) => refused(StatusCode::CONFLICT, ApiError::new(why)),
     }
 }
 
