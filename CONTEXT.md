@@ -108,7 +108,7 @@ on it, or one holding it as a **Companion Repo**, is neither Done nor Closed —
 the rule unregistering follows — naming each one, a Draft with no Worktree
 aside, having committed nothing as anybody; removing an
 Author is refused while a registered Repo of this device points at it; a Repo
-whose Author is gone from `config.yaml` refuses a start by name and halts with a
+whose Author is gone from the one list refuses a start by name and halts with a
 **Notice** where nobody pressed; and a **Companion Repo** of another Author is
 refused on the composer, read-only or read-write alike, a sandbox having one
 environment.
@@ -119,12 +119,16 @@ whether a token is held, and the home device — read off each member's own list
 over the **Relay** as the Profiles are, and never a mirror of a mirror, and a
 copy of the token in its own `secrets.yaml` under the uuid, written and taken
 away as the mirrors refresh, so a home that is quiet does not stop a Repo here.
+A Repo is pointed at a mirror the way it is at one of this device's own, and
+everything that reads a Repo's Author reads the mirror's name and email and the
+copy; a mirror whose home holds no token is a tokenless Author here too.
 A new Author is at home where it was made; a mirror is edited from wherever it
 is drawn and the press relayed home, token verification included; removal checks
 the home device's Repos alone, a member's Repo left pointing at a mirror that
 has gone refusing its start under the rule above. A mirror whose copy has not
 arrived refuses a **Start** by name, naming the home device, and halts a
-pipeline step with a Notice; a **Transfer** whose far Repo points at another
+pipeline step with a Notice, and nothing Verkstead does on its Repo falls back
+to the host's own login meanwhile; a **Transfer** whose far Repo points at another
 Author is refused by the **Preflight**, naming both; and **Create repo** on a
 member offers the one list.
 **On the settings page it is the Git section as it was**, with a dropdown at

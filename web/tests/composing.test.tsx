@@ -92,6 +92,7 @@ import {
   openAgent,
   theWorkbench,
 } from "./bench";
+import { MIRRORED, oneList } from "./authors";
 import { carrying, drag, dropOn } from "./dragging";
 // The path field's own rows are `browsed`, the listbox's being `rows` below:
 // one page draws both, and a browse's levels are not what a picker offers.
@@ -3788,13 +3789,14 @@ describe("registering a repo from the Repo dropdown", () => {
     const fetching = theWorkbench(
       whenever("/api/ui/repos", json({ Added: OPENED }), "POST"),
       whenever("/api/ui/settings", json(TOKENED)),
+      whenever("/api/ui/authors", json(oneList(TOKENED))),
     );
     const { container } = mount("/compose");
 
     await composing(container);
     const field = await openRepoModal();
     await waitFor(() =>
-      expect(askedFor(fetching, "/api/ui/settings")).toBeGreaterThan(0),
+      expect(askedFor(fetching, "/api/ui/authors")).toBeGreaterThan(0),
     );
 
     expect(authorPick()).toBeNull();
@@ -3810,6 +3812,7 @@ describe("registering a repo from the Repo dropdown", () => {
     const fetching = theWorkbench(
       whenever("/api/ui/repos", json({ Added: OPENED }), "POST"),
       whenever("/api/ui/settings", json(TWO_AUTHORS)),
+      whenever("/api/ui/authors", json(oneList(TWO_AUTHORS))),
     );
     const { container } = mount("/compose");
 
@@ -3841,6 +3844,68 @@ describe("registering a repo from the Repo dropdown", () => {
     );
     await waitFor(() => expect(stored().repo).toBe(OPENED.id));
   });
+
+  /// A member's Author is one the repo can be opened as too, named with the
+  /// machine it is at home on, and the pick of it goes out as its uuid.
+  it("offers a member's author with its machine, and opens a repo under it", async () => {
+    const fetching = theWorkbench(
+      whenever("/api/ui/repos", json({ Added: OPENED }), "POST"),
+      whenever("/api/ui/settings", json(TOKENED)),
+      whenever("/api/ui/authors", json(oneList(TOKENED, MIRRORED))),
+    );
+    const { container } = mount("/compose");
+
+    await composing(container);
+    const field = await openRepoModal();
+    await waitFor(() => expect(authorPick()).not.toBeNull());
+    const pick = authorPick()!;
+
+    expect([...pick.options].map((option) => option.text)).toEqual([
+      "Select",
+      "Ada Lovelace",
+      "Client · the-workstation",
+    ]);
+
+    fireEvent.change(pick, { target: { value: MIRRORED.id } });
+    register(field, OPENED.path);
+
+    await waitFor(() =>
+      expect(sent(fetching, "/api/ui/repos")).toEqual({
+        path: OPENED.path,
+        author: MIRRORED.id,
+      }),
+    );
+  });
+
+  /// And a lone member's Author, with none of this device's own, is named on
+  /// the press without a pick being asked for: the server's silent pick is
+  /// this device's own one, of which there is none.
+  it("opens a repo under a lone member's author without asking", async () => {
+    const fetching = theWorkbench(
+      whenever("/api/ui/repos", json({ Added: OPENED }), "POST"),
+      whenever("/api/ui/settings", json({ ...TOKENED, authors: [] })),
+      whenever("/api/ui/authors", json([MIRRORED])),
+    );
+    const { container } = mount("/compose");
+
+    await composing(container);
+    const field = await openRepoModal();
+    await waitFor(() =>
+      expect(askedFor(fetching, "/api/ui/authors")).toBeGreaterThan(0),
+    );
+    // And answered, which nothing on the card shows.
+    await new Promise((settled) => setTimeout(settled, 50));
+
+    expect(authorPick()).toBeNull();
+    register(field, OPENED.path);
+
+    await waitFor(() =>
+      expect(sent(fetching, "/api/ui/repos")).toEqual({
+        path: OPENED.path,
+        author: MIRRORED.id,
+      }),
+    );
+  });
 });
 
 /// The other row at that foot: **Create repo**, which *makes* a repository
@@ -3871,8 +3936,9 @@ describe("making a repo from the Repo dropdown", () => {
   const LISTING = listing as DirectoryListing;
 
   /// The workbench with the create answered however the test says, that
-  /// directory served both by name and as the server's home, and the settings
-  /// saying whether there is a token.
+  /// directory served both by name and as the server's home, the settings
+  /// saying whether there is a token, and the one list of Authors — the
+  /// settings' own where the test names none.
   ///
   /// The settings as an answer rather than as a view, because one of the states
   /// this card has is the read not having landed — see the test that holds it
@@ -3880,10 +3946,12 @@ describe("making a repo from the Repo dropdown", () => {
   const creating = (
     answer: () => Promise<Response>,
     settings: () => Promise<Response> = json(UNTOKENED),
+    authors: () => Promise<Response> = json(oneList(UNTOKENED)),
   ) =>
     theWorkbench(
       whenever("/api/ui/repos/new", answer, "POST"),
       whenever("/api/ui/settings", settings),
+      whenever("/api/ui/authors", authors),
       // What the repo it made was last grilled with, which the page asks for the
       // moment the draft lands on it — the fixture's repos are served this
       // already, and the one this create makes is not one of them.
@@ -4061,11 +4129,16 @@ describe("making a repo from the Repo dropdown", () => {
   /// With two, Create is held until one is picked, and the pick goes out with
   /// the rest of the create.
   it("makes a repo under the author picked, and not before one is", async () => {
-    const fetching = creating(json({ Made: MADE }), json(TWO_AUTHORS));
+    const fetching = creating(
+      json({ Made: MADE }),
+      json(TWO_AUTHORS),
+      json(oneList(TWO_AUTHORS)),
+    );
     const { container } = mount("/compose");
 
     await composing(container);
     await createRepoModal();
+    await waitFor(() => expect(authorPick()).not.toBeNull());
 
     fireEvent.input(screen.getByLabelText(WHERE), {
       target: { value: "/home/ada/src" },
@@ -4160,12 +4233,14 @@ describe("making a repo from the Repo dropdown", () => {
     const fetching = creating(
       json({ Made: MADE }),
       json({ ...TWO_AUTHORS, github_token: TOKENED.github_token }),
+      json(oneList(TWO_AUTHORS)),
     );
     const { container } = mount("/compose");
     const first = TOKENED.authors[0]!.id;
 
     await composing(container);
     await createRepoModal();
+    await waitFor(() => expect(authorPick()).not.toBeNull());
 
     expect(tick()).toBeNull();
     expect(noRemote()).toBeNull();

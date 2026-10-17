@@ -32,6 +32,7 @@ import { Empty, ErrorLine, Note } from "../notices";
 import { keyOf, useDevice } from "../reaching";
 import {
   authorGone,
+  authorTokenAwaited,
   authorUnpicked,
   otherAuthorHeld,
   companionRefusal,
@@ -109,6 +110,10 @@ export function adoptRefusal(outcome: Adopted): string {
 
     if ("RepoAuthorUnpicked" in outcome) {
       return authorUnpicked(outcome.RepoAuthorUnpicked.repo);
+    }
+
+    if ("RepoAuthorTokenAwaited" in outcome) {
+      return authorTokenAwaited(outcome.RepoAuthorTokenAwaited);
     }
 
     if ("OtherAuthor" in outcome) {

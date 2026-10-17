@@ -1518,6 +1518,43 @@ async fn a_repo_opened_under_the_second_author_runs_its_sessions_as_it() {
     }
 }
 
+/// A Repo pointed at a member's Author whose home holds no token runs its
+/// sessions as that Author's name and email, and with no `GH_TOKEN` at all —
+/// a tokenless Author, as one of this device's own would be — and nothing of
+/// this device's own Author.
+#[tokio::test]
+async fn a_repo_pointed_at_a_tokenless_mirror_runs_its_sessions_as_it() {
+    use verkstead_server::settings::{Author, Mirrored};
+
+    let mut fixture = grilling().await;
+    fixture.configure(THE_AUTHOR);
+    fixture.configure_github_token("author_tokens:\n  work: ghp_theworkone\n");
+
+    fixture.settings.holding_mirrors(vec![Mirrored::of(
+        Author::of(
+            "away".to_owned(),
+            Some("Away".to_owned()),
+            Some("Ada Lovelace".to_owned()),
+            Some("ada@away.example".to_owned()),
+        ),
+        "the-workstation".to_owned(),
+        false,
+    )]);
+
+    fixture.recorded_as("away").await;
+
+    let given = environment(&fixture.sandbox(vec![]));
+
+    assert_eq!(configured_email(&given), Some("ada@away.example"));
+    assert_eq!(given.get("GH_TOKEN"), None, "a tokenless Author's session");
+    for (name, value) in &given {
+        assert!(
+            !value.contains("tobi@tobico.net") && !value.contains("ghp_theworkone"),
+            "this device's own Author's is in {name}={value}"
+        );
+    }
+}
+
 /// A Repo repointed on the Repos pane, once nothing live is in it, runs the
 /// next session on it as the new Author: its `user.email` and its `GH_TOKEN`,
 /// and nothing of the one it was opened as.

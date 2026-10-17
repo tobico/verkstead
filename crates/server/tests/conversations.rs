@@ -31,6 +31,7 @@ use verkstead_render::{
     StageState, Standing, Started, SteerCancelled, SteerCompanionRefusal, SteerOpened,
     SteerPairingView, SteerSaved, TakenUp, TargetRecorded, TimelineEvent, Uncommitted,
 };
+use verkstead_server::settings::{Author, Mirrored, Settings};
 use verkstead_server::{Gh, open_database, router_asking_github, router_keeping, store};
 
 /// A router, plus the directory holding its database and its data directory
@@ -3596,6 +3597,151 @@ async fn starting_on_a_repo_with_no_author_picked_among_two_is_refused_naming_it
     );
 }
 
+/// Hold `away` as this device's mirror of a member's Author — the one list
+/// the refresher hands the settings — at home on `the-workstation`, its home
+/// holding a token for it or not.
+fn mirroring(dir: &tempfile::TempDir, holds_token: bool) {
+    Settings::in_data_dir(dir.path()).holding_mirrors(vec![Mirrored::of(
+        Author::of(
+            "away".to_owned(),
+            Some("Away".to_owned()),
+            Some("Ada Lovelace".to_owned()),
+            Some("ada@away.example".to_owned()),
+        ),
+        "the-workstation".to_owned(),
+        holds_token,
+    )]);
+}
+
+/// Point the Repo `repo_id` at `author` from its row on the Repos pane.
+async fn repoint(app: &Router, repo_id: i64, author: &str) {
+    let repointed: verkstead_render::Repointed = post(
+        app,
+        &format!("/api/ui/repos/{repo_id}/author"),
+        &serde_json::json!({ "author": author }),
+    )
+    .await;
+
+    assert!(
+        matches!(&repointed, verkstead_render::Repointed::Repointed(entry) if entry.author.as_deref() == Some(author)),
+        "the repoint onto {author}: {repointed:?}"
+    );
+}
+
+/// A member's Author is one a Repo can be pointed at like this device's own —
+/// at **Open repo** and on the Repos pane — and a Repo pointed at one whose
+/// home holds no token is committed as its name and email.
+#[tokio::test]
+async fn a_repo_pointed_at_a_tokenless_mirror_records_it_and_commits_as_it() {
+    let (elsewhere, dir, app, repo, repo_id) =
+        under_the_second_author("    name: Tobi at Home\n    email: tobi@example.com\n").await;
+    mirroring(&dir, false);
+
+    let opened_as: Registered = post(
+        &app,
+        "/api/ui/repos",
+        &serde_json::json!({
+            "path": repository(elsewhere.path().join("askance")),
+            "author": "away",
+        }),
+    )
+    .await;
+    assert!(
+        matches!(&opened_as, Registered::Added(entry) if entry.author.as_deref() == Some("away")),
+        "opened as the mirror: {opened_as:?}"
+    );
+
+    repoint(&app, repo_id, "away").await;
+    task_list(&repo, INHERITED);
+
+    let id = ready(&app, elsewhere.path(), repo_id).await;
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    let view = opened(&app, id).await;
+    let worktree = PathBuf::from(view.worktree.clone().expect("a start makes one").path);
+
+    assert_eq!(
+        tip(&worktree),
+        [
+            "chore: clear the task list inherited from main",
+            "Ada Lovelace",
+            "ada@away.example",
+        ],
+    );
+}
+
+/// A Repo pointed at a member's Author whose home holds a token, with no copy
+/// of it here, refuses a Start and an adoption naming the home device — and
+/// starts once the copy is held.
+#[tokio::test]
+async fn a_repo_pointed_at_a_mirror_awaiting_its_token_refuses_naming_its_home() {
+    let (elsewhere, dir, app, repo, repo_id) =
+        under_the_second_author("    name: Tobi at Home\n    email: tobi@example.com\n").await;
+    roadmap(
+        &repo,
+        OPEN_AT_THREE,
+        &["03-implementation.md", "04-wrap-up.md"],
+    );
+    mirroring(&dir, true);
+    repoint(&app, repo_id, "away").await;
+
+    let repo_name = || "verkstead".to_owned();
+    let device = || "the-workstation".to_owned();
+
+    let id = ready(&app, elsewhere.path(), repo_id).await;
+    let branch = opened(&app, id).await.branch;
+
+    assert_eq!(
+        grill(&app, id).await,
+        GrillingStarted::RepoAuthorTokenAwaited {
+            repo: repo_name(),
+            device: device(),
+        }
+    );
+    assert_eq!(opened(&app, id).await.worktree, None);
+    assert!(!has_branch(&repo, &branch));
+
+    let adopting = ready_to_adopt_again(&app, repo_id, "mvp").await;
+    assert_eq!(
+        press_adopt(&app, adopting).await,
+        Adopted::RepoAuthorTokenAwaited {
+            repo: repo_name(),
+            device: device(),
+        }
+    );
+    assert!(!has_branch(&repo, "roadmaps/mvp/03-implementation"));
+
+    std::fs::write(
+        dir.path().join("secrets.yaml"),
+        "author_tokens:\n  away: ghp_thecopy\n",
+    )
+    .unwrap();
+
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+}
+
+/// A Repo pointed at a member's Author that has since gone — removed at home,
+/// or its device unlinked — refuses its next Start as a Repo whose Author is
+/// gone from `config.yaml` does.
+#[tokio::test]
+async fn a_repo_pointed_at_a_mirror_that_has_gone_refuses_as_one_gone() {
+    let (elsewhere, dir, app, _repo, repo_id) =
+        under_the_second_author("    name: Tobi at Home\n    email: tobi@example.com\n").await;
+    mirroring(&dir, false);
+    repoint(&app, repo_id, "away").await;
+
+    Settings::in_data_dir(dir.path()).holding_mirrors(Vec::new());
+
+    let id = ready(&app, elsewhere.path(), repo_id).await;
+
+    assert_eq!(
+        grill(&app, id).await,
+        GrillingStarted::RepoAuthorGone {
+            repo: "verkstead".to_owned(),
+        }
+    );
+}
+
 /// [`under_the_second_author`] with three more Repos beside `verkstead`, which
 /// is `home`'s: `askance`, recorded as `work`, and `notes` and `granit`, as
 /// `home`. Hands back the database too, for a repoint made behind the
@@ -3675,6 +3821,23 @@ async fn a_companion_of_another_author_is_refused_naming_both() {
 
     assert_eq!(add_companion(&app, id, notes).await, CompanionAdded::Added);
     assert_eq!(companions(&app, id).await, ["notes"]);
+}
+
+/// And a member's Author is another Author like any of this device's own: a
+/// companion pointed at a mirror beside a Repo of this device's is refused
+/// naming both.
+#[tokio::test]
+async fn a_companion_pointed_at_a_mirror_is_of_another_author() {
+    let (_elsewhere, dir, app, _repo, pool, [repo_id, _, notes, _]) = beside_another_author().await;
+    mirroring(&dir, false);
+    recorded_as(&pool, notes, "away").await;
+
+    let id = started(&app, repo_id).await;
+
+    assert_eq!(
+        add_companion(&app, id, notes).await,
+        CompanionAdded::OtherAuthor(other_author("notes", "Away", "Tobi at Home")),
+    );
 }
 
 /// And a steer widening a running Conversation is held to the same rule, in
@@ -10893,6 +11056,15 @@ async fn a_take_up_is_refused_over_the_repos_author_as_a_start_is() {
             },
         ),
         ("", TakenUp::NoGitAuthor),
+        // And the one it records being a member's, whose token's copy has not
+        // arrived.
+        (
+            "",
+            TakenUp::RepoAuthorTokenAwaited {
+                repo: "verkstead".to_owned(),
+                device: "the-workstation".to_owned(),
+            },
+        ),
     ] {
         let (elsewhere, dir, app, repo, upstream, repo_id) = workbench_reviewing().await;
         head_on_origin(&upstream, "rate-limiting");
@@ -10900,6 +11072,14 @@ async fn a_take_up_is_refused_over_the_repos_author_as_a_start_is() {
 
         let id = reviewing(&app, elsewhere.path(), repo_id, 41).await;
         std::fs::write(dir.path().join(CONFIG), config).unwrap();
+
+        if let TakenUp::RepoAuthorTokenAwaited { .. } = refusal {
+            Settings::in_data_dir(dir.path()).holding_mirrors(vec![Mirrored::of(
+                Author::of("work".to_owned(), None, Some("Ada".to_owned()), None),
+                "the-workstation".to_owned(),
+                true,
+            )]);
+        }
 
         assert_eq!(press_take_up(&app, id).await, refusal);
         nothing_taken_up(&app, id, &repo).await;

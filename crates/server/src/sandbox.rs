@@ -4049,14 +4049,15 @@ impl Sandbox {
             // Read above rather than here: the volume check a Windows profile
             // needs is made before a session is rendered — see [`across_volumes`].
             home,
-            // The Conversation's Repo's Author's — see [`Config::author_of`] —
-            // and nothing of any other Author's: a companion contributes none
-            // of its own, a sandbox having the one environment. Neither half
-            // where there is none: git's own "tell me who you are" and `gh`'s
-            // own "not logged in" are the failures worth having.
+            // The Conversation's Repo's Author's — see [`Config::author_of`],
+            // and [`Config::token_of`] for a mirror's copy — and nothing of any
+            // other Author's: a companion contributes none of its own, a
+            // sandbox having the one environment. Neither half where there is
+            // none: git's own "tell me who you are" and `gh`'s own "not logged
+            // in" are the failures worth having.
             github_token: config
                 .author_of(conversation.repo.author.as_deref())
-                .and_then(|author| secrets.author_token(author.id()))
+                .and_then(|author| config.token_of(author, secrets))
                 .map(str::to_owned),
             git_author: config
                 .author_of(conversation.repo.author.as_deref())

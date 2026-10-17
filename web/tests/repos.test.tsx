@@ -617,8 +617,9 @@ describe("the author of a repo", () => {
     );
   });
 
-  /// A member's Author counts towards the two, and a repo pointed at one is
-  /// named by it with the machine it is at home on (ADR-0025).
+  /// A member's Author counts towards the two, a repo pointed at one is
+  /// named by it with the machine it is at home on, and every row offers it
+  /// (ADR-0025).
   it("names a mirrored author with its machine", async () => {
     serving(
       whenever("/api/ui/repos", json(recorded(MIRRORED.id))),
@@ -638,6 +639,11 @@ describe("the author of a repo", () => {
     expect(
       screen.queryByText(/isn't configured any more/),
     ).toBeNull();
+
+    // And a repo of this device's own Author can be repointed at it.
+    expect(
+      [...authorOf(FIRST.name)!.options].map((option) => option.text),
+    ).toEqual([WORK.name, "Client · the-workstation"]);
   });
 
   /// A start on a repo whose author was deleted by hand is sent here, so the

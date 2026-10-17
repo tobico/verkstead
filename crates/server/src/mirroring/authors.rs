@@ -28,7 +28,7 @@ use verkstead_render::AuthorEntry;
 use verkstead_schema::Nudge;
 
 use crate::relaying::read_of;
-use crate::settings::Settings;
+use crate::settings::{Author, Mirrored, Settings};
 use crate::{AppState, store};
 
 /// What a member's Authors are read at, which is the path this device serves
@@ -116,6 +116,11 @@ pub(crate) fn refreshing(state: &AppState) {
 async fn held(state: AppState) {
     let mut moved = state.nudges.subscribe();
 
+    // What the last run wrote down first, so that a Repo pointed at a mirror
+    // resolves from the moment the server is up rather than from the moment
+    // every member has answered.
+    hold(&state).await;
+
     read_every_member(&state).await;
 
     loop {
@@ -172,6 +177,7 @@ async fn read_every_member(state: &AppState) {
                 "the Authors of devices this one is no longer linked to are gone",
             );
 
+            hold(state).await;
             state.nudges.announce_here(Nudge::Authors);
         }
 
@@ -184,6 +190,10 @@ async fn read_every_member(state: &AppState) {
     for member in members {
         read_member(state, &member.device).await;
     }
+
+    // And once more whether or not any row moved, for the device names the
+    // mirrors are held under: the membership moving is also a member renamed.
+    hold(state).await;
 }
 
 /// Read one member's Authors and write down what it said, whole.
@@ -239,7 +249,10 @@ async fn read_member(state: &AppState, device: &str) {
         .collect();
 
     match store::record_author_mirrors(&state.pool, device, &at_home).await {
-        Ok(true) => state.nudges.announce_here(Nudge::Authors),
+        Ok(true) => {
+            hold(state).await;
+            state.nudges.announce_here(Nudge::Authors);
+        }
         Ok(false) => {}
         Err(error) => tracing::error!(
             error = ?error,
@@ -247,4 +260,49 @@ async fn read_member(state: &AppState, device: &str) {
             "a member's Authors could not be written down",
         ),
     }
+}
+
+/// Hand every mirror this device has written down to the settings, which is
+/// where a Repo's Author is resolved — see [`Settings::holding_mirrors`] — each
+/// with the name of the device it is at home on, for the refusal that names it.
+///
+/// **A store that cannot be read leaves what is held as it is**, for the reason
+/// a member not answering keeps its rows.
+async fn hold(state: &AppState) {
+    match mirrored(state).await {
+        Ok(mirrors) => state.settings.holding_mirrors(mirrors),
+        Err(error) => tracing::error!(
+            error = ?error,
+            "the Author mirrors could not be read, so the ones held stand",
+        ),
+    }
+}
+
+/// Every mirror row, as the settings hold one.
+async fn mirrored(state: &AppState) -> Result<Vec<Mirrored>> {
+    let mirrors = store::author_mirrors(&state.pool).await?;
+
+    if mirrors.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let homes = crate::profiles::members_by_device(&state.pool).await?;
+
+    Ok(mirrors
+        .into_iter()
+        .map(|mirror| {
+            let device = crate::profiles::whose(&homes, &mirror.device).name;
+
+            Mirrored::of(
+                Author::of(
+                    mirror.id,
+                    Some(mirror.display_name),
+                    Some(mirror.name),
+                    Some(mirror.email),
+                ),
+                device,
+                mirror.holds_token,
+            )
+        })
+        .collect())
 }

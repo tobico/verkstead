@@ -273,6 +273,10 @@ export function grillRefusal(outcome: GrillingStarted): string {
       return authorUnpicked(outcome.RepoAuthorUnpicked.repo);
     }
 
+    if ("RepoAuthorTokenAwaited" in outcome) {
+      return authorTokenAwaited(outcome.RepoAuthorTokenAwaited);
+    }
+
     if ("OtherAuthor" in outcome) {
       return otherAuthorHeld(outcome.OtherAuthor);
     }
@@ -293,6 +297,16 @@ export function authorGone(repo: string): string {
 /// And over one with no author picked among several.
 export function authorUnpicked(repo: string): string {
   return `The ${repo} repo has no author picked, so Verkstead can't commit on the branch. Pick one under Repos in Settings first.`;
+}
+
+/// And over one whose author is at home on another device, whose token has
+/// not reached this one yet: named with that device, which is where it comes
+/// from, the way a profile whose home isn't answering is (ADR-0025).
+export function authorTokenAwaited(awaited: {
+  repo: string;
+  device: string;
+}): string {
+  return `The ${awaited.repo} repo's author is at home on ${awaited.device}, and its token hasn't reached this device yet. Try again once ${awaited.device} is reachable.`;
 }
 
 /// What a press says over a companion under another author than the repo the

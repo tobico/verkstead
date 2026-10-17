@@ -106,7 +106,6 @@ import {
 } from "../api/client";
 import type {
   AuthorEntry,
-  AuthorSaved,
   Created,
   Registered,
   RepoEntry,
@@ -176,18 +175,30 @@ export const CREATE_REFUSAL: Record<CreateRefused, string> = {
 };
 
 /// Which Author a Repo arriving through **Open repo** or **Create repo** is
-/// recorded as (ADR-0025): picked where more than one is configured, and the one
-/// there is, silently, where there is only one.
+/// recorded as (ADR-0025): picked where the one list holds more than one, and
+/// the one there is, silently, where there is only one.
 ///
-/// Read off the settings the way the create's GitHub tick is. A settings read
-/// that has not answered, or failed, offers nothing to pick between, and the
-/// press goes out naming nobody — which the server records as the one Author,
-/// or refuses by name where there are several.
+/// Read off this device's one list — its own Authors and a mirror of every
+/// member's — the way the Repos pane's rows are. A read that has not answered,
+/// or failed, offers nothing to pick between, and the press goes out naming
+/// nobody — which the server records as the one Author, or refuses by name
+/// where there are several.
 function useAuthorPick() {
-  const settings = useSettings();
+  const listed = useAuthors();
 
-  /// Every Author, in the settings' order.
-  const authors = (): AuthorSaved[] => settings.data?.authors ?? [];
+  /// Every Author, this device's own first.
+  const authors = (): AuthorEntry[] => listed.data ?? [];
+
+  /// The only one there is, where it is a member's: the server's silent pick
+  /// is this device's own one, so a lone mirror is named rather than left to
+  /// it.
+  const lone = (): string | undefined => {
+    const [only, ...others] = authors();
+
+    return only !== undefined && others.length === 0 && only.device !== null
+      ? only.id
+      : undefined;
+  };
 
   /// Whether there is a choice to make at all.
   const asked = (): boolean => authors().length > 1;
@@ -201,14 +212,14 @@ function useAuthorPick() {
     chosen,
     setChosen,
     /// The Author picked, where one is.
-    picked: (): AuthorSaved | undefined =>
+    picked: (): AuthorEntry | undefined =>
       authors().find(({ id }) => id === chosen()),
     /// Whether the press is held for want of a pick.
     wanting: (): boolean => asked() && chosen() === "",
     /// What the press sends: the pick where there was one to make, and nothing
     /// where there was not.
     sent: (): string | undefined =>
-      asked() && chosen() !== "" ? chosen() : undefined,
+      asked() ? chosen() || undefined : lone(),
   };
 }
 
@@ -235,7 +246,7 @@ function AuthorPicker(props: {
         id={id}
         options={props.pick.authors()}
         value={(author) => author.id}
-        label={authorLabel}
+        label={authorRow}
         chosen={props.pick.chosen()}
         pick={(author) => {
           props.pick.setChosen(author);
@@ -610,19 +621,12 @@ function RowAuthor(props: {
     props.repo.author !== null &&
     !props.authors.some(({ id }) => id === props.repo.author);
 
-  // What can be picked: this device's own Authors, and the mirror the Repo
-  // already points at where it does, for the row to name it by.
-  const offered = (): AuthorEntry[] =>
-    props.authors.filter(
-      (author) => author.device === null || author.id === props.repo.author,
-    );
-
   return (
     <div class={styles.author}>
       <label for={id}>Author</label>
       <Picker
         id={id}
-        options={offered()}
+        options={props.authors}
         value={(author) => author.id}
         label={authorRow}
         chosen={props.repo.author ?? ""}
@@ -994,7 +998,7 @@ export function CreateRepo(props: {
 
     const picked = author.picked();
 
-    return picked === undefined ? null : picked.github_token != null;
+    return picked === undefined ? null : picked.holds_token;
   };
 
   // And whether it is ticked, which starts on: somebody who has saved a token

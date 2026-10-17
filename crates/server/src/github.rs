@@ -60,20 +60,37 @@ use crate::unseen::Unseen;
 /// Author's account is fetched as that Author, exactly as `gh` already asks
 /// about it. See [`Gh::credential`].
 #[derive(Clone)]
-pub(crate) struct Credential(Option<String>);
+pub(crate) struct Credential(AsWhom);
+
+/// Who a git or a `gh` of Verkstead's own authenticates as.
+#[derive(Clone)]
+enum AsWhom {
+    /// Whatever the host is logged in as: an Author with no token, or no
+    /// Author at all.
+    Host,
+
+    /// This token and no other.
+    Token(String),
+
+    /// Nobody: the Repo's Author is a mirror whose home holds a token and whose
+    /// copy has not arrived, called by the name of that home. The host's login
+    /// in its place is the mistake an Author per Repo exists to stop
+    /// (ADR-0025), so a git asks as nobody and a `gh` is not run.
+    Awaited(String),
+}
 
 impl Credential {
     /// The host's own, which is what an Author with no token leaves git to:
     /// nothing is overridden, exactly as before there were Authors.
     #[cfg(test)]
     pub(crate) fn host() -> Credential {
-        Credential(None)
+        Credential(AsWhom::Host)
     }
 
     /// This token and no other — see [`crate::publishing`], which has read one
     /// itself.
     pub(crate) fn token(token: &str) -> Credential {
-        Credential(Some(token.to_owned()))
+        Credential(AsWhom::Token(token.to_owned()))
     }
 
     /// Have `git` authenticate as it, and never stop to ask.
@@ -95,15 +112,25 @@ impl Credential {
     /// Where there is no token the machine's configuration stands untouched —
     /// and the prompt is turned off all the same: a terminal prompt from a
     /// credential helper that found nothing would be a server thread waiting
-    /// for ever.
+    /// for ever. Where a token is awaited the machine's helpers are cleared
+    /// and none put in their place, so git asks as nobody rather than as the
+    /// host.
     pub(crate) fn on<'c>(&self, command: &'c mut Command) -> &'c mut Command {
         const HELPER: &str = r#"!f() { if test "$1" = get; then printf 'username=x-access-token\npassword=%s\n' "$GH_TOKEN"; fi; }; f"#;
 
-        if let Some(token) = &self.0 {
-            command
-                .args(["-c", "credential.helper=", "-c"])
-                .arg(format!("credential.helper={HELPER}"))
-                .env("GH_TOKEN", token);
+        match &self.0 {
+            AsWhom::Host => {}
+            AsWhom::Token(token) => {
+                command
+                    .args(["-c", "credential.helper=", "-c"])
+                    .arg(format!("credential.helper={HELPER}"))
+                    .env("GH_TOKEN", token);
+            }
+            AsWhom::Awaited(_) => {
+                command
+                    .args(["-c", "credential.helper="])
+                    .env_remove("GH_TOKEN");
+            }
         }
 
         command.env("GIT_TERMINAL_PROMPT", "0")
@@ -115,8 +142,9 @@ impl Credential {
 impl std::fmt::Debug for Credential {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.0 {
-            Some(_) => f.write_str("Credential(an Author's token)"),
-            None => f.write_str("Credential(the host's)"),
+            AsWhom::Token(_) => f.write_str("Credential(an Author's token)"),
+            AsWhom::Host => f.write_str("Credential(the host's)"),
+            AsWhom::Awaited(_) => f.write_str("Credential(nobody's, a token awaited)"),
         }
     }
 }
@@ -183,20 +211,43 @@ impl Gh {
         }
     }
 
-    /// The token to authenticate as, read now — `None` where none is
+    /// Who to authenticate as, read now — the host where no token is
     /// configured, which leaves the call to whatever login the host's `gh` has.
     ///
     /// The Author's this `Gh` asks as — see [`Gh::as_author`] and
-    /// [`crate::settings::Config::author_of`].
-    fn token(&self) -> Option<String> {
-        let settings = self.settings.as_ref()?;
-        let config = settings.config();
-        let author = config.author_of(self.author.as_deref())?;
+    /// [`crate::settings::Config::author_of`], which resolves a member's mirror
+    /// as well as this device's own, and [`crate::settings::Config::token_of`],
+    /// which reads a mirror's token off its copy. A mirror whose copy has not
+    /// arrived is nobody rather than the host.
+    fn whom(&self) -> AsWhom {
+        let Some(settings) = self.settings.as_ref() else {
+            return AsWhom::Host;
+        };
 
-        settings
-            .secrets()
-            .author_token(author.id())
-            .map(str::to_owned)
+        let config = settings.config();
+
+        let Some(author) = config.author_of(self.author.as_deref()) else {
+            return AsWhom::Host;
+        };
+
+        if let Some(mirror) = config.mirror(author.id()).filter(|mirror| mirror.awaited()) {
+            return AsWhom::Awaited(mirror.device().to_owned());
+        }
+
+        match config.token_of(author, &settings.secrets()) {
+            Some(token) => AsWhom::Token(token.to_owned()),
+            None => AsWhom::Host,
+        }
+    }
+
+    /// The token to authenticate as, or `None` for the host's own login — or
+    /// why there is to be neither, where the Author's token is awaited.
+    fn token(&self) -> Result<Option<String>, Trouble> {
+        match self.whom() {
+            AsWhom::Host => Ok(None),
+            AsWhom::Token(token) => Ok(Some(token)),
+            AsWhom::Awaited(device) => Err(Trouble::Ours(awaited(&device))),
+        }
     }
 
     /// Whether there is a token to authenticate as at all — which, where there
@@ -206,13 +257,13 @@ impl Gh {
     /// read, and a repository made under it is one in an account nobody chose.
     /// See [`crate::repos::create`].
     pub(crate) fn tokened(&self) -> bool {
-        self.token().is_some()
+        matches!(self.token(), Ok(Some(_)))
     }
 
     /// What Verkstead's own git on the Repo authenticates as — the same token
     /// this `Gh` would hand `gh`, read now. See [`Credential`].
     pub(crate) fn credential(&self) -> Credential {
-        Credential(self.token())
+        Credential(self.whom())
     }
 
     /// Run it inside `repo` and take its stdout, or say why there is none.
@@ -220,7 +271,7 @@ impl Gh {
     /// Blocking, like everything that shells out. The callers are on
     /// `spawn_blocking` — see [`pull_request`] and [`details`].
     fn ask(&self, repo: &Path, args: &[&str]) -> Result<String, Trouble> {
-        self.run(Some(repo), self.token(), args)
+        self.run(Some(repo), self.token()?, args)
     }
 
     /// And run it about nothing in particular, authenticating as `token`.
@@ -433,7 +484,7 @@ impl Gh {
         // `gh` with nothing configured falls back on is the host's own login,
         // and an extension asked as nobody is one that may refuse for a reason
         // that has nothing to do with being installed.
-        if let Some(token) = self.token() {
+        if let Some(token) = self.token()? {
             command.env("GH_TOKEN", token);
         }
 
@@ -454,6 +505,15 @@ impl Gh {
             false => Err(Trouble::read(&String::from_utf8_lossy(&output.stderr))),
         }
     }
+}
+
+/// What a `gh` or a git about a Repo says in place of running, where the
+/// Repo's Author is at home on `device` and the copy of its token has not
+/// reached this one.
+pub(crate) fn awaited(device: &str) -> String {
+    format!(
+        "This repo's author is at home on {device}, and its token hasn't reached this device yet."
+    )
 }
 
 /// Why `gh` could not answer.
@@ -2546,6 +2606,69 @@ mod tests {
         }
 
         (dir, settings)
+    }
+
+    /// A Repo pointed at a member's Author is asked about as that Author: with
+    /// the copy of its token where its home holds one and the copy is here,
+    /// never as the host while the copy is awaited — the `gh` is not run at
+    /// all, and a git is handed no helper of the host's — and as the host where
+    /// its home holds no token, the way a tokenless Author of this device's own
+    /// is.
+    #[test]
+    fn a_mirrored_authors_repo_is_asked_about_with_its_copy_and_never_the_hosts_login() {
+        use crate::settings::{Author, Mirrored};
+
+        let (repo, gh) = stub_saying_its_token();
+        let (_data_dir, settings) = configured(None);
+        let gh = gh.authenticated_by(settings.clone());
+
+        let mirror = |id: &str, holds_token| {
+            Mirrored::of(
+                Author::of(id.to_owned(), None, Some("Ada".to_owned()), None),
+                "the-workstation".to_owned(),
+                holds_token,
+            )
+        };
+
+        settings.holding_mirrors(vec![mirror("tokened", true), mirror("tokenless", false)]);
+
+        let tokened = gh.as_author(Some("tokened"));
+
+        assert_eq!(
+            pull_request(&tokened, repo.path(), "rate-limiting"),
+            Err(Trouble::Ours(awaited("the-workstation"))),
+            "refused while the copy is awaited, rather than asked as the host",
+        );
+        assert!(!tokened.tokened());
+        assert_eq!(
+            format!("{:?}", tokened.credential()),
+            "Credential(nobody's, a token awaited)",
+        );
+
+        std::fs::write(
+            settings.secrets_path(),
+            "author_tokens:\n  tokened: ghp_thecopy\n  tokenless: ghp_astaleone\n",
+        )
+        .unwrap();
+
+        assert_eq!(
+            pull_request(&tokened, repo.path(), "rate-limiting")
+                .unwrap()
+                .title,
+            "ghp_thecopy",
+        );
+        // The host's own, which is whatever this process was started with.
+        assert_ne!(
+            pull_request(
+                &gh.as_author(Some("tokenless")),
+                repo.path(),
+                "rate-limiting"
+            )
+            .unwrap()
+            .title,
+            "ghp_astaleone",
+            "a home holding no token is a tokenless Author, whatever copy lingers",
+        );
     }
 
     /// One token in `secrets.yaml` is the whole of Verkstead's GitHub auth:

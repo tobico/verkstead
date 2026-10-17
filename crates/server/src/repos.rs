@@ -35,7 +35,7 @@ use verkstead_render::{
 
 use crate::github::Gh;
 use crate::resolved::{Resolved, resolve};
-use crate::settings::{Author, Signature};
+use crate::settings::{Author, Config, Signature};
 use crate::store;
 use crate::unseen::Unseen;
 
@@ -50,34 +50,42 @@ use crate::unseen::Unseen;
 /// the thread it borrows costs nothing.
 pub(crate) async fn register(
     pool: &SqlitePool,
-    authors: &[Author],
+    config: &Config,
     asked: &str,
     author: Option<&str>,
 ) -> Result<Registered> {
-    let author = match picked(authors, author) {
+    let author = match picked(config, author) {
         Ok(author) => author,
         Err(refusal) => return Ok(refusal.into()),
     };
 
-    registering(pool, authors, author.map(Author::id), PathBuf::from(asked)).await
+    registering(
+        pool,
+        config.authors(),
+        author.map(Author::id),
+        PathBuf::from(asked),
+    )
+    .await
 }
 
 /// Which Author a Repo registered now is recorded as, out of the uuid the
 /// registration named.
 ///
 /// **A uuid named is that Author or a refusal**, whatever else is configured:
-/// a form that named one the file no longer holds was drawn over a list that
-/// has since changed. **None named is the one Author** where there is exactly
-/// one — there is nobody else it could be (ADR-0025) — nobody where there is
-/// none, and a refusal where there are several, there being no saying which.
-fn picked<'a>(authors: &'a [Author], asked: Option<&str>) -> Result<Option<&'a Author>, Unpicked> {
-    match (asked, authors) {
-        (Some(id), _) => authors
-            .iter()
+/// a form that named one the one list no longer holds was drawn over a list
+/// that has since changed. A member's mirror is an Author like this device's
+/// own here — see [`Config::one_list`]. **None named is the one Author** where
+/// this device has exactly one — there is nobody else it could be (ADR-0025)
+/// — nobody where there is none, and a refusal where there are several, there
+/// being no saying which.
+fn picked<'a>(config: &'a Config, asked: Option<&str>) -> Result<Option<&'a Author>, Unpicked> {
+    match (asked, config.authors()) {
+        (Some(id), _) => config
+            .one_list()
             .find(|author| author.id() == id)
             .map(Some)
             .ok_or(Unpicked::NoSuchAuthor),
-        (None, [] | [_]) => Ok(authors.first()),
+        (None, authors @ ([] | [_])) => Ok(authors.first()),
         (None, _) => Err(Unpicked::AuthorUnpicked),
     }
 }
@@ -231,11 +239,13 @@ fn unpicked(author: Option<&str>, authors: &[Author]) -> bool {
 /// rare enough that the thread it borrows costs nothing.
 pub(crate) async fn create(
     pool: &SqlitePool,
-    authors: &[Author],
+    config: &Config,
     gh: &Gh,
     creation: &Creation,
     at_once: usize,
 ) -> Result<Created> {
+    let authors = config.authors();
+
     let Creation {
         parent,
         name,
@@ -243,7 +253,7 @@ pub(crate) async fn create(
         author,
     } = creation;
 
-    let picked = match picked(authors, author.as_deref()) {
+    let picked = match picked(config, author.as_deref()) {
         Ok(picked) => picked,
         Err(refusal) => return Ok(refusal.into()),
     };
@@ -288,8 +298,15 @@ pub(crate) async fn create(
             // And not at all where that Author has no token: `gh` would fall
             // back to the host's own login and make the repository in an
             // account nobody picked. Made here only, and said why — the shape a
-            // GitHub that would not finish already has.
-            if gh.tokened() {
+            // GitHub that would not finish already has. A mirror whose token's
+            // copy has not arrived says that instead.
+            let awaited = picked
+                .and_then(|author| config.mirror(author.id()))
+                .filter(|mirror| mirror.awaited());
+
+            if let Some(mirror) = awaited {
+                Some(crate::github::awaited(mirror.device()))
+            } else if gh.tokened() {
                 tokio::task::spawn_blocking(move || {
                     crate::github::create_repository(&gh, &dir, &called)
                 })
@@ -663,23 +680,23 @@ pub(crate) async fn remove(pool: &SqlitePool, id: i64) -> Result<RepoRemoved> {
 /// Point a Repo at the Author with the uuid `author`, from its row on the Repos
 /// pane, if nothing live has it in it.
 ///
-/// **The uuid is one configured or a refusal**, read off `authors` at the
+/// **The uuid is one in the one list or a refusal**, read off `config` at the
 /// moment of the press, for [`picked`]'s reason. The rest is the store's — see
 /// [`store::repoint_repo`], which refuses under live work on the Repo and
 /// beside it. Nothing is handed to a session already running: the sandbox
 /// reads the Author at launch, so the next one is the new Author's.
 pub(crate) async fn repoint(
     pool: &SqlitePool,
-    authors: &[Author],
+    config: &Config,
     id: i64,
     author: &str,
 ) -> Result<Repointed> {
-    if !authors.iter().any(|configured| configured.id() == author) {
+    if !config.one_list().any(|listed| listed.id() == author) {
         return Ok(Repointed::NoSuchAuthor);
     }
 
     Ok(match store::repoint_repo(pool, id, author).await? {
-        store::Repointing::Repointed(repo) => Repointed::Repointed(entry(repo, authors)),
+        store::Repointing::Repointed(repo) => Repointed::Repointed(entry(repo, config.authors())),
         store::Repointing::NoSuchRepo => Repointed::NoSuchRepo,
         store::Repointing::InUse { on, beside } => Repointed::InUse { on, beside },
     })

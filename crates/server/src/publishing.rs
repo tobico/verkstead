@@ -142,7 +142,20 @@ pub(crate) fn publish_as(
     let config = settings.config();
 
     let author = config.author_of(recorded);
-    let token = author.and_then(|author| secrets.author_token(author.id()));
+
+    // A mirror whose token's copy has not arrived is refused by that name
+    // rather than as an Author with no token, which it is not.
+    if let Some(mirror) = author
+        .and_then(|author| config.mirror(author.id()))
+        .filter(|mirror| mirror.awaited())
+    {
+        return (
+            Publishing::Refused(crate::github::awaited(mirror.device())),
+            None,
+        );
+    }
+
+    let token = author.and_then(|author| config.token_of(author, &secrets));
 
     let published = publish(
         gh,

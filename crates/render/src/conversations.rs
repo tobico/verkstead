@@ -4403,6 +4403,16 @@ pub enum GrillingStarted {
         repo: String,
     },
 
+    /// Or it records a member's Author whose home holds a token, and the copy
+    /// of that token has not reached this device yet. Named with the home
+    /// device, the way a Profile whose home is not answering is: working as
+    /// that Author without it, or as the host's own login, was turned down
+    /// (ADR-0025).
+    RepoAuthorTokenAwaited {
+        repo: String,
+        device: String,
+    },
+
     /// A companion is under another Author than the Repo, which it can only
     /// have become since it was added — a hand edit of `config.yaml`, or a
     /// repoint. Asked again at the cut for that reason, before anything is made:
@@ -5264,7 +5274,7 @@ pub enum Adopted {
     /// for the same reason.
     NoGitAuthor,
 
-    /// The Repo's Author is gone or unpicked — see
+    /// The Repo's Author is gone, unpicked or awaiting its token — see
     /// [`GrillingStarted::RepoAuthorGone`], the same refusals at the other
     /// door.
     RepoAuthorGone {
@@ -5272,6 +5282,10 @@ pub enum Adopted {
     },
     RepoAuthorUnpicked {
         repo: String,
+    },
+    RepoAuthorTokenAwaited {
+        repo: String,
+        device: String,
     },
 
     /// A companion is under another Author than the Repo — see
@@ -5497,7 +5511,7 @@ pub enum TakenUp {
     /// [`GrillingStarted::NoGitAuthor`], the same refusal at the other door.
     NoGitAuthor,
 
-    /// The Repo's Author is gone or unpicked — see
+    /// The Repo's Author is gone, unpicked or awaiting its token — see
     /// [`GrillingStarted::RepoAuthorGone`], the same refusals at the other
     /// door.
     RepoAuthorGone {
@@ -5505,6 +5519,10 @@ pub enum TakenUp {
     },
     RepoAuthorUnpicked {
         repo: String,
+    },
+    RepoAuthorTokenAwaited {
+        repo: String,
+        device: String,
     },
 
     /// A companion is under another Author than the Repo — see

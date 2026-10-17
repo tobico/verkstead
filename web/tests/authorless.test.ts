@@ -1,6 +1,6 @@
 //! What a start, an adoption and a take-up say over a repo with no author of its
-//! own: one `config.yaml` no longer holds, or none picked among several
-//! (ADR-0025).
+//! own to work as: one the one list no longer holds, none picked among
+//! several, or a member's whose token hasn't reached this device (ADR-0025).
 //!
 //! The same sentence at every door, naming the repo and sending the human to
 //! where another is picked.
@@ -34,6 +34,17 @@ describe("a repo with no author of its own", () => {
     expect(takeUpRefusal({ RepoAuthorUnpicked: { repo: "verkstead" } })).toBe(
       said,
     );
+  });
+
+  it("names the device a mirrored author's token is still to come from", () => {
+    const awaited = { repo: "verkstead", device: "the-workstation" };
+    const said = grillRefusal({ RepoAuthorTokenAwaited: awaited });
+
+    expect(said).toBe(
+      "The verkstead repo's author is at home on the-workstation, and its token hasn't reached this device yet. Try again once the-workstation is reachable.",
+    );
+    expect(adoptRefusal({ RepoAuthorTokenAwaited: awaited })).toBe(said);
+    expect(takeUpRefusal({ RepoAuthorTokenAwaited: awaited })).toBe(said);
   });
 
   it("is told to set a git author at a take-up, as at a start", () => {

@@ -879,6 +879,11 @@ async fn start(
 
     let Some(author) = config
         .author_of(conversation.repo.author.as_deref())
+        .filter(|_| {
+            config
+                .author_missing(conversation.repo.author.as_deref())
+                .is_none()
+        })
         .and_then(Author::configured)
     else {
         let (missing, fix) = unsigned(
@@ -893,8 +898,7 @@ async fn start(
             settled,
             format!(
                 "Stage {} of the `{}` roadmap was ready to start, but {}, so Verkstead can't \
-                 commit on its branch. Nothing was started. {} in settings, then continue the \
-                 roadmap.",
+                 commit on its branch. Nothing was started. {}, then continue the roadmap.",
                 stage.label, stage.roadmap, missing, fix,
             ),
         )
@@ -2062,22 +2066,32 @@ async fn load(state: &AppState, conversation_id: i64) -> Option<store::Conversat
 
 /// What is missing that a stage cannot commit as, in the halt's words, and
 /// what to do about it: the Repo called `repo` named, and sent to the Repos
-/// pane, where its own record is why — an Author `config.yaml` no longer holds,
-/// or none picked among several — then the Repo's Author named where there is
-/// more than one it could have been, and the sentence a missing git author
-/// always had where there is not.
-fn unsigned(config: &Config, recorded: Option<&str>, repo: &str) -> (String, &'static str) {
+/// pane, where its own record is why — an Author no longer in the one list, or
+/// none picked among several — or sent to the device a mirrored Author is at
+/// home on, where its token is still to arrive from; then the Repo's Author
+/// named where there is more than one it could have been, and the sentence a
+/// missing git author always had where there is not.
+fn unsigned(config: &Config, recorded: Option<&str>, repo: &str) -> (String, String) {
     match config.author_missing(recorded) {
         Some(Unauthored::Gone) => {
             return (
                 format!("the `{repo}` repo's author isn't configured any more"),
-                "Pick another under Repos",
+                "Pick another under Repos in settings".to_owned(),
             );
         }
         Some(Unauthored::Unpicked) => {
             return (
                 format!("the `{repo}` repo has no author picked"),
-                "Pick one under Repos",
+                "Pick one under Repos in settings".to_owned(),
+            );
+        }
+        Some(Unauthored::TokenAwaited { device }) => {
+            return (
+                format!(
+                    "the `{repo}` repo's author is at home on {device} and its token hasn't \
+                     reached this device yet"
+                ),
+                format!("Once {device} is reachable again"),
             );
         }
         None => {}
@@ -2097,9 +2111,12 @@ fn unsigned(config: &Config, recorded: Option<&str>, repo: &str) -> (String, &'s
                     Some(_) => "email",
                 },
             ),
-            "Set it",
+            "Set it in settings".to_owned(),
         ),
-        None => ("no git author is set".to_owned(), "Set one"),
+        None => (
+            "no git author is set".to_owned(),
+            "Set one in settings".to_owned(),
+        ),
     }
 }
 
@@ -2137,7 +2154,7 @@ mod tests {
             unsigned(&two, Some("work"), "verkstead"),
             (
                 "its repo's author, Tobias Cohen, has no email set".to_owned(),
-                "Set it"
+                "Set it in settings".to_owned()
             )
         );
         assert_eq!(
@@ -2148,14 +2165,46 @@ mod tests {
             unsigned(&two, None, "verkstead"),
             (
                 "the `verkstead` repo has no author picked".to_owned(),
-                "Pick one under Repos"
+                "Pick one under Repos in settings".to_owned()
             )
         );
         assert_eq!(
             unsigned(&two, Some("gone"), "verkstead"),
             (
                 "the `verkstead` repo's author isn't configured any more".to_owned(),
-                "Pick another under Repos"
+                "Pick another under Repos in settings".to_owned()
+            )
+        );
+    }
+
+    /// A halt over a Repo pointed at a member's Author whose token's copy has
+    /// not arrived names the device it is at home on, and sends the human
+    /// there rather than to settings.
+    #[test]
+    fn a_halt_over_a_mirror_awaiting_its_token_names_its_home() {
+        use crate::settings::{Mirrored, Settings};
+
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+
+        settings.holding_mirrors(vec![Mirrored::of(
+            Author::of(
+                "away".to_owned(),
+                None,
+                Some("Ada Lovelace".to_owned()),
+                Some("ada@away.example".to_owned()),
+            ),
+            "the-workstation".to_owned(),
+            true,
+        )]);
+
+        assert_eq!(
+            unsigned(&settings.config(), Some("away"), "verkstead"),
+            (
+                "the `verkstead` repo's author is at home on the-workstation and its token \
+                 hasn't reached this device yet"
+                    .to_owned(),
+                "Once the-workstation is reachable again".to_owned(),
             )
         );
     }

@@ -501,3 +501,121 @@ async fn a_member_that_stops_answering_keeps_its_rows() {
         "drawn as the machine that did not answer",
     );
 }
+
+/// A git repository with one commit on `main`, which is all a registration
+/// asks of one.
+fn repository(path: &Path) {
+    std::fs::create_dir_all(path).unwrap();
+
+    for args in [
+        &["init", "--quiet", "--initial-branch", "main"][..],
+        &[
+            "-c",
+            "user.name=Verkstead Test",
+            "-c",
+            "user.email=test@verkstead.invalid",
+            "commit",
+            "--quiet",
+            "--allow-empty",
+            "-m",
+            "first",
+        ],
+    ] {
+        let status = std::process::Command::new("git")
+            .args(args)
+            .current_dir(path)
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?}");
+    }
+}
+
+/// A member's Author, once the refresher has written its mirror down, is one
+/// a Repo here can be opened as and repointed at — and once it has gone from
+/// home, one it can be repointed at no longer.
+#[tokio::test]
+async fn a_repo_here_can_be_pointed_at_a_members_author() {
+    let (a, b, _holding) = linked_up().await;
+
+    b.saves_author(HOME, "", "Ada Lovelace", "ada@home.example")
+        .await;
+    a.saves_author(WORK, "Work", "Ada Lovelace", "ada@work.example")
+        .await;
+    b.authors_saying(|rows| with(rows, WORK).is_some()).await;
+
+    let elsewhere = tempfile::tempdir().unwrap();
+    let path = elsewhere.path().join("verkstead");
+    repository(&path);
+
+    let (status, said) = pressing(
+        &b.workbench,
+        "/api/ui/repos",
+        Some(&serde_json::json!({ "path": path, "author": WORK }).to_string()),
+    )
+    .await;
+    assert!(status.is_success(), "{status} {said}");
+
+    let registered: verkstead_render::Registered = serde_json::from_str(&said).unwrap();
+    let verkstead_render::Registered::Added(repo) = registered else {
+        panic!("opened as the mirror: {said}");
+    };
+    assert_eq!(repo.author.as_deref(), Some(WORK));
+
+    let repoint = |author: &'static str| {
+        let workbench = b.workbench.clone();
+        let id = repo.id;
+
+        async move {
+            let (_, said) = pressing(
+                &workbench,
+                &format!("/api/ui/repos/{id}/author"),
+                Some(&serde_json::json!({ "author": author }).to_string()),
+            )
+            .await;
+
+            serde_json::from_str::<verkstead_render::Repointed>(&said).unwrap()
+        }
+    };
+
+    // Asked until it says so, the list read above and the Authors a press
+    // resolves out of being written one after the other.
+    let repointed_until = |author: &'static str, what: fn(&verkstead_render::Repointed) -> bool| {
+        let repoint = &repoint;
+
+        async move {
+            let mut last = None;
+
+            let waited = tokio::time::timeout(WAITING, async {
+                loop {
+                    let said = repoint(author).await;
+
+                    if what(&said) {
+                        return;
+                    }
+
+                    last = Some(said);
+                    tokio::time::sleep(LOOKING).await;
+                }
+            })
+            .await;
+
+            waited.unwrap_or_else(|_| panic!("the repoint onto {author} said {last:?}"));
+        }
+    };
+
+    assert!(matches!(
+        repoint(HOME).await,
+        verkstead_render::Repointed::Repointed(_)
+    ));
+    repointed_until(WORK, |said| {
+        matches!(said, verkstead_render::Repointed::Repointed(_))
+    })
+    .await;
+
+    a.removes_author(WORK).await;
+
+    repointed_until(WORK, |said| {
+        *said == verkstead_render::Repointed::NoSuchAuthor
+    })
+    .await;
+}

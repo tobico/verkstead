@@ -1130,7 +1130,7 @@ async fn register_repo(
 ) -> HttpResponse {
     match crate::repos::register(
         &state.pool,
-        state.settings.config().authors(),
+        &state.settings.config(),
         &registration.path,
         registration.author.as_deref(),
     )
@@ -1167,7 +1167,7 @@ async fn create_repo(
 
     match crate::repos::create(
         &state.pool,
-        config.authors(),
+        &config,
         &state.github,
         &creation,
         // What the Repo pane this comes back with says is waiting in it, which is
@@ -1255,7 +1255,7 @@ async fn repoint_repo(
 
     match crate::repos::repoint(
         &state.pool,
-        state.settings.config().authors(),
+        &state.settings.config(),
         id,
         &repointing.author,
     )
