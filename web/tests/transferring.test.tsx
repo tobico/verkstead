@@ -733,6 +733,7 @@ describe("cloning what the far end lacks", () => {
     expect(sent(fetching, CLONE)).toEqual({
       origin: VERKSTEAD.origin,
       parent: "/mnt/code",
+      author: VERKSTEAD.author,
     });
     expect(askedFor(fetching, "/api/ui/repos/clone")).toBe(0);
     expect(card.textContent).toContain("laptop has everything");
@@ -768,6 +769,7 @@ describe("cloning what the far end lacks", () => {
     expect(sent(fetching, CLONE)).toEqual({
       origin: VERKSTEAD.origin,
       parent: "/mnt/code",
+      author: VERKSTEAD.author,
     });
     expect(screen.queryByLabelText("Parent directory")).toBeNull();
     expect(repoParent(LAPTOP)).toBe("/mnt/code");
