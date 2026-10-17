@@ -804,6 +804,12 @@ pub struct Devices {
     /// handle (see [`crate::annex::booting::Annexed::up`]). `None` everywhere
     /// else.
     annexed: Option<std::sync::Arc<crate::annex::booting::Annexed>>,
+
+    /// And who to tell when its Devices list moves with nobody pressing
+    /// anything over here, which is a Keeper forgetting its Annex — see
+    /// [`Devices::forget_annex`]. Nobody listening unless a start said
+    /// otherwise, see [`Devices::nudging`].
+    nudges: crate::nudge::Nudges,
 }
 
 impl Devices {
@@ -833,6 +839,7 @@ impl Devices {
             peer_port: crate::peer::PEER_PORT,
             annex_trouble: std::sync::Arc::default(),
             annexed: None,
+            nudges: crate::nudge::Nudges::new(),
         }
     }
 
@@ -947,6 +954,12 @@ impl Devices {
             annexed: Some(annexed),
             ..self
         }
+    }
+
+    /// The same, telling `nudges` when its Devices list moves of itself — the
+    /// stream a start's workbench pages listen on.
+    pub fn nudging(self, nudges: crate::nudge::Nudges) -> Devices {
+        Devices { nudges, ..self }
     }
 
     /// The Annex this device keeps, where it keeps one.
@@ -2072,7 +2085,7 @@ impl Devices {
     /// (ADR-0024): the membership is the Keeper's, so the press is refused
     /// naming the device, before anybody is told anything — see
     /// [`Unlinkable`]. A Keeper forgetting its own Annex is a path that is not
-    /// this one. **A Keeper unlinked takes its Annexes with it**: each is told
+    /// this one — see [`Devices::forget_annex`]. **A Keeper unlinked takes its Annexes with it**: each is told
     /// it has left and forgotten here, and every member is told to drop all of
     /// them, while the pair keep each other.
     pub(crate) async fn unlink(&self, device: &str) -> std::result::Result<(), Unlinkable> {
@@ -2188,6 +2201,55 @@ impl Devices {
                 }
             }
         }
+    }
+
+    /// **Forget the Annex this device keeps**, whose box has gone from under
+    /// it — unregistered by hand, or WSL taken off the machine (ADR-0024, *The
+    /// box on Windows*). `Ok(true)` where there was one to forget.
+    ///
+    /// **Not Unlink**, which an Annex refuses everywhere and goes on refusing:
+    /// this is the one path that drops an Annex's row, and only its Keeper
+    /// takes it, at its start, on what its own machine says — see
+    /// [`crate::annex::booting::Annexed::up`]. It tells the cluster the way an
+    /// unlink does, every member asked to drop the row and the ones that do
+    /// not answer owed it, but the Annex itself is not dialled first: it is
+    /// gone, which is the whole of why it is being forgotten.
+    ///
+    /// **And what this device held for it goes with it**: the Annex Forward
+    /// points at nothing and its row's line is taken away. A box made again
+    /// later is linked as a new Annex by the Keeper's Join.
+    pub(crate) async fn forget_annex(&self) -> Result<bool> {
+        let held = self.members.rows().await?;
+
+        let (annexes, staying): (Vec<_>, Vec<_>) = held
+            .into_iter()
+            .partition(|member| member.kept_by.as_deref() == Some(self.device.id()));
+
+        if annexes.is_empty() {
+            return Ok(false);
+        }
+
+        for annex in &annexes {
+            self.members.forget(&annex.device).await?;
+
+            tracing::info!(
+                device = %annex.device,
+                name = %annex.name,
+                "this device's Annex has no box any more, so it has been forgotten",
+            );
+        }
+
+        for member in &staying {
+            for annex in &annexes {
+                self.dropping(member, &annex.device).await;
+            }
+        }
+
+        self.annex_forward.point_at_nothing();
+        self.annex_troubled(None);
+        self.nudges.announce(verkstead_schema::Nudge::Devices);
+
+        Ok(true)
     }
 
     /// What `device` is called here: *this device* where it is this one, the

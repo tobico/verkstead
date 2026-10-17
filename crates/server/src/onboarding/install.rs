@@ -1438,7 +1438,7 @@ fn annexing(machine: &Machine, plan: &mut Plan) {
                 }));
         }
 
-        Probed::NoDistro => {
+        Probed::NoDistro | Probed::Unread => {
             const STEPS: &[(Making, How, &str)] = &[
                 (Making::Download, How::AsTheUser, "Downloading NixOS-WSL…"),
                 (

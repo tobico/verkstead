@@ -261,15 +261,19 @@ impl Backend for Wsl {
                 Ok(said) => {
                     said.code != Some(NOT_INSTALLED) && !said.text.contains("is not installed")
                 }
-                Err(_) => false,
+                Err(missing) if missing.kind() == std::io::ErrorKind::NotFound => false,
+                Err(_) => return Probed::Unread,
             };
 
             return unanswered(installed, self.facts());
         }
 
+        // A list that fails is one with no distro in it — it ends with -1 then
+        // — and one that would not run says nothing about the distro at all.
         let listed = match self.wsl(&["--list", "--verbose"]) {
             Ok(said) if said.success => said.text,
-            _ => return Probed::NoDistro,
+            Ok(_) => return Probed::NoDistro,
+            Err(_) => return Probed::Unread,
         };
 
         match listed_state(&listed) {
@@ -959,6 +963,24 @@ pub(crate) mod tests {
         let backend = Wsl::at(missing, &powershell.program);
 
         assert_eq!(backend.probe(), Probed::NoWsl);
+    }
+
+    /// A `wsl.exe` that is there and will not run is not one that is missing:
+    /// nothing is known about the box, so the probe says it could not read it.
+    #[test]
+    fn a_wsl_exe_that_will_not_run_is_unread() {
+        let powershell = Stub::new();
+        powershell.answers(1, FACTS_NO_WSL, 0);
+
+        let unrunnable = powershell.dir.path().join("wsl.exe");
+        std::fs::write(&unrunnable, "not a program").unwrap();
+        let backend = Wsl::at(unrunnable, &powershell.program);
+
+        assert_eq!(backend.probe(), Probed::Unread);
+        assert!(
+            powershell.calls().is_empty(),
+            "nothing about WSL being off is read off a wsl.exe that would not run"
+        );
     }
 
     #[test]

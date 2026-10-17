@@ -83,6 +83,15 @@ impl Pointing {
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(address);
     }
 
+    /// Point it nowhere again, which is what a Keeper that forgot its Annex
+    /// does — see [`crate::device::Devices::forget_annex`].
+    pub fn point_at_nothing(&self) {
+        *self
+            .at
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+    }
+
     /// Where it forwards to now, if anywhere.
     pub fn pointed_at(&self) -> Option<String> {
         self.at

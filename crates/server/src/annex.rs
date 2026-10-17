@@ -66,6 +66,16 @@ pub enum Probed {
     /// rather than one to boot. See [`Backend::made`].
     NoDistro,
 
+    /// What runs boxes is there and could not be asked: `wsl.exe` is on the
+    /// machine and would not run. Nothing is known about the box, which is
+    /// what keeps it apart from [`Probed::NoWsl`] and [`Probed::NoDistro`]: a
+    /// Keeper's start that finds either of those forgets its Annex, and one
+    /// that finds this forgets nothing — see [`booting::Annexed::up`].
+    ///
+    /// Drawn as [`Probed::NoDistro`] is everywhere else, which is what it read
+    /// as before it was told apart.
+    Unread,
+
     /// The box is there, and was made to the end.
     ///
     /// **Read without starting it**, which is why where its network is is not

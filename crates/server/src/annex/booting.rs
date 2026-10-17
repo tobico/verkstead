@@ -5,7 +5,13 @@
 //! [`Annexed::started`] once its listeners are bound and goes on serving: a box
 //! is seconds to minutes from up, and a workbench that would not answer until
 //! it was would be the Annex costing the Keeper the thing it is for. Where the
-//! probe finds no box made to the end, there is nothing to do.
+//! probe finds no box made to the end, there is nothing to boot.
+//!
+//! **And an Annex whose box has gone is forgotten**, where the probe finds no
+//! WSL or no distro made to the end and this Keeper holds an Annex: one
+//! unregistered by hand is noticed rather than offered, its row dropped here
+//! and on every member — see [`Devices::forget_annex`]. A probe that could not
+//! be read is not "no box", and forgets nothing.
 //!
 //! **And once more where the box is made**: the wizard's install run ends by
 //! booting and linking the box it has just rebuilt through [`Annexed::up`] —
@@ -153,8 +159,9 @@ impl Annexed {
     }
 
     /// The same, saying how it went: `Ok(true)` for an Annex up and linked,
-    /// `Ok(false)` where there is no box made to the end, and the line put on
-    /// `devices` where it would not come up.
+    /// `Ok(false)` where there is no box made to the end — the Annex forgotten,
+    /// where there was one and the box is gone — and the line put on `devices`
+    /// where it would not come up.
     ///
     /// **And the install run's last step**, the box it has just made booted and
     /// linked by the same Keeper that terminates it at its stop — see
@@ -164,9 +171,20 @@ impl Annexed {
         let annex = self.annex.clone();
         let probed = tokio::task::spawn_blocking(move || annex.probe()).await;
 
-        let Ok(Probed::Present { .. }) = probed else {
-            return Ok(false);
-        };
+        match probed {
+            Ok(Probed::Present { .. }) => {}
+
+            // No box, where this Keeper held an Annex: it was taken away by
+            // hand, so it is forgotten rather than offered — see
+            // [`Annexed::forgotten`]. A probe that could not be read, or a box
+            // that cannot run until a restart or the firmware, forgets nothing.
+            Ok(Probed::NoWsl | Probed::NoDistro) => {
+                self.forgotten(devices).await;
+                return Ok(false);
+            }
+
+            _ => return Ok(false),
+        }
 
         let annex = self.annex.clone();
         let booted = tokio::task::spawn_blocking(move || annex.boot()).await;
@@ -197,6 +215,25 @@ impl Annexed {
         self.read_pinned().await;
 
         self.linked(devices, networking, repinning).await
+    }
+
+    /// The Annex forgotten, its box having gone from under it (ADR-0024):
+    /// its row dropped here and on every member, and the release held for
+    /// the Components row dropped with it — see [`Devices::forget_annex`]. A
+    /// Keeper that held no Annex has nothing to forget.
+    async fn forgotten(&self, devices: &Devices) {
+        *self.pinned.lock().expect("never poisoned") = None;
+
+        match devices.forget_annex().await {
+            Ok(true) => tracing::info!(
+                "this device's Annex's box is gone, so the Annex has been forgotten on every member",
+            ),
+            Ok(false) => {}
+            Err(why) => tracing::error!(
+                why = %format!("{why:#}"),
+                "this device's Annex's box is gone, and the Annex could not be forgotten",
+            ),
+        }
     }
 
     /// The box, up, linked over and over until it answers or the boot's time
@@ -438,7 +475,7 @@ impl Annexed {
     /// The row's state, as the backend's probe says it.
     fn probed(&self) -> AnnexState {
         match self.annex.probe() {
-            Probed::NoWsl | Probed::NoDistro => AnnexState::NotInstalled,
+            Probed::NoWsl | Probed::NoDistro | Probed::Unread => AnnexState::NotInstalled,
             Probed::NeedsRestart => AnnexState::NeedsRestart,
             Probed::VirtualizationOff => AnnexState::VirtualizationOff,
             Probed::Present { running: true } => AnnexState::Running,
@@ -749,7 +786,7 @@ mod tests {
     use super::*;
     use crate::annex::wsl::Wsl;
     use crate::annex::wsl::tests::{
-        ANSWERING_STATUS, FACTS_NO_WSL, Stub, inside, listed, made, strings, utf16,
+        ANSWERING_STATUS, FACTS_NO_WSL, NO_DISTROS, Stub, inside, listed, made, strings, utf16,
     };
 
     /// An Annex over `backend`, kept by a Keeper with no settings of note.
@@ -996,6 +1033,211 @@ mod tests {
                 handed("/var/lib/verkstead/secrets.yaml"),
             ]
         );
+    }
+
+    const KEEPER: &str = "keeper";
+    const ANNEX: &str = "annex";
+    const MEMBER: &str = "laptop";
+
+    /// A Keeper's devices, with its Annex's row and one other member's
+    /// seeded — the member at an address nobody answers at — its Annex
+    /// Forward pointed at the Annex, the Annex's row carrying a line, and the
+    /// pages it tells listened to.
+    struct Keeping {
+        devices: Devices,
+        pool: sqlx::SqlitePool,
+        pointing: crate::peer::annex_forward::Pointing,
+        told: tokio::sync::broadcast::Receiver<verkstead_schema::Nudged>,
+        _dir: tempfile::TempDir,
+    }
+
+    async fn keeping() -> Keeping {
+        let dir = tempfile::tempdir().unwrap();
+        let pool = crate::open_database(&dir.path().join("verkstead.db"))
+            .await
+            .unwrap();
+
+        for (device, kept_by) in [(ANNEX, Some(KEEPER)), (MEMBER, None)] {
+            verkstead_store::record_member(
+                &pool,
+                &verkstead_store::Linking {
+                    device: device.to_owned(),
+                    name: device.to_owned(),
+                    os: "Linux".to_owned(),
+                    addresses: vec!["127.0.0.1:1".to_owned()],
+                    fingerprint: format!("{device}-fingerprint"),
+                    kept_by: kept_by.map(str::to_owned),
+                },
+            )
+            .await
+            .unwrap();
+        }
+
+        let reading = crate::device::reading::Reading::stated(
+            crate::remote::Tailscale::running(vec!["verkstead-no-such-tailscale".to_owned()], 8422),
+            crate::platform::Platform::Windows,
+            None,
+            Vec::new(),
+        );
+
+        let pointing = crate::peer::annex_forward::Pointing::at_nothing();
+        pointing.point_at("127.0.0.1:8425");
+
+        let nudges = crate::nudge::Nudges::new();
+        let told = nudges.subscribe();
+
+        let devices = Devices::of(
+            crate::device::Device::stated(dir.path(), KEEPER).unwrap(),
+            reading,
+            crate::peer::Members::recorded(pool.clone()),
+            crate::peer::joining::Joins::recorded(pool.clone()),
+        )
+        .waiting(Duration::from_millis(500))
+        .forwarding_for_the_annex(pointing.clone())
+        .nudging(nudges);
+
+        devices.annex_troubled(Some("The annex didn't answer.".to_owned()));
+
+        Keeping {
+            devices,
+            pool,
+            pointing,
+            told,
+            _dir: dir,
+        }
+    }
+
+    /// Whose rows `keeping` holds now.
+    async fn held(keeping: &Keeping) -> Vec<String> {
+        verkstead_store::members(&keeping.pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|member| member.device)
+            .collect()
+    }
+
+    /// The Keeper's start over `backend`, the release its Annex was pinned to
+    /// held from an earlier boot.
+    async fn started_over(backend: Wsl, keeping: &Keeping) -> Annexed {
+        let (annexed, _dir) = annexed(backend);
+        *annexed.pinned.lock().unwrap() = Some("0.1.0".to_owned());
+
+        assert_eq!(annexed.up(&keeping.devices).await, Ok(false));
+        annexed
+    }
+
+    /// A distro unregistered by hand is forgotten at the Keeper's next start:
+    /// its row dropped here, the other member told to drop it — and owed the
+    /// telling, being away — and everything held for it let go of.
+    #[tokio::test]
+    async fn a_keepers_start_with_its_distro_gone_forgets_its_annex() {
+        let only_the_humans =
+            utf16("  NAME      STATE           VERSION\r\n* Ubuntu    Stopped         2\r\n");
+
+        for (listed, code) in [(only_the_humans, 0), (utf16(NO_DISTROS), -1)] {
+            let mut keeping = keeping().await;
+
+            // The marker outlives an unregister: it is the Keeper's own file,
+            // beside the disk image `wsl --unregister` deletes.
+            let (backend, wsl, _powershell) = made();
+            wsl.answers(1, utf16(ANSWERING_STATUS), 0)
+                .answers(2, listed, code);
+
+            let annexed = started_over(backend, &keeping).await;
+
+            assert_eq!(held(&keeping).await, [MEMBER], "the Annex's row is gone");
+            assert_eq!(
+                verkstead_store::announcements_owed(&keeping.pool, ANNEX)
+                    .await
+                    .unwrap(),
+                [MEMBER],
+                "and the member that did not answer is owed the telling",
+            );
+
+            assert_eq!(keeping.pointing.pointed_at(), None);
+            assert_eq!(keeping.devices.annex_trouble(), None);
+            assert_eq!(*annexed.pinned.lock().unwrap(), None);
+            assert!(
+                matches!(
+                    keeping.told.try_recv(),
+                    Ok(verkstead_schema::Nudged {
+                        device: None,
+                        moved: verkstead_schema::Nudge::Devices,
+                        ..
+                    })
+                ),
+                "and the pages were told the list moved",
+            );
+
+            assert_eq!(
+                wsl.calls(),
+                [strings(&["--status"]), strings(&["--list", "--verbose"])],
+                "nothing is booted or run inside",
+            );
+        }
+    }
+
+    /// With WSL itself gone, the same.
+    #[tokio::test]
+    async fn a_keepers_start_with_wsl_gone_forgets_its_annex() {
+        let keeping = keeping().await;
+
+        let powershell = Stub::new();
+        powershell.answers(1, FACTS_NO_WSL, 0);
+        let missing = powershell.dir.path().join("no-such-wsl.exe");
+
+        started_over(Wsl::at(missing, &powershell.program), &keeping).await;
+
+        assert_eq!(held(&keeping).await, [MEMBER]);
+        assert_eq!(keeping.pointing.pointed_at(), None);
+    }
+
+    /// A probe that could not be read is not "no box": nothing is forgotten,
+    /// and nobody is told anything.
+    #[tokio::test]
+    async fn a_probe_that_could_not_be_read_forgets_nothing() {
+        let mut keeping = keeping().await;
+
+        let powershell = Stub::new();
+        let unrunnable = powershell.dir.path().join("wsl.exe");
+        std::fs::write(&unrunnable, "not a program").unwrap();
+
+        let annexed = started_over(Wsl::at(unrunnable, &powershell.program), &keeping).await;
+
+        assert_eq!(held(&keeping).await, [ANNEX, MEMBER]);
+        assert!(
+            verkstead_store::announcements_owed(&keeping.pool, ANNEX)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            keeping.pointing.pointed_at().as_deref(),
+            Some("127.0.0.1:8425")
+        );
+        assert!(keeping.devices.annex_trouble().is_some());
+        assert!(annexed.pinned.lock().unwrap().is_some());
+        assert!(keeping.told.try_recv().is_err());
+    }
+
+    /// A Keeper that never had an Annex has nothing to forget, and tells
+    /// nobody so.
+    #[tokio::test]
+    async fn a_keeper_with_no_annex_and_no_box_forgets_nothing() {
+        let mut keeping = keeping().await;
+        verkstead_store::forget_member(&keeping.pool, ANNEX)
+            .await
+            .unwrap();
+
+        let (backend, wsl, _powershell) = made();
+        wsl.answers(1, utf16(ANSWERING_STATUS), 0)
+            .answers(2, utf16(NO_DISTROS), -1);
+
+        started_over(backend, &keeping).await;
+
+        assert_eq!(held(&keeping).await, [MEMBER]);
+        assert!(keeping.told.try_recv().is_err());
     }
 
     /// The row's line is one sentence, whatever the box said under its first

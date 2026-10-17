@@ -1623,7 +1623,9 @@ fn annexed(probed: annex::Probed) -> DependencyState {
         annex::Probed::NeedsRestart => DependencyState::Owed {
             owed: Owed::Restart,
         },
-        annex::Probed::NoDistro => DependencyState::Owed { owed: Owed::Annex },
+        annex::Probed::NoDistro | annex::Probed::Unread => {
+            DependencyState::Owed { owed: Owed::Annex }
+        }
         annex::Probed::VirtualizationOff => DependencyState::Refused {
             barred: Barred::Virtualization,
         },

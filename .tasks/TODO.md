@@ -24,4 +24,4 @@ Roadmap stage: [04: Keeping the Annex](docs/roadmaps/wsl-annex/04-keeping-the-an
 - [x] 03: The re-pin at start — [details](03-the-re-pin-at-start.md)
 - [x] 04: Update — [details](04-update.md)
 - [x] 05: The settings copied at boot — [details](05-the-settings-copied-at-boot.md)
-- [ ] 06: Forgetting a removed distro — [details](06-forgetting-a-removed-distro.md)
+- [x] 06: Forgetting a removed distro — [details](06-forgetting-a-removed-distro.md)

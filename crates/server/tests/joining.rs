@@ -2635,6 +2635,103 @@ async fn no_box_is_booted_where_none_was_made() {
     assert!(listing(&keeper.workbench()).await.members.is_empty());
 }
 
+/// A third device, beside the Keeper and its Annex.
+const C: &str = "ffeeddccbbaa99887766554433221100";
+
+/// A distro unregistered by hand is forgotten at the Keeper's next start, on
+/// every member: the Annex's row is gone from the Keeper's list and from the
+/// third device's, whose open page is told, and the Components row reads *not
+/// installed*. The Annex itself is not dialled — it is gone.
+#[tokio::test]
+async fn a_keepers_start_with_its_box_gone_forgets_its_annex_on_every_member() {
+    let annex = made_annex().await;
+    let keeper = Verkstead::asking().await;
+
+    Annexed::of(Arc::new(Boxed::of(&annex, KEEPER_AT)), keeper.settings())
+        .started(&keeper.devices())
+        .await;
+
+    let mut laptop = Verkstead::called(
+        C,
+        Reading::stated(no_tailscale(), Platform::HERE, None, Vec::new()),
+    )
+    .await;
+    laptop.answer();
+
+    let linking =
+        |of: &Verkstead, addresses: Vec<String>, kept_by: Option<&str>| verkstead_store::Linking {
+            device: of.device.id().to_owned(),
+            name: of.device.id().to_owned(),
+            os: "Linux".to_owned(),
+            addresses,
+            fingerprint: of.device.fingerprint().to_owned(),
+            kept_by: kept_by.map(str::to_owned),
+        };
+
+    verkstead_store::record_member(&keeper.pool, &linking(&laptop, vec![laptop.at()], None))
+        .await
+        .unwrap();
+    for (member, kept_by) in [(&keeper, None), (&annex, Some(A))] {
+        verkstead_store::record_member(&laptop.pool, &linking(member, Vec::new(), kept_by))
+            .await
+            .unwrap();
+    }
+
+    let mut listening = Listening::open(&laptop.workbench()).await;
+
+    let gone = Arc::new(Boxed {
+        probed: annex::Probed::NoDistro,
+        ..Boxed::of(&annex, KEEPER_AT)
+    });
+    let annexed = Annexed::of(gone.clone(), keeper.settings());
+    annexed.started(&keeper.devices().waiting(PATIENCE)).await;
+
+    let ids = |view: DevicesView| -> Vec<String> {
+        view.members
+            .into_iter()
+            .map(|member| member.identity.device)
+            .collect()
+    };
+
+    assert_eq!(ids(listing(&keeper.workbench()).await), [C]);
+    assert_eq!(listening.nudge().await, Nudge::Devices);
+    assert_eq!(ids(listing(&laptop.workbench()).await), [A]);
+    assert_eq!(
+        annexed.reading(None).state,
+        verkstead_render::AnnexState::NotInstalled
+    );
+
+    assert_eq!(gone.booted.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        ids(listing(&annex.workbench()).await),
+        [A],
+        "the Annex was told nothing",
+    );
+}
+
+/// A probe that could not be read is not a box gone: the Annex's row stays.
+#[tokio::test]
+async fn a_keepers_start_whose_probe_could_not_be_read_keeps_its_annex() {
+    let annex = made_annex().await;
+    let keeper = Verkstead::asking().await;
+
+    Annexed::of(Arc::new(Boxed::of(&annex, KEEPER_AT)), keeper.settings())
+        .started(&keeper.devices())
+        .await;
+
+    let unread = Arc::new(Boxed {
+        probed: annex::Probed::Unread,
+        ..Boxed::of(&annex, KEEPER_AT)
+    });
+    Annexed::of(unread, keeper.settings())
+        .started(&keeper.devices())
+        .await;
+
+    let kept = listing(&keeper.workbench()).await;
+    assert_eq!(kept.members.len(), 1);
+    assert_eq!(kept.members[0].identity.device, B);
+}
+
 /// The ordered stop terminates the box this start booted, once.
 #[tokio::test]
 async fn the_stop_terminates_the_box_the_start_booted() {
