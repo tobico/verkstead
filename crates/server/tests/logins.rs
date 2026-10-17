@@ -122,7 +122,7 @@ impl Workbench {
         // starts work is refused without.
         std::fs::write(
             dir.path().join("config.yaml"),
-            "git_author:\n  name: Verkstead Test\n  email: test@verkstead.invalid\n",
+            "authors:\n  - id: work\n    name: Verkstead Test\n    email: test@verkstead.invalid\n",
         )
         .unwrap();
 

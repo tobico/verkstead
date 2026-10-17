@@ -308,7 +308,7 @@ pub(crate) async fn joining(state: &AppState, conversation_id: i64) -> Vec<skill
         conversation_id,
         &chain,
         stands_on.as_deref(),
-        &landed(&of, named).await,
+        &landed(state, &of, named).await,
     )
 }
 
@@ -333,12 +333,13 @@ pub(crate) async fn joining(state: &AppState, conversation_id: i64) -> Vec<skill
 /// Blocking git, on a thread of its own: a fetch has no deadline to answer
 /// within, and this one is a step in front of a session launch rather than a
 /// page being drawn.
-async fn landed(of: &Stage, branches: Vec<String>) -> HashSet<String> {
+async fn landed(state: &AppState, of: &Stage, branches: Vec<String>) -> HashSet<String> {
     let repo = of.repo.clone();
     let default = of.default_branch.clone();
+    let credential = state.github.as_author(of.author.as_deref()).credential();
 
     let read = tokio::task::spawn_blocking(move || {
-        if let worktrees::Fetched::Failed(said) = worktrees::fetch(&repo) {
+        if let worktrees::Fetched::Failed(said) = worktrees::fetch(&repo, &credential) {
             tracing::error!(
                 said,
                 repo = %repo.display(),
@@ -455,6 +456,7 @@ async fn stage(state: &AppState, conversation_id: i64) -> Option<Stage> {
         repo_id: repo.id,
         repo: repo.path,
         default_branch: repo.default_branch,
+        author: repo.author,
         roadmap: of.roadmap,
         label,
     })
@@ -474,6 +476,10 @@ struct Stage {
     /// The Repo's default branch, as the registry names it — what a branch
     /// having merged has merged *into*.
     default_branch: String,
+
+    /// The uuid of the Repo's Author, whose token the fetch in [`landed`]
+    /// presents.
+    author: Option<String>,
 
     /// The roadmap's directory name under `docs/roadmaps/`.
     roadmap: String,
@@ -781,6 +787,7 @@ mod tests {
             repo_id: REPO,
             repo: PathBuf::from("/home/tobi/src/verkstead"),
             default_branch: "main".to_owned(),
+            author: None,
             roadmap: ROADMAP.to_owned(),
             label: label.to_owned(),
         }

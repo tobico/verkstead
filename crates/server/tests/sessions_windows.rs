@@ -83,7 +83,8 @@ const BRIEF: &str = "# Rate limiting\n\nThe API has none.\n";
 const LISTENING: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8422);
 
 /// Who a session commits as, which every sandbox is configured out of.
-const THE_AUTHOR: &str = "git_author:\n  name: Verkstead Test\n  email: test@verkstead.invalid\n";
+const THE_AUTHOR: &str =
+    "authors:\n  - id: work\n    name: Verkstead Test\n    email: test@verkstead.invalid\n";
 
 /// How long to wait for something a session says.
 ///

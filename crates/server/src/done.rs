@@ -700,7 +700,7 @@ async fn uncovered(state: &AppState, conversation_id: i64) -> Option<String> {
 
     for companion in committed {
         let asked = {
-            let gh = state.github.clone();
+            let gh = state.github.as_author(companion.author.as_deref());
             let repo = companion.path.clone();
             let head = companion.head.clone();
 

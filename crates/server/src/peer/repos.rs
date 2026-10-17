@@ -32,7 +32,9 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use verkstead_render::RepoAcross;
+use verkstead_render::{AuthorThere, RepoAcross};
+
+use crate::settings::{Config, Unauthored};
 
 use crate::{AppState, store};
 
@@ -81,11 +83,15 @@ pub(crate) async fn held(State(state): State<AppState>) -> Response {
         }
     };
 
+    let settings = state.settings.clone();
     let answered = tokio::task::spawn_blocking(move || {
+        let config = settings.config();
+
         repos
             .into_iter()
             .map(|repo| RepoAcross {
                 id: repo.id,
+                author: author_there(&config, repo.author.as_deref()),
                 origin: crate::repos::origin(&repo.path),
                 // Stored as UTF-8 in the first place — a path that is not cannot
                 // be registered — so nothing is lost putting it back on the wire.
@@ -111,6 +117,28 @@ pub(crate) async fn held(State(state): State<AppState>) -> Response {
             )
                 .into_response()
         }
+    }
+}
+
+/// The Author a Repo recorded as `recorded` works as on this device, as a
+/// member is told of it: the one this device resolves, local or mirrored, and
+/// *unpicked* where it records none among several (ADR-0025).
+///
+/// Resolved here rather than sent as the bare uuid, because what the Repo
+/// records and what it works as differ where it records nothing — the one
+/// Author there is — and only this device knows which it is.
+fn author_there(config: &Config, recorded: Option<&str>) -> AuthorThere {
+    match config.author_of(recorded) {
+        Some(author) => AuthorThere::As {
+            id: author.id().to_owned(),
+            called: author.called().to_owned(),
+        },
+
+        None if config.author_missing(recorded) == Some(Unauthored::Unpicked) => {
+            AuthorThere::Unpicked
+        }
+
+        None => AuthorThere::Unsaid,
     }
 }
 

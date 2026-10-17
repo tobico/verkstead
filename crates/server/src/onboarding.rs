@@ -1204,14 +1204,18 @@ impl Onboarding {
     pub(crate) async fn prefill(&self, settings: &Settings, gh: &Gh) -> Result<PrefillView> {
         // What is wanted is decided here, off the settings, and the probes are
         // made for that alone — see [`Wanted`].
+        //
+        // About the first Author, which is the one the step's fields are: the
+        // wizard asks for one, and more are the settings page's to add.
         let wanted = {
             let config = settings.config();
-            let author = config.git_author();
+            let author = config.authors().first();
 
             Wanted {
-                name: author.name().is_none(),
-                email: author.email().is_none(),
-                token: settings.secrets().github_token().is_none(),
+                name: author.and_then(|author| author.name()).is_none(),
+                email: author.and_then(|author| author.email()).is_none(),
+                token: author
+                    .is_none_or(|author| settings.secrets().author_token(author.id()).is_none()),
             }
         };
 
@@ -1343,8 +1347,7 @@ async fn steps(
     // Every reading of a Profile is this list, so there is nothing cheaper to
     // ask: a machine has a handful of them.
     let profiles = store::profiles(pool).await?;
-    let author = settings.config();
-    let author = author.git_author();
+    let config = settings.config();
 
     Ok(StepsView {
         dependencies: dependencies_met(dependencies),
@@ -1367,7 +1370,12 @@ async fn steps(
         // laptop's lid opened.
         accounts: !profiles.is_empty(),
 
-        git: author.name().is_some() && author.email().is_some(),
+        // An Author configured, both halves of it, as a git author was before
+        // there could be more than one.
+        git: config
+            .authors()
+            .iter()
+            .any(|author| author.configured().is_some()),
     })
 }
 

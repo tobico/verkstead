@@ -6,6 +6,18 @@
     "roadmap_stages": 1,
     "roadmap_stages_configured": true
   },
+  "authors": [
+    {
+      "display_name": "",
+      "email": "ada@example.com",
+      "github_token": {
+        "at": "2026-08-03T09:07:11.000Z",
+        "last_four": "cdef"
+      },
+      "id": "3f2c9a4e-8d1b-4c7a-9e2f-5b6d7c8e9f01",
+      "name": "Ada Lovelace"
+    }
+  ],
   "cleanup": {
     "delete": {
       "days": 90,
@@ -20,7 +32,9 @@
   },
   "conflict_resolution": "Rebase",
   "git_author": {
+    "display_name": "",
     "email": "ada@example.com",
+    "id": "3f2c9a4e-8d1b-4c7a-9e2f-5b6d7c8e9f01",
     "name": "Ada Lovelace"
   },
   "github_token": {

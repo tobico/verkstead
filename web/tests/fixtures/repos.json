@@ -1,11 +1,15 @@
 [
   {
+    "author": null,
+    "author_unpicked": false,
     "default_branch": "trunk",
     "id": 2,
     "name": "askance",
     "path": "/srv/repos/askance"
   },
   {
+    "author": null,
+    "author_unpicked": false,
     "default_branch": "main",
     "id": 1,
     "name": "verkstead",

@@ -580,7 +580,7 @@ pub(crate) async fn covering(state: AppState, conversation_id: i64) {
 
     for companion in committed {
         let asked = {
-            let gh = state.github.clone();
+            let gh = state.github.as_author(companion.author.as_deref());
             let repo = companion.path.clone();
             let head = companion.head.clone();
 
@@ -710,6 +710,10 @@ pub(crate) struct Committed {
     /// Where it is on this machine, which is where `gh` is run.
     pub(crate) path: PathBuf,
 
+    /// And the uuid of the Author it records, which is whose token `gh` is
+    /// run with — see [`github::Gh::as_author`].
+    pub(crate) author: Option<String>,
+
     /// The branch the work is on there, mirroring resolved.
     pub(crate) branch: String,
 
@@ -816,6 +820,7 @@ pub(crate) async fn committed_in(
             repo_id: companion.repo.id,
             name: companion.repo.name.clone(),
             path: repo,
+            author: companion.repo.author.clone(),
             branch,
             head,
         });
@@ -938,11 +943,11 @@ pub(crate) async fn asked(
     state: &AppState,
     conversation_id: i64,
 ) -> Option<(i64, String, Result<store::PullRequest, github::Trouble>)> {
-    let (repo_id, repo, branch) = branch(state, conversation_id).await?;
+    let (repo_id, repo, author, branch) = branch(state, conversation_id).await?;
     let head = head_ref(conversation_id, &repo, &branch).await;
 
     let asked = {
-        let gh = state.github.clone();
+        let gh = state.github.as_author(author.as_deref());
         let head = head.clone();
 
         // Off the runtime's threads: this is a process, and one that goes to the
@@ -1012,17 +1017,21 @@ async fn head_ref(conversation_id: i64, repo: &Path, branch: &str) -> String {
     }
 }
 
-/// Which registered Repo to ask `gh` in, where it is on disk, and which branch
-/// to ask about.
+/// Which registered Repo to ask `gh` in, where it is on disk, the Author it is
+/// asked as, and which branch to ask about.
 ///
 /// The repository rather than the Worktree, exactly as the branch watcher asks
 /// it: the remotes and the refs are the repository's, and a Worktree may have
 /// been removed by the time this runs.
-async fn branch(state: &AppState, conversation_id: i64) -> Option<(i64, PathBuf, String)> {
+async fn branch(
+    state: &AppState,
+    conversation_id: i64,
+) -> Option<(i64, PathBuf, Option<String>, String)> {
     match store::load_conversation(&state.pool, conversation_id).await {
         Ok(Some(conversation)) => Some((
             conversation.repo.id,
             conversation.repo.path,
+            conversation.repo.author,
             conversation.branch,
         )),
         Ok(None) => {

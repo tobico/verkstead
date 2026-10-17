@@ -27,6 +27,7 @@ import type {
   Adopted,
   AgentOutputEvent,
   AgentType,
+  AuthorEntry,
   BacklogPane,
   BriefEvent,
   Capture,
@@ -37,6 +38,7 @@ import type {
   ConversationClosed,
   ConversationEntry,
   ConversationSteered,
+  CompanionAdded,
   ConversationStopped,
   ConversationUnarchived,
   ConversationView,
@@ -77,6 +79,7 @@ import type {
   SharePublished,
   Shown,
   ShowingArchived,
+  SettingsView,
   StageEntry,
   StageListEvent,
   StageState,
@@ -366,6 +369,7 @@ import {
   unreadable,
   whenever,
 } from "./serving";
+import { MIRRORED, oneList } from "./authors";
 // And the Nudge stream, for the one pane that follows it rather than the cache:
 // the Code pane's tree re-reads the folders it has open on a `files` Nudge, and
 // those listings are held above the pane rather than in a query — see
@@ -3090,7 +3094,8 @@ describe("the page of a draft from before, holding a pull request", () => {
 
     // And every refusal the move can come back with has a sentence to be read
     // as, which is the list this draws them off.
-    const said: Record<RepoSwitched, string> = REPO_SWITCH_REFUSAL;
+    const said: Record<Extract<RepoSwitched, string>, string> =
+      REPO_SWITCH_REFUSAL;
     expect(said.Adopting).toContain("repo");
   });
 
@@ -5047,11 +5052,11 @@ describe("switching a draft's repo", () => {
         json({ Made: { ...(repoView as RepoView), id: 4343 } }),
         "POST",
       ),
-      // The card asks the settings one thing — whether a GitHub token is saved
-      // — and says nothing about GitHub, and takes no create, until they
-      // answer. Which is a read this page makes nowhere else, so it is served
-      // here rather than left to the fallback.
-      whenever("/api/ui/settings", json(told)),
+      // The card asks the one list one thing — whether the Author it is made
+      // as holds a GitHub token — and says nothing about GitHub, and takes no
+      // create, until it answers. The fallback serves it empty, so it is
+      // served here.
+      whenever("/api/ui/authors", json(oneList(told as SettingsView))),
       json("Switched"),
     );
     const { container } = mount(`/conversations/${OPEN.id}`);
@@ -5065,7 +5070,7 @@ describe("switching a draft's repo", () => {
     );
 
     // Waited for, as the human filling the card in waits for it: what says the
-    // settings have answered is the card having something to say about GitHub.
+    // one list has answered is the card having something to say about GitHub.
     await waitFor(() =>
       expect(
         screen.getByLabelText("Create it on GitHub too, privately"),
@@ -5103,7 +5108,7 @@ describe("switching a draft's repo", () => {
         }),
         "POST",
       ),
-      whenever("/api/ui/settings", json(told)),
+      whenever("/api/ui/authors", json(oneList(told as SettingsView))),
       json("Switched"),
     );
     const { container } = mount(`/conversations/${OPEN.id}`);
@@ -5446,6 +5451,35 @@ describe("a conversation's companion repos", () => {
       ).toBe(COMPANION_REFUSAL.OwnRepo),
     );
     expect(container.querySelector(`.${dropdown.drop}`)).toBeTruthy();
+  });
+
+  /// And a repo under another author than this conversation's is refused
+  /// naming it and both authors, where the pick was made (ADR-0025).
+  it("says a companion of another author is refused, naming both", async () => {
+    theWorkbenchWith({ companions: [] }, whenever(
+      `/api/ui/conversations/${OPEN.id}/companions`,
+      json({
+        OtherAuthor: {
+          companion: "askance",
+          companion_author: "Work",
+          author: "Home",
+        },
+      } satisfies CompanionAdded),
+      "POST",
+    ));
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const adder = await theAdder(container);
+    fireEvent.change(adder, { target: { value: String(OPEN.repo.id) } });
+
+    await waitFor(() =>
+      expect(
+        container.querySelector(`.${setup.addCompanion} .${setup.failure}`)
+          ?.textContent,
+      ).toBe(
+        "The askance repo is Work's and this conversation's repo is Home's. A conversation works as one author.",
+      ),
+    );
   });
 
   /// A row apiece in the Repo panel, naming the repository.
@@ -9171,6 +9205,99 @@ describe("the mark of the harness a session ran under", () => {
     // Nor as a tooltip, which is what the `<title>` lobehub ships would have
     // drawn — taken out of every one of the four files as they were copied.
     expect(mark.querySelector("title")).toBeNull();
+  });
+});
+
+/// The Author beside the Repo on the Brief's Configuration (ADR-0025): who the
+/// work is committed and pushed as, drawn under the Repos pane row's condition.
+describe("the author on the brief", () => {
+  const ONE_AUTHOR = told as SettingsView;
+  const WORK = ONE_AUTHOR.authors[0]!;
+  const HOME: SettingsView["authors"][number] = {
+    id: "9b1e7c2d-4a5f-4e8b-8c3d-2f1a0e9d8c7b",
+    display_name: "Home",
+    name: "A. L.",
+    email: "al@home.example",
+    github_token: null,
+  };
+  const TWO_AUTHORS: SettingsView = { ...ONE_AUTHOR, authors: [WORK, HOME] };
+
+  /// The grilling Conversation's Brief opened, its Repo recorded as `author`,
+  /// against `settings`.
+  async function briefWith(
+    settings: SettingsView,
+    author: string | null,
+    ...mirrors: AuthorEntry[]
+  ): Promise<Element> {
+    const fetching = theGrilling(
+      whenever(
+        `/api/ui/conversations/${GRILLING.id}`,
+        json({ ...GRILLING, repo: { ...GRILLING.repo, author } }),
+      ),
+      whenever("/api/ui/settings", json(settings)),
+      whenever("/api/ui/authors", json(oneList(settings, ...mirrors))),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.timelineEvent} > .${timeline.brief}`),
+    );
+    const summary = await drawn(
+      container,
+      `.${shell.detailsPane} .${briefPane.configuration}`,
+    );
+    // Read the list before saying anything is or is not drawn off it.
+    await waitFor(() =>
+      expect(askedFor(fetching, "/api/ui/authors")).toBeGreaterThan(0),
+    );
+    await new Promise((settle) => setTimeout(settle, 0));
+    return summary;
+  }
+
+  const terms = (summary: Element): string[] =>
+    [...summary.querySelectorAll(`.${briefPane.fact} dt`)].map(
+      (term) => term.textContent!,
+    );
+
+  const said = (summary: Element, term: string): string | undefined =>
+    [...summary.querySelectorAll(`.${briefPane.fact}`)]
+      .find((fact) => fact.querySelector("dt")!.textContent === term)
+      ?.querySelector("dd")!.textContent ?? undefined;
+
+  it("names the second author beside the repo", async () => {
+    const summary = await briefWith(TWO_AUTHORS, HOME.id);
+
+    await waitFor(() => expect(said(summary, "Author")).toBe("Home"));
+    expect(terms(summary).slice(0, 2)).toEqual(["Repo", "Author"]);
+  });
+
+  it("names an author with no display name by its git name", async () => {
+    const summary = await briefWith(TWO_AUTHORS, WORK.id);
+
+    await waitFor(() => expect(said(summary, "Author")).toBe(WORK.name));
+  });
+
+  it("draws no author with one configured", async () => {
+    const summary = await briefWith(ONE_AUTHOR, WORK.id);
+
+    expect(terms(summary)).toContain("Repo");
+    expect(terms(summary)).not.toContain("Author");
+  });
+
+  /// A member's Author is one of the list, counted and named like this
+  /// device's own (ADR-0025).
+  it("names a mirrored author beside the repo", async () => {
+    const summary = await briefWith(ONE_AUTHOR, MIRRORED.id, MIRRORED);
+
+    await waitFor(() => expect(said(summary, "Author")).toBe("Client"));
+  });
+
+  it("says so where the repo's author is gone", async () => {
+    const summary = await briefWith(ONE_AUTHOR, "a-uuid-nobody-holds");
+
+    await waitFor(() =>
+      expect(said(summary, "Author")).toBe("Not configured any more."),
+    );
   });
 });
 
@@ -19828,6 +19955,8 @@ describe("the configuration on the brief's pane", () => {
       name: "askance",
       path: "/srv/repos/askance",
       default_branch: "trunk",
+      author: null,
+      author_unpicked: false,
     },
     mode: "ReadOnly",
     base_ref: null,
@@ -19845,6 +19974,8 @@ describe("the configuration on the brief's pane", () => {
       name: "tobico-skills",
       path: "/srv/repos/tobico-skills",
       default_branch: "main",
+      author: null,
+      author_unpicked: false,
     },
     mode: "ReadWrite",
     base_ref: "main",

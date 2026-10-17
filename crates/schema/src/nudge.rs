@@ -156,6 +156,15 @@ pub enum Nudge {
     /// callers, and a second device watching is what it is waiting for.
     Profiles,
 
+    /// The Authors moved: one saved or removed here, or the mirrors of a
+    /// member's rewritten off what it last answered (ADR-0025).
+    ///
+    /// **What a member hears to read this device's Authors again**, the way it
+    /// hears [`Nudge::Profiles`] — announced to the cluster where a save or a
+    /// removal changes the list, and kept to this device's own pages where all
+    /// that moved is the mirrors it holds of somebody else's.
+    Authors,
+
     /// Where a Profile's login has got to moved: the harness printed the
     /// address, took a code, finished, or was killed.
     ///

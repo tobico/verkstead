@@ -29,7 +29,13 @@
 //! side by side, and the one press it offers cannot be taken back, so the row
 //! carries what tells them apart.
 //!
-//! So the one thing there is to *do* to a Repo is take it off the registry,
+//! **And which Author it is, once there are two.** Each row then carries the
+//! Author its work is committed and pushed as, in a dropdown that changes it
+//! (ADR-0025) — refused, in words under the row, while a conversation on the
+//! repo or holding it as a companion is still going, naming each one. With one
+//! Author the row says nothing about it.
+//!
+//! Beyond that, the one thing there is to *do* to a Repo is take it off the registry,
 //! which is an unregistering rather than a delete: Verkstead stops offering the
 //! repository, the directory is left where it is, and every Conversation ever
 //! worked in it goes on saying so. **It is asked about once before it happens**
@@ -96,20 +102,24 @@ import {
   listRepos,
   registerRepo,
   removeRepo,
+  repointRepo,
 } from "../api/client";
 import type {
+  AuthorEntry,
   Created,
   Registered,
   RepoEntry,
   RepoRemoved,
   RepoView,
+  Repointed,
 } from "../api/types";
 import { repoParent, setRepoParent } from "../remembered";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine, Note } from "../notices";
-import { keyOf, useDevice } from "../reaching";
+import { keyOf, useDevice, type Device } from "../reaching";
+import { Picker } from "../picking";
 import { rowPress } from "../rows";
-import { useSettings } from "../settings/PathEditor";
+import { authorLabel, authorRow, useAuthors } from "../authors";
 import { PaneHead } from "../workbench/PaneHead";
 import styles from "./RepoList.module.css";
 import { SettingsCard } from "../settings/SettingsCard";
@@ -123,6 +133,14 @@ import { SettingsCard } from "../settings/SettingsCard";
 /// registered already is the repository somebody named.
 export type RepoRefused = Extract<Registered, string>;
 
+/// What a registration or a create that named no Author among several is told,
+/// which the card's own press never sends.
+const UNPICKED =
+  "More than one author is configured. Pick the one this repo is committed as.";
+
+/// And one that named an Author the settings no longer hold.
+const NO_SUCH_AUTHOR = "That author isn't configured any more. Pick another.";
+
 /// What each way of being refused says, once, wherever it is met.
 export const REFUSAL: Record<RepoRefused, string> = {
   NotAbsolute: "Give the repo's absolute path, starting with a slash.",
@@ -131,6 +149,8 @@ export const REFUSAL: Record<RepoRefused, string> = {
     "That isn't a git repository. Name the repository's own directory.",
   NoDefaultBranch:
     "That repository has no branch to call its default. Check one out first.",
+  AuthorUnpicked: UNPICKED,
+  NoSuchAuthor: NO_SUCH_AUTHOR,
 };
 
 /// The ways a create is answered with a sentence rather than a Repo, in the same
@@ -149,7 +169,99 @@ export const CREATE_REFUSAL: Record<CreateRefused, string> = {
   BadName: "That isn't a name a directory can have.",
   NoAuthor:
     "No git author is configured, and the first commit needs one. Set one in Settings.",
+  AuthorUnpicked: UNPICKED,
+  NoSuchAuthor: NO_SUCH_AUTHOR,
 };
+
+/// Which Author a Repo arriving through **Open repo** or **Create repo** is
+/// recorded as (ADR-0025): picked where the one list holds more than one, and
+/// the one there is, silently, where there is only one.
+///
+/// Read off the one list of the device the Repo lands on — its own Authors and
+/// a mirror of every member's, this device's among them where that is a
+/// member — over the Relay the way the card's browse goes. That device is the
+/// one that resolves the pick, so a list read here would offer an Author it
+/// has under another uuid or none at all. A read that has not answered, or
+/// failed, offers nothing to pick between, and the press goes out naming
+/// nobody — which the server records as the one Author, or refuses by name
+/// where there are several.
+function useAuthorPick(device: () => Device) {
+  const listed = useAuthors(device);
+
+  /// Every Author, that device's own first.
+  const authors = (): AuthorEntry[] => listed.data ?? [];
+
+  /// The only one there is, where it is a mirror: the server's silent pick is
+  /// that device's own one, so a lone mirror is named rather than left to it.
+  const lone = (): string | undefined => {
+    const [only, ...others] = authors();
+
+    return only !== undefined && others.length === 0 && only.device !== null
+      ? only.id
+      : undefined;
+  };
+
+  /// Whether there is a choice to make at all.
+  const asked = (): boolean => authors().length > 1;
+
+  // The uuid picked, or the empty string while none is.
+  const [chosen, setChosen] = createSignal("");
+
+  return {
+    authors,
+    /// Whether the list is still being read, which is neither one Author nor
+    /// several.
+    pending: (): boolean => listed.isPending,
+    asked,
+    chosen,
+    setChosen,
+    /// The Author picked, where one is.
+    picked: (): AuthorEntry | undefined =>
+      authors().find(({ id }) => id === chosen()),
+    /// Whether the press is held for want of a pick.
+    wanting: (): boolean => asked() && chosen() === "",
+    /// What the press sends: the pick where there was one to make, and nothing
+    /// where there was not.
+    sent: (): string | undefined =>
+      asked() ? chosen() || undefined : lone(),
+  };
+}
+
+/// The picker itself, drawn only where there are two Authors or more: with one,
+/// neither card says anything about who the repo is committed as, and reads as
+/// it did before there was a list.
+///
+/// A native dropdown, there being nothing on a row but its name — see
+/// `picking.tsx`. Each row is the display name, falling back to the git name.
+function AuthorPicker(props: {
+  pick: ReturnType<typeof useAuthorPick>;
+  /// Said when the pick moves, for the card to clear a refusal that was about
+  /// the last one.
+  moved: () => void;
+}): JSX.Element {
+  const id = createUniqueId();
+
+  return (
+    <Show when={props.pick.asked()}>
+      <label class={styles.second} for={id}>
+        Author
+      </label>
+      <Picker
+        id={id}
+        options={props.pick.authors()}
+        value={(author) => author.id}
+        label={authorRow}
+        chosen={props.pick.chosen()}
+        pick={(author) => {
+          props.pick.setChosen(author);
+          props.moved();
+        }}
+        gone={() => props.pick.setChosen("")}
+        nothing="Select"
+      />
+    </Show>
+  );
+}
 
 /// And what each way of being refused a removal says.
 ///
@@ -161,6 +273,62 @@ export const REPO_REMOVAL_REFUSAL: Record<RepoRemoved, string> = {
   InUse:
     "A conversation that's still going is on it. Finish or close that conversation first.",
 };
+
+/// What a repoint refused under live work names: the branches of the
+/// conversations on the repo, and of the ones holding it as a companion.
+type Live = Extract<Repointed, { InUse: unknown }>["InUse"];
+
+/// A pick made on one row: the Repo, and the uuid it is to be pointed at.
+type Repointing = { repo: RepoEntry; author: string };
+
+/// And what each bare refusal of one says.
+const REPOINT_REFUSAL: Record<Extract<Repointed, string>, string> = {
+  NoSuchRepo: "That repo is off the registry already.",
+  NoSuchAuthor: NO_SUCH_AUTHOR,
+};
+
+/// Names in a sentence, with the serial comma: `a`, `a and b`, `a, b, and c`.
+function named(branches: string[]): JSX.Element {
+  return (
+    <For each={branches}>
+      {(branch, at) => (
+        <>
+          {at() === 0
+            ? ""
+            : at() === branches.length - 1
+              ? branches.length === 2
+                ? " and "
+                : ", and "
+              : ", "}
+          <code>{branch}</code>
+        </>
+      )}
+    </For>
+  );
+}
+
+/// The refusal of a repoint under live work, naming the work: the author a
+/// branch is half committed as would change under it (ADR-0025).
+function LiveWork(props: { live: Live }): JSX.Element {
+  const many = (): number => props.live.on.length + props.live.beside.length;
+  const going = (branches: string[]): string =>
+    branches.length === 1 ? "is" : "are";
+
+  return (
+    <>
+      <Show when={props.live.on.length > 0}>
+        {named(props.live.on)} {going(props.live.on)} still going on this
+        repo.{" "}
+      </Show>
+      <Show when={props.live.beside.length > 0}>
+        {named(props.live.beside)} {going(props.live.beside)} still going with
+        this repo as a companion.{" "}
+      </Show>
+      Finish or close {many() === 1 ? "it" : "them"} before changing the
+      author.
+    </>
+  );
+}
 
 /// The Repos as they stand, read once for the card and the pane that draw them.
 ///
@@ -258,8 +426,43 @@ export function ReposPane(props: {
   // something about the conversation it named.
   const [refused, setRefused] = createSignal<{
     repo: number;
-    said: string;
+    said: string | Live;
   } | null>(null);
+
+  // Who the Repos can be, read off the cluster's one list — this device's own
+  // Authors and a mirror of every member's: with one Author or none, no row
+  // says anything about it.
+  const listed = useAuthors();
+  const authors = (): AuthorEntry[] => listed.data ?? [];
+  const asked = (): boolean => authors().length > 1;
+
+  // And a row whose Author the list no longer holds, which is drawn with one
+  // Author as well: a start on it is refused and sent here to pick another, so
+  // here is where the picker has to be (ADR-0025).
+  const gone = (repo: RepoEntry): boolean =>
+    repo.author !== null &&
+    authors().length > 0 &&
+    !authors().some(({ id }) => id === repo.author);
+
+  const repoint = useMutation(() => ({
+    mutationFn: (pick: Repointing) => repointRepo(pick.repo.id, pick.author),
+    onSuccess: (outcome: Repointed, pick: Repointing) => {
+      // The list redraws either way: a repoint is the row changing, and a
+      // refusal is about work that has moved on since the list was read.
+      void queries.invalidateQueries({ queryKey: ["repos"] });
+
+      if (typeof outcome === "string") {
+        setRefused({ repo: pick.repo.id, said: REPOINT_REFUSAL[outcome] });
+      } else if ("InUse" in outcome) {
+        setRefused({ repo: pick.repo.id, said: outcome.InUse });
+      }
+    },
+    onError: (error: Error, pick: Repointing) =>
+      setRefused({
+        repo: pick.repo.id,
+        said: `The repo's author couldn't be changed. ${error.message}`,
+      }),
+  }));
 
   const remove = useMutation(() => ({
     mutationFn: (repo: RepoEntry) => removeRepo(repo.id),
@@ -354,14 +557,36 @@ export function ReposPane(props: {
                       </button>
                     </div>
 
+                    {/* Who the Repo's work is committed and pushed as, and
+                        where that is changed (ADR-0025) — drawn only once
+                        there are two Authors to be, or where the one it
+                        records is gone. */}
+                    <Show when={asked() || gone(repo)}>
+                      <RowAuthor
+                        repo={repo}
+                        authors={authors()}
+                        disabled={repoint.isPending}
+                        pick={(author) => {
+                          setRefused(null);
+                          repoint.mutate({ repo, author });
+                        }}
+                      />
+                    </Show>
+
                     {/* Refused rather than taken out from under the work going
                         on in it, and said under the row the press was made on:
                         the name above it is what says which Repo this is
                         about. */}
-                    <Show when={refused()?.repo === repo.id}>
-                      <ErrorLine class={styles.failure}>
-                        {refused()?.said}
-                      </ErrorLine>
+                    <Show when={refused()?.repo === repo.id ? refused() : null}>
+                      {(said) => (
+                        <ErrorLine class={styles.failure}>
+                          {typeof said().said === "string" ? (
+                            (said().said as string)
+                          ) : (
+                            <LiveWork live={said().said as Live} />
+                          )}
+                        </ErrorLine>
+                      )}
                     </Show>
                   </li>
                 )}
@@ -379,6 +604,55 @@ export function ReposPane(props: {
         remove={confirmed}
       />
     </>
+  );
+}
+
+/// One row's Author: a dropdown of every one configured, showing the Repo's
+/// own, and a line under it where there is none to show — one still to be
+/// picked, or one `config.yaml` no longer holds.
+///
+/// A pick is sent at once, the Git section's switcher's way, and the dropdown
+/// goes on saying what the server holds until the list is read again.
+function RowAuthor(props: {
+  repo: RepoEntry;
+  authors: AuthorEntry[];
+  disabled: boolean;
+  pick: (author: string) => void;
+}): JSX.Element {
+  const id = createUniqueId();
+
+  const gone = (): boolean =>
+    props.repo.author !== null &&
+    !props.authors.some(({ id }) => id === props.repo.author);
+
+  return (
+    <div class={styles.author}>
+      <label for={id}>Author</label>
+      <Picker
+        id={id}
+        options={props.authors}
+        value={(author) => author.id}
+        label={authorRow}
+        chosen={props.repo.author ?? ""}
+        disabled={props.disabled}
+        pick={(author) => {
+          if (author !== props.repo.author) {
+            props.pick(author);
+          }
+        }}
+        nothing="Select"
+      />
+      <Show when={props.repo.author_unpicked}>
+        <Note class={styles.authorNote}>
+          No author is picked for this repo yet.
+        </Note>
+      </Show>
+      <Show when={gone()}>
+        <Note class={styles.authorNote}>
+          This repo's author isn't configured any more. Pick another.
+        </Note>
+      </Show>
+    </div>
   );
 }
 
@@ -482,8 +756,13 @@ export function RepoRegistration(props: {
   // path that was sent, and it stops being about the one being typed.
   const [refused, setRefused] = createSignal<RepoRefused | null>(null);
 
+  // Which Author it is recorded as, where there are several to pick between —
+  // off that machine's one list, it being the one that records the pick.
+  const author = useAuthorPick(device);
+
   const register = useMutation(() => ({
-    mutationFn: (asked: string) => registerRepo(device(), asked),
+    mutationFn: (asked: string) =>
+      registerRepo(device(), asked, author.sent()),
     onSuccess: (outcome: Registered) => {
       // A refusal, which is a bare word on the wire — the two outcomes that
       // leave a Repo registered carry it. Said where the path was typed, which
@@ -518,7 +797,7 @@ export function RepoRegistration(props: {
     ev.preventDefault();
 
     const asked = path().trim();
-    if (asked === "") {
+    if (asked === "" || author.wanting()) {
       return;
     }
 
@@ -541,10 +820,14 @@ export function RepoRegistration(props: {
         }}
       />
 
+      <AuthorPicker pick={author} moved={() => setRefused(null)} />
+
       <div class={styles.buttons}>
         <button
           type="submit"
-          disabled={register.isPending || path().trim() === ""}
+          disabled={
+            register.isPending || path().trim() === "" || author.wanting()
+          }
         >
           {props.submit}
         </button>
@@ -631,8 +914,10 @@ export function OpenRepo(props: {
 /// home, this browse going out under it like every other.
 ///
 /// **And a tick that makes the same repository on GitHub**, drawn only where a
-/// token is saved. The settings say whether there is one without ever handing it
-/// over, which is the whole of what this has to know. Where there is one the
+/// token is held for the Author it is made as, on the device it is made on —
+/// that device's own token or its copy of a member's. The one list says whether
+/// there is one without ever handing it over, which is the whole of what this
+/// has to know. Where there is one the
 /// tick is drawn and starts on, and what it makes is private: a repository made
 /// from here is somebody's work before it is anybody else's business, and public
 /// is a decision to take deliberately rather than by leaving a box alone.
@@ -644,9 +929,9 @@ export function OpenRepo(props: {
 /// local repository is still worth making, and the token can be saved
 /// afterwards.
 ///
-/// **And neither of them until the settings have answered**, which is a state of
-/// its own rather than the second one said early. Nothing else on either page
-/// this card opens over reads the settings, so that query is cold every time it
+/// **And neither of them until the one list has answered**, which is a state of
+/// its own rather than the second one said early. That device's list may not
+/// have been read on this page yet, so the query can be cold when the card
 /// opens: a card that took *not read yet* for *no token* would put the note in
 /// front of somebody who has one, every time, and swap it for the tick it was
 /// denying a moment later. So it says nothing about GitHub while it does not
@@ -655,7 +940,7 @@ export function OpenRepo(props: {
 ///
 /// A read that *failed* is an answer, though, and the answer is the same as no
 /// token: the local repository is still worth making, and a card that stayed
-/// shut because the settings were unreadable would be a create nobody could
+/// shut because the list was unreadable would be a create nobody could
 /// make for a reason that has nothing to do with creating.
 ///
 /// A refusal keeps the modal up with the reason under the fields, for the
@@ -680,18 +965,15 @@ export function CreateRepo(props: {
 }): JSX.Element {
   const queries = useQueryClient();
 
-  // What Verkstead has been told, for the one thing this card asks of it:
-  // whether a GitHub token is saved. Never the token itself — what comes back
-  // about it is that there is one and what its last four characters are.
+  // Whether the Author it is made as holds a GitHub token on the device it is
+  // made on — that device's own, or its copy of a member's — and `null` while
+  // that is not known. Never the token itself: the one list says there is one
+  // and nothing more.
   //
-  // Read from here rather than already in hand: nothing else on the compose
-  // page or on a draft's Repo panel reads the settings, so this card is always
-  // what starts that read — which is why the answer's absence has to be a state
-  // of its own below.
-  const settings = useSettings();
-
-  // Whether there is one — and `null` while the read above is still out, which
-  // is neither.
+  // Read off the one list rather than already in hand: nothing else on the
+  // compose page or on a draft's Repo panel reads it for the picked device, so
+  // this card is often what starts that read — which is why the answer's
+  // absence has to be a state of its own below.
   //
   // Three states rather than two, because a card that read an unanswered query
   // as *no token* would say so: the note under the fields would stand where the
@@ -699,20 +981,44 @@ export function CreateRepo(props: {
   // denying. What the card does while it does not know is say nothing about
   // GitHub and take no create — see the two `Show`s and the press below.
   //
-  // Pending rather than absent data, so that a settings read which *failed* is
-  // an answer like any other: false, which is the true one — a token nothing
-  // can read is a token nothing can make a repository as — and the local
+  // Pending rather than absent data, so that a read which *failed* is an
+  // answer like any other: false, which is the true one — a token nothing can
+  // read is a token nothing can make a repository as — and the local
   // repository is still worth making, which a card held shut would not be.
-  const tokened = (): boolean | null =>
-    settings.isPending ? null : settings.data?.github_token != null;
+  //
+  // **The picked Author's token, where there are several.** The repository is
+  // made on GitHub as the Author it is made as or not at all, so the question
+  // is whether *that one* holds a token — and it is not settled until one is
+  // picked, which draws neither the tick nor the note in the meantime. With one
+  // Author it is that one's.
+  const tokened = (): boolean | null => {
+    if (author.pending()) {
+      return null;
+    }
+
+    if (!author.asked()) {
+      return author.authors()[0]?.holds_token ?? false;
+    }
+
+    const picked = author.picked();
+
+    return picked === undefined ? null : picked.holds_token;
+  };
 
   // And whether it is ticked, which starts on: somebody who has saved a token
-  // has said what they mean to do with it.
+  // has said what they mean to do with it. On again with every new pick, the
+  // tick being drawn afresh for the Author picked.
   const [onGithub, setOnGithub] = createSignal(true);
 
-  // And which device it is being made on, for [`RepoRegistration`]'s reason:
-  // the dropdown this card was opened from may be a member's draft.
+  // Which device it is being made on, for [`RepoRegistration`]'s reason: the
+  // dropdown this card was opened from may be a member's draft.
   const device = useDevice();
+
+  // And which Author it is made as, where there are several to pick between —
+  // off that device's one list, for the registration's reason: the first
+  // commit is by it, the Repo is recorded as its, and the GitHub repository is
+  // made with its token there.
+  const author = useAuthorPick(device);
 
   // The heading's own id, for [`OpenRepo`]'s reason: two Repo dropdowns may be
   // drawn on one page, and an id is the page's to keep unique.
@@ -770,7 +1076,13 @@ export function CreateRepo(props: {
 
   const create = useMutation(() => ({
     mutationFn: (asked: { parent: string; name: string; github: boolean }) =>
-      createRepo(device(), asked.parent, asked.name, asked.github),
+      createRepo(
+        device(),
+        asked.parent,
+        asked.name,
+        asked.github,
+        author.sent(),
+      ),
     onSuccess: (outcome: Created) => {
       // Four of the refusals are a bare word, which this file has the sentence
       // for; the fifth is git's own account of what it would not do, said in
@@ -828,9 +1140,14 @@ export function CreateRepo(props: {
 
     const where = parent().trim();
     const called = name().trim();
-    // Nothing while the settings are unread, for the press's own reason: what
+    // Nothing while the one list is unread, for the press's own reason: what
     // this card would ask of GitHub is not settled yet.
-    if (where === "" || called === "" || tokened() === null) {
+    if (
+      where === "" ||
+      called === "" ||
+      tokened() === null ||
+      author.wanting()
+    ) {
       return;
     }
 
@@ -899,9 +1216,17 @@ export function CreateRepo(props: {
             }}
           />
 
+          <AuthorPicker
+            pick={author}
+            moved={() => {
+              setRefused(null);
+              setOnGithub(true);
+            }}
+          />
+
           {/* And the third question, asked only where there is a token to answer
             it with — see the note below, which is what stands here instead.
-            Neither of them until the settings have answered: what is drawn there
+            Neither of them until the one list has answered: what is drawn there
             is what the card is about to do about GitHub, and it does not know
             yet. */}
           <Show when={tokened() === true}>
@@ -926,14 +1251,16 @@ export function CreateRepo(props: {
             is one that will stop halfway through the first conversation. */}
           <Show when={tokened() === false}>
             <Note class={styles.remote}>
-              No GitHub token is saved, so this repo is made here only. It needs
-              a remote, or a token saved in Settings, before the work on it can
-              be finished.
+              {author.asked()
+                ? `${authorLabel(author.picked()!)} has no GitHub token saved`
+                : "No GitHub token is saved"}
+              , so this repo is made here only. It needs a remote, or a token
+              saved in Settings, before the work on it can be finished.
             </Note>
           </Show>
 
           <div class={styles.buttons}>
-            {/* Held while the settings are unread as well as while a field is
+            {/* Held while the one list is unread as well as while a field is
                 empty, and for the same kind of reason: a create that went out
                 then would ask nothing of GitHub without the card ever having
                 said so, which is the sentence above going missing rather than
@@ -943,6 +1270,7 @@ export function CreateRepo(props: {
               disabled={
                 create.isPending ||
                 tokened() === null ||
+                author.wanting() ||
                 parent().trim() === "" ||
                 name().trim() === ""
               }

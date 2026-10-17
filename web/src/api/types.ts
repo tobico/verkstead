@@ -125,7 +125,7 @@ harness: boolean, };
  * watching says itself on a Timeline instead — see the server's `continuing`
  * module, which starts the same stage by the other route.
  */
-export type Adopted = "Adopted" | "NoSuchConversation" | "NotDrafting" | "NotAdopting" | "NoGrillingProfile" | "NoImplementationProfile" | "NoReviewProfile" | { "ProfileBroken": ProfileTrouble } | "NoGitAuthor" | "FetchFailed" | "NoBaseCommit" | "NoRoadmap" | { "Misdeclared": { 
+export type Adopted = "Adopted" | "NoSuchConversation" | "NotDrafting" | "NotAdopting" | "NoGrillingProfile" | "NoImplementationProfile" | "NoReviewProfile" | { "ProfileBroken": ProfileTrouble } | "NoGitAuthor" | { "RepoAuthorGone": { repo: string, } } | { "RepoAuthorUnpicked": { repo: string, } } | { "RepoAuthorTokenAwaited": { repo: string, device: string, } } | { "OtherAuthor": OtherAuthor } | "FetchFailed" | "NoBaseCommit" | "NoRoadmap" | { "Misdeclared": { 
 /**
  * Why, as the judgement put it.
  */
@@ -649,13 +649,101 @@ origin: AttachmentOrigin,
 label: string | null, };
 
 /**
- * Who a session's commits are by.
+ * Who a session's commits are by: the Author the Git section is about, which
+ * is whichever its dropdown picked — the first in `config.yaml`'s list, on a
+ * read and wherever there is only one.
  *
- * Two strings rather than two optionals, empty where nothing is configured:
- * the form holds them that way, and half an author is a real state — a name
- * with no address is what git complains about by name.
+ * The names as strings rather than optionals, empty where nothing is
+ * configured: the form holds them that way, and half an author is a real
+ * state — a name with no address is what git complains about by name.
  */
-export type Author = { name: string, email: string, };
+export type Author = { 
+/**
+ * The uuid it is kept under, or `null` where there is no Author yet —
+ * which is a fresh install. A save sending `null` is about the first
+ * Author, and makes it under a fresh uuid where there is none and the
+ * fields hold anything. A save sending a uuid that is not in the list is
+ * a new Author, written on the end of it: that is **Add author**, which
+ * mints the uuid in the page.
+ */
+id: string | null, 
+/**
+ * What it is called in rows and pickers, empty where nobody named it and
+ * the git name stands in. Sent back as it came on a save from a section
+ * that does not draw it.
+ */
+display_name: string, name: string, email: string, };
+
+/**
+ * One Author's fields and its token, edited alone: what the Git section
+ * sends for a **mirror**, which is put to the device that Author is at home on
+ * as the ordinary edit of its own (ADR-0025).
+ *
+ * The Author alone rather than a [`SettingsEdit`], because a settings save is
+ * the whole of the files it is made on, and this device holds none of the
+ * home device's other settings to send. The fields are values and the token
+ * is an action, as they are in a settings save, for its reason.
+ */
+export type AuthorEdit = { display_name: string, name: string, email: string, github_token: TokenEdit, };
+
+/**
+ * What became of an [`AuthorEdit`], in the words of the device the Author is
+ * at home on.
+ */
+export type AuthorEdited = { "Saved": { verified: Verified | null, } } | "NoSuchAuthor";
+
+/**
+ * One Author of the cluster's **one list**: this device's own, or a mirror of
+ * one a member holds at home (ADR-0025).
+ *
+ * What `GET /api/ui/authors` answers, to this device's pages and to a member
+ * across the link alike — which is why there is **nothing of the token** here,
+ * not even its last four: whether one is held is all a row says about it.
+ */
+export type AuthorEntry = { id: string, 
+/**
+ * What it is called in rows and pickers, empty where nobody named it and
+ * the git name stands in.
+ */
+display_name: string, name: string, email: string, 
+/**
+ * Whether the device it is at home on holds a GitHub token for it.
+ */
+holds_token: boolean, 
+/**
+ * The device it is at home on, or `null` for one of this device's own.
+ *
+ * A member taking this list in takes only the rows with none, so a mirror
+ * is always one hop from its home and never a mirror of a mirror.
+ */
+device: RowDevice | null, };
+
+/**
+ * What became of removing an Author, from the Git section's switcher.
+ *
+ * Refused while a registered Repo points at it (ADR-0025): its next session
+ * would have nobody to commit as. An unregistered Repo keeps the association
+ * as history and blocks nothing.
+ */
+export type AuthorRemoved = "Removed" | "NoSuchAuthor" | { "InUse": { repos: Array<string>, } };
+
+/**
+ * One Author as the settings files hold it, with what can be said about its
+ * token beside it.
+ *
+ * Its uuid is always there, unlike [`Author`]'s: this is a read of an Author
+ * that exists, where that is also what a fresh install's save sends.
+ */
+export type AuthorSaved = { id: string, 
+/**
+ * What it is called in rows and pickers, empty where nobody named it and
+ * the git name stands in.
+ */
+display_name: string, name: string, email: string, 
+/**
+ * What can be said about its token, or `null` where it holds none.
+ */
+github_token: TokenSaved | null, };
 
 /**
  * The backlog opened: every task document of it, rendered.
@@ -1027,7 +1115,7 @@ diff: DiffView | null, };
  * different sentence to put in front of the human — and two of them are about
  * what a companion *is* rather than about anything that has gone wrong.
  */
-export type CompanionAdded = "Added" | "NoSuchConversation" | "NotDrafting" | "NoSuchRepo" | "OwnRepo" | "AlreadyAdded";
+export type CompanionAdded = "Added" | "NoSuchConversation" | "NotDrafting" | "NoSuchRepo" | "OwnRepo" | "AlreadyAdded" | { "OtherAuthor": OtherAuthor };
 
 /**
  * One registered Repo a steer puts on a Conversation, with everything a setup
@@ -2132,7 +2220,7 @@ permitted: Array<string>, };
  * about to put a draft on it, and a page that had to go and read the Repo it
  * just made would be asking for something the server was already holding.
  */
-export type Created = { "Made": RepoView } | { "MadeWithoutRemote": { repo: RepoView, why: string, } } | "ParentMissing" | "AlreadyThere" | "BadName" | "NoAuthor" | { "Refused": string };
+export type Created = { "Made": RepoView } | { "MadeWithoutRemote": { repo: RepoView, why: string, } } | "ParentMissing" | "AlreadyThere" | "BadName" | "NoAuthor" | "AuthorUnpicked" | "NoSuchAuthor" | { "Refused": string };
 
 /**
  * A repository the human is asking Verkstead to *make*, said as where it is to
@@ -2170,7 +2258,13 @@ name: string,
  * the modal draws no tick at all then, and says a remote is needed before
  * the work is finished.
  */
-github: boolean, };
+github: boolean, 
+/**
+ * And the uuid of the Author it is made as: the first commit is by it, the
+ * push to GitHub is with its token, and the Repo is recorded as its. Asked
+ * and refused the way a [`Registration`]'s is.
+ */
+author?: string, };
 
 /**
  * What a row is about.
@@ -3063,7 +3157,7 @@ export type FoundOn = "Lan" | "Tailscale";
  * the Repo they are about. Nothing gates the button on a companion: the
  * configuration is always complete, so refusal at the start is the whole story.
  */
-export type GrillingStarted = "Started" | "NoSuchConversation" | "NotDrafting" | "NoGrillingProfile" | "NoImplementationProfile" | "NoReviewProfile" | { "ProfileBroken": ProfileTrouble } | "EmptyBrief" | "NoGitAuthor" | "FetchFailed" | "NoBaseCommit" | "BranchExists" | "WorktreeRefused" | { "Companion": { 
+export type GrillingStarted = "Started" | "NoSuchConversation" | "NotDrafting" | "NoGrillingProfile" | "NoImplementationProfile" | "NoReviewProfile" | { "ProfileBroken": ProfileTrouble } | "EmptyBrief" | "NoGitAuthor" | { "RepoAuthorGone": { repo: string, } } | { "RepoAuthorUnpicked": { repo: string, } } | { "RepoAuthorTokenAwaited": { repo: string, device: string, } } | { "OtherAuthor": OtherAuthor } | "FetchFailed" | "NoBaseCommit" | "BranchExists" | "WorktreeRefused" | { "Companion": { 
 /**
  * What the companion Repo is called, which is what the human picked it
  * by and what they will go and look at.
@@ -3185,7 +3279,15 @@ name: string,
  * repository the work itself is in. Both are refusals; they are not
  * the same sentence.
  */
-companion: boolean, } } | { "Harness": { role: PairingRole, 
+companion: boolean, } } | { "RepoAuthor": { name: string, companion: boolean, 
+/**
+ * What this device's Author for it is called.
+ */
+here: string, 
+/**
+ * And what that device's is called.
+ */
+there: string, } } | { "RepoAuthorUnpicked": { name: string, companion: boolean, } } | { "Harness": { role: PairingRole, 
 /**
  * The Agent Profile's name as it reads here, or nothing for the one
  * account on its harness that nobody named.
@@ -3774,7 +3876,7 @@ name: string | null, };
  * the behaviour every kind used to get — so a new kind is safe to add and an
  * old page stays correct against a newer server.
  */
-export type Nudge = { "kind": "transcript", conversation: number, } | { "kind": "screen", conversation: number, } | { "kind": "commit", conversation: number, } | { "kind": "files", conversation: number, } | { "kind": "ports", conversation: number, } | { "kind": "terminals", conversation: number, } | { "kind": "forwards" } | { "kind": "set", conversation: number, } | { "kind": "liveness", conversation: number, } | { "kind": "conversation", conversation: number, } | { "kind": "conversations" } | { "kind": "repos" } | { "kind": "joins" } | { "kind": "devices" } | { "kind": "discovered" } | { "kind": "profiles" } | { "kind": "login", profile: number, } | { "kind": "everything" };
+export type Nudge = { "kind": "transcript", conversation: number, } | { "kind": "screen", conversation: number, } | { "kind": "commit", conversation: number, } | { "kind": "files", conversation: number, } | { "kind": "ports", conversation: number, } | { "kind": "terminals", conversation: number, } | { "kind": "forwards" } | { "kind": "set", conversation: number, } | { "kind": "liveness", conversation: number, } | { "kind": "conversation", conversation: number, } | { "kind": "conversations" } | { "kind": "repos" } | { "kind": "joins" } | { "kind": "devices" } | { "kind": "discovered" } | { "kind": "profiles" } | { "kind": "authors" } | { "kind": "login", profile: number, } | { "kind": "everything" };
 
 /**
  * One Nudge as it goes down a stream: what moved, and **whose news it is**.
@@ -3799,7 +3901,7 @@ export type Nudged = {
  * Device Id — absent for this device's own, which is every Nudge a
  * workbench has ever sent about its own work.
  */
-device?: string | null, } & ({ "kind": "transcript", conversation: number, } | { "kind": "screen", conversation: number, } | { "kind": "commit", conversation: number, } | { "kind": "files", conversation: number, } | { "kind": "ports", conversation: number, } | { "kind": "terminals", conversation: number, } | { "kind": "forwards" } | { "kind": "set", conversation: number, } | { "kind": "liveness", conversation: number, } | { "kind": "conversation", conversation: number, } | { "kind": "conversations" } | { "kind": "repos" } | { "kind": "joins" } | { "kind": "devices" } | { "kind": "discovered" } | { "kind": "profiles" } | { "kind": "login", profile: number, } | { "kind": "everything" });
+device?: string | null, } & ({ "kind": "transcript", conversation: number, } | { "kind": "screen", conversation: number, } | { "kind": "commit", conversation: number, } | { "kind": "files", conversation: number, } | { "kind": "ports", conversation: number, } | { "kind": "terminals", conversation: number, } | { "kind": "forwards" } | { "kind": "set", conversation: number, } | { "kind": "liveness", conversation: number, } | { "kind": "conversation", conversation: number, } | { "kind": "conversations" } | { "kind": "repos" } | { "kind": "joins" } | { "kind": "devices" } | { "kind": "discovered" } | { "kind": "profiles" } | { "kind": "authors" } | { "kind": "login", profile: number, } | { "kind": "everything" });
 
 /**
  * Whether a fresh Verkstead can do anything yet, and what it would take.
@@ -3913,6 +4015,28 @@ text_html: string, recommended: boolean,
  * and a block in one of its cells would break the row apart.
  */
 cells: Array<string>, };
+
+/**
+ * A companion whose Author is not the Conversation's own Repo's, named with
+ * both Authors: what every door that composes a sandbox refuses it with.
+ *
+ * The Authors by the name the Repos pane draws them under — the display name,
+ * or the git name where nobody gave one — because that pane is where the
+ * human goes to put one of them right.
+ */
+export type OtherAuthor = { 
+/**
+ * What the companion Repo is called.
+ */
+companion: string, 
+/**
+ * Who it is committed and pushed as.
+ */
+companion_author: string, 
+/**
+ * And who the Conversation's own Repo is.
+ */
+author: string, };
 
 /**
  * Which of a Conversation's three roles a Pairing is for.
@@ -4752,17 +4876,25 @@ id: number, html: string, };
  * match its own spelling against the list afterwards would be guessing at an
  * answer this endpoint is already holding.
  */
-export type Registered = { "Added": RepoEntry } | "NotAbsolute" | "Missing" | "NotARepository" | "NoDefaultBranch" | { "AlreadyRegistered": RepoEntry };
+export type Registered = { "Added": RepoEntry } | "NotAbsolute" | "Missing" | "NotARepository" | "NoDefaultBranch" | { "AlreadyRegistered": RepoEntry } | "AuthorUnpicked" | "NoSuchAuthor";
 
 /**
  * A repository the human is asking Verkstead to take on, named by its absolute
  * path.
  *
- * A path and nothing else: the name and the default branch are read off the
- * repository rather than claimed, for the same reason the CLI derives a Set's
- * `project` and `branch` instead of trusting them.
+ * A path, and the Author it is to be recorded as: the name and the default
+ * branch are read off the repository rather than claimed, for the same reason
+ * the CLI derives a Set's `project` and `branch` instead of trusting them.
  */
-export type Registration = { path: string, };
+export type Registration = { path: string, 
+/**
+ * The uuid of the Author the Repo's work is to be done as (ADR-0025).
+ *
+ * Asked only where more than one is configured, and refused there when it
+ * is missing — see [`Registered::AuthorUnpicked`]. With one configured
+ * nothing need be sent and the Repo is recorded as that one.
+ */
+author?: string, };
 
 /**
  * Whether the human is done with the banner that points at this section.
@@ -4865,7 +4997,18 @@ repo: string | null, diff: DiffView, };
  * typed to register it: that is the directory Verkstead will actually work in,
  * so it is the one worth showing.
  */
-export type RepoEntry = { id: number, name: string, path: string, default_branch: string, };
+export type RepoEntry = { id: number, name: string, path: string, default_branch: string, 
+/**
+ * The uuid of the Author its work is done as, or nothing where none is
+ * recorded (ADR-0025).
+ */
+author: string | null, 
+/**
+ * No Author is recorded and more than one is configured, so there is no
+ * saying which this Repo's work is done as. With one Author or none there
+ * is nothing to choose between, so this is never said of those.
+ */
+author_unpicked: boolean, };
 
 /**
  * What a Repo was last grilled with, as a Conversation started on it would
@@ -4923,7 +5066,7 @@ export type RepoRemoved = "Removed" | "NoSuchRepo" | "InUse";
 /**
  * What became of moving a Conversation onto another Repo.
  */
-export type RepoSwitched = "Switched" | "NoSuchConversation" | "NotDrafting" | "Adopting" | "NoSuchRepo";
+export type RepoSwitched = "Switched" | "NoSuchConversation" | "NotDrafting" | "Adopting" | "NoSuchRepo" | { "OtherAuthor": OtherAuthor };
 
 /**
  * One registered Repo, whole: the row, and everything a reading of the
@@ -4955,6 +5098,14 @@ path: string,
  */
 default_branch: string, 
 /**
+ * The uuid of the Author it is recorded as, as [`RepoEntry::author`].
+ */
+author: string | null, 
+/**
+ * Whether one is still to be picked, as [`RepoEntry::author_unpicked`].
+ */
+author_unpicked: boolean, 
+/**
  * Every branch the repository has, local and remote-tracking both — the
  * same reading the base dropdown is filled from.
  */
@@ -4976,6 +5127,24 @@ finished: number,
  * which is most repositories most days.
  */
 roadmaps: Array<AbandonedRoadmap>, };
+
+/**
+ * What became of pointing a Repo at another Author.
+ *
+ * Refused while work that is neither Done nor Closed has the Repo in it, the
+ * rule unregistering follows and for the reason ADR-0025 gives: a branch half
+ * committed as one Author would carry on as another.
+ */
+export type Repointed = { "Repointed": RepoEntry } | "NoSuchRepo" | "NoSuchAuthor" | { "InUse": { on: Array<string>, beside: Array<string>, } };
+
+/**
+ * A Repo pointed at another Author, from its row on the Repos pane.
+ */
+export type Repointing = { 
+/**
+ * The uuid of the Author its work is to be done as from now on.
+ */
+author: string, };
 
 /**
  * The **Resolve conflicts** press as the page receives it: when, and nothing
@@ -5587,7 +5756,12 @@ attachments: Array<AttachmentView>, };
  * one — and the token's half is an action rather than a value, because most
  * saves are not about the token at all.
  */
-export type SettingsEdit = { git_author: Author, github_token: TokenEdit, 
+export type SettingsEdit = { git_author: Author, 
+/**
+ * What is to become of the token of the Author `git_author` is about —
+ * the one it names, or the one a `null` uuid makes.
+ */
+github_token: TokenEdit, 
 /**
  * The languages as the page has just left them, as values rather than as
  * an action: there is nothing secret about a switch or a size, so a save
@@ -5751,10 +5925,20 @@ tried: Array<ServerTried>, };
  */
 export type SettingsView = { git_author: Author, 
 /**
- * What can be said about the configured token, or `null` where there is
+ * What can be said about that Author's token, or `null` where it holds
  * none — which is what a Verkstead nobody has told anything looks like.
  */
 github_token: TokenSaved | null, 
+/**
+ * And every Author, in the order `config.yaml` lists them — empty on a
+ * Verkstead nobody has told anything. The first of them is `git_author`
+ * above, which is the one a form about something else sends back and the
+ * wizard's git step asks for.
+ *
+ * What the Git section's dropdown offers, once there are two to choose
+ * between, and what its fields are drawn from.
+ */
+authors: Array<AuthorSaved>, 
 /**
  * And the languages a session is given build support for, one per
  * descriptor the server loaded — the ones Verkstead ships with whatever
@@ -6319,7 +6503,7 @@ export type SteerCancelled = "Cancelled" | "NoSuchConversation";
  * be refused for and what a steer can be refused for are different lists, and
  * one list would say each press can be refused for things it never could.
  */
-export type SteerCompanionRefusal = "OwnRepo" | "AlreadyAdded" | "NotACompanion" | "AlreadyReadWrite" | "FetchFailed" | "NoBaseCommit" | "BranchExists" | "WorktreeRefused";
+export type SteerCompanionRefusal = "OwnRepo" | { "OtherAuthor": { companion_author: string, author: string, } } | "AlreadyAdded" | "NotACompanion" | "AlreadyReadWrite" | "FetchFailed" | "NoBaseCommit" | "BranchExists" | "WorktreeRefused";
 
 /**
  * A steer as the page receives it: when, where the human sent it, and what
@@ -6807,7 +6991,7 @@ conversation: number, } } | { "WouldDiscard": {
  * every Conversation standing on a link of it is closed by the one
  * press.
  */
-uncommitted: Array<Uncommitted>, } } | "NoImplementationProfile" | "NoReviewProfile" | { "ProfileBroken": ProfileTrouble } | "FetchFailed" | "NoHeadBranch" | "BranchAhead" | "BranchDiverged" | "FastForwardFailed" | { "CheckedOutElsewhere": { 
+uncommitted: Array<Uncommitted>, } } | "NoImplementationProfile" | "NoReviewProfile" | { "ProfileBroken": ProfileTrouble } | "NoGitAuthor" | { "RepoAuthorGone": { repo: string, } } | { "RepoAuthorUnpicked": { repo: string, } } | { "RepoAuthorTokenAwaited": { repo: string, device: string, } } | { "OtherAuthor": OtherAuthor } | "FetchFailed" | "NoHeadBranch" | "BranchAhead" | "BranchDiverged" | "FastForwardFailed" | { "CheckedOutElsewhere": { 
 /**
  * Where it is checked out, as git named it.
  */
@@ -7046,7 +7230,7 @@ export type TimelineEvent = { "Brief": BriefEvent } | { "Moved": MovedEvent } | 
 export type TokenEdit = "Keep" | { "Set": { token: string, } } | "Clear";
 
 /**
- * Everything about the configured token that is not the token.
+ * Everything about the Author's token that is not the token.
  */
 export type TokenSaved = { 
 /**

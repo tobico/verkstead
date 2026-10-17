@@ -125,6 +125,7 @@ import type {
   MemoEvent,
   MovedEvent,
   NoticeEvent,
+  OtherAuthor,
   PendingSteerView,
   PinnedEvent,
   ProfileEntry,
@@ -258,12 +259,74 @@ export function companionRefusal(why: CompanionRefusal): string {
 /// thing to go and look at is one of several repos rather than the obvious one.
 export function grillRefusal(outcome: GrillingStarted): string {
   if (typeof outcome === "object") {
-    return "ProfileBroken" in outcome
-      ? profileRefusal(outcome.ProfileBroken)
-      : `${outcome.Companion.repo}: ${companionRefusal(outcome.Companion.why)}`;
+    if ("ProfileBroken" in outcome) {
+      return profileRefusal(outcome.ProfileBroken);
+    }
+
+    if ("RepoAuthorGone" in outcome) {
+      return authorGone(outcome.RepoAuthorGone.repo);
+    }
+
+    if ("RepoAuthorUnpicked" in outcome) {
+      return authorUnpicked(outcome.RepoAuthorUnpicked.repo);
+    }
+
+    if ("RepoAuthorTokenAwaited" in outcome) {
+      return authorTokenAwaited(outcome.RepoAuthorTokenAwaited);
+    }
+
+    if ("OtherAuthor" in outcome) {
+      return otherAuthorHeld(outcome.OtherAuthor);
+    }
+
+    return `${outcome.Companion.repo}: ${companionRefusal(outcome.Companion.why)}`;
   }
 
   return GRILL_REFUSAL[outcome];
+}
+
+/// What a press says over a repo whose author `config.yaml` no longer holds,
+/// whichever press it was — a start or an adoption — and where to pick
+/// another (ADR-0025).
+export function authorGone(repo: string): string {
+  return `The ${repo} repo's author isn't configured any more, so Verkstead can't commit on the branch. Pick another under Repos in Settings first.`;
+}
+
+/// And over one with no author picked among several.
+export function authorUnpicked(repo: string): string {
+  return `The ${repo} repo has no author picked, so Verkstead can't commit on the branch. Pick one under Repos in Settings first.`;
+}
+
+/// And over one whose author is at home on another device, whose token has
+/// not reached this one yet: named with that device, which is where it comes
+/// from, the way a profile whose home isn't answering is (ADR-0025).
+export function authorTokenAwaited(awaited: {
+  repo: string;
+  device: string;
+}): string {
+  return `The ${awaited.repo} repo's author is at home on ${awaited.device}, and its token hasn't reached this device yet. Try again once ${awaited.device} is reachable.`;
+}
+
+/// What a press says over a companion under another author than the repo the
+/// conversation is on: one sandbox is one GitHub token and one git author, so
+/// the two can't share it (ADR-0025).
+///
+/// `repo` is how that repo is spoken of — *this conversation's repo*, or *that
+/// repo* where the press was the switch onto it.
+export function otherAuthor(
+  other: OtherAuthor,
+  repo = "this conversation's repo",
+): string {
+  return `The ${other.companion} repo is ${other.companion_author}'s and ${repo} is ${other.author}'s. A conversation works as one author.`;
+}
+
+/// And the same over a companion already on the conversation, which is the
+/// one to take off.
+export function otherAuthorHeld(
+  other: OtherAuthor,
+  repo = "this conversation's repo",
+): string {
+  return `${otherAuthor(other, repo)} Take the ${other.companion} repo off first.`;
 }
 
 /// What to say about a press refused over a chosen profile, whichever press it

@@ -63,6 +63,10 @@ use verkstead_server::settings::Settings;
 use verkstead_server::skills::Skills;
 use verkstead_server::store;
 
+/// The one Author a test's sessions commit as, keyed `work`.
+const THE_AUTHOR: &str =
+    "authors:\n  - id: work\n    name: Tobias Cohen\n    email: tobi@tobico.net\n";
+
 /// The device every Conversation started here is ranked by, named the way a
 /// cluster names one (ADR-0020, *Ranks*).
 const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
@@ -3082,7 +3086,7 @@ async fn the_binds_the_settings_file_holds_are_inside_and_writable_too() {
 )]
 async fn a_read_only_companion_is_there_to_read_and_a_commit_from_it_is_refused() {
     let fixture = grilling_alongside(&[("askance", store::CompanionMode::ReadOnly)]).await;
-    fixture.configure("git_author:\n  name: Tobias Cohen\n  email: tobi@tobico.net\n");
+    fixture.configure(THE_AUTHOR);
 
     let companion = fixture.companion_worktree("askance").to_owned();
 
@@ -3160,7 +3164,7 @@ async fn a_read_only_companion_is_there_to_read_and_a_commit_from_it_is_refused(
 )]
 async fn a_read_write_companion_takes_a_commit_on_its_own_branch() {
     let fixture = grilling_alongside(&[("askance", store::CompanionMode::ReadWrite)]).await;
-    fixture.configure("git_author:\n  name: Tobias Cohen\n  email: tobi@tobico.net\n");
+    fixture.configure(THE_AUTHOR);
 
     let companion = fixture.companion_worktree("askance").to_owned();
 
@@ -3541,8 +3545,8 @@ async fn the_compile_server_holds_the_worktrees_and_none_of_the_data_directory()
 
     // The four things it must not reach, really on disk so that their being
     // refused inside is the policy rather than the fixture.
-    fixture.configure("git_author:\n  name: Tobias Cohen\n");
-    fixture.configure_github_token("github_token: ghp_thetoken\n");
+    fixture.configure("authors:\n  - id: work\n    name: Tobias Cohen\n");
+    fixture.configure_github_token("author_tokens:\n  work: ghp_thetoken\n");
     std::fs::write(fixture.state.path().join("verkstead.db"), "the database\n").unwrap();
     std::fs::create_dir_all(fixture.state.path().join("handoffs")).unwrap();
     fixture.attach("wireframe.png", b"PNG");

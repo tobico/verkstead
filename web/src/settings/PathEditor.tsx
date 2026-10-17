@@ -48,6 +48,7 @@ import { useReading } from "../freshness";
 import { Empty } from "../notices";
 import {
   heldAtOnce,
+  heldAuthor,
   heldCleanup,
   heldInstructions,
   heldLanguages,
@@ -126,7 +127,7 @@ export function useWritingPaths() {
       return saveSettings({
         // The rest of both files as they stand: the endpoint writes them whole,
         // and a paths editor has no business with any of it.
-        git_author: standing?.git_author ?? { name: "", email: "" },
+        git_author: heldAuthor(standing),
         github_token: "Keep",
         // And the languages as they stand — see [`heldLanguages`].
         ...heldLanguages(standing),

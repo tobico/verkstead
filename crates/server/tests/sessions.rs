@@ -8261,7 +8261,8 @@ fn configure(fixture: &Grilling, more: &str) {
 
 /// Who every session in these tests commits as, which is the whole of what a
 /// bench's `config.yaml` says until a test writes something else into it.
-const THE_AUTHOR: &str = "git_author:\n  name: Verkstead Test\n  email: test@verkstead.invalid\n";
+const THE_AUTHOR: &str =
+    "authors:\n  - id: work\n    name: Verkstead Test\n    email: test@verkstead.invalid\n";
 
 /// What Verkstead has written down about whether this Conversation's own pull
 /// request merges, which is the reading a card is drawn off long after anything
@@ -21280,6 +21281,127 @@ async fn a_settle_with_no_git_author_starts_no_stage_and_says_so() {
         titles.contains(&format!("{} is done.", roadmap.branch)),
         "beside the Conversation that settled saying so: {titles:?}",
     );
+}
+
+/// A Repo whose Author was taken out of `config.yaml` by hand halts the stage
+/// that would carry on onto it, naming the Repo and sending the human to the
+/// Repos pane — rather than starting it as the Author left (ADR-0025).
+#[tokio::test]
+async fn a_settle_on_a_repo_whose_author_is_gone_starts_no_stage_and_says_so() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+    let worked = spill.path().join("task-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, RECORDS_STACKING, ""),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    // The Repo is recorded as `work`, and `work` is the entry deleted: another
+    // Author stands in the file, and is not who the stage is started as.
+    std::fs::write(
+        fixture.state.path().join("config.yaml"),
+        "authors:\n  - id: home\n    name: Tobi at Home\n    email: tobi@example.com\n",
+    )
+    .unwrap();
+
+    staged(&fixture).await;
+
+    let said = said_on(&fixture, fixture.id, "author isn't configured any more").await;
+
+    assert!(
+        said.contains("Stage 01") && said.contains("repo's author isn't configured any more"),
+        "the notice names the stage and why: {said:?}",
+    );
+    assert!(
+        said.contains("Nothing was started") && said.contains("Pick another under Repos"),
+        "and where the human picks another: {said:?}",
+    );
+
+    assert_eq!(
+        conversations(&fixture.app).await.len(),
+        1,
+        "no stage was started",
+    );
+    assert!(
+        !git(
+            &fixture.repo(),
+            &["branch", "--list", "roadmaps/rate-limiting/01-counter"]
+        )
+        .contains("01-counter"),
+        "and no branch was cut for it",
+    );
+    assert!(!planning.exists(), "nor any session launched");
+}
+
+/// A companion moved under another Author since the roadmap was grilled with
+/// it halts the stage that would inherit it, naming the companion and both
+/// Authors — one sandbox works as one author (ADR-0025) — and nothing is
+/// started.
+#[tokio::test]
+async fn a_stage_inheriting_a_companion_of_another_author_starts_nothing_and_says_so() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+    let worked = spill.path().join("task-prompts");
+
+    let fixture = grilling_at_pace(
+        spill,
+        &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, RECORDS_STACKING, ""),
+        &gh_about(GREEN, "", ""),
+        *BRISKLY,
+        &[("askance", CompanionMode::ReadOnly)],
+    )
+    .await;
+
+    // A second Author, and the companion recorded as it behind the
+    // workbench's back: admitted as `work`'s, and `home`'s by the time the
+    // stage would inherit it.
+    std::fs::write(
+        fixture.state.path().join("config.yaml"),
+        format!("{THE_AUTHOR}  - id: home\n    name: Tobi at Home\n    email: tobi@example.com\n"),
+    )
+    .unwrap();
+
+    let askance = companion_repo(&fixture).await;
+    let pool = open_database(&fixture.database).await.unwrap();
+    sqlx::query("UPDATE repo_authors SET author = 'home' WHERE repo_id = ?")
+        .bind(askance)
+        .execute(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+
+    staged(&fixture).await;
+
+    let said = said_on(&fixture, fixture.id, "one sandbox works as one author").await;
+
+    assert!(
+        said.contains("Stage 01")
+            && said.contains("<code>askance</code> is Tobi at Home's")
+            && said.contains("is Verkstead Test's"),
+        "the notice names the stage, the companion and both authors: {said:?}",
+    );
+    assert!(
+        said.contains("Nothing was started"),
+        "and says nothing was: {said:?}"
+    );
+
+    assert_eq!(
+        conversations(&fixture.app).await.len(),
+        1,
+        "no stage was started",
+    );
+    assert!(
+        !git(
+            &fixture.repo(),
+            &["branch", "--list", "roadmaps/rate-limiting/01-counter"]
+        )
+        .contains("01-counter"),
+        "and no branch was cut for it",
+    );
+    assert!(!planning.exists(), "nor any session launched");
 }
 
 /// A stage already on a branch is a stage already under way, and the unattended

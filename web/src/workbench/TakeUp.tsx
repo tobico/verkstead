@@ -30,7 +30,14 @@ import { For, Show, type JSX } from "solid-js";
 
 import type { TakenUp, Uncommitted } from "../api/types";
 import { pathOf } from "./openings";
-import { companionRefusal, profileRefusal } from "./Timeline";
+import {
+  authorGone,
+  authorTokenAwaited,
+  authorUnpicked,
+  companionRefusal,
+  otherAuthorHeld,
+  profileRefusal,
+} from "./Timeline";
 
 /// Each way of being refused a take-up, in the words of what to go and do about
 /// it — for the conversation's own repo.
@@ -52,6 +59,8 @@ export const TAKE_UP_REFUSAL: Record<Extract<TakenUp, string>, string> = {
   NoImplementationProfile:
     "Choose an implementation profile and model on the brief first.",
   NoReviewProfile: "Choose a review profile and model on the brief first.",
+  NoGitAuthor:
+    "No git author is set, so Verkstead can't commit on the branch. Set one in Settings first.",
   FetchFailed:
     "Git couldn't fetch from the repo's remote, so nothing was started. The server log says why.",
   NoHeadBranch:
@@ -104,6 +113,22 @@ export function takeUpRefusal(outcome: TakenUp): string {
 
     if ("ProfileBroken" in outcome) {
       return profileRefusal(outcome.ProfileBroken);
+    }
+
+    if ("RepoAuthorGone" in outcome) {
+      return authorGone(outcome.RepoAuthorGone.repo);
+    }
+
+    if ("RepoAuthorUnpicked" in outcome) {
+      return authorUnpicked(outcome.RepoAuthorUnpicked.repo);
+    }
+
+    if ("RepoAuthorTokenAwaited" in outcome) {
+      return authorTokenAwaited(outcome.RepoAuthorTokenAwaited);
+    }
+
+    if ("OtherAuthor" in outcome) {
+      return otherAuthorHeld(outcome.OtherAuthor);
     }
 
     return `That branch is already checked out at ${outcome.CheckedOutElsewhere.at}, and git holds one checkout per branch.`;

@@ -441,7 +441,7 @@ async fn unaddressed(
     watched: &Watched,
 ) -> Option<Vec<Comment>> {
     let asked = {
-        let gh = state.github.clone();
+        let gh = state.github.as_author(watched.repo.author.as_deref());
         let repo = watched.repo.path.clone();
         let number = watched.number;
 
@@ -902,6 +902,7 @@ mod tests {
                 path: std::path::PathBuf::from("/watched/askance"),
                 name: "askance".to_owned(),
                 default_branch: "main".to_owned(),
+                author: None,
             },
             number: 7,
             head: Some("rate-limiting".to_owned()),

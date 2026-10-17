@@ -89,7 +89,7 @@ import type {
 import { useReading } from "../freshness";
 import { Empty, ErrorLine, More, Note } from "../notices";
 import { PaneHead } from "../workbench/PaneHead";
-import { heldConfig } from "./held";
+import { heldAuthor, heldConfig } from "./held";
 import styles from "./McpServers.module.css";
 import { SettingsCard } from "./SettingsCard";
 
@@ -187,7 +187,7 @@ export function savingServers(
   servers: McpServersEdit,
 ): SettingsEdit {
   return {
-    git_author: told?.git_author ?? { name: "", email: "" },
+    git_author: heldAuthor(told),
     // Untouched. This has no business with the credentials, and a blank token
     // field read as *clear this* is exactly what `Keep` is here to stop.
     github_token: "Keep",

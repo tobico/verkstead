@@ -584,19 +584,22 @@ does not, and nothing at all where there is no rustup on the `PATH`, which is
 every nix machine.
 
 A session's GitHub auth and the author of its commits are two of those settings
-rather than anything found in a home directory. Put a token in `secrets.yaml`
-beside the database, and who you are in `config.yaml`:
+rather than anything found in a home directory. Who you are is an **Author** in
+`config.yaml`, keyed by a uuid, and its token is in `secrets.yaml` beside the
+database under that uuid:
 
 ```yaml
 # secrets.yaml
-github_token: ghp_...
+author_tokens:
+  3f2c9a4e-8d1b-4c7a-9e2f-5b6d7c8e9f01: ghp_...
 ```
 
 ```yaml
 # config.yaml
-git_author:
-  name: Tobias Cohen
-  email: tobi@tobico.net
+authors:
+  - id: 3f2c9a4e-8d1b-4c7a-9e2f-5b6d7c8e9f01
+    name: Tobias Cohen
+    email: tobi@tobico.net
 languages:
   rust:
     enabled: true
@@ -640,6 +643,11 @@ is where Rust's two used to be said, and is still read as Rust's — the map win
 where both say something, and the first save from the settings page carries it
 into the map and leaves the old key out of the file.
 
+A Data Directory from before the list said `git_author:` in `config.yaml` and
+`github_token:` in `secrets.yaml`. The first start moves the two into the list
+as one Author under a fresh uuid, and neither key is in either file afterwards
+([ADR-0025](adr/0025-a-repo-has-an-author.md)).
+
 `sandbox_binds` at the foot is the other place the Sandbox Configuration binds
 are said. A bind is one absolute path, every session gets every one of them, and
 what the server goes by is the union of this file and the installation's own
@@ -662,7 +670,7 @@ what the settings page saves through:
 
 ```console
 $ curl http://127.0.0.1:8422/api/ui/settings
-{"git_author":{"name":"","email":""},"github_token":null,
+{"git_author":{"id":null,"display_name":"","name":"","email":""},"github_token":null,
  "languages":[{"name":"rust","label":"Rust","enabled":true,"size":"30G",
    "size_configured":false,"compiling":"Cached","unread":null},
   {"name":"go","label":"Go","enabled":true,"size":"30G",
@@ -679,7 +687,8 @@ $ curl http://127.0.0.1:8422/api/ui/settings
  "share_on_done":false,"paths":{"binds":[]},
  "ignored_comments":[],"instructions":""}
 $ curl -X POST -H 'Content-Type: application/json' \
-    -d '{"git_author":{"name":"Tobias Cohen","email":"tobi@tobico.net"},
+    -d '{"git_author":{"id":null,"display_name":"",
+           "name":"Tobias Cohen","email":"tobi@tobico.net"},
          "github_token":{"Set":{"token":"ghp_..."}},
          "languages":[{"name":"rust","enabled":true,"size":""},
            {"name":"go","enabled":true,"size":""},
@@ -693,7 +702,8 @@ $ curl -X POST -H 'Content-Type: application/json' \
          "sandbox_binds":["/var/cache/verkstead-node"],
          "ignored_comments":"Keep","instructions":""}' \
     http://127.0.0.1:8422/api/ui/settings
-{"settings":{"git_author":{"name":"Tobias Cohen","email":"tobi@tobico.net"},
+{"settings":{"git_author":{"id":"3f2c9a4e-8d1b-4c7a-9e2f-5b6d7c8e9f01",
+    "display_name":"","name":"Tobias Cohen","email":"tobi@tobico.net"},
   "github_token":{"last_four":"cdef","at":"2026-08-23T08:23:15.041950412Z"},
   "languages":[{"name":"rust","label":"Rust","enabled":true,"size":"30G",
     "size_configured":false,"compiling":"Cached","unread":null},
@@ -726,7 +736,9 @@ Verkstead needs that GitHub says the token has not been given — `gist`, which
 publishing a share writes with, and empty on a token that carries it or on a
 fine-grained one GitHub named no scopes for at all. `"github_token"` is
 `"Keep"` to leave the configured one alone, which is what a save of the author
-fields sends, and `"Clear"` to take it away.
+fields sends, and `"Clear"` to take it away. Both halves are about the Author
+whose uuid `"git_author"` carries; a `null` uuid is the first Author, made under
+a fresh uuid where there is none yet and the save says anything about it.
 
 `"languages"` is one entry per **descriptor** the server loaded — the seven
 Verkstead ships and whatever `config.yaml` added — sent as values rather than as

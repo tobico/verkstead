@@ -183,7 +183,7 @@ use crate::attachments::{self, Attachments};
 use crate::build_cache::{self, BuildCache, Compiles};
 use crate::handoffs::{self, Handoffs};
 use crate::platform::Platform;
-use crate::settings::{Config, GitAuthor, Secrets};
+use crate::settings::{Author, Config, GitAuthor, Secrets};
 use crate::skills::Skills;
 use crate::store;
 use crate::terminal;
@@ -4049,8 +4049,20 @@ impl Sandbox {
             // Read above rather than here: the volume check a Windows profile
             // needs is made before a session is rendered — see [`across_volumes`].
             home,
-            github_token: secrets.github_token().map(str::to_owned),
-            git_author: config.git_author().clone(),
+            // The Conversation's Repo's Author's — see [`Config::author_of`],
+            // and [`Config::token_of`] for a mirror's copy — and nothing of any
+            // other Author's: a companion contributes none of its own, a
+            // sandbox having the one environment. Neither half where there is
+            // none: git's own "tell me who you are" and `gh`'s own "not logged
+            // in" are the failures worth having.
+            github_token: config
+                .author_of(conversation.repo.author.as_deref())
+                .and_then(|author| config.token_of(author, secrets))
+                .map(str::to_owned),
+            git_author: config
+                .author_of(conversation.repo.author.as_deref())
+                .map(Author::git_author)
+                .unwrap_or_default(),
             instructions: config.instructions().to_owned(),
             // Resolved here rather than carried as names, so that the one
             // reading of the settings a launch makes is the one every part of
@@ -4101,7 +4113,8 @@ impl Sandbox {
     /// directory of its own — see [`Home::place`] — and is told of no
     /// Conversation to ask from, because it has none. Nothing the installation
     /// binds is bound either: those are for working on code, and nothing here
-    /// does.
+    /// does. **No Author either**: a login has no Repo to have one, and
+    /// commits nothing — so no `GH_TOKEN` and no `GIT_CONFIG_*` author pairs.
     ///
     /// **On Windows it runs as the session account**, as a session does, behind
     /// a boundary of its own kept under [`login_boundary`] — there being no
@@ -4116,7 +4129,6 @@ impl Sandbox {
         skills: &Skills,
         verkstead: &Executable,
         secrets: &Secrets,
-        config: &Config,
     ) -> Option<Sandbox> {
         let home = homes.for_login(profile.id);
         let place = home.place();
@@ -4171,8 +4183,10 @@ impl Sandbox {
             handoff_dir: None,
             attachments: None,
             home,
+            // No token and no author: a login has no Repo, so it has no Author
+            // to be, and it commits nothing.
             github_token: None,
-            git_author: config.git_author().clone(),
+            git_author: GitAuthor::default(),
             instructions: String::new(),
             mcp_servers: Vec::new(),
             server: None,

@@ -55,7 +55,7 @@ import type {
 } from "../api/types";
 import { useReading } from "../freshness";
 import { ErrorLine, Note } from "../notices";
-import { heldConfig } from "../settings/held";
+import { heldAuthor, heldConfig } from "../settings/held";
 import { TokenScopes } from "../settings/scopes";
 import { utcStamp } from "../set/when";
 import { COMPOSE } from "./steps";
@@ -186,7 +186,13 @@ export function Git(): JSX.Element {
   /// and a wizard turned down over a pattern or a name somebody hand-edited into
   /// the file would be a wizard nobody could finish.
   const edit = (): SettingsEdit => ({
-    git_author: { name: authorName().trim(), email: authorEmail().trim() },
+    // Over the one Author there is, or none yet — the wizard asks for one, and
+    // a save under no uuid is what makes it.
+    git_author: {
+      ...heldAuthor(told()),
+      name: authorName().trim(),
+      email: authorEmail().trim(),
+    },
     github_token: tokenEdit(),
     share_on_done: told()?.share_on_done ?? false,
     ignored_comments: "Keep",

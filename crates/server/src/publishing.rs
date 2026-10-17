@@ -41,8 +41,8 @@
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-use crate::github::{self, Gh, Trouble};
-use crate::settings::GitAuthor;
+use crate::github::{self, Credential, Gh, Trouble};
+use crate::settings::{Author, GitAuthor, Settings};
 use crate::unseen::Unseen;
 
 /// What became of a publish, in the server's own words — see
@@ -122,6 +122,53 @@ pub(crate) fn publish(
     }
 }
 
+/// [`publish`] as the Author a Conversation's Repo recorded as `recorded` —
+/// see [`crate::settings::Config::author_of`] — and answer the token it was
+/// published as beside what became of it.
+///
+/// Its token for the gist, and its name on the gist's commit. Both files are
+/// read here, at the moment of the publish, for the reason every other reader
+/// of them reads them late. The token comes back because the comments that
+/// follow a publish are left as whoever the gist belongs to.
+pub(crate) fn publish_as(
+    gh: &Gh,
+    settings: &Settings,
+    recorded: Option<&str>,
+    description: &str,
+    name: &str,
+    document: &str,
+) -> (Publishing, Option<String>) {
+    let secrets = settings.secrets();
+    let config = settings.config();
+
+    let author = config.author_of(recorded);
+
+    // A mirror whose token's copy has not arrived is refused by that name
+    // rather than as an Author with no token, which it is not.
+    if let Some(mirror) = author
+        .and_then(|author| config.mirror(author.id()))
+        .filter(|mirror| mirror.awaited())
+    {
+        return (
+            Publishing::Refused(crate::github::awaited(mirror.device())),
+            None,
+        );
+    }
+
+    let token = author.and_then(|author| config.token_of(author, &secrets));
+
+    let published = publish(
+        gh,
+        token,
+        &author.map(Author::git_author).unwrap_or_default(),
+        description,
+        name,
+        document,
+    );
+
+    (published, token.map(str::to_owned))
+}
+
 /// What the gist holds between being made and being pushed to, which is a few
 /// seconds at most.
 ///
@@ -188,30 +235,15 @@ fn written(
 
 /// One git command in `dir`, authenticating as `token` where it reaches GitHub.
 ///
-/// The credential helper is declared on every call rather than only on the two
-/// that talk to the network, because which of them does is git's business: a
-/// clone may fetch, a push may re-fetch, and a helper that is there and unasked
-/// costs nothing.
-///
-/// **The token goes through the environment.** The helper is a shell function
-/// that reads `GH_TOKEN`, so what appears in the process list is the shape of
-/// the helper and never the credential — which is exactly what putting the token
-/// in the remote URL would do instead. The empty `credential.helper=` in front
-/// of it clears whatever the machine has configured, so that a publish
-/// authenticates as the token it was given and never as the host's stored login.
+/// Through the helper every git of Verkstead's own on a Repo goes through —
+/// see [`Credential::on`], which is where the token reaches git, and where it
+/// never reaches the process list.
 fn git(dir: &Path, token: &str, args: &[&str]) -> Result<(), String> {
-    const HELPER: &str = r#"!f() { if test "$1" = get; then printf 'username=x-access-token\npassword=%s\n' "$GH_TOKEN"; fi; }; f"#;
-
-    let output = Command::new("git")
-        .args(["-c", "credential.helper=", "-c"])
-        .arg(format!("credential.helper={HELPER}"))
+    let output = Credential::token(token)
+        .on(&mut Command::new("git"))
         .args(args)
         .unseen()
         .current_dir(dir)
-        .env("GH_TOKEN", token)
-        // Nothing here may stop to ask: a terminal prompt from a credential
-        // helper that found nothing would be a server thread waiting for ever.
-        .env("GIT_TERMINAL_PROMPT", "0")
         .stdin(Stdio::null())
         .output()
         .map_err(|error| format!("Git couldn't be run: {error}."))?;
@@ -290,7 +322,8 @@ mod tests {
     const SHARE: &str = "<!doctype html>\n<script>ok()</script>\n<p>Aperçu</p>\n";
 
     /// A `gh` that answers the three calls a publish makes, and writes down
-    /// which of them it was asked for.
+    /// which of them it was asked for — and, in `tokens`, what `GH_TOKEN` each
+    /// was run with.
     ///
     /// The gist it makes is a bare repository the test made, which is the whole
     /// reason this can be proved without a network: a gist is a git remote, and
@@ -305,7 +338,8 @@ mod tests {
             "/bin/sh".to_owned(),
             "-c".to_owned(),
             format!(
-                r#"case "$*" in
+                r#"printf '%s\n' "${{GH_TOKEN-unset}}" >> "{notes}/tokens"
+                case "$*" in
                     "api -i user")
                         printf 'HTTP/2.0 200 OK\r\nX-Oauth-Scopes: %s\r\n\r\n{{"login":"tobico"}}' "${{GH_TOKEN-unset}}" ;;
                     "api -X POST /gists --input -")
@@ -386,6 +420,78 @@ mod tests {
             Some("Tobias Cohen".to_owned()),
             Some("tobi@tobico.net".to_owned()),
         )
+    }
+
+    /// A share is published as its Conversation's Repo's Author: every `gh` of
+    /// the publish runs with that Author's token, the gist's commit is by its
+    /// name, and the token handed back for the comments is the same one.
+    ///
+    /// The tokens are scope lists, for [`gh`]'s reason, each with the gist
+    /// scope and a word of its own to tell them apart by.
+    #[test]
+    fn a_share_is_published_as_the_repos_own_author() {
+        let dir = tempfile::tempdir().unwrap();
+        let remote = gist(dir.path());
+        let gh = gh(&remote, dir.path());
+
+        let data_dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(data_dir.path());
+
+        std::fs::write(
+            settings.config_path(),
+            concat!(
+                "authors:\n",
+                "  - id: work\n",
+                "    name: Tobias Cohen\n",
+                "    email: tobi@tobico.net\n",
+                "  - id: home\n",
+                "    name: Tobi at Home\n",
+                "    email: tobi@example.com\n",
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            settings.secrets_path(),
+            "author_tokens:\n  work: 'repo, gist, work'\n  home: 'repo, gist, home'\n",
+        )
+        .unwrap();
+
+        let (published, token) = publish_as(
+            &gh,
+            &settings,
+            Some("home"),
+            "A Verkstead conversation: sharing",
+            "share.html",
+            SHARE,
+        );
+
+        assert_eq!(
+            published,
+            Publishing::At("https://gist.github.com/tobico/9f1".to_owned()),
+        );
+        assert_eq!(
+            token.as_deref(),
+            Some("repo, gist, home"),
+            "what the comments are left as"
+        );
+
+        let tokens = std::fs::read_to_string(dir.path().join("tokens")).unwrap();
+        assert!(
+            tokens.lines().count() >= 2 && tokens.lines().all(|line| line == "repo, gist, home"),
+            "every gh of the publish ran as the Repo's Author: {tokens:?}"
+        );
+
+        let read = dir.path().join("read");
+        holding(&remote, dir.path(), "share.html");
+        let output = Command::new("git")
+            .args(["log", "-1", "--format=%an <%ae>"])
+            .current_dir(&read)
+            .output()
+            .unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "Tobi at Home <tobi@example.com>",
+        );
     }
 
     #[test]

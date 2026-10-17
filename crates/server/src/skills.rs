@@ -4765,6 +4765,7 @@ mod tests {
                 path: PathBuf::from(format!("/home/tobi/src/{name}")),
                 name: name.to_owned(),
                 default_branch: "main".to_owned(),
+                author: None,
             },
             mode,
             base_ref: None,

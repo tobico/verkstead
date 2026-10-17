@@ -40,7 +40,8 @@ use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
-use verkstead_render::{Lacking, PairingRole, Preflight, ProfileEntry};
+use verkstead_render::{AuthorEntry, Lacking, PairingRole, Preflight, ProfileEntry};
+use verkstead_schema::Nudge;
 use verkstead_server::device::reading::Reading;
 use verkstead_server::device::{Device, Devices};
 use verkstead_server::nudge::Nudges;
@@ -49,7 +50,7 @@ use verkstead_server::peer::joining::Joins;
 use verkstead_server::peer::{self, Members};
 use verkstead_server::platform::{self, Environment, Platform};
 use verkstead_server::remote::Tailscale;
-use verkstead_server::{Routers, open_database, routers_answering_devices_telling, store};
+use verkstead_server::{Routers, open_database, routers_keeping_answering_devices_telling, store};
 use verkstead_store::{Linking, record_member};
 
 /// The device the work is on, and where every assertion is made: the preflight
@@ -83,6 +84,7 @@ struct Verkstead {
     pool: SqlitePool,
     workbench: Router,
     address: SocketAddr,
+    nudges: Nudges,
 
     /// Held for the length of the test: the identity, the database, the
     /// accounts and every repository registered on it live in it.
@@ -136,14 +138,20 @@ impl Verkstead {
         let Routers {
             workbench,
             over_the_link,
-        } = routers_answering_devices_telling(pool.clone(), cluster, nudges.clone(), machine);
+        } = routers_keeping_answering_devices_telling(
+            pool.clone(),
+            dir.path().to_owned(),
+            cluster,
+            nudges.clone(),
+            machine,
+        );
 
         tokio::spawn(listener.serving(peer::router(
             device.clone(),
             reading,
             members,
             Joins::none(),
-            nudges,
+            nudges.clone(),
             over_the_link,
         )));
 
@@ -152,6 +160,7 @@ impl Verkstead {
             pool,
             workbench,
             address,
+            nudges,
             dir,
         }
     }
@@ -199,6 +208,52 @@ impl Verkstead {
             .await
             .unwrap()
             .expect("the Repo that was just registered")
+    }
+
+    /// Write `yaml` as this device's `config.yaml`, which is where its own
+    /// Authors are.
+    fn configured(&self, yaml: &str) {
+        std::fs::write(self.dir.path().join("config.yaml"), yaml).unwrap();
+    }
+
+    /// Read every member's Authors again and wait until each of `ids` is
+    /// drawn here as a mirror — the refresher's own round, as a membership
+    /// moving starts one.
+    async fn mirrors(&self, ids: &[&str]) {
+        self.nudges.announce(Nudge::Devices);
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+
+        loop {
+            let rows: Vec<AuthorEntry> = reading(&self.workbench, "/api/ui/authors").await;
+
+            if ids
+                .iter()
+                .all(|id| rows.iter().any(|row| row.id == *id && row.device.is_some()))
+            {
+                return;
+            }
+
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the mirrors of {ids:?} never arrived: {rows:?}",
+            );
+
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    }
+
+    /// Record `repo` as the Author with the uuid `author`.
+    async fn repoint(&self, repo: &store::Repo, author: &str) {
+        let repointed = store::repoint_repo(&self.pool, repo.id, author)
+            .await
+            .unwrap();
+
+        assert!(
+            matches!(repointed, store::Repointing::Repointed(_)),
+            "repointing {}: {repointed:?}",
+            repo.name,
+        );
     }
 
     /// An account on this machine for a Profile to name: the pair Claude Code
@@ -564,5 +619,113 @@ async fn a_device_that_is_not_answering_is_unreachable_and_nothing_else() {
         found.lacks,
         vec![Lacking::Unreachable],
         "a machine that said nothing has failed none of the questions under it",
+    );
+}
+
+/// Two Authors at home on A, which B holds as mirrors: the one list, as two
+/// devices of a cluster each draw it.
+const TWO_AUTHORS: &str = "authors:\n  - id: work\n    display_name: Work\n    name: Ada Lovelace\n    email: ada@work.example\n  - id: home\n    display_name: Home\n    name: Ada Lovelace\n    email: ada@home.example\n";
+
+/// A far Repo under another Author than this one's is named with both, and a
+/// repoint over there clears it — the same Author being the same uuid, a mirror
+/// there and the local one here alike.
+#[tokio::test]
+async fn a_repo_under_another_author_over_there_is_named_with_both() {
+    let (a, b) = linked_up().await;
+    a.configured(TWO_AUTHORS);
+    b.mirrors(&["work", "home"]).await;
+
+    let origin = "https://github.com/you/widgets.git";
+
+    let there = b.repo("widgets-clone", Some(origin)).await;
+    b.repoint(&there, "home").await;
+
+    let here = a.repo("widgets", Some(origin)).await;
+    a.repoint(&here, "work").await;
+
+    let profile = a.saves("work").await;
+    let conversation = a.conversation(&here, profile).await;
+
+    assert_eq!(
+        a.preflight(conversation, B).await.lacks,
+        vec![Lacking::RepoAuthor {
+            name: "widgets".to_owned(),
+            companion: false,
+            here: "Work".to_owned(),
+            there: "Home".to_owned(),
+        }],
+    );
+
+    b.repoint(&there, "work").await;
+
+    assert_eq!(
+        a.preflight(conversation, B).await.lacks,
+        Vec::new(),
+        "the mirror of Work over there is Work",
+    );
+}
+
+/// A Companion whose match over there is under another Author is named as the
+/// Companion, with both.
+#[tokio::test]
+async fn a_companion_under_another_author_over_there_is_named_with_both() {
+    let (a, b) = linked_up().await;
+    a.configured(TWO_AUTHORS);
+    b.mirrors(&["work", "home"]).await;
+
+    let origin = "https://github.com/you/widgets.git";
+    let beside = "https://github.com/you/askance.git";
+
+    let there = b.repo("widgets-clone", Some(origin)).await;
+    b.repoint(&there, "work").await;
+    let companion_there = b.repo("askance", Some(beside)).await;
+    b.repoint(&companion_there, "home").await;
+
+    let here = a.repo("widgets", Some(origin)).await;
+    a.repoint(&here, "work").await;
+    let companion = a.repo("askance", Some(beside)).await;
+    a.repoint(&companion, "work").await;
+
+    let profile = a.saves("work").await;
+    let conversation = a.conversation(&here, profile).await;
+
+    store::add_companion(&a.pool, conversation, companion.id)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        a.preflight(conversation, B).await.lacks,
+        vec![Lacking::RepoAuthor {
+            name: "askance".to_owned(),
+            companion: true,
+            here: "Work".to_owned(),
+            there: "Home".to_owned(),
+        }],
+    );
+}
+
+/// A far Repo with no Author picked among the several over there is a finding
+/// of its own, whatever this one's is.
+#[tokio::test]
+async fn a_repo_with_no_author_picked_over_there_is_named() {
+    let (a, b) = linked_up().await;
+    a.configured(TWO_AUTHORS);
+    b.configured(TWO_AUTHORS);
+
+    let origin = "https://github.com/you/widgets.git";
+
+    b.repo("widgets-clone", Some(origin)).await;
+    let here = a.repo("widgets", Some(origin)).await;
+    a.repoint(&here, "work").await;
+
+    let profile = a.saves("work").await;
+    let conversation = a.conversation(&here, profile).await;
+
+    assert_eq!(
+        a.preflight(conversation, B).await.lacks,
+        vec![Lacking::RepoAuthorUnpicked {
+            name: "widgets".to_owned(),
+            companion: false,
+        }],
     );
 }

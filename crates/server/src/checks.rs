@@ -160,14 +160,16 @@
 //! wrap-up is over.
 
 use std::path::Path;
+use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use verkstead_schema::Nudge;
 
 use crate::AppState;
-use crate::github::{Check, Checked, Mergeable};
+use crate::github::{Check, Checked, Credential, Mergeable};
 use crate::repos::git;
 use crate::store;
+use crate::unseen::Unseen;
 use crate::wrapping::{Watched, named};
 
 /// How many fix sessions one check gets before the human is asked instead.
@@ -381,7 +383,7 @@ async fn once(
     };
 
     let asked = {
-        let gh = state.github.clone();
+        let gh = state.github.as_author(watched.repo.author.as_deref());
         let repo = watched.repo.path.clone();
         let number = watched.number;
 
@@ -557,12 +559,18 @@ async fn checking(
         let pushed = {
             let worktree = watched.worktree.clone();
             let head = watched.head.clone();
+            let credential = state
+                .github
+                .as_author(watched.repo.author.as_deref())
+                .credential();
 
             // Off the runtime's threads: this is a process, and one that goes
             // to the network.
-            tokio::task::spawn_blocking(move || pushed_head(&worktree, head.as_deref()))
-                .await
-                .unwrap_or_default()
+            tokio::task::spawn_blocking(move || {
+                pushed_head(&worktree, head.as_deref(), &credential)
+            })
+            .await
+            .unwrap_or_default()
         };
 
         if let (false, Some(pushed)) = (suite.head.is_empty(), pushed.as_deref()) {
@@ -635,7 +643,7 @@ async fn checking(
 /// the caller reads as nothing to hold the rollup against rather than as a reason
 /// to distrust it. A checkout with no remote is every one of this suite's own,
 /// and a branch origin has never heard of is one nothing has pushed.
-fn pushed_head(worktree: &Path, head: Option<&str>) -> Option<String> {
+fn pushed_head(worktree: &Path, head: Option<&str>, credential: &Credential) -> Option<String> {
     let checked_out;
 
     let branch = match head {
@@ -648,13 +656,26 @@ fn pushed_head(worktree: &Path, head: Option<&str>) -> Option<String> {
 
     // One line of `<commit>\trefs/heads/<branch>`, or nothing at all where origin
     // is not holding that branch — which `ls-remote` reports by saying nothing
-    // rather than by failing.
-    let said = git(
-        worktree,
-        &["ls-remote", "origin", &format!("refs/heads/{branch}")],
-    )?;
+    // rather than by failing. Asked as the Repo's Author, the way the fetch
+    // before a cut is: a private repository under the second Author's account
+    // answers that Author and nobody else.
+    let said = credential
+        .on(&mut Command::new("git"))
+        .args(["ls-remote", "origin", &format!("refs/heads/{branch}")])
+        .unseen()
+        .current_dir(worktree)
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .ok()
+        .filter(|output| output.status.success())?;
 
-    Some(said.split_whitespace().next()?.to_owned())
+    Some(
+        String::from_utf8_lossy(&said.stdout)
+            .split_whitespace()
+            .next()?
+            .to_owned(),
+    )
 }
 
 /// Write down how the suite is, and tell the open pages where that is news.
@@ -1672,12 +1693,12 @@ mod tests {
         // checkout` leaves one — and the branch below is still a pull request with
         // a suite of its own.
         assert_eq!(
-            pushed_head(worktree, Some("rate-limiting")).as_deref(),
+            pushed_head(worktree, Some("rate-limiting"), &Credential::host()).as_deref(),
             Some(low.as_str()),
             "the branch below the checkout is asked about by name",
         );
         assert_eq!(
-            pushed_head(worktree, Some("rate-limiting-2")).as_deref(),
+            pushed_head(worktree, Some("rate-limiting-2"), &Credential::host()).as_deref(),
             Some(high.as_str()),
             "and so is the one the checkout is on",
         );
@@ -1691,7 +1712,7 @@ mod tests {
 
         assert_ne!(head(worktree), high);
         assert_eq!(
-            pushed_head(worktree, Some("rate-limiting-2")).as_deref(),
+            pushed_head(worktree, Some("rate-limiting-2"), &Credential::host()).as_deref(),
             Some(high.as_str()),
             "an unpushed commit is not what a rollup is held against",
         );
@@ -1699,14 +1720,42 @@ mod tests {
         // A pull request recorded before Verkstead wrote the head down has none,
         // and there the checkout stands in — which is the branch such a row was on.
         assert_eq!(
-            pushed_head(worktree, None).as_deref(),
+            pushed_head(worktree, None, &Credential::host()).as_deref(),
             Some(high.as_str()),
             "with no head on the record, the branch the Worktree is on is asked about",
         );
 
         // And a branch origin has never heard of is *Verkstead cannot tell*, which
         // holds nothing up.
-        assert_eq!(pushed_head(worktree, Some("rate-limiting-3")), None);
+        assert_eq!(
+            pushed_head(worktree, Some("rate-limiting-3"), &Credential::host()),
+            None
+        );
+    }
+
+    /// And origin is asked as the Repo's Author, through the same helper the
+    /// fetch before a cut goes through: the token it was handed, and no other.
+    #[test]
+    fn what_was_pushed_is_asked_as_the_repos_author() {
+        let dir = tempfile::tempdir().unwrap();
+        run(dir.path(), &["init", "--initial-branch", "main"]);
+
+        let (url, offered) = crate::stand_ins::remote_recording_logins();
+        run(dir.path(), &["remote", "add", "origin", &url]);
+
+        assert_eq!(
+            pushed_head(
+                dir.path(),
+                Some("rate-limiting"),
+                &Credential::token("ghp_thehomeone"),
+            ),
+            None,
+            "a remote that turns the login away is *Verkstead cannot tell*",
+        );
+        assert_eq!(
+            *offered.lock().unwrap(),
+            vec!["x-access-token:ghp_thehomeone".to_owned()],
+        );
     }
 
     /// A companion's pull request, which is the one a fix session has to be sent
@@ -1718,6 +1767,7 @@ mod tests {
                 path: std::path::PathBuf::from("/watched/askance"),
                 name: "askance".to_owned(),
                 default_branch: "main".to_owned(),
+                author: None,
             },
             number: 7,
             head: Some("rate-limiting".to_owned()),

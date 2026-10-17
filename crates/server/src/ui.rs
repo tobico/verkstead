@@ -35,33 +35,34 @@ use time::format_description::well_known::Rfc3339;
 use tokio_util::io::ReaderStream;
 use verkstead_render::{
     Adopted, AnswerAttached, AnswerAttachmentRemoved, AskingDevice, AtOnceView, Attached,
-    AttachmentRemoved, Author, BaseBranchChoice, BranchRename, BriefEdit, CheckRollup,
-    CleanupStepView, CleanupView, CommentedOn, CompanionAdded, CompanionBaseRecorded,
-    CompanionBranchRenamed, CompanionModeChoice, CompanionModeChosen, CompanionRemoved,
-    CompanionView, CompileCaching, Confirming, ConflictResolution, ConversationArchived,
-    ConversationClosed, ConversationEntry, ConversationMove, ConversationSteered,
-    ConversationStopped, ConversationUnarchived, ConversationView, Creation, Cursor, DevicesView,
-    DiskUse, DroppedRow, Eviction, FileDeleted, FileDeleting, FileListsView, FileMade, FileMaking,
-    FileReading, FileRenamed, FileRenaming, FileRootsView, FileStatusView, FileWrite, FileWritten,
-    FolderListing, GrillingStarted, HeaderEdit, IgnoreRule, IgnoredCommentsEdit, InstallPress,
-    LanguageCleared, LanguageEdit, LanguageView, Lifecycle, Locked, McpHeader, McpServer,
-    McpServerEdit, McpServersEdit, Merging, MissedOut, NewAdoption, NewCompanion, NewConversation,
-    NewJoin, NewRank, OpenTerminal, PairingView, Parked, PendingSteerView, Permitting, Process,
-    ProcessChoice, ProcessPicked, ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration,
-    RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice,
-    RuleField, RuleRefused, Running, RunningOn, ServeEdit, ServePress, ServerAttached, ServerField,
-    ServerRefused, ServerRemoved, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView,
-    ShareCommented, SharePublished, SharedCommit, SharedConversation, ShowArchived,
-    ShowingArchived, SizeRefused, Standing, SteerCancelled, SteerForm, SteerOpened,
-    SteerPairingView, SteerSaved, SteerSubmission, StoreView, Submitted, Subscribed, Subscription,
-    TakenUp, TargetNamed, TargetRecorded, TerminalOpened, TimelineEvent, TokenEdit, TokenSaved,
-    TransferredTo, Transferring, UnreadEntry, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
+    AttachmentRemoved, Author, AuthorEdit, AuthorEdited, AuthorSaved, BaseBranchChoice,
+    BranchRename, BriefEdit, CheckRollup, CleanupStepView, CleanupView, CommentedOn,
+    CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed, CompanionModeChoice,
+    CompanionModeChosen, CompanionRemoved, CompanionView, CompileCaching, Confirming,
+    ConflictResolution, ConversationArchived, ConversationClosed, ConversationEntry,
+    ConversationMove, ConversationSteered, ConversationStopped, ConversationUnarchived,
+    ConversationView, Creation, Cursor, DevicesView, DiskUse, DroppedRow, Eviction, FileDeleted,
+    FileDeleting, FileListsView, FileMade, FileMaking, FileReading, FileRenamed, FileRenaming,
+    FileRootsView, FileStatusView, FileWrite, FileWritten, FolderListing, GrillingStarted,
+    HeaderEdit, IgnoreRule, IgnoredCommentsEdit, InstallPress, LanguageCleared, LanguageEdit,
+    LanguageView, Lifecycle, Locked, McpHeader, McpServer, McpServerEdit, McpServersEdit, Merging,
+    MissedOut, NewAdoption, NewCompanion, NewConversation, NewJoin, NewRank, OpenTerminal,
+    PairingView, Parked, PendingSteerView, Permitting, Process, ProcessChoice, ProcessPicked,
+    ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration, RemoteBanner, RemoteView,
+    RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice, RuleField, RuleRefused,
+    Running, RunningOn, ServeEdit, ServePress, ServerAttached, ServerField, ServerRefused,
+    ServerRemoved, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView, ShareCommented,
+    SharePublished, SharedCommit, SharedConversation, ShowArchived, ShowingArchived, SizeRefused,
+    Standing, SteerCancelled, SteerForm, SteerOpened, SteerPairingView, SteerSaved,
+    SteerSubmission, StoreView, Submitted, Subscribed, Subscription, TakenUp, TargetNamed,
+    TargetRecorded, TerminalOpened, TimelineEvent, TokenEdit, TokenSaved, TransferredTo,
+    Transferring, UnreadEntry, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
 use crate::onboarding::Refusal;
 use crate::peer::workbench::OverTheLink;
-use crate::settings::{AtOnce, Cleanup, CleanupStep, Config, GitAuthor, RuleTrouble};
+use crate::settings::{AtOnce, Cleanup, CleanupStep, Config, RuleTrouble};
 use crate::{AppState, store};
 
 /// The viewer's routes, over the state the agent API is already holding: a
@@ -121,6 +122,9 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // under the Profile: what comes back is a named outcome, and a refusal
         // is an answer rather than a status.
         .route("/api/ui/repos/{id}/remove", post(remove_repo))
+        // And which Author it is, the one thing about a Repo the pane changes
+        // rather than takes away — refused the same way, under live work.
+        .route("/api/ui/repos/{id}/author", post(repoint_repo))
         .route(
             "/api/ui/conversations",
             get(conversations).post(start_conversation),
@@ -641,6 +645,20 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // read and the save being the same page's two halves — and one save for
         // the author and the token together, because the page has one button.
         .route("/api/ui/settings", get(settings).post(save_settings))
+        // And taking one Author away, which is a press on the Git section's
+        // switcher rather than a key of a save: refused by name while a Repo
+        // points at it, the way a Repo's removal is refused under live work.
+        // And the cluster's one list of Authors: this device's own and a mirror
+        // of every member's, marked with its home — what the Git switcher draws,
+        // and what a member reads this device's own off across the link (see
+        // [`crate::mirroring::authors`]). Nothing of a token but whether one is
+        // held, because a member reads it too.
+        .route("/api/ui/authors", get(authors))
+        // And one Author edited alone, which is what the Git section sends for
+        // a member's: put to the device it is at home on, as that device's own
+        // edit — see [`crate::mirroring::authors::edited`].
+        .route("/api/ui/authors/{id}", post(edit_author))
+        .route("/api/ui/authors/{id}/remove", post(remove_author))
         // Emptying one language's stores, which is an act rather than a value
         // the settings hold, so a route of its own rather than a key of a save.
         .route("/api/ui/languages/{name}/clear", post(clear_language))
@@ -1036,7 +1054,11 @@ async fn repos(State(state): State<AppState>) -> HttpResponse {
         }
     };
 
-    let rows: Vec<RepoEntry> = repos.into_iter().map(crate::repos::entry).collect();
+    let config = state.settings.config();
+    let rows: Vec<RepoEntry> = repos
+        .into_iter()
+        .map(|repo| crate::repos::entry(repo, config.authors()))
+        .collect();
 
     Json(rows).into_response()
 }
@@ -1111,7 +1133,14 @@ async fn register_repo(
     State(state): State<AppState>,
     Json(registration): Json<Registration>,
 ) -> HttpResponse {
-    match crate::repos::register(&state.pool, &registration.path).await {
+    match crate::repos::register(
+        &state.pool,
+        &state.settings.config(),
+        &registration.path,
+        registration.author.as_deref(),
+    )
+    .await
+    {
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, "registering a Repo failed");
@@ -1124,7 +1153,7 @@ async fn register_repo(
 ///
 /// The other way a Repo arrives, and the one that ends in the same registration:
 /// a directory under the parent, `git init` onto `main`, a `README.md` committed
-/// as the configured author, the same repository on GitHub where that was asked
+/// as the Author picked, the same repository on GitHub where that was asked
 /// for, and the Repo the pane is drawn from back. See [`crate::repos::create`].
 ///
 /// Every refusal is a named outcome in the body rather than a status, the way
@@ -1139,18 +1168,16 @@ async fn create_repo(
     State(state): State<AppState>,
     Json(creation): Json<Creation>,
 ) -> HttpResponse {
-    let author = state.settings.config();
+    let config = state.settings.config();
 
     match crate::repos::create(
         &state.pool,
-        author.git_author(),
+        &config,
         &state.github,
-        &creation.parent,
-        &creation.name,
-        creation.github,
+        &creation,
         // What the Repo pane this comes back with says is waiting in it, which is
         // bounded by the same setting the notice is — see [`crate::stages::waiting`].
-        author.at_once().roadmap_stages(),
+        config.at_once().roadmap_stages(),
     )
     .await
     {
@@ -1180,6 +1207,188 @@ async fn remove_repo(State(state): State<AppState>, Path(id): Path<String>) -> H
         Err(error) => {
             tracing::error!(error = ?error, repo_id = id, "removing a Repo failed");
             unavailable("The repo couldn't be removed.")
+        }
+    }
+}
+
+/// `GET /api/ui/authors` — the one list of Authors: this device's own, then a
+/// mirror of every member's with the device it is at home on.
+async fn authors(State(state): State<AppState>) -> HttpResponse {
+    match crate::mirroring::authors::listed(&state).await {
+        Ok(listed) => Json(listed).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, "reading the Authors failed");
+            unavailable("The authors couldn't be read.")
+        }
+    }
+}
+
+/// `POST /api/ui/authors/{id}` — rewrite one Author's fields, and set or clear
+/// its token, and nothing else of either file.
+///
+/// **Reached for a mirror, and relayed home when it is one** (ADR-0025): the
+/// edit is put to the device the Author is at home on, and what comes back is
+/// that device's own word — the token verified there, with its own `gh` — or a
+/// refusal naming the machine that did not take it. See
+/// [`crate::mirroring::authors::edited`]. Arriving at home, it is the half
+/// below: the Author's own entry written over and the token by the settings
+/// save's rules, then tried against GitHub after the writing for its reason.
+async fn edit_author(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(edit): Json<AuthorEdit>,
+) -> HttpResponse {
+    match crate::mirroring::authors::edited(&state, &id, &edit).await {
+        Ok(crate::mirroring::Pressed::Here) => {}
+
+        Ok(crate::mirroring::Pressed::Away(outcome)) => {
+            return Json(outcome).into_response();
+        }
+
+        Ok(crate::mirroring::Pressed::Refused(why)) => {
+            tracing::warn!("an Author was not saved at home: {}", why.saying);
+            return refused(why.status, ApiError::new(why.saying));
+        }
+
+        Err(error) => {
+            tracing::error!(
+                error = ?error,
+                author = id,
+                "reading which device an Author is at home on failed",
+            );
+            return unavailable("The author couldn't be saved.");
+        }
+    }
+
+    let settings = state.settings.clone();
+    let gh = state.github.clone();
+
+    let saved = tokio::task::spawn_blocking(move || {
+        let token = match &edit.github_token {
+            TokenEdit::Keep => None,
+            TokenEdit::Set { token } => Some(Some(token.clone())),
+            TokenEdit::Clear => Some(None),
+        };
+
+        let author = crate::settings::Author::of(
+            id.clone(),
+            Some(edit.display_name),
+            Some(edit.name),
+            Some(edit.email),
+        );
+
+        if !settings.editing_author(author, token)? {
+            return Ok::<_, std::io::Error>(AuthorEdited::NoSuchAuthor);
+        }
+
+        // Read back off the file rather than taken from the request, for the
+        // settings save's reason: a token of whitespace is nothing configured.
+        let verified = match &edit.github_token {
+            TokenEdit::Set { .. } => settings
+                .secrets()
+                .author_token(&id)
+                .map(|token| verifying(&gh, token)),
+            TokenEdit::Keep | TokenEdit::Clear => None,
+        };
+
+        Ok(AuthorEdited::Saved { verified })
+    })
+    .await;
+
+    match saved {
+        Ok(Ok(outcome)) => {
+            // Every member's mirror of it, and its copy of the token, redrawn
+            // on the read this sets going.
+            if matches!(outcome, AuthorEdited::Saved { .. }) {
+                state.nudges.announce(Nudge::Authors);
+            }
+
+            Json(outcome).into_response()
+        }
+        Ok(Err(error)) => {
+            tracing::error!(error = ?error, "writing an Author into the settings files failed");
+            unavailable("The author couldn't be saved.")
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, "saving an Author failed");
+            unavailable("The author couldn't be saved.")
+        }
+    }
+}
+
+/// `POST /api/ui/authors/{id}/remove` — take one Author out of the settings.
+///
+/// Every refusal is a named outcome in the body, the Repo removal's way: the
+/// Repos pointing at it are what the switcher puts in words.
+///
+/// **Relayed home for a mirror**, checking that device's Repos alone, and
+/// refused naming the machine where it did not take it — see
+/// [`crate::mirroring::authors::removed`].
+async fn remove_author(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+    match crate::mirroring::authors::removed(&state, &id).await {
+        Ok(crate::mirroring::Pressed::Here) => {}
+
+        Ok(crate::mirroring::Pressed::Away(outcome)) => {
+            return Json(outcome).into_response();
+        }
+
+        Ok(crate::mirroring::Pressed::Refused(why)) => {
+            tracing::warn!("an Author was not removed at home: {}", why.saying);
+            return refused(why.status, ApiError::new(why.saying));
+        }
+
+        Err(error) => {
+            tracing::error!(
+                error = ?error,
+                author = id,
+                "reading which device an Author is at home on failed",
+            );
+            return unavailable("The author couldn't be removed.");
+        }
+    }
+
+    match crate::repos::remove_author(&state.pool, &state.settings, &id).await {
+        Ok(outcome) => {
+            // Every member's mirror of it goes on the read this sets going.
+            if outcome == verkstead_render::AuthorRemoved::Removed {
+                state.nudges.announce(Nudge::Authors);
+            }
+
+            Json(outcome).into_response()
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, author = id, "removing an Author failed");
+            unavailable("The author couldn't be removed.")
+        }
+    }
+}
+
+/// `POST /api/ui/repos/{id}/author` — point one at another Author.
+///
+/// Every refusal is a named outcome in the body, the removal's way: live work
+/// in the Repo is a reason the pane puts in words, naming that work. An id that
+/// is not a number is the answer an id nothing is registered under gets.
+async fn repoint_repo(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(repointing): Json<verkstead_render::Repointing>,
+) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(verkstead_render::Repointed::NoSuchRepo).into_response();
+    };
+
+    match crate::repos::repoint(
+        &state.pool,
+        &state.settings.config(),
+        id,
+        &repointing.author,
+    )
+    .await
+    {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, repo_id = id, "repointing a Repo failed");
+            unavailable("The repo's author couldn't be changed.")
         }
     }
 }
@@ -1838,10 +2047,13 @@ pub(crate) async fn conversation_view(
     // And each companion's, which is the same look at the filesystem: a
     // Conversation with three companions has four checkouts, and every one of
     // them is a directory somebody could have deleted.
+    // And who each of them can be done as, which is what says whether one
+    // with no Author recorded has one still to pick.
+    let config = state.settings.config();
     let mut companions = Vec::new();
 
     for reading in conversation.companions {
-        match companion(reading).await {
+        match companion(reading, config.authors()).await {
             Ok(companion) => companions.push(companion),
             Err(error) => {
                 tracing::error!(error = ?error, conversation_id = id, "reading a companion worktree failed");
@@ -1929,6 +2141,10 @@ pub(crate) async fn conversation_view(
             crate::stages::adopting(
                 &state.pool,
                 conversation.repo.clone(),
+                state
+                    .github
+                    .as_author(conversation.repo.author.as_deref())
+                    .credential(),
                 conversation.base_commit.clone(),
                 roadmap,
                 state.settings.config().at_once().roadmap_stages(),
@@ -2249,14 +2465,7 @@ pub(crate) async fn conversation_view(
 
     let view = ConversationView {
         id: conversation.id,
-        repo: RepoEntry {
-            id: conversation.repo.id,
-            name: conversation.repo.name,
-            // Stored as UTF-8 in the first place — a path that is not cannot be
-            // registered — so nothing is lost putting it back on the wire.
-            path: conversation.repo.path.to_string_lossy().into_owned(),
-            default_branch: conversation.repo.default_branch,
-        },
+        repo: crate::repos::entry(conversation.repo, config.authors()),
         process: process(conversation.process),
         branch: conversation.branch,
         branch_named: conversation.branch_named,
@@ -2823,24 +3032,20 @@ async fn publishing(
 
     let gh = state.github.clone();
     let settings = state.settings.clone();
+    let recorded = bundle.conversation.repo.author.clone();
 
     // One blocking hop for the whole publish: a `gh`, a clone, a commit and a
     // push. Every one of them is a process, and none of them belongs on the
     // runtime's threads.
     let published = tokio::task::spawn_blocking(move || {
-        let secrets = settings.secrets();
-        let config = settings.config();
-
-        let published = crate::publishing::publish(
+        crate::publishing::publish_as(
             &gh,
-            secrets.github_token(),
-            config.git_author(),
+            &settings,
+            recorded.as_deref(),
             &description,
             &name,
             &file,
-        );
-
-        (published, secrets.github_token().map(str::to_owned))
+        )
     })
     .await;
 
@@ -4109,7 +4314,7 @@ async fn pull_request(
         }
     };
 
-    let gh = state.github.clone();
+    let gh = state.github.as_author(repo.author.as_deref());
     let number = opened.number;
 
     let asked = {
@@ -4549,7 +4754,14 @@ async fn switch_repo(
         return Json(RepoSwitched::NoSuchConversation).into_response();
     };
 
-    match crate::conversations::switch_repo(&state.pool, id, choice.repo_id).await {
+    match crate::conversations::switch_repo(
+        &state.pool,
+        &state.settings.config(),
+        id,
+        choice.repo_id,
+    )
+    .await
+    {
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "switching a conversation's repo failed");
@@ -4653,7 +4865,14 @@ async fn add_companion(
         return Json(CompanionAdded::NoSuchConversation).into_response();
     };
 
-    match crate::conversations::add_companion(&state.pool, id, added.repo_id).await {
+    match crate::conversations::add_companion(
+        &state.pool,
+        &state.settings.config(),
+        id,
+        added.repo_id,
+    )
+    .await
+    {
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "adding a companion repo failed");
@@ -5030,7 +5249,15 @@ async fn preflight(
         }
     };
 
-    match crate::preflight::of(state.devices.as_ref(), &state.pool, &conversation, &device).await {
+    match crate::preflight::of(
+        state.devices.as_ref(),
+        &state.pool,
+        &state.settings.config(),
+        &conversation,
+        &device,
+    )
+    .await
+    {
         Ok(reading) => Json(reading).into_response(),
         Err(refusal) => {
             tracing::warn!("a transfer could not be preflighted: {}", refusal.saying);
@@ -5670,18 +5897,14 @@ fn moved_profiles(state: &AppState, moved: bool) {
 /// there is not something a database knows, and a companion deleted by hand
 /// should read as a Conversation with a problem rather than as an obscure
 /// failure from whatever next works in it.
-async fn companion(companion: store::Companion) -> Result<CompanionView, anyhow::Error> {
+async fn companion(
+    companion: store::Companion,
+    authors: &[crate::settings::Author],
+) -> Result<CompanionView, anyhow::Error> {
     let worktree = crate::conversations::worktree(companion.worktree).await?;
 
     Ok(CompanionView {
-        repo: RepoEntry {
-            id: companion.repo.id,
-            name: companion.repo.name,
-            // Stored as UTF-8 in the first place — a path that is not cannot be
-            // registered — so nothing is lost putting it back on the wire.
-            path: companion.repo.path.to_string_lossy().into_owned(),
-            default_branch: companion.repo.default_branch,
-        },
+        repo: crate::repos::entry(companion.repo, authors),
         mode: crate::steering::reaching(companion.mode),
         base_ref: companion.base_ref,
         branch: companion.branch,
@@ -6165,8 +6388,25 @@ async fn save_settings(
     State(state): State<AppState>,
     Json(edit): Json<SettingsEdit>,
 ) -> HttpResponse {
+    // A save that adds an Author beside the only one there is ends the one
+    // Author's standing for every Repo that records none, so they are recorded
+    // as it first — see [`recording_the_only_author`].
+    if let Err(error) = recording_the_only_author(&state, edit.git_author.id.as_deref()).await {
+        tracing::error!(error = ?error, "recording the Repos as the only Author failed");
+        return unavailable("The settings couldn't be saved.");
+    }
+
     let settings = state.settings.clone();
     let gh = state.github.clone();
+
+    // This device's Authors as they stood, for telling the cluster afterwards
+    // whether the save moved them — see below.
+    let authors_before = crate::mirroring::authors::own(&state.settings);
+
+    // And whether it set or cleared a token, which the rows above cannot show:
+    // a rotation leaves an Author holding one, and every member's copy of it is
+    // what the news is for.
+    let token_moved = !matches!(edit.github_token, TokenEdit::Keep);
 
     // One blocking hop for the whole save: two files written and, where a token
     // was set, a `gh` run. Everything here is the filesystem or a process, and
@@ -6279,9 +6519,40 @@ async fn save_settings(
             ));
         }
 
+        // Which Author the Git section's fields are about: the one whose uuid
+        // the page sent, or — where it sent none, which is a page drawn before
+        // there was one — the first there is. Made now under a fresh uuid where
+        // there is none at all and the page said anything about it, which is
+        // the first save of a fresh install; where it said nothing, as every
+        // other section's save of a fresh install says nothing, there is still
+        // no Author and nothing is written for one.
+        let drawn = edit.git_author;
+        let said = [&drawn.display_name, &drawn.name, &drawn.email]
+            .iter()
+            .any(|field| !field.trim().is_empty())
+            || matches!(&edit.github_token, TokenEdit::Set { token } if !token.trim().is_empty());
+        let id = match drawn.id.or_else(|| {
+            settings
+                .config()
+                .authors()
+                .first()
+                .map(|first| first.id().to_owned())
+        }) {
+            Some(id) => Some(id),
+            None if said => Some(crate::settings::minted_uuid()?),
+            None => None,
+        };
+
         settings.save_config(
             &Config::of(
-                GitAuthor::of(Some(edit.git_author.name), Some(edit.git_author.email)),
+                id.clone().map(|id| {
+                    crate::settings::Author::of(
+                        id,
+                        Some(drawn.display_name),
+                        Some(drawn.name),
+                        Some(drawn.email),
+                    )
+                }),
                 // The two keys the page writes, per language it drew: the
                 // switch as it stands, and the size as it was typed with an
                 // empty field meaning nothing configured — clearing it is how
@@ -6369,10 +6640,14 @@ async fn save_settings(
             writing = true;
         }
 
-        let verifying = match &edit.github_token {
-            TokenEdit::Keep => None,
-            TokenEdit::Set { token } => {
-                secrets = secrets.with_token(Some(token.clone()));
+        // Under the uuid of the Author the fields were about, which leaves
+        // every other Author's token where it was. No uuid is no Author, and
+        // nothing to keep a token under: the save said nothing that would make
+        // one, so the token's half said nothing either.
+        let verifying = match (&edit.github_token, &id) {
+            (TokenEdit::Keep, _) | (_, None) => None,
+            (TokenEdit::Set { token }, Some(id)) => {
+                secrets = secrets.with_author_token(id, Some(token.clone()));
                 writing = true;
 
                 // Read back off the secrets that are to be written rather than
@@ -6380,10 +6655,10 @@ async fn save_settings(
                 // nothing configured, and verifying what was typed would
                 // announce an account for a token no session will ever be
                 // given.
-                secrets.github_token().map(str::to_owned)
+                secrets.author_token(id).map(str::to_owned)
             }
-            TokenEdit::Clear => {
-                secrets = secrets.with_token(None);
+            (TokenEdit::Clear, Some(id)) => {
+                secrets = secrets.with_author_token(id, None);
                 writing = true;
 
                 None
@@ -6399,13 +6674,7 @@ async fn save_settings(
         // write a gist is a token whose failure would otherwise be found by a
         // human pressing Share — and the answer to it is on this page, which is
         // where they already are.
-        let verified = verifying.map(|token| match crate::github::authenticates_as(&gh, &token) {
-            Ok(account) => Verified::Account {
-                login: account.login,
-                missing: needed(&account.scopes),
-            },
-            Err(trouble) => Verified::Refused { why: trouble.why() },
-        });
+        let verified = verifying.map(|token| self::verifying(&gh, &token));
 
         // And the declarations this save wrote down, each with the header values
         // just written beside it — which is what is spoken to below. Read back
@@ -6466,6 +6735,13 @@ async fn save_settings(
             // was spoken to, and changes nothing about what was saved.
             saved.tried = crate::mcp::tried(&trying).await;
 
+            // And every member told where the save moved this device's Authors,
+            // which is what has each read them again and redraw its mirrors.
+            // Only then: a save about the build cache is no news to anybody.
+            if token_moved || crate::mirroring::authors::own(&state.settings) != authors_before {
+                state.nudges.announce(Nudge::Authors);
+            }
+
             Json(saved).into_response()
         }
         // The one way this fails: a file that would not be written. Something to
@@ -6480,6 +6756,17 @@ async fn save_settings(
             tracing::error!(error = ?error, "saving the settings failed");
             unavailable("The settings couldn't be saved.")
         }
+    }
+}
+
+/// What GitHub made of a token just saved: whose it is, and what it may do.
+fn verifying(gh: &crate::github::Gh, token: &str) -> Verified {
+    match crate::github::authenticates_as(gh, token) {
+        Ok(account) => Verified::Account {
+            login: account.login,
+            missing: needed(&account.scopes),
+        },
+        Err(trouble) => Verified::Refused { why: trouble.why() },
     }
 }
 
@@ -6661,14 +6948,27 @@ fn as_told(
 ) -> SettingsView {
     let secrets = settings.secrets();
     let config = settings.config();
-    let author = config.git_author();
+    // The first Author, which is the one the Git section is about — and blank
+    // fields under no uuid where there is none yet.
+    let author = config.authors().first();
     let cleanup = config.cleanup();
     let at_once = config.at_once();
 
     SettingsView {
         git_author: Author {
-            name: author.name().unwrap_or_default().to_owned(),
-            email: author.email().unwrap_or_default().to_owned(),
+            id: author.map(|author| author.id().to_owned()),
+            display_name: author
+                .and_then(|author| author.display_name())
+                .unwrap_or_default()
+                .to_owned(),
+            name: author
+                .and_then(|author| author.name())
+                .unwrap_or_default()
+                .to_owned(),
+            email: author
+                .and_then(|author| author.email())
+                .unwrap_or_default()
+                .to_owned(),
         },
         // Every descriptor this installation loaded, in the order they were
         // written: the ones embedded in the binary with what `config.yaml` says
@@ -6749,14 +7049,68 @@ fn as_told(
         instructions: config.instructions().to_owned(),
         // And what is running, which is no file's either.
         running,
-        github_token: secrets.github_token().map(|token| TokenSaved {
-            last_four: last_four(token),
-            at: settings
-                .secrets_written_at()
-                .and_then(|at| at.format(&Rfc3339).ok())
-                .unwrap_or_default(),
-        }),
+        github_token: author.and_then(|author| token_saved(settings, &secrets, author)),
+        // And every Author with its token's standing, the first included: the
+        // Git section draws the one it is about out of this list, and offers
+        // the whole of it once there are two.
+        authors: config
+            .authors()
+            .iter()
+            .map(|author| AuthorSaved {
+                id: author.id().to_owned(),
+                display_name: author.display_name().unwrap_or_default().to_owned(),
+                name: author.name().unwrap_or_default().to_owned(),
+                email: author.email().unwrap_or_default().to_owned(),
+                github_token: token_saved(settings, &secrets, author),
+            })
+            .collect(),
     }
+}
+
+/// Record every Repo that records no Author as the one Author configured, where
+/// the save about to be made adds a second — `drawn` being the uuid the Git
+/// section sent, which is a new Author where the file does not hold it.
+///
+/// With one Author, a Repo recording none is that one's — see
+/// [`crate::settings::Config::author_of`] — and a Repo registered while there
+/// was no Author at all is the ordinary way to have one. A second Author ends
+/// that, and the Repo would go from committing as the first to having nobody to
+/// commit as, which is the change ADR-0025 says adding an Author never makes.
+/// So what the fallback said is written down while it still holds: the
+/// statement the first start's move records with, safe to run twice.
+///
+/// Before the save rather than after it, so that no Repo is ever read with two
+/// Authors configured and none recorded. A save refused afterwards leaves the
+/// rows standing, which says nothing the one Author's fallback did not already.
+async fn recording_the_only_author(state: &AppState, drawn: Option<&str>) -> anyhow::Result<()> {
+    let config = state.settings.config();
+
+    let (Some(drawn), [only]) = (drawn, config.authors()) else {
+        return Ok(());
+    };
+
+    if drawn == only.id() {
+        return Ok(());
+    }
+
+    store::record_the_repo_authors(&state.pool, only.id()).await
+}
+
+/// What can be said about an Author's token, which is everything but the
+/// token: its last four characters and when the secrets file was written — the
+/// file's, there being one file for every Author's token.
+fn token_saved(
+    settings: &crate::settings::Settings,
+    secrets: &crate::settings::Secrets,
+    author: &crate::settings::Author,
+) -> Option<TokenSaved> {
+    secrets.author_token(author.id()).map(|token| TokenSaved {
+        last_four: last_four(token),
+        at: settings
+            .secrets_written_at()
+            .and_then(|at| at.format(&Rfc3339).ok())
+            .unwrap_or_default(),
+    })
 }
 
 /// One ignore rule as the settings file holds it, out of what the page sent:

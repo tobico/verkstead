@@ -46,7 +46,7 @@ import type { SettingsSaved, SettingsView } from "../api/types";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine, Note } from "../notices";
 import { PaneHead } from "../workbench/PaneHead";
-import { heldAtOnce, heldCleanup, heldLanguages, heldPaths } from "./held";
+import { heldAtOnce, heldAuthor, heldCleanup, heldLanguages, heldPaths } from "./held";
 import styles from "./Instructions.module.css";
 import { SettingsCard } from "./SettingsCard";
 
@@ -135,7 +135,7 @@ export function InstructionsPane(props: {
       saveSettings({
         // The rest of both files as they stand: the endpoint writes them whole,
         // so a section left out would be a section emptied.
-        git_author: told()?.git_author ?? { name: "", email: "" },
+        git_author: heldAuthor(told()),
         // Untouched. This form has no business with the credentials, and a
         // blank token field read as *clear this* is exactly what `Keep` is
         // here to stop.

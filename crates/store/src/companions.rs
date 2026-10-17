@@ -645,6 +645,7 @@ pub async fn companions(pool: &SqlitePool, id: i64) -> Result<Vec<Companion>> {
         String,
         String,
         String,
+        Option<String>,
         String,
         Option<String>,
         String,
@@ -657,7 +658,9 @@ pub async fn companions(pool: &SqlitePool, id: i64) -> Result<Vec<Companion>> {
     // nowhere on disk yet, and that is the ordinary state rather than a missing
     // one.
     let rows: Vec<Row> = sqlx::query_as(
-        "SELECT r.id, r.path, r.name, r.default_branch, c.mode, c.base_ref, c.branch,
+        "SELECT r.id, r.path, r.name, r.default_branch,
+                (SELECT author FROM repo_authors WHERE repo_id = r.id),
+                c.mode, c.base_ref, c.branch,
                 w.path, w.base_commit
          FROM companions c
          JOIN repos r ON r.id = c.repo_id
@@ -678,6 +681,7 @@ pub async fn companions(pool: &SqlitePool, id: i64) -> Result<Vec<Companion>> {
                 path,
                 name,
                 default_branch,
+                author,
                 mode,
                 base_ref,
                 branch,
@@ -690,6 +694,7 @@ pub async fn companions(pool: &SqlitePool, id: i64) -> Result<Vec<Companion>> {
                         path: std::path::PathBuf::from(path),
                         name,
                         default_branch,
+                        author,
                     },
                     mode: CompanionMode::read(&mode)?,
                     base_ref: base_ref.filter(|base| !base.is_empty()),

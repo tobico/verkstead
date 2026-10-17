@@ -199,7 +199,7 @@ impl Verkstead {
         // Who a session commits as, which every sandbox is configured out of.
         std::fs::write(
             dir.path().join("config.yaml"),
-            "git_author:\n  name: Verkstead Test\n  email: test@verkstead.invalid\n",
+            "authors:\n  - id: work\n    name: Verkstead Test\n    email: test@verkstead.invalid\n",
         )
         .unwrap();
 
@@ -346,7 +346,7 @@ impl Verkstead {
         std::fs::write(
             &config_file,
             serde_json::json!({
-                "oauthAccount": { "emailAddress": "you@example.com" },
+                "oauthAccount": { "accountUuid": "the-accounts-uuid", "emailAddress": "you@example.com" },
                 "mcpServers": { "theirs": { "command": "the-humans-own-server" } },
                 "projects": {
                     "/home/you/src/secrets": {
@@ -1145,8 +1145,9 @@ async fn a_session_away_from_home_runs_under_the_account_at_home() {
         "and reaches the model the way that account does. It printed: {said:?}",
     );
     assert!(
-        said.contains("you@example.com"),
-        "and its `.claude.json` says whose account it is. It printed: {said:?}",
+        said.contains("the-accounts-uuid") && !said.contains("you@example.com"),
+        "and its `.claude.json` says which account it is, without the email \
+         that names the human. It printed: {said:?}",
     );
 
     // And none of how the human on A works, which is what a root never carries

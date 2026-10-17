@@ -25,12 +25,13 @@ use verkstead_render::{
     Broken, CheckRollup, CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed,
     CompanionMode, CompanionModeChosen, CompanionRefusal, CompanionRemoved, ConversationArchived,
     ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
-    ConversationUnarchived, ConversationView, GrillingStarted, Lifecycle, Merging, PickedView,
-    PinnedEvent, Process, ProcessPicked, ProfileChosen, ProfileSaved, ProfileTrouble, Registered,
-    RepoEntry, RepoSwitched, Resolved, Resumed, RoadmapPane, ShowingArchived, StageState, Standing,
-    Started, SteerCancelled, SteerCompanionRefusal, SteerOpened, SteerPairingView, SteerSaved,
-    TakenUp, TargetRecorded, TimelineEvent, Uncommitted,
+    ConversationUnarchived, ConversationView, GrillingStarted, Lifecycle, Merging, OtherAuthor,
+    PickedView, PinnedEvent, Process, ProcessPicked, ProfileChosen, ProfileSaved, ProfileTrouble,
+    Registered, RepoEntry, RepoSwitched, Resolved, Resumed, RoadmapPane, ShowingArchived,
+    StageState, Standing, Started, SteerCancelled, SteerCompanionRefusal, SteerOpened,
+    SteerPairingView, SteerSaved, TakenUp, TargetRecorded, TimelineEvent, Uncommitted,
 };
+use verkstead_server::settings::{Author, Mirrored, Settings};
 use verkstead_server::{Gh, open_database, router_asking_github, router_keeping, store};
 
 /// A router, plus the directory holding its database and its data directory
@@ -69,7 +70,8 @@ const CONFIG: &str = "config.yaml";
 
 /// And who that author is, on every workbench here but the one that takes it
 /// away.
-const THE_AUTHOR: &str = "git_author:\n  name: Verkstead Test\n  email: test@verkstead.invalid\n";
+const THE_AUTHOR: &str =
+    "authors:\n  - id: work\n    name: Verkstead Test\n    email: test@verkstead.invalid\n";
 
 /// How many stages of one roadmap this workbench runs side by side.
 ///
@@ -3369,6 +3371,580 @@ async fn starting_clears_the_task_list_the_base_carried() {
         said.contains("1 of 2 entries still open"),
         "and how far through it was: {said:?}",
     );
+}
+
+/// A workbench with two Authors, its one Repo recorded as the second: `work`
+/// complete and first in the list, and `home` with whatever `home` says after
+/// its uuid.
+///
+/// Registered with nobody configured, so the registration records nothing, and
+/// then recorded as `home` the way the first start's move records every Repo
+/// with none — there being no screen yet to pick one on.
+async fn under_the_second_author(
+    home: &str,
+) -> (tempfile::TempDir, tempfile::TempDir, Router, PathBuf, i64) {
+    let elsewhere = tempfile::tempdir().unwrap();
+    let (dir, pool, app) = app_and_pool_keeping().await;
+    let repo = repository(elsewhere.path().join("verkstead"));
+
+    no_author(&dir);
+
+    let registered: Registered =
+        post(&app, "/api/ui/repos", &serde_json::json!({ "path": repo })).await;
+    assert!(matches!(registered, Registered::Added(_)));
+
+    store::record_the_repo_authors(&pool, "home").await.unwrap();
+
+    std::fs::write(
+        dir.path().join(CONFIG),
+        format!(
+            "authors:\n  - id: work\n    name: Verkstead Test\n    email: test@verkstead.invalid\n  - id: home\n{home}"
+        ),
+    )
+    .unwrap();
+
+    let repo_id = listed_repos(&app).await;
+
+    (elsewhere, dir, app, repo, repo_id)
+}
+
+/// The clearing is by the Repo's Author rather than by the first in the list:
+/// everything on a Repo's branches is committed as whoever that Repo records.
+#[tokio::test]
+async fn the_clearing_is_committed_as_the_repos_own_author() {
+    let (elsewhere, _dir, app, repo, repo_id) =
+        under_the_second_author("    name: Tobi at Home\n    email: tobi@example.com\n").await;
+    task_list(&repo, INHERITED);
+
+    let id = ready(&app, elsewhere.path(), repo_id).await;
+
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    let view = opened(&app, id).await;
+    let worktree = PathBuf::from(view.worktree.clone().expect("a start makes one").path);
+
+    assert_eq!(
+        tip(&worktree),
+        [
+            "chore: clear the task list inherited from main",
+            "Tobi at Home",
+            "tobi@example.com",
+        ],
+    );
+}
+
+/// And a Repo whose Author has no email is refused exactly as a workbench with
+/// no git author is, though another Author in the list has one: that one is not
+/// who this Repo's work is by.
+#[tokio::test]
+async fn starting_on_a_repo_whose_author_has_no_email_is_refused_by_name() {
+    let (elsewhere, _dir, app, repo, repo_id) =
+        under_the_second_author("    name: Tobi at Home\n").await;
+
+    let id = ready(&app, elsewhere.path(), repo_id).await;
+    let branch = opened(&app, id).await.branch;
+
+    assert_eq!(grill(&app, id).await, GrillingStarted::NoGitAuthor);
+
+    let view = opened(&app, id).await;
+
+    assert_eq!(view.state, Lifecycle::Draft, "the press did not happen");
+    assert_eq!(view.worktree, None);
+    assert!(!has_branch(&repo, &branch));
+}
+
+/// And the same at the other door, an adoption.
+#[tokio::test]
+async fn adopting_on_a_repo_whose_author_has_no_email_is_refused_by_name() {
+    let (elsewhere, _dir, app, repo, repo_id) =
+        under_the_second_author("    name: Tobi at Home\n").await;
+    roadmap(
+        &repo,
+        OPEN_AT_THREE,
+        &["03-implementation.md", "04-wrap-up.md"],
+    );
+
+    let id = ready_to_adopt(&app, elsewhere.path(), repo_id, "mvp").await;
+
+    assert_eq!(press_adopt(&app, id).await, Adopted::NoGitAuthor);
+    assert!(!has_branch(&repo, "roadmaps/mvp/03-implementation"));
+}
+
+/// A Repo recorded as `home`, with `home` then taken out of `config.yaml` by
+/// hand — the one way a Repo's Author goes (ADR-0025) — and `work` left.
+async fn under_a_vanished_author() -> (tempfile::TempDir, tempfile::TempDir, Router, PathBuf, i64) {
+    let (elsewhere, dir, app, repo, repo_id) =
+        under_the_second_author("    name: Tobi at Home\n    email: tobi@example.com\n").await;
+
+    std::fs::write(
+        dir.path().join(CONFIG),
+        "authors:\n  - id: work\n    name: Verkstead Test\n    email: test@verkstead.invalid\n",
+    )
+    .unwrap();
+
+    (elsewhere, dir, app, repo, repo_id)
+}
+
+/// A Repo whose Author is gone refuses a Start, a grilling's and a Tinker's
+/// alike, naming the Repo — rather than saying nobody set an author, or
+/// falling back on the Author left.
+#[tokio::test]
+async fn starting_on_a_repo_whose_author_is_gone_is_refused_naming_the_repo() {
+    for tinkering in [false, true] {
+        let (elsewhere, _dir, app, repo, repo_id) = under_a_vanished_author().await;
+        let gone = GrillingStarted::RepoAuthorGone {
+            repo: "verkstead".to_owned(),
+        };
+
+        let id = match tinkering {
+            false => ready(&app, elsewhere.path(), repo_id).await,
+            true => tinker(&app, elsewhere.path(), repo_id).await,
+        };
+        let branch = opened(&app, id).await.branch;
+
+        assert_eq!(grill(&app, id).await, gone);
+
+        let view = opened(&app, id).await;
+        assert_eq!(view.state, Lifecycle::Draft, "the press did not happen");
+        assert_eq!(view.worktree, None);
+        assert!(!has_branch(&repo, &branch));
+    }
+}
+
+/// And the way out the refusal names is open: the draft the Start was refused
+/// on has committed nothing, so it does not hold the Repos pane's repoint, and
+/// the Start pressed again lands as the Author picked.
+#[tokio::test]
+async fn a_start_refused_for_a_gone_author_lands_once_another_is_picked() {
+    let (elsewhere, _dir, app, _repo, repo_id) = under_a_vanished_author().await;
+
+    let id = ready(&app, elsewhere.path(), repo_id).await;
+
+    assert!(matches!(
+        grill(&app, id).await,
+        GrillingStarted::RepoAuthorGone { .. }
+    ));
+
+    let repointed: verkstead_render::Repointed = post(
+        &app,
+        &format!("/api/ui/repos/{repo_id}/author"),
+        &serde_json::json!({ "author": "work" }),
+    )
+    .await;
+    assert!(
+        matches!(repointed, verkstead_render::Repointed::Repointed(_)),
+        "the draft held the repoint: {repointed:?}"
+    );
+
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+}
+
+/// And the same at the other door, an adoption.
+#[tokio::test]
+async fn adopting_on_a_repo_whose_author_is_gone_is_refused_naming_the_repo() {
+    let (elsewhere, _dir, app, repo, repo_id) = under_a_vanished_author().await;
+    roadmap(
+        &repo,
+        OPEN_AT_THREE,
+        &["03-implementation.md", "04-wrap-up.md"],
+    );
+
+    let id = ready_to_adopt(&app, elsewhere.path(), repo_id, "mvp").await;
+
+    assert_eq!(
+        press_adopt(&app, id).await,
+        Adopted::RepoAuthorGone {
+            repo: "verkstead".to_owned()
+        }
+    );
+    assert!(!has_branch(&repo, "roadmaps/mvp/03-implementation"));
+}
+
+/// A Repo recording no Author among two is told to pick one, by name, at
+/// both doors.
+#[tokio::test]
+async fn starting_on_a_repo_with_no_author_picked_among_two_is_refused_naming_it() {
+    let (elsewhere, dir, app, repo, repo_id) =
+        under_the_second_author("    name: Tobi at Home\n    email: tobi@example.com\n").await;
+    roadmap(
+        &repo,
+        OPEN_AT_THREE,
+        &["03-implementation.md", "04-wrap-up.md"],
+    );
+
+    // Taken back to nothing recorded, which a Repo registered before the
+    // first Author was, had the move at the start not recorded it.
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM repo_authors")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let unpicked = || "verkstead".to_owned();
+
+    let id = ready(&app, elsewhere.path(), repo_id).await;
+    assert_eq!(
+        grill(&app, id).await,
+        GrillingStarted::RepoAuthorUnpicked { repo: unpicked() }
+    );
+
+    let id = ready_to_adopt_again(&app, repo_id, "mvp").await;
+    assert_eq!(
+        press_adopt(&app, id).await,
+        Adopted::RepoAuthorUnpicked { repo: unpicked() }
+    );
+}
+
+/// Hold `away` as this device's mirror of a member's Author — the one list
+/// the refresher hands the settings — at home on `the-workstation`, its home
+/// holding a token for it or not.
+fn mirroring(dir: &tempfile::TempDir, holds_token: bool) {
+    Settings::in_data_dir(dir.path()).holding_mirrors(vec![Mirrored::of(
+        Author::of(
+            "away".to_owned(),
+            Some("Away".to_owned()),
+            Some("Ada Lovelace".to_owned()),
+            Some("ada@away.example".to_owned()),
+        ),
+        "the-workstation".to_owned(),
+        holds_token,
+    )]);
+}
+
+/// Point the Repo `repo_id` at `author` from its row on the Repos pane.
+async fn repoint(app: &Router, repo_id: i64, author: &str) {
+    let repointed: verkstead_render::Repointed = post(
+        app,
+        &format!("/api/ui/repos/{repo_id}/author"),
+        &serde_json::json!({ "author": author }),
+    )
+    .await;
+
+    assert!(
+        matches!(&repointed, verkstead_render::Repointed::Repointed(entry) if entry.author.as_deref() == Some(author)),
+        "the repoint onto {author}: {repointed:?}"
+    );
+}
+
+/// A member's Author is one a Repo can be pointed at like this device's own —
+/// at **Open repo** and on the Repos pane — and a Repo pointed at one whose
+/// home holds no token is committed as its name and email.
+#[tokio::test]
+async fn a_repo_pointed_at_a_tokenless_mirror_records_it_and_commits_as_it() {
+    let (elsewhere, dir, app, repo, repo_id) =
+        under_the_second_author("    name: Tobi at Home\n    email: tobi@example.com\n").await;
+    mirroring(&dir, false);
+
+    let opened_as: Registered = post(
+        &app,
+        "/api/ui/repos",
+        &serde_json::json!({
+            "path": repository(elsewhere.path().join("askance")),
+            "author": "away",
+        }),
+    )
+    .await;
+    assert!(
+        matches!(&opened_as, Registered::Added(entry) if entry.author.as_deref() == Some("away")),
+        "opened as the mirror: {opened_as:?}"
+    );
+
+    repoint(&app, repo_id, "away").await;
+    task_list(&repo, INHERITED);
+
+    let id = ready(&app, elsewhere.path(), repo_id).await;
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    let view = opened(&app, id).await;
+    let worktree = PathBuf::from(view.worktree.clone().expect("a start makes one").path);
+
+    assert_eq!(
+        tip(&worktree),
+        [
+            "chore: clear the task list inherited from main",
+            "Ada Lovelace",
+            "ada@away.example",
+        ],
+    );
+}
+
+/// A Repo pointed at a member's Author whose home holds a token, with no copy
+/// of it here, refuses a Start and an adoption naming the home device — and
+/// starts once the copy is held.
+#[tokio::test]
+async fn a_repo_pointed_at_a_mirror_awaiting_its_token_refuses_naming_its_home() {
+    let (elsewhere, dir, app, repo, repo_id) =
+        under_the_second_author("    name: Tobi at Home\n    email: tobi@example.com\n").await;
+    roadmap(
+        &repo,
+        OPEN_AT_THREE,
+        &["03-implementation.md", "04-wrap-up.md"],
+    );
+    mirroring(&dir, true);
+    repoint(&app, repo_id, "away").await;
+
+    let repo_name = || "verkstead".to_owned();
+    let device = || "the-workstation".to_owned();
+
+    let id = ready(&app, elsewhere.path(), repo_id).await;
+    let branch = opened(&app, id).await.branch;
+
+    assert_eq!(
+        grill(&app, id).await,
+        GrillingStarted::RepoAuthorTokenAwaited {
+            repo: repo_name(),
+            device: device(),
+        }
+    );
+    assert_eq!(opened(&app, id).await.worktree, None);
+    assert!(!has_branch(&repo, &branch));
+
+    let adopting = ready_to_adopt_again(&app, repo_id, "mvp").await;
+    assert_eq!(
+        press_adopt(&app, adopting).await,
+        Adopted::RepoAuthorTokenAwaited {
+            repo: repo_name(),
+            device: device(),
+        }
+    );
+    assert!(!has_branch(&repo, "roadmaps/mvp/03-implementation"));
+
+    std::fs::write(
+        dir.path().join("secrets.yaml"),
+        "author_tokens:\n  away: ghp_thecopy\n",
+    )
+    .unwrap();
+
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+}
+
+/// A Repo pointed at a member's Author that has since gone — removed at home,
+/// or its device unlinked — refuses its next Start as a Repo whose Author is
+/// gone from `config.yaml` does.
+#[tokio::test]
+async fn a_repo_pointed_at_a_mirror_that_has_gone_refuses_as_one_gone() {
+    let (elsewhere, dir, app, _repo, repo_id) =
+        under_the_second_author("    name: Tobi at Home\n    email: tobi@example.com\n").await;
+    mirroring(&dir, false);
+    repoint(&app, repo_id, "away").await;
+
+    Settings::in_data_dir(dir.path()).holding_mirrors(Vec::new());
+
+    let id = ready(&app, elsewhere.path(), repo_id).await;
+
+    assert_eq!(
+        grill(&app, id).await,
+        GrillingStarted::RepoAuthorGone {
+            repo: "verkstead".to_owned(),
+        }
+    );
+}
+
+/// [`under_the_second_author`] with three more Repos beside `verkstead`, which
+/// is `home`'s: `askance`, recorded as `work`, and `notes` and `granit`, as
+/// `home`. Hands back the database too, for a repoint made behind the
+/// workbench's back — the hand edit ADR-0025 says an admitted companion can
+/// still be moved by.
+async fn beside_another_author() -> (
+    tempfile::TempDir,
+    tempfile::TempDir,
+    Router,
+    PathBuf,
+    SqlitePool,
+    [i64; 4],
+) {
+    let (elsewhere, dir, app, repo, repo_id) =
+        under_the_second_author("    name: Tobi at Home\n    email: tobi@example.com\n").await;
+
+    let mut ids = [repo_id; 4];
+    for (at, (name, author)) in [("askance", "work"), ("notes", "home"), ("granit", "home")]
+        .into_iter()
+        .enumerate()
+    {
+        let path = repository(elsewhere.path().join(name));
+        let registered: Registered = post(
+            &app,
+            "/api/ui/repos",
+            &serde_json::json!({ "path": path, "author": author }),
+        )
+        .await;
+        let Registered::Added(entry) = registered else {
+            panic!("{name} was registered as {author}: {registered:?}");
+        };
+        ids[at + 1] = entry.id;
+    }
+
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    (elsewhere, dir, app, repo, pool, ids)
+}
+
+/// Record the Repo `repo_id` as `author` straight into the store, as a repoint
+/// nobody pressed.
+async fn recorded_as(pool: &SqlitePool, repo_id: i64, author: &str) {
+    sqlx::query("UPDATE repo_authors SET author = ? WHERE repo_id = ?")
+        .bind(author)
+        .bind(repo_id)
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+/// The refusal naming `companion` as `companion_author`'s, beside a Repo of
+/// `author`'s.
+fn other_author(companion: &str, companion_author: &str, author: &str) -> OtherAuthor {
+    OtherAuthor {
+        companion: companion.to_owned(),
+        companion_author: companion_author.to_owned(),
+        author: author.to_owned(),
+    }
+}
+
+/// One sandbox is one `GH_TOKEN` and one git author, so a companion of another
+/// Author is refused on the composer naming it and both Authors — and one of
+/// the Repo's own Author is admitted as ever.
+#[tokio::test]
+async fn a_companion_of_another_author_is_refused_naming_both() {
+    let (_elsewhere, _dir, app, _repo, _pool, [repo_id, askance, notes, _]) =
+        beside_another_author().await;
+    let id = started(&app, repo_id).await;
+
+    assert_eq!(
+        add_companion(&app, id, askance).await,
+        CompanionAdded::OtherAuthor(other_author("askance", "Verkstead Test", "Tobi at Home")),
+    );
+    assert!(companions(&app, id).await.is_empty());
+
+    assert_eq!(add_companion(&app, id, notes).await, CompanionAdded::Added);
+    assert_eq!(companions(&app, id).await, ["notes"]);
+}
+
+/// And a member's Author is another Author like any of this device's own: a
+/// companion pointed at a mirror beside a Repo of this device's is refused
+/// naming both.
+#[tokio::test]
+async fn a_companion_pointed_at_a_mirror_is_of_another_author() {
+    let (_elsewhere, dir, app, _repo, pool, [repo_id, _, notes, _]) = beside_another_author().await;
+    mirroring(&dir, false);
+    recorded_as(&pool, notes, "away").await;
+
+    let id = started(&app, repo_id).await;
+
+    assert_eq!(
+        add_companion(&app, id, notes).await,
+        CompanionAdded::OtherAuthor(other_author("notes", "Away", "Tobi at Home")),
+    );
+}
+
+/// And a steer widening a running Conversation is held to the same rule, in
+/// either mode: read-only companions of another Author were turned down too.
+#[tokio::test]
+async fn a_steer_adding_a_companion_of_another_author_is_refused_in_either_mode() {
+    for mode in ["ReadOnly", "ReadWrite"] {
+        let (elsewhere, _dir, app, _repo, _pool, [repo_id, askance, ..]) =
+            beside_another_author().await;
+        let id = ready(&app, elsewhere.path(), repo_id).await;
+
+        assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+        assert_eq!(steer(&app, id).await, SteerOpened::Opened);
+        assert_eq!(
+            steer_alongside(
+                &app,
+                id,
+                "Grilling",
+                serde_json::json!([alongside(askance, mode)])
+            )
+            .await,
+            ConversationSteered::Companion {
+                repo: "askance".to_owned(),
+                why: SteerCompanionRefusal::OtherAuthor {
+                    companion_author: "Verkstead Test".to_owned(),
+                    author: "Tobi at Home".to_owned(),
+                },
+            },
+            "{mode}",
+        );
+        assert!(companions(&app, id).await.is_empty(), "{mode}");
+    }
+}
+
+/// Switching a draft's Repo keeps its companions, so a switch onto a Repo of
+/// another Author than one of them is refused naming them — rather than the
+/// companion quietly dropped — and onto one of the same Author it lands.
+#[tokio::test]
+async fn switching_onto_a_repo_of_another_author_than_a_companion_is_refused() {
+    let (_elsewhere, _dir, app, _repo, _pool, [repo_id, askance, notes, granit]) =
+        beside_another_author().await;
+    let id = started(&app, repo_id).await;
+    assert_eq!(add_companion(&app, id, notes).await, CompanionAdded::Added);
+
+    let switch = |onto: i64| {
+        let app = app.clone();
+        async move {
+            post::<RepoSwitched>(
+                &app,
+                &format!("/api/ui/conversations/{id}/repo"),
+                &serde_json::json!({ "repo_id": onto }),
+            )
+            .await
+        }
+    };
+
+    assert_eq!(
+        switch(askance).await,
+        RepoSwitched::OtherAuthor(other_author("notes", "Tobi at Home", "Verkstead Test")),
+    );
+    assert_eq!(opened(&app, id).await.repo.id, repo_id, "it stayed put");
+
+    assert_eq!(switch(granit).await, RepoSwitched::Switched);
+    assert_eq!(opened(&app, id).await.repo.id, granit);
+    assert_eq!(companions(&app, id).await, ["notes"]);
+}
+
+/// A companion moved under another Author after it was admitted — by hand,
+/// here — makes the cut refuse naming it and both Authors, at a grilling's
+/// start and at an adoption alike, and nothing is made.
+#[tokio::test]
+async fn a_companion_repointed_since_its_add_refuses_the_cut() {
+    let (elsewhere, _dir, app, repo, pool, [repo_id, _, notes, _]) = beside_another_author().await;
+    roadmap(
+        &repo,
+        OPEN_AT_THREE,
+        &["03-implementation.md", "04-wrap-up.md"],
+    );
+    let refusal = || other_author("notes", "Verkstead Test", "Tobi at Home");
+
+    let id = ready(&app, elsewhere.path(), repo_id).await;
+    assert_eq!(add_companion(&app, id, notes).await, CompanionAdded::Added);
+
+    let adopting = ready_to_adopt_again(&app, repo_id, "mvp").await;
+    assert_eq!(
+        add_companion(&app, adopting, notes).await,
+        CompanionAdded::Added
+    );
+
+    recorded_as(&pool, notes, "work").await;
+
+    let branch = opened(&app, id).await.branch;
+    assert_eq!(
+        grill(&app, id).await,
+        GrillingStarted::OtherAuthor(refusal())
+    );
+
+    let view = opened(&app, id).await;
+    assert_eq!(view.state, Lifecycle::Draft, "the press did not happen");
+    assert_eq!(view.worktree, None);
+    assert!(!has_branch(&repo, &branch));
+
+    assert_eq!(
+        press_adopt(&app, adopting).await,
+        Adopted::OtherAuthor(refusal())
+    );
+    assert!(!has_branch(&repo, "roadmaps/mvp/03-implementation"));
 }
 
 /// A base carrying no list is started with nothing extra: no commit and no
@@ -8415,7 +8991,7 @@ async fn a_companion_a_steer_cannot_deliver_refuses_it_by_name() {
             steer_alongside(&app, id, "Grilling", serde_json::json!([row])).await,
             ConversationSteered::Companion {
                 repo: "askance".to_owned(),
-                why,
+                why: why.clone(),
             },
         );
 
@@ -8696,7 +9272,7 @@ async fn an_upgrade_git_will_not_make_refuses_the_steer_by_name() {
             steer_opening(&app, id, "Grilling", serde_json::json!([opening(reading)])).await,
             ConversationSteered::Companion {
                 repo: "askance".to_owned(),
-                why,
+                why: why.clone(),
             },
         );
 
@@ -10464,6 +11040,50 @@ async fn a_review_draws_none_of_the_pull_requests_own_commits() {
         .is_empty(),
         "and the sweep's own reading still finds nothing to draw",
     );
+}
+
+/// A take-up is a start like any other, and refused for everything a grill
+/// start refuses over the Author: one `config.yaml` no longer holds, named by
+/// the Repo, and no git author at all — before anything is checked out.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_take_up_is_refused_over_the_repos_author_as_a_start_is() {
+    for (config, refusal) in [
+        (
+            "authors:\n  - id: home\n    name: Tobi\n    email: tobi@example.com\n",
+            TakenUp::RepoAuthorGone {
+                repo: "verkstead".to_owned(),
+            },
+        ),
+        ("", TakenUp::NoGitAuthor),
+        // And the one it records being a member's, whose token's copy has not
+        // arrived.
+        (
+            "",
+            TakenUp::RepoAuthorTokenAwaited {
+                repo: "verkstead".to_owned(),
+                device: "the-workstation".to_owned(),
+            },
+        ),
+    ] {
+        let (elsewhere, dir, app, repo, upstream, repo_id) = workbench_reviewing().await;
+        head_on_origin(&upstream, "rate-limiting");
+        opened_on_github(&repo, 41, "rate-limiting");
+
+        let id = reviewing(&app, elsewhere.path(), repo_id, 41).await;
+        std::fs::write(dir.path().join(CONFIG), config).unwrap();
+
+        if let TakenUp::RepoAuthorTokenAwaited { .. } = refusal {
+            Settings::in_data_dir(dir.path()).holding_mirrors(vec![Mirrored::of(
+                Author::of("work".to_owned(), None, Some("Ada".to_owned()), None),
+                "the-workstation".to_owned(),
+                true,
+            )]);
+        }
+
+        assert_eq!(press_take_up(&app, id).await, refusal);
+        nothing_taken_up(&app, id, &repo).await;
+    }
 }
 
 /// And the pull request it recorded carries the head branch GitHub named, which

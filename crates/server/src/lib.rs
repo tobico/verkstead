@@ -1233,6 +1233,40 @@ pub fn routers_answering_devices_telling(
     }
 }
 
+/// And the same two routers over a device that keeps its settings files in
+/// `data_dir`, which is what a suite about the Authors needs: an Author is at
+/// home in `config.yaml` and `secrets.yaml`, and a router handed nowhere to keep
+/// them has nowhere to save one (ADR-0025).
+pub fn routers_keeping_answering_devices_telling(
+    pool: SqlitePool,
+    data_dir: PathBuf,
+    devices: device::Devices,
+    nudges: nudge::Nudges,
+    machine: onboarding::Machine,
+) -> Routers {
+    let gate = key::Gate::open();
+
+    let state = standing(
+        pool,
+        updates::Updates::nothing_learned(),
+        nothing_bound(),
+        data_dir,
+        sessions::Sessions::none(),
+        Gh::on_path(),
+        tailnet(),
+        &gate,
+        machine,
+        None,
+        Some(devices),
+        nudges,
+    );
+
+    Routers {
+        workbench: serving(state.clone(), &gate),
+        over_the_link: peer::workbench::served(state),
+    }
+}
+
 /// And both of them over a device that **runs sessions**, keeping what it makes
 /// in `data_dir` and reaching GitHub through `gh`.
 ///
@@ -1642,6 +1676,11 @@ fn standing(
     // does, because what it keeps is rows in this store rather than a list in
     // this device's memory, and the two are refreshed by different news.
     mirroring::refreshing(&state);
+
+    // And the mirror rows of every member's Authors, on the Profiles' schedule
+    // and beside them, so every device draws one list of Authors (ADR-0025) —
+    // see [`mirroring::authors`].
+    mirroring::authors::refreshing(&state);
 
     // And what this device forwards, on the same channel again: a member's
     // `ports` Nudge is that Conversation's ports read over the link and held on
@@ -2081,6 +2120,32 @@ impl StartedBy {
     }
 }
 
+/// Move an installation's one `git_author` and `github_token` into the list
+/// of Authors, and record every Repo it registered as that Author (ADR-0025):
+/// what a start does before anything reads an Author or answers a route.
+///
+/// The uuid minted, where anything was moved — the second start finds the
+/// list and moves nothing, and records nothing either. See
+/// [`settings::Settings::moving_the_single_author`] and
+/// [`store::record_the_repo_authors`].
+pub async fn moving_the_single_author(
+    settings: &settings::Settings,
+    pool: &SqlitePool,
+) -> Result<Option<String>> {
+    let Some(id) = settings
+        .moving_the_single_author()
+        .context("moving the one git author and GitHub token into the list of Authors")?
+    else {
+        return Ok(None);
+    };
+
+    store::record_the_repo_authors(pool, &id)
+        .await
+        .context("recording the Repos as the Author the git author became")?;
+
+    Ok(Some(id))
+}
+
 /// Take the address, open the database, and serve until the process is stopped.
 ///
 /// **The socket is taken before anything is made.** Everything below makes
@@ -2261,6 +2326,23 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
     // installation has: whether anything names a store beside the Worktrees is
     // what says whether there is a directory to make.
     let settings = settings::Settings::in_data_dir(&data_dir);
+
+    // And the one author and the one token an installation from before the
+    // Author list wrote, moved into that list as one Author — here, before
+    // anything below reads an Author, so that from the first session on the
+    // files have one shape (ADR-0025). A file nothing can parse is left for the
+    // human to fix; one that cannot be written is a Data Directory this start
+    // cannot work in. See [`settings::Settings::moving_the_single_author`].
+    //
+    // And every Repo that installation registered is recorded as that Author,
+    // which is what it has been committing as all along — here because the uuid
+    // was only minted a moment ago, in a file the store's own open cannot see,
+    // and before the routes for the reason the rankings above are: a Repo list
+    // answered ahead of it would be one with Repos nobody had said were whose.
+    // See [`store::record_the_repo_authors`].
+    if let Some(id) = moving_the_single_author(&settings, &pool).await? {
+        tracing::info!(author = %id, "the one git author and GitHub token are now an Author");
+    }
 
     // And the shared build cache, which is resolved for the reason the binds
     // above are and *made* here, which they never are — see

@@ -488,8 +488,9 @@ pub async fn commit_repo(
     conversation_id: i64,
     event_id: i64,
 ) -> Result<Option<Repo>> {
-    let row: Option<(i64, String, String, String)> = sqlx::query_as(
-        "SELECT r.id, r.path, r.name, r.default_branch
+    let row: Option<(i64, String, String, String, Option<String>)> = sqlx::query_as(
+        "SELECT r.id, r.path, r.name, r.default_branch,
+                (SELECT author FROM repo_authors WHERE repo_id = r.id)
          FROM commits c
          JOIN repos r ON r.id = c.repo_id
          WHERE c.event_id = ? AND c.conversation_id = ?",
@@ -500,11 +501,12 @@ pub async fn commit_repo(
     .await
     .with_context(|| format!("reading the repository of the commit of Event {event_id}"))?;
 
-    Ok(row.map(|(id, path, name, default_branch)| Repo {
+    Ok(row.map(|(id, path, name, default_branch, author)| Repo {
         id,
         path: std::path::PathBuf::from(path),
         name,
         default_branch,
+        author,
     }))
 }
 

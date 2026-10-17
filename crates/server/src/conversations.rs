@@ -43,19 +43,20 @@ use verkstead_render::{
     Adopted, Attached, AttachedServerView, AttachmentRemoved, AttachmentView, BaseRecorded,
     BranchRenamed, BriefSaved, CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed,
     CompanionMode, CompanionModeChosen, CompanionRefusal, CompanionRemoved, ConversationClosed,
-    ConversationMove, GrillingStarted, PairingView, PickedView, Process, ProcessPicked,
-    ProfileEntry, ProfileTrouble, RepoPairingsView, RepoSwitched, ServerAttached, ServerRemoved,
-    Started, TakenUp, TargetRecorded, Uncommitted, Worktree,
+    ConversationMove, GrillingStarted, OtherAuthor, PairingView, PickedView, Process,
+    ProcessPicked, ProfileEntry, ProfileTrouble, RepoPairingsView, RepoSwitched, ServerAttached,
+    ServerRemoved, Started, TakenUp, TargetRecorded, Uncommitted, Worktree,
 };
 use verkstead_schema::{Direction, Nudge};
 
 use crate::AppState;
 use crate::attachments::{self, Attachments};
 use crate::boundaries;
+use crate::github::Gh;
 
 use crate::handoffs::Handoffs;
 use crate::repos::git;
-use crate::settings::Author;
+use crate::settings::{Author, Config, Signature, Unauthored};
 use crate::skills;
 use crate::stages::Startable;
 use crate::store;
@@ -1171,7 +1172,31 @@ pub(crate) async fn set_base_branch(
 /// are the ones saying something *has* been settled elsewhere: a worktree, which
 /// the store answers off the row it wrote, and an adoption, whose repository was
 /// settled by the roadmap — or by the pull request — rather than by the human.
-pub(crate) async fn switch_repo(pool: &SqlitePool, id: i64, repo_id: i64) -> Result<RepoSwitched> {
+///
+/// And one question that is not about the rows: whose the Repo switched onto
+/// is. Every companion is kept but the one it becomes, so one under another
+/// Author is refused by name rather than dropped — see [`other_author`].
+pub(crate) async fn switch_repo(
+    pool: &SqlitePool,
+    config: &Config,
+    id: i64,
+    repo_id: i64,
+) -> Result<RepoSwitched> {
+    if let (Some(conversation), Some(onto)) = (
+        store::load_conversation(pool, id).await?,
+        store::registered_repo(pool, repo_id).await?,
+    ) {
+        let kept = conversation
+            .companions
+            .iter()
+            .map(|companion| &companion.repo)
+            .filter(|companion| companion.id != onto.id);
+
+        if let Some(other) = other_author(config, &onto, kept) {
+            return Ok(RepoSwitched::OtherAuthor(other));
+        }
+    }
+
     Ok(match store::switch_repo(pool, id, repo_id).await? {
         store::Switched::Switched => RepoSwitched::Switched,
         store::Switched::NoSuchConversation => RepoSwitched::NoSuchConversation,
@@ -1241,9 +1266,23 @@ pub(crate) async fn pick_process(
 /// starts.
 pub(crate) async fn add_companion(
     pool: &SqlitePool,
+    config: &Config,
     id: i64,
     repo_id: i64,
 ) -> Result<CompanionAdded> {
+    // Whose it is, which is a question about `config.yaml` rather than the
+    // table, and so asked here: the store's refusals first where they apply —
+    // its own Repo and one gone from the registry say more than an Author
+    // would — and this beside them.
+    if let (Some(conversation), Some(added)) = (
+        store::load_conversation(pool, id).await?,
+        store::registered_repo(pool, repo_id).await?,
+    ) && added.id != conversation.repo.id
+        && let Some(other) = other_author(config, &conversation.repo, [&added])
+    {
+        return Ok(CompanionAdded::OtherAuthor(other));
+    }
+
     Ok(match store::add_companion(pool, id, repo_id).await? {
         store::Adding::Added => CompanionAdded::Added,
         store::Adding::NoSuchConversation => CompanionAdded::NoSuchConversation,
@@ -1251,6 +1290,36 @@ pub(crate) async fn add_companion(
         store::Adding::NoSuchRepo => CompanionAdded::NoSuchRepo,
         store::Adding::OwnRepo => CompanionAdded::OwnRepo,
         store::Adding::AlreadyAdded => CompanionAdded::AlreadyAdded,
+    })
+}
+
+/// The first of `companions` under another Author than `repo`, as
+/// [`Config::author_of`] resolves both, named with the two of them — or `None`
+/// where every one is the Repo's own Author's.
+///
+/// Only two Authors that are both there differ. A side with nobody resolved is
+/// a Repo whose Author is gone or unpicked, which the start refuses by name of
+/// its own (see [`Config::author_missing`]), or an installation with no Author
+/// at all, where nothing is anybody's.
+///
+/// One sandbox is one environment — one `GH_TOKEN`, one git author — so this
+/// is asked at every door that composes one: the add, the switch, and every cut
+/// that takes companions, a stage's carry-on included (ADR-0025).
+pub(crate) fn other_author<'a>(
+    config: &Config,
+    repo: &store::Repo,
+    companions: impl IntoIterator<Item = &'a store::Repo>,
+) -> Option<OtherAuthor> {
+    let author = config.author_of(repo.author.as_deref())?;
+
+    companions.into_iter().find_map(|companion| {
+        let theirs = config.author_of(companion.author.as_deref())?;
+
+        (theirs.id() != author.id()).then(|| OtherAuthor {
+            companion: companion.name.clone(),
+            companion_author: theirs.called().to_owned(),
+            author: author.called().to_owned(),
+        })
     })
 }
 
@@ -1383,6 +1452,56 @@ pub(crate) async fn rename_companion_branch(
             store::Configured::NoSuchCompanion => CompanionBranchRenamed::NoSuchCompanion,
         },
     )
+}
+
+/// A start refused because the Repo called `repo` has no Author of its own to
+/// commit as — see [`crate::settings::Config::author_missing`].
+fn unauthored_start(why: Unauthored, repo: &str) -> GrillingStarted {
+    let repo = repo.to_owned();
+
+    match why {
+        Unauthored::Gone => GrillingStarted::RepoAuthorGone { repo },
+        Unauthored::Unpicked => GrillingStarted::RepoAuthorUnpicked { repo },
+        Unauthored::TokenAwaited { device } => {
+            GrillingStarted::RepoAuthorTokenAwaited { repo, device }
+        }
+    }
+}
+
+/// Why a take-up of `conversation` has nobody to commit and push as, in the
+/// order [`start_grilling`] asks: the Repo's own record first, then a companion
+/// under another Author, then an Author with no git name or email.
+fn unauthored_take_up(config: &Config, conversation: &store::Conversation) -> Option<TakenUp> {
+    let repo = || conversation.repo.name.clone();
+
+    match config.author_missing(conversation.repo.author.as_deref()) {
+        Some(Unauthored::Gone) => return Some(TakenUp::RepoAuthorGone { repo: repo() }),
+        Some(Unauthored::Unpicked) => return Some(TakenUp::RepoAuthorUnpicked { repo: repo() }),
+        Some(Unauthored::TokenAwaited { device }) => {
+            return Some(TakenUp::RepoAuthorTokenAwaited {
+                repo: repo(),
+                device,
+            });
+        }
+        None => {}
+    }
+
+    if let Some(other) = other_author(
+        config,
+        &conversation.repo,
+        conversation
+            .companions
+            .iter()
+            .map(|companion| &companion.repo),
+    ) {
+        return Some(TakenUp::OtherAuthor(other));
+    }
+
+    config
+        .author_of(conversation.repo.author.as_deref())
+        .and_then(Author::configured)
+        .is_none()
+        .then_some(TakenUp::NoGitAuthor)
 }
 
 /// Give a drafting Conversation somewhere to work: a branch off its base commit
@@ -1534,7 +1653,29 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     // list makes no difference to the refusal, because a workbench with no
     // author configured is a misconfiguration to name rather than a case to work
     // around.
-    let author = Author::configured(state.settings.config().git_author());
+    //
+    // The Repo's Author, which is who everything on its branches is by — and,
+    // where it has none, whether that is its own record's doing, which is
+    // refused by name in the same place. As is a companion under another
+    // Author, which only a hand edit or a repoint since its add can have made.
+    let config = state.settings.config();
+    let author = config
+        .author_of(conversation.repo.author.as_deref())
+        .and_then(Author::configured);
+    let unauthored = config
+        .author_missing(conversation.repo.author.as_deref())
+        .map(|why| unauthored_start(why, &conversation.repo.name))
+        .or_else(|| {
+            other_author(
+                &config,
+                &conversation.repo,
+                conversation
+                    .companions
+                    .iter()
+                    .map(|companion| &companion.repo),
+            )
+            .map(GrillingStarted::OtherAuthor)
+        });
 
     // What the work branches from, resolved here and nowhere earlier: what the
     // human picked is a branch, and what they meant by picking it is wherever it
@@ -1565,6 +1706,8 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     // The filesystem and git halves together, off the runtime: a worktree of a
     // large repository is not a quick call, and every part of this blocks.
     let made = tokio::task::spawn_blocking({
+        let gh = state.github.clone();
+        let own = state.github.as_author(conversation.repo.author.as_deref());
         let branch = branch.clone();
         let checkouts = state.checkouts.clone();
         move || {
@@ -1599,6 +1742,10 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
             // an author is wanted. Before the fetch, which is the first thing
             // that costs anything, and before the name is chosen: nothing has
             // been made yet, so the refusal leaves nothing behind.
+            if let Some(refusal) = unauthored {
+                return Err(refusal);
+            }
+
             let Some(author) = author else {
                 return Err(GrillingStarted::NoGitAuthor);
             };
@@ -1608,7 +1755,7 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
             // work starting from wherever this checkout happened to be left.
             // Refused rather than carried on with: the human is at the button,
             // and offline or an authentication that has gone is theirs to fix.
-            if let worktrees::Fetched::Failed(said) = worktrees::fetch(&repo) {
+            if let worktrees::Fetched::Failed(said) = worktrees::fetch(&repo, &own.credential()) {
                 tracing::error!(
                     said,
                     repo = %repo.display(),
@@ -1674,8 +1821,8 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
             }];
 
             for companion in companions {
-                let beside =
-                    plan(&data_dir, id, &branch, companion, &planned).map_err(Unmade::grilling)?;
+                let beside = plan(&data_dir, &gh, id, &branch, companion, &planned)
+                    .map_err(Unmade::grilling)?;
 
                 planned.push(beside);
             }
@@ -2096,6 +2243,7 @@ fn refusal(why: &CompanionRefusal) -> String {
 /// companions being handed one directory — see [`worktrees::unclaimed_path`].
 fn plan(
     data: &Path,
+    gh: &Gh,
     id: i64,
     branch: &str,
     companion: store::Companion,
@@ -2107,7 +2255,10 @@ fn plan(
         why,
     };
 
-    if let worktrees::Fetched::Failed(said) = worktrees::fetch(&repo) {
+    // As the companion's own Author, whose token reaches it.
+    let credential = gh.as_author(companion.repo.author.as_deref()).credential();
+
+    if let worktrees::Fetched::Failed(said) = worktrees::fetch(&repo, &credential) {
         tracing::error!(
             said,
             repo = %repo.display(),
@@ -2243,7 +2394,7 @@ fn unmake(made: &[Checkout]) {
 /// human in those words too — [`Unmade::Own`] — because it is the same thing
 /// from where they are standing: a press that made nothing, with the reason in
 /// the server's log.
-fn clearing(planned: &[Checkout], base: &str, author: &Author) -> Result<Clearing, Unmade> {
+fn clearing(planned: &[Checkout], base: &str, author: &Signature) -> Result<Clearing, Unmade> {
     // The Conversation's own is the first of the list, every list being built
     // that way. A list with nothing in it is no start at all, and there is
     // nothing to clear in one.
@@ -2398,7 +2549,39 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
     // before anything that costs a git call.
     let config = state.settings.config();
 
-    let Some(author) = Author::configured(config.git_author()) else {
+    // Named first where the reason is the Repo's own record, for the reason
+    // [`start_grilling`] names it first.
+    let repo = || conversation.repo.name.clone();
+
+    match config.author_missing(conversation.repo.author.as_deref()) {
+        Some(Unauthored::Gone) => return Ok(Adopted::RepoAuthorGone { repo: repo() }),
+        Some(Unauthored::Unpicked) => return Ok(Adopted::RepoAuthorUnpicked { repo: repo() }),
+        Some(Unauthored::TokenAwaited { device }) => {
+            return Ok(Adopted::RepoAuthorTokenAwaited {
+                repo: repo(),
+                device,
+            });
+        }
+        None => {}
+    }
+
+    // And a companion under another Author, which only a hand edit or a
+    // repoint since it was added can have made — see [`other_author`].
+    if let Some(other) = other_author(
+        &config,
+        &conversation.repo,
+        conversation
+            .companions
+            .iter()
+            .map(|companion| &companion.repo),
+    ) {
+        return Ok(Adopted::OtherAuthor(other));
+    }
+
+    let Some(author) = config
+        .author_of(conversation.repo.author.as_deref())
+        .and_then(Author::configured)
+    else {
         return Ok(Adopted::NoGitAuthor);
     };
 
@@ -2429,6 +2612,7 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
     // The reading, off the runtime's threads: fetching, resolving a commit and
     // reading a roadmap out of a git directory are all blocking calls.
     let read = tokio::task::spawn_blocking({
+        let own = state.github.as_author(conversation.repo.author.as_deref());
         let repo = repo.clone();
 
         move || {
@@ -2438,7 +2622,7 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
             // or having lost an authentication is theirs to go and fix. A
             // repository with no remote has nothing to fetch and is never
             // refused for it.
-            if let worktrees::Fetched::Failed(said) = worktrees::fetch(&repo) {
+            if let worktrees::Fetched::Failed(said) = worktrees::fetch(&repo, &own.credential()) {
                 tracing::error!(
                     said,
                     repo = %repo.display(),
@@ -2511,6 +2695,7 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
     // names nothing, so the branch cut beside the stage is the stage's own.
 
     let made = tokio::task::spawn_blocking({
+        let gh = state.github.clone();
         let path = path.clone();
         let branch = branch.clone();
         let commit = commit.clone();
@@ -2532,8 +2717,8 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
             }];
 
             for companion in companions {
-                let beside =
-                    plan(&data_dir, id, &branch, companion, &planned).map_err(Unmade::adopting)?;
+                let beside = plan(&data_dir, &gh, id, &branch, companion, &planned)
+                    .map_err(Unmade::adopting)?;
 
                 planned.push(beside);
             }
@@ -2723,7 +2908,7 @@ async fn alongside(
     commit: &str,
     named: &str,
     stacks_on: Option<&str>,
-    author: &Author,
+    author: &Signature,
 ) {
     let branch = stage.branch();
 
@@ -2826,6 +3011,7 @@ async fn alongside(
     // Off the same base commit: what the human settled on the composer is the
     // base of every stage this press starts.
     let made = tokio::task::spawn_blocking({
+        let gh = state.github.clone();
         let repo = adopting.repo.path.clone();
         let path = path.clone();
         let branch = branch.clone();
@@ -2846,7 +3032,7 @@ async fn alongside(
             }];
 
             for companion in companions {
-                let beside = plan(&data_dir, id, &branch, companion, &planned)?;
+                let beside = plan(&data_dir, &gh, id, &branch, companion, &planned)?;
 
                 planned.push(beside);
             }
@@ -3271,6 +3457,13 @@ pub(crate) async fn take_up(state: &AppState, id: i64, discarding: &[i64]) -> Re
         return Ok(TakenUp::NotHoldingOne);
     }
 
+    // Who the sessions it sends commit and push as, refused for everything a
+    // grill start refuses over it — see [`start_grilling`]. Asked of the files
+    // alone, so before anything that costs a call.
+    if let Some(refusal) = unauthored_take_up(&state.settings.config(), &conversation) {
+        return Ok(refusal);
+    }
+
     // Whether each Claude account it would run under is logged in, asked
     // first for the reason a grill start asks — see [`crate::logins::asked`].
     crate::logins::asked(state, chosen(&conversation)).await;
@@ -3464,6 +3657,8 @@ pub(crate) async fn take_up(state: &AppState, id: i64, discarding: &[i64]) -> Re
     // Everything git has to be asked, off the runtime's threads: fetching,
     // resolving, moving a ref and making a worktree all block.
     let made = tokio::task::spawn_blocking({
+        let gh = state.github.clone();
+        let own = state.github.as_author(conversation.repo.author.as_deref());
         let repo = conversation.repo.path.clone();
         let path = path.clone();
         let head = head.clone();
@@ -3476,7 +3671,7 @@ pub(crate) async fn take_up(state: &AppState, id: i64, discarding: &[i64]) -> Re
             // first: a remote-tracking ref is only as fresh as the last fetch,
             // and the whole of what is being taken up lives on the remote. The
             // human is at this button, so being offline is theirs to go and fix.
-            if let worktrees::Fetched::Failed(said) = worktrees::fetch(&repo) {
+            if let worktrees::Fetched::Failed(said) = worktrees::fetch(&repo, &own.credential()) {
                 tracing::error!(
                     said,
                     repo = %repo.display(),
@@ -3500,8 +3695,8 @@ pub(crate) async fn take_up(state: &AppState, id: i64, discarding: &[i64]) -> Re
             // presses use: a Conversation taking something up drafts like any
             // other, so its setup card put those rows there like any other's.
             for companion in companions {
-                let beside =
-                    plan(&data_dir, id, &head, companion, &planned).map_err(Unmade::taking_up)?;
+                let beside = plan(&data_dir, &gh, id, &head, companion, &planned)
+                    .map_err(Unmade::taking_up)?;
 
                 planned.push(beside);
             }
@@ -4328,7 +4523,7 @@ async fn resolve(
 
     // Off the runtime's threads: `gh` is a process, and running one blocks.
     let asked = tokio::task::spawn_blocking({
-        let gh = state.github.clone();
+        let gh = state.github.as_author(conversation.repo.author.as_deref());
         let repo = conversation.repo.path.clone();
 
         move || crate::github::pull_request_numbered(&gh, &repo, named.number)
@@ -4416,7 +4611,7 @@ async fn opened_on(
 ) -> Result<std::result::Result<Option<i64>, TakenUp>> {
     // Off the runtime's threads, as [`resolve`]'s own call is: `gh` is a process.
     let asked = tokio::task::spawn_blocking({
-        let gh = state.github.clone();
+        let gh = state.github.as_author(conversation.repo.author.as_deref());
         let repo = conversation.repo.path.clone();
         let branch = branch.to_owned();
 

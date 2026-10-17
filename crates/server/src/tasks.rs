@@ -43,7 +43,7 @@ use verkstead_render::{BacklogPane, TaskEntry, TaskListEvent};
 
 use crate::checklist;
 use crate::repos::run;
-use crate::settings::Author;
+use crate::settings::Signature;
 
 /// Where a Conversation's backlog lives inside its Worktree.
 pub(crate) const BACKLOG: &str = ".tasks";
@@ -356,7 +356,7 @@ impl Clearing {
 /// afterwards, and it has to reach the log.
 ///
 /// Blocking from end to end, and called where the checkouts are made.
-pub(crate) fn clear(worktree: &Path, base: &str, author: &Author) -> Clearing {
+pub(crate) fn clear(worktree: &Path, base: &str, author: &Signature) -> Clearing {
     let backlog = worktree.join(BACKLOG);
 
     if !backlog.is_dir() {
@@ -761,8 +761,8 @@ Takes a Conversation from finished grilling to implemented work.
     }
 
     /// Who every clearing here is committed as.
-    fn author() -> Author {
-        Author::configured(&crate::settings::GitAuthor::of(
+    fn author() -> Signature {
+        Signature::configured(&crate::settings::GitAuthor::of(
             Some("Ada Lovelace".to_owned()),
             Some("ada@example.com".to_owned()),
         ))

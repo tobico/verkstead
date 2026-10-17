@@ -164,7 +164,8 @@ use std::path::{Path, PathBuf};
 use verkstead_schema::{Direction, Nudge};
 
 use crate::AppState;
-use crate::settings::Author;
+use crate::github::{Credential, Gh};
+use crate::settings::{Author, Config, Signature, Unauthored};
 use crate::stages::{self, Next, Stage};
 use crate::store;
 use crate::tasks::{self, Clearing};
@@ -874,16 +875,31 @@ async fn start(
     // start without one is a misconfiguration to name rather than a case to work
     // around — and naming it here, where nothing has been made, is cheaper for
     // the human than naming it after a stage has half started.
-    let Some(author) = Author::configured(state.settings.config().git_author()) else {
+    let config = state.settings.config();
+
+    let Some(author) = config
+        .author_of(conversation.repo.author.as_deref())
+        .filter(|_| {
+            config
+                .author_missing(conversation.repo.author.as_deref())
+                .is_none()
+        })
+        .and_then(Author::configured)
+    else {
+        let (missing, fix) = unsigned(
+            &config,
+            conversation.repo.author.as_deref(),
+            &conversation.repo.name,
+        );
+
         halting(
             state,
             brought,
             settled,
             format!(
-                "Stage {} of the `{}` roadmap was ready to start, but no git author is set, so \
-                 Verkstead can't commit on its branch. Nothing was started. Set one in settings, \
-                 then continue the roadmap.",
-                stage.label, stage.roadmap,
+                "Stage {} of the `{}` roadmap was ready to start, but {}, so Verkstead can't \
+                 commit on its branch. Nothing was started. {}, then continue the roadmap.",
+                stage.label, stage.roadmap, missing, fix,
             ),
         )
         .await;
@@ -910,6 +926,33 @@ async fn start(
 
         return;
     };
+
+    // And the companions it inherits, each still the Repo's own Author's: the
+    // set was admitted once, but a hand edit of `config.yaml` or a repoint
+    // since can have moved one under another — and one sandbox is one
+    // `GH_TOKEN` and one git author (ADR-0025). Before anything is made, for
+    // the author's reason.
+    if let Some(other) = crate::conversations::other_author(
+        &config,
+        &conversation.repo,
+        conversation
+            .companions
+            .iter()
+            .map(|companion| &companion.repo),
+    ) {
+        return halting(
+            state,
+            brought,
+            settled,
+            format!(
+                "Stage {} of the `{}` roadmap was ready to start, but its companion repo `{}` is \
+                 {}'s and its repo is {}'s, and one sandbox works as one author. Nothing was \
+                 started. Pick the same author for both under Repos, then continue the roadmap.",
+                stage.label, stage.roadmap, other.companion, other.companion_author, other.author,
+            ),
+        )
+        .await;
+    }
 
     // A branch by that name already is a stage somebody — or some earlier run —
     // has started already. Refused rather than worked around: the alternative is
@@ -974,8 +1017,9 @@ async fn start(
     let stands = tokio::task::spawn_blocking({
         let repo = repo.clone();
         let default = conversation.repo.default_branch.clone();
+        let gh = state.github.as_author(conversation.repo.author.as_deref());
 
-        move || standing(&repo, &default, &base, stacks)
+        move || standing(&repo, &gh.credential(), &default, &base, stacks)
     })
     .await;
 
@@ -1070,6 +1114,7 @@ async fn start(
         let companions = conversation.companions.clone();
         let base = cut_from.clone();
         let checkouts = state.checkouts.clone();
+        let gh = state.github.clone();
 
         move || {
             let Some(commit) = worktrees::resolve(&repo, &from) else {
@@ -1096,6 +1141,7 @@ async fn start(
 
                 planned.push(beside(
                     &data,
+                    &gh,
                     id,
                     &branch,
                     base.as_deref(),
@@ -1349,14 +1395,20 @@ impl Stands {
 ///
 /// Blocking, and called on a borrowed thread: a fetch has no deadline to answer
 /// within.
-fn standing(repo: &Path, default: &str, base: &str, stacks: bool) -> Option<Stands> {
+fn standing(
+    repo: &Path,
+    credential: &Credential,
+    default: &str,
+    base: &str,
+    stacks: bool,
+) -> Option<Stands> {
     if stacks {
         return Some(Stands::Recorded {
             base: base.to_owned(),
         });
     }
 
-    if let worktrees::Fetched::Failed(said) = worktrees::fetch(repo) {
+    if let worktrees::Fetched::Failed(said) = worktrees::fetch(repo, credential) {
         tracing::error!(
             said,
             repo = %repo.display(),
@@ -1567,6 +1619,7 @@ impl Why {
 /// companion start without having checked out another.
 fn beside(
     data: &Path,
+    gh: &Gh,
     id: i64,
     branch: &str,
     base: Option<&str>,
@@ -1598,7 +1651,10 @@ fn beside(
     let named = match &cut_from {
         Some(cut_from) => cut_from.clone(),
         None => {
-            if let worktrees::Fetched::Failed(said) = worktrees::fetch(&repo) {
+            // As the companion's own Author, whose token reaches it.
+            let credential = gh.as_author(companion.repo.author.as_deref()).credential();
+
+            if let worktrees::Fetched::Failed(said) = worktrees::fetch(&repo, &credential) {
                 tracing::error!(
                     said,
                     repo = %repo.display(),
@@ -1715,7 +1771,7 @@ fn make(planned: &[Checkout]) -> Result<(), Halted> {
 /// checkout exactly as a `worktree add` git refused unwinds them — and said to
 /// the human as [`Halted::Own`], because it is the same thing from where they
 /// are standing: a stage that made nothing, with the reason in the server's log.
-fn clearing(planned: &[Checkout], from: &str, author: &Author) -> Result<Clearing, Halted> {
+fn clearing(planned: &[Checkout], from: &str, author: &Signature) -> Result<Clearing, Halted> {
     let Some(own) = planned.first() else {
         return Ok(Clearing::Nothing);
     };
@@ -2008,11 +2064,150 @@ async fn load(state: &AppState, conversation_id: i64) -> Option<store::Conversat
     }
 }
 
+/// What is missing that a stage cannot commit as, in the halt's words, and
+/// what to do about it: the Repo called `repo` named, and sent to the Repos
+/// pane, where its own record is why — an Author no longer in the one list, or
+/// none picked among several — or sent to the device a mirrored Author is at
+/// home on, where its token is still to arrive from; then the Repo's Author
+/// named where there is more than one it could have been, and the sentence a
+/// missing git author always had where there is not.
+fn unsigned(config: &Config, recorded: Option<&str>, repo: &str) -> (String, String) {
+    match config.author_missing(recorded) {
+        Some(Unauthored::Gone) => {
+            return (
+                format!("the `{repo}` repo's author isn't configured any more"),
+                "Pick another under Repos in settings".to_owned(),
+            );
+        }
+        Some(Unauthored::Unpicked) => {
+            return (
+                format!("the `{repo}` repo has no author picked"),
+                "Pick one under Repos in settings".to_owned(),
+            );
+        }
+        Some(Unauthored::TokenAwaited { device }) => {
+            return (
+                format!(
+                    "the `{repo}` repo's author is at home on {device} and its token hasn't \
+                     reached this device yet"
+                ),
+                format!("Once {device} is reachable again"),
+            );
+        }
+        None => {}
+    }
+
+    let named = config
+        .author_of(recorded)
+        .filter(|_| config.authors().len() > 1)
+        .and_then(|author| Some((author.display_name().or(author.name())?, author)));
+
+    match named {
+        Some((called, author)) => (
+            format!(
+                "its repo's author, {called}, has no {} set",
+                match author.name() {
+                    None => "git name",
+                    Some(_) => "email",
+                },
+            ),
+            "Set it in settings".to_owned(),
+        ),
+        None => (
+            "no git author is set".to_owned(),
+            "Set one in settings".to_owned(),
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::process::{Command, Stdio};
 
     use super::*;
+
+    /// The halt names the Repo's Author and what it lacks only where there is
+    /// another Author it could have been taken for; with one, it says what a
+    /// missing git author always said.
+    #[test]
+    fn a_halt_over_the_author_names_it_only_among_several() {
+        let one = Config::read("authors:\n  - id: work\n    name: Tobias Cohen\n").unwrap();
+        assert_eq!(
+            unsigned(&one, Some("work"), "verkstead").0,
+            "no git author is set"
+        );
+        assert_eq!(
+            unsigned(&Config::default(), None, "verkstead").0,
+            "no git author is set"
+        );
+
+        let two = Config::read(concat!(
+            "authors:\n",
+            "  - id: work\n",
+            "    name: Tobias Cohen\n",
+            "  - id: home\n",
+            "    display_name: Home\n",
+            "    email: tobi@example.com\n",
+        ))
+        .unwrap();
+        assert_eq!(
+            unsigned(&two, Some("work"), "verkstead"),
+            (
+                "its repo's author, Tobias Cohen, has no email set".to_owned(),
+                "Set it in settings".to_owned()
+            )
+        );
+        assert_eq!(
+            unsigned(&two, Some("home"), "verkstead").0,
+            "its repo's author, Home, has no git name set"
+        );
+        assert_eq!(
+            unsigned(&two, None, "verkstead"),
+            (
+                "the `verkstead` repo has no author picked".to_owned(),
+                "Pick one under Repos in settings".to_owned()
+            )
+        );
+        assert_eq!(
+            unsigned(&two, Some("gone"), "verkstead"),
+            (
+                "the `verkstead` repo's author isn't configured any more".to_owned(),
+                "Pick another under Repos in settings".to_owned()
+            )
+        );
+    }
+
+    /// A halt over a Repo pointed at a member's Author whose token's copy has
+    /// not arrived names the device it is at home on, and sends the human
+    /// there rather than to settings.
+    #[test]
+    fn a_halt_over_a_mirror_awaiting_its_token_names_its_home() {
+        use crate::settings::{Mirrored, Settings};
+
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+
+        settings.holding_mirrors(vec![Mirrored::of(
+            Author::of(
+                "away".to_owned(),
+                None,
+                Some("Ada Lovelace".to_owned()),
+                Some("ada@away.example".to_owned()),
+            ),
+            "the-workstation".to_owned(),
+            true,
+        )]);
+
+        assert_eq!(
+            unsigned(&settings.config(), Some("away"), "verkstead"),
+            (
+                "the `verkstead` repo's author is at home on the-workstation and its token \
+                 hasn't reached this device yet"
+                    .to_owned(),
+                "Once the-workstation is reachable again".to_owned(),
+            )
+        );
+    }
 
     /// A repository with a default branch and a branch off it to be cut from —
     /// which is the shape every stage start reads, whatever it decides.
@@ -2069,8 +2264,14 @@ mod tests {
 
         /// Where the stage's branch starts, as [`start`] asks it.
         fn stands(&self, stacks: bool) -> Stands {
-            standing(self.path(), "main", "roadmap/01-first", stacks)
-                .expect("a repository with no remote has nothing to fail to fetch")
+            standing(
+                self.path(),
+                &Credential::host(),
+                "main",
+                "roadmap/01-first",
+                stacks,
+            )
+            .expect("a repository with no remote has nothing to fail to fetch")
         }
     }
 
@@ -2226,10 +2427,26 @@ mod tests {
             &["remote", "add", "origin", "/verkstead/no/such/repository"],
         );
 
-        assert!(standing(repo.path(), "main", "roadmap/01-first", false).is_none());
+        assert!(
+            standing(
+                repo.path(),
+                &Credential::host(),
+                "main",
+                "roadmap/01-first",
+                false
+            )
+            .is_none()
+        );
 
         assert!(
-            standing(repo.path(), "main", "roadmap/01-first", true).is_some(),
+            standing(
+                repo.path(),
+                &Credential::host(),
+                "main",
+                "roadmap/01-first",
+                true
+            )
+            .is_some(),
             "and a recorded stack is never refused for it, having asked for no fetch",
         );
     }
@@ -2241,7 +2458,13 @@ mod tests {
         let repo = Repo::new();
 
         assert!(matches!(
-            standing(repo.path(), "main", "roadmap/no-such-branch", false),
+            standing(
+                repo.path(),
+                &Credential::host(),
+                "main",
+                "roadmap/no-such-branch",
+                false
+            ),
             Some(Stands::Off { .. }),
         ));
     }

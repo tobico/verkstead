@@ -17,9 +17,9 @@
 //! the home a session gets rather than under this process's. See
 //! [`Gh::extension`].
 //!
-//! It authenticates as the configured token — the one in `secrets.yaml` that
-//! every session's sandbox gets too — handed to `gh` as `GH_TOKEN` in the
-//! environment of the call. The file is read at the moment of the call rather
+//! It authenticates as the token of the Repo's Author — the one in
+//! `secrets.yaml` that every session on that Repo gets too — handed to `gh` as
+//! `GH_TOKEN` in the environment of the call. See [`Gh::as_author`]. The file is read at the moment of the call rather
 //! than held from startup, so a token saved or rotated through the settings
 //! page reaches the next `gh` without the server being restarted.
 //!
@@ -51,6 +51,104 @@ use crate::settings::Settings;
 use crate::store;
 use crate::unseen::Unseen;
 
+/// What a git of Verkstead's own presents to a remote: an Author's token, or
+/// nothing at all, which leaves git to the host's own credentials.
+///
+/// Every git that reaches a remote on a Repo goes through this — the fetch
+/// before a cut, the fetch that draws a page, the checks' `ls-remote` and a
+/// share's clone and push — so that a private repository under the second
+/// Author's account is fetched as that Author, exactly as `gh` already asks
+/// about it. See [`Gh::credential`].
+#[derive(Clone)]
+pub(crate) struct Credential(AsWhom);
+
+/// Who a git or a `gh` of Verkstead's own authenticates as.
+#[derive(Clone)]
+enum AsWhom {
+    /// Whatever the host is logged in as: an Author with no token, or no
+    /// Author at all.
+    Host,
+
+    /// This token and no other.
+    Token(String),
+
+    /// Nobody: the Repo's Author is a mirror whose home holds a token and whose
+    /// copy has not arrived, called by the name of that home. The host's login
+    /// in its place is the mistake an Author per Repo exists to stop
+    /// (ADR-0025), so a git asks as nobody and a `gh` is not run.
+    Awaited(String),
+}
+
+impl Credential {
+    /// The host's own, which is what an Author with no token leaves git to:
+    /// nothing is overridden, exactly as before there were Authors.
+    #[cfg(test)]
+    pub(crate) fn host() -> Credential {
+        Credential(AsWhom::Host)
+    }
+
+    /// This token and no other — see [`crate::publishing`], which has read one
+    /// itself.
+    pub(crate) fn token(token: &str) -> Credential {
+        Credential(AsWhom::Token(token.to_owned()))
+    }
+
+    /// Have `git` authenticate as it, and never stop to ask.
+    ///
+    /// **The token goes through the environment.** The helper is a shell
+    /// function that reads `GH_TOKEN`, so what appears in the process list is
+    /// the shape of the helper and never the credential — which is exactly what
+    /// putting the token in the remote URL would do instead. The empty
+    /// `credential.helper=` in front of it clears whatever the machine has
+    /// configured, so that a git given a token authenticates as that token and
+    /// never as the host's stored login.
+    ///
+    /// Declared on every call rather than only on the ones that talk to the
+    /// network, because which of them does is git's business: a clone may
+    /// fetch, a push may re-fetch, and a helper that is there and unasked costs
+    /// nothing. And so `command` is expected to be a `git` with no arguments
+    /// yet: `-c` goes in front of the subcommand.
+    ///
+    /// Where there is no token the machine's configuration stands untouched —
+    /// and the prompt is turned off all the same: a terminal prompt from a
+    /// credential helper that found nothing would be a server thread waiting
+    /// for ever. Where a token is awaited the machine's helpers are cleared
+    /// and none put in their place, so git asks as nobody rather than as the
+    /// host.
+    pub(crate) fn on<'c>(&self, command: &'c mut Command) -> &'c mut Command {
+        const HELPER: &str = r#"!f() { if test "$1" = get; then printf 'username=x-access-token\npassword=%s\n' "$GH_TOKEN"; fi; }; f"#;
+
+        match &self.0 {
+            AsWhom::Host => {}
+            AsWhom::Token(token) => {
+                command
+                    .args(["-c", "credential.helper=", "-c"])
+                    .arg(format!("credential.helper={HELPER}"))
+                    .env("GH_TOKEN", token);
+            }
+            AsWhom::Awaited(_) => {
+                command
+                    .args(["-c", "credential.helper="])
+                    .env_remove("GH_TOKEN");
+            }
+        }
+
+        command.env("GIT_TERMINAL_PROMPT", "0")
+    }
+}
+
+/// Never the token: a `Credential` in a log line says whose it is not, and
+/// whether there is one is all a reader needs.
+impl std::fmt::Debug for Credential {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.0 {
+            AsWhom::Token(_) => f.write_str("Credential(an Author's token)"),
+            AsWhom::Host => f.write_str("Credential(the host's)"),
+            AsWhom::Awaited(_) => f.write_str("Credential(nobody's, a token awaited)"),
+        }
+    }
+}
+
 /// The host's `gh`, as Verkstead runs it.
 #[derive(Debug, Clone)]
 pub struct Gh {
@@ -63,6 +161,11 @@ pub struct Gh {
     /// no settings behind it — a router watching nothing has no Data Directory
     /// to read one out of, and nothing on it ever asks GitHub anything.
     settings: Option<Settings>,
+
+    /// The uuid of the Author the Repo being asked about recorded, which is
+    /// whose token is read — see [`Gh::as_author`]. `None` is a Repo that
+    /// records none, which is the one Author's where there is only one.
+    author: Option<String>,
 }
 
 impl Gh {
@@ -76,6 +179,7 @@ impl Gh {
         Gh {
             program,
             settings: None,
+            author: None,
         }
     }
 
@@ -93,14 +197,73 @@ impl Gh {
         }
     }
 
-    /// The token to authenticate as, read now — `None` where none is
+    /// And the same again, asking as the Author a Repo recorded as `recorded`
+    /// — its `author`, read off the store with the rest of it.
+    ///
+    /// Every call about a Repo is made as that Repo's Author, so a pull request
+    /// of one Author's Repo is never read with another's token. Held as the
+    /// uuid rather than the token, for [`Gh::authenticated_by`]'s reason: the
+    /// token is read at the moment of the call.
+    pub(crate) fn as_author(&self, recorded: Option<&str>) -> Gh {
+        Gh {
+            author: recorded.map(str::to_owned),
+            ..self.clone()
+        }
+    }
+
+    /// Who to authenticate as, read now — the host where no token is
     /// configured, which leaves the call to whatever login the host's `gh` has.
-    fn token(&self) -> Option<String> {
-        self.settings
-            .as_ref()?
-            .secrets()
-            .github_token()
-            .map(str::to_owned)
+    ///
+    /// The Author's this `Gh` asks as — see [`Gh::as_author`] and
+    /// [`crate::settings::Config::author_of`], which resolves a member's mirror
+    /// as well as this device's own, and [`crate::settings::Config::token_of`],
+    /// which reads a mirror's token off its copy. A mirror whose copy has not
+    /// arrived is nobody rather than the host.
+    fn whom(&self) -> AsWhom {
+        let Some(settings) = self.settings.as_ref() else {
+            return AsWhom::Host;
+        };
+
+        let config = settings.config();
+
+        let Some(author) = config.author_of(self.author.as_deref()) else {
+            return AsWhom::Host;
+        };
+
+        if let Some(mirror) = config.mirror(author.id()).filter(|mirror| mirror.awaited()) {
+            return AsWhom::Awaited(mirror.device().to_owned());
+        }
+
+        match config.token_of(author, &settings.secrets()) {
+            Some(token) => AsWhom::Token(token.to_owned()),
+            None => AsWhom::Host,
+        }
+    }
+
+    /// The token to authenticate as, or `None` for the host's own login — or
+    /// why there is to be neither, where the Author's token is awaited.
+    fn token(&self) -> Result<Option<String>, Trouble> {
+        match self.whom() {
+            AsWhom::Host => Ok(None),
+            AsWhom::Token(token) => Ok(Some(token)),
+            AsWhom::Awaited(device) => Err(Trouble::Ours(awaited(&device))),
+        }
+    }
+
+    /// Whether there is a token to authenticate as at all — which, where there
+    /// is none, would leave a call to the host's own login.
+    ///
+    /// What a write asks before it is made: a read under the host's login is a
+    /// read, and a repository made under it is one in an account nobody chose.
+    /// See [`crate::repos::create`].
+    pub(crate) fn tokened(&self) -> bool {
+        matches!(self.token(), Ok(Some(_)))
+    }
+
+    /// What Verkstead's own git on the Repo authenticates as — the same token
+    /// this `Gh` would hand `gh`, read now. See [`Credential`].
+    pub(crate) fn credential(&self) -> Credential {
+        Credential(self.whom())
     }
 
     /// Run it inside `repo` and take its stdout, or say why there is none.
@@ -108,7 +271,7 @@ impl Gh {
     /// Blocking, like everything that shells out. The callers are on
     /// `spawn_blocking` — see [`pull_request`] and [`details`].
     fn ask(&self, repo: &Path, args: &[&str]) -> Result<String, Trouble> {
-        self.run(Some(repo), self.token(), args)
+        self.run(Some(repo), self.token()?, args)
     }
 
     /// And run it about nothing in particular, authenticating as `token`.
@@ -321,7 +484,7 @@ impl Gh {
         // `gh` with nothing configured falls back on is the host's own login,
         // and an extension asked as nobody is one that may refuse for a reason
         // that has nothing to do with being installed.
-        if let Some(token) = self.token() {
+        if let Some(token) = self.token()? {
             command.env("GH_TOKEN", token);
         }
 
@@ -342,6 +505,15 @@ impl Gh {
             false => Err(Trouble::read(&String::from_utf8_lossy(&output.stderr))),
         }
     }
+}
+
+/// What a `gh` or a git about a Repo says in place of running, where the
+/// Repo's Author is at home on `device` and the copy of its token has not
+/// reached this one.
+pub(crate) fn awaited(device: &str) -> String {
+    format!(
+        "This repo's author is at home on {device}, and its token hasn't reached this device yet."
+    )
 }
 
 /// Why `gh` could not answer.
@@ -2421,10 +2593,13 @@ mod tests {
     }
 
     /// The settings files in a directory of their own, with `secrets.yaml`
-    /// written as the settings page would write it.
+    /// written as the settings page would write it — under the one Author,
+    /// `work`, that `config.yaml` names.
     fn configured(yaml: Option<&str>) -> (tempfile::TempDir, Settings) {
         let dir = tempfile::tempdir().unwrap();
         let settings = Settings::in_data_dir(dir.path());
+
+        std::fs::write(settings.config_path(), "authors:\n  - id: work\n").unwrap();
 
         if let Some(yaml) = yaml {
             std::fs::write(settings.secrets_path(), yaml).unwrap();
@@ -2433,13 +2608,77 @@ mod tests {
         (dir, settings)
     }
 
+    /// A Repo pointed at a member's Author is asked about as that Author: with
+    /// the copy of its token where its home holds one and the copy is here,
+    /// never as the host while the copy is awaited — the `gh` is not run at
+    /// all, and a git is handed no helper of the host's — and as the host where
+    /// its home holds no token, the way a tokenless Author of this device's own
+    /// is.
+    #[test]
+    fn a_mirrored_authors_repo_is_asked_about_with_its_copy_and_never_the_hosts_login() {
+        use crate::settings::{Author, Mirrored};
+
+        let (repo, gh) = stub_saying_its_token();
+        let (_data_dir, settings) = configured(None);
+        let gh = gh.authenticated_by(settings.clone());
+
+        let mirror = |id: &str, holds_token| {
+            Mirrored::of(
+                Author::of(id.to_owned(), None, Some("Ada".to_owned()), None),
+                "the-workstation".to_owned(),
+                holds_token,
+            )
+        };
+
+        settings.holding_mirrors(vec![mirror("tokened", true), mirror("tokenless", false)]);
+
+        let tokened = gh.as_author(Some("tokened"));
+
+        assert_eq!(
+            pull_request(&tokened, repo.path(), "rate-limiting"),
+            Err(Trouble::Ours(awaited("the-workstation"))),
+            "refused while the copy is awaited, rather than asked as the host",
+        );
+        assert!(!tokened.tokened());
+        assert_eq!(
+            format!("{:?}", tokened.credential()),
+            "Credential(nobody's, a token awaited)",
+        );
+
+        std::fs::write(
+            settings.secrets_path(),
+            "author_tokens:\n  tokened: ghp_thecopy\n  tokenless: ghp_astaleone\n",
+        )
+        .unwrap();
+
+        assert_eq!(
+            pull_request(&tokened, repo.path(), "rate-limiting")
+                .unwrap()
+                .title,
+            "ghp_thecopy",
+        );
+        // The host's own, which is whatever this process was started with.
+        assert_ne!(
+            pull_request(
+                &gh.as_author(Some("tokenless")),
+                repo.path(),
+                "rate-limiting"
+            )
+            .unwrap()
+            .title,
+            "ghp_astaleone",
+            "a home holding no token is a tokenless Author, whatever copy lingers",
+        );
+    }
+
     /// One token in `secrets.yaml` is the whole of Verkstead's GitHub auth:
     /// every host-side ask runs as it, so a machine with no `gh auth login`
     /// anywhere on it still reads pull requests, checks and comments.
     #[test]
     fn the_configured_token_authenticates_the_views_the_checks_and_the_comments() {
         let (repo, gh) = stub_saying_its_token();
-        let (_data_dir, settings) = configured(Some("github_token: ghp_theconfiguredone\n"));
+        let (_data_dir, settings) =
+            configured(Some("author_tokens:\n  work: ghp_theconfiguredone\n"));
         let gh = gh.authenticated_by(settings);
 
         assert_eq!(
@@ -2464,7 +2703,7 @@ mod tests {
     #[test]
     fn a_token_saved_after_startup_is_what_the_next_gh_runs_as() {
         let (repo, gh) = stub_saying_its_token();
-        let (_data_dir, settings) = configured(Some("github_token: the-first\n"));
+        let (_data_dir, settings) = configured(Some("author_tokens:\n  work: the-first\n"));
         let gh = gh.authenticated_by(settings.clone());
 
         assert_eq!(
@@ -2474,13 +2713,58 @@ mod tests {
             "the-first",
         );
 
-        std::fs::write(settings.secrets_path(), "github_token: the-second\n").unwrap();
+        std::fs::write(
+            settings.secrets_path(),
+            "author_tokens:\n  work: the-second\n",
+        )
+        .unwrap();
 
         assert_eq!(
             pull_request(&gh, repo.path(), "rate-limiting")
                 .unwrap()
                 .title,
             "the-second",
+        );
+    }
+
+    /// A call about a Repo is made as that Repo's Author: the token read is the
+    /// one under the uuid the Repo recorded, and never another Author's.
+    #[test]
+    fn a_repos_pull_request_is_read_with_its_own_authors_token() {
+        let (repo, gh) = stub_saying_its_token();
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+
+        std::fs::write(
+            settings.config_path(),
+            "authors:\n  - id: work\n  - id: home\n",
+        )
+        .unwrap();
+        std::fs::write(
+            settings.secrets_path(),
+            "author_tokens:\n  work: ghp_theworkone\n  home: ghp_thehomeone\n",
+        )
+        .unwrap();
+
+        let gh = gh.authenticated_by(settings);
+
+        for (recorded, token) in [("work", "ghp_theworkone"), ("home", "ghp_thehomeone")] {
+            assert_eq!(
+                pull_request(&gh.as_author(Some(recorded)), repo.path(), "rate-limiting")
+                    .unwrap()
+                    .title,
+                token,
+                "a Repo recorded as {recorded}",
+            );
+        }
+
+        assert_eq!(
+            checks(&gh.as_author(Some("home")), repo.path(), 41)
+                .unwrap()
+                .checks[0]
+                .name,
+            "ghp_thehomeone",
+            "and every other call about it the same way",
         );
     }
 
@@ -2507,7 +2791,7 @@ mod tests {
 
         // And the three ways settings say nothing: no file, an empty one, and
         // one that will not parse.
-        for yaml in [None, Some(""), Some("github_token: [oh\n")] {
+        for yaml in [None, Some(""), Some("author_tokens: [oh\n")] {
             let (repo, gh) = stub_saying_its_token();
             let (_data_dir, settings) = configured(yaml);
             let gh = gh.authenticated_by(settings);
@@ -2553,7 +2837,7 @@ mod tests {
             "gh".to_owned(),
         ]);
 
-        let (_data_dir, settings) = configured(Some("github_token: the-saved-one\n"));
+        let (_data_dir, settings) = configured(Some("author_tokens:\n  work: the-saved-one\n"));
 
         assert_eq!(
             authenticates_as(&gh.authenticated_by(settings), "the-candidate")

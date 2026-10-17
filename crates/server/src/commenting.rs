@@ -108,6 +108,7 @@ mod tests {
             path: PathBuf::from(path),
             name: name.to_owned(),
             default_branch: "main".to_owned(),
+            author: None,
         }
     }
 

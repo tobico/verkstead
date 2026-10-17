@@ -18,6 +18,12 @@
 //! than of the checks underneath it: a browser that skipped the form, or a
 //! `curl` that never saw one, meets the same answers.
 //!
+//! And which Author each Repo is recorded as (ADR-0025): the one Author
+//! configured, silently, at registering and at a create; nobody where there is
+//! no Author or more than one, which the view says is still to be picked; the
+//! Author it had, for a Repo registered again; and, at the first start of an
+//! installation from before the list, the Author its one git author became.
+//!
 //! Where a repository *is* is not one of the refusals. Anywhere the server can
 //! read is somewhere a Repo can be registered from, whatever the installation
 //! was started with.
@@ -32,10 +38,9 @@ use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
-use verkstead_render::{Created, Registered, RepoEntry, RepoRemoved, RepoView};
-// Only the shell stand-in below authenticates as a saved token, and that is
-// off Windows with the shell it needs.
-#[cfg(unix)]
+use verkstead_render::{
+    AuthorRemoved, Created, Registered, RepoEntry, RepoRemoved, RepoView, Repointed,
+};
 use verkstead_server::settings::Settings;
 use verkstead_server::{Gh, open_database, router_asking_github, router_keeping, store};
 
@@ -601,11 +606,12 @@ async fn workbench_authored() -> (tempfile::TempDir, Router) {
     (dir, app)
 }
 
-/// Say who Verkstead commits as, in the file the settings page writes.
+/// Say who Verkstead commits as, in the file the settings page writes: one
+/// Author, keyed `work`.
 fn author(dir: &tempfile::TempDir, name: &str, email: &str) {
     std::fs::write(
         dir.path().join("config.yaml"),
-        format!("git_author:\n  name: \"{name}\"\n  email: \"{email}\"\n"),
+        format!("authors:\n  - id: work\n    name: \"{name}\"\n    email: \"{email}\"\n"),
     )
     .unwrap();
 }
@@ -768,7 +774,11 @@ async fn nothing_is_made_without_an_author() {
 
     // Half an author is no author: git wants both, and the answer is about the
     // settings page rather than about git.
-    std::fs::write(dir.path().join("config.yaml"), "git_author:\n  name: Ada\n").unwrap();
+    std::fs::write(
+        dir.path().join("config.yaml"),
+        "authors:\n  - id: work\n    name: Ada\n",
+    )
+    .unwrap();
     assert_eq!(
         create(&app, root.path(), "verkstead").await,
         Created::NoAuthor
@@ -844,7 +854,7 @@ async fn workbench_with_gh(answering: &str) -> (tempfile::TempDir, tempfile::Tem
     author(&dir, "Ada Lovelace", "ada@example.com");
     std::fs::write(
         dir.path().join("secrets.yaml"),
-        "github_token: ghp_thetokenthatwassaved\n",
+        "author_tokens:\n  work: ghp_thetokenthatwassaved\n",
     )
     .unwrap();
 
@@ -949,6 +959,75 @@ async fn a_create_with_the_tick_off_asks_github_nothing() {
     );
 }
 
+/// A create under the second of two Authors runs `gh` with the second's token.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_create_on_github_under_the_second_author_pushes_with_its_token() {
+    let root = tempfile::tempdir().unwrap();
+    let (dir, notes, app) = workbench_with_gh("exit 0").await;
+    two_authors(&dir);
+    std::fs::write(
+        dir.path().join("secrets.yaml"),
+        "author_tokens:\n  work: ghp_theworkone\n  personal: ghp_thepersonalone\n",
+    )
+    .unwrap();
+
+    made(
+        post(
+            &app,
+            "/api/ui/repos/new",
+            &serde_json::json!({
+                "parent": root.path(),
+                "name": "widgets",
+                "github": true,
+                "author": "personal",
+            }),
+        )
+        .await,
+    );
+
+    assert_eq!(noted(&notes, "token"), "ghp_thepersonalone");
+}
+
+/// A create asked onto GitHub under an Author with no token is made here and
+/// registered, and `gh` is never run: it would fall back to the host's own
+/// login, and make the repository in an account nobody picked.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_create_on_github_under_an_author_with_no_token_runs_no_gh() {
+    let root = tempfile::tempdir().unwrap();
+    let (dir, notes, app) = workbench_with_gh("exit 0").await;
+    two_authors(&dir);
+    // The work one has a token and the personal one has none.
+
+    let outcome = post(
+        &app,
+        "/api/ui/repos/new",
+        &serde_json::json!({
+            "parent": root.path(),
+            "name": "widgets",
+            "github": true,
+            "author": "personal",
+        }),
+    )
+    .await;
+
+    let Created::MadeWithoutRemote { repo, why } = outcome else {
+        panic!("the create did not answer with both halves: {outcome:?}");
+    };
+
+    assert_eq!(
+        why,
+        "A. L. has no GitHub token saved, so it wasn't made on GitHub."
+    );
+    assert!(
+        !notes.path().join("asked").exists(),
+        "`gh` was never run for an Author with nothing to run it as",
+    );
+    assert_eq!(repo.author.as_deref(), Some("personal"));
+    assert_eq!(listed(&app).await.len(), 1, "and it is on the registry");
+}
+
 /// A GitHub failure after the local repository exists is not a failed create.
 ///
 /// The directory, the commit and the registration all stand — what is missing is
@@ -1003,6 +1082,12 @@ async fn a_machine_with_no_gh_leaves_the_local_repository_registered_too() {
     let dir = tempfile::tempdir().unwrap();
 
     author(&dir, "Ada Lovelace", "ada@example.com");
+    // A token to run it as, or there would be nothing to run it for.
+    std::fs::write(
+        dir.path().join("secrets.yaml"),
+        "author_tokens:\n  work: ghp_thetokenthatwassaved\n",
+    )
+    .unwrap();
 
     let pool = open_database(&dir.path().join("verkstead.db"))
         .await
@@ -1010,10 +1095,11 @@ async fn a_machine_with_no_gh_leaves_the_local_repository_registered_too() {
     let data_dir = dir.path().to_owned();
     let app = router_asking_github(
         pool,
-        data_dir,
+        data_dir.clone(),
         Gh::running(vec![
             dir.path().join("there-is-no-gh-here").display().to_string(),
-        ]),
+        ])
+        .authenticated_by(Settings::in_data_dir(&data_dir)),
     );
 
     let outcome = create_on_github(&app, root.path(), "widgets").await;
@@ -1028,4 +1114,543 @@ async fn a_machine_with_no_gh_leaves_the_local_repository_registered_too() {
     );
     assert_eq!(listed(&app).await.len(), 1);
     assert_eq!(listed(&app).await[0].id, repo.id);
+}
+
+/// Two Authors configured, `work` and `personal`, neither with a display name.
+fn two_authors(dir: &tempfile::TempDir) {
+    std::fs::write(
+        dir.path().join("config.yaml"),
+        concat!(
+            "authors:\n",
+            "  - id: work\n",
+            "    name: Ada Lovelace\n",
+            "    email: ada@work.example\n",
+            "  - id: personal\n",
+            "    name: A. L.\n",
+            "    email: al@home.example\n",
+        ),
+    )
+    .unwrap();
+}
+
+/// With one Author configured, a Repo registered is recorded as its with
+/// nothing asked — and the list and the registration both say so.
+#[tokio::test]
+async fn a_repo_registered_with_one_author_is_recorded_as_its() {
+    let src = tempfile::tempdir().unwrap();
+    let (_dir, app) = workbench_authored().await;
+    let repo = repository(src.path().join("verkstead"));
+
+    let registered = added(register(&app, &repo).await);
+
+    assert_eq!(registered.author.as_deref(), Some("work"));
+    assert!(!registered.author_unpicked);
+    assert_eq!(listed(&app).await, vec![registered]);
+}
+
+/// With none configured there is nobody to record, and nothing to pick
+/// between either.
+#[tokio::test]
+async fn a_repo_registered_with_no_author_is_recorded_as_nobody() {
+    let src = tempfile::tempdir().unwrap();
+    let (_dir, app) = workbench().await;
+    let repo = repository(src.path().join("verkstead"));
+
+    let registered = added(register(&app, &repo).await);
+
+    assert_eq!(registered.author, None);
+    assert!(!registered.author_unpicked);
+}
+
+/// A Repo registered while there was no Author, with two configured since,
+/// has no saying which: nothing is recorded and the view says one is still to
+/// be picked.
+#[tokio::test]
+async fn a_repo_with_no_author_among_two_is_stated_as_unpicked() {
+    let src = tempfile::tempdir().unwrap();
+    let (dir, app) = workbench().await;
+    let repo = repository(src.path().join("verkstead"));
+
+    added(register(&app, &repo).await);
+    two_authors(&dir);
+
+    let listed = listed(&app).await;
+    assert_eq!(listed[0].author, None);
+    assert!(listed[0].author_unpicked);
+}
+
+/// The same Repo, with the first Author made since and a second added on the
+/// Git section, is the first's: the save that adds the second records it as
+/// the one it was committing as all along, rather than leaving it to pick.
+#[tokio::test]
+async fn adding_a_second_author_keeps_a_repo_that_recorded_none_as_the_first() {
+    let src = tempfile::tempdir().unwrap();
+    let (dir, app) = workbench().await;
+    let repo = repository(src.path().join("verkstead"));
+
+    added(register(&app, &repo).await);
+
+    std::fs::write(
+        dir.path().join("config.yaml"),
+        "authors:\n  - id: work\n    name: Ada Lovelace\n    email: ada@work.example\n",
+    )
+    .unwrap();
+
+    // **Add author**, as the Git section sends it: the fields over a uuid the
+    // page minted, and every other section as it stands.
+    let _: serde_json::Value = post(
+        &app,
+        "/api/ui/settings",
+        &serde_json::json!({
+            "git_author": {
+                "id": "a1b2c3d4-0000-4000-8000-000000000002",
+                "display_name": "Home",
+                "name": "A. L.",
+                "email": "al@home.example",
+            },
+            "github_token": "Keep",
+            "languages": [{ "name": "rust", "enabled": true, "size": "" }],
+            "cleanup": {
+                "trim": { "enabled": true, "days": "" },
+                "delete": { "enabled": false, "days": "" },
+            },
+            "at_once": { "roadmap_stages": "", "conversations": "" },
+            "conflict_resolution": "Merge",
+            "share_on_done": false,
+            "sandbox_binds": [],
+            "ignored_comments": "Keep",
+            "mcp_servers": "Keep",
+            "instructions": "",
+        }),
+    )
+    .await;
+
+    let listed = listed(&app).await;
+    assert_eq!(listed[0].author.as_deref(), Some("work"));
+    assert!(!listed[0].author_unpicked);
+}
+
+/// Ask to register a path as the Author with the uuid `author`, the way the
+/// **Open repo** card asks once there are two to pick between.
+async fn register_as(app: &Router, path: &Path, author: &str) -> Registered {
+    post(
+        app,
+        "/api/ui/repos",
+        &serde_json::json!({ "path": path, "author": author }),
+    )
+    .await
+}
+
+/// And to make one as the Author with the uuid `author`.
+async fn create_as(app: &Router, parent: &Path, name: &str, author: &str) -> Created {
+    post(
+        app,
+        "/api/ui/repos/new",
+        &serde_json::json!({ "parent": parent, "name": name, "github": false, "author": author }),
+    )
+    .await
+}
+
+/// With two Authors, a registration that picks one is recorded as the one it
+/// picked — the second as readily as the first.
+#[tokio::test]
+async fn a_repo_registered_among_two_authors_is_recorded_as_the_one_picked() {
+    let src = tempfile::tempdir().unwrap();
+    let (dir, app) = workbench().await;
+    two_authors(&dir);
+    let repo = repository(src.path().join("verkstead"));
+
+    let registered = added(register_as(&app, &repo, "personal").await);
+
+    assert_eq!(registered.author.as_deref(), Some("personal"));
+    assert!(!registered.author_unpicked);
+    assert_eq!(listed(&app).await, vec![registered]);
+}
+
+/// With two Authors, a registration that names none is refused by name, and
+/// so is one naming a uuid nobody configured — and neither registers anything.
+#[tokio::test]
+async fn a_registration_among_two_authors_names_one_that_is_configured() {
+    let src = tempfile::tempdir().unwrap();
+    let (dir, app) = workbench().await;
+    two_authors(&dir);
+    let repo = repository(src.path().join("verkstead"));
+
+    assert_eq!(register(&app, &repo).await, Registered::AuthorUnpicked);
+    assert_eq!(
+        register_as(&app, &repo, "nobody-of-that-uuid").await,
+        Registered::NoSuchAuthor
+    );
+    assert!(listed(&app).await.is_empty(), "nothing was registered");
+}
+
+/// A uuid nobody configured is refused with one Author too: the one there is
+/// stands in only for a registration that named nobody.
+#[tokio::test]
+async fn a_registration_naming_an_unknown_author_is_refused_with_one_configured() {
+    let src = tempfile::tempdir().unwrap();
+    let (_dir, app) = workbench_authored().await;
+    let repo = repository(src.path().join("verkstead"));
+
+    assert_eq!(
+        register_as(&app, &repo, "personal").await,
+        Registered::NoSuchAuthor
+    );
+    assert!(listed(&app).await.is_empty());
+}
+
+/// Create repo under the second of two Authors makes its first commit as that
+/// Author, and records the Repo as its.
+#[tokio::test]
+async fn a_repository_created_under_the_second_author_is_its() {
+    let root = tempfile::tempdir().unwrap();
+    let (dir, app) = workbench().await;
+    two_authors(&dir);
+
+    let repo = made(create_as(&app, root.path(), "verkstead", "personal").await);
+
+    assert_eq!(
+        git_says(
+            &root.path().join("verkstead"),
+            &["log", "-1", "--format=%an <%ae>"]
+        ),
+        "A. L. <al@home.example>"
+    );
+    assert_eq!(repo.author.as_deref(), Some("personal"));
+    assert!(!repo.author_unpicked);
+}
+
+/// And a create among two that names none, or one nobody configured, is
+/// refused by name with nothing made.
+#[tokio::test]
+async fn a_create_among_two_authors_names_one_that_is_configured() {
+    let root = tempfile::tempdir().unwrap();
+    let (dir, app) = workbench().await;
+    two_authors(&dir);
+
+    assert_eq!(
+        create(&app, root.path(), "verkstead").await,
+        Created::AuthorUnpicked
+    );
+    assert_eq!(
+        create_as(&app, root.path(), "verkstead", "nobody-of-that-uuid").await,
+        Created::NoSuchAuthor
+    );
+    assert!(!root.path().join("verkstead").exists(), "nothing was made");
+    assert!(listed(&app).await.is_empty());
+}
+
+/// A picked Author lacking an email refuses the create the way a missing git
+/// author does.
+#[tokio::test]
+async fn a_create_under_an_author_with_no_email_is_refused() {
+    let root = tempfile::tempdir().unwrap();
+    let (dir, app) = workbench().await;
+    std::fs::write(
+        dir.path().join("config.yaml"),
+        concat!(
+            "authors:\n",
+            "  - id: work\n",
+            "    name: Ada Lovelace\n",
+            "    email: ada@work.example\n",
+            "  - id: personal\n",
+            "    name: A. L.\n",
+        ),
+    )
+    .unwrap();
+
+    assert_eq!(
+        create_as(&app, root.path(), "verkstead", "personal").await,
+        Created::NoAuthor
+    );
+    assert!(!root.path().join("verkstead").exists());
+}
+
+/// A Repo registered under one Author and then a second added is still the
+/// first's: adding an Author changes nothing about a Repo already registered.
+#[tokio::test]
+async fn adding_a_second_author_leaves_a_registered_repo_as_it_was() {
+    let src = tempfile::tempdir().unwrap();
+    let (dir, app) = workbench_authored().await;
+    let repo = repository(src.path().join("verkstead"));
+
+    added(register(&app, &repo).await);
+    two_authors(&dir);
+
+    let listed = listed(&app).await;
+    assert_eq!(listed[0].author.as_deref(), Some("work"));
+    assert!(!listed[0].author_unpicked);
+}
+
+/// Taken away and registered again, a Repo comes back as the Author it had —
+/// even where another is the one configured by then.
+#[tokio::test]
+async fn a_repo_registered_again_keeps_the_author_it_had() {
+    let src = tempfile::tempdir().unwrap();
+    let (dir, app) = workbench_authored().await;
+    let repo = repository(src.path().join("verkstead"));
+
+    let first = added(register(&app, &repo).await);
+    assert_eq!(remove(&app, first.id).await, RepoRemoved::Removed);
+
+    std::fs::write(
+        dir.path().join("config.yaml"),
+        "authors:\n  - id: personal\n    name: A. L.\n    email: al@home.example\n",
+    )
+    .unwrap();
+
+    let again = added(register(&app, &repo).await);
+
+    assert_eq!(again.id, first.id);
+    assert_eq!(again.author.as_deref(), Some("work"));
+}
+
+/// A created repository is registered the way a typed path is, so it is
+/// recorded as the one Author too.
+#[tokio::test]
+async fn a_created_repository_is_recorded_as_the_one_author() {
+    let root = tempfile::tempdir().unwrap();
+    let (_dir, app) = workbench_authored().await;
+
+    let repo = made(create(&app, root.path(), "verkstead").await);
+
+    assert_eq!(repo.author.as_deref(), Some("work"));
+    assert!(!repo.author_unpicked);
+}
+
+/// The first start of an installation from before the list makes its one git
+/// author an Author, and records every Repo it had registered as that Author.
+#[tokio::test]
+async fn the_repos_from_before_the_list_are_recorded_as_the_author_the_start_moved() {
+    let src = tempfile::tempdir().unwrap();
+    let (dir, pool, app) = workbench_and_pool().await;
+
+    // Registered before there was an Author to record — which is what every
+    // Repo of such an installation is.
+    let first = added(register(&app, &repository(src.path().join("verkstead"))).await);
+    let second = added(register(&app, &repository(src.path().join("askance"))).await);
+    assert_eq!(first.author, None);
+
+    std::fs::write(
+        dir.path().join("config.yaml"),
+        "git_author:\n  name: Ada Lovelace\n  email: ada@example.com\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("secrets.yaml"),
+        "github_token: ghp_thetoken\n",
+    )
+    .unwrap();
+
+    let settings = Settings::in_data_dir(dir.path());
+    let id = verkstead_server::moving_the_single_author(&settings, &pool)
+        .await
+        .unwrap()
+        .expect("the one git author was moved into the list");
+
+    let listed = listed(&app).await;
+    assert_eq!(listed.len(), 2);
+    for repo in &listed {
+        assert_eq!(repo.author.as_deref(), Some(id.as_str()), "{}", repo.name);
+        assert!(!repo.author_unpicked);
+    }
+    assert!(listed.iter().any(|repo| repo.id == first.id));
+    assert!(listed.iter().any(|repo| repo.id == second.id));
+
+    // And the second start moves nothing and records nothing.
+    assert_eq!(
+        verkstead_server::moving_the_single_author(&settings, &pool)
+            .await
+            .unwrap(),
+        None
+    );
+}
+
+/// Ask for a Repo to be pointed at the Author with the uuid `author`, as its
+/// row on the Repos pane does.
+async fn repoint(app: &Router, id: i64, author: &str) -> Repointed {
+    post(
+        app,
+        &format!("/api/ui/repos/{id}/author"),
+        &serde_json::json!({ "author": author }),
+    )
+    .await
+}
+
+/// A Repo nothing live is in is pointed at the other Author, and the list reads
+/// it as that Author's from then on.
+#[tokio::test]
+async fn an_idle_repo_is_repointed_to_the_other_author() {
+    let src = tempfile::tempdir().unwrap();
+    let (dir, pool, app) = workbench_and_pool().await;
+    two_authors(&dir);
+    let repo = repository(src.path().join("verkstead"));
+
+    let registered = added(register_as(&app, &repo, "work").await);
+
+    // Work that is over is no reason to keep the Author it was done as.
+    let over = store::start_conversation(&pool, registered.id, "rate-limiting", THIS_DEVICE)
+        .await
+        .unwrap()
+        .unwrap();
+    store::set_state(&pool, over, store::Lifecycle::Done)
+        .await
+        .unwrap();
+
+    let Repointed::Repointed(repointed) = repoint(&app, registered.id, "personal").await else {
+        panic!("the repoint was refused");
+    };
+
+    assert_eq!(repointed.author.as_deref(), Some("personal"));
+    assert_eq!(listed(&app).await, vec![repointed]);
+}
+
+/// A live Conversation on the Repo refuses the repoint, naming its branch, and
+/// so does one holding it as a Companion Repo — and the Author stands.
+#[tokio::test]
+async fn a_repo_in_live_work_is_refused_a_repoint_naming_the_work() {
+    let src = tempfile::tempdir().unwrap();
+    let (dir, pool, app) = workbench_and_pool().await;
+    two_authors(&dir);
+
+    let own = added(register_as(&app, &repository(src.path().join("verkstead")), "work").await);
+    let beside = added(register_as(&app, &repository(src.path().join("askance")), "work").await);
+
+    let going = store::start_conversation(&pool, own.id, "rate-limiting", THIS_DEVICE)
+        .await
+        .unwrap()
+        .unwrap();
+    store::add_companion(&pool, going, beside.id).await.unwrap();
+    store::set_state(&pool, going, store::Lifecycle::Grilling)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        repoint(&app, own.id, "personal").await,
+        Repointed::InUse {
+            on: vec!["rate-limiting".to_owned()],
+            beside: vec![],
+        },
+    );
+    assert_eq!(
+        repoint(&app, beside.id, "personal").await,
+        Repointed::InUse {
+            on: vec![],
+            beside: vec!["rate-limiting".to_owned()],
+        },
+    );
+    assert!(
+        listed(&app)
+            .await
+            .iter()
+            .all(|repo| repo.author.as_deref() == Some("work")),
+        "nothing was repointed",
+    );
+
+    store::set_state(&pool, going, store::Lifecycle::Closed)
+        .await
+        .unwrap();
+
+    assert!(matches!(
+        repoint(&app, own.id, "personal").await,
+        Repointed::Repointed(_)
+    ));
+}
+
+/// A uuid nobody configured is refused before anything is asked of the Repo,
+/// and an id nothing is registered under is a named outcome too.
+#[tokio::test]
+async fn a_repoint_names_a_configured_author_and_a_registered_repo() {
+    let src = tempfile::tempdir().unwrap();
+    let (dir, app) = workbench().await;
+    two_authors(&dir);
+    let registered =
+        added(register_as(&app, &repository(src.path().join("verkstead")), "work").await);
+
+    assert_eq!(
+        repoint(&app, registered.id, "nobody").await,
+        Repointed::NoSuchAuthor
+    );
+    assert_eq!(repoint(&app, 404, "personal").await, Repointed::NoSuchRepo);
+    assert_eq!(
+        post::<Repointed>(
+            &app,
+            "/api/ui/repos/not-a-number/author",
+            &serde_json::json!({ "author": "personal" }),
+        )
+        .await,
+        Repointed::NoSuchRepo
+    );
+    assert_eq!(listed(&app).await[0].author.as_deref(), Some("work"));
+}
+
+/// Ask for the Author with the uuid `id` to be removed, as the Git section's
+/// switcher does.
+async fn remove_author(app: &Router, id: &str) -> AuthorRemoved {
+    post(
+        app,
+        &format!("/api/ui/authors/{id}/remove"),
+        &serde_json::Value::Null,
+    )
+    .await
+}
+
+/// An Author two registered Repos point at is refused removal naming both;
+/// once both are unregistered — their association kept as history — it goes,
+/// and its token with it.
+#[tokio::test]
+async fn an_author_repos_point_at_is_refused_removal_naming_them() {
+    let src = tempfile::tempdir().unwrap();
+    let (dir, app) = workbench().await;
+    two_authors(&dir);
+    std::fs::write(
+        dir.path().join("secrets.yaml"),
+        "author_tokens:\n  work: ghp_work\n  personal: ghp_personal\n",
+    )
+    .unwrap();
+
+    let askance =
+        added(register_as(&app, &repository(src.path().join("askance")), "personal").await);
+    let verkstead =
+        added(register_as(&app, &repository(src.path().join("verkstead")), "personal").await);
+    added(register_as(&app, &repository(src.path().join("other")), "work").await);
+
+    assert_eq!(
+        remove_author(&app, "personal").await,
+        AuthorRemoved::InUse {
+            repos: vec!["askance".to_owned(), "verkstead".to_owned()],
+        },
+    );
+    assert!(
+        Settings::in_data_dir(dir.path())
+            .config()
+            .author("personal")
+            .is_some(),
+        "nothing was removed",
+    );
+
+    assert_eq!(remove(&app, askance.id).await, RepoRemoved::Removed);
+    assert_eq!(remove(&app, verkstead.id).await, RepoRemoved::Removed);
+
+    assert_eq!(
+        remove_author(&app, "personal").await,
+        AuthorRemoved::Removed
+    );
+
+    let settings = Settings::in_data_dir(dir.path());
+    assert!(settings.config().author("personal").is_none());
+    assert!(settings.config().author("work").is_some());
+    assert_eq!(settings.secrets().author_token("personal"), None);
+    assert_eq!(settings.secrets().author_token("work"), Some("ghp_work"));
+    assert!(
+        !std::fs::read_to_string(settings.secrets_path())
+            .unwrap()
+            .contains("ghp_personal"),
+        "the token is gone from the file",
+    );
+
+    assert_eq!(
+        remove_author(&app, "personal").await,
+        AuthorRemoved::NoSuchAuthor
+    );
 }

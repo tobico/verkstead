@@ -86,6 +86,7 @@ use verkstead_render::{
 
 use crate::checklist;
 use crate::declarations;
+use crate::github::Credential;
 use crate::repos::git;
 use crate::{store, worktrees};
 
@@ -2431,6 +2432,7 @@ const FETCHING: std::time::Duration = std::time::Duration::from_secs(10);
 pub(crate) async fn adopting(
     pool: &SqlitePool,
     repo: store::Repo,
+    credential: Credential,
     base: Option<String>,
     roadmap: String,
     at_once: usize,
@@ -2481,7 +2483,7 @@ pub(crate) async fn adopting(
             // behind it always answers.
             None => {
                 if let worktrees::Fetched::Failed(said) =
-                    worktrees::fetch_within(&repo.path, FETCHING)
+                    worktrees::fetch_within(&repo.path, &credential, FETCHING)
                 {
                     tracing::warn!(
                         said,
@@ -2957,6 +2959,7 @@ Turns this askance clone into Verkstead.
                 path: self.path().to_owned(),
                 name: "verkstead".to_owned(),
                 default_branch: "main".to_owned(),
+                author: None,
             }
         }
         /// The stage lists this worktree comes back with, with a record holding
@@ -6865,6 +6868,7 @@ Turns this askance clone into Verkstead.
             path: repo.path().to_owned(),
             name: "verkstead".to_owned(),
             default_branch: "main".to_owned(),
+            author: None,
         })
         .expect("two of its roadmaps have a stage to start");
 
@@ -6996,6 +7000,7 @@ Turns this askance clone into Verkstead.
                 path: repo.path().to_owned(),
                 name: "verkstead".to_owned(),
                 default_branch: "main".to_owned(),
+                author: None,
             }),
             None,
         );
@@ -7052,6 +7057,7 @@ Turns this askance clone into Verkstead.
             path: repo.path().to_owned(),
             name: "verkstead".to_owned(),
             default_branch: "main".to_owned(),
+            author: None,
         })
         .expect("origin holds a roadmap with a stage left to start");
 
@@ -7079,6 +7085,7 @@ Turns this askance clone into Verkstead.
                 path: repo.path().to_owned(),
                 name: "verkstead".to_owned(),
                 default_branch: "trunk".to_owned(),
+                author: None,
             }),
             None,
         );
@@ -7127,7 +7134,15 @@ Turns this askance clone into Verkstead.
         let store = tempfile::tempdir().unwrap();
         let pool = empty_store(&store).await;
 
-        let view = adopting(&pool, repo.registered(), None, "mvp".to_owned(), AT_ONCE).await;
+        let view = adopting(
+            &pool,
+            repo.registered(),
+            Credential::host(),
+            None,
+            "mvp".to_owned(),
+            AT_ONCE,
+        )
+        .await;
 
         assert_eq!(view.roadmap, "mvp");
         assert_eq!(view.title, "MVP roadmap");
@@ -7164,7 +7179,15 @@ Turns this askance clone into Verkstead.
         let store = tempfile::tempdir().unwrap();
         let pool = empty_store(&store).await;
 
-        let view = adopting(&pool, repo.registered(), None, "mvp".to_owned(), AT_ONCE).await;
+        let view = adopting(
+            &pool,
+            repo.registered(),
+            Credential::host(),
+            None,
+            "mvp".to_owned(),
+            AT_ONCE,
+        )
+        .await;
 
         assert_eq!(
             view.stage.expect("stage 01 stands on nothing").label,
@@ -7210,7 +7233,15 @@ Turns this askance clone into Verkstead.
         let store = tempfile::tempdir().unwrap();
         let pool = empty_store(&store).await;
 
-        let at_tip = adopting(&pool, repo.registered(), None, "mvp".to_owned(), AT_ONCE).await;
+        let at_tip = adopting(
+            &pool,
+            repo.registered(),
+            Credential::host(),
+            None,
+            "mvp".to_owned(),
+            AT_ONCE,
+        )
+        .await;
         assert_eq!(
             at_tip.stage.expect("that stage is startable").label,
             "04",
@@ -7220,6 +7251,7 @@ Turns this askance clone into Verkstead.
         let earlier = adopting(
             &pool,
             repo.registered(),
+            Credential::host(),
             Some(before),
             "mvp".to_owned(),
             AT_ONCE,
@@ -7256,7 +7288,15 @@ Turns this askance clone into Verkstead.
                 None => "public-release",
             };
 
-            let view = adopting(&pool, repo.registered(), base, roadmap.to_owned(), AT_ONCE).await;
+            let view = adopting(
+                &pool,
+                repo.registered(),
+                Credential::host(),
+                base,
+                roadmap.to_owned(),
+                AT_ONCE,
+            )
+            .await;
 
             assert_eq!(view.roadmap, roadmap, "{why}");
             assert_eq!(view.title, "", "{why}");
@@ -7277,7 +7317,15 @@ Turns this askance clone into Verkstead.
         let store = tempfile::tempdir().unwrap();
         let pool = empty_store(&store).await;
 
-        let view = adopting(&pool, repo.registered(), None, "mvp".to_owned(), AT_ONCE).await;
+        let view = adopting(
+            &pool,
+            repo.registered(),
+            Credential::host(),
+            None,
+            "mvp".to_owned(),
+            AT_ONCE,
+        )
+        .await;
 
         assert_eq!(view.roadmap, "mvp");
         assert_eq!(view.stage, None);

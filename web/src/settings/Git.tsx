@@ -30,6 +30,29 @@
 //! own now, and the card reads as open while that pane is, which is what every
 //! other card in this app says about itself.
 //!
+//! **Every Author, one at a time.** The token and the Git Author's fields are
+//! about one Author, and a dropdown at the form's head picks which, with **Add
+//! author** at its foot behind a rule the way the Repo dropdown carries Open
+//! repo and Create repo. Drawn only once there are two to choose between, and
+//! the display name with it, it being read nowhere but in those rows: with one
+//! Author the pane reads as it did before there could be two, and the way to a
+//! second is a quiet press under the first one's fields. Switching drops what
+//! was typed and not saved, which was about the Author being left. An Author
+//! being added is a uuid minted here, saved like any other — the server makes
+//! a new Author of a uuid it does not hold. **Remove author** sits at the same
+//! foot, asks once on a card naming the Author, and is refused while a
+//! registered Repo points at it, the Repos named under the dropdown: their next
+//! session would have nobody to commit as (ADR-0025).
+//!
+//! **A member's Authors are rows of the same dropdown**, after this device's
+//! own and marked with the machine each is at home on, because a cluster draws
+//! one list of them (ADR-0025). One of those picked is edited with the same
+//! fields, and the pane says which machine the press goes to: Save and Remove
+//! are put to the device it is at home on, as that device's own edit of it,
+//! the token verified there — see `editAuthor`. What is drawn afterwards is the
+//! mirror that device gives back rather than what was typed, and a machine that
+//! is not answering is named in the refusal.
+//!
 //! Both halves read the one query. They are two views of the same two files, and
 //! a read apiece would be two reads of them — the cache is what makes the second
 //! caller free.
@@ -99,18 +122,40 @@
 //! row, with everything the human typed left exactly where they left it.
 
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
-import { Index, Match, Show, Switch, createSignal, type JSX } from "solid-js";
+import {
+  Index,
+  Match,
+  Show,
+  Switch,
+  createSignal,
+  createUniqueId,
+  type JSX,
+} from "solid-js";
 
 import { Check } from "../Check";
+import { Modal } from "../Modal";
 import { PaneSticky } from "../Panes";
 import { QuietButton } from "../QuietButton";
-import { loadSettings, saveSettings } from "../api/client";
+import {
+  editAuthor,
+  loadSettings,
+  removeAuthor,
+  saveSettings,
+} from "../api/client";
+import { authorLabel, authorRow, useAuthors } from "../authors";
+import { osIcon } from "../devices";
 import { useReading } from "../freshness";
-import { Picker } from "../picking";
+import { Listbox, Picker } from "../picking";
 import type {
+  Author,
+  AuthorEdit,
+  AuthorEdited,
+  AuthorRemoved,
+  AuthorSaved,
   ConflictResolution,
   IgnoreRule,
   IgnoredCommentsEdit,
+  RowDevice,
   RuleField,
   RuleRefused,
   SettingsEdit,
@@ -123,7 +168,7 @@ import type {
 import { Empty, ErrorLine, Note } from "../notices";
 import { utcStamp } from "../set/when";
 import { PaneHead } from "../workbench/PaneHead";
-import { heldConfig } from "./held";
+import { heldAuthor, heldConfig } from "./held";
 import { TokenScopes } from "./scopes";
 import styles from "./Git.module.css";
 import { SettingsCard } from "./SettingsCard";
@@ -151,32 +196,71 @@ function useGit() {
 ///
 /// Drawn in both panes: on the card it is what is configured, and in the form it
 /// is what Replace and Clear are about.
-function standing(saved: TokenSaved): JSX.Element {
+///
+/// Handed an accessor rather than the value, because the pane's is a different
+/// Author's token the moment its dropdown is switched, and a `Show` that stayed
+/// shown would otherwise keep saying the first one's.
+function standing(saved: () => TokenSaved): JSX.Element {
   return (
     <p class={styles.tokenStanding}>
-      A token ending <code class={styles.lastFour}>{saved.last_four}</code>,
-      saved <span>{utcStamp(saved.at)}</span>.
+      A token ending <code class={styles.lastFour}>{saved().last_four}</code>,
+      saved <span>{utcStamp(saved().at)}</span>.
     </p>
   );
 }
 
 /// Half an author is as broken as none: git complains by name about whichever
 /// half it has not been given.
-function authorless(told: SettingsView): boolean {
-  return told.git_author.name === "" || told.git_author.email === "";
+function authorless(author: Author | AuthorSaved): boolean {
+  return author.name === "" || author.email === "";
 }
 
-/// What the card says, in a line: who commits and which token is saved — or,
-/// where either is missing, that it is, which is the line in the warning colour.
-function summary(told: SettingsView): string {
-  const tokenless = told.github_token === null;
-  const author = authorless(told);
+/// One row of the switcher: an Author this device's files hold, or a mirror of
+/// a member's — the device it is at home on, and whether a token is held there.
+type Listed = AuthorSaved & { device: RowDevice | null; holds_token: boolean };
 
+/// What one Author is missing, in the card's words — or `null` where it has
+/// everything a session needs.
+function lacking(tokenless: boolean, author: boolean): string | null {
   if (tokenless && author) return "No GitHub token or git author";
   if (tokenless) return "No GitHub token";
   if (author) return "No git author";
 
-  return `${told.git_author.name} · token …${told.github_token!.last_four}`;
+  return null;
+}
+
+/// Whether the card is drawn in the warning colour: an Author missing either
+/// half, or no Author at all.
+function warning(told: SettingsView): boolean {
+  return told.authors.length > 1
+    ? told.authors.some(
+        (author) => author.github_token === null || authorless(author),
+      )
+    : told.github_token === null || authorless(told.git_author);
+}
+
+/// What the card says, in a line: who commits and which token is saved — or,
+/// where either is missing, that it is, which is the line in the warning colour.
+///
+/// With several Authors the warning names the Author it is about, the first
+/// that is missing anything, and the line that has nothing to warn about names
+/// every one of them. With one it is exactly what it was before there could be
+/// two: the one Author's name and token.
+function summary(told: SettingsView): string {
+  if (told.authors.length > 1) {
+    for (const author of told.authors) {
+      const missing = lacking(author.github_token === null, authorless(author));
+
+      if (missing) return `${missing} for ${authorLabel(author)}`;
+    }
+
+    return told.authors.map(authorLabel).join(", ");
+  }
+
+  return (
+    lacking(told.github_token === null, authorless(told.git_author)) ??
+    `${told.git_author.name} · token …${told.github_token!.last_four}`
+  );
 }
 
 /// What git has been told, as the card that opens it.
@@ -212,7 +296,7 @@ export function GitCard(props: {
             title={TITLE}
             open={props.open}
             press={props.press}
-            warn={told().github_token === null || authorless(told())}
+            warn={warning(told())}
             status={summary(told())}
           />
         )}
@@ -235,8 +319,18 @@ export function GitPane(props: {
   const queries = useQueryClient();
   const settings = useGit();
 
+  // Which Author the fields are about, by uuid, or `null` for the first —
+  // which is the only one there is, until somebody adds a second.
+  const [chosen, setChosen] = createSignal<string | null>(null);
+
+  // And the uuid **Add author** minted, while the Author it opened has not been
+  // saved: it is a row of the dropdown until then, and an Author in the file
+  // from the save that names it on.
+  const [adding, setAdding] = createSignal<string | null>(null);
+
   // What has been typed, or `null` while nothing has — the fields follow the
   // server until somebody touches them, the way a branch name does.
+  const [displayName, setDisplayName] = createSignal<string | null>(null);
   const [name, setName] = createSignal<string | null>(null);
   const [email, setEmail] = createSignal<string | null>(null);
 
@@ -255,7 +349,13 @@ export function GitPane(props: {
   // afterwards. Said in this pane rather than on the card, because this is where
   // the press that asked it was made and the pane is still standing to hear the
   // answer.
-  const [verified, setVerified] = createSignal<Verified | null>(null);
+  //
+  // Kept with the uuid of the Author it was about, so that switching the
+  // dropdown does not say one Author's account under another's fields.
+  const [verifiedAs, setVerifiedAs] = createSignal<{
+    id: string | null;
+    verified: Verified;
+  } | null>(null);
 
   // The ignore rules as they are being edited, or `null` while nobody has
   // touched a row — the rows follow the server until then, the way the author
@@ -270,11 +370,113 @@ export function GitPane(props: {
   const [refusals, setRefusals] = createSignal<RuleRefused[]>([]);
 
   const told = (): SettingsView | undefined => settings.data;
-  const author = () => told()?.git_author;
-  const configured = () => told()?.github_token ?? null;
 
+  // And the cluster's one list, for the mirrors of every member's Authors.
+  const listed = useAuthors();
+
+  /// Every member's Author this device mirrors, as rows of the switcher.
+  const mirrors = (): Listed[] =>
+    (listed.data ?? [])
+      .filter((one) => one.device !== null)
+      .map((one) => ({
+        id: one.id,
+        display_name: one.display_name,
+        name: one.name,
+        email: one.email,
+        github_token: null,
+        device: one.device,
+        holds_token: one.holds_token,
+      }));
+
+  /// Every Author there is to pick between: the ones the files hold, the one
+  /// **Add author** opened on the end of them while it is still unsaved, and
+  /// then every member's.
+  const authors = (): Listed[] => {
+    const saved: Listed[] = (told()?.authors ?? []).map((one) => ({
+      ...one,
+      device: null,
+      holds_token: one.github_token !== null,
+    }));
+    const minted = adding();
+
+    const own: Listed[] =
+      minted === null || saved.some((one) => one.id === minted)
+        ? saved
+        : [
+            ...saved,
+            {
+              id: minted,
+              display_name: "",
+              name: "",
+              email: "",
+              github_token: null,
+              device: null,
+              holds_token: false,
+            },
+          ];
+
+    return [...own, ...mirrors()];
+  };
+
+  /// Whether there are two to choose between, which is what draws the
+  /// dropdown — and the display name, which is only ever read in its rows.
+  const several = () => authors().length > 1;
+
+  /// The Author the fields are about: the one picked, or the first where the
+  /// pick is gone or was never made.
+  ///
+  /// With one, the first Author as the read's own single fields have it,
+  /// which is what the card is drawn from too — the pane reads exactly as it
+  /// did before there could be two. Its uuid is empty on a Verkstead with no
+  /// Author yet, which a save sends as none.
+  const author = (): Listed | undefined => {
+    if (several()) {
+      return authors().find((one) => one.id === chosen()) ?? authors()[0];
+    }
+
+    const standing = told();
+
+    return (
+      standing && {
+        ...standing.git_author,
+        id: standing.git_author.id ?? "",
+        github_token: standing.github_token,
+        device: null,
+        holds_token: standing.github_token !== null,
+      }
+    );
+  };
+
+  /// The device the Author the fields are about is at home on, where that is
+  /// not this one: a mirror, whose Save and Remove are put to that device.
+  const mirror = (): RowDevice | null => author()?.device ?? null;
+
+  /// Its uuid as a save names it: none, where there is no Author yet.
+  const authorId = (): string | null => author()?.id || null;
+
+  /// Whether that is the Author **Add author** opened, still unsaved.
+  const drafting = () => author() !== undefined && author()!.id === adding();
+
+  const configured = () => author()?.github_token ?? null;
+
+  /// Whether the Author the fields are about holds a token — its own saved
+  /// one here, or one its home holds for a mirror, of which nothing more than
+  /// that crosses.
+  const holding = () =>
+    mirror() !== null
+      ? (author()?.holds_token ?? false)
+      : configured() !== null;
+
+  const authorDisplayName = () => displayName() ?? author()?.display_name ?? "";
   const authorName = () => name() ?? author()?.name ?? "";
   const authorEmail = () => email() ?? author()?.email ?? "";
+
+  /// What GitHub said about the token last saved from here, where it was saved
+  /// under the Author the fields are about now.
+  const verified = (): Verified | null => {
+    const what = verifiedAs();
+    return what && what.id === authorId() ? what.verified : null;
+  };
 
   /// Everything in `config.yaml` this form is not about, as it stands — see
   /// [`heldConfig`], which the wizard's git step sends the same way. The
@@ -306,7 +508,7 @@ export function GitPane(props: {
     share_on_done: boolean;
     conflict_resolution: ConflictResolution;
   }): SettingsEdit => ({
-    git_author: told()?.git_author ?? { name: "", email: "" },
+    git_author: heldAuthor(told()),
     // Untouched, for the reason a blank field is a `Keep`.
     github_token: "Keep",
     // And the rules left exactly where they are: neither control is the form's
@@ -320,7 +522,7 @@ export function GitPane(props: {
     ...owned,
   });
 
-  const typing = () => replacing() || configured() === null;
+  const typing = () => replacing() || !holding();
 
   /// The rows as they are drawn: what has been typed, or what is written down
   /// while nothing has been.
@@ -413,15 +615,85 @@ export function GitPane(props: {
   /// fields go back to following the server, which has just been told what they
   /// said.
   const spent = () => {
-    setName(null);
-    setEmail(null);
-    setToken("");
-    setReplacing(false);
+    unedited();
 
     // And the rows go back to following the server, which has just been told
     // what they said: what is drawn from here on is what was written down.
     setRules(null);
     setRefusals([]);
+  };
+
+  /// The Author fields back to following the server, and the token field
+  /// shut and empty — what a save leaves, and what a switch of the dropdown
+  /// does, so that nothing typed about one Author is sent as another's.
+  const unedited = () => {
+    setDisplayName(null);
+    setName(null);
+    setEmail(null);
+    setToken("");
+    setReplacing(false);
+  };
+
+  // The Author a **Remove author** has asked about, while the card asking is
+  // up — or `null` while none is.
+  const [removing, setRemoving] = createSignal<AuthorSaved | null>(null);
+
+  // And why the last removal did not happen: the Repos still pointing at the
+  // Author, or a sentence. Nothing clears it but another press or a switch.
+  const [unremoved, setUnremoved] = createSignal<string[] | string | null>(
+    null,
+  );
+
+  const removal = useMutation(() => ({
+    mutationFn: (gone: AuthorSaved) => removeAuthor(gone.id),
+    onSuccess: (outcome: AuthorRemoved) => {
+      // Read again either way: the Author list is the files', and the Repos
+      // pane's rows are drawn against it.
+      void queries.invalidateQueries({ queryKey: ["settings"] });
+      void queries.invalidateQueries({ queryKey: ["repos"] });
+      void queries.invalidateQueries({ queryKey: ["authors"] });
+
+      if (outcome === "Removed") {
+        unedited();
+        setChosen(null);
+      } else if (outcome === "NoSuchAuthor") {
+        setUnremoved("That author isn't configured any more.");
+      } else {
+        setUnremoved(outcome.InUse.repos);
+      }
+    },
+    onError: (error: Error) =>
+      setUnremoved(`The author couldn't be removed. ${error.message}`),
+  }));
+
+  /// What **Remove author** does, which is ask rather than act.
+  const askRemoval = () => {
+    setUnremoved(null);
+    setRemoving(author() ?? null);
+  };
+
+  /// Make the fields about another Author. Whatever was typed and not saved
+  /// stays with the Author it was typed about, which is to say it goes: it
+  /// was never written down. And an Author **Add author** opened and nobody
+  /// saved goes with it, there being nothing of it anywhere but this page.
+  const pick = (id: string) => {
+    if (id === author()?.id) return;
+
+    unedited();
+    setUnremoved(null);
+    setUnsaved(null);
+    if (id !== adding()) setAdding(null);
+    setChosen(id);
+  };
+
+  /// **Add author**: the same fields over a uuid minted here, which the save
+  /// that names it makes an Author of.
+  const addAuthor = () => {
+    const id = mintedUuid();
+
+    unedited();
+    setAdding(id);
+    setChosen(id);
   };
 
   const save = useMutation(() => ({
@@ -435,8 +707,23 @@ export function GitPane(props: {
         return;
       }
 
-      setVerified(saved.verified);
+      setVerifiedAs(
+        saved.verified === null
+          ? null
+          : {
+              // A save about no Author yet made the first one, so the answer
+              // is about whichever uuid the server minted for it.
+              id: sentAbout() ?? saved.settings.git_author.id,
+              verified: saved.verified,
+            },
+      );
       spent();
+
+      // An Author that was being added is one now, where the save named it:
+      // the read below carries it, so it is no longer this page's to draw.
+      if (saved.settings.authors.some((one) => one.id === adding())) {
+        setAdding(null);
+      }
 
       // Taken from the answer rather than asked for again, which is the one
       // place this differs from the Repos and the Profiles: what a save
@@ -446,6 +733,39 @@ export function GitPane(props: {
       queries.setQueryData(["settings"], saved.settings);
     },
   }));
+
+  /// And a mirror's Save, which is put to the device it is at home on as that
+  /// device's own edit of it — the fields and the token, and nothing else of
+  /// this form, that device's other settings being its own.
+  ///
+  /// Nothing is written into the list from here: the server reads its home
+  /// again before it answers, so the read below is the mirror that device
+  /// gave back rather than what was typed.
+  const away = useMutation(() => ({
+    mutationFn: (sent: { id: string; edit: AuthorEdit }) =>
+      editAuthor(sent.id, sent.edit),
+    onSuccess: (outcome: AuthorEdited, sent) => {
+      void queries.invalidateQueries({ queryKey: ["authors"] });
+
+      if (outcome === "NoSuchAuthor") {
+        setUnsaved("That author isn't configured there any more.");
+        return;
+      }
+
+      setVerifiedAs(
+        outcome.Saved.verified === null
+          ? null
+          : { id: sent.id, verified: outcome.Saved.verified },
+      );
+      unedited();
+    },
+    onError: (error: Error) =>
+      setUnsaved(`The author couldn't be saved. ${error.message}`),
+  }));
+
+  // Why the last Save of a mirror did not land — its home not answering, or
+  // the Author gone from there — or `null`.
+  const [unsaved, setUnsaved] = createSignal<string | null>(null);
 
   /// Save, with whatever is to become of the token.
   ///
@@ -465,9 +785,32 @@ export function GitPane(props: {
     // left from turning down a save about their own email address.
     tidied();
 
+    // A mirror's fields and token go to its home, and the rest of the form
+    // stays here: the select and the checkbox save themselves, and the rules
+    // are this device's own — so a Save made over a mirror is about the mirror.
+    const home = mirror();
+    const id = authorId();
+
+    if (home !== null && id !== null) {
+      setUnsaved(null);
+      away.mutate({
+        id,
+        edit: {
+          display_name: authorDisplayName(),
+          name: authorName(),
+          email: authorEmail(),
+          github_token,
+        },
+      });
+      return;
+    }
+
+    const about = editing(github_token);
+    setSentAbout(about.id);
+
     save.mutate({
-      git_author: { name: authorName(), email: authorEmail() },
-      github_token,
+      git_author: about,
+      github_token: drafting() && !said(github_token) ? "Keep" : github_token,
       share_on_done: sharing(),
       // And the ignore rules, which this pane is the one that owns: the whole
       // list where somebody has touched a row, and `Keep` where nobody has —
@@ -481,6 +824,36 @@ export function GitPane(props: {
       ...held(),
     });
   };
+
+  /// Whether a save says anything about the Author **Add author** opened: a
+  /// field typed in, or a token. One that says nothing writes no Author — a
+  /// row nobody filled in is no more an Author than it is a rule.
+  const said = (github_token: TokenEdit): boolean =>
+    [authorDisplayName(), authorName(), authorEmail()].some(
+      (field) => field.trim() !== "",
+    ) || github_token !== "Keep";
+
+  /// The Author a press of Save is about: the one the fields were read from,
+  /// with what they hold now, by its uuid — which is what says which Author the
+  /// save lands on, and makes a new one of a uuid the file does not hold.
+  ///
+  /// The first Author as it stands, where the fields are about an Author that
+  /// was added and never filled in: the rest of the form is still saved, and
+  /// nothing is made out of nothing.
+  const editing = (github_token: TokenEdit): Author => {
+    if (drafting() && !said(github_token)) return heldAuthor(told());
+
+    return {
+      id: authorId(),
+      display_name: authorDisplayName(),
+      name: authorName(),
+      email: authorEmail(),
+    };
+  };
+
+  /// And the uuid the last save went out about, for the answer to be kept
+  /// against — see [`verified`].
+  const [sentAbout, setSentAbout] = createSignal<string | null>(null);
 
   /// The checkbox's own save, which is its own press — see [`beside`] for what
   /// rides along with it.
@@ -534,6 +907,65 @@ export function GitPane(props: {
         </Match>
         <Match when={told()}>
           <form class={styles.form} onSubmit={submit}>
+            {/* Which Author everything down to the Git Author's fields is
+                about — drawn only once there are two to choose between, so
+                that a Verkstead with one Author reads as it did before there
+                could be two. **Add author** is at its foot, behind the rule,
+                the way the Repo dropdown carries Open repo and Create repo. */}
+            <Show when={several()}>
+              <section>
+                <h3>
+                  <label for="git-author-pick">Author</label>
+                </h3>
+
+                <Listbox
+                  id="git-author-pick"
+                  options={authors()}
+                  value={(one) => one.id}
+                  label={authorRow}
+                  icon={(one) =>
+                    one.device === null ? undefined : osIcon(one.device.os ?? "")
+                  }
+                  chosen={author()?.id ?? ""}
+                  pick={pick}
+                  actions={[
+                    { label: "Add author", press: addAuthor },
+                    // Not for one **Add author** opened, which is nowhere
+                    // but this page: switching away is what drops it.
+                    ...(drafting()
+                      ? []
+                      : [{ label: "Remove author", press: askRemoval }]),
+                  ]}
+                />
+
+                <Show when={unremoved()}>
+                  {(why) => (
+                    <ErrorLine>
+                      {typeof why() === "string" ? (
+                        why()
+                      ) : (
+                        <InUse
+                          repos={why() as string[]}
+                          home={mirror()?.name ?? null}
+                        />
+                      )}
+                    </ErrorLine>
+                  )}
+                </Show>
+              </section>
+            </Show>
+
+            {/* A member's Author, picked: which machine a press of Save or
+                Remove goes to, said once above the fields it is about. */}
+            <Show when={mirror()}>
+              {(device) => (
+                <p class={styles.athome}>
+                  This author is at home on {device().name}. Saving or removing
+                  it here changes it there.
+                </p>
+              )}
+            </Show>
+
             <section>
               <h3>GitHub Token</h3>
 
@@ -543,7 +975,15 @@ export function GitPane(props: {
                   been saved here. */}
               <TokenScopes class={styles.tokenScopes} />
 
-              <Show when={configured()}>{(saved) => standing(saved())}</Show>
+              <Show when={configured()}>{(saved) => standing(saved)}</Show>
+
+              {/* A mirror's token is its home's, and nothing of it crosses
+                  but that there is one. */}
+              <Show when={mirror() !== null && holding()}>
+                <p class={styles.tokenStanding}>
+                  A token is saved on {mirror()!.name}.
+                </p>
+              </Show>
 
               {/* What GitHub said about the last token saved from here: the
                   account it authenticates as, or why nobody could be asked.
@@ -590,9 +1030,9 @@ export function GitPane(props: {
                     <button
                       type="button"
                       class={styles.clear}
-                      disabled={save.isPending}
+                      disabled={save.isPending || away.isPending}
                       onClick={() => {
-                        setVerified(null);
+                        setVerifiedAs(null);
                         write("Clear");
                       }}
                     >
@@ -617,7 +1057,7 @@ export function GitPane(props: {
                 {/* Only where there was one to go back to: with nothing
                     configured, the field is the form rather than a detour
                     from it. */}
-                <Show when={configured() !== null}>
+                <Show when={holding()}>
                   <div class={styles.tokenActions}>
                     <button
                       type="button"
@@ -636,6 +1076,22 @@ export function GitPane(props: {
 
             <section>
               <h3>Git Author</h3>
+
+              {/* What the dropdown's rows call this Author, which is the
+                  only place it is read — so drawn only where they are. */}
+              <Show when={several()}>
+                <label for="author-display-name">Display name</label>
+                <input
+                  id="author-display-name"
+                  type="text"
+                  autocapitalize="words"
+                  autocorrect="off"
+                  spellcheck={false}
+                  placeholder={authorName() || "Work"}
+                  value={authorDisplayName()}
+                  onInput={(ev) => setDisplayName(ev.currentTarget.value)}
+                />
+              </Show>
 
               <label for="author-name">Name</label>
               <input
@@ -661,6 +1117,15 @@ export function GitPane(props: {
                 value={authorEmail()}
                 onInput={(ev) => setEmail(ev.currentTarget.value)}
               />
+
+              {/* With one Author, the way to a second: a quiet press under
+                  its fields rather than a dropdown with one row in it. Once
+                  there are two, it is the dropdown's own last row instead. */}
+              <Show when={!several() && authorId() !== null}>
+                <QuietButton class={styles.addAuthor} onClick={addAuthor}>
+                  Add author
+                </QuietButton>
+              </Show>
             </section>
 
             <section>
@@ -797,10 +1262,16 @@ export function GitPane(props: {
             </section>
 
             <div class={styles.buttons}>
-              <button type="submit" disabled={save.isPending}>
+              <button type="submit" disabled={save.isPending || away.isPending}>
                 Save
               </button>
             </div>
+
+            {/* A mirror's Save that its home did not take, naming the
+                machine. */}
+            <Show when={unsaved()}>
+              {(why) => <ErrorLine class={styles.failure}>{why()}</ErrorLine>}
+            </Show>
 
             {/* A server that could not write the files, which is the one
                 thing here that is an error rather than an answer. Said
@@ -814,6 +1285,116 @@ export function GitPane(props: {
           </form>
         </Match>
       </Switch>
+
+      {/* Asked before anything happens, the way a Repo's Remove is: the
+          token goes with it, and a pasted token is not shown again. */}
+      <ConfirmRemoval
+        asked={removing()}
+        keep={() => setRemoving(null)}
+        home={mirror()?.name ?? null}
+        remove={() => {
+          const gone = removing();
+          setRemoving(null);
+
+          if (gone !== null) removal.mutate(gone);
+        }}
+      />
     </>
   );
+}
+
+/// The Repos a removal was refused over, named, and what to do about them.
+function InUse(props: {
+  repos: string[];
+  /// The machine those Repos are on, where the Author is a member's — or
+  /// `null` for this device's own.
+  home: string | null;
+}): JSX.Element {
+  const listed = (): string => {
+    const repos = props.repos;
+
+    if (repos.length <= 2) return repos.join(" and ");
+
+    return `${repos.slice(0, -1).join(", ")}, and ${repos[repos.length - 1]}`;
+  };
+
+  return (
+    <>
+      {listed()} {props.repos.length === 1 ? "is" : "are"} still this author's.
+      Pick another author for {props.repos.length === 1 ? "it" : "them"} under
+      Repos{props.home === null ? "" : ` on ${props.home}`} first, or remove{" "}
+      {props.repos.length === 1 ? "it" : "them"}.
+    </>
+  );
+}
+
+/// What **Remove author** is answered with before anything has happened: which
+/// Author it would take out, what goes with it, and the two ways out.
+function ConfirmRemoval(props: {
+  /// The Author asked about, or `null` while nothing is being asked.
+  asked: AuthorSaved | null;
+  /// The machine it is at home on, where it is a member's, whose settings it
+  /// comes out of — or `null` for this device's own.
+  home: string | null;
+  /// The way back, which Escape and a press on the backdrop come to as well.
+  keep: () => void;
+  /// And the removal, made.
+  remove: () => void;
+}): JSX.Element {
+  const id = createUniqueId();
+
+  return (
+    <Modal
+      class={styles.confirming!}
+      open={props.asked !== null}
+      close={props.keep}
+      labelledBy={id}
+    >
+      <p id={id} class={styles.confirmingTitle}>
+        Remove {props.asked ? authorLabel(props.asked) : ""}?
+      </p>
+      <p class={styles.confirmingWhy}>
+        Its name, email and GitHub token come out of the settings
+        {props.home === null ? "" : ` on ${props.home}`}. Commits already made
+        as it stay as they are.
+      </p>
+      <div class={styles.confirmingOut}>
+        <button
+          type="button"
+          class={`${styles.secondary!} secondary`}
+          onClick={() => props.keep()}
+        >
+          Cancel
+        </button>
+        <button type="button" onClick={() => props.remove()}>
+          Remove
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+/// A fresh version-4 uuid for an Author **Add author** opens, which is what
+/// the save names it by and the server keeps it under.
+///
+/// Out of `getRandomValues` rather than `randomUUID`, which a browser gives
+/// only to a secure context — and the workbench is reached over plain HTTP on
+/// a LAN as often as on `localhost`.
+function mintedUuid(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+
+  bytes[6] = (bytes[6]! & 0x0f) | 0x40;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0"));
+
+  return [
+    hex.slice(0, 4),
+    hex.slice(4, 6),
+    hex.slice(6, 8),
+    hex.slice(8, 10),
+    hex.slice(10, 16),
+  ]
+    .map((part) => part.join(""))
+    .join("-");
 }

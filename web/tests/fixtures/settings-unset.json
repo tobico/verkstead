@@ -6,6 +6,7 @@
     "roadmap_stages": 3,
     "roadmap_stages_configured": false
   },
+  "authors": [],
   "cleanup": {
     "delete": {
       "days": 30,
@@ -20,7 +21,9 @@
   },
   "conflict_resolution": "Merge",
   "git_author": {
+    "display_name": "",
     "email": "",
+    "id": null,
     "name": ""
   },
   "github_token": null,

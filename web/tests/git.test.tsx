@@ -287,7 +287,7 @@ describe("what Next saves", () => {
     await waitFor(() => expect(wrote(fetching, SETTINGS)).toBe(true));
 
     expect(sent(fetching)).toEqual({
-      git_author: { name: "Ada King", email: "ada@example.com" },
+      git_author: { ...TOLD.git_author, name: "Ada King", email: "ada@example.com" },
       github_token: { Set: { token: "ghp_intheenvironment" } },
       share_on_done: TOLD.share_on_done,
       // The one thing a save can be refused over, left alone: a wizard turned

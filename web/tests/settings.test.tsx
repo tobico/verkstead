@@ -34,13 +34,20 @@ import {
   Route,
   createMemoryHistory,
 } from "@solidjs/router";
-import { fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@solidjs/testing-library";
 import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
 import type { JSX } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "../src/App";
 import type {
+  AuthorSaved,
   ConflictResolution,
   ConversationEntry,
   ProfileEntry,
@@ -76,6 +83,8 @@ import { rowKey } from "../src/reaching";
 import notices from "../src/notices.module.css";
 import { SET_UP, drawn } from "./bench";
 import { json, serving, whenever } from "./serving";
+import { MIRRORED, oneList } from "./authors";
+import { authorLabel } from "../src/authors";
 import conversations from "./fixtures/conversations.json" with { type: "json" };
 import profiles from "./fixtures/profiles.json" with { type: "json" };
 import repos from "./fixtures/repos.json" with { type: "json" };
@@ -299,7 +308,7 @@ describe("what is not configured", () => {
   });
 
   it("warns that there is no git author", async () => {
-    theSettings({ ...TOLD, git_author: { name: "", email: "" } });
+    theSettings({ ...TOLD, git_author: { ...TOLD.git_author, name: "", email: "" } });
     const { container } = mountCard();
 
     const status = await theLine(container);
@@ -324,7 +333,7 @@ describe("what is not configured", () => {
   /// half it has not been given — so the card warns rather than naming the half
   /// there is, which is a name commits would still fail under.
   it("warns about an author with only half of one", async () => {
-    theSettings({ ...TOLD, git_author: { name: "Ada Lovelace", email: "" } });
+    theSettings({ ...TOLD, git_author: { ...TOLD.git_author, name: "Ada Lovelace", email: "" } });
     const { container } = mountCard();
 
     const status = await theLine(container);
@@ -521,7 +530,7 @@ describe("saving", () => {
     await waitFor(() =>
       expect(sent(fetching)).toEqual({
         git_author: {
-          name: TOLD.git_author.name,
+          ...TOLD.git_author,
           email: "ada@analytical.engine",
         },
         github_token: "Keep",
@@ -553,7 +562,11 @@ describe("saving", () => {
     const rewritten: SettingsSaved = {
       settings: {
         ...SAVED.settings,
-        git_author: { name: "Augusta Ada King", email: "ada@example.com" },
+        git_author: {
+          ...SAVED.settings.git_author,
+          name: "Augusta Ada King",
+          email: "ada@example.com",
+        },
       },
       verified: null,
       refused: [],
@@ -777,6 +790,7 @@ describe("replacing and clearing the token", () => {
       settings: {
         git_author: TOLD.git_author,
         github_token: null,
+        authors: TOLD.authors.map((one) => ({ ...one, github_token: null })),
         // Untouched by this form, and so untouched in what the save answers
         // with — see the sections below it for what does change these.
         languages: TOLD.languages,
@@ -1436,6 +1450,527 @@ function thePage(at = "/settings") {
     history,
   };
 }
+
+/// A second Author, under a uuid of its own and with a token of its own, and
+/// no display name — so its rows read as its git name.
+const SECOND: AuthorSaved = {
+  id: "b7e1d2c3-4a5b-4c6d-8e7f-90a1b2c3d4e5",
+  display_name: "",
+  name: "Toby Cohen",
+  email: "toby@example.com",
+  github_token: { last_four: "home", at: TOLD.github_token!.at },
+};
+
+/// And the settings with both: the first Author named *Work* for its rows,
+/// and the second on the end of the list.
+const TWO: SettingsView = {
+  ...TOLD,
+  authors: [{ ...TOLD.authors[0]!, display_name: "Work" }, SECOND],
+};
+
+/// What a uuid minted in the page looks like: a version-4 one.
+const MINTED = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+/// Pick a row of the Author dropdown, by what it reads as.
+async function pickAuthor(label: string) {
+  fireEvent.click(screen.getByRole("combobox", { name: "Author" }));
+  fireEvent.click(await waitFor(() => screen.getByRole("option", { name: label })));
+}
+
+describe("the authors", () => {
+  /// **Remove author** asks once, naming the Author, and sends nothing until
+  /// the card's own Remove is pressed.
+  it("asks once before removing an Author", async () => {
+    const fetching = serving(
+      whenever("/api/ui/settings", json(TWO)),
+      whenever(`/api/ui/authors/${SECOND.id}/remove`, json("Removed"), "POST"),
+    );
+    mountPane();
+    await waitFor(() => screen.getByRole("combobox", { name: "Author" }));
+
+    await pickAuthor(SECOND.name);
+    await pickAuthor("Remove author");
+
+    const asking = await waitFor(() =>
+      screen.getByRole("dialog", { name: `Remove ${SECOND.name}?` }),
+    );
+    const removals = () =>
+      fetching.mock.calls.filter(([asked]) =>
+        String(asked).endsWith("/remove"),
+      );
+    expect(removals()).toHaveLength(0);
+
+    fireEvent.click(
+      [...asking.querySelectorAll("button")].find(
+        (one) => one.textContent === "Remove",
+      )!,
+    );
+
+    await waitFor(() => expect(removals()).toHaveLength(1));
+  });
+
+  /// Refused while registered repos point at it, naming them under the
+  /// dropdown — where the human is looking when they pressed it.
+  it("names the repos a removal was refused over", async () => {
+    serving(
+      whenever("/api/ui/settings", json(TWO)),
+      whenever(
+        `/api/ui/authors/${SECOND.id}/remove`,
+        json({ InUse: { repos: ["askance", "verkstead"] } }),
+        "POST",
+      ),
+    );
+    mountPane();
+    await waitFor(() => screen.getByRole("combobox", { name: "Author" }));
+
+    await pickAuthor(SECOND.name);
+    await pickAuthor("Remove author");
+
+    const asking = await waitFor(() => screen.getByRole("dialog"));
+    fireEvent.click(
+      [...asking.querySelectorAll("button")].find(
+        (one) => one.textContent === "Remove",
+      )!,
+    );
+
+    await waitFor(() =>
+      screen.getByText(/askance and verkstead are still this author's/),
+    );
+  });
+
+  /// A member's Author is a row of the dropdown after this device's own,
+  /// marked with its machine, and picked it is edited with the same fields,
+  /// the pane saying which machine a press goes to (ADR-0025).
+  it("lists a member's author marked with its machine", async () => {
+    serving(
+      whenever("/api/ui/settings", json(TOLD)),
+      whenever("/api/ui/authors", json(oneList(TOLD, MIRRORED))),
+    );
+    mountPane();
+    await waitFor(() => screen.getByRole("combobox", { name: "Author" }));
+
+    fireEvent.click(screen.getByRole("combobox", { name: "Author" }));
+    expect(
+      within(screen.getByRole("listbox"))
+        .getAllByRole("option")
+        .map((option) => option.textContent),
+    ).toEqual([
+      authorLabel(TOLD.authors[0]!),
+      "Client · the-workstation",
+      "Add author",
+      "Remove author",
+    ]);
+    fireEvent.click(
+      screen.getByRole("option", { name: "Client · the-workstation" }),
+    );
+
+    await waitFor(() =>
+      screen.getByText(
+        "This author is at home on the-workstation. Saving or removing it here changes it there.",
+      ),
+    );
+    expect((screen.getByLabelText("Email") as HTMLInputElement).value).toBe(
+      MIRRORED.email,
+    );
+    screen.getByText("A token is saved on the-workstation.");
+    expect(screen.queryByLabelText("Token")).toBeNull();
+
+    fireEvent.click(screen.getByRole("combobox", { name: "Author" }));
+    screen.getByRole("option", { name: "Remove author" });
+  });
+
+  /// Save over a mirror sends its fields alone to its own route, which the
+  /// server puts to its home — never a settings save — and the list is read
+  /// again rather than drawn from what was typed.
+  it("saves a member's author to its home", async () => {
+    let listed = oneList(TOLD, MIRRORED);
+    const fetching = serving(
+      whenever("/api/ui/settings", json(TOLD)),
+      whenever("/api/ui/authors", () => json(listed)()),
+      whenever(
+        `/api/ui/authors/${MIRRORED.id}`,
+        () => {
+          listed = oneList(TOLD, { ...MIRRORED, email: "ada@new.example" });
+          return json({ Saved: { verified: null } })();
+        },
+        "POST",
+      ),
+    );
+    mountPane();
+    await waitFor(() => screen.getByRole("combobox", { name: "Author" }));
+    await pickAuthor("Client · the-workstation");
+
+    const email = (await waitFor(() =>
+      screen.getByLabelText("Email"),
+    )) as HTMLInputElement;
+    fireEvent.input(email, { target: { value: "ada@new.example" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(
+        fetching.mock.calls.filter(
+          ([asked]) => String(asked) === `/api/ui/authors/${MIRRORED.id}`,
+        ),
+      ).toHaveLength(1),
+    );
+    const [, init] = fetching.mock.calls.find(
+      ([asked]) => String(asked) === `/api/ui/authors/${MIRRORED.id}`,
+    )!;
+    expect(JSON.parse(String(init!.body))).toEqual({
+      display_name: MIRRORED.display_name,
+      name: MIRRORED.name,
+      email: "ada@new.example",
+      github_token: "Keep",
+    });
+    expect(
+      fetching.mock.calls.some(
+        ([asked, init]) =>
+          String(asked) === "/api/ui/settings" && init?.method === "POST",
+      ),
+    ).toBe(false);
+
+    await waitFor(() =>
+      expect((screen.getByLabelText("Email") as HTMLInputElement).value).toBe(
+        "ada@new.example",
+      ),
+    );
+  });
+
+  /// A token replaced on a mirror is verified on its home, and what that
+  /// device's GitHub said is drawn here.
+  it("shows the verification a member's author's home answered", async () => {
+    serving(
+      whenever("/api/ui/settings", json(TOLD)),
+      whenever("/api/ui/authors", json(oneList(TOLD, MIRRORED))),
+      whenever(
+        `/api/ui/authors/${MIRRORED.id}`,
+        json({
+          Saved: {
+            verified: { Account: { login: "ada-client", missing: [] } },
+          },
+        }),
+        "POST",
+      ),
+    );
+    mountPane();
+    await waitFor(() => screen.getByRole("combobox", { name: "Author" }));
+    await pickAuthor("Client · the-workstation");
+
+    fireEvent.click(
+      await waitFor(() => screen.getByRole("button", { name: "Replace" })),
+    );
+    fireEvent.input(screen.getByLabelText("Token"), {
+      target: { value: "ghp_fromhere" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => screen.getByText("ada-client"));
+  });
+
+  /// A home that is not answering refuses the Save, naming the machine.
+  it("names the machine that didn't take a member's author's save", async () => {
+    serving(
+      whenever("/api/ui/settings", json(TOLD)),
+      whenever("/api/ui/authors", json(oneList(TOLD, MIRRORED))),
+      whenever(
+        `/api/ui/authors/${MIRRORED.id}`,
+        json({ error: "the-workstation couldn't be reached." }, 502),
+        "POST",
+      ),
+    );
+    mountPane();
+    await waitFor(() => screen.getByRole("combobox", { name: "Author" }));
+    await pickAuthor("Client · the-workstation");
+
+    fireEvent.click(
+      await waitFor(() => screen.getByRole("button", { name: "Save" })),
+    );
+
+    await waitFor(() =>
+      screen.getByText(/the-workstation couldn't be reached\./),
+    );
+  });
+
+  /// And a removal refused at home names that machine's Repos, and where to
+  /// repoint them.
+  it("names the home's repos a member's author's removal was refused over", async () => {
+    serving(
+      whenever("/api/ui/settings", json(TOLD)),
+      whenever("/api/ui/authors", json(oneList(TOLD, MIRRORED))),
+      whenever(
+        `/api/ui/authors/${MIRRORED.id}/remove`,
+        json({ InUse: { repos: ["askance"] } }),
+        "POST",
+      ),
+    );
+    mountPane();
+    await waitFor(() => screen.getByRole("combobox", { name: "Author" }));
+    await pickAuthor("Client · the-workstation");
+    await pickAuthor("Remove author");
+
+    const asking = await waitFor(() => screen.getByRole("dialog"));
+    expect(asking.textContent).toContain("settings on the-workstation");
+    fireEvent.click(
+      [...asking.querySelectorAll("button")].find(
+        (one) => one.textContent === "Remove",
+      )!,
+    );
+
+    await waitFor(() =>
+      screen.getByText(
+        /askance is still this author's\. Pick another author for it under Repos on the-workstation first/,
+      ),
+    );
+  });
+
+  /// With one Author there is no dropdown, and so no way to remove it.
+  it("offers no removal with one Author", async () => {
+    theSettings(TOLD);
+    mountPane();
+    await waitFor(() => screen.getByLabelText("Email"));
+
+    expect(screen.queryByRole("option", { name: "Remove author" })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "Author" })).toBeNull();
+  });
+
+  /// One Author is the pane as it was before there could be two: no dropdown,
+  /// no display name, and only a quiet way to a second.
+  it("draws no dropdown with one Author", async () => {
+    theSettings(TOLD);
+    mountPane();
+    await waitFor(() => screen.getByLabelText("Email"));
+
+    expect(screen.queryByRole("combobox", { name: "Author" })).toBeNull();
+    expect(screen.queryByLabelText("Display name")).toBeNull();
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe(
+      TOLD.git_author.name,
+    );
+    screen.getByRole("button", { name: "Add author" });
+  });
+
+  /// And none with no Author at all either, where there is nothing yet to add
+  /// a second to.
+  it("offers no Add author before there is a first", async () => {
+    theSettings(UNSET);
+    mountPane();
+    await waitFor(() => screen.getByLabelText("Email"));
+
+    expect(screen.queryByRole("button", { name: "Add author" })).toBeNull();
+  });
+
+  it("draws the dropdown with both once a second is added", async () => {
+    theSettings(TOLD);
+    mountPane();
+    await waitFor(() => screen.getByLabelText("Email"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Add author" }));
+
+    const pick = await waitFor(() =>
+      screen.getByRole("combobox", { name: "Author" }),
+    );
+    expect(pick.textContent).toContain("New author");
+
+    // Empty fields over the new one, and its token field open: there is no
+    // token of its to keep.
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText("Email") as HTMLInputElement).value).toBe("");
+    screen.getByLabelText("Token");
+    screen.getByLabelText("Display name");
+
+    // And the first in the rows by its git name, nobody having named it.
+    fireEvent.click(pick);
+    screen.getByRole("option", { name: TOLD.git_author.name });
+    screen.getByRole("option", { name: "New author" });
+    screen.getByRole("option", { name: "Add author" });
+  });
+
+  it("labels each row by its display name, falling back to the git name", async () => {
+    theSettings(TWO);
+    mountPane();
+
+    const pick = await waitFor(() =>
+      screen.getByRole("combobox", { name: "Author" }),
+    );
+    expect(pick.textContent).toContain("Work");
+
+    fireEvent.click(pick);
+    screen.getByRole("option", { name: "Work" });
+    screen.getByRole("option", { name: SECOND.name });
+  });
+
+  it("fills the fields with the Author picked", async () => {
+    theSettings(TWO);
+    mountPane();
+    await waitFor(() => screen.getByRole("combobox", { name: "Author" }));
+
+    await pickAuthor(SECOND.name);
+
+    await waitFor(() =>
+      expect((screen.getByLabelText("Email") as HTMLInputElement).value).toBe(
+        SECOND.email,
+      ),
+    );
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe(
+      SECOND.name,
+    );
+    // Its display name empty, with the git name standing in as the example.
+    expect(
+      (screen.getByLabelText("Display name") as HTMLInputElement).placeholder,
+    ).toBe(SECOND.name);
+    screen.getByText(SECOND.github_token!.last_four);
+  });
+
+  /// What was typed about one Author was typed about that one: switching drops
+  /// it rather than carrying it onto the next, and switching back finds the
+  /// first as the server has it.
+  it("does not carry unsaved edits onto another Author", async () => {
+    const fetching = theSettings(TWO, json(SAVED));
+    mountPane();
+    await waitFor(() => screen.getByRole("combobox", { name: "Author" }));
+
+    fireEvent.input(screen.getByLabelText("Email"), {
+      target: { value: "half-typed@" },
+    });
+    await pickAuthor(SECOND.name);
+
+    await waitFor(() =>
+      expect((screen.getByLabelText("Email") as HTMLInputElement).value).toBe(
+        SECOND.email,
+      ),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect((sent(fetching) as { git_author: unknown }).git_author).toEqual({
+        id: SECOND.id,
+        display_name: "",
+        name: SECOND.name,
+        email: SECOND.email,
+      }),
+    );
+
+    await pickAuthor("Work");
+    await waitFor(() =>
+      expect((screen.getByLabelText("Email") as HTMLInputElement).value).toBe(
+        TOLD.git_author.email,
+      ),
+    );
+  });
+
+  /// A token saved under the second Author is sent under its uuid alone —
+  /// which is what leaves the first's where it was — and the account GitHub
+  /// verified it as is said under the second's fields and not the first's.
+  it("saves a token under the second Author and names its login", async () => {
+    const fetching = theSettings(TWO, json({
+      ...SAVED,
+      settings: TWO,
+      verified: { Account: { login: "toby", missing: [] } },
+    }));
+    mountPane();
+    await waitFor(() => screen.getByRole("combobox", { name: "Author" }));
+
+    await pickAuthor(SECOND.name);
+    fireEvent.click(await waitFor(() => screen.getByRole("button", { name: "Replace" })));
+    fireEvent.input(screen.getByLabelText("Token"), {
+      target: { value: TOKEN },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => screen.getByText(/GitHub says it's/));
+    expect(screen.getByText("toby")).toBeTruthy();
+
+    const edit = sent(fetching) as {
+      git_author: { id: string };
+      github_token: unknown;
+    };
+    expect(edit.git_author.id).toBe(SECOND.id);
+    expect(edit.github_token).toEqual({ Set: { token: TOKEN } });
+
+    // And nothing of it under the first.
+    await pickAuthor("Work");
+    await waitFor(() =>
+      expect((screen.getByLabelText("Email") as HTMLInputElement).value).toBe(
+        TOLD.git_author.email,
+      ),
+    );
+    expect(screen.queryByText(/GitHub says it's/)).toBeNull();
+  });
+
+  /// **Add author** is the same fields over a uuid minted in the page, which
+  /// the save names it by — a uuid the server does not hold, so a new Author.
+  it("saves an added Author under a fresh uuid", async () => {
+    const fetching = theSettings(TWO, json(SAVED));
+    mountPane();
+    await waitFor(() => screen.getByRole("combobox", { name: "Author" }));
+
+    await pickAuthor("Add author");
+    await waitFor(() =>
+      expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe(""),
+    );
+
+    fireEvent.input(screen.getByLabelText("Display name"), {
+      target: { value: "Client" },
+    });
+    fireEvent.input(screen.getByLabelText("Name"), {
+      target: { value: "Ada Lovelace" },
+    });
+    fireEvent.input(screen.getByLabelText("Email"), {
+      target: { value: "ada@client.example" },
+    });
+    fireEvent.input(screen.getByLabelText("Token"), {
+      target: { value: TOKEN },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => sent(fetching));
+    const edit = sent(fetching) as {
+      git_author: { id: string; display_name: string; email: string };
+      github_token: unknown;
+    };
+    expect(edit.git_author.id).toMatch(MINTED);
+    expect(TWO.authors.map((one) => one.id)).not.toContain(edit.git_author.id);
+    expect(edit.git_author.display_name).toBe("Client");
+    expect(edit.git_author.email).toBe("ada@client.example");
+    expect(edit.github_token).toEqual({ Set: { token: TOKEN } });
+  });
+
+  /// And an Author added and never filled in is nobody: the rest of the form
+  /// still saves, about the first Author as it stands.
+  it("writes no Author for one added and left blank", async () => {
+    const fetching = theSettings(TOLD, json(SAVED));
+    mountPane();
+    await waitFor(() => screen.getByLabelText("Email"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Add author" }));
+    await waitFor(() => screen.getByRole("combobox", { name: "Author" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(sent(fetching)).toMatchObject({
+        git_author: TOLD.git_author,
+        github_token: "Keep",
+      }),
+    );
+  });
+
+  /// The card: with two it names them both, and a warning names the Author it
+  /// is about.
+  it("names every Author on the card", async () => {
+    theSettings(TWO);
+    const { container } = mountCard();
+
+    expect((await theLine(container)).textContent).toBe(`Work, ${SECOND.name}`);
+  });
+
+  it("says on the card which Author is missing a token", async () => {
+    theSettings({ ...TWO, authors: [TWO.authors[0]!, { ...SECOND, github_token: null }] });
+    const { container } = mountCard();
+
+    expect((await theLine(container)).textContent).toBe(
+      `No GitHub token for ${SECOND.name}`,
+    );
+  });
+});
 
 /// The three panes of the frame, in the order they are walked through.
 function panes(container: ParentNode): HTMLElement[] {

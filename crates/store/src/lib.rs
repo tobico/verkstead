@@ -31,6 +31,7 @@ use verkstead_schema::{QuestionSet, Response, ResponseAccepted, ValidationError}
 mod archives;
 mod arrivals;
 mod attachments;
+mod author_mirrors;
 mod banners;
 mod births;
 mod captures;
@@ -86,6 +87,9 @@ pub use arrivals::{Arrival, ArrivingPicked, Replacing, arrive, arrived_checkout,
 pub use attachments::{
     Attachment, Origin, attach, attached_sets, attachment, attachments, detach, detach_from_set,
     set_attachment, set_attachments,
+};
+pub use author_mirrors::{
+    AuthorMirror, author_mirrors, forget_author_mirrors_of_departed, record_author_mirrors,
 };
 pub use banners::{dismiss_remote_banner, remote_banner_dismissed};
 pub use births::{
@@ -147,7 +151,7 @@ pub use memos::{
     Memo, Retirement, Retiring, StandingMemo, leave_memo, memo_of, restore_memo, retire_memo,
     standing_memos,
 };
-pub use migrations::{rank_the_conversations, stamp_the_births};
+pub use migrations::{rank_the_conversations, record_the_repo_authors, stamp_the_births};
 pub use pairings::{RepoPairings, last_started_pairings, remembered_pairings};
 pub use pauses::Pause;
 pub use pending_steers::{
@@ -173,8 +177,9 @@ pub use push::{
     store_subscription, vapid_keys,
 };
 pub use repos::{
-    ConflictResolution, Repo, Unregistering, load_repo, recorded_repos, register_repo,
-    registered_repo, registered_repo_at, registered_repos, unregister_repo,
+    ConflictResolution, Repo, Repointing, Unregistering, load_repo, recorded_repos, register_repo,
+    register_repo_as, registered_repo, registered_repo_at, registered_repos, repoint_repo,
+    unregister_repo,
 };
 pub use session_endings::{Ended, end_session, session_ending};
 pub use session_names::{continued_as, found_as, session_id, session_ids};
@@ -934,6 +939,11 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // nothing, being a fact about the person rather than about any Conversation
     // — see [`banners`].
     banners::apply_schema(pool).await?;
+
+    // And the Authors every member holds at home, one row apiece and keyed by
+    // the uuid that is the same everywhere — see [`author_mirrors`]. Hanging off
+    // nothing, the membership it is pruned against coming and going on its own.
+    author_mirrors::apply_schema(pool).await?;
 
     // And last of all, whatever a database written by an older Verkstead
     // still needs done to it. After every table above, because what a rewrite

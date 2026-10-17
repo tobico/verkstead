@@ -47,6 +47,7 @@ use std::process::{Command, Stdio};
 use std::sync::{Arc, LazyLock, Mutex, Weak, mpsc};
 use std::time::Duration;
 
+use crate::github::Credential;
 use crate::repos::git;
 use crate::store;
 use crate::unseen::Unseen;
@@ -370,8 +371,8 @@ pub(crate) enum Fetched {
 /// then fails again a moment later when its base commit will not resolve. The
 /// difference is not worth splitting here: what follows either way is a refusal
 /// naming something the human can go and look at.
-pub(crate) fn fetch(repo: &Path) -> Fetched {
-    fetching(repo, None)
+pub(crate) fn fetch(repo: &Path, credential: &Credential) -> Fetched {
+    fetching(repo, credential, None)
 }
 
 /// The same fetch, given only so long to answer.
@@ -392,11 +393,11 @@ pub(crate) fn fetch(repo: &Path) -> Fetched {
 /// is, so the child is put in a process group of its own and the whole group is
 /// killed — a signal to the parent alone would leave the helper running with
 /// nothing left to wait for it.
-pub(crate) fn fetch_within(repo: &Path, limit: Duration) -> Fetched {
-    fetching(repo, Some(limit))
+pub(crate) fn fetch_within(repo: &Path, credential: &Credential, limit: Duration) -> Fetched {
+    fetching(repo, credential, Some(limit))
 }
 
-fn fetching(repo: &Path, limit: Option<Duration>) -> Fetched {
+fn fetching(repo: &Path, credential: &Credential, limit: Option<Duration>) -> Fetched {
     let remotes = git(repo, &["remote"]).unwrap_or_default();
 
     if remotes.trim().is_empty() {
@@ -407,14 +408,16 @@ fn fetching(repo: &Path, limit: Option<Duration>) -> Fetched {
     // stderr is the whole of what a fetch that failed has to say.
     let mut command = Command::new("git");
 
-    command
+    // As the Repo's Author where it has a token, and as the host where it has
+    // none. Either way a fetch that wants a password must fail rather than
+    // wait for one: there is nobody at this terminal to type it, and an
+    // authentication that has gone is one of the two things this is expected
+    // to catch.
+    credential
+        .on(&mut command)
         .args(["fetch", "--all", "--quiet"])
         .unseen()
         .current_dir(repo)
-        // A fetch that wants a password must fail rather than wait for one:
-        // there is nobody at this terminal to type it, and an authentication
-        // that has gone is one of the two things this is expected to catch.
-        .env("GIT_TERMINAL_PROMPT", "0")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -1655,7 +1658,7 @@ mod tests {
         run(&repo, &["remote", "add", "origin", &url]);
 
         let started = std::time::Instant::now();
-        let fetched = fetch_within(&repo, Duration::from_millis(500));
+        let fetched = fetch_within(&repo, &Credential::host(), Duration::from_millis(500));
 
         let Fetched::Failed(said) = fetched else {
             panic!("a fetch that never answers is a fetch that failed");
@@ -1704,15 +1707,75 @@ mod tests {
         );
 
         assert!(matches!(
-            fetch_within(&clone, Duration::from_secs(30)),
+            fetch_within(&clone, &Credential::host(), Duration::from_secs(30)),
             Fetched::Fresh
         ));
 
         // And one with nowhere to fetch from still says so rather than waiting.
         assert!(matches!(
-            fetch_within(&upstream, Duration::from_secs(30)),
+            fetch_within(&upstream, &Credential::host(), Duration::from_secs(30)),
             Fetched::NoRemote
         ));
+    }
+
+    /// A repository whose own configuration has a credential helper of the
+    /// host's, answering `host:host-secret` — and only that one, the machine's
+    /// global helpers cleared in front of it, so nothing on the machine running
+    /// the suite can answer instead.
+    fn a_repository_with_a_login_of_the_hosts() -> (tempfile::TempDir, PathBuf) {
+        let (dir, repo) = repository();
+
+        run(&repo, &["config", "--add", "credential.helper", ""]);
+        run(
+            &repo,
+            &[
+                "config",
+                "--add",
+                "credential.helper",
+                "!f() { test \"$1\" = get && printf 'username=host\\npassword=host-secret\\n'; }; f",
+            ],
+        );
+
+        (dir, repo)
+    }
+
+    /// A fetch as an Author with a token presents that token and nothing else:
+    /// not the host's stored login, which is cleared in front of it.
+    #[test]
+    fn a_fetch_as_an_author_presents_that_authors_token_and_no_other() {
+        let (_dir, repo) = a_repository_with_a_login_of_the_hosts();
+        let (url, offered) = crate::stand_ins::remote_recording_logins();
+        run(&repo, &["remote", "add", "origin", &url]);
+
+        let fetched = fetch(&repo, &Credential::token("ghp_thehomeone"));
+
+        assert!(
+            matches!(fetched, Fetched::Failed(_)),
+            "the stand-in turns every login away"
+        );
+        assert_eq!(
+            *offered.lock().unwrap(),
+            vec!["x-access-token:ghp_thehomeone".to_owned()],
+            "the Author's token, and the host's login never offered"
+        );
+    }
+
+    /// And a fetch with no token to present is the host's, with the machine's
+    /// configuration standing exactly as it was.
+    #[test]
+    fn a_fetch_with_no_token_is_left_to_the_hosts_own_login() {
+        let (_dir, repo) = a_repository_with_a_login_of_the_hosts();
+        let (url, offered) = crate::stand_ins::remote_recording_logins();
+        run(&repo, &["remote", "add", "origin", &url]);
+
+        let fetched = fetch_within(&repo, &Credential::host(), Duration::from_secs(30));
+
+        assert!(matches!(fetched, Fetched::Failed(_)));
+        assert_eq!(
+            *offered.lock().unwrap(),
+            vec!["host:host-secret".to_owned()],
+            "what the host has configured is what is offered"
+        );
     }
 
     #[test]

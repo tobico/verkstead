@@ -35,6 +35,17 @@ pub struct RepoEntry {
     pub name: String,
     pub path: String,
     pub default_branch: String,
+
+    /// The uuid of the Author its work is done as, or nothing where none is
+    /// recorded (ADR-0025).
+    #[serde(default)]
+    pub author: Option<String>,
+
+    /// No Author is recorded and more than one is configured, so there is no
+    /// saying which this Repo's work is done as. With one Author or none there
+    /// is nothing to choose between, so this is never said of those.
+    #[serde(default)]
+    pub author_unpicked: bool,
 }
 
 /// One registered Repo as a member across the link is told of it: the row, and
@@ -75,18 +86,55 @@ pub struct RepoAcross {
     /// repository has no origin — which is a repository that matches by name or
     /// not at all.
     pub origin: Option<String>,
+
+    /// The Author that device's Repo works as, as that device resolves it
+    /// (ADR-0025): what a transfer's preflight compares its own Repo's with.
+    ///
+    /// Defaulted, so a Verkstead older than this one reads as
+    /// [`AuthorThere::Unsaid`] rather than as an answer this end cannot read.
+    #[serde(default)]
+    pub author: AuthorThere,
+}
+
+/// Which Author a member's Repo works as, as that member answers it.
+///
+/// **The uuid is what is compared**, being the same on every device: a mirror
+/// over there and the local Author here are one Author. The name travels beside
+/// it only to be said.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AuthorThere {
+    /// The Author it works as: its uuid, and what it is called on a screen.
+    As { id: String, called: String },
+
+    /// Several Authors over there and none recorded for it, which is a Repo
+    /// nothing can be committed in until one is picked there.
+    Unpicked,
+
+    /// Nothing to compare: no Author configured over there at all, a recorded
+    /// one gone, or a Verkstead that does not say.
+    #[default]
+    Unsaid,
 }
 
 /// A repository the human is asking Verkstead to take on, named by its absolute
 /// path.
 ///
-/// A path and nothing else: the name and the default branch are read off the
-/// repository rather than claimed, for the same reason the CLI derives a Set's
-/// `project` and `branch` instead of trusting them.
+/// A path, and the Author it is to be recorded as: the name and the default
+/// branch are read off the repository rather than claimed, for the same reason
+/// the CLI derives a Set's `project` and `branch` instead of trusting them.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct Registration {
     pub path: String,
+
+    /// The uuid of the Author the Repo's work is to be done as (ADR-0025).
+    ///
+    /// Asked only where more than one is configured, and refused there when it
+    /// is missing — see [`Registered::AuthorUnpicked`]. With one configured
+    /// nothing need be sent and the Repo is recorded as that one.
+    #[serde(default)]
+    #[cfg_attr(feature = "typescript", ts(optional))]
+    pub author: Option<String>,
 }
 
 /// What became of a registration.
@@ -134,6 +182,14 @@ pub enum Registered {
     /// already* and nothing else, while a dropdown that was registering one to
     /// work in has the repository it named rather than a dead end.
     AlreadyRegistered(RepoEntry),
+
+    /// More than one Author is configured and the registration named none, so
+    /// there is no saying whose work this Repo's is. Nothing is registered.
+    AuthorUnpicked,
+
+    /// The registration named an Author that is not configured — one removed
+    /// since the form was drawn, most likely. Nothing is registered.
+    NoSuchAuthor,
 }
 
 /// What became of taking one off the registry.
@@ -162,6 +218,42 @@ pub enum RepoRemoved {
     /// A Conversation that is neither Done nor Closed is on it. Work still going
     /// on in a repository is the reason to keep it registered.
     InUse,
+}
+
+/// A Repo pointed at another Author, from its row on the Repos pane.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct Repointing {
+    /// The uuid of the Author its work is to be done as from now on.
+    pub author: String,
+}
+
+/// What became of pointing a Repo at another Author.
+///
+/// Refused while work that is neither Done nor Closed has the Repo in it, the
+/// rule unregistering follows and for the reason ADR-0025 gives: a branch half
+/// committed as one Author would carry on as another.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum Repointed {
+    /// Recorded, and the row as it now reads. The next session on it commits
+    /// and pushes as the new Author.
+    Repointed(RepoEntry),
+
+    /// There is no registered Repo with that id.
+    NoSuchRepo,
+
+    /// The Author named is not configured — one removed since the pane was
+    /// drawn, most likely. Nothing is recorded.
+    NoSuchAuthor,
+
+    /// Live work has it in it, named by branch: the Conversations on it in
+    /// `on`, and the ones holding it as a Companion Repo in `beside`, each
+    /// oldest first. At least one of them is not empty.
+    InUse {
+        on: Vec<String>,
+        beside: Vec<String>,
+    },
 }
 
 /// One registered Repo, whole: the row, and everything a reading of the
@@ -193,6 +285,12 @@ pub struct RepoView {
 
     /// And what a Conversation branches from unless it is told otherwise.
     pub default_branch: String,
+
+    /// The uuid of the Author it is recorded as, as [`RepoEntry::author`].
+    pub author: Option<String>,
+
+    /// Whether one is still to be picked, as [`RepoEntry::author_unpicked`].
+    pub author_unpicked: bool,
 
     /// Every branch the repository has, local and remote-tracking both — the
     /// same reading the base dropdown is filled from.
@@ -246,6 +344,13 @@ pub struct Creation {
     /// the modal draws no tick at all then, and says a remote is needed before
     /// the work is finished.
     pub github: bool,
+
+    /// And the uuid of the Author it is made as: the first commit is by it, the
+    /// push to GitHub is with its token, and the Repo is recorded as its. Asked
+    /// and refused the way a [`Registration`]'s is.
+    #[serde(default)]
+    #[cfg_attr(feature = "typescript", ts(optional))]
+    pub author: Option<String>,
 }
 
 /// What became of a create.
@@ -298,10 +403,18 @@ pub enum Created {
     /// name.
     BadName,
 
-    /// Nobody is configured to commit as. The first commit is this repository's
+    /// Nobody is configured to commit as, or the Author it is made as lacks a
+    /// name or an email. The first commit is this repository's
     /// own history from here on, so it is refused rather than made by a
     /// stand-in — see the settings page's **Git author**.
     NoAuthor,
+
+    /// More than one Author is configured and the create named none. Nothing
+    /// is made.
+    AuthorUnpicked,
+
+    /// The create named an Author that is not configured. Nothing is made.
+    NoSuchAuthor,
 
     /// Anything else, in git's own words where git is what failed: the directory
     /// could not be made, or `git` would not do one of the four things a fresh

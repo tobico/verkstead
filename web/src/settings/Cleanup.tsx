@@ -72,6 +72,7 @@ import { Empty, ErrorLine, Note } from "../notices";
 import { PaneHead } from "../workbench/PaneHead";
 import {
   heldAtOnce,
+  heldAuthor,
   heldCleanup,
   heldInstructions,
   heldLanguages,
@@ -208,7 +209,7 @@ export function CleanupPane(props: {
 
   const save = useMutation(() => ({
     mutationFn: ({ edit }: Asked) => {
-      const author = told()?.git_author ?? { name: "", email: "" };
+      const author = heldAuthor(told());
 
       return saveSettings({
         git_author: author,

@@ -6,6 +6,7 @@
 //! see [`program`].
 
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 
 /// A program at `path` holding `contents`, executable where this platform has
 /// such a thing.
@@ -62,4 +63,67 @@ pub(crate) fn program(path: &Path, contents: &str) {
 
     #[cfg(not(unix))]
     std::fs::write(path, contents).unwrap();
+}
+
+/// A remote over http that asks for a login and writes down every one it is
+/// offered, as the `user:password` git sent — and then turns it away, since
+/// whose credential arrived is the whole of what a test of it asks.
+///
+/// Hands back the url to point a remote at, and the logins as they arrive.
+pub(crate) fn remote_recording_logins() -> (String, Arc<Mutex<Vec<String>>>) {
+    use base64::Engine;
+    use std::io::{BufRead, BufReader, Write};
+    use std::net::TcpListener;
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let offered = Arc::new(Mutex::new(Vec::new()));
+
+    std::thread::spawn({
+        let offered = offered.clone();
+
+        move || {
+            for mut stream in listener.incoming().flatten() {
+                let mut login = None;
+
+                for line in BufReader::new(&stream).lines() {
+                    let Ok(line) = line else { break };
+
+                    if line.is_empty() {
+                        break;
+                    }
+
+                    let Some((name, value)) = line.split_once(": ") else {
+                        continue;
+                    };
+
+                    if let ("authorization", Some(basic)) = (
+                        name.to_ascii_lowercase().as_str(),
+                        value.strip_prefix("Basic "),
+                    ) {
+                        let decoded = base64::engine::general_purpose::STANDARD
+                            .decode(basic.trim())
+                            .unwrap();
+                        login = Some(String::from_utf8(decoded).unwrap());
+                    }
+                }
+
+                // Asked for where nothing was offered, which is what has git go
+                // to its credential helper; refused where something was.
+                let answer = match login {
+                    Some(login) => {
+                        offered.lock().unwrap().push(login);
+                        "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                    }
+                    None => {
+                        "HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Basic realm=\"repo\"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                    }
+                };
+
+                let _ = stream.write_all(answer.as_bytes());
+            }
+        }
+    });
+
+    (format!("http://127.0.0.1:{port}/repo.git"), offered)
 }

@@ -49,6 +49,10 @@ const THIS_DEVICE: &str = "aa00bb11cc22dd33ee44ff5566778899";
 /// session inside is told to put its Question Sets to.
 const LISTENING: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8422);
 
+/// The one Author a test's sessions commit as, keyed `work`.
+const THE_AUTHOR: &str =
+    "authors:\n  - id: work\n    name: Tobias Cohen\n    email: tobi@tobico.net\n";
+
 /// What the settings page's Instructions card was given, as `config.yaml` holds
 /// it — and what every root's global instructions file holds, byte for byte.
 const THE_INSTRUCTIONS: &str = "Say what you changed.\n\n- And why.\n";
@@ -500,6 +504,20 @@ fi
         std::fs::write(self.settings.secrets_path(), yaml).unwrap();
     }
 
+    /// Record the Repo as the Author `author`, as the store would at its
+    /// registration, and read the Conversation back with it — which is what the
+    /// server builds every sandbox off.
+    async fn recorded_as(&mut self, author: &str) {
+        store::record_the_repo_authors(&self.pool, author)
+            .await
+            .unwrap();
+
+        self.conversation = store::load_conversation(&self.pool, self.conversation.id)
+            .await
+            .unwrap()
+            .expect("the Conversation is still there");
+    }
+
     /// And `config.yaml`, which is who those sandboxes commit as, how their
     /// shared build cache is set, and what MCP servers this installation
     /// declares.
@@ -778,6 +796,45 @@ fi
 
 /// Stand one up, with no companion repos — which is the ordinary Conversation
 /// and what most of these tests are about.
+/// Register `repo` through `POST /api/ui/repos` as **Open repo** does with
+/// two Authors configured and `author` picked, and hand back its id.
+async fn opened_through_the_page(
+    pool: &sqlx::SqlitePool,
+    data_dir: &Path,
+    repo: &Path,
+    author: &str,
+) -> i64 {
+    use axum::body::Body;
+    use axum::http::{Request, header};
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
+
+    std::fs::write(data_dir.join("config.yaml"), TWO_AUTHORS).unwrap();
+    std::fs::write(data_dir.join("secrets.yaml"), TWO_TOKENS).unwrap();
+
+    let app = verkstead_server::router_keeping(pool.clone(), data_dir.to_owned());
+    let response = app
+        .oneshot(
+            Request::post("/api/ui/repos")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "path": repo, "author": author }).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+
+    match serde_json::from_slice(&body).unwrap() {
+        verkstead_render::Registered::Added(repo) => {
+            assert_eq!(repo.author.as_deref(), Some(author));
+            repo.id
+        }
+        refused => panic!("the registration was refused: {refused:?}"),
+    }
+}
+
 async fn grilling() -> Grilling {
     grilling_alongside(&[]).await
 }
@@ -790,6 +847,21 @@ async fn grilling() -> Grilling {
 /// checks them out: a read-write companion on a branch of its own, a read-only
 /// one detached at the commit its base resolved to.
 async fn grilling_alongside(companions: &[(&str, store::CompanionMode)]) -> Grilling {
+    grilling_with(companions, None).await
+}
+
+/// And one whose Repo was opened the way the Repo dropdown's **Open repo**
+/// opens one, with [`TWO_AUTHORS`] configured and `author` picked: registered
+/// through the server's own endpoint rather than straight into the store, so
+/// that what the session is handed is what the pick recorded.
+async fn grilling_opened_as(author: &str) -> Grilling {
+    grilling_with(&[], Some(author)).await
+}
+
+async fn grilling_with(
+    companions: &[(&str, store::CompanionMode)],
+    opened_as: Option<&str>,
+) -> Grilling {
     let elsewhere = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
     let home = tempfile::tempdir().unwrap();
@@ -840,10 +912,16 @@ async fn grilling_alongside(companions: &[(&str, store::CompanionMode)]) -> Gril
         .await
         .unwrap();
 
-    let repo_row = store::register_repo(&pool, &repo, "verkstead", "main")
-        .await
-        .unwrap()
-        .expect("the Repo registers");
+    let repo_row = match opened_as {
+        None => {
+            store::register_repo(&pool, &repo, "verkstead", "main")
+                .await
+                .unwrap()
+                .expect("the Repo registers")
+                .id
+        }
+        Some(author) => opened_through_the_page(&pool, state.path(), &repo, author).await,
+    };
 
     let claude_dir = elsewhere.path().join("account/.claude");
     let config_file = elsewhere.path().join("account/.claude.json");
@@ -895,7 +973,7 @@ async fn grilling_alongside(companions: &[(&str, store::CompanionMode)]) -> Gril
     .unwrap()
     .expect("the Profile saves");
 
-    let id = store::start_conversation(&pool, repo_row.id, "rate-limiting", THIS_DEVICE)
+    let id = store::start_conversation(&pool, repo_row, "rate-limiting", THIS_DEVICE)
         .await
         .unwrap()
         .expect("the Conversation starts");
@@ -1363,7 +1441,7 @@ async fn the_system_comes_in_read_only_and_the_hosts_gitconfig_not_at_all() {
 #[tokio::test]
 async fn a_commit_made_inside_is_by_the_configured_author() {
     let fixture = grilling().await;
-    fixture.configure("git_author:\n  name: Tobias Cohen\n  email: tobi@tobico.net\n");
+    fixture.configure(THE_AUTHOR);
 
     let reported = probe(
         &fixture.sandbox(vec![]),
@@ -1389,6 +1467,320 @@ async fn a_commit_made_inside_is_by_the_configured_author() {
         "the commit is by whoever config.yaml says, not by the repository's own \
          local identity and not by the host's gitconfig"
     );
+}
+
+/// Two Authors, each with an email and a token of its own — which a Repo is
+/// committed and pushed as is what it recorded.
+const TWO_AUTHORS: &str = concat!(
+    "authors:\n",
+    "  - id: work\n",
+    "    name: Tobias Cohen\n",
+    "    email: tobi@tobico.net\n",
+    "  - id: home\n",
+    "    name: Tobi\n",
+    "    email: tobi@example.com\n",
+);
+
+/// And their tokens, under their uuids.
+const TWO_TOKENS: &str = "author_tokens:\n  work: ghp_theworkone\n  home: ghp_thehomeone\n";
+
+/// What `user.email` is among the counted `GIT_CONFIG_*` pairs `environment`
+/// was handed, where it is there at all.
+fn configured_email(environment: &BTreeMap<String, String>) -> Option<&str> {
+    environment
+        .iter()
+        .find(|(name, value)| name.starts_with("GIT_CONFIG_KEY_") && *value == "user.email")
+        .and_then(|(name, _)| {
+            environment
+                .get(&name.replace("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_"))
+                .map(String::as_str)
+        })
+}
+
+/// A Repo opened under the second of two Authors runs its sessions as that
+/// Author: its `user.email` and its `GH_TOKEN`, and nothing of the first's.
+#[tokio::test]
+async fn a_repo_opened_under_the_second_author_runs_its_sessions_as_it() {
+    let fixture = grilling_opened_as("home").await;
+
+    let given = environment(&fixture.sandbox(vec![]));
+
+    assert_eq!(configured_email(&given), Some("tobi@example.com"));
+    assert_eq!(
+        given.get("GH_TOKEN").map(String::as_str),
+        Some("ghp_thehomeone")
+    );
+    for (name, value) in &given {
+        assert!(
+            !value.contains("tobi@tobico.net") && !value.contains("ghp_theworkone"),
+            "the first Author's is in {name}={value}"
+        );
+    }
+}
+
+/// A Repo pointed at a member's Author whose home holds no token runs its
+/// sessions as that Author's name and email, and with no `GH_TOKEN` at all —
+/// a tokenless Author, as one of this device's own would be — and nothing of
+/// this device's own Author.
+#[tokio::test]
+async fn a_repo_pointed_at_a_tokenless_mirror_runs_its_sessions_as_it() {
+    use verkstead_server::settings::{Author, Mirrored};
+
+    let mut fixture = grilling().await;
+    fixture.configure(THE_AUTHOR);
+    fixture.configure_github_token("author_tokens:\n  work: ghp_theworkone\n");
+
+    fixture.settings.holding_mirrors(vec![Mirrored::of(
+        Author::of(
+            "away".to_owned(),
+            Some("Away".to_owned()),
+            Some("Ada Lovelace".to_owned()),
+            Some("ada@away.example".to_owned()),
+        ),
+        "the-workstation".to_owned(),
+        false,
+    )]);
+
+    fixture.recorded_as("away").await;
+
+    let given = environment(&fixture.sandbox(vec![]));
+
+    assert_eq!(configured_email(&given), Some("ada@away.example"));
+    assert_eq!(given.get("GH_TOKEN"), None, "a tokenless Author's session");
+    for (name, value) in &given {
+        assert!(
+            !value.contains("tobi@tobico.net") && !value.contains("ghp_theworkone"),
+            "this device's own Author's is in {name}={value}"
+        );
+    }
+}
+
+/// A Repo pointed at a member's Author whose token's copy has arrived runs its
+/// sessions as that Author: its name, its email and the copy as `GH_TOKEN` —
+/// and none of the other tokens this device holds, though it holds a copy of
+/// every one of the home's Authors' beside its own.
+#[tokio::test]
+async fn a_repo_pointed_at_a_mirror_runs_its_sessions_from_the_copy() {
+    use verkstead_server::settings::{Author, Mirrored};
+
+    let mut fixture = grilling().await;
+    fixture.configure(THE_AUTHOR);
+    fixture.configure_github_token(
+        "author_tokens:\n  work: ghp_theworkone\n  away: ghp_theawaycopy\n  \
+         other: ghp_theothercopy\n",
+    );
+
+    let mirror = |id: &str, email: &str| {
+        Mirrored::of(
+            Author::of(
+                id.to_owned(),
+                None,
+                Some("Ada Lovelace".to_owned()),
+                Some(email.to_owned()),
+            ),
+            "the-workstation".to_owned(),
+            true,
+        )
+    };
+
+    fixture.settings.holding_mirrors(vec![
+        mirror("away", "ada@away.example"),
+        mirror("other", "ada@other.example"),
+    ]);
+
+    fixture.recorded_as("away").await;
+
+    let given = environment(&fixture.sandbox(vec![]));
+
+    assert_eq!(configured_email(&given), Some("ada@away.example"));
+    assert_eq!(
+        given.get("GH_TOKEN").map(String::as_str),
+        Some("ghp_theawaycopy")
+    );
+    assert!(
+        given.values().any(|value| value == "Ada Lovelace"),
+        "the mirror's git name: {given:#?}"
+    );
+    for (name, value) in &given {
+        assert!(
+            !value.contains("ghp_theworkone")
+                && !value.contains("ghp_theothercopy")
+                && !value.contains("ada@other.example")
+                && !value.contains("tobi@tobico.net"),
+            "another Author's is in {name}={value}"
+        );
+    }
+}
+
+/// A Repo repointed on the Repos pane, once nothing live is in it, runs the
+/// next session on it as the new Author: its `user.email` and its `GH_TOKEN`,
+/// and nothing of the one it was opened as.
+#[tokio::test]
+async fn a_repo_repointed_runs_its_next_session_as_the_new_author() {
+    use axum::body::Body;
+    use axum::http::{Request, header};
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
+
+    let mut fixture = grilling_opened_as("work").await;
+
+    // The grilling is live, which refuses a repoint — so it is put over first,
+    // and the session built after stands in for the next one on the Repo.
+    store::set_state(
+        &fixture.pool,
+        fixture.conversation.id,
+        store::Lifecycle::Done,
+    )
+    .await
+    .unwrap();
+
+    let app =
+        verkstead_server::router_keeping(fixture.pool.clone(), fixture.state.path().to_owned());
+    let response = app
+        .oneshot(
+            Request::post(format!(
+                "/api/ui/repos/{}/author",
+                fixture.conversation.repo.id
+            ))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                serde_json::json!({ "author": "home" }).to_string(),
+            ))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let outcome: verkstead_render::Repointed = serde_json::from_slice(&body).unwrap();
+    assert!(
+        matches!(outcome, verkstead_render::Repointed::Repointed(_)),
+        "the repoint was refused: {outcome:?}"
+    );
+
+    fixture.conversation = store::load_conversation(&fixture.pool, fixture.conversation.id)
+        .await
+        .unwrap()
+        .expect("the Conversation is still there");
+
+    let given = environment(&fixture.sandbox(vec![]));
+
+    assert_eq!(configured_email(&given), Some("tobi@example.com"));
+    assert_eq!(
+        given.get("GH_TOKEN").map(String::as_str),
+        Some("ghp_thehomeone")
+    );
+    for (name, value) in &given {
+        assert!(
+            !value.contains("tobi@tobico.net") && !value.contains("ghp_theworkone"),
+            "the old Author's is in {name}={value}"
+        );
+    }
+}
+
+/// Two Repos under two Authors are two sessions as two people: each one's
+/// environment carries its own Repo's Author's `user.email` and `GH_TOKEN`, and
+/// nothing anywhere in it is the other Author's. A Conversation Terminal is that
+/// same sandbox shelled, so it is given the same.
+#[tokio::test]
+async fn each_repo_is_its_own_authors_name_and_token_and_nothing_of_the_others() {
+    let mut at_work = grilling().await;
+    let mut at_home = grilling().await;
+
+    for fixture in [&at_work, &at_home] {
+        fixture.configure(TWO_AUTHORS);
+        fixture.configure_github_token(TWO_TOKENS);
+    }
+
+    at_work.recorded_as("work").await;
+    at_home.recorded_as("home").await;
+
+    let shell = on_the_host("bash").display().to_string();
+
+    for (fixture, own, others) in [
+        (
+            &at_work,
+            ("tobi@tobico.net", "ghp_theworkone"),
+            ("tobi@example.com", "ghp_thehomeone"),
+        ),
+        (
+            &at_home,
+            ("tobi@example.com", "ghp_thehomeone"),
+            ("tobi@tobico.net", "ghp_theworkone"),
+        ),
+    ] {
+        let session = environment(&fixture.sandbox(vec![]));
+        let terminal = environment(&fixture.sandbox(vec![]).shelled(&shell));
+
+        for (which, given) in [("session", &session), ("terminal", &terminal)] {
+            assert_eq!(
+                configured_email(given),
+                Some(own.0),
+                "the {which}'s user.email"
+            );
+            assert_eq!(
+                given.get("GH_TOKEN").map(String::as_str),
+                Some(own.1),
+                "the {which}'s GH_TOKEN"
+            );
+
+            for (name, value) in given {
+                assert!(
+                    !value.contains(others.0) && !value.contains(others.1),
+                    "the {which} on {own:?}'s Repo carries the other Author's in {name}={value}"
+                );
+            }
+        }
+    }
+}
+
+/// A Profile's login has no Repo, so it has no Author to be: an Author
+/// configured reaches it as neither `user.name` and `user.email` among the
+/// counted pairs nor a `GH_TOKEN`. It commits nothing, and an agent signing in
+/// has no business holding anybody's token.
+#[tokio::test]
+async fn a_logins_sandbox_is_given_no_author_and_no_token() {
+    let fixture = grilling().await;
+    fixture.configure(THE_AUTHOR);
+    fixture.configure_github_token("author_tokens:\n  work: ghp_thetoken\n");
+
+    let login = Sandbox::for_login(
+        &fixture.profile,
+        &Homes::on(
+            Platform::HERE,
+            fixture.home.path().to_owned(),
+            fixture.state.path(),
+        ),
+        &fixture.skills,
+        &fixture.verkstead,
+        &fixture.settings.secrets(),
+    )
+    .expect("a Profile's login has a sandbox to run in");
+
+    let reported = probe(
+        &login,
+        r#"
+        keys=""
+        i=0
+        while [ "$i" -lt "${GIT_CONFIG_COUNT-0}" ]; do
+            eval "keys=\"$keys \$GIT_CONFIG_KEY_$i\""
+            i=$((i + 1))
+        done
+        say keys "$keys"
+        say token "${GH_TOKEN-unset}"
+        "#,
+    );
+
+    assert!(
+        !reported["keys"].contains("user."),
+        "no author among the counted pairs: {:?}",
+        reported["keys"]
+    );
+    assert!(
+        reported["keys"].contains("credential."),
+        "the pairs were read at all: {:?}",
+        reported["keys"]
+    );
+    assert_eq!(reported["token"], "unset");
 }
 
 /// And with nobody configured, git's own refusal stands. No author is invented
@@ -1448,7 +1840,8 @@ async fn no_author_configured_is_git_asking_to_be_told_who_you_are() {
 #[tokio::test]
 async fn an_ssh_github_remote_resolves_to_https_and_the_token_is_what_pushes_it() {
     let fixture = grilling().await;
-    fixture.configure_github_token("github_token: ghp_theconfiguredone\n");
+    fixture.configure("authors:\n  - id: work\n");
+    fixture.configure_github_token("author_tokens:\n  work: ghp_theconfiguredone\n");
 
     let reported = probe(
         &fixture.sandbox(vec![]),
@@ -2405,7 +2798,8 @@ fn made(sandbox: &Sandbox) -> Closing {
 #[tokio::test]
 async fn the_configured_token_is_in_the_environment_and_the_hosts_gh_login_is_not_inside() {
     let fixture = grilling().await;
-    fixture.configure_github_token("github_token: ghp_theconfiguredone\n");
+    fixture.configure("authors:\n  - id: work\n");
+    fixture.configure_github_token("author_tokens:\n  work: ghp_theconfiguredone\n");
     let sandbox = fixture.sandbox(vec![]);
 
     let reported = probe(
@@ -2441,8 +2835,9 @@ async fn the_configured_token_is_in_the_environment_and_the_hosts_gh_login_is_no
 /// for itself that it is not logged in.
 #[tokio::test]
 async fn no_token_configured_is_a_session_that_starts_with_no_gh_token() {
-    for configured in [None, Some(""), Some("github_token: [oh\n")] {
+    for configured in [None, Some(""), Some("author_tokens: [oh\n")] {
         let fixture = grilling().await;
+        fixture.configure("authors:\n  - id: work\n");
 
         if let Some(yaml) = configured {
             fixture.configure_github_token(yaml);
@@ -5238,7 +5633,7 @@ async fn the_extra_binds_sandbox_configuration_asks_for_are_there_and_writable()
 #[tokio::test]
 async fn a_read_only_companion_is_there_to_read_and_a_commit_from_it_is_refused() {
     let fixture = grilling_alongside(&[("askance", store::CompanionMode::ReadOnly)]).await;
-    fixture.configure("git_author:\n  name: Tobias Cohen\n  email: tobi@tobico.net\n");
+    fixture.configure(THE_AUTHOR);
 
     let companion = fixture.companion_worktree("askance").to_owned();
 
@@ -5313,7 +5708,7 @@ async fn a_read_only_companion_is_there_to_read_and_a_commit_from_it_is_refused(
 #[tokio::test]
 async fn a_read_write_companion_takes_a_commit_on_its_own_branch() {
     let fixture = grilling_alongside(&[("askance", store::CompanionMode::ReadWrite)]).await;
-    fixture.configure("git_author:\n  name: Tobias Cohen\n  email: tobi@tobico.net\n");
+    fixture.configure(THE_AUTHOR);
 
     let companion = fixture.companion_worktree("askance").to_owned();
 
@@ -6022,8 +6417,8 @@ async fn the_compile_server_holds_the_worktrees_and_none_of_the_data_directory()
 
     // The four things it must not reach, really on disk so that their absence
     // inside is the bind rather than the fixture.
-    fixture.configure("git_author:\n  name: Tobias Cohen\n");
-    fixture.configure_github_token("github_token: ghp_thetoken\n");
+    fixture.configure("authors:\n  - id: work\n    name: Tobias Cohen\n");
+    fixture.configure_github_token("author_tokens:\n  work: ghp_thetoken\n");
     std::fs::write(fixture.state.path().join("verkstead.db"), "the database\n").unwrap();
     fixture.attach("wireframe.png", b"PNG");
 

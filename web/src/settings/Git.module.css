@@ -249,7 +249,8 @@
    the fill, the weight and the padding it takes are given back here. The remove
    takes the colour of what it does, as the Clear above it does. */
 .form .remove,
-.form .add {
+.form .add,
+.form .addAuthor {
   padding: 0.35rem 0.75rem;
   font-weight: inherit;
   font-size: 0.9rem;
@@ -260,6 +261,14 @@
 
 .form .remove {
   color: var(--removed);
+}
+
+/* And the way to a second Author, under the first one's fields: off the email
+   field above it by the gap a field keeps, so it reads as an act on the
+   section rather than a part of the field. */
+.form .addAuthor {
+  display: block;
+  margin-top: 0.4rem;
 }
 
 /* The field being typed in, which is no pointer's doing: the border says which
@@ -299,4 +308,61 @@
     background: none;
     border-color: var(--removed);
   }
+}
+
+/* The card Remove author is answered with, the shape the Repos pane's Remove
+   takes. */
+.confirming .confirmingTitle {
+  margin-top: 0;
+  font-weight: 600;
+}
+
+.confirming .confirmingWhy {
+  margin: 0.75rem 0 0;
+  color: var(--ink-soft);
+}
+
+.confirming .confirmingOut {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: 1rem;
+}
+
+/* The shape both of them take, which is this row's own. Said for both and over
+   `.secondary`, which is the paint rather than the shape. */
+.confirming .confirmingOut button {
+  flex: 1 1 9rem;
+  padding: 0.7rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  border-radius: 0.5rem;
+  cursor: pointer;
+}
+
+/* And the press that does the thing, filled. The way back beside it is a
+   secondary press like every other in the app — `.secondary` in
+   `styles/base.css` paints it — and it is stood out of the way with `:where`,
+   which weighs nothing: a bare `:not` would carry its class into this
+   selector's weight, and a rule written to sit over this press would find itself
+   under it instead. */
+.confirming .confirmingOut button:not(:where(.secondary)) {
+  color: var(--paper);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+}
+
+@media (hover: hover) {
+  .confirming .confirmingOut button:not(:where(.secondary)):hover {
+    background: var(--accent-deep);
+    border-color: var(--accent-deep);
+  }
+}
+
+/* Where a member's Author lives, over its fields: the Profiles pane's line
+   over a mirrored account, at its size and room. */
+.athome {
+  margin: 0 0 0.85rem;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
 }

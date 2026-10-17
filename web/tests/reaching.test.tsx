@@ -289,6 +289,8 @@ describe("a press on a conversation that lives on another device", () => {
       name: "widgets",
       path: "/srv/repos/widgets",
       default_branch: "main",
+      author: null,
+      author_unpicked: false,
     };
     const fetching = theMember(
       whenever(at("/repos"), json({ Added: opened }), "POST"),

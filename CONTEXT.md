@@ -29,9 +29,8 @@ control. **Open repo** registers a repository that already exists, over a path
 field that browses, and a path already registered is the repository somebody
 named rather than a refusal.
 **Create repo** makes one first: a directory under a parent that is browsed for,
-`git init` onto `main`, a `README.md` naming it and one commit by the configured
-git author — an empty repository has no commit for a Conversation to take a base
-from, which is why there is a README at all — and, where a GitHub token is saved
+`git init` onto `main`, a `README.md` naming it and one commit by its **Author** — an empty repository has no commit for a Conversation to take a base
+from, which is why there is a README at all — and, where that Author has a token
 and the tick is left on, a private repository of the same name with `origin` set
 and `main` pushed. Both land on the one registry, and either way the Repo becomes
 the draft's the moment it is there: the compose page's own state, or a move on a
@@ -74,6 +73,78 @@ to do without one; **a device that is not answering is refused by name** instead
 those being two different things to say — one sends the human to **Open repo**
 and the other to the machine.
 _Avoid_: project, codebase, checkout
+
+**Author**:
+Who a Repo's work is committed and pushed as: a git name, an email and, where
+GitHub is in use, a token — the human's own name on the work, where an **Agent
+Profile** is the account the agent runs under, and the two are picked
+independently. Keyed by a uuid, with an optional display name that falls back to
+the git name: the uuid is what a Repo records and what every device of a cluster
+agrees on, so the display name is free to change. Kept in `config.yaml` as
+`authors:`, the tokens in `secrets.yaml` under the uuid — the split the GitHub
+token and the MCP header values already follow — and read at the moment a
+session is launched, so a change reaches the next session without a restart
+([ADR-0025](docs/adr/0025-a-repo-has-an-author.md)).
+**Every Repo has one**, picked at **Open repo** and **Create repo** where more
+than one exists and recorded silently where there is one, and shown and changed
+on the Repos pane. With one Author nothing on screen says so: the pickers, and
+the display name beside a Repo on the Brief and on the Repos pane, are drawn
+only once there are two. A session is handed its Repo's Author and nothing of
+any other — the git configuration and the `GH_TOKEN` in its environment are
+that Author's — which is what keeps the wrong name off a commit and the wrong
+token out of an agent's reach. **The Profile is the channel it does not
+close**: every harness login names its account, and a Profile whose memory is
+shared carries the transcripts of every Repo it worked on, so keeping two
+Authors apart takes a Profile per Author, its memory not shared across them —
+said rather than refused. And everything Verkstead itself does on a Repo —
+every `gh` call, every fetch and push of its own, the GitHub repository
+**Create repo** makes — authenticates as that Author's token, through the
+credential helper publishing already hands one to; an Author with no token
+leaves git to the host's own credentials. A **Share** is published as its Repo's
+Author too, the gist and the comment linking it alike, and an Author with no
+token refuses the publish rather than lending it another's.
+**Refused rather than mixed.** Repointing a Repo is refused while a Conversation
+on it, or one holding it as a **Companion Repo**, is neither Done nor Closed —
+the rule unregistering follows — naming each one, a Draft with no Worktree
+aside, having committed nothing as anybody; removing an
+Author is refused while a registered Repo of this device points at it; a Repo
+whose Author is gone from the one list refuses a start by name and halts with a
+**Notice** where nobody pressed; and a **Companion Repo** of another Author is
+refused on the composer, read-only or read-write alike, a sandbox having one
+environment.
+**One list across a cluster**, the way the Profiles are one. An Author is at home
+on the device whose files hold it; every other device keeps a mirror row in
+its database, keyed by the uuid — the display name, the git name, the email,
+whether a token is held, and the home device — read off each member's own list
+over the **Relay** as the Profiles are, and never a mirror of a mirror, and a
+copy of the token in its own `secrets.yaml` under the uuid, so a home that is
+quiet does not stop a Repo here — fetched on a member's own call over the Peer
+Listener, which hands over only that device's own Authors' tokens, written as
+the mirrors refresh, and taken away when the mirror goes, when its device is
+unlinked or when its home stops holding one. A home not answering leaves the
+copy as it stands, and a session carries its own Repo's Author's copy and none
+of the others this device holds.
+A Repo is pointed at a mirror the way it is at one of this device's own, and
+everything that reads a Repo's Author reads the mirror's name and email and the
+copy; a mirror whose home holds no token is a tokenless Author here too.
+A new Author is at home where it was made; a mirror is edited from wherever it
+is drawn and the press relayed home, token verification included; removal checks
+the home device's Repos alone, a member's Repo left pointing at a mirror that
+has gone refusing its start under the rule above. A mirror whose copy has not
+arrived refuses a **Start** by name, naming the home device, and halts a
+pipeline step with a Notice, and nothing Verkstead does on its Repo falls back
+to the host's own login meanwhile; a **Transfer** whose far Repo points at another
+Author is refused by the **Preflight**, naming both; and **Create repo** on a
+member offers the one list.
+**On the settings page it is the Git section as it was**, with a dropdown at
+its head picking which Author the fields are about and **Add author** at its
+foot, the way the Repo dropdown carries its two presses. A member's Authors are
+rows of it after this device's own, marked with the machine each is at home on. The onboarding wizard
+asks for one. The first start moves a single `git_author` and `github_token`
+into the list as that one Author, and records every Repo as its, unregistered
+ones included, so no Repo is ever without one.
+_Avoid_: identity, persona, account (that is a Profile's), git user, committer,
+credentials (the token is one part of an Author)
 
 **Conversation**:
 The core entity: a Repo, a base commit, a Brief, a **Process**, one branch and
@@ -871,7 +942,7 @@ harness runs it — what a human would otherwise keep in their own global
 account's own files, so the account's global instructions are not in one, and
 this is what stands where they would have been.
 **One text for the whole installation** rather than one per **Agent Profile**,
-kept in `config.yaml` beside the git author and the **Sandbox Configuration**'s
+kept in `config.yaml` beside the Authors and the **Sandbox Configuration**'s
 binds — a thing Verkstead is *told* rather than one it finds. It saves as a
 value the way those do: what the page sends is what the file holds afterwards,
 so clearing the box takes the key away rather than leaving an empty one. Nothing
@@ -915,7 +986,7 @@ the field at fault. **A server is never renamed**: everything that refers to one
 refers to it by that name, so the settings page offers a name on a new
 declaration alone and changing one is deleting it and declaring another. The URL
 and the headers are edited.
-**Kept in `config.yaml`** beside the git author and the **Instructions** — a
+**Kept in `config.yaml`** beside the Authors and the **Instructions** — a
 thing Verkstead is *told* rather than one it finds — and read at the moment a
 session is launched, so a corrected URL fixes every Conversation that attached
 that server. An absent key, an empty one and one nothing can parse are the same
@@ -2294,7 +2365,7 @@ wizard at `/setup` is the only page there is: every other URL redirects there.
 What it is about is the **objective** — a sandbox, `git` and at least one of the
 four harnesses present; at least one **Agent Profile**, a **mirror** of a
 member's counting as one, its account being fetched from the device it is at
-home on before every launch; a git author. Present
+home on before every launch; an **Author**. Present
 means a session would find it, so every probe resolves on the `PATH` inside the
 **Sandbox** rather than the server's own: a harness on the server's `PATH` and
 nowhere a session looks is a row that ticks and a session that cannot start. The
@@ -2347,7 +2418,7 @@ Verkstead started again from a shell that names it; the second offers
 the agent accounts already in the server's home as Profiles and holds its
 Next until there is one, because a step that walked past a Profile would
 clear the mode onto the empty state a skip was rejected for; the third asks for
-the git author over fields prefilled with whatever the machine could say for
+the first **Author** over fields prefilled with whatever the machine could say for
 itself, each labelled with where it was found. Which step is open is a fact
 about the browser in front of you and is kept on the device, never on the wire.
 The last Next clears the mode and lands on the compose page.

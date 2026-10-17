@@ -1689,6 +1689,22 @@ async fn additions(
             return Ok(Additions::Refused(ConversationSteered::NoSuchCompanionRepo));
         };
 
+        // And of the Conversation's own Repo's Author, for the add's reason:
+        // one sandbox works as one author (ADR-0025).
+        if let Some(other) = crate::conversations::other_author(
+            &state.settings.config(),
+            &conversation.repo,
+            [&repo],
+        ) {
+            return Ok(refused(
+                &other.companion,
+                SteerCompanionRefusal::OtherAuthor {
+                    companion_author: other.companion_author,
+                    author: other.author,
+                },
+            ));
+        }
+
         added.push(store::Companion {
             repo,
             mode: mode(addition.mode),
@@ -2037,6 +2053,7 @@ async fn plan(
 
     let planned = tokio::task::spawn_blocking({
         let branch = branch.clone();
+        let gh = state.github.clone();
 
         move || {
             // The name before anything else, the directory being named for it.
@@ -2090,7 +2107,7 @@ async fn plan(
                     .collect();
 
                 checkouts.push(alongside(
-                    &data_dir, id, &branch, joining, companion, &claimed,
+                    &data_dir, &gh, id, &branch, joining, companion, &claimed,
                 )?);
             }
 
@@ -2149,6 +2166,7 @@ async fn plan(
 /// companion refuse without having made another.
 fn alongside(
     data: &Path,
+    gh: &crate::github::Gh,
     id: i64,
     branch: &str,
     joining: Joining,
@@ -2194,7 +2212,10 @@ fn alongside(
         Joining::Added | Joining::Recorded => None,
     };
 
-    if let crate::worktrees::Fetched::Failed(said) = crate::worktrees::fetch(&repo) {
+    // As the companion's own Author, whose token reaches it.
+    let credential = gh.as_author(companion.repo.author.as_deref()).credential();
+
+    if let crate::worktrees::Fetched::Failed(said) = crate::worktrees::fetch(&repo, &credential) {
         tracing::error!(
             said,
             repo = %repo.display(),

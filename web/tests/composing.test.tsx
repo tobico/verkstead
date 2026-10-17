@@ -28,6 +28,7 @@ import type {
   ConversationEntry,
   ConversationView,
   Created,
+  AuthorEntry,
   DevicesView,
   DirectoryListing,
   Process,
@@ -92,6 +93,7 @@ import {
   openAgent,
   theWorkbench,
 } from "./bench";
+import { MIRRORED, oneList } from "./authors";
 import { carrying, drag, dropOn } from "./dragging";
 // The path field's own rows are `browsed`, the listbox's being `rows` below:
 // one page draws both, and a browse's levels are not what a picker offers.
@@ -527,7 +529,33 @@ const TOKENED = told as SettingsView;
 
 /// And the same with none, which is what a Verkstead nobody has told anything
 /// looks like — and what every test that is not about the tick reads.
-const UNTOKENED: SettingsView = { ...TOKENED, github_token: null };
+const UNTOKENED: SettingsView = {
+  ...TOKENED,
+  github_token: null,
+  authors: [{ ...TOKENED.authors[0]!, github_token: null }],
+};
+
+/// The second of two Authors, with no display name, so its row reads as its
+/// git name.
+const SECOND: SettingsView["authors"][number] = {
+  id: "9b1e7c2d-4a5f-4e8b-8c3d-2f1a0e9d8c7b",
+  display_name: "",
+  name: "A. L.",
+  email: "al@home.example",
+  github_token: null,
+};
+
+/// The settings with two Authors configured, which is what draws the pick on
+/// **Open repo** and **Create repo**.
+const TWO_AUTHORS: SettingsView = {
+  ...UNTOKENED,
+  authors: [TOKENED.authors[0]!, SECOND],
+};
+
+/// The Author pick on either card, or `null` where it is not drawn.
+function authorPick(): HTMLSelectElement | null {
+  return screen.queryByLabelText("Author") as HTMLSelectElement | null;
+}
 
 describe("the compose page", () => {
   // Per device, so every test starts on a device holding nothing — and with
@@ -3664,6 +3692,8 @@ describe("registering a repo from the Repo dropdown", () => {
     name: "widgets",
     path: "/srv/repos/widgets",
     default_branch: "main",
+    author: null,
+    author_unpicked: false,
   };
 
   /// The workbench with the registration answered however the test says.
@@ -3757,6 +3787,130 @@ describe("registering a repo from the Repo dropdown", () => {
     expect(field.value).toBe("/srv/repos/notes");
     expect(stored().repo).toBeNull();
   });
+
+  /// With one Author there is nobody to pick between, so the card asks nothing
+  /// about it and the press names nobody — the server records the one there is.
+  it("draws no author pick with one author", async () => {
+    const fetching = theWorkbench(
+      whenever("/api/ui/repos", json({ Added: OPENED }), "POST"),
+      whenever("/api/ui/settings", json(TOKENED)),
+      whenever("/api/ui/authors", json(oneList(TOKENED))),
+    );
+    const { container } = mount("/compose");
+
+    await composing(container);
+    const field = await openRepoModal();
+    await waitFor(() =>
+      expect(askedFor(fetching, "/api/ui/authors")).toBeGreaterThan(0),
+    );
+
+    expect(authorPick()).toBeNull();
+    register(field, OPENED.path);
+    await waitFor(() =>
+      expect(sent(fetching, "/api/ui/repos")).toEqual({ path: OPENED.path }),
+    );
+  });
+
+  /// With two, Open is held until one is picked, and the pick goes out with
+  /// the path.
+  it("opens a repo under the author picked, and not before one is", async () => {
+    const fetching = theWorkbench(
+      whenever("/api/ui/repos", json({ Added: OPENED }), "POST"),
+      whenever("/api/ui/settings", json(TWO_AUTHORS)),
+      whenever("/api/ui/authors", json(oneList(TWO_AUTHORS))),
+    );
+    const { container } = mount("/compose");
+
+    await composing(container);
+    const field = await openRepoModal();
+    await waitFor(() => expect(authorPick()).not.toBeNull());
+    const pick = authorPick()!;
+
+    // Each row is the display name, falling back to the git name.
+    expect([...pick.options].map((option) => option.text)).toEqual([
+      "Select",
+      "Ada Lovelace",
+      "A. L.",
+    ]);
+
+    fireEvent.input(field, { target: { value: OPENED.path } });
+    const open = screen.getByRole("button", { name: "Open" });
+    expect((open as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.change(pick, { target: { value: SECOND.id } });
+    expect((open as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(open);
+
+    await waitFor(() =>
+      expect(sent(fetching, "/api/ui/repos")).toEqual({
+        path: OPENED.path,
+        author: SECOND.id,
+      }),
+    );
+    await waitFor(() => expect(stored().repo).toBe(OPENED.id));
+  });
+
+  /// A member's Author is one the repo can be opened as too, named with the
+  /// machine it is at home on, and the pick of it goes out as its uuid.
+  it("offers a member's author with its machine, and opens a repo under it", async () => {
+    const fetching = theWorkbench(
+      whenever("/api/ui/repos", json({ Added: OPENED }), "POST"),
+      whenever("/api/ui/settings", json(TOKENED)),
+      whenever("/api/ui/authors", json(oneList(TOKENED, MIRRORED))),
+    );
+    const { container } = mount("/compose");
+
+    await composing(container);
+    const field = await openRepoModal();
+    await waitFor(() => expect(authorPick()).not.toBeNull());
+    const pick = authorPick()!;
+
+    expect([...pick.options].map((option) => option.text)).toEqual([
+      "Select",
+      "Ada Lovelace",
+      "Client · the-workstation",
+    ]);
+
+    fireEvent.change(pick, { target: { value: MIRRORED.id } });
+    register(field, OPENED.path);
+
+    await waitFor(() =>
+      expect(sent(fetching, "/api/ui/repos")).toEqual({
+        path: OPENED.path,
+        author: MIRRORED.id,
+      }),
+    );
+  });
+
+  /// And a lone member's Author, with none of this device's own, is named on
+  /// the press without a pick being asked for: the server's silent pick is
+  /// this device's own one, of which there is none.
+  it("opens a repo under a lone member's author without asking", async () => {
+    const fetching = theWorkbench(
+      whenever("/api/ui/repos", json({ Added: OPENED }), "POST"),
+      whenever("/api/ui/settings", json({ ...TOKENED, authors: [] })),
+      whenever("/api/ui/authors", json([MIRRORED])),
+    );
+    const { container } = mount("/compose");
+
+    await composing(container);
+    const field = await openRepoModal();
+    await waitFor(() =>
+      expect(askedFor(fetching, "/api/ui/authors")).toBeGreaterThan(0),
+    );
+    // And answered, which nothing on the card shows.
+    await new Promise((settled) => setTimeout(settled, 50));
+
+    expect(authorPick()).toBeNull();
+    register(field, OPENED.path);
+
+    await waitFor(() =>
+      expect(sent(fetching, "/api/ui/repos")).toEqual({
+        path: OPENED.path,
+        author: MIRRORED.id,
+      }),
+    );
+  });
 });
 
 /// The other row at that foot: **Create repo**, which *makes* a repository
@@ -3787,19 +3941,21 @@ describe("making a repo from the Repo dropdown", () => {
   const LISTING = listing as DirectoryListing;
 
   /// The workbench with the create answered however the test says, that
-  /// directory served both by name and as the server's home, and the settings
-  /// saying whether there is a token.
+  /// directory served both by name and as the server's home, and the one list
+  /// of Authors saying whether the one there is holds a token — none, where the
+  /// test names no list.
   ///
-  /// The settings as an answer rather than as a view, because one of the states
+  /// The list as an answer rather than as a view, because one of the states
   /// this card has is the read not having landed — see the test that holds it
   /// with [`hangs`].
   const creating = (
     answer: () => Promise<Response>,
-    settings: () => Promise<Response> = json(UNTOKENED),
+    authors: () => Promise<Response> = json(oneList(UNTOKENED)),
   ) =>
     theWorkbench(
       whenever("/api/ui/repos/new", answer, "POST"),
-      whenever("/api/ui/settings", settings),
+      whenever("/api/ui/settings", json(UNTOKENED)),
+      whenever("/api/ui/authors", authors),
       // What the repo it made was last grilled with, which the page asks for the
       // moment the draft lands on it — the fixture's repos are served this
       // already, and the one this create makes is not one of them.
@@ -3824,8 +3980,12 @@ describe("making a repo from the Repo dropdown", () => {
 
     await waitFor(() => expect(screen.getByLabelText(WHERE)).toBeTruthy());
 
+    // With two Authors neither stands until one is picked, and the pick being
+    // drawn is what says the settings have answered.
     if (settled) {
-      await waitFor(() => expect(tick() ?? noRemote()).toBeTruthy());
+      await waitFor(() =>
+        expect(tick() ?? noRemote() ?? authorPick()).toBeTruthy(),
+      );
     }
   }
 
@@ -3955,11 +4115,62 @@ describe("making a repo from the Repo dropdown", () => {
     expect(stored().repo).toBeNull();
   });
 
+  /// With one Author the card asks nothing about who the repo is made as.
+  it("draws no author pick with one author", async () => {
+    const fetching = creating(json({ Made: MADE }));
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await createRepoModal();
+
+    expect(authorPick()).toBeNull();
+    make("/home/ada/src", "widgets");
+    await waitFor(() =>
+      expect(sent(fetching, "/api/ui/repos/new")).not.toHaveProperty("author"),
+    );
+  });
+
+  /// With two, Create is held until one is picked, and the pick goes out with
+  /// the rest of the create.
+  it("makes a repo under the author picked, and not before one is", async () => {
+    const fetching = creating(json({ Made: MADE }), json(oneList(TWO_AUTHORS)));
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await createRepoModal();
+    await waitFor(() => expect(authorPick()).not.toBeNull());
+
+    fireEvent.input(screen.getByLabelText(WHERE), {
+      target: { value: "/home/ada/src" },
+    });
+    fireEvent.input(screen.getByLabelText(CALLED), {
+      target: { value: "widgets" },
+    });
+    const create = screen.getByRole("button", {
+      name: "Create",
+    }) as HTMLButtonElement;
+    expect(create.disabled).toBe(true);
+
+    fireEvent.change(authorPick()!, { target: { value: SECOND.id } });
+    expect(create.disabled).toBe(false);
+    fireEvent.click(create);
+
+    await waitFor(() =>
+      expect(sent(fetching, "/api/ui/repos/new")).toEqual({
+        parent: "/home/ada/src",
+        name: "widgets",
+        github: false,
+        author: SECOND.id,
+      }),
+    );
+    await waitFor(() => expect(stored().repo).toBe(MADE.id));
+  });
+
   /// Where a token is saved the tick is drawn and starts on: somebody who has
   /// saved one has said what they mean to do with it, and the pipeline this
   /// repository is about to go through ends in a push.
   it("asks for it on GitHub too where a token is saved", async () => {
-    const fetching = creating(json({ Made: MADE }), json(TOKENED));
+    const fetching = creating(json({ Made: MADE }), json(oneList(TOKENED)));
     const { container } = mount("/compose");
 
     await composing(container);
@@ -3981,7 +4192,7 @@ describe("making a repo from the Repo dropdown", () => {
   /// And taking it off is a repository made here only, which is a thing somebody
   /// may well mean: the tick is on by default rather than compulsory.
   it("leaves GitHub alone where the tick is taken off", async () => {
-    const fetching = creating(json({ Made: MADE }), json(TOKENED));
+    const fetching = creating(json({ Made: MADE }), json(oneList(TOKENED)));
     const { container } = mount("/compose");
 
     await composing(container);
@@ -4014,13 +4225,73 @@ describe("making a repo from the Repo dropdown", () => {
     expect(tick()).toBeNull();
   });
 
+  /// With two Authors the tick follows the one picked: the repository is made
+  /// on GitHub with that Author's token or not at all, so an Author with none
+  /// draws the sentence, one with a token draws the tick, on — and nothing is
+  /// said about GitHub before a pick.
+  it("draws the tick for the author picked, where it has a token", async () => {
+    const fetching = creating(json({ Made: MADE }), json(oneList(TWO_AUTHORS)));
+    const { container } = mount("/compose");
+    const first = TOKENED.authors[0]!.id;
+
+    await composing(container);
+    await createRepoModal();
+    await waitFor(() => expect(authorPick()).not.toBeNull());
+
+    expect(tick()).toBeNull();
+    expect(noRemote()).toBeNull();
+
+    fireEvent.change(authorPick()!, { target: { value: SECOND.id } });
+    await waitFor(() =>
+      screen.getByText(/^A\. L\. has no GitHub token saved.*needs a remote/),
+    );
+    expect(tick()).toBeNull();
+
+    // Taken off under one Author, and on again for the next.
+    fireEvent.change(authorPick()!, { target: { value: first } });
+    await waitFor(() => expect(tick()?.checked).toBe(true));
+    expect(noRemote()).toBeNull();
+    fireEvent.click(tick()!);
+    expect(tick()!.checked).toBe(false);
+
+    fireEvent.change(authorPick()!, { target: { value: SECOND.id } });
+    await waitFor(() => expect(noRemote()).toBeTruthy());
+    expect(tick()).toBeNull();
+
+    fireEvent.change(authorPick()!, { target: { value: first } });
+    await waitFor(() => expect(tick()?.checked).toBe(true));
+
+    make("/home/ada/src", "widgets");
+    await waitFor(() =>
+      expect(sent(fetching, "/api/ui/repos/new")).toEqual({
+        parent: "/home/ada/src",
+        name: "widgets",
+        github: true,
+        author: first,
+      }),
+    );
+  });
+
+  /// And with one Author the note reads as it always has, naming nobody.
+  it("names no author in the note with one author", async () => {
+    creating(json({ Made: MADE }));
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await createRepoModal();
+
+    await waitFor(() =>
+      screen.getByText(/^No GitHub token is saved, so this repo is made here/),
+    );
+  });
+
   /// And says neither of those things until it has been told which it is.
   ///
   /// Nothing else on this page reads the settings, so the read this card starts
   /// is always in flight when it opens. A card that took *not answered yet* for
   /// *no token* would put the sentence above in front of everybody who has one,
   /// every time, and replace it with the tick a moment later.
-  it("says nothing about GitHub until the settings have answered", async () => {
+  it("says nothing about GitHub until the one list has answered", async () => {
     const fetching = creating(json({ Made: MADE }), hangs());
     const { container } = mount("/compose");
 
@@ -4065,7 +4336,7 @@ describe("making a repo from the Repo dropdown", () => {
           why: "The gh command said: Name already exists on this account.",
         },
       } satisfies Created),
-      json(TOKENED),
+      json(oneList(TOKENED)),
     );
     const { container } = mount("/compose");
 
@@ -4156,6 +4427,8 @@ describe("the two repo rows on the picked device", () => {
     name: "widgets-over-there",
     path: "/mnt/code/widgets",
     default_branch: "main",
+    author: null,
+    author_unpicked: false,
   };
 
   /// And one a create made there, in the same place and for the same reason.
@@ -4386,6 +4659,111 @@ describe("the two repo rows on the picked device", () => {
     await waitFor(() => screen.getByText(REPO_REFUSAL.NotARepository));
     expect(held(PATH)).toBe("/mnt/code/notes");
     expect(stored().repo).toBeNull();
+  });
+
+  /// The member's one list: an Author of its own with a token, and its mirror of
+  /// this device's own with none — marked with this device, it being at home
+  /// here.
+  const THEIR_OWN: AuthorEntry = {
+    id: "6e8f0a2c-3b4d-4e5f-9a1b-2c3d4e5f6a7b",
+    display_name: "Laptop",
+    name: "Ada Lovelace",
+    email: "ada@laptop.example",
+    holds_token: true,
+    device: null,
+  };
+
+  const HOME_HERE: AuthorEntry = {
+    ...oneList(UNTOKENED)[0]!,
+    device: {
+      id: LINKED.this.device,
+      name: LINKED.this.name,
+      os: LINKED.this.os,
+      reachable: true,
+    },
+  };
+
+  /// And the member's list served under it, with this device's own a single
+  /// Author with a token, so that a card reading the wrong end draws no pick
+  /// and a tick.
+  const theirAuthors = () => [
+    whenever(at("/authors"), json([THEIR_OWN, HOME_HERE])),
+    whenever("/api/ui/authors", json(oneList(TOKENED))),
+  ];
+
+  /// **Create repo** on the member offers the member's one list — its own
+  /// Author and its mirror of this device's — and the GitHub tick follows the
+  /// token the one picked holds over there.
+  it("offers the member's authors on Create repo, and records the pick there", async () => {
+    const fetching = theirs(
+      ...theirAuthors(),
+      whenever(at("/repos/new"), json({ Made: THEIR_MADE }), "POST"),
+      whenever(at(`/repos/${THEIR_MADE.id}/pairings`), json(NO_PAIRINGS)),
+    );
+    const { container } = mount("/compose");
+
+    await draftingOnTheMember(container);
+    await waitFor(() => expect(offered("Repo")).toHaveLength(THEIRS.length));
+    press("Repo", "Create repo");
+    await waitFor(() => expect(authorPick()).not.toBeNull());
+
+    expect([...authorPick()!.options].map((option) => option.text)).toEqual([
+      "Select",
+      "Laptop",
+      `Ada Lovelace · ${LINKED.this.name}`,
+    ]);
+
+    // This device's own holds no token over there, so the note stands.
+    fireEvent.change(authorPick()!, { target: { value: HOME_HERE.id } });
+    await waitFor(() => expect(noRemote()).toBeTruthy());
+    expect(screen.queryByLabelText(/on GitHub too/)).toBeNull();
+
+    // And the member's own does.
+    fireEvent.change(authorPick()!, { target: { value: THEIR_OWN.id } });
+    await waitFor(() =>
+      expect(screen.queryByLabelText(/on GitHub too/)).not.toBeNull(),
+    );
+
+    make("/mnt/code", "widgets");
+
+    await waitFor(() => expect(stored().repo).toBe(THEIR_MADE.id));
+    expect(sent(fetching, at("/repos/new"))).toEqual({
+      parent: "/mnt/code",
+      name: "widgets",
+      github: true,
+      author: THEIR_OWN.id,
+    });
+  });
+
+  /// **Open repo** on the member the same way, and a pick of an Author at home
+  /// on this device goes out as the uuid the member mirrors it under.
+  it("offers the member's authors on Open repo, this device's among them", async () => {
+    const fetching = theirs(
+      ...theirAuthors(),
+      whenever(at("/repos"), json({ Added: THEIR_OPENED }), "POST"),
+      whenever(at(`/repos/${THEIR_OPENED.id}/pairings`), json(NO_PAIRINGS)),
+      whenever(at(`/repos/${THEIR_OPENED.id}/branches`), json(BRANCHES)),
+    );
+    const { container } = mount("/compose");
+
+    await draftingOnTheMember(container);
+    await openCard(THEIRS);
+    await waitFor(() => expect(authorPick()).not.toBeNull());
+
+    expect([...authorPick()!.options].map((option) => option.text)).toEqual([
+      "Select",
+      "Laptop",
+      `Ada Lovelace · ${LINKED.this.name}`,
+    ]);
+
+    fireEvent.change(authorPick()!, { target: { value: HOME_HERE.id } });
+    register(THEIR_OPENED.path);
+
+    await waitFor(() => expect(stored().repo).toBe(THEIR_OPENED.id));
+    expect(sent(fetching, at("/repos"))).toEqual({
+      path: THEIR_OPENED.path,
+      author: HOME_HERE.id,
+    });
   });
 
   /// And with this device picked — which is what an untouched browser is on,

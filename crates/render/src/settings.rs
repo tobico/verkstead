@@ -132,9 +132,18 @@ use ts_rs::TS;
 pub struct SettingsView {
     pub git_author: Author,
 
-    /// What can be said about the configured token, or `null` where there is
+    /// What can be said about that Author's token, or `null` where it holds
     /// none — which is what a Verkstead nobody has told anything looks like.
     pub github_token: Option<TokenSaved>,
+
+    /// And every Author, in the order `config.yaml` lists them — empty on a
+    /// Verkstead nobody has told anything. The first of them is `git_author`
+    /// above, which is the one a form about something else sends back and the
+    /// wizard's git step asks for.
+    ///
+    /// What the Git section's dropdown offers, once there are two to choose
+    /// between, and what its fields are drawn from.
+    pub authors: Vec<AuthorSaved>,
 
     /// And the languages a session is given build support for, one per
     /// descriptor the server loaded — the ones Verkstead ships with whatever
@@ -692,19 +701,146 @@ pub struct AtOnceEdit {
     pub conversations: String,
 }
 
-/// Who a session's commits are by.
+/// Who a session's commits are by: the Author the Git section is about, which
+/// is whichever its dropdown picked — the first in `config.yaml`'s list, on a
+/// read and wherever there is only one.
 ///
-/// Two strings rather than two optionals, empty where nothing is configured:
-/// the form holds them that way, and half an author is a real state — a name
-/// with no address is what git complains about by name.
+/// The names as strings rather than optionals, empty where nothing is
+/// configured: the form holds them that way, and half an author is a real
+/// state — a name with no address is what git complains about by name.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct Author {
+    /// The uuid it is kept under, or `null` where there is no Author yet —
+    /// which is a fresh install. A save sending `null` is about the first
+    /// Author, and makes it under a fresh uuid where there is none and the
+    /// fields hold anything. A save sending a uuid that is not in the list is
+    /// a new Author, written on the end of it: that is **Add author**, which
+    /// mints the uuid in the page.
+    pub id: Option<String>,
+
+    /// What it is called in rows and pickers, empty where nobody named it and
+    /// the git name stands in. Sent back as it came on a save from a section
+    /// that does not draw it.
+    pub display_name: String,
+
     pub name: String,
     pub email: String,
 }
 
-/// Everything about the configured token that is not the token.
+/// One Author as the settings files hold it, with what can be said about its
+/// token beside it.
+///
+/// Its uuid is always there, unlike [`Author`]'s: this is a read of an Author
+/// that exists, where that is also what a fresh install's save sends.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct AuthorSaved {
+    pub id: String,
+
+    /// What it is called in rows and pickers, empty where nobody named it and
+    /// the git name stands in.
+    pub display_name: String,
+
+    pub name: String,
+    pub email: String,
+
+    /// What can be said about its token, or `null` where it holds none.
+    pub github_token: Option<TokenSaved>,
+}
+
+/// One Author of the cluster's **one list**: this device's own, or a mirror of
+/// one a member holds at home (ADR-0025).
+///
+/// What `GET /api/ui/authors` answers, to this device's pages and to a member
+/// across the link alike — which is why there is **nothing of the token** here,
+/// not even its last four: whether one is held is all a row says about it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct AuthorEntry {
+    pub id: String,
+
+    /// What it is called in rows and pickers, empty where nobody named it and
+    /// the git name stands in.
+    pub display_name: String,
+
+    pub name: String,
+    pub email: String,
+
+    /// Whether the device it is at home on holds a GitHub token for it.
+    pub holds_token: bool,
+
+    /// The device it is at home on, or `null` for one of this device's own.
+    ///
+    /// A member taking this list in takes only the rows with none, so a mirror
+    /// is always one hop from its home and never a mirror of a mirror.
+    pub device: Option<crate::RowDevice>,
+}
+
+/// One of a member's Authors' **token**, as that device hands it to another
+/// member for the copy kept in its own `secrets.yaml` (ADR-0025).
+///
+/// A member's own call on the Peer Listener and never the viewer's: no page
+/// draws it, so it is not in the viewer's types. `null` is an Author its home
+/// holds no token for.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AuthorToken {
+    pub token: Option<String>,
+}
+
+/// One Author's fields and its token, edited alone: what the Git section
+/// sends for a **mirror**, which is put to the device that Author is at home on
+/// as the ordinary edit of its own (ADR-0025).
+///
+/// The Author alone rather than a [`SettingsEdit`], because a settings save is
+/// the whole of the files it is made on, and this device holds none of the
+/// home device's other settings to send. The fields are values and the token
+/// is an action, as they are in a settings save, for its reason.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct AuthorEdit {
+    pub display_name: String,
+    pub name: String,
+    pub email: String,
+    pub github_token: TokenEdit,
+}
+
+/// What became of an [`AuthorEdit`], in the words of the device the Author is
+/// at home on.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum AuthorEdited {
+    /// Written into that device's `config.yaml`, and the token into its
+    /// `secrets.yaml` where the edit set one — with what GitHub made of it,
+    /// asked from there, or `null` where the edit was not about a token.
+    Saved { verified: Option<Verified> },
+
+    /// No Author with that uuid is configured there: one removed since the
+    /// page was drawn, most likely.
+    NoSuchAuthor,
+}
+
+/// What became of removing an Author, from the Git section's switcher.
+///
+/// Refused while a registered Repo points at it (ADR-0025): its next session
+/// would have nobody to commit as. An unregistered Repo keeps the association
+/// as history and blocks nothing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum AuthorRemoved {
+    /// Out of `config.yaml`, and its token out of `secrets.yaml`.
+    Removed,
+
+    /// No Author with that uuid is configured: one removed since the page was
+    /// drawn, most likely.
+    NoSuchAuthor,
+
+    /// Registered Repos point at it, named, alphabetically as the Repos pane
+    /// lists them. Never empty.
+    InUse { repos: Vec<String> },
+}
+
+/// Everything about the Author's token that is not the token.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct TokenSaved {
@@ -728,6 +864,9 @@ pub struct TokenSaved {
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct SettingsEdit {
     pub git_author: Author,
+
+    /// What is to become of the token of the Author `git_author` is about —
+    /// the one it names, or the one a `null` uuid makes.
     pub github_token: TokenEdit,
 
     /// The languages as the page has just left them, as values rather than as

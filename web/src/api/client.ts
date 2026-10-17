@@ -22,6 +22,10 @@ import type {
   AskingDevice,
   Attached,
   AttachmentRemoved,
+  AuthorEntry,
+  AuthorEdit,
+  AuthorEdited,
+  AuthorRemoved,
   BacklogPane,
   Locked,
   LoginState,
@@ -89,6 +93,8 @@ import type {
   RepoEntry,
   RepoPairingsView,
   RepoRemoved,
+  Repointed,
+  Repointing,
   RepoSwitched,
   Resolved,
   Response as Decided,
@@ -337,18 +343,22 @@ export function listDirectory(
 /// status: a path that names no repository is the server reading the path
 /// rather than failing to, and every refusal is a different sentence to put in
 /// front of the human.
+///
+/// `author` is the uuid of the Author picked, where there are several to pick
+/// between; with one, nothing is sent and the Repo is recorded as that one.
 export function registerRepo(
   device: Device,
   path: string,
+  author?: string,
 ): Promise<Registered> {
-  return post<Registered>(on(device, "/api/ui/repos"), { path });
+  return post<Registered>(on(device, "/api/ui/repos"), { path, author });
 }
 
 /// Ask Verkstead to *make* a repository under `parent` and take it on.
 ///
 /// The other way a Repo arrives, and the one that ends in the same
 /// registration: a directory of that name, `git init` onto `main`, a `README.md`
-/// committed as the configured author, and the opened Repo back.
+/// committed as the Author picked, and the opened Repo back.
 ///
 /// Two fields rather than a joined path, because the two halves are answered
 /// differently — the parent is browsed for and the name is typed — and joining
@@ -366,10 +376,11 @@ export function createRepo(
   parent: string,
   name: string,
   github: boolean,
+  author?: string,
 ): Promise<Created> {
   return post<Created>(
     on(device, "/api/ui/repos/new"),
-    { parent, name, github },
+    { parent, name, github, author },
   );
 }
 
@@ -382,6 +393,16 @@ export function createRepo(
 /// with live work on it is refused for a reason worth saying, and not a failure.
 export function removeRepo(id: number): Promise<RepoRemoved> {
   return post<RepoRemoved>(`/api/ui/repos/${id}/remove`);
+}
+
+/// Point one at another Author, by the uuid the settings list it under.
+///
+/// The outcome is the answer's body, the removal's way: live work in the Repo
+/// refuses it for a reason worth saying, naming that work.
+export function repointRepo(id: number, author: string): Promise<Repointed> {
+  return post<Repointed>(`/api/ui/repos/${id}/author`, {
+    author,
+  } satisfies Repointing);
 }
 
 /// The registered Repos holding roadmaps nothing is driving.
@@ -2200,6 +2221,34 @@ export function loadSettings(): Promise<SettingsView> {
 /// way.
 export function saveSettings(edit: SettingsEdit): Promise<SettingsSaved> {
   return post<SettingsSaved>("/api/ui/settings", edit);
+}
+
+/// The cluster's one list of Authors: this device's own, then a mirror of every
+/// member's, each marked with the device it is at home on.
+///
+/// Of whichever device is asked: a member's own list is what names an Author
+/// beside work on that member, a Repo there recording a uuid out of it.
+export function listAuthors(device: Device): Promise<AuthorEntry[]> {
+  return get<AuthorEntry[]>(on(device, "/api/ui/authors"));
+}
+
+/// Take one Author out of the settings, by its uuid: its entry and its token.
+///
+/// The outcome is the answer's body, a Repo removal's way: a registered Repo
+/// still pointing at it refuses it, naming the Repos.
+export function removeAuthor(id: string): Promise<AuthorRemoved> {
+  return post<AuthorRemoved>(`/api/ui/authors/${encodeURIComponent(id)}/remove`);
+}
+
+/// Rewrite one Author's fields and set or clear its token, by its uuid, and
+/// nothing else of the settings — what the Git section sends for a member's
+/// Author, which the server puts to the device it is at home on. A machine
+/// that is not answering is a refusal naming it.
+export function editAuthor(
+  id: string,
+  edit: AuthorEdit,
+): Promise<AuthorEdited> {
+  return post<AuthorEdited>(`/api/ui/authors/${encodeURIComponent(id)}`, edit);
 }
 
 /// Empty every store of one language — sccache's too, for Rust.
