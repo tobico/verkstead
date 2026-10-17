@@ -675,6 +675,24 @@ id: string | null,
 display_name: string, name: string, email: string, };
 
 /**
+ * One Author's fields and its token, edited alone: what the Git section
+ * sends for a **mirror**, which is put to the device that Author is at home on
+ * as the ordinary edit of its own (ADR-0025).
+ *
+ * The Author alone rather than a [`SettingsEdit`], because a settings save is
+ * the whole of the files it is made on, and this device holds none of the
+ * home device's other settings to send. The fields are values and the token
+ * is an action, as they are in a settings save, for its reason.
+ */
+export type AuthorEdit = { display_name: string, name: string, email: string, github_token: TokenEdit, };
+
+/**
+ * What became of an [`AuthorEdit`], in the words of the device the Author is
+ * at home on.
+ */
+export type AuthorEdited = { "Saved": { verified: Verified | null, } } | "NoSuchAuthor";
+
+/**
  * One Author of the cluster's **one list**: this device's own, or a mirror of
  * one a member holds at home (ADR-0025).
  *

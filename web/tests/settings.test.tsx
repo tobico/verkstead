@@ -1539,9 +1539,9 @@ describe("the authors", () => {
   });
 
   /// A member's Author is a row of the dropdown after this device's own,
-  /// marked with its machine, and picked it is drawn read-only, saying where
-  /// it is at home (ADR-0025).
-  it("lists a member's author read-only, marked with its machine", async () => {
+  /// marked with its machine, and picked it is edited with the same fields,
+  /// the pane saying which machine a press goes to (ADR-0025).
+  it("lists a member's author marked with its machine", async () => {
     serving(
       whenever("/api/ui/settings", json(TOLD)),
       whenever("/api/ui/authors", json(oneList(TOLD, MIRRORED))),
@@ -1565,14 +1565,162 @@ describe("the authors", () => {
     );
 
     await waitFor(() =>
-      screen.getByText(/This author is at home on the-workstation/),
+      screen.getByText(
+        "This author is at home on the-workstation. Saving or removing it here changes it there.",
+      ),
     );
-    screen.getByText(/ada@client\.example/);
-    expect(screen.queryByLabelText("Email")).toBeNull();
+    expect((screen.getByLabelText("Email") as HTMLInputElement).value).toBe(
+      MIRRORED.email,
+    );
+    screen.getByText("A token is saved on the-workstation.");
     expect(screen.queryByLabelText("Token")).toBeNull();
 
     fireEvent.click(screen.getByRole("combobox", { name: "Author" }));
-    expect(screen.queryByRole("option", { name: "Remove author" })).toBeNull();
+    screen.getByRole("option", { name: "Remove author" });
+  });
+
+  /// Save over a mirror sends its fields alone to its own route, which the
+  /// server puts to its home — never a settings save — and the list is read
+  /// again rather than drawn from what was typed.
+  it("saves a member's author to its home", async () => {
+    let listed = oneList(TOLD, MIRRORED);
+    const fetching = serving(
+      whenever("/api/ui/settings", json(TOLD)),
+      whenever("/api/ui/authors", () => json(listed)()),
+      whenever(
+        `/api/ui/authors/${MIRRORED.id}`,
+        () => {
+          listed = oneList(TOLD, { ...MIRRORED, email: "ada@new.example" });
+          return json({ Saved: { verified: null } })();
+        },
+        "POST",
+      ),
+    );
+    mountPane();
+    await waitFor(() => screen.getByRole("combobox", { name: "Author" }));
+    await pickAuthor("Client · the-workstation");
+
+    const email = (await waitFor(() =>
+      screen.getByLabelText("Email"),
+    )) as HTMLInputElement;
+    fireEvent.input(email, { target: { value: "ada@new.example" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(
+        fetching.mock.calls.filter(
+          ([asked]) => String(asked) === `/api/ui/authors/${MIRRORED.id}`,
+        ),
+      ).toHaveLength(1),
+    );
+    const [, init] = fetching.mock.calls.find(
+      ([asked]) => String(asked) === `/api/ui/authors/${MIRRORED.id}`,
+    )!;
+    expect(JSON.parse(String(init!.body))).toEqual({
+      display_name: MIRRORED.display_name,
+      name: MIRRORED.name,
+      email: "ada@new.example",
+      github_token: "Keep",
+    });
+    expect(
+      fetching.mock.calls.some(
+        ([asked, init]) =>
+          String(asked) === "/api/ui/settings" && init?.method === "POST",
+      ),
+    ).toBe(false);
+
+    await waitFor(() =>
+      expect((screen.getByLabelText("Email") as HTMLInputElement).value).toBe(
+        "ada@new.example",
+      ),
+    );
+  });
+
+  /// A token replaced on a mirror is verified on its home, and what that
+  /// device's GitHub said is drawn here.
+  it("shows the verification a member's author's home answered", async () => {
+    serving(
+      whenever("/api/ui/settings", json(TOLD)),
+      whenever("/api/ui/authors", json(oneList(TOLD, MIRRORED))),
+      whenever(
+        `/api/ui/authors/${MIRRORED.id}`,
+        json({
+          Saved: {
+            verified: { Account: { login: "ada-client", missing: [] } },
+          },
+        }),
+        "POST",
+      ),
+    );
+    mountPane();
+    await waitFor(() => screen.getByRole("combobox", { name: "Author" }));
+    await pickAuthor("Client · the-workstation");
+
+    fireEvent.click(
+      await waitFor(() => screen.getByRole("button", { name: "Replace" })),
+    );
+    fireEvent.input(screen.getByLabelText("Token"), {
+      target: { value: "ghp_fromhere" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => screen.getByText("ada-client"));
+  });
+
+  /// A home that is not answering refuses the Save, naming the machine.
+  it("names the machine that didn't take a member's author's save", async () => {
+    serving(
+      whenever("/api/ui/settings", json(TOLD)),
+      whenever("/api/ui/authors", json(oneList(TOLD, MIRRORED))),
+      whenever(
+        `/api/ui/authors/${MIRRORED.id}`,
+        json({ error: "the-workstation couldn't be reached." }, 502),
+        "POST",
+      ),
+    );
+    mountPane();
+    await waitFor(() => screen.getByRole("combobox", { name: "Author" }));
+    await pickAuthor("Client · the-workstation");
+
+    fireEvent.click(
+      await waitFor(() => screen.getByRole("button", { name: "Save" })),
+    );
+
+    await waitFor(() =>
+      screen.getByText(/the-workstation couldn't be reached\./),
+    );
+  });
+
+  /// And a removal refused at home names that machine's Repos, and where to
+  /// repoint them.
+  it("names the home's repos a member's author's removal was refused over", async () => {
+    serving(
+      whenever("/api/ui/settings", json(TOLD)),
+      whenever("/api/ui/authors", json(oneList(TOLD, MIRRORED))),
+      whenever(
+        `/api/ui/authors/${MIRRORED.id}/remove`,
+        json({ InUse: { repos: ["askance"] } }),
+        "POST",
+      ),
+    );
+    mountPane();
+    await waitFor(() => screen.getByRole("combobox", { name: "Author" }));
+    await pickAuthor("Client · the-workstation");
+    await pickAuthor("Remove author");
+
+    const asking = await waitFor(() => screen.getByRole("dialog"));
+    expect(asking.textContent).toContain("settings on the-workstation");
+    fireEvent.click(
+      [...asking.querySelectorAll("button")].find(
+        (one) => one.textContent === "Remove",
+      )!,
+    );
+
+    await waitFor(() =>
+      screen.getByText(
+        /askance is still this author's\. Pick another author for it under Repos on the-workstation first/,
+      ),
+    );
   });
 
   /// With one Author there is no dropdown, and so no way to remove it.
@@ -1594,9 +1742,9 @@ describe("the authors", () => {
 
     expect(screen.queryByRole("combobox", { name: "Author" })).toBeNull();
     expect(screen.queryByLabelText("Display name")).toBeNull();
-    expect(
-      (screen.getByLabelText("Name") as HTMLInputElement).value,
-    ).toBe(TOLD.git_author.name);
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe(
+      TOLD.git_author.name,
+    );
     screen.getByRole("button", { name: "Add author" });
   });
 

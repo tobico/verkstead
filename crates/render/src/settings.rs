@@ -788,6 +788,38 @@ pub struct AuthorToken {
     pub token: Option<String>,
 }
 
+/// One Author's fields and its token, edited alone: what the Git section
+/// sends for a **mirror**, which is put to the device that Author is at home on
+/// as the ordinary edit of its own (ADR-0025).
+///
+/// The Author alone rather than a [`SettingsEdit`], because a settings save is
+/// the whole of the files it is made on, and this device holds none of the
+/// home device's other settings to send. The fields are values and the token
+/// is an action, as they are in a settings save, for its reason.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct AuthorEdit {
+    pub display_name: String,
+    pub name: String,
+    pub email: String,
+    pub github_token: TokenEdit,
+}
+
+/// What became of an [`AuthorEdit`], in the words of the device the Author is
+/// at home on.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum AuthorEdited {
+    /// Written into that device's `config.yaml`, and the token into its
+    /// `secrets.yaml` where the edit set one — with what GitHub made of it,
+    /// asked from there, or `null` where the edit was not about a token.
+    Saved { verified: Option<Verified> },
+
+    /// No Author with that uuid is configured there: one removed since the
+    /// page was drawn, most likely.
+    NoSuchAuthor,
+}
+
 /// What became of removing an Author, from the Git section's switcher.
 ///
 /// Refused while a registered Repo points at it (ADR-0025): its next session

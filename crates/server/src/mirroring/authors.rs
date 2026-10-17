@@ -32,11 +32,12 @@
 use std::collections::BTreeMap;
 
 use anyhow::Result;
-use verkstead_render::{AuthorEntry, AuthorToken};
+use verkstead_render::{AuthorEdit, AuthorEdited, AuthorEntry, AuthorRemoved, AuthorToken};
 use verkstead_schema::Nudge;
 
+use super::{MOST_AN_OUTCOME_IS, Pressed};
 use crate::peer::authors::TOKEN;
-use crate::relaying::{asking, read_of, word_from};
+use crate::relaying::{Call, Streamed, as_json, asking, read_of, word_from};
 use crate::settings::{Author, Mirrored, Settings};
 use crate::{AppState, store};
 
@@ -109,6 +110,102 @@ pub(crate) fn own(settings: &Settings) -> Vec<AuthorEntry> {
             device: None,
         })
         .collect()
+}
+
+/// Put an edit of an Author to the device it is at home on, or say that it is
+/// this device's own.
+///
+/// **The Profile mirrors' hop, for an Author** — see [`super::edited`]: the
+/// press is put to the home device as the ordinary edit of its own Author,
+/// addressed by the uuid, which is the same there; what comes back is that
+/// device's own word, the token's verification included, asked from there with
+/// its own `gh`. A home that did not take it is refused naming the machine and
+/// nothing here has moved.
+///
+/// **And the mirror redraws off the refreshed row** rather than off what was
+/// typed: a save that landed is followed by the ordinary read of that member,
+/// which writes the copy of a token set this way as any refresh does.
+pub(crate) async fn edited(
+    state: &AppState,
+    id: &str,
+    edit: &AuthorEdit,
+) -> Result<Pressed<AuthorEdited>> {
+    let Some(device) = home_of(state, id).await? else {
+        return Ok(Pressed::Here);
+    };
+
+    let call = Call {
+        method: reqwest::Method::POST,
+        onwards: format!("{AUTHORS}/{id}"),
+        headers: as_json(),
+        body: Streamed::saying(serde_json::to_vec(edit)?),
+    };
+
+    Ok(
+        match word_from::<AuthorEdited>(state.devices.as_ref(), &device, call, MOST_AN_OUTCOME_IS)
+            .await
+        {
+            Ok(said) => {
+                if matches!(said, AuthorEdited::Saved { .. }) {
+                    read_member(state, &device).await;
+                }
+
+                Pressed::Away(said)
+            }
+            Err(why) => Pressed::Refused(why),
+        },
+    )
+}
+
+/// And a removal, which is the same hop: it takes the Author off its home
+/// device, **checking that device's Repos only** — its own refusal naming its
+/// own Repos comes back as it stands. A Repo on this device left pointing at
+/// the mirror that goes with it refuses its next Start by name, rather than
+/// every member being asked first (ADR-0025).
+pub(crate) async fn removed(state: &AppState, id: &str) -> Result<Pressed<AuthorRemoved>> {
+    let Some(device) = home_of(state, id).await? else {
+        return Ok(Pressed::Here);
+    };
+
+    let call = Call {
+        method: reqwest::Method::POST,
+        onwards: format!("{AUTHORS}/{id}/remove"),
+        headers: as_json(),
+        body: Streamed::Nothing,
+    };
+
+    Ok(
+        match word_from::<AuthorRemoved>(state.devices.as_ref(), &device, call, MOST_AN_OUTCOME_IS)
+            .await
+        {
+            Ok(said) => {
+                if said == AuthorRemoved::Removed {
+                    read_member(state, &device).await;
+                }
+
+                Pressed::Away(said)
+            }
+            Err(why) => Pressed::Refused(why),
+        },
+    )
+}
+
+/// The Device Id of the member the Author `id` is at home on — or `None` for
+/// one of this device's own, and for a uuid nobody holds, which falls through
+/// to the local half and is refused there as an Author that has gone.
+///
+/// **A uuid `config.yaml` holds is this device's own** whatever a mirror row
+/// says, which is the one list's rule.
+async fn home_of(state: &AppState, id: &str) -> Result<Option<String>> {
+    if state.settings.config().author(id).is_some() {
+        return Ok(None);
+    }
+
+    Ok(store::author_mirrors(&state.pool)
+        .await?
+        .into_iter()
+        .find(|mirror| mirror.id == id)
+        .map(|mirror| mirror.device))
 }
 
 /// Keep every member's Author mirrors fresh, for as long as this server runs.

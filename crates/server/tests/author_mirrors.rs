@@ -820,3 +820,206 @@ async fn the_token_call_refuses_a_mirror_an_unknown_uuid_and_a_stranger() {
         "a stranger: {said:?}",
     );
 }
+
+impl Verkstead {
+    /// One of the list's Authors edited alone, the way the Git section saves a
+    /// mirror: the status and what came back.
+    async fn edits_author(&self, id: &str, edit: serde_json::Value) -> (StatusCode, String) {
+        pressing(
+            &self.workbench,
+            &format!("/api/ui/authors/{id}"),
+            Some(&edit.to_string()),
+        )
+        .await
+    }
+
+    /// And taken away, whatever came of it.
+    async fn presses_remove(&self, id: &str) -> (StatusCode, String) {
+        pressing(
+            &self.workbench,
+            &format!("/api/ui/authors/{id}/remove"),
+            None,
+        )
+        .await
+    }
+
+    /// A repository registered here as `author`.
+    async fn registers(&self, path: &Path, author: &str) {
+        repository(path);
+
+        let (status, said) = pressing(
+            &self.workbench,
+            "/api/ui/repos",
+            Some(&serde_json::json!({ "path": path, "author": author }).to_string()),
+        )
+        .await;
+
+        assert!(status.is_success(), "{status} {said}");
+        assert!(said.contains("Added"), "registered: {said}");
+    }
+}
+
+/// What `config.yaml` in `dir` holds, as text.
+fn config_in(dir: &Path) -> String {
+    std::fs::read_to_string(dir.join("config.yaml")).unwrap_or_default()
+}
+
+/// An edit of a mirror's email made on B lands in A's own `config.yaml`, and
+/// B's list says it the moment the press answers, off the row A gave back.
+#[tokio::test]
+async fn an_edit_of_a_mirror_is_made_at_home() {
+    let (a, b, _holding) = linked_up().await;
+
+    a.saves_author(WORK, "Work", "Ada Lovelace", "ada@work.example")
+        .await;
+    b.authors_saying(|rows| with(rows, WORK).is_some()).await;
+
+    let (status, said) = b
+        .edits_author(
+            WORK,
+            serde_json::json!({
+                "display_name": "Work",
+                "name": "Ada Lovelace",
+                "email": "ada@new.example",
+                "github_token": "Keep",
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+    assert_eq!(said, r#"{"Saved":{"verified":null}}"#);
+
+    let config = config_in(a.dir.path());
+    assert!(config.contains("ada@new.example"), "at home: {config}");
+    assert!(
+        !config_in(b.dir.path()).contains("ada@new.example"),
+        "and nothing of it in B's own files",
+    );
+
+    let rows = b.authors().await;
+    let row = with(&rows, WORK).expect("still listed");
+    assert_eq!(row.email, "ada@new.example", "redrawn off A's row");
+    assert!(row.device.is_some(), "still A's");
+}
+
+/// A token set on a mirror from B is saved in A's `secrets.yaml`, verified
+/// from A, and comes back to B only as the copy.
+#[tokio::test]
+async fn a_token_set_on_a_mirror_is_saved_and_verified_at_home() {
+    let (a, b, _holding) = linked_up().await;
+
+    a.saves_author(WORK, "Work", "Ada Lovelace", "ada@work.example")
+        .await;
+    b.authors_saying(|rows| with(rows, WORK).is_some()).await;
+
+    let (status, said) = b
+        .edits_author(
+            WORK,
+            serde_json::json!({
+                "display_name": "Work",
+                "name": "Ada Lovelace",
+                "email": "ada@work.example",
+                "github_token": { "Set": { "token": "ghp_setfromb" } },
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+
+    let said: verkstead_render::AuthorEdited = serde_json::from_str(&said).unwrap();
+    assert!(
+        matches!(
+            said,
+            verkstead_render::AuthorEdited::Saved { verified: Some(_) }
+        ),
+        "with what A's GitHub made of it: {said:?}",
+    );
+
+    assert!(
+        secrets_in(a.dir.path()).contains(&format!("{WORK}: ghp_setfromb")),
+        "saved at home",
+    );
+    b.secrets_saying(|said| said.contains("ghp_setfromb")).await;
+
+    let rows = b.authors().await;
+    assert!(with(&rows, WORK).unwrap().holds_token);
+}
+
+/// Removing a mirror from B checks A's Repos alone: refused naming the one at
+/// home pointing at it, removed once none does — and B's own Repo that pointed
+/// at it is left with an Author that has gone.
+#[tokio::test]
+async fn a_removal_of_a_mirror_checks_the_homes_repos() {
+    let (a, b, _holding) = linked_up().await;
+
+    a.saves_author(WORK, "Work", "Ada Lovelace", "ada@work.example")
+        .await;
+    a.saves_author(HOME, "Home", "Ada Lovelace", "ada@home.example")
+        .await;
+    b.authors_saying(|rows| with(rows, WORK).is_some() && with(rows, HOME).is_some())
+        .await;
+
+    let repos = tempfile::tempdir().unwrap();
+    a.registers(&repos.path().join("at-home"), WORK).await;
+    b.registers(&repos.path().join("on-b"), HOME).await;
+
+    let (status, said) = b.presses_remove(WORK).await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+    assert_eq!(said, r#"{"InUse":{"repos":["at-home"]}}"#);
+    assert!(config_in(a.dir.path()).contains(WORK), "still at home");
+
+    let (status, said) = b.presses_remove(HOME).await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+    assert_eq!(said, "\"Removed\"", "B's own Repo is not asked about");
+    assert!(!config_in(a.dir.path()).contains(HOME), "gone at home");
+
+    let rows = b.authors().await;
+    assert!(
+        with(&rows, HOME).is_none(),
+        "and from the list here at once"
+    );
+
+    assert_eq!(
+        verkstead_server::settings::Settings::in_data_dir(b.dir.path())
+            .config()
+            .author_missing(Some(HOME)),
+        Some(verkstead_server::settings::Unauthored::Gone),
+        "B's Repo refuses its next Start as an Author that has gone",
+    );
+}
+
+/// With A not answering, an edit and a removal of its Author from B are each
+/// refused naming A, and nothing anywhere moves.
+#[tokio::test]
+async fn a_home_not_answering_refuses_the_press_by_name() {
+    let (a, b, holding) = linked_up().await;
+
+    a.saves_author(WORK, "Work", "Ada Lovelace", "ada@work.example")
+        .await;
+    b.authors_saying(|rows| with(rows, WORK).is_some()).await;
+
+    drop(holding);
+    b.linked_to(&a.device, A_MACHINE, A_OS, vec!["127.0.0.1:1".to_owned()])
+        .await;
+
+    let (status, said) = b
+        .edits_author(
+            WORK,
+            serde_json::json!({
+                "display_name": "Work",
+                "name": "Ada Lovelace",
+                "email": "ada@new.example",
+                "github_token": "Keep",
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_GATEWAY, "{said}");
+    assert!(said.contains(A_MACHINE), "naming A: {said}");
+
+    let (status, said) = b.presses_remove(WORK).await;
+    assert_eq!(status, StatusCode::BAD_GATEWAY, "{said}");
+    assert!(said.contains(A_MACHINE), "naming A: {said}");
+
+    assert!(config_in(a.dir.path()).contains("ada@work.example"));
+
+    let rows = b.authors().await;
+    assert_eq!(with(&rows, WORK).unwrap().email, "ada@work.example");
+}

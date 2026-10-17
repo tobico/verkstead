@@ -359,16 +359,10 @@
   }
 }
 
-/* Where a member's Author lives, over its facts: the Profiles pane's line over
-   a mirrored account, at its size and room. */
+/* Where a member's Author lives, over its fields: the Profiles pane's line
+   over a mirrored account, at its size and room. */
 .athome {
   margin: 0 0 0.85rem;
   font-size: 0.9rem;
   color: var(--ink-soft);
-}
-
-/* And its name and email, read-only, at the size of the lines around them. */
-.mirrored {
-  margin: 0 0 0.85rem;
-  font-size: 0.9rem;
 }

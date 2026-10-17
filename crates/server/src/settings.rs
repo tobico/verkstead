@@ -455,6 +455,42 @@ impl Settings {
         Ok(true)
     }
 
+    /// Write `author` over the Author `config.yaml` holds under its uuid, and
+    /// — where `token` is `Some` — that Author's token into `secrets.yaml`, a
+    /// `None` inside it taking the token away. `false` where the file holds no
+    /// such Author and nothing was written.
+    ///
+    /// One Author and nothing else of either file, which is what an edit put
+    /// here from a member is: that device holds none of this one's other
+    /// settings, so it sends none — see [`crate::mirroring::authors::edited`].
+    /// A file nothing can parse is an error, for [`Settings::removing_author`]'s
+    /// reason.
+    pub fn editing_author(
+        &self,
+        author: Author,
+        token: Option<Option<String>>,
+    ) -> std::io::Result<bool> {
+        let unparsed = || std::io::Error::other("a settings file won't parse");
+
+        let config = Self::parsed(&self.config_path(), Config::read).ok_or_else(unparsed)?;
+
+        if config.author(author.id()).is_none() {
+            return Ok(false);
+        }
+
+        let id = author.id().to_owned();
+
+        self.save_config(&config.with_author(author))?;
+
+        if let Some(token) = token {
+            let secrets = Self::parsed(&self.secrets_path(), Secrets::read).ok_or_else(unparsed)?;
+
+            self.save_secrets(&secrets.with_author_token(&id, token))?;
+        }
+
+        Ok(true)
+    }
+
     /// What the settings file at `path` says read by `read`, nothing written
     /// counting as the empty file — or `None` where it will not parse.
     fn parsed<T: Default>(
@@ -1331,6 +1367,16 @@ impl Config {
             Some(mirror) if !mirror.holds_token => None,
             _ => secrets.author_token(author.id()),
         }
+    }
+
+    /// And the same config with `author` written over the entry under its
+    /// uuid, every other key as it was — see [`Settings::editing_author`].
+    pub fn with_author(mut self, author: Author) -> Config {
+        if let Some(kept) = self.authors.iter_mut().find(|kept| kept.id == author.id) {
+            *kept = author;
+        }
+
+        self
     }
 
     /// And the same config with the Author whose uuid is `id` taken out, every

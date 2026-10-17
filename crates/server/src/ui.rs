@@ -35,27 +35,28 @@ use time::format_description::well_known::Rfc3339;
 use tokio_util::io::ReaderStream;
 use verkstead_render::{
     Adopted, AnswerAttached, AnswerAttachmentRemoved, AskingDevice, AtOnceView, Attached,
-    AttachmentRemoved, Author, AuthorSaved, BaseBranchChoice, BranchRename, BriefEdit, CheckRollup,
-    CleanupStepView, CleanupView, CommentedOn, CompanionAdded, CompanionBaseRecorded,
-    CompanionBranchRenamed, CompanionModeChoice, CompanionModeChosen, CompanionRemoved,
-    CompanionView, CompileCaching, Confirming, ConflictResolution, ConversationArchived,
-    ConversationClosed, ConversationEntry, ConversationMove, ConversationSteered,
-    ConversationStopped, ConversationUnarchived, ConversationView, Creation, Cursor, DevicesView,
-    DiskUse, DroppedRow, Eviction, FileDeleted, FileDeleting, FileListsView, FileMade, FileMaking,
-    FileReading, FileRenamed, FileRenaming, FileRootsView, FileStatusView, FileWrite, FileWritten,
-    FolderListing, GrillingStarted, HeaderEdit, IgnoreRule, IgnoredCommentsEdit, InstallPress,
-    LanguageCleared, LanguageEdit, LanguageView, Lifecycle, Locked, McpHeader, McpServer,
-    McpServerEdit, McpServersEdit, Merging, MissedOut, NewAdoption, NewCompanion, NewConversation,
-    NewJoin, NewRank, OpenTerminal, PairingView, Parked, PendingSteerView, Permitting, Process,
-    ProcessChoice, ProcessPicked, ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration,
-    RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice,
-    RuleField, RuleRefused, Running, RunningOn, ServeEdit, ServePress, ServerAttached, ServerField,
-    ServerRefused, ServerRemoved, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView,
-    ShareCommented, SharePublished, SharedCommit, SharedConversation, ShowArchived,
-    ShowingArchived, SizeRefused, Standing, SteerCancelled, SteerForm, SteerOpened,
-    SteerPairingView, SteerSaved, SteerSubmission, StoreView, Submitted, Subscribed, Subscription,
-    TakenUp, TargetNamed, TargetRecorded, TerminalOpened, TimelineEvent, TokenEdit, TokenSaved,
-    TransferredTo, Transferring, UnreadEntry, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
+    AttachmentRemoved, Author, AuthorEdit, AuthorEdited, AuthorSaved, BaseBranchChoice,
+    BranchRename, BriefEdit, CheckRollup, CleanupStepView, CleanupView, CommentedOn,
+    CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed, CompanionModeChoice,
+    CompanionModeChosen, CompanionRemoved, CompanionView, CompileCaching, Confirming,
+    ConflictResolution, ConversationArchived, ConversationClosed, ConversationEntry,
+    ConversationMove, ConversationSteered, ConversationStopped, ConversationUnarchived,
+    ConversationView, Creation, Cursor, DevicesView, DiskUse, DroppedRow, Eviction, FileDeleted,
+    FileDeleting, FileListsView, FileMade, FileMaking, FileReading, FileRenamed, FileRenaming,
+    FileRootsView, FileStatusView, FileWrite, FileWritten, FolderListing, GrillingStarted,
+    HeaderEdit, IgnoreRule, IgnoredCommentsEdit, InstallPress, LanguageCleared, LanguageEdit,
+    LanguageView, Lifecycle, Locked, McpHeader, McpServer, McpServerEdit, McpServersEdit, Merging,
+    MissedOut, NewAdoption, NewCompanion, NewConversation, NewJoin, NewRank, OpenTerminal,
+    PairingView, Parked, PendingSteerView, Permitting, Process, ProcessChoice, ProcessPicked,
+    ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration, RemoteBanner, RemoteView,
+    RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice, RuleField, RuleRefused,
+    Running, RunningOn, ServeEdit, ServePress, ServerAttached, ServerField, ServerRefused,
+    ServerRemoved, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView, ShareCommented,
+    SharePublished, SharedCommit, SharedConversation, ShowArchived, ShowingArchived, SizeRefused,
+    Standing, SteerCancelled, SteerForm, SteerOpened, SteerPairingView, SteerSaved,
+    SteerSubmission, StoreView, Submitted, Subscribed, Subscription, TakenUp, TargetNamed,
+    TargetRecorded, TerminalOpened, TimelineEvent, TokenEdit, TokenSaved, TransferredTo,
+    Transferring, UnreadEntry, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -653,6 +654,10 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // [`crate::mirroring::authors`]). Nothing of a token but whether one is
         // held, because a member reads it too.
         .route("/api/ui/authors", get(authors))
+        // And one Author edited alone, which is what the Git section sends for
+        // a member's: put to the device it is at home on, as that device's own
+        // edit — see [`crate::mirroring::authors::edited`].
+        .route("/api/ui/authors/{id}", post(edit_author))
         .route("/api/ui/authors/{id}/remove", post(remove_author))
         // Emptying one language's stores, which is an act rather than a value
         // the settings hold, so a route of its own rather than a key of a save.
@@ -1218,11 +1223,130 @@ async fn authors(State(state): State<AppState>) -> HttpResponse {
     }
 }
 
+/// `POST /api/ui/authors/{id}` — rewrite one Author's fields, and set or clear
+/// its token, and nothing else of either file.
+///
+/// **Reached for a mirror, and relayed home when it is one** (ADR-0025): the
+/// edit is put to the device the Author is at home on, and what comes back is
+/// that device's own word — the token verified there, with its own `gh` — or a
+/// refusal naming the machine that did not take it. See
+/// [`crate::mirroring::authors::edited`]. Arriving at home, it is the half
+/// below: the Author's own entry written over and the token by the settings
+/// save's rules, then tried against GitHub after the writing for its reason.
+async fn edit_author(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(edit): Json<AuthorEdit>,
+) -> HttpResponse {
+    match crate::mirroring::authors::edited(&state, &id, &edit).await {
+        Ok(crate::mirroring::Pressed::Here) => {}
+
+        Ok(crate::mirroring::Pressed::Away(outcome)) => {
+            return Json(outcome).into_response();
+        }
+
+        Ok(crate::mirroring::Pressed::Refused(why)) => {
+            tracing::warn!("an Author was not saved at home: {}", why.saying);
+            return refused(why.status, ApiError::new(why.saying));
+        }
+
+        Err(error) => {
+            tracing::error!(
+                error = ?error,
+                author = id,
+                "reading which device an Author is at home on failed",
+            );
+            return unavailable("The author couldn't be saved.");
+        }
+    }
+
+    let settings = state.settings.clone();
+    let gh = state.github.clone();
+
+    let saved = tokio::task::spawn_blocking(move || {
+        let token = match &edit.github_token {
+            TokenEdit::Keep => None,
+            TokenEdit::Set { token } => Some(Some(token.clone())),
+            TokenEdit::Clear => Some(None),
+        };
+
+        let author = crate::settings::Author::of(
+            id.clone(),
+            Some(edit.display_name),
+            Some(edit.name),
+            Some(edit.email),
+        );
+
+        if !settings.editing_author(author, token)? {
+            return Ok::<_, std::io::Error>(AuthorEdited::NoSuchAuthor);
+        }
+
+        // Read back off the file rather than taken from the request, for the
+        // settings save's reason: a token of whitespace is nothing configured.
+        let verified = match &edit.github_token {
+            TokenEdit::Set { .. } => settings
+                .secrets()
+                .author_token(&id)
+                .map(|token| verifying(&gh, token)),
+            TokenEdit::Keep | TokenEdit::Clear => None,
+        };
+
+        Ok(AuthorEdited::Saved { verified })
+    })
+    .await;
+
+    match saved {
+        Ok(Ok(outcome)) => {
+            // Every member's mirror of it, and its copy of the token, redrawn
+            // on the read this sets going.
+            if matches!(outcome, AuthorEdited::Saved { .. }) {
+                state.nudges.announce(Nudge::Authors);
+            }
+
+            Json(outcome).into_response()
+        }
+        Ok(Err(error)) => {
+            tracing::error!(error = ?error, "writing an Author into the settings files failed");
+            unavailable("The author couldn't be saved.")
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, "saving an Author failed");
+            unavailable("The author couldn't be saved.")
+        }
+    }
+}
+
 /// `POST /api/ui/authors/{id}/remove` — take one Author out of the settings.
 ///
 /// Every refusal is a named outcome in the body, the Repo removal's way: the
 /// Repos pointing at it are what the switcher puts in words.
+///
+/// **Relayed home for a mirror**, checking that device's Repos alone, and
+/// refused naming the machine where it did not take it — see
+/// [`crate::mirroring::authors::removed`].
 async fn remove_author(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+    match crate::mirroring::authors::removed(&state, &id).await {
+        Ok(crate::mirroring::Pressed::Here) => {}
+
+        Ok(crate::mirroring::Pressed::Away(outcome)) => {
+            return Json(outcome).into_response();
+        }
+
+        Ok(crate::mirroring::Pressed::Refused(why)) => {
+            tracing::warn!("an Author was not removed at home: {}", why.saying);
+            return refused(why.status, ApiError::new(why.saying));
+        }
+
+        Err(error) => {
+            tracing::error!(
+                error = ?error,
+                author = id,
+                "reading which device an Author is at home on failed",
+            );
+            return unavailable("The author couldn't be removed.");
+        }
+    }
+
     match crate::repos::remove_author(&state.pool, &state.settings, &id).await {
         Ok(outcome) => {
             // Every member's mirror of it goes on the read this sets going.
@@ -6531,13 +6655,7 @@ async fn save_settings(
         // write a gist is a token whose failure would otherwise be found by a
         // human pressing Share — and the answer to it is on this page, which is
         // where they already are.
-        let verified = verifying.map(|token| match crate::github::authenticates_as(&gh, &token) {
-            Ok(account) => Verified::Account {
-                login: account.login,
-                missing: needed(&account.scopes),
-            },
-            Err(trouble) => Verified::Refused { why: trouble.why() },
-        });
+        let verified = verifying.map(|token| self::verifying(&gh, &token));
 
         // And the declarations this save wrote down, each with the header values
         // just written beside it — which is what is spoken to below. Read back
@@ -6619,6 +6737,17 @@ async fn save_settings(
             tracing::error!(error = ?error, "saving the settings failed");
             unavailable("The settings couldn't be saved.")
         }
+    }
+}
+
+/// What GitHub made of a token just saved: whose it is, and what it may do.
+fn verifying(gh: &crate::github::Gh, token: &str) -> Verified {
+    match crate::github::authenticates_as(gh, token) {
+        Ok(account) => Verified::Account {
+            login: account.login,
+            missing: needed(&account.scopes),
+        },
+        Err(trouble) => Verified::Refused { why: trouble.why() },
     }
 }
 
