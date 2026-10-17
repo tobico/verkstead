@@ -26,4 +26,4 @@ edits 02 built, and its preflight compares the picks 02 makes changeable.
 
 - [x] 01: The author list — [brief](01-author-list.md) — no dependencies
 - [x] 02: The pick on screen and the rules — [brief](02-pick-and-rules.md) — after 01
-- [ ] 03: One list across the cluster — [brief](03-one-list-across-the-cluster.md) — after 02 *(in progress: `roadmaps/authors/03-one-list-across-the-cluster`)*
+- [x] 03: One list across the cluster — [brief](03-one-list-across-the-cluster.md) — after 02
