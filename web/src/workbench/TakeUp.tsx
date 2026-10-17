@@ -34,7 +34,7 @@ import {
   authorGone,
   authorUnpicked,
   companionRefusal,
-  otherAuthor,
+  otherAuthorHeld,
   profileRefusal,
 } from "./Timeline";
 
@@ -123,7 +123,7 @@ export function takeUpRefusal(outcome: TakenUp): string {
     }
 
     if ("OtherAuthor" in outcome) {
-      return otherAuthor(outcome.OtherAuthor);
+      return otherAuthorHeld(outcome.OtherAuthor);
     }
 
     return `That branch is already checked out at ${outcome.CheckedOutElsewhere.at}, and git holds one checkout per branch.`;

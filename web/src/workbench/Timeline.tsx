@@ -274,7 +274,7 @@ export function grillRefusal(outcome: GrillingStarted): string {
     }
 
     if ("OtherAuthor" in outcome) {
-      return otherAuthor(outcome.OtherAuthor);
+      return otherAuthorHeld(outcome.OtherAuthor);
     }
 
     return `${outcome.Companion.repo}: ${companionRefusal(outcome.Companion.why)}`;
@@ -306,6 +306,15 @@ export function otherAuthor(
   repo = "this conversation's repo",
 ): string {
   return `The ${other.companion} repo is ${other.companion_author}'s and ${repo} is ${other.author}'s. A conversation works as one author.`;
+}
+
+/// And the same over a companion already on the conversation, which is the
+/// one to take off.
+export function otherAuthorHeld(
+  other: OtherAuthor,
+  repo = "this conversation's repo",
+): string {
+  return `${otherAuthor(other, repo)} Take the ${other.companion} repo off first.`;
 }
 
 /// What to say about a press refused over a chosen profile, whichever press it

@@ -143,7 +143,7 @@ import {
 import { namesPullRequest } from "./targets";
 import styles from "./Setup.module.css";
 import { keeping } from "./settling";
-import { otherAuthor } from "./Timeline";
+import { otherAuthor, otherAuthorHeld } from "./Timeline";
 
 /// What each way of being refused a branch name says.
 export const BRANCH_REFUSAL: Record<BranchRenamed, string> = {
@@ -170,7 +170,7 @@ export const REPO_SWITCH_REFUSAL: Record<Extract<RepoSwitched, string>, string> 
 /// was onto.
 export function repoSwitchRefusal(outcome: RepoSwitched): string {
   if (typeof outcome === "object") {
-    return otherAuthor(outcome.OtherAuthor, "that repo");
+    return otherAuthorHeld(outcome.OtherAuthor, "that repo");
   }
 
   return REPO_SWITCH_REFUSAL[outcome];

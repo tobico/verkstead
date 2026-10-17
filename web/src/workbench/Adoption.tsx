@@ -33,7 +33,7 @@ import { keyOf, useDevice } from "../reaching";
 import {
   authorGone,
   authorUnpicked,
-  otherAuthor,
+  otherAuthorHeld,
   companionRefusal,
   profileRefusal,
 } from "./Timeline";
@@ -112,7 +112,7 @@ export function adoptRefusal(outcome: Adopted): string {
     }
 
     if ("OtherAuthor" in outcome) {
-      return otherAuthor(outcome.OtherAuthor);
+      return otherAuthorHeld(outcome.OtherAuthor);
     }
 
     if ("Misdeclared" in outcome) {
