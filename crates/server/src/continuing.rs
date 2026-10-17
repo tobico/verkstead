@@ -164,7 +164,7 @@ use std::path::{Path, PathBuf};
 use verkstead_schema::{Direction, Nudge};
 
 use crate::AppState;
-use crate::settings::{Author, Config, Signature};
+use crate::settings::{Author, Config, Signature, Unauthored};
 use crate::stages::{self, Next, Stage};
 use crate::store;
 use crate::tasks::{self, Clearing};
@@ -880,7 +880,11 @@ async fn start(
         .author_of(conversation.repo.author.as_deref())
         .and_then(Author::configured)
     else {
-        let (missing, fix) = unsigned(&config, conversation.repo.author.as_deref());
+        let (missing, fix) = unsigned(
+            &config,
+            conversation.repo.author.as_deref(),
+            &conversation.repo.name,
+        );
 
         halting(
             state,
@@ -2016,10 +2020,28 @@ async fn load(state: &AppState, conversation_id: i64) -> Option<store::Conversat
 }
 
 /// What is missing that a stage cannot commit as, in the halt's words, and
-/// what to do about it: the Repo's Author named where there is more than one
-/// it could have been, and the sentence a missing git author always had where
-/// there is not.
-fn unsigned(config: &Config, recorded: Option<&str>) -> (String, &'static str) {
+/// what to do about it: the Repo called `repo` named, and sent to the Repos
+/// pane, where its own record is why — an Author `config.yaml` no longer holds,
+/// or none picked among several — then the Repo's Author named where there is
+/// more than one it could have been, and the sentence a missing git author
+/// always had where there is not.
+fn unsigned(config: &Config, recorded: Option<&str>, repo: &str) -> (String, &'static str) {
+    match config.author_missing(recorded) {
+        Some(Unauthored::Gone) => {
+            return (
+                format!("the `{repo}` repo's author isn't configured any more"),
+                "Pick another under Repos",
+            );
+        }
+        Some(Unauthored::Unpicked) => {
+            return (
+                format!("the `{repo}` repo has no author picked"),
+                "Pick one under Repos",
+            );
+        }
+        None => {}
+    }
+
     let named = config
         .author_of(recorded)
         .filter(|_| config.authors().len() > 1)
@@ -2052,8 +2074,14 @@ mod tests {
     #[test]
     fn a_halt_over_the_author_names_it_only_among_several() {
         let one = Config::read("authors:\n  - id: work\n    name: Tobias Cohen\n").unwrap();
-        assert_eq!(unsigned(&one, Some("work")).0, "no git author is set");
-        assert_eq!(unsigned(&Config::default(), None).0, "no git author is set");
+        assert_eq!(
+            unsigned(&one, Some("work"), "verkstead").0,
+            "no git author is set"
+        );
+        assert_eq!(
+            unsigned(&Config::default(), None, "verkstead").0,
+            "no git author is set"
+        );
 
         let two = Config::read(concat!(
             "authors:\n",
@@ -2065,19 +2093,29 @@ mod tests {
         ))
         .unwrap();
         assert_eq!(
-            unsigned(&two, Some("work")),
+            unsigned(&two, Some("work"), "verkstead"),
             (
                 "its repo's author, Tobias Cohen, has no email set".to_owned(),
                 "Set it"
             )
         );
         assert_eq!(
-            unsigned(&two, Some("home")).0,
+            unsigned(&two, Some("home"), "verkstead").0,
             "its repo's author, Home, has no git name set"
         );
         assert_eq!(
-            unsigned(&two, None),
-            ("no git author is set".to_owned(), "Set one")
+            unsigned(&two, None, "verkstead"),
+            (
+                "the `verkstead` repo has no author picked".to_owned(),
+                "Pick one under Repos"
+            )
+        );
+        assert_eq!(
+            unsigned(&two, Some("gone"), "verkstead"),
+            (
+                "the `verkstead` repo's author isn't configured any more".to_owned(),
+                "Pick another under Repos"
+            )
         );
     }
 

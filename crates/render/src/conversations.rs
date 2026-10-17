@@ -4359,6 +4359,19 @@ pub enum GrillingStarted {
     /// a case to work around.
     NoGitAuthor,
 
+    /// The Repo records an Author `config.yaml` no longer holds — a hand edit
+    /// took it out — so there is nobody to commit as. Named, and sent to the
+    /// Repos pane to pick another: falling back to the first Author was
+    /// turned down (ADR-0025).
+    RepoAuthorGone {
+        repo: String,
+    },
+
+    /// Or it records none, and there is more than one Author it could be.
+    RepoAuthorUnpicked {
+        repo: String,
+    },
+
     /// Git would not fetch from the Repo's remote, so what the work would come
     /// off cannot be trusted to be what the remote is holding. Refused rather
     /// than branched from refs that may be stale: being offline, or having lost
@@ -5205,6 +5218,16 @@ pub enum Adopted {
     /// [`GrillingStarted::NoGitAuthor`], the same refusal at the other door and
     /// for the same reason.
     NoGitAuthor,
+
+    /// The Repo's Author is gone or unpicked — see
+    /// [`GrillingStarted::RepoAuthorGone`], the same refusals at the other
+    /// door.
+    RepoAuthorGone {
+        repo: String,
+    },
+    RepoAuthorUnpicked {
+        repo: String,
+    },
 
     /// Git would not fetch from the Repo's remote, so the roadmap at the base
     /// commit cannot be trusted to be the roadmap origin is holding. Refused

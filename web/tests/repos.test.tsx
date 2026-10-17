@@ -612,6 +612,22 @@ describe("the author of a repo", () => {
     );
   });
 
+  /// A start on a repo whose author was deleted by hand is sent here, so the
+  /// row draws its picker with one author left too — and only that row.
+  it("draws the picker for a gone author with one author left", async () => {
+    serving(
+      whenever("/api/ui/repos", json(recorded("a-uuid-nobody-holds"))),
+      whenever("/api/ui/settings", json(ONE_AUTHOR)),
+    );
+    mountPane();
+
+    await waitFor(() => expect(authorOf(REPOS[1]!.name)).not.toBeNull());
+    screen.getByText(
+      "This repo's author isn't configured any more. Pick another.",
+    );
+    expect(authorOf(FIRST.name)).toBeNull();
+  });
+
   it("asks the server to repoint it and reads the list again", async () => {
     const fetching = serving(
       whenever("/api/ui/repos", json(recorded(HOME.id))),

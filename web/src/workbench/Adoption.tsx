@@ -30,7 +30,12 @@ import { adoptRoadmap } from "../api/client";
 import type { Adopted, ConversationView } from "../api/types";
 import { Empty, ErrorLine, Note } from "../notices";
 import { keyOf, useDevice } from "../reaching";
-import { companionRefusal, profileRefusal } from "./Timeline";
+import {
+  authorGone,
+  authorUnpicked,
+  companionRefusal,
+  profileRefusal,
+} from "./Timeline";
 import styles from "./Adoption.module.css";
 
 /// Each way of being refused an adoption, in the words of what to go and do
@@ -95,6 +100,14 @@ export function adoptRefusal(outcome: Adopted): string {
 
     if ("ProfileBroken" in outcome) {
       return profileRefusal(outcome.ProfileBroken);
+    }
+
+    if ("RepoAuthorGone" in outcome) {
+      return authorGone(outcome.RepoAuthorGone.repo);
+    }
+
+    if ("RepoAuthorUnpicked" in outcome) {
+      return authorUnpicked(outcome.RepoAuthorUnpicked.repo);
     }
 
     if ("Misdeclared" in outcome) {

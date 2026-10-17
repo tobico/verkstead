@@ -19,7 +19,7 @@ Roadmap stage: [02: The pick on screen and the rules](docs/roadmaps/authors/02-p
 
 - [x] 01: Create repo's GitHub follows the picked Author — [details](01-create-repo-github-follows-the-pick.md)
 - [x] 02: The Repos pane shows and repoints the Author — [details](02-repos-pane-repoints-the-author.md)
-- [ ] 03: Removing an Author, and the Author that is gone — [details](03-removal-and-the-vanished-author.md)
+- [x] 03: Removing an Author, and the Author that is gone — [details](03-removal-and-the-vanished-author.md)
 - [ ] 04: Companions of another Author are refused — [details](04-companions-of-another-author.md)
 - [ ] 05: Verkstead's own git fetches as the Repo's Author — [details](05-server-git-as-the-author.md)
 - [ ] 06: The Brief names the Author — [details](06-the-brief-names-the-author.md)

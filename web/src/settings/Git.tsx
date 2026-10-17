@@ -39,7 +39,10 @@
 //! second is a quiet press under the first one's fields. Switching drops what
 //! was typed and not saved, which was about the Author being left. An Author
 //! being added is a uuid minted here, saved like any other — the server makes
-//! a new Author of a uuid it does not hold. Removing one is not here yet.
+//! a new Author of a uuid it does not hold. **Remove author** sits at the same
+//! foot, asks once on a card naming the Author, and is refused while a
+//! registered Repo points at it, the Repos named under the dropdown: their next
+//! session would have nobody to commit as (ADR-0025).
 //!
 //! Both halves read the one query. They are two views of the same two files, and
 //! a read apiece would be two reads of them — the cache is what makes the second
@@ -110,16 +113,26 @@
 //! row, with everything the human typed left exactly where they left it.
 
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
-import { Index, Match, Show, Switch, createSignal, type JSX } from "solid-js";
+import {
+  Index,
+  Match,
+  Show,
+  Switch,
+  createSignal,
+  createUniqueId,
+  type JSX,
+} from "solid-js";
 
 import { Check } from "../Check";
+import { Modal } from "../Modal";
 import { PaneSticky } from "../Panes";
 import { QuietButton } from "../QuietButton";
-import { loadSettings, saveSettings } from "../api/client";
+import { loadSettings, removeAuthor, saveSettings } from "../api/client";
 import { useReading } from "../freshness";
 import { Listbox, Picker } from "../picking";
 import type {
   Author,
+  AuthorRemoved,
   AuthorSaved,
   ConflictResolution,
   IgnoreRule,
@@ -567,6 +580,43 @@ export function GitPane(props: {
     setReplacing(false);
   };
 
+  // The Author a **Remove author** has asked about, while the card asking is
+  // up — or `null` while none is.
+  const [removing, setRemoving] = createSignal<AuthorSaved | null>(null);
+
+  // And why the last removal did not happen: the Repos still pointing at the
+  // Author, or a sentence. Nothing clears it but another press or a switch.
+  const [unremoved, setUnremoved] = createSignal<string[] | string | null>(
+    null,
+  );
+
+  const removal = useMutation(() => ({
+    mutationFn: (gone: AuthorSaved) => removeAuthor(gone.id),
+    onSuccess: (outcome: AuthorRemoved) => {
+      // Read again either way: the Author list is the files', and the Repos
+      // pane's rows are drawn against it.
+      void queries.invalidateQueries({ queryKey: ["settings"] });
+      void queries.invalidateQueries({ queryKey: ["repos"] });
+
+      if (outcome === "Removed") {
+        unedited();
+        setChosen(null);
+      } else if (outcome === "NoSuchAuthor") {
+        setUnremoved("That author isn't configured any more.");
+      } else {
+        setUnremoved(outcome.InUse.repos);
+      }
+    },
+    onError: (error: Error) =>
+      setUnremoved(`The author couldn't be removed. ${error.message}`),
+  }));
+
+  /// What **Remove author** does, which is ask rather than act.
+  const askRemoval = () => {
+    setUnremoved(null);
+    setRemoving(author() ?? null);
+  };
+
   /// Make the fields about another Author. Whatever was typed and not saved
   /// stays with the Author it was typed about, which is to say it goes: it
   /// was never written down. And an Author **Add author** opened and nobody
@@ -575,6 +625,7 @@ export function GitPane(props: {
     if (id === author()?.id) return;
 
     unedited();
+    setUnremoved(null);
     if (id !== adding()) setAdding(null);
     setChosen(id);
   };
@@ -765,8 +816,27 @@ export function GitPane(props: {
                   label={authorLabel}
                   chosen={author()?.id ?? ""}
                   pick={pick}
-                  actions={[{ label: "Add author", press: addAuthor }]}
+                  actions={[
+                    { label: "Add author", press: addAuthor },
+                    // Not for one **Add author** opened, which is nowhere
+                    // but this page: switching away is what drops it.
+                    ...(drafting()
+                      ? []
+                      : [{ label: "Remove author", press: askRemoval }]),
+                  ]}
                 />
+
+                <Show when={unremoved()}>
+                  {(why) => (
+                    <ErrorLine>
+                      {typeof why() === "string" ? (
+                        why()
+                      ) : (
+                        <InUse repos={why() as string[]} />
+                      )}
+                    </ErrorLine>
+                  )}
+                </Show>
               </section>
             </Show>
 
@@ -1075,7 +1145,81 @@ export function GitPane(props: {
           </form>
         </Match>
       </Switch>
+
+      {/* Asked before anything happens, the way a Repo's Remove is: the
+          token goes with it, and a pasted token is not shown again. */}
+      <ConfirmRemoval
+        asked={removing()}
+        keep={() => setRemoving(null)}
+        remove={() => {
+          const gone = removing();
+          setRemoving(null);
+
+          if (gone !== null) removal.mutate(gone);
+        }}
+      />
     </>
+  );
+}
+
+/// The Repos a removal was refused over, named, and what to do about them.
+function InUse(props: { repos: string[] }): JSX.Element {
+  const listed = (): string => {
+    const repos = props.repos;
+
+    if (repos.length <= 2) return repos.join(" and ");
+
+    return `${repos.slice(0, -1).join(", ")}, and ${repos[repos.length - 1]}`;
+  };
+
+  return (
+    <>
+      {listed()} {props.repos.length === 1 ? "is" : "are"} still this author's.
+      Pick another author for {props.repos.length === 1 ? "it" : "them"} under
+      Repos first, or remove {props.repos.length === 1 ? "it" : "them"}.
+    </>
+  );
+}
+
+/// What **Remove author** is answered with before anything has happened: which
+/// Author it would take out, what goes with it, and the two ways out.
+function ConfirmRemoval(props: {
+  /// The Author asked about, or `null` while nothing is being asked.
+  asked: AuthorSaved | null;
+  /// The way back, which Escape and a press on the backdrop come to as well.
+  keep: () => void;
+  /// And the removal, made.
+  remove: () => void;
+}): JSX.Element {
+  const id = createUniqueId();
+
+  return (
+    <Modal
+      class={styles.confirming!}
+      open={props.asked !== null}
+      close={props.keep}
+      labelledBy={id}
+    >
+      <p id={id} class={styles.confirmingTitle}>
+        Remove {props.asked ? authorLabel(props.asked) : ""}?
+      </p>
+      <p class={styles.confirmingWhy}>
+        Its name, email and GitHub token come out of the settings. Commits
+        already made as it stay as they are.
+      </p>
+      <div class={styles.confirmingOut}>
+        <button
+          type="button"
+          class={`${styles.secondary!} secondary`}
+          onClick={() => props.keep()}
+        >
+          Cancel
+        </button>
+        <button type="button" onClick={() => props.remove()}>
+          Remove
+        </button>
+      </div>
+    </Modal>
   );
 }
 

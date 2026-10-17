@@ -749,6 +749,26 @@ pub struct AuthorSaved {
     pub github_token: Option<TokenSaved>,
 }
 
+/// What became of removing an Author, from the Git section's switcher.
+///
+/// Refused while a registered Repo points at it (ADR-0025): its next session
+/// would have nobody to commit as. An unregistered Repo keeps the association
+/// as history and blocks nothing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum AuthorRemoved {
+    /// Out of `config.yaml`, and its token out of `secrets.yaml`.
+    Removed,
+
+    /// No Author with that uuid is configured: one removed since the page was
+    /// drawn, most likely.
+    NoSuchAuthor,
+
+    /// Registered Repos point at it, named, alphabetically as the Repos pane
+    /// lists them. Never empty.
+    InUse { repos: Vec<String> },
+}
+
 /// Everything about the Author's token that is not the token.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]

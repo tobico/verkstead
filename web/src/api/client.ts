@@ -22,6 +22,7 @@ import type {
   AskingDevice,
   Attached,
   AttachmentRemoved,
+  AuthorRemoved,
   BacklogPane,
   Locked,
   LoginState,
@@ -2217,6 +2218,14 @@ export function loadSettings(): Promise<SettingsView> {
 /// way.
 export function saveSettings(edit: SettingsEdit): Promise<SettingsSaved> {
   return post<SettingsSaved>("/api/ui/settings", edit);
+}
+
+/// Take one Author out of the settings, by its uuid: its entry and its token.
+///
+/// The outcome is the answer's body, a Repo removal's way: a registered Repo
+/// still pointing at it refuses it, naming the Repos.
+export function removeAuthor(id: string): Promise<AuthorRemoved> {
+  return post<AuthorRemoved>(`/api/ui/authors/${encodeURIComponent(id)}/remove`);
 }
 
 /// Empty every store of one language — sccache's too, for Rust.

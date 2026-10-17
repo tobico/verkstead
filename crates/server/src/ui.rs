@@ -644,6 +644,10 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // read and the save being the same page's two halves — and one save for
         // the author and the token together, because the page has one button.
         .route("/api/ui/settings", get(settings).post(save_settings))
+        // And taking one Author away, which is a press on the Git section's
+        // switcher rather than a key of a save: refused by name while a Repo
+        // points at it, the way a Repo's removal is refused under live work.
+        .route("/api/ui/authors/{id}/remove", post(remove_author))
         // Emptying one language's stores, which is an act rather than a value
         // the settings hold, so a route of its own rather than a key of a save.
         .route("/api/ui/languages/{name}/clear", post(clear_language))
@@ -1192,6 +1196,20 @@ async fn remove_repo(State(state): State<AppState>, Path(id): Path<String>) -> H
         Err(error) => {
             tracing::error!(error = ?error, repo_id = id, "removing a Repo failed");
             unavailable("The repo couldn't be removed.")
+        }
+    }
+}
+
+/// `POST /api/ui/authors/{id}/remove` — take one Author out of the settings.
+///
+/// Every refusal is a named outcome in the body, the Repo removal's way: the
+/// Repos pointing at it are what the switcher puts in words.
+async fn remove_author(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+    match crate::repos::remove_author(&state.pool, &state.settings, &id).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, author = id, "removing an Author failed");
+            unavailable("The author couldn't be removed.")
         }
     }
 }

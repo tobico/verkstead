@@ -260,12 +260,34 @@ export function companionRefusal(why: CompanionRefusal): string {
 /// thing to go and look at is one of several repos rather than the obvious one.
 export function grillRefusal(outcome: GrillingStarted): string {
   if (typeof outcome === "object") {
-    return "ProfileBroken" in outcome
-      ? profileRefusal(outcome.ProfileBroken)
-      : `${outcome.Companion.repo}: ${companionRefusal(outcome.Companion.why)}`;
+    if ("ProfileBroken" in outcome) {
+      return profileRefusal(outcome.ProfileBroken);
+    }
+
+    if ("RepoAuthorGone" in outcome) {
+      return authorGone(outcome.RepoAuthorGone.repo);
+    }
+
+    if ("RepoAuthorUnpicked" in outcome) {
+      return authorUnpicked(outcome.RepoAuthorUnpicked.repo);
+    }
+
+    return `${outcome.Companion.repo}: ${companionRefusal(outcome.Companion.why)}`;
   }
 
   return GRILL_REFUSAL[outcome];
+}
+
+/// What a press says over a repo whose author `config.yaml` no longer holds,
+/// whichever press it was — a start or an adoption — and where to pick
+/// another (ADR-0025).
+export function authorGone(repo: string): string {
+  return `The ${repo} repo's author isn't configured any more, so Verkstead can't commit on the branch. Pick another under Repos in Settings first.`;
+}
+
+/// And over one with no author picked among several.
+export function authorUnpicked(repo: string): string {
+  return `The ${repo} repo has no author picked, so Verkstead can't commit on the branch. Pick one under Repos in Settings first.`;
 }
 
 /// What to say about a press refused over a chosen profile, whichever press it

@@ -1470,6 +1470,76 @@ async function pickAuthor(label: string) {
 }
 
 describe("the authors", () => {
+  /// **Remove author** asks once, naming the Author, and sends nothing until
+  /// the card's own Remove is pressed.
+  it("asks once before removing an Author", async () => {
+    const fetching = serving(
+      whenever("/api/ui/settings", json(TWO)),
+      whenever(`/api/ui/authors/${SECOND.id}/remove`, json("Removed"), "POST"),
+    );
+    mountPane();
+    await waitFor(() => screen.getByRole("combobox", { name: "Author" }));
+
+    await pickAuthor(SECOND.name);
+    await pickAuthor("Remove author");
+
+    const asking = await waitFor(() =>
+      screen.getByRole("dialog", { name: `Remove ${SECOND.name}?` }),
+    );
+    const removals = () =>
+      fetching.mock.calls.filter(([asked]) =>
+        String(asked).endsWith("/remove"),
+      );
+    expect(removals()).toHaveLength(0);
+
+    fireEvent.click(
+      [...asking.querySelectorAll("button")].find(
+        (one) => one.textContent === "Remove",
+      )!,
+    );
+
+    await waitFor(() => expect(removals()).toHaveLength(1));
+  });
+
+  /// Refused while registered repos point at it, naming them under the
+  /// dropdown — where the human is looking when they pressed it.
+  it("names the repos a removal was refused over", async () => {
+    serving(
+      whenever("/api/ui/settings", json(TWO)),
+      whenever(
+        `/api/ui/authors/${SECOND.id}/remove`,
+        json({ InUse: { repos: ["askance", "verkstead"] } }),
+        "POST",
+      ),
+    );
+    mountPane();
+    await waitFor(() => screen.getByRole("combobox", { name: "Author" }));
+
+    await pickAuthor(SECOND.name);
+    await pickAuthor("Remove author");
+
+    const asking = await waitFor(() => screen.getByRole("dialog"));
+    fireEvent.click(
+      [...asking.querySelectorAll("button")].find(
+        (one) => one.textContent === "Remove",
+      )!,
+    );
+
+    await waitFor(() =>
+      screen.getByText(/askance and verkstead are still this author's/),
+    );
+  });
+
+  /// With one Author there is no dropdown, and so no way to remove it.
+  it("offers no removal with one Author", async () => {
+    theSettings(TOLD);
+    mountPane();
+    await waitFor(() => screen.getByLabelText("Email"));
+
+    expect(screen.queryByRole("option", { name: "Remove author" })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "Author" })).toBeNull();
+  });
+
   /// One Author is the pane as it was before there could be two: no dropdown,
   /// no display name, and only a quiet way to a second.
   it("draws no dropdown with one Author", async () => {

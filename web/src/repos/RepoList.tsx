@@ -419,6 +419,14 @@ export function ReposPane(props: {
   const authors = (): AuthorSaved[] => settings.data?.authors ?? [];
   const asked = (): boolean => authors().length > 1;
 
+  // And a row whose Author `config.yaml` no longer holds, which is drawn with
+  // one Author as well: a start on it is refused and sent here to pick
+  // another, so here is where the picker has to be (ADR-0025).
+  const gone = (repo: RepoEntry): boolean =>
+    repo.author !== null &&
+    authors().length > 0 &&
+    !authors().some(({ id }) => id === repo.author);
+
   const repoint = useMutation(() => ({
     mutationFn: (pick: Repointing) => repointRepo(pick.repo.id, pick.author),
     onSuccess: (outcome: Repointed, pick: Repointing) => {
@@ -534,8 +542,9 @@ export function ReposPane(props: {
 
                     {/* Who the Repo's work is committed and pushed as, and
                         where that is changed (ADR-0025) — drawn only once
-                        there are two Authors to be. */}
-                    <Show when={asked()}>
+                        there are two Authors to be, or where the one it
+                        records is gone. */}
+                    <Show when={asked() || gone(repo)}>
                       <RowAuthor
                         repo={repo}
                         authors={authors()}

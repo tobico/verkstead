@@ -3469,6 +3469,105 @@ async fn adopting_on_a_repo_whose_author_has_no_email_is_refused_by_name() {
     assert!(!has_branch(&repo, "roadmaps/mvp/03-implementation"));
 }
 
+/// A Repo recorded as `home`, with `home` then taken out of `config.yaml` by
+/// hand — the one way a Repo's Author goes (ADR-0025) — and `work` left.
+async fn under_a_vanished_author() -> (tempfile::TempDir, tempfile::TempDir, Router, PathBuf, i64) {
+    let (elsewhere, dir, app, repo, repo_id) =
+        under_the_second_author("    name: Tobi at Home\n    email: tobi@example.com\n").await;
+
+    std::fs::write(
+        dir.path().join(CONFIG),
+        "authors:\n  - id: work\n    name: Verkstead Test\n    email: test@verkstead.invalid\n",
+    )
+    .unwrap();
+
+    (elsewhere, dir, app, repo, repo_id)
+}
+
+/// A Repo whose Author is gone refuses a Start, a grilling's and a Tinker's
+/// alike, naming the Repo — rather than saying nobody set an author, or
+/// falling back on the Author left.
+#[tokio::test]
+async fn starting_on_a_repo_whose_author_is_gone_is_refused_naming_the_repo() {
+    for tinkering in [false, true] {
+        let (elsewhere, _dir, app, repo, repo_id) = under_a_vanished_author().await;
+        let gone = GrillingStarted::RepoAuthorGone {
+            repo: "verkstead".to_owned(),
+        };
+
+        let id = match tinkering {
+            false => ready(&app, elsewhere.path(), repo_id).await,
+            true => tinker(&app, elsewhere.path(), repo_id).await,
+        };
+        let branch = opened(&app, id).await.branch;
+
+        assert_eq!(grill(&app, id).await, gone);
+
+        let view = opened(&app, id).await;
+        assert_eq!(view.state, Lifecycle::Draft, "the press did not happen");
+        assert_eq!(view.worktree, None);
+        assert!(!has_branch(&repo, &branch));
+    }
+}
+
+/// And the same at the other door, an adoption.
+#[tokio::test]
+async fn adopting_on_a_repo_whose_author_is_gone_is_refused_naming_the_repo() {
+    let (elsewhere, _dir, app, repo, repo_id) = under_a_vanished_author().await;
+    roadmap(
+        &repo,
+        OPEN_AT_THREE,
+        &["03-implementation.md", "04-wrap-up.md"],
+    );
+
+    let id = ready_to_adopt(&app, elsewhere.path(), repo_id, "mvp").await;
+
+    assert_eq!(
+        press_adopt(&app, id).await,
+        Adopted::RepoAuthorGone {
+            repo: "verkstead".to_owned()
+        }
+    );
+    assert!(!has_branch(&repo, "roadmaps/mvp/03-implementation"));
+}
+
+/// A Repo recording no Author among two is told to pick one, by name, at
+/// both doors.
+#[tokio::test]
+async fn starting_on_a_repo_with_no_author_picked_among_two_is_refused_naming_it() {
+    let (elsewhere, dir, app, repo, repo_id) =
+        under_the_second_author("    name: Tobi at Home\n    email: tobi@example.com\n").await;
+    roadmap(
+        &repo,
+        OPEN_AT_THREE,
+        &["03-implementation.md", "04-wrap-up.md"],
+    );
+
+    // Taken back to nothing recorded, which a Repo registered before the
+    // first Author was, had the move at the start not recorded it.
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM repo_authors")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let unpicked = || "verkstead".to_owned();
+
+    let id = ready(&app, elsewhere.path(), repo_id).await;
+    assert_eq!(
+        grill(&app, id).await,
+        GrillingStarted::RepoAuthorUnpicked { repo: unpicked() }
+    );
+
+    let id = ready_to_adopt_again(&app, repo_id, "mvp").await;
+    assert_eq!(
+        press_adopt(&app, id).await,
+        Adopted::RepoAuthorUnpicked { repo: unpicked() }
+    );
+}
+
 /// A base carrying no list is started with nothing extra: no commit and no
 /// notice. The ordinary start is every start, and it must arrive holding
 /// exactly what its base held.

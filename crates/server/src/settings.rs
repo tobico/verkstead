@@ -362,6 +362,36 @@ impl Settings {
         Ok(minted)
     }
 
+    /// Take the Author whose uuid is `id` out of `config.yaml`, and its token
+    /// out of `secrets.yaml` — `false` where the file holds no such Author and
+    /// nothing was written.
+    ///
+    /// Whether anything still points at it is the caller's to ask first — see
+    /// [`crate::repos::remove_author`]: these two files know nothing of the
+    /// Repos. `config.yaml` first, so that stopping between the writes leaves
+    /// a token under a uuid nobody holds, which nothing reads, rather than an
+    /// Author whose token has gone. **A file nothing can parse is an error**
+    /// rather than an Author missing from it: written back from nothing, it
+    /// would lose whatever the human meant by it.
+    pub fn removing_author(&self, id: &str) -> std::io::Result<bool> {
+        let unparsed = || std::io::Error::other("a settings file won't parse");
+
+        let config = Self::parsed(&self.config_path(), Config::read).ok_or_else(unparsed)?;
+        let secrets = Self::parsed(&self.secrets_path(), Secrets::read).ok_or_else(unparsed)?;
+
+        if config.author(id).is_none() {
+            return Ok(false);
+        }
+
+        self.save_config(&config.without_author(id))?;
+
+        if secrets.author_token(id).is_some() {
+            self.save_secrets(&secrets.with_author_token(id, None))?;
+        }
+
+        Ok(true)
+    }
+
     /// What the settings file at `path` says read by `read`, nothing written
     /// counting as the empty file — or `None` where it will not parse.
     fn parsed<T: Default>(
@@ -1160,6 +1190,33 @@ impl Config {
         }
     }
 
+    /// Why a Repo recorded as `recorded` has no Author at all, where the
+    /// reason is the Repo's record rather than an Author's fields: a uuid no
+    /// Author in this file holds any more, or none recorded among several.
+    /// `None` where [`Config::author_of`] finds one, and where no Author is
+    /// configured at all: there is nobody to pick instead, and what every door
+    /// already says — that no git author is set — is the whole of it.
+    ///
+    /// Asked at every door that commits as the Repo's Author, so that a hand
+    /// edit of this file is named for what it is rather than read as nobody
+    /// having set an author (ADR-0025). Falling back to the first Author was
+    /// turned down there.
+    pub fn author_missing(&self, recorded: Option<&str>) -> Option<Unauthored> {
+        match (recorded, self.authors.len()) {
+            (_, 0) => None,
+            (Some(id), _) if self.author(id).is_none() => Some(Unauthored::Gone),
+            (None, several) if several > 1 => Some(Unauthored::Unpicked),
+            _ => None,
+        }
+    }
+
+    /// And the same config with the Author whose uuid is `id` taken out, every
+    /// other key as it was — see [`Settings::removing_author`].
+    pub fn without_author(mut self, id: &str) -> Config {
+        self.authors.retain(|author| author.id != id);
+        self
+    }
+
     /// And what this file says about the languages: the map an installer
     /// writes, with `rust_build_cache` read underneath it as Rust's `enabled`
     /// and `size`.
@@ -1693,6 +1750,18 @@ impl GitAuthor {
     pub fn email(&self) -> Option<&str> {
         self.email.as_deref()
     }
+}
+
+/// Why a Repo has no Author to commit and push as, where the reason is the
+/// Repo's own record — see [`Config::author_missing`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Unauthored {
+    /// It records a uuid no configured Author holds: one removed from
+    /// `config.yaml` by hand.
+    Gone,
+
+    /// It records none, and there is more than one Author it could be.
+    Unpicked,
 }
 
 /// Who a Repo's work is committed and pushed as: a git name, an email and —
@@ -2425,7 +2494,7 @@ mod tests {
     use super::{
         AtOnce, AttachedServer, Author, Cleanup, CleanupStep, Config, ConflictResolution,
         GitAuthor, HeaderValue, IgnoreRule, Languages, McpServer, RuleTrouble, Secrets,
-        ServerTrouble, Settings, Signature, trouble_among,
+        ServerTrouble, Settings, Signature, Unauthored, trouble_among,
     };
 
     /// The Author the tests here write and read back, keyed `work` — any
@@ -2787,6 +2856,90 @@ mod tests {
         assert_eq!(one.author_of(None).map(Author::id), Some("work"));
 
         assert!(Config::default().author_of(None).is_none());
+    }
+
+    /// A Repo with no Author says why when the reason is its own record: a
+    /// uuid nobody holds, or none among several. With an Author found, or none
+    /// configured at all, there is nothing of the Repo's to name.
+    #[test]
+    fn a_repo_without_an_author_says_whether_it_is_gone_or_unpicked() {
+        let two = Config::read(concat!(
+            "authors:\n",
+            "  - id: work\n",
+            "    name: Tobias Cohen\n",
+            "  - id: home\n",
+            "    name: Tobi\n",
+        ))
+        .unwrap();
+
+        assert_eq!(two.author_missing(Some("gone")), Some(Unauthored::Gone));
+        assert_eq!(two.author_missing(None), Some(Unauthored::Unpicked));
+        assert_eq!(two.author_missing(Some("home")), None);
+
+        let one = Config::read("authors:\n  - id: work\n").unwrap();
+        assert_eq!(one.author_missing(Some("gone")), Some(Unauthored::Gone));
+        assert_eq!(one.author_missing(None), None, "the only one is its");
+
+        assert_eq!(Config::default().author_missing(None), None);
+        assert_eq!(
+            Config::default().author_missing(Some("gone")),
+            None,
+            "with nobody configured there is nobody to pick instead"
+        );
+    }
+
+    /// Removing an Author takes its entry and its token and nothing else out
+    /// of either file, and one the file does not hold writes nothing.
+    #[test]
+    fn removing_an_author_takes_its_entry_and_its_token() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+
+        std::fs::write(
+            settings.config_path(),
+            concat!(
+                "authors:\n",
+                "  - id: work\n",
+                "    name: Tobias Cohen\n",
+                "  - id: home\n",
+                "    name: Tobi\n",
+                "share_on_done: true\n",
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            settings.secrets_path(),
+            "author_tokens:\n  work: ghp_work\n  home: ghp_home\n",
+        )
+        .unwrap();
+
+        assert!(settings.removing_author("home").unwrap());
+
+        let config = settings.config();
+        let ids: Vec<_> = config.authors().iter().map(Author::id).collect();
+        assert_eq!(ids, ["work"]);
+        assert!(config.share_on_done(), "the rest of the file stands");
+
+        let secrets = settings.secrets();
+        assert_eq!(secrets.author_token("home"), None);
+        assert_eq!(secrets.author_token("work"), Some("ghp_work"));
+
+        assert!(!settings.removing_author("home").unwrap(), "already gone");
+    }
+
+    /// A `config.yaml` nothing can parse is not written over by a removal.
+    #[test]
+    fn removing_an_author_from_a_file_nothing_can_parse_is_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+
+        std::fs::write(settings.config_path(), "authors: [oh\n").unwrap();
+
+        assert!(settings.removing_author("work").is_err());
+        assert_eq!(
+            std::fs::read_to_string(settings.config_path()).unwrap(),
+            "authors: [oh\n"
+        );
     }
 
     #[test]

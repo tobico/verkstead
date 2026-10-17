@@ -309,3 +309,52 @@
     border-color: var(--removed);
   }
 }
+
+/* The card Remove author is answered with, the shape the Repos pane's Remove
+   takes. */
+.confirming .confirmingTitle {
+  margin-top: 0;
+  font-weight: 600;
+}
+
+.confirming .confirmingWhy {
+  margin: 0.75rem 0 0;
+  color: var(--ink-soft);
+}
+
+.confirming .confirmingOut {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: 1rem;
+}
+
+/* The shape both of them take, which is this row's own. Said for both and over
+   `.secondary`, which is the paint rather than the shape. */
+.confirming .confirmingOut button {
+  flex: 1 1 9rem;
+  padding: 0.7rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  border-radius: 0.5rem;
+  cursor: pointer;
+}
+
+/* And the press that does the thing, filled. The way back beside it is a
+   secondary press like every other in the app — `.secondary` in
+   `styles/base.css` paints it — and it is stood out of the way with `:where`,
+   which weighs nothing: a bare `:not` would carry its class into this
+   selector's weight, and a rule written to sit over this press would find itself
+   under it instead. */
+.confirming .confirmingOut button:not(:where(.secondary)) {
+  color: var(--paper);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+}
+
+@media (hover: hover) {
+  .confirming .confirmingOut button:not(:where(.secondary)):hover {
+    background: var(--accent-deep);
+    border-color: var(--accent-deep);
+  }
+}

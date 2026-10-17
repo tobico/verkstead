@@ -55,7 +55,7 @@ use crate::boundaries;
 
 use crate::handoffs::Handoffs;
 use crate::repos::git;
-use crate::settings::{Author, Signature};
+use crate::settings::{Author, Signature, Unauthored};
 use crate::skills;
 use crate::stages::Startable;
 use crate::store;
@@ -1385,6 +1385,17 @@ pub(crate) async fn rename_companion_branch(
     )
 }
 
+/// A start refused because the Repo called `repo` has no Author of its own to
+/// commit as — see [`crate::settings::Config::author_missing`].
+fn unauthored_start(why: Unauthored, repo: &str) -> GrillingStarted {
+    let repo = repo.to_owned();
+
+    match why {
+        Unauthored::Gone => GrillingStarted::RepoAuthorGone { repo },
+        Unauthored::Unpicked => GrillingStarted::RepoAuthorUnpicked { repo },
+    }
+}
+
 /// Give a drafting Conversation somewhere to work: a branch off its base commit
 /// and a worktree of its Repo, and the move onto the Timeline that says so.
 ///
@@ -1535,12 +1546,16 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     // author configured is a misconfiguration to name rather than a case to work
     // around.
     //
-    // The Repo's Author, which is who everything on its branches is by.
-    let author = state
-        .settings
-        .config()
+    // The Repo's Author, which is who everything on its branches is by — and,
+    // where it has none, whether that is its own record's doing, which is
+    // refused by name in the same place.
+    let config = state.settings.config();
+    let author = config
         .author_of(conversation.repo.author.as_deref())
         .and_then(Author::configured);
+    let unauthored = config
+        .author_missing(conversation.repo.author.as_deref())
+        .map(|why| unauthored_start(why, &conversation.repo.name));
 
     // What the work branches from, resolved here and nowhere earlier: what the
     // human picked is a branch, and what they meant by picking it is wherever it
@@ -1605,6 +1620,10 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
             // an author is wanted. Before the fetch, which is the first thing
             // that costs anything, and before the name is chosen: nothing has
             // been made yet, so the refusal leaves nothing behind.
+            if let Some(refusal) = unauthored {
+                return Err(refusal);
+            }
+
             let Some(author) = author else {
                 return Err(GrillingStarted::NoGitAuthor);
             };
@@ -2403,6 +2422,16 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
     // [`start_grilling`] asks it here: after the record and the Profiles, and
     // before anything that costs a git call.
     let config = state.settings.config();
+
+    // Named first where the reason is the Repo's own record, for the reason
+    // [`start_grilling`] names it first.
+    let repo = || conversation.repo.name.clone();
+
+    match config.author_missing(conversation.repo.author.as_deref()) {
+        Some(Unauthored::Gone) => return Ok(Adopted::RepoAuthorGone { repo: repo() }),
+        Some(Unauthored::Unpicked) => return Ok(Adopted::RepoAuthorUnpicked { repo: repo() }),
+        None => {}
+    }
 
     let Some(author) = config
         .author_of(conversation.repo.author.as_deref())

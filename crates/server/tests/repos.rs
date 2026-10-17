@@ -38,7 +38,9 @@ use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
-use verkstead_render::{Created, Registered, RepoEntry, RepoRemoved, RepoView, Repointed};
+use verkstead_render::{
+    AuthorRemoved, Created, Registered, RepoEntry, RepoRemoved, RepoView, Repointed,
+};
 use verkstead_server::settings::Settings;
 use verkstead_server::{Gh, open_database, router_asking_github, router_keeping, store};
 
@@ -1577,4 +1579,75 @@ async fn a_repoint_names_a_configured_author_and_a_registered_repo() {
         Repointed::NoSuchRepo
     );
     assert_eq!(listed(&app).await[0].author.as_deref(), Some("work"));
+}
+
+/// Ask for the Author with the uuid `id` to be removed, as the Git section's
+/// switcher does.
+async fn remove_author(app: &Router, id: &str) -> AuthorRemoved {
+    post(
+        app,
+        &format!("/api/ui/authors/{id}/remove"),
+        &serde_json::Value::Null,
+    )
+    .await
+}
+
+/// An Author two registered Repos point at is refused removal naming both;
+/// once both are unregistered — their association kept as history — it goes,
+/// and its token with it.
+#[tokio::test]
+async fn an_author_repos_point_at_is_refused_removal_naming_them() {
+    let src = tempfile::tempdir().unwrap();
+    let (dir, app) = workbench().await;
+    two_authors(&dir);
+    std::fs::write(
+        dir.path().join("secrets.yaml"),
+        "author_tokens:\n  work: ghp_work\n  personal: ghp_personal\n",
+    )
+    .unwrap();
+
+    let askance =
+        added(register_as(&app, &repository(src.path().join("askance")), "personal").await);
+    let verkstead =
+        added(register_as(&app, &repository(src.path().join("verkstead")), "personal").await);
+    added(register_as(&app, &repository(src.path().join("other")), "work").await);
+
+    assert_eq!(
+        remove_author(&app, "personal").await,
+        AuthorRemoved::InUse {
+            repos: vec!["askance".to_owned(), "verkstead".to_owned()],
+        },
+    );
+    assert!(
+        Settings::in_data_dir(dir.path())
+            .config()
+            .author("personal")
+            .is_some(),
+        "nothing was removed",
+    );
+
+    assert_eq!(remove(&app, askance.id).await, RepoRemoved::Removed);
+    assert_eq!(remove(&app, verkstead.id).await, RepoRemoved::Removed);
+
+    assert_eq!(
+        remove_author(&app, "personal").await,
+        AuthorRemoved::Removed
+    );
+
+    let settings = Settings::in_data_dir(dir.path());
+    assert!(settings.config().author("personal").is_none());
+    assert!(settings.config().author("work").is_some());
+    assert_eq!(settings.secrets().author_token("personal"), None);
+    assert_eq!(settings.secrets().author_token("work"), Some("ghp_work"));
+    assert!(
+        !std::fs::read_to_string(settings.secrets_path())
+            .unwrap()
+            .contains("ghp_personal"),
+        "the token is gone from the file",
+    );
+
+    assert_eq!(
+        remove_author(&app, "personal").await,
+        AuthorRemoved::NoSuchAuthor
+    );
 }
