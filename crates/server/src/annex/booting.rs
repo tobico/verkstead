@@ -23,6 +23,14 @@
 //! up the dial finds nothing, and the first one that gets through is the
 //! answer.
 //!
+//! **And pinned to the Keeper's own release before it is linked**, where its
+//! flake says another: the files written again, the Verkstead inputs alone
+//! relocked, and the box rebuilt, all before the link puts it to use — so the
+//! rebuild, which restarts the Annex's server, never lands on live work. The
+//! Components row reads *updating* meanwhile. A re-pin that fails leaves the
+//! box on its old release with the line on its row, and the next start tries
+//! again — see [`super::pinning`].
+//!
 //! **And the release its flake pins read back once it is up**, and held for
 //! the Components row: what the box runs is said of a stopped one too, and
 //! nothing is booted to say it — see [`Annexed::reading`].
@@ -45,7 +53,8 @@ use std::time::Duration;
 use anyhow::{Context, bail};
 use verkstead_render::{AnnexComponent, AnnexState};
 
-use super::{Backend, DATA_DIR, Inside, Probed, flake};
+use super::flake::Binary;
+use super::{Backend, DATA_DIR, Inside, Probed, flake, pinning};
 use crate::device::{AnnexData, CERTIFICATE_FILE, Devices};
 use crate::settings::{Config, KeptBy};
 
@@ -69,9 +78,17 @@ pub struct Annexed {
     /// How long the box has to come up — [`BOOT_TIME`], but for a suite.
     patience: Duration,
 
+    /// The binary the box is to run, which is what it is pinned to — see
+    /// [`pinning::stale`].
+    binary: Binary,
+
     /// Whether this start booted the box, which is what says there is one to
     /// terminate at the stop.
     booted: AtomicBool,
+
+    /// Whether the box is being re-pinned and rebuilt at this moment, which the
+    /// Components row reads as *updating*.
+    updating: AtomicBool,
 
     /// The release the box is pinned to, read off its flake when this start
     /// booted it and held from then on — so the Components row says it of a
@@ -86,7 +103,9 @@ impl Annexed {
         Annexed {
             annex,
             patience: BOOT_TIME,
+            binary: Binary::Released,
             booted: AtomicBool::new(false),
+            updating: AtomicBool::new(false),
             pinned: Mutex::new(None),
         }
     }
@@ -95,6 +114,12 @@ impl Annexed {
     /// [`BOOT_TIME`] — a suite's box that never will.
     pub fn waiting(self, patience: Duration) -> Annexed {
         Annexed { patience, ..self }
+    }
+
+    /// The same, the box running `binary` rather than the release's — what
+    /// [`flake::ANNEX_BINARY`] names in a development build.
+    pub fn running(self, binary: Binary) -> Annexed {
+        Annexed { binary, ..self }
     }
 
     /// Boot the box where there is one, and link it — see the module's docs.
@@ -142,6 +167,10 @@ impl Annexed {
             .await
             .unwrap_or(super::Networking::Nat);
 
+        // Pinned to this Keeper's release before anything is linked to it, and
+        // what failed held to stay on its row once the link has come up.
+        let repinning = self.repinned().await;
+
         self.read_pinned().await;
 
         let port = devices.keeping().port;
@@ -157,7 +186,7 @@ impl Annexed {
                         keeper_at = %addresses.keeper_at,
                         "this device's Annex is up and linked",
                     );
-                    devices.annex_troubled(None);
+                    devices.annex_troubled(repinning);
                     return Ok(true);
                 }
                 Err(why) => why,
@@ -191,6 +220,72 @@ impl Annexed {
         Err(line)
     }
 
+    /// The box, booted, pinned to this Keeper's release where it is pinned to
+    /// another — see [`pinning`] — with the Components row reading *updating*
+    /// while it is. `None` where it is pinned to this release already or now,
+    /// and otherwise the line for the Annex's row.
+    ///
+    /// The rebuild's last lines go to the log, and the last of them to the
+    /// row: what `nix` says about a build that failed is at the end.
+    async fn repinned(&self) -> Option<String> {
+        let system = flake::system(&crate::platform::hostname(), &self.binary);
+
+        let stale = {
+            let annex = self.annex.clone();
+            let system = system.clone();
+            let binary = self.binary.clone();
+
+            tokio::task::spawn_blocking(move || pinning::stale(annex.as_ref(), &system, &binary))
+                .await
+                .unwrap_or(false)
+        };
+
+        if !stale {
+            return None;
+        }
+
+        tracing::info!(
+            release = flake::VERSION,
+            "this device's Annex is pinned to another release, so it is being pinned to this one and rebuilt",
+        );
+
+        self.updating.store(true, Ordering::SeqCst);
+
+        let annex = self.annex.clone();
+        let binary = self.binary.clone();
+        let repinned = tokio::task::spawn_blocking(move || {
+            pinning::repinned(annex.as_ref(), &system, &binary, &mut |line| {
+                tracing::debug!(line, "the Annex's rebuild");
+            })
+        })
+        .await;
+
+        self.updating.store(false, Ordering::SeqCst);
+
+        match repinned
+            .map_err(anyhow::Error::from)
+            .and_then(|repinned| repinned)
+        {
+            Ok(()) => {
+                tracing::info!(
+                    release = flake::VERSION,
+                    "this device's Annex is pinned to this release"
+                );
+                None
+            }
+            Err(why) => {
+                let why = format!("{why:#}");
+                tracing::warn!(%why, "this device's Annex could not be pinned to this release, and runs the one it ran");
+
+                let last = why.lines().rfind(|line| !line.trim().is_empty());
+                Some(sentence(
+                    "The annex couldn't be updated",
+                    last.unwrap_or_default(),
+                ))
+            }
+        }
+    }
+
     /// Read the release the box's flake pins and hold it, for the Components
     /// row to draw from then on. A flake that will not be read, or names no
     /// release, leaves what was held: the version is the row's, and a box that
@@ -215,14 +310,12 @@ impl Annexed {
     /// image — none of which boots it — and `trouble`, the line its Devices row
     /// carries.
     ///
-    /// **Blocks**, the probe being `wsl.exe` run twice.
+    /// **Blocks**, the probe being `wsl.exe` run twice — and not at all while
+    /// the box is being re-pinned, which is what it reads as then.
     pub fn reading(&self, trouble: Option<String>) -> AnnexComponent {
-        let state = match self.annex.probe() {
-            Probed::NoWsl | Probed::NoDistro => AnnexState::NotInstalled,
-            Probed::NeedsRestart => AnnexState::NeedsRestart,
-            Probed::VirtualizationOff => AnnexState::VirtualizationOff,
-            Probed::Present { running: true } => AnnexState::Running,
-            Probed::Present { running: false } => AnnexState::Stopped,
+        let state = match self.updating.load(Ordering::SeqCst) {
+            true => AnnexState::Updating,
+            false => self.probed(),
         };
 
         AnnexComponent {
@@ -230,6 +323,17 @@ impl Annexed {
             version: self.pinned.lock().expect("never poisoned").clone(),
             disk: self.annex.taken(),
             trouble,
+        }
+    }
+
+    /// The row's state, as the backend's probe says it.
+    fn probed(&self) -> AnnexState {
+        match self.annex.probe() {
+            Probed::NoWsl | Probed::NoDistro => AnnexState::NotInstalled,
+            Probed::NeedsRestart => AnnexState::NeedsRestart,
+            Probed::VirtualizationOff => AnnexState::VirtualizationOff,
+            Probed::Present { running: true } => AnnexState::Running,
+            Probed::Present { running: false } => AnnexState::Stopped,
         }
     }
 
@@ -489,6 +593,83 @@ mod tests {
             calls[1..],
             [probing.clone(), probing].concat(),
             "nothing run inside"
+        );
+    }
+
+    /// A development build's binary, named the way [`flake::ANNEX_BINARY`]
+    /// names one, and the flake a box running it is pinned with.
+    fn development_build(dir: &std::path::Path) -> (Binary, String) {
+        let path = dir.join("verkstead");
+        std::fs::write(&path, b"a Linux build").unwrap();
+        let binary = Binary::Copied(path);
+
+        let flake = flake::system("winvm", &binary).flake;
+        (binary, flake)
+    }
+
+    /// A development build whose binary has changed since the box was
+    /// rebuilt copies it in and rebuilds, though the flake is the same.
+    #[tokio::test]
+    async fn a_development_builds_changed_binary_is_copied_in_and_rebuilt() {
+        let (backend, wsl, _powershell) = made();
+        let (binary, pinned) = development_build(wsl.dir.path());
+
+        wsl.answers(1, &pinned, 0)
+            .answers(2, format!("{}  /etc/nixos/verkstead\n", "0".repeat(64)), 0)
+            .answers(3, &pinned, 0);
+
+        let annexed = annexed(backend);
+        let annexed = annexed.running(binary);
+
+        assert_eq!(annexed.repinned().await, None);
+
+        let calls = wsl.calls();
+        let written = |mode: &str, path: &str| {
+            inside("root", &["install", "-D", "-m", mode, "/dev/stdin", path])
+        };
+
+        assert!(
+            calls.contains(&written("755", "/etc/nixos/verkstead")),
+            "{calls:?}"
+        );
+        assert_eq!(
+            calls.last(),
+            Some(&inside(
+                "root",
+                &[
+                    "NIX_CONFIG=experimental-features = nix-command flakes",
+                    "nixos-rebuild",
+                    "switch",
+                    "--flake",
+                    "/etc/nixos#verkstead",
+                ],
+            ))
+        );
+    }
+
+    /// And one whose binary is the one in the box already rebuilds nothing.
+    #[tokio::test]
+    async fn a_development_builds_unchanged_binary_rebuilds_nothing() {
+        let (backend, wsl, _powershell) = made();
+        let (binary, pinned) = development_build(wsl.dir.path());
+        let Binary::Copied(path) = &binary else {
+            unreachable!()
+        };
+        let digest = crate::annex::image::digest_of(path).unwrap();
+
+        wsl.answers(1, &pinned, 0)
+            .answers(2, format!("{digest}  /etc/nixos/verkstead\n"), 0);
+
+        let annexed = annexed(backend);
+        let annexed = annexed.running(binary);
+
+        assert_eq!(annexed.repinned().await, None);
+        assert_eq!(
+            wsl.calls(),
+            [
+                inside("root", &["cat", "--", "/etc/nixos/flake.nix"]),
+                inside("root", &["sha256sum", "--", "/etc/nixos/verkstead"]),
+            ]
         );
     }
 

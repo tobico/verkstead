@@ -20,7 +20,8 @@
 //! at all. The release tag still supplies the module.
 //!
 //! Nothing here touches the box: what puts these files in it is the wizard's
-//! install run, through [`super::Backend::run`].
+//! install run, through [`super::Backend::run`], and the re-pin at the
+//! Keeper's start — see [`super::pinning`].
 
 use std::path::PathBuf;
 
@@ -51,9 +52,21 @@ pub const REPOS: &str = "/srv/repos";
 /// The Keeper's own version, which the box is pinned to.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// The directory of the box the flake, its lock, its configuration and a
+/// development build's binary are in.
+pub const NIXOS: &str = "/etc/nixos";
+
 /// Where the flake is in the box, which is where the release it is pinned to
 /// is read back from — see [`pinned`].
 pub const IN_THE_BOX: &str = "/etc/nixos/flake.nix";
+
+/// And its configuration, and the lock its first rebuild wrote beside it.
+pub const CONFIGURATION_IN_THE_BOX: &str = "/etc/nixos/configuration.nix";
+pub const LOCK_IN_THE_BOX: &str = "/etc/nixos/flake.lock";
+
+/// And where a development build's binary is copied to — see
+/// [`Binary::Copied`].
+pub const COPIED_IN_THE_BOX: &str = "/etc/nixos/verkstead";
 
 /// What the `verkstead` input's url is up to the tag — see [`pinned`].
 const RELEASE_URL: &str = "github:tobico/verkstead/v";
@@ -120,8 +133,38 @@ pub struct Written {
     pub secrets: String,
 }
 
+/// The two `.nix` files alone, which are what a re-pin writes again — see
+/// [`super::pinning`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct System {
+    /// `/etc/nixos/flake.nix`.
+    pub flake: String,
+
+    /// `/etc/nixos/configuration.nix`.
+    pub configuration: String,
+}
+
 /// The files that make `keeper`'s Annex, running `binary`.
 pub fn written(keeper: &Keeper, binary: &Binary) -> std::io::Result<Written> {
+    let System {
+        flake,
+        configuration,
+    } = system(keeper.hostname, binary);
+
+    let config = Config::of_an_annex(keeper.kept_by.clone()).text()?;
+    let secrets = Secrets::default().text()?;
+
+    Ok(Written {
+        flake,
+        configuration,
+        config,
+        secrets,
+    })
+}
+
+/// The flake that pins the box to this Keeper's release running `binary`, and
+/// the configuration that names it after `hostname`.
+pub fn system(hostname: &str, binary: &Binary) -> System {
     let (binary_input, binary) = match binary {
         Binary::Released => (
             format!(
@@ -152,7 +195,7 @@ pub fn written(keeper: &Keeper, binary: &Binary) -> std::io::Result<Written> {
     let configuration = filled(
         CONFIGURATION_NIX,
         &[
-            ("hostName", &host_name(keeper.hostname)),
+            ("hostName", &host_name(hostname)),
             ("listen", &format!("127.0.0.1:{ANNEX_WORKBENCH_PORT}")),
             ("peerListen", &format!("0.0.0.0:{ANNEX_PEER_PORT}")),
             ("repos", REPOS),
@@ -160,15 +203,20 @@ pub fn written(keeper: &Keeper, binary: &Binary) -> std::io::Result<Written> {
         ],
     );
 
-    let config = Config::of_an_annex(keeper.kept_by.clone()).text()?;
-    let secrets = Secrets::default().text()?;
-
-    Ok(Written {
+    System {
         flake,
         configuration,
-        config,
-        secrets,
-    })
+    }
+}
+
+/// The inputs that are Verkstead's in a flake [`system`] wrote for `binary`:
+/// the release's module, and its binary where the flake fetches one. These are
+/// what a re-pin moves in the lock, and nothing else.
+pub fn verksteads(binary: &Binary) -> &'static [&'static str] {
+    match binary {
+        Binary::Released => &["verkstead", "verkstead-binary"],
+        Binary::Copied(_) => &["verkstead"],
+    }
 }
 
 /// The release a flake this module wrote pins the box to: its `verkstead`

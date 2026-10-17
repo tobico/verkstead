@@ -21,6 +21,7 @@ use std::process::{ExitStatus, Output};
 pub mod booting;
 pub mod flake;
 pub mod image;
+pub mod pinning;
 pub mod wsl;
 
 /// The port an Annex's **Peer Listener** binds, never the Keeper's 8423.

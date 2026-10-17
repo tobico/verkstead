@@ -128,7 +128,7 @@ async fn checksum(client: &reqwest::Client, image: &Image) -> anyhow::Result<Str
 }
 
 /// The SHA-256 of the file at `path`, as lower-case hex.
-fn digest_of(path: &Path) -> anyhow::Result<String> {
+pub(crate) fn digest_of(path: &Path) -> anyhow::Result<String> {
     let mut file = std::fs::File::open(path)
         .with_context(|| format!("Verkstead couldn't read {}", path.display()))?;
     let mut hasher = Sha256::new();
