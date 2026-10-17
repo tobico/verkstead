@@ -2053,6 +2053,7 @@ async fn plan(
 
     let planned = tokio::task::spawn_blocking({
         let branch = branch.clone();
+        let gh = state.github.clone();
 
         move || {
             // The name before anything else, the directory being named for it.
@@ -2106,7 +2107,7 @@ async fn plan(
                     .collect();
 
                 checkouts.push(alongside(
-                    &data_dir, id, &branch, joining, companion, &claimed,
+                    &data_dir, &gh, id, &branch, joining, companion, &claimed,
                 )?);
             }
 
@@ -2165,6 +2166,7 @@ async fn plan(
 /// companion refuse without having made another.
 fn alongside(
     data: &Path,
+    gh: &crate::github::Gh,
     id: i64,
     branch: &str,
     joining: Joining,
@@ -2210,7 +2212,10 @@ fn alongside(
         Joining::Added | Joining::Recorded => None,
     };
 
-    if let crate::worktrees::Fetched::Failed(said) = crate::worktrees::fetch(&repo) {
+    // As the companion's own Author, whose token reaches it.
+    let credential = gh.as_author(companion.repo.author.as_deref()).credential();
+
+    if let crate::worktrees::Fetched::Failed(said) = crate::worktrees::fetch(&repo, &credential) {
         tracing::error!(
             said,
             repo = %repo.display(),

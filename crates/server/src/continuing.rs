@@ -164,6 +164,7 @@ use std::path::{Path, PathBuf};
 use verkstead_schema::{Direction, Nudge};
 
 use crate::AppState;
+use crate::github::{Credential, Gh};
 use crate::settings::{Author, Config, Signature, Unauthored};
 use crate::stages::{self, Next, Stage};
 use crate::store;
@@ -1012,8 +1013,9 @@ async fn start(
     let stands = tokio::task::spawn_blocking({
         let repo = repo.clone();
         let default = conversation.repo.default_branch.clone();
+        let gh = state.github.as_author(conversation.repo.author.as_deref());
 
-        move || standing(&repo, &default, &base, stacks)
+        move || standing(&repo, &gh.credential(), &default, &base, stacks)
     })
     .await;
 
@@ -1108,6 +1110,7 @@ async fn start(
         let companions = conversation.companions.clone();
         let base = cut_from.clone();
         let checkouts = state.checkouts.clone();
+        let gh = state.github.clone();
 
         move || {
             let Some(commit) = worktrees::resolve(&repo, &from) else {
@@ -1134,6 +1137,7 @@ async fn start(
 
                 planned.push(beside(
                     &data,
+                    &gh,
                     id,
                     &branch,
                     base.as_deref(),
@@ -1387,14 +1391,20 @@ impl Stands {
 ///
 /// Blocking, and called on a borrowed thread: a fetch has no deadline to answer
 /// within.
-fn standing(repo: &Path, default: &str, base: &str, stacks: bool) -> Option<Stands> {
+fn standing(
+    repo: &Path,
+    credential: &Credential,
+    default: &str,
+    base: &str,
+    stacks: bool,
+) -> Option<Stands> {
     if stacks {
         return Some(Stands::Recorded {
             base: base.to_owned(),
         });
     }
 
-    if let worktrees::Fetched::Failed(said) = worktrees::fetch(repo) {
+    if let worktrees::Fetched::Failed(said) = worktrees::fetch(repo, credential) {
         tracing::error!(
             said,
             repo = %repo.display(),
@@ -1605,6 +1615,7 @@ impl Why {
 /// companion start without having checked out another.
 fn beside(
     data: &Path,
+    gh: &Gh,
     id: i64,
     branch: &str,
     base: Option<&str>,
@@ -1636,7 +1647,10 @@ fn beside(
     let named = match &cut_from {
         Some(cut_from) => cut_from.clone(),
         None => {
-            if let worktrees::Fetched::Failed(said) = worktrees::fetch(&repo) {
+            // As the companion's own Author, whose token reaches it.
+            let credential = gh.as_author(companion.repo.author.as_deref()).credential();
+
+            if let worktrees::Fetched::Failed(said) = worktrees::fetch(&repo, &credential) {
                 tracing::error!(
                     said,
                     repo = %repo.display(),
@@ -2201,8 +2215,14 @@ mod tests {
 
         /// Where the stage's branch starts, as [`start`] asks it.
         fn stands(&self, stacks: bool) -> Stands {
-            standing(self.path(), "main", "roadmap/01-first", stacks)
-                .expect("a repository with no remote has nothing to fail to fetch")
+            standing(
+                self.path(),
+                &Credential::host(),
+                "main",
+                "roadmap/01-first",
+                stacks,
+            )
+            .expect("a repository with no remote has nothing to fail to fetch")
         }
     }
 
@@ -2358,10 +2378,26 @@ mod tests {
             &["remote", "add", "origin", "/verkstead/no/such/repository"],
         );
 
-        assert!(standing(repo.path(), "main", "roadmap/01-first", false).is_none());
+        assert!(
+            standing(
+                repo.path(),
+                &Credential::host(),
+                "main",
+                "roadmap/01-first",
+                false
+            )
+            .is_none()
+        );
 
         assert!(
-            standing(repo.path(), "main", "roadmap/01-first", true).is_some(),
+            standing(
+                repo.path(),
+                &Credential::host(),
+                "main",
+                "roadmap/01-first",
+                true
+            )
+            .is_some(),
             "and a recorded stack is never refused for it, having asked for no fetch",
         );
     }
@@ -2373,7 +2409,13 @@ mod tests {
         let repo = Repo::new();
 
         assert!(matches!(
-            standing(repo.path(), "main", "roadmap/no-such-branch", false),
+            standing(
+                repo.path(),
+                &Credential::host(),
+                "main",
+                "roadmap/no-such-branch",
+                false
+            ),
             Some(Stands::Off { .. }),
         ));
     }

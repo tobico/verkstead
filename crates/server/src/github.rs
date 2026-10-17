@@ -51,6 +51,76 @@ use crate::settings::Settings;
 use crate::store;
 use crate::unseen::Unseen;
 
+/// What a git of Verkstead's own presents to a remote: an Author's token, or
+/// nothing at all, which leaves git to the host's own credentials.
+///
+/// Every git that reaches a remote on a Repo goes through this — the fetch
+/// before a cut, the fetch that draws a page, the checks' `ls-remote` and a
+/// share's clone and push — so that a private repository under the second
+/// Author's account is fetched as that Author, exactly as `gh` already asks
+/// about it. See [`Gh::credential`].
+#[derive(Clone)]
+pub(crate) struct Credential(Option<String>);
+
+impl Credential {
+    /// The host's own, which is what an Author with no token leaves git to:
+    /// nothing is overridden, exactly as before there were Authors.
+    #[cfg(test)]
+    pub(crate) fn host() -> Credential {
+        Credential(None)
+    }
+
+    /// This token and no other — see [`crate::publishing`], which has read one
+    /// itself.
+    pub(crate) fn token(token: &str) -> Credential {
+        Credential(Some(token.to_owned()))
+    }
+
+    /// Have `git` authenticate as it, and never stop to ask.
+    ///
+    /// **The token goes through the environment.** The helper is a shell
+    /// function that reads `GH_TOKEN`, so what appears in the process list is
+    /// the shape of the helper and never the credential — which is exactly what
+    /// putting the token in the remote URL would do instead. The empty
+    /// `credential.helper=` in front of it clears whatever the machine has
+    /// configured, so that a git given a token authenticates as that token and
+    /// never as the host's stored login.
+    ///
+    /// Declared on every call rather than only on the ones that talk to the
+    /// network, because which of them does is git's business: a clone may
+    /// fetch, a push may re-fetch, and a helper that is there and unasked costs
+    /// nothing. And so `command` is expected to be a `git` with no arguments
+    /// yet: `-c` goes in front of the subcommand.
+    ///
+    /// Where there is no token the machine's configuration stands untouched —
+    /// and the prompt is turned off all the same: a terminal prompt from a
+    /// credential helper that found nothing would be a server thread waiting
+    /// for ever.
+    pub(crate) fn on<'c>(&self, command: &'c mut Command) -> &'c mut Command {
+        const HELPER: &str = r#"!f() { if test "$1" = get; then printf 'username=x-access-token\npassword=%s\n' "$GH_TOKEN"; fi; }; f"#;
+
+        if let Some(token) = &self.0 {
+            command
+                .args(["-c", "credential.helper=", "-c"])
+                .arg(format!("credential.helper={HELPER}"))
+                .env("GH_TOKEN", token);
+        }
+
+        command.env("GIT_TERMINAL_PROMPT", "0")
+    }
+}
+
+/// Never the token: a `Credential` in a log line says whose it is not, and
+/// whether there is one is all a reader needs.
+impl std::fmt::Debug for Credential {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.0 {
+            Some(_) => f.write_str("Credential(an Author's token)"),
+            None => f.write_str("Credential(the host's)"),
+        }
+    }
+}
+
 /// The host's `gh`, as Verkstead runs it.
 #[derive(Debug, Clone)]
 pub struct Gh {
@@ -137,6 +207,12 @@ impl Gh {
     /// See [`crate::repos::create`].
     pub(crate) fn tokened(&self) -> bool {
         self.token().is_some()
+    }
+
+    /// What Verkstead's own git on the Repo authenticates as — the same token
+    /// this `Gh` would hand `gh`, read now. See [`Credential`].
+    pub(crate) fn credential(&self) -> Credential {
+        Credential(self.token())
     }
 
     /// Run it inside `repo` and take its stdout, or say why there is none.

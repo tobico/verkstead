@@ -1983,6 +1983,10 @@ pub(crate) async fn conversation_view(
             crate::stages::adopting(
                 &state.pool,
                 conversation.repo.clone(),
+                state
+                    .github
+                    .as_author(conversation.repo.author.as_deref())
+                    .credential(),
                 conversation.base_commit.clone(),
                 roadmap,
                 state.settings.config().at_once().roadmap_stages(),

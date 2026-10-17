@@ -52,6 +52,7 @@ use verkstead_schema::{Direction, Nudge};
 use crate::AppState;
 use crate::attachments::{self, Attachments};
 use crate::boundaries;
+use crate::github::Gh;
 
 use crate::handoffs::Handoffs;
 use crate::repos::git;
@@ -1666,6 +1667,8 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     // The filesystem and git halves together, off the runtime: a worktree of a
     // large repository is not a quick call, and every part of this blocks.
     let made = tokio::task::spawn_blocking({
+        let gh = state.github.clone();
+        let own = state.github.as_author(conversation.repo.author.as_deref());
         let branch = branch.clone();
         let checkouts = state.checkouts.clone();
         move || {
@@ -1713,7 +1716,7 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
             // work starting from wherever this checkout happened to be left.
             // Refused rather than carried on with: the human is at the button,
             // and offline or an authentication that has gone is theirs to fix.
-            if let worktrees::Fetched::Failed(said) = worktrees::fetch(&repo) {
+            if let worktrees::Fetched::Failed(said) = worktrees::fetch(&repo, &own.credential()) {
                 tracing::error!(
                     said,
                     repo = %repo.display(),
@@ -1779,8 +1782,8 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
             }];
 
             for companion in companions {
-                let beside =
-                    plan(&data_dir, id, &branch, companion, &planned).map_err(Unmade::grilling)?;
+                let beside = plan(&data_dir, &gh, id, &branch, companion, &planned)
+                    .map_err(Unmade::grilling)?;
 
                 planned.push(beside);
             }
@@ -2201,6 +2204,7 @@ fn refusal(why: &CompanionRefusal) -> String {
 /// companions being handed one directory — see [`worktrees::unclaimed_path`].
 fn plan(
     data: &Path,
+    gh: &Gh,
     id: i64,
     branch: &str,
     companion: store::Companion,
@@ -2212,7 +2216,10 @@ fn plan(
         why,
     };
 
-    if let worktrees::Fetched::Failed(said) = worktrees::fetch(&repo) {
+    // As the companion's own Author, whose token reaches it.
+    let credential = gh.as_author(companion.repo.author.as_deref()).credential();
+
+    if let worktrees::Fetched::Failed(said) = worktrees::fetch(&repo, &credential) {
         tracing::error!(
             said,
             repo = %repo.display(),
@@ -2560,6 +2567,7 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
     // The reading, off the runtime's threads: fetching, resolving a commit and
     // reading a roadmap out of a git directory are all blocking calls.
     let read = tokio::task::spawn_blocking({
+        let own = state.github.as_author(conversation.repo.author.as_deref());
         let repo = repo.clone();
 
         move || {
@@ -2569,7 +2577,7 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
             // or having lost an authentication is theirs to go and fix. A
             // repository with no remote has nothing to fetch and is never
             // refused for it.
-            if let worktrees::Fetched::Failed(said) = worktrees::fetch(&repo) {
+            if let worktrees::Fetched::Failed(said) = worktrees::fetch(&repo, &own.credential()) {
                 tracing::error!(
                     said,
                     repo = %repo.display(),
@@ -2642,6 +2650,7 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
     // names nothing, so the branch cut beside the stage is the stage's own.
 
     let made = tokio::task::spawn_blocking({
+        let gh = state.github.clone();
         let path = path.clone();
         let branch = branch.clone();
         let commit = commit.clone();
@@ -2663,8 +2672,8 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
             }];
 
             for companion in companions {
-                let beside =
-                    plan(&data_dir, id, &branch, companion, &planned).map_err(Unmade::adopting)?;
+                let beside = plan(&data_dir, &gh, id, &branch, companion, &planned)
+                    .map_err(Unmade::adopting)?;
 
                 planned.push(beside);
             }
@@ -2957,6 +2966,7 @@ async fn alongside(
     // Off the same base commit: what the human settled on the composer is the
     // base of every stage this press starts.
     let made = tokio::task::spawn_blocking({
+        let gh = state.github.clone();
         let repo = adopting.repo.path.clone();
         let path = path.clone();
         let branch = branch.clone();
@@ -2977,7 +2987,7 @@ async fn alongside(
             }];
 
             for companion in companions {
-                let beside = plan(&data_dir, id, &branch, companion, &planned)?;
+                let beside = plan(&data_dir, &gh, id, &branch, companion, &planned)?;
 
                 planned.push(beside);
             }
@@ -3595,6 +3605,8 @@ pub(crate) async fn take_up(state: &AppState, id: i64, discarding: &[i64]) -> Re
     // Everything git has to be asked, off the runtime's threads: fetching,
     // resolving, moving a ref and making a worktree all block.
     let made = tokio::task::spawn_blocking({
+        let gh = state.github.clone();
+        let own = state.github.as_author(conversation.repo.author.as_deref());
         let repo = conversation.repo.path.clone();
         let path = path.clone();
         let head = head.clone();
@@ -3607,7 +3619,7 @@ pub(crate) async fn take_up(state: &AppState, id: i64, discarding: &[i64]) -> Re
             // first: a remote-tracking ref is only as fresh as the last fetch,
             // and the whole of what is being taken up lives on the remote. The
             // human is at this button, so being offline is theirs to go and fix.
-            if let worktrees::Fetched::Failed(said) = worktrees::fetch(&repo) {
+            if let worktrees::Fetched::Failed(said) = worktrees::fetch(&repo, &own.credential()) {
                 tracing::error!(
                     said,
                     repo = %repo.display(),
@@ -3631,8 +3643,8 @@ pub(crate) async fn take_up(state: &AppState, id: i64, discarding: &[i64]) -> Re
             // presses use: a Conversation taking something up drafts like any
             // other, so its setup card put those rows there like any other's.
             for companion in companions {
-                let beside =
-                    plan(&data_dir, id, &head, companion, &planned).map_err(Unmade::taking_up)?;
+                let beside = plan(&data_dir, &gh, id, &head, companion, &planned)
+                    .map_err(Unmade::taking_up)?;
 
                 planned.push(beside);
             }

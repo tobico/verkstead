@@ -41,7 +41,7 @@
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-use crate::github::{self, Gh, Trouble};
+use crate::github::{self, Credential, Gh, Trouble};
 use crate::settings::{Author, GitAuthor, Settings};
 use crate::unseen::Unseen;
 
@@ -222,30 +222,15 @@ fn written(
 
 /// One git command in `dir`, authenticating as `token` where it reaches GitHub.
 ///
-/// The credential helper is declared on every call rather than only on the two
-/// that talk to the network, because which of them does is git's business: a
-/// clone may fetch, a push may re-fetch, and a helper that is there and unasked
-/// costs nothing.
-///
-/// **The token goes through the environment.** The helper is a shell function
-/// that reads `GH_TOKEN`, so what appears in the process list is the shape of
-/// the helper and never the credential — which is exactly what putting the token
-/// in the remote URL would do instead. The empty `credential.helper=` in front
-/// of it clears whatever the machine has configured, so that a publish
-/// authenticates as the token it was given and never as the host's stored login.
+/// Through the helper every git of Verkstead's own on a Repo goes through —
+/// see [`Credential::on`], which is where the token reaches git, and where it
+/// never reaches the process list.
 fn git(dir: &Path, token: &str, args: &[&str]) -> Result<(), String> {
-    const HELPER: &str = r#"!f() { if test "$1" = get; then printf 'username=x-access-token\npassword=%s\n' "$GH_TOKEN"; fi; }; f"#;
-
-    let output = Command::new("git")
-        .args(["-c", "credential.helper=", "-c"])
-        .arg(format!("credential.helper={HELPER}"))
+    let output = Credential::token(token)
+        .on(&mut Command::new("git"))
         .args(args)
         .unseen()
         .current_dir(dir)
-        .env("GH_TOKEN", token)
-        // Nothing here may stop to ask: a terminal prompt from a credential
-        // helper that found nothing would be a server thread waiting for ever.
-        .env("GIT_TERMINAL_PROMPT", "0")
         .stdin(Stdio::null())
         .output()
         .map_err(|error| format!("Git couldn't be run: {error}."))?;
