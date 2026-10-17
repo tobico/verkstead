@@ -385,7 +385,8 @@ impl Annexed {
     /// session with it — see [`running_there`]. What is running is asked of the
     /// Annex at the press rather than taken off the merged list, which could be
     /// a refresh behind, and an Annex that cannot be asked refuses rather than
-    /// guesses.
+    /// guesses. A box that is stopped runs no session, so it is not asked: it
+    /// is booted and updated.
     ///
     /// **One at a time**, and none beside the re-pin at the start: a press
     /// while either is going is taken, and the row goes on reading the one
@@ -401,17 +402,21 @@ impl Annexed {
         let annex = self.annex.clone();
         let probed = tokio::task::spawn_blocking(move || annex.probe()).await;
 
-        if !matches!(probed, Ok(Probed::Present { .. })) {
+        let Ok(Probed::Present { running }) = probed else {
             return Err("There's no annex on this machine to update.".to_owned());
-        }
+        };
 
-        running_there(&devices).await?;
+        // A stopped box runs no session, and could not be asked whether it
+        // did: there is nothing to refuse for.
+        if running {
+            running_there(&devices).await?;
+        }
 
         self.updating.store(true, Ordering::SeqCst);
 
         let this = self.clone();
         tokio::spawn(async move {
-            this.updated(&devices).await;
+            this.updated(&devices, running).await;
             this.updating.store(false, Ordering::SeqCst);
         });
 
@@ -422,8 +427,31 @@ impl Annexed {
     /// The release read again afterwards, a rebuilt box being pinned to this
     /// Keeper's, and the line of a failed rebuild kept on the row through the
     /// link that follows: the Annex answers on what it ran before.
-    async fn updated(&self, devices: &Devices) {
+    ///
+    /// **A box that was stopped is booted first**, and held up the way the
+    /// Keeper's start holds it, so the link that follows has an Annex to reach
+    /// and the Keeper's stop terminates it.
+    async fn updated(&self, devices: &Devices, running: bool) {
         tracing::info!("this device's Annex is being updated");
+
+        if !running {
+            let annex = self.annex.clone();
+            let booted = tokio::task::spawn_blocking(move || annex.boot()).await;
+
+            if let Err(why) = booted
+                .map_err(anyhow::Error::from)
+                .and_then(|booted| booted)
+            {
+                tracing::warn!(why = %format!("{why:#}"), "this device's Annex could not be booted to be updated");
+                devices.annex_troubled(Some(sentence(
+                    "The annex couldn't be started",
+                    &format!("{why:#}"),
+                )));
+                return;
+            }
+
+            self.booted.store(true, Ordering::SeqCst);
+        }
 
         let system = flake::system(&crate::platform::hostname(), &self.binary);
         let trouble = self.rebuilt(system, pinning::updated).await;

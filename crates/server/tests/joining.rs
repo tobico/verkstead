@@ -1628,6 +1628,15 @@ struct Boxed {
 }
 
 impl Boxed {
+    /// The same box, running — what Update finds once the Keeper's start has
+    /// booted it, and asks about what runs in it.
+    fn running(annex: &Verkstead, keeper_at: &str) -> Boxed {
+        Boxed {
+            probed: annex::Probed::Present { running: true },
+            ..Boxed::of(annex, keeper_at)
+        }
+    }
+
     /// A box made to the end, whose Annex is `annex` and whose Keeper is
     /// reached at `keeper_at`, pinned to this Keeper's own release.
     fn of(annex: &Verkstead, keeper_at: &str) -> Boxed {
@@ -2207,7 +2216,7 @@ async fn update_with_a_session_running_in_the_annex_is_refused_naming_it() {
     ]))
     .await;
     let keeper = Verkstead::asking().await;
-    let boxed = Arc::new(Boxed::of(&annex, KEEPER_AT));
+    let boxed = Arc::new(Boxed::running(&annex, KEEPER_AT));
 
     let (annexed, devices) = kept_and_started(&keeper, &boxed).await;
     let before = boxed.ran();
@@ -2242,7 +2251,7 @@ async fn update_with_sessions_running_names_the_first_and_counts_the_rest() {
     ]))
     .await;
     let keeper = Verkstead::asking().await;
-    let boxed = Arc::new(Boxed::of(&annex, KEEPER_AT));
+    let boxed = Arc::new(Boxed::running(&annex, KEEPER_AT));
 
     let (_annexed, devices) = kept_and_started(&keeper, &boxed).await;
     let (status, said) = press_update(&keeper, &devices).await;
@@ -2264,7 +2273,7 @@ async fn update_with_a_session_still_naming_its_branch_calls_it_a_draft() {
     let annex =
         made_annex_serving(its_conversations(&[("grand-otter", Named::Naming, true)])).await;
     let keeper = Verkstead::asking().await;
-    let boxed = Arc::new(Boxed::of(&annex, KEEPER_AT));
+    let boxed = Arc::new(Boxed::running(&annex, KEEPER_AT));
 
     let (_annexed, devices) = kept_and_started(&keeper, &boxed).await;
     let (status, said) = press_update(&keeper, &devices).await;
@@ -2276,13 +2285,45 @@ async fn update_with_a_session_still_naming_its_branch_calls_it_a_draft() {
     );
 }
 
+/// A stopped box runs no session, so Update on one is taken without asking
+/// it anything: booted, relocked, rebuilt and linked.
+#[tokio::test]
+async fn update_on_a_stopped_box_boots_and_updates_it_without_asking() {
+    let annex =
+        made_annex_serving(its_conversations(&[("solid-viewer", Named::Typed, true)])).await;
+    let keeper = Verkstead::asking().await;
+    let boxed = Arc::new(Boxed::of(&annex, KEEPER_AT));
+
+    let annexed = Arc::new(Annexed::of(boxed.clone(), keeper.settings()));
+    let devices = keeper.devices().keeping_an_annex(annexed.clone());
+
+    let (status, said) = press_update(&keeper, &devices).await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+
+    update_over(&annexed).await;
+
+    let flakes = "NIX_CONFIG=experimental-features = nix-command flakes";
+    assert_eq!(boxed.booted.load(Ordering::SeqCst), 1, "booted first");
+    assert_eq!(
+        boxed.ran()[..2],
+        [
+            format!(
+                "{flakes} nix flake update --flake /etc/nixos \
+                 nixpkgs nixpkgs-unstable verkstead verkstead-binary"
+            ),
+            format!("{flakes} nixos-rebuild switch --flake /etc/nixos#verkstead"),
+        ],
+    );
+    assert!(boxed.ran().contains(&"addresses".to_owned()), "and linked");
+}
+
 /// An Annex that cannot be asked what it is running — never linked here — is
 /// refused rather than guessed about.
 #[tokio::test]
 async fn update_on_an_annex_that_cannot_be_asked_is_refused() {
     let annex = made_annex().await;
     let keeper = Verkstead::asking().await;
-    let boxed = Arc::new(Boxed::of(&annex, KEEPER_AT));
+    let boxed = Arc::new(Boxed::running(&annex, KEEPER_AT));
 
     let annexed = Arc::new(Annexed::of(boxed.clone(), keeper.settings()));
     let devices = keeper.devices().keeping_an_annex(annexed);
@@ -2305,7 +2346,7 @@ async fn update_on_an_annex_that_cannot_be_asked_is_refused() {
 async fn update_on_an_idle_annex_moves_every_input_but_nixos_wsl_and_links_it_again() {
     let annex = made_annex_serving(its_conversations(&[("old-work", Named::Typed, false)])).await;
     let keeper = Verkstead::asking().await;
-    let boxed = Arc::new(Boxed::of(&annex, KEEPER_AT));
+    let boxed = Arc::new(Boxed::running(&annex, KEEPER_AT));
 
     let (annexed, devices) = kept_and_started(&keeper, &boxed).await;
     assert_eq!(
@@ -2362,7 +2403,7 @@ async fn update_on_an_idle_annex_moves_every_input_but_nixos_wsl_and_links_it_ag
     );
 
     let reading = annexed.reading(devices.annex_trouble());
-    assert_eq!(reading.state, verkstead_render::AnnexState::Stopped);
+    assert_eq!(reading.state, verkstead_render::AnnexState::Running);
     assert_eq!(reading.version.as_deref(), Some(annex::flake::VERSION));
     assert_eq!(reading.trouble, None);
 
@@ -2383,7 +2424,7 @@ async fn a_failed_update_leaves_its_line_on_the_row_and_the_annex_answering() {
              error: builder for '/nix/store/abc-verkstead.drv' failed with exit code 1\n",
             false,
         ),
-        ..Boxed::of(&annex, KEEPER_AT)
+        ..Boxed::running(&annex, KEEPER_AT)
     });
     let pinned = boxed.nixos(annex::flake::IN_THE_BOX);
 
