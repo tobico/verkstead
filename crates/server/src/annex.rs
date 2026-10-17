@@ -67,7 +67,8 @@ pub enum Probed {
     NoDistro,
 
     /// What runs boxes is there and could not be asked: `wsl.exe` is on the
-    /// machine and would not run. Nothing is known about the box, which is
+    /// machine and would not run, or listed no box while the box's disk image
+    /// is still on the Keeper's disk. Nothing is known about the box, which is
     /// what keeps it apart from [`Probed::NoWsl`] and [`Probed::NoDistro`]: a
     /// Keeper's start that finds either of those forgets its Annex, and one
     /// that finds this forgets nothing — see [`booting::Annexed::up`].

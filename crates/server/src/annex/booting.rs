@@ -8,7 +8,7 @@
 //! probe finds no box made to the end, there is nothing to boot.
 //!
 //! **And an Annex whose box has gone is forgotten**, where the probe finds no
-//! WSL or no distro made to the end and this Keeper holds an Annex: one
+//! WSL, or no distro and no disk image of one, and this Keeper holds an Annex: one
 //! unregistered by hand is noticed rather than offered, its row dropped here
 //! and on every member — see [`Devices::forget_annex`]. A probe that could not
 //! be read is not "no box", and forgets nothing.
@@ -177,8 +177,14 @@ impl Annexed {
             // No box, where this Keeper held an Annex: it was taken away by
             // hand, so it is forgotten rather than offered — see
             // [`Annexed::forgotten`]. A probe that could not be read, or a box
-            // that cannot run until a restart or the firmware, forgets nothing.
-            Ok(Probed::NoWsl | Probed::NoDistro) => {
+            // that cannot run until a restart or the firmware, forgets nothing;
+            // nor does a box still listed and never said to be made, whose disk
+            // image is still there.
+            Ok(Probed::NoWsl) => {
+                self.forgotten(devices).await;
+                return Ok(false);
+            }
+            Ok(Probed::NoDistro) if self.annex.taken().is_none() => {
                 self.forgotten(devices).await;
                 return Ok(false);
             }
@@ -1219,6 +1225,32 @@ mod tests {
         assert!(keeping.devices.annex_trouble().is_some());
         assert!(annexed.pinned.lock().unwrap().is_some());
         assert!(keeping.told.try_recv().is_err());
+    }
+
+    /// A list that failed, or lists the distro without the Keeper's marker,
+    /// beside a disk image that is still there is not a box gone: nothing is
+    /// forgotten, and nobody is told anything.
+    #[tokio::test]
+    async fn a_keepers_start_beside_the_boxs_disk_forgets_nothing() {
+        let failed = utf16("Error code: Wsl/Service/E_UNEXPECTED\r\n");
+
+        for (listed, code, marked) in [(failed, -1, true), (utf16(&listed("Stopped")), 0, false)] {
+            let mut keeping = keeping().await;
+
+            let (backend, wsl, _powershell) = made();
+            std::fs::write(backend.disk().join("ext4.vhdx"), vec![0; 4096]).unwrap();
+            if !marked {
+                std::fs::remove_file(backend.disk().join("made")).unwrap();
+            }
+            wsl.answers(1, utf16(ANSWERING_STATUS), 0)
+                .answers(2, listed, code);
+
+            started_over(backend, &keeping).await;
+
+            assert_eq!(held(&keeping).await, [ANNEX, MEMBER], "marked: {marked}");
+            assert!(keeping.devices.annex_trouble().is_some());
+            assert!(keeping.told.try_recv().is_err());
+        }
     }
 
     /// A Keeper that never had an Annex has nothing to forget, and tells

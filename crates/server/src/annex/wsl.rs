@@ -268,17 +268,25 @@ impl Backend for Wsl {
             return unanswered(installed, self.facts());
         }
 
-        // A list that fails is one with no distro in it — it ends with -1 then
-        // — and one that would not run says nothing about the distro at all.
+        // A list that fails lists nothing — one with no distro in it ends with
+        // -1, and so do most of WSL's own errors — and one that would not run
+        // says nothing about the distro at all.
         let listed = match self.wsl(&["--list", "--verbose"]) {
-            Ok(said) if said.success => said.text,
-            Ok(_) => return Probed::NoDistro,
+            Ok(said) if said.success => listed_state(&said.text),
+            Ok(_) => None,
             Err(_) => return Probed::Unread,
         };
 
-        match listed_state(&listed) {
+        match listed {
             Some(running) if self.disk.join(MADE).is_file() => Probed::Present { running },
-            Some(_) | None => Probed::NoDistro,
+            Some(_) => Probed::NoDistro,
+
+            // Not listed, and gone only where its disk image went with it,
+            // which `wsl --unregister` deletes: a list that failed for a
+            // reason of WSL's own beside a disk that is still there says
+            // nothing about the box.
+            None if self.taken().is_none() => Probed::NoDistro,
+            None => Probed::Unread,
         }
     }
 
@@ -1051,6 +1059,28 @@ pub(crate) mod tests {
         powershell.answers(1, hyper_v, 0);
 
         assert_eq!(backend.probe(), Probed::NeedsRestart);
+    }
+
+    /// A list that fails, or lists no box, while the box's disk image is still
+    /// on the Keeper's disk says nothing about the box: WSL exits -1 for most
+    /// of its errors as well as for having no distro.
+    #[test]
+    fn a_list_without_the_box_beside_its_disk_is_unread() {
+        for (listed, code) in [
+            (utf16("Error code: Wsl/Service/E_UNEXPECTED\r\n"), -1),
+            (utf16(NO_DISTROS), -1),
+            (
+                utf16("  NAME      STATE           VERSION\r\n* Ubuntu    Running         2\r\n"),
+                0,
+            ),
+        ] {
+            let (backend, wsl, _powershell) = made();
+            std::fs::write(backend.disk().join(DISK_IMAGE), vec![0; 4096]).unwrap();
+            wsl.answers(1, utf16(ANSWERING_STATUS), 0)
+                .answers(2, listed, code);
+
+            assert_eq!(backend.probe(), Probed::Unread);
+        }
     }
 
     #[test]
