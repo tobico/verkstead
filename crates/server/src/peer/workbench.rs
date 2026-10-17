@@ -115,7 +115,8 @@ pub(crate) struct OverTheLink;
 /// viewer's: the news a member tells its members when it has something worth a
 /// phone — see [`super::news`] — this device's Repos with their origins, see
 /// [`super::repos`], and the files of one of its accounts a session away from
-/// home is given, see [`super::account`].
+/// home is given, see [`super::account`], and the token a mirror of one of its
+/// Authors is copied from, see [`super::authors`].
 ///
 /// Built here because each answers out of this same state: what the news is shown
 /// to is the push subscriptions of *this* device's browsers, and the Repos are
@@ -131,6 +132,7 @@ pub(crate) fn served(state: AppState) -> Router {
         .merge(super::checkouts::route())
         .merge(super::transfers::route())
         .merge(super::account::route())
+        .merge(super::authors::route())
         .merge(super::memory::route())
         .with_state(state)
         .layer(axum::Extension(OverTheLink))

@@ -6260,6 +6260,11 @@ async fn save_settings(
     // whether the save moved them — see below.
     let authors_before = crate::mirroring::authors::own(&state.settings);
 
+    // And whether it set or cleared a token, which the rows above cannot show:
+    // a rotation leaves an Author holding one, and every member's copy of it is
+    // what the news is for.
+    let token_moved = !matches!(edit.github_token, TokenEdit::Keep);
+
     // One blocking hop for the whole save: two files written and, where a token
     // was set, a `gh` run. Everything here is the filesystem or a process, and
     // none of it belongs on the runtime's threads.
@@ -6596,7 +6601,7 @@ async fn save_settings(
             // And every member told where the save moved this device's Authors,
             // which is what has each read them again and redraw its mirrors.
             // Only then: a save about the build cache is no news to anybody.
-            if crate::mirroring::authors::own(&state.settings) != authors_before {
+            if token_moved || crate::mirroring::authors::own(&state.settings) != authors_before {
                 state.nudges.announce(Nudge::Authors);
             }
 

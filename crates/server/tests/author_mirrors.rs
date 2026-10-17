@@ -619,3 +619,204 @@ async fn a_repo_here_can_be_pointed_at_a_members_author() {
     })
     .await;
 }
+
+/// What `secrets.yaml` in `dir` holds, as text.
+fn secrets_in(dir: &Path) -> String {
+    std::fs::read_to_string(dir.join("secrets.yaml")).unwrap_or_default()
+}
+
+/// A secret of B's own that no copy may move: what every write of a copy has
+/// to leave as it was.
+const B_OWN: &str = "session_account_password: Vk1-hunter2\n";
+
+impl Verkstead {
+    /// The token one of `device`'s Authors has there, asked over the link the
+    /// way the refresher asks it.
+    async fn asks_token_of(&self, device: &str, id: &str) -> Result<Option<String>, String> {
+        verkstead_server::mirroring::authors::token_at(Some(&self.cluster), device, id)
+            .await
+            .map_err(|refused| refused.saying)
+    }
+
+    /// Write `secrets.yaml` and tell the cluster, the way a token saved on the
+    /// Git section does.
+    fn holds_tokens(&self, yaml: &str) {
+        std::fs::write(self.dir.path().join("secrets.yaml"), yaml).unwrap();
+        self.nudges.announce(Nudge::Authors);
+    }
+
+    /// `secrets.yaml` once it says what the test is waiting for.
+    async fn secrets_saying(&self, what: impl Fn(&str) -> bool) -> String {
+        let mut last = String::new();
+
+        let waited = tokio::time::timeout(WAITING, async {
+            loop {
+                last = secrets_in(self.dir.path());
+
+                if what(&last) {
+                    return last.clone();
+                }
+
+                tokio::time::sleep(LOOKING).await;
+            }
+        })
+        .await;
+
+        waited.unwrap_or_else(|_| panic!("secrets.yaml never said it:\n{last}"))
+    }
+}
+
+/// A member's Author's token is copied into this device's `secrets.yaml` under
+/// its uuid, beside what was there; a rotation at home is the copy after the
+/// next refresh; and with the home not answering the copy stands.
+#[tokio::test]
+async fn a_members_token_is_copied_here_and_follows_a_rotation() {
+    let (a, b, holding) = linked_up().await;
+
+    std::fs::write(b.dir.path().join("secrets.yaml"), B_OWN).unwrap();
+
+    a.holds_tokens(&format!(
+        "author_tokens:\n  {WORK}: ghp_thefirst\n  {HOME}: ghp_theother\n"
+    ));
+    a.saves_author(WORK, "Work", "Ada Lovelace", "ada@work.example")
+        .await;
+    a.saves_author(HOME, "Home", "Ada Lovelace", "ada@home.example")
+        .await;
+
+    let said = b
+        .secrets_saying(|said| said.contains("ghp_thefirst") && said.contains("ghp_theother"))
+        .await;
+    assert!(said.contains(&format!("{WORK}: ghp_thefirst")), "{said}");
+    assert!(said.contains("Vk1-hunter2"), "B's own stays: {said}");
+
+    a.holds_tokens(&format!(
+        "author_tokens:\n  {WORK}: ghp_thesecond\n  {HOME}: ghp_theother\n"
+    ));
+
+    let said = b
+        .secrets_saying(|said| said.contains("ghp_thesecond"))
+        .await;
+    assert!(
+        !said.contains("ghp_thefirst"),
+        "the old one is gone: {said}"
+    );
+    assert!(said.contains("Vk1-hunter2"), "B's own stays: {said}");
+
+    // And with A gone quiet, a refresh leaves the copy where it is.
+    drop(holding);
+    b.linked_to(&a.device, A_MACHINE, A_OS, vec!["127.0.0.1:1".to_owned()])
+        .await;
+    b.nudges.announce(Nudge::Devices);
+    tokio::time::sleep(SETTLING).await;
+
+    assert!(
+        secrets_in(b.dir.path()).contains("ghp_thesecond"),
+        "the copy stands with its home quiet",
+    );
+}
+
+/// Clearing the token at home, removing the Author at home, and unlinking the
+/// device each take the copy out, and nothing else of B's file moves.
+#[tokio::test]
+async fn the_copy_goes_with_the_token_the_author_and_the_device() {
+    let (a, b, _holding) = linked_up().await;
+
+    std::fs::write(b.dir.path().join("secrets.yaml"), B_OWN).unwrap();
+
+    a.holds_tokens(&format!(
+        "author_tokens:\n  {WORK}: ghp_thework\n  {HOME}: ghp_thehome\n"
+    ));
+    a.saves_author(WORK, "Work", "Ada Lovelace", "ada@work.example")
+        .await;
+    a.saves_author(HOME, "Home", "Ada Lovelace", "ada@home.example")
+        .await;
+
+    b.secrets_saying(|said| said.contains("ghp_thework") && said.contains("ghp_thehome"))
+        .await;
+
+    // Cleared at home.
+    a.holds_tokens(&format!("author_tokens:\n  {HOME}: ghp_thehome\n"));
+
+    let said = b.secrets_saying(|said| !said.contains("ghp_thework")).await;
+    assert!(
+        said.contains("ghp_thehome") && said.contains("Vk1-hunter2"),
+        "{said}"
+    );
+
+    // Removed at home.
+    a.removes_author(HOME).await;
+
+    let said = b.secrets_saying(|said| !said.contains("ghp_thehome")).await;
+    assert!(said.contains("Vk1-hunter2"), "{said}");
+
+    // And unlinked, with a fresh token to lose.
+    a.holds_tokens(&format!("author_tokens:\n  {WORK}: ghp_again\n"));
+    b.secrets_saying(|said| said.contains("ghp_again")).await;
+
+    forget_member(&b.pool, A).await.unwrap();
+    b.nudges.announce(Nudge::Devices);
+
+    let said = b.secrets_saying(|said| !said.contains("ghp_again")).await;
+    assert_eq!(said, B_OWN, "every other secret as it was");
+}
+
+/// The token call hands over only the answering device's own Authors' tokens,
+/// and only to a member.
+#[tokio::test]
+async fn the_token_call_refuses_a_mirror_an_unknown_uuid_and_a_stranger() {
+    let (a, b, _holding) = linked_up().await;
+
+    a.holds_tokens(&format!("author_tokens:\n  {WORK}: ghp_thework\n"));
+    a.saves_author(WORK, "Work", "Ada Lovelace", "ada@work.example")
+        .await;
+
+    assert_eq!(
+        b.asks_token_of(A, WORK).await,
+        Ok(Some("ghp_thework".to_owned())),
+    );
+
+    // A uuid A only holds a mirror of: C's Author, and C's to hand over.
+    record_author_mirrors(
+        &a.pool,
+        C,
+        &[AuthorMirror {
+            id: HOME.to_owned(),
+            device: C.to_owned(),
+            display_name: String::new(),
+            name: "The Third".to_owned(),
+            email: "third@example.com".to_owned(),
+            holds_token: true,
+        }],
+    )
+    .await
+    .unwrap();
+    std::fs::write(
+        a.dir.path().join("secrets.yaml"),
+        format!("author_tokens:\n  {WORK}: ghp_thework\n  {HOME}: ghp_thecopy\n"),
+    )
+    .unwrap();
+
+    let said = b.asks_token_of(A, HOME).await;
+    assert!(
+        said.as_ref().is_err_and(|said| said.contains("404")),
+        "a mirror there: {said:?}",
+    );
+
+    let said = b.asks_token_of(A, "no-such-uuid").await;
+    assert!(
+        said.as_ref().is_err_and(|said| said.contains("404")),
+        "an unknown uuid: {said:?}",
+    );
+
+    // And a device A holds no membership for is turned away at the gate.
+    let stranger = Verkstead::answering(C).await;
+    stranger
+        .linked_to(&a.device, A_MACHINE, A_OS, vec![a.at()])
+        .await;
+
+    let said = stranger.asks_token_of(A, WORK).await;
+    assert!(
+        said.as_ref().is_err_and(|said| said.contains("403")),
+        "a stranger: {said:?}",
+    );
+}

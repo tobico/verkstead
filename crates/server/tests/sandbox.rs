@@ -1555,6 +1555,63 @@ async fn a_repo_pointed_at_a_tokenless_mirror_runs_its_sessions_as_it() {
     }
 }
 
+/// A Repo pointed at a member's Author whose token's copy has arrived runs its
+/// sessions as that Author: its name, its email and the copy as `GH_TOKEN` —
+/// and none of the other tokens this device holds, though it holds a copy of
+/// every one of the home's Authors' beside its own.
+#[tokio::test]
+async fn a_repo_pointed_at_a_mirror_runs_its_sessions_from_the_copy() {
+    use verkstead_server::settings::{Author, Mirrored};
+
+    let mut fixture = grilling().await;
+    fixture.configure(THE_AUTHOR);
+    fixture.configure_github_token(
+        "author_tokens:\n  work: ghp_theworkone\n  away: ghp_theawaycopy\n  \
+         other: ghp_theothercopy\n",
+    );
+
+    let mirror = |id: &str, email: &str| {
+        Mirrored::of(
+            Author::of(
+                id.to_owned(),
+                None,
+                Some("Ada Lovelace".to_owned()),
+                Some(email.to_owned()),
+            ),
+            "the-workstation".to_owned(),
+            true,
+        )
+    };
+
+    fixture.settings.holding_mirrors(vec![
+        mirror("away", "ada@away.example"),
+        mirror("other", "ada@other.example"),
+    ]);
+
+    fixture.recorded_as("away").await;
+
+    let given = environment(&fixture.sandbox(vec![]));
+
+    assert_eq!(configured_email(&given), Some("ada@away.example"));
+    assert_eq!(
+        given.get("GH_TOKEN").map(String::as_str),
+        Some("ghp_theawaycopy")
+    );
+    assert!(
+        given.values().any(|value| value == "Ada Lovelace"),
+        "the mirror's git name: {given:#?}"
+    );
+    for (name, value) in &given {
+        assert!(
+            !value.contains("ghp_theworkone")
+                && !value.contains("ghp_theothercopy")
+                && !value.contains("ada@other.example")
+                && !value.contains("tobi@tobico.net"),
+            "another Author's is in {name}={value}"
+        );
+    }
+}
+
 /// A Repo repointed on the Repos pane, once nothing live is in it, runs the
 /// next session on it as the new Author: its `user.email` and its `GH_TOKEN`,
 /// and nothing of the one it was opened as.

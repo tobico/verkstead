@@ -125,7 +125,15 @@ and the alternative named is what was turned down.
   home at the moment it is needed and keeping it nowhere — the account mirror's
   rule — was turned down: a home device that is quiet should not stop a repo
   here from working, and a rotation at home being stale until the next refresh
-  is accepted.
+  is accepted. *As landed:* the copy is fetched on a member call of its own,
+  `GET /api/peer/v1/authors/{uuid}/token`, behind the Member Gate over the
+  mutually authenticated link the account mirror's login travels; it answers
+  only the device's own Authors, a uuid it merely mirrors being `404` as the
+  account call answers a mirror row. A token set or cleared at home is news to
+  every member, the copy is taken away when the mirror goes, when its device is
+  unlinked or when the home answers that it holds none, and a home not
+  answering leaves it as it stands. A session is handed its Repo's Author's
+  token alone, however many copies the device holds.
 
 - **A mirror whose copy has not arrived yet refuses a Start by name**, naming
   the home device, the way a broken Profile mirror does; a pipeline step that

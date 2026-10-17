@@ -117,8 +117,13 @@ on the device whose files hold it; every other device keeps a mirror row in
 its database, keyed by the uuid — the display name, the git name, the email,
 whether a token is held, and the home device — read off each member's own list
 over the **Relay** as the Profiles are, and never a mirror of a mirror, and a
-copy of the token in its own `secrets.yaml` under the uuid, written and taken
-away as the mirrors refresh, so a home that is quiet does not stop a Repo here.
+copy of the token in its own `secrets.yaml` under the uuid, so a home that is
+quiet does not stop a Repo here — fetched on a member's own call over the Peer
+Listener, which hands over only that device's own Authors' tokens, written as
+the mirrors refresh, and taken away when the mirror goes, when its device is
+unlinked or when its home stops holding one. A home not answering leaves the
+copy as it stands, and a session carries its own Repo's Author's copy and none
+of the others this device holds.
 A Repo is pointed at a mirror the way it is at one of this device's own, and
 everything that reads a Repo's Author reads the mirror's name and email and the
 copy; a mirror whose home holds no token is a tokenless Author here too.

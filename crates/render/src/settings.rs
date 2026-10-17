@@ -777,6 +777,17 @@ pub struct AuthorEntry {
     pub device: Option<crate::RowDevice>,
 }
 
+/// One of a member's Authors' **token**, as that device hands it to another
+/// member for the copy kept in its own `secrets.yaml` (ADR-0025).
+///
+/// A member's own call on the Peer Listener and never the viewer's: no page
+/// draws it, so it is not in the viewer's types. `null` is an Author its home
+/// holds no token for.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AuthorToken {
+    pub token: Option<String>,
+}
+
 /// What became of removing an Author, from the Git section's switcher.
 ///
 /// Refused while a registered Repo points at it (ADR-0025): its next session

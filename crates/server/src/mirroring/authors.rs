@@ -20,14 +20,23 @@
 //! is no local id, because what names an Author — a Repo's record — already
 //! names it by the uuid. See [`store::record_author_mirrors`].
 //!
-//! **No token crosses here.** What a row says of one is whether the home device
-//! holds it.
+//! **No token crosses on the list.** What a row says of one is whether the home
+//! device holds it. The token itself is fetched on a member's own call — see
+//! [`crate::peer::authors`] — and a **copy** written into this device's own
+//! `secrets.yaml` under the uuid as the rows are written down, so that a Repo
+//! here pointed at a mirror commits and pushes from it whether or not its home
+//! is answering at the moment of need. It is taken away when the mirror goes,
+//! when its device is unlinked, and when the home stops holding one; a home not
+//! answering leaves the copy as it stands, and it is used (ADR-0025).
+
+use std::collections::BTreeMap;
 
 use anyhow::Result;
-use verkstead_render::AuthorEntry;
+use verkstead_render::{AuthorEntry, AuthorToken};
 use verkstead_schema::Nudge;
 
-use crate::relaying::read_of;
+use crate::peer::authors::TOKEN;
+use crate::relaying::{asking, read_of, word_from};
 use crate::settings::{Author, Mirrored, Settings};
 use crate::{AppState, store};
 
@@ -39,6 +48,11 @@ const AUTHORS: &str = "/api/ui/authors";
 /// written down: **the Profiles' megabyte**, for its reason. An Author is a few
 /// hundred bytes.
 const MOST_THE_AUTHORS_ARE: usize = super::MOST_THE_PROFILES_ARE;
+
+/// The most a member's answer about one token may be: **sixty-four
+/// kilobytes**, the login's bound beside it. A GitHub token is under a hundred
+/// bytes.
+const MOST_A_TOKEN_IS: usize = 64 * 1024;
 
 /// The one list: this device's own Authors in the order `config.yaml` holds
 /// them, with no device mark, and then every member's, each marked with the
@@ -177,6 +191,7 @@ async fn read_every_member(state: &AppState) {
                 "the Authors of devices this one is no longer linked to are gone",
             );
 
+            copying(state, gone.into_iter().map(|id| (id, Copy::Gone)).collect()).await;
             hold(state).await;
             state.nudges.announce_here(Nudge::Authors);
         }
@@ -248,17 +263,177 @@ async fn read_member(state: &AppState, device: &str) {
         })
         .collect();
 
-    match store::record_author_mirrors(&state.pool, device, &at_home).await {
-        Ok(true) => {
-            hold(state).await;
-            state.nudges.announce_here(Nudge::Authors);
+    // What this device held of it before, for the copies of the Authors that
+    // have gone from home since.
+    let before = match store::author_mirrors(&state.pool).await {
+        Ok(rows) => rows
+            .into_iter()
+            .filter(|row| row.device == device)
+            .map(|row| row.id)
+            .collect::<Vec<_>>(),
+        Err(error) => {
+            tracing::error!(
+                error = ?error,
+                device,
+                "the Authors held of a member could not be read, so its mirrors stand",
+            );
+            return;
         }
-        Ok(false) => {}
-        Err(error) => tracing::error!(
-            error = ?error,
-            device,
-            "a member's Authors could not be written down",
-        ),
+    };
+
+    let moved = match store::record_author_mirrors(&state.pool, device, &at_home).await {
+        Ok(moved) => moved,
+        Err(error) => {
+            tracing::error!(
+                error = ?error,
+                device,
+                "a member's Authors could not be written down",
+            );
+            return;
+        }
+    };
+
+    let mut copies: BTreeMap<String, Copy> =
+        before.into_iter().map(|id| (id, Copy::Gone)).collect();
+
+    for row in &at_home {
+        let copy = match row.holds_token {
+            false => Copy::Gone,
+            true => token_of(state, device, &row.id).await,
+        };
+
+        copies.insert(row.id.clone(), copy);
+    }
+
+    let copied = copying(state, copies).await;
+
+    if moved || copied {
+        hold(state).await;
+        state.nudges.announce_here(Nudge::Authors);
+    }
+}
+
+/// What becomes of the copy of one mirror's token.
+#[derive(Debug)]
+enum Copy {
+    /// Written under the uuid, over whatever copy was there.
+    Held(String),
+
+    /// Taken away: the mirror has gone, or its home holds no token for it.
+    Gone,
+
+    /// Left as it stands: the home did not say.
+    AsItStands,
+}
+
+/// What the member at `device` says the token of its Author `id` is.
+///
+/// **A home not answering leaves the copy as it stands**, and so does any
+/// answer this device cannot read — a refusal of a uuid included, which is an
+/// Author removed between the list and this call and goes with its row on the
+/// next read. Only a home that answers *none* takes the copy away.
+async fn token_of(state: &AppState, device: &str, id: &str) -> Copy {
+    match token_at(state.devices.as_ref(), device, id).await {
+        Ok(Some(token)) => Copy::Held(token),
+        Ok(None) => Copy::Gone,
+        Err(why) => {
+            tracing::debug!(
+                device,
+                author = id,
+                "a member's Author's token could not be read, so the copy stands as it is: {}",
+                why.saying,
+            );
+            Copy::AsItStands
+        }
+    }
+}
+
+/// The token the member at `device` holds for its own Author `id`, `None`
+/// where it holds none — or the refusal naming the machine, which is a home
+/// not answering, a caller it holds no membership for, or a uuid that is not
+/// one of its own Authors (ADR-0025).
+///
+/// Public for the suite that stands two devices up and asks it, as the
+/// refresher here does.
+pub async fn token_at(
+    devices: Option<&crate::device::Devices>,
+    device: &str,
+    id: &str,
+) -> Result<Option<String>, crate::Refusal> {
+    let said: AuthorToken = word_from(
+        devices,
+        device,
+        asking(TOKEN.replace("{author}", id)),
+        MOST_A_TOKEN_IS,
+    )
+    .await?;
+
+    Ok(said.token)
+}
+
+/// Write `copies` into this device's `secrets.yaml`, each under its uuid, and
+/// every other secret in the file left as it was — and say whether the file
+/// moved.
+///
+/// **One read and one write**, with nothing awaited between them: a save on
+/// the settings page writes the whole file too, and the window in which one
+/// could undo the other is kept to the two calls.
+///
+/// **A uuid `config.yaml` holds is never touched**: that is this device's own
+/// Author, and the token under it is its own rather than a copy of anybody's.
+async fn copying(state: &AppState, copies: BTreeMap<String, Copy>) -> bool {
+    let settings = state.settings.clone();
+
+    let written = tokio::task::spawn_blocking(move || {
+        let config = settings.config();
+        let mut secrets = settings.secrets();
+        let mut moved = false;
+
+        for (id, copy) in copies {
+            if config.author(&id).is_some() {
+                continue;
+            }
+
+            let now = secrets.author_token(&id).map(str::to_owned);
+
+            secrets = match copy {
+                Copy::Held(token) if now.as_deref() != Some(&token) => {
+                    moved = true;
+                    secrets.with_author_token(&id, Some(token))
+                }
+                Copy::Gone if now.is_some() => {
+                    moved = true;
+                    secrets.with_author_token(&id, None)
+                }
+                _ => secrets,
+            };
+        }
+
+        if !moved {
+            return Ok(false);
+        }
+
+        settings.save_secrets(&secrets).map(|()| true)
+    })
+    .await;
+
+    match written {
+        Ok(Ok(moved)) => moved,
+        Ok(Err(error)) => {
+            tracing::error!(
+                error = ?error,
+                "the copies of the members' Authors' tokens could not be written into \
+                 secrets.yaml, so the ones there stand",
+            );
+            false
+        }
+        Err(error) => {
+            tracing::error!(
+                error = ?error,
+                "writing the copies of the members' Authors' tokens ended badly",
+            );
+            false
+        }
     }
 }
 
