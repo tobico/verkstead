@@ -2678,10 +2678,7 @@ echo {token}
 
         for running in [false, true] {
             assert_eq!(
-                reads(annex::Probed::Present {
-                    running,
-                    networking: annex::Networking::Nat,
-                }),
+                reads(annex::Probed::Present { running }),
                 DependencyState::Present {
                     at: None,
                     target: None,

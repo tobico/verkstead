@@ -21,25 +21,25 @@ use crate::{
     AttachmentRemoved, AuthorEdit, AuthorEdited, AuthorEntry, AuthorRemoved, BacklogPane,
     BaseBranchChoice, BaseRecorded, BranchRename, BranchRenamed, BriefEdit, BriefSaved, Capture,
     ClonableRepo, Cloned, Cloning, CommitPane, CompanionAdded, CompanionBaseRecorded,
-    CompanionBranchRenamed, CompanionModeChoice, CompanionModeChosen, CompanionRemoved, Confirming,
-    ConversationArchived, ConversationClosed, ConversationEntry, ConversationMove,
-    ConversationSteered, ConversationStopped, ConversationUnarchived, ConversationView, Created,
-    Creation, DeviceIdentity, DevicesView, DirectoryListing, DiscoveredDevice, DroppedRow,
-    FileDeleted, FileDeleting, FileListsView, FileMade, FileMaking, FileReading, FileRenamed,
-    FileRenaming, FileRootsView, FileStatusView, FileWrite, FileWritten, FolderListing,
-    ForwardsView, GrillingStarted, InstallPress, LanguageCleared, LinkedDevice, Locked,
-    LoginClosed, LoginCode, LoginOpened, LoginState, MemoPressed, NewAdoption, NewCompanion,
-    NewConversation, NewJoin, NewRank, OnboardingView, OpenTerminal, PendingJoin, Permitting,
-    PortsView, PrefillView, Preflight, ProcessChoice, ProcessPicked, ProfileChoice, ProfileChosen,
-    ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails, PushKey,
-    Registered, Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoPairingsView,
-    RepoRemoved, RepoSwitched, RepoView, Repointed, Repointing, Resolved, Resumed, RoadmapPane,
-    RoleChoice, Screen, ServeEdit, ServePress, ServerAttached, ServerRemoved, SetReading,
-    SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedConversation,
-    ShowArchived, ShowingArchived, Shown, Started, SteerCancelled, SteerForm, SteerOpened,
-    SteerSaved, SteerSubmission, Submitted, Subscribed, Subscription, TakenUp, TargetNamed,
-    TargetRecorded, TerminalClosed, TerminalOpened, TerminalsView, TranscriptView, Transferring,
-    Unsubscribe, UpdateNotice, Watching,
+    CompanionBranchRenamed, CompanionModeChoice, CompanionModeChosen, CompanionRemoved,
+    ComponentsView, Confirming, ConversationArchived, ConversationClosed, ConversationEntry,
+    ConversationMove, ConversationSteered, ConversationStopped, ConversationUnarchived,
+    ConversationView, Created, Creation, DeviceIdentity, DevicesView, DirectoryListing,
+    DiscoveredDevice, DroppedRow, FileDeleted, FileDeleting, FileListsView, FileMade, FileMaking,
+    FileReading, FileRenamed, FileRenaming, FileRootsView, FileStatusView, FileWrite, FileWritten,
+    FolderListing, ForwardsView, GrillingStarted, InstallPress, LanguageCleared, LinkedDevice,
+    Locked, LoginClosed, LoginCode, LoginOpened, LoginState, MemoPressed, NewAdoption,
+    NewCompanion, NewConversation, NewJoin, NewRank, OnboardingView, OpenTerminal, PendingJoin,
+    Permitting, PortsView, PrefillView, Preflight, ProcessChoice, ProcessPicked, ProfileChoice,
+    ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails,
+    PushKey, Registered, Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry,
+    RepoPairingsView, RepoRemoved, RepoSwitched, RepoView, Repointed, Repointing, Resolved,
+    Resumed, RoadmapPane, RoleChoice, Screen, ServeEdit, ServePress, ServerAttached, ServerRemoved,
+    SetReading, SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished,
+    SharedConversation, ShowArchived, ShowingArchived, Shown, Started, SteerCancelled, SteerForm,
+    SteerOpened, SteerSaved, SteerSubmission, Submitted, Subscribed, Subscription, TakenUp,
+    TargetNamed, TargetRecorded, TerminalClosed, TerminalOpened, TerminalsView, TranscriptView,
+    Transferring, Unsubscribe, UpdateNotice, Watching,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -483,6 +483,11 @@ fn the_viewers_types_are_written_from_these() {
     // Each member carries whether the last dial to it got through, which is
     // what dims a row and reads *unreachable* on it.
     DevicesView::export_all(&config).unwrap();
+
+    // And what this machine has installed beyond what the wizard checks, which
+    // is the Components section's whole read: the Annex's row on a Windows
+    // Keeper, and nothing anywhere else.
+    ComponentsView::export_all(&config).unwrap();
     LinkedDevice::export_all(&config).unwrap();
 
     // And the ports of members' terminals this device is holding on its own

@@ -132,8 +132,9 @@ const WHY: Record<Dependency, string> = {
 /// What a row that cannot be had here says, in place of a box.
 ///
 /// The WSL row's alone: a firmware with virtualization off is nothing a press
-/// here can change, so the row says what is wrong and where it is put right.
-const BARRED: Record<Barred, string> = {
+/// here can change, so the row says what is wrong and where it is put right —
+/// and the Components pane says it of its row in the same words.
+export const BARRED: Record<Barred, string> = {
   Virtualization:
     "Virtualization is off in this PC's firmware settings, so WSL can't run. " +
     "Turn it on there, then restart.",

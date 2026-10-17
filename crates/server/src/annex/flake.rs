@@ -51,6 +51,13 @@ pub const REPOS: &str = "/srv/repos";
 /// The Keeper's own version, which the box is pinned to.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// Where the flake is in the box, which is where the release it is pinned to
+/// is read back from — see [`pinned`].
+pub const IN_THE_BOX: &str = "/etc/nixos/flake.nix";
+
+/// What the `verkstead` input's url is up to the tag — see [`pinned`].
+const RELEASE_URL: &str = "github:tobico/verkstead/v";
+
 /// The system the box is, and the release asset built for it.
 const SYSTEM: &str = "x86_64-linux";
 const RELEASE_ASSET: &str = "verkstead-linux-x64";
@@ -162,6 +169,20 @@ pub fn written(keeper: &Keeper, binary: &Binary) -> std::io::Result<Written> {
         config,
         secrets,
     })
+}
+
+/// The release a flake this module wrote pins the box to: its `verkstead`
+/// input's tag, without the `v` — `0.42.0`, say — or `None` in a flake that
+/// names no release.
+///
+/// What the box was last rebuilt onto rather than what this Keeper is: a
+/// Keeper updated since reads its old release here until the box is pinned
+/// again.
+pub fn pinned(flake: &str) -> Option<String> {
+    let (_, after) = flake.split_once(RELEASE_URL)?;
+    let tag = &after[..after.find('"')?];
+
+    (!tag.is_empty()).then(|| tag.to_owned())
 }
 
 /// The stable channel the repository's own flake pins nixpkgs to:
@@ -283,6 +304,23 @@ mod tests {
             "{flake}"
         );
         assert!(!unfilled(&flake), "{flake}");
+    }
+
+    /// What a written flake pins is read back off it, which is the version
+    /// the Components row draws.
+    #[test]
+    fn the_release_pinned_is_read_back_off_the_written_flake() {
+        for binary in [Binary::Released, Binary::Copied("/tmp/verkstead".into())] {
+            let flake = written_for("winvm", &binary).flake;
+
+            assert_eq!(pinned(&flake).as_deref(), Some(VERSION), "{binary:?}");
+        }
+
+        assert_eq!(pinned("{ inputs = { }; }"), None);
+        assert_eq!(
+            pinned("verkstead.url = \"github:tobico/verkstead/v0.9.1\";"),
+            Some("0.9.1".to_owned())
+        );
     }
 
     #[test]

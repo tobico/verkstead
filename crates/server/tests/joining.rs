@@ -1604,10 +1604,7 @@ impl Boxed {
     /// reached at `keeper_at`.
     fn of(annex: &Verkstead, keeper_at: &str) -> Boxed {
         Boxed {
-            probed: annex::Probed::Present {
-                running: false,
-                networking: annex::Networking::Nat,
-            },
+            probed: annex::Probed::Present { running: false },
             data_dir: annex.dir.path().to_owned(),
             annex_at: annex.at().parse().unwrap(),
             keeper_at: keeper_at.parse().unwrap(),
@@ -1626,6 +1623,15 @@ impl Boxed {
         self.data_dir.join(name.trim_start_matches('/'))
     }
 }
+
+/// The flake in every box here: the `verkstead` input as the Keeper writes it,
+/// at a release that is not this build's, so what is read back is the box's.
+const PINNED_FLAKE: &str = "{
+  inputs.verkstead = {
+    url = \"github:tobico/verkstead/v0.9.1\";
+  };
+}
+";
 
 /// A program that ran to its end, having said `out`.
 fn ran(out: &str) -> std::process::Output {
@@ -1658,6 +1664,10 @@ impl annex::Backend for Boxed {
         &self.data_dir
     }
 
+    fn taken(&self) -> Option<u64> {
+        None
+    }
+
     fn make(&self, _: &std::path::Path) -> anyhow::Result<()> {
         unreachable!("a booted box is not made")
     }
@@ -1678,6 +1688,10 @@ impl annex::Backend for Boxed {
     fn terminate(&self) -> anyhow::Result<()> {
         self.terminated.fetch_add(1, Ordering::SeqCst);
         Ok(())
+    }
+
+    fn networking(&self) -> annex::Networking {
+        annex::Networking::Nat
     }
 
     fn run(&self, _: annex::Inside, argv: &[&str]) -> anyhow::Result<std::process::Output> {
@@ -1702,6 +1716,10 @@ impl annex::Backend for Boxed {
     }
 
     fn read(&self, path: &str) -> anyhow::Result<Vec<u8>> {
+        if path == annex::flake::IN_THE_BOX {
+            return Ok(PINNED_FLAKE.as_bytes().to_vec());
+        }
+
         Ok(std::fs::read(self.inside(path))?)
     }
 
@@ -1765,6 +1783,34 @@ async fn a_keepers_start_boots_its_annex_and_links_it() {
             .and_then(KeptBy::at),
         Some(KEEPER_AT),
         "the Annex reaches its Keeper at the address the probe read",
+    );
+}
+
+/// The release the box's flake pins is read at the start that boots it and
+/// held: the Components row draws it of a box that has stopped since, and
+/// reading the row boots nothing.
+#[tokio::test]
+async fn a_keepers_start_holds_the_release_its_annex_is_pinned_to() {
+    let annex = made_annex().await;
+    let keeper = Verkstead::asking().await;
+    let boxed = Arc::new(Boxed::of(&annex, KEEPER_AT));
+
+    let annexed = Annexed::of(boxed.clone());
+    assert_eq!(annexed.reading(None).version, None, "nothing read yet");
+
+    annexed.started(&keeper.devices()).await;
+
+    let reading = annexed.reading(None);
+    assert_eq!(reading.version.as_deref(), Some("0.9.1"));
+    assert_eq!(
+        reading.state,
+        verkstead_render::AnnexState::Stopped,
+        "the box probes stopped, and is drawn so"
+    );
+    assert_eq!(
+        boxed.booted.load(Ordering::SeqCst),
+        1,
+        "booted by the start alone"
     );
 }
 

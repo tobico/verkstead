@@ -23,6 +23,10 @@
 //! up the dial finds nothing, and the first one that gets through is the
 //! answer.
 //!
+//! **And the release its flake pins read back once it is up**, and held for
+//! the Components row: what the box runs is said of a stopped one too, and
+//! nothing is booted to say it — see [`Annexed::reading`].
+//!
 //! **A box that will not come up is a line on its row**, held on the
 //! [`Devices`] handle and drawn under the Annex's row on the Devices list, and
 //! in the log. The Keeper carries on either way, and the row reads
@@ -34,13 +38,14 @@
 //! — what held the box up dies with this process, and WSL's idle timeout stops
 //! it.
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::{Context, bail};
+use verkstead_render::{AnnexComponent, AnnexState};
 
-use super::{Backend, DATA_DIR, Inside, Probed};
+use super::{Backend, DATA_DIR, Inside, Probed, flake};
 use crate::device::{AnnexData, CERTIFICATE_FILE, Devices};
 use crate::settings::{Config, KeptBy};
 
@@ -67,6 +72,12 @@ pub struct Annexed {
     /// Whether this start booted the box, which is what says there is one to
     /// terminate at the stop.
     booted: AtomicBool,
+
+    /// The release the box is pinned to, read off its flake when this start
+    /// booted it and held from then on — so the Components row says it of a
+    /// box that has stopped since, and nothing is booted to read it. `None`
+    /// until the first boot has.
+    pinned: Mutex<Option<String>>,
 }
 
 impl Annexed {
@@ -76,6 +87,7 @@ impl Annexed {
             annex,
             patience: BOOT_TIME,
             booted: AtomicBool::new(false),
+            pinned: Mutex::new(None),
         }
     }
 
@@ -104,7 +116,7 @@ impl Annexed {
         let annex = self.annex.clone();
         let probed = tokio::task::spawn_blocking(move || annex.probe()).await;
 
-        let Ok(Probed::Present { networking, .. }) = probed else {
+        let Ok(Probed::Present { .. }) = probed else {
             return Ok(false);
         };
 
@@ -122,6 +134,15 @@ impl Annexed {
         }
 
         self.booted.store(true, Ordering::SeqCst);
+
+        // Up now, so what is asked of it from inside starts nothing: where its
+        // network is, and the release its flake pins.
+        let annex = self.annex.clone();
+        let networking = tokio::task::spawn_blocking(move || annex.networking())
+            .await
+            .unwrap_or(super::Networking::Nat);
+
+        self.read_pinned().await;
 
         let port = devices.keeping().port;
         let started = tokio::time::Instant::now();
@@ -168,6 +189,48 @@ impl Annexed {
 
         devices.annex_troubled(Some(line.clone()));
         Err(line)
+    }
+
+    /// Read the release the box's flake pins and hold it, for the Components
+    /// row to draw from then on. A flake that will not be read, or names no
+    /// release, leaves what was held: the version is the row's, and a box that
+    /// came up is not one that failed for it.
+    async fn read_pinned(&self) {
+        let annex = self.annex.clone();
+        let read = tokio::task::spawn_blocking(move || annex.read(flake::IN_THE_BOX)).await;
+
+        match read.map_err(anyhow::Error::from).and_then(|read| read) {
+            Ok(text) => match flake::pinned(&String::from_utf8_lossy(&text)) {
+                Some(version) => *self.pinned.lock().expect("never poisoned") = Some(version),
+                None => tracing::warn!("this device's Annex's flake names no release"),
+            },
+            Err(why) => {
+                tracing::warn!(why = %format!("{why:#}"), "this device's Annex's flake could not be read");
+            }
+        }
+    }
+
+    /// The Annex's row on the Components pane, read now: the backend's probe,
+    /// the release held since the box was booted, and the size of its disk
+    /// image — none of which boots it — and `trouble`, the line its Devices row
+    /// carries.
+    ///
+    /// **Blocks**, the probe being `wsl.exe` run twice.
+    pub fn reading(&self, trouble: Option<String>) -> AnnexComponent {
+        let state = match self.annex.probe() {
+            Probed::NoWsl | Probed::NoDistro => AnnexState::NotInstalled,
+            Probed::NeedsRestart => AnnexState::NeedsRestart,
+            Probed::VirtualizationOff => AnnexState::VirtualizationOff,
+            Probed::Present { running: true } => AnnexState::Running,
+            Probed::Present { running: false } => AnnexState::Stopped,
+        };
+
+        AnnexComponent {
+            state,
+            version: self.pinned.lock().expect("never poisoned").clone(),
+            disk: self.annex.taken(),
+            trouble,
+        }
     }
 
     /// One try at the link: the two addresses read off the box, and the
@@ -342,7 +405,92 @@ impl AnnexData for InTheBox {
 
 #[cfg(test)]
 mod tests {
-    use super::sentence;
+    use super::*;
+    use crate::annex::wsl::Wsl;
+    use crate::annex::wsl::tests::{
+        ANSWERING_STATUS, FACTS_NO_WSL, Stub, inside, listed, made, strings, utf16,
+    };
+
+    /// An Annex over `backend`.
+    fn annexed(backend: Wsl) -> Annexed {
+        Annexed::of(Arc::new(backend))
+    }
+
+    /// A machine with no WSL reads *not installed*, with nothing to say of a
+    /// version or a disk.
+    #[test]
+    fn the_components_row_of_a_machine_with_no_wsl_is_not_installed() {
+        let powershell = Stub::new();
+        powershell.answers(1, FACTS_NO_WSL, 0);
+
+        let missing = powershell.dir.path().join("no-such-wsl.exe");
+        let annexed = annexed(Wsl::at(missing, &powershell.program));
+
+        assert_eq!(
+            annexed.reading(None),
+            AnnexComponent {
+                state: AnnexState::NotInstalled,
+                version: None,
+                disk: None,
+                trouble: None,
+            }
+        );
+    }
+
+    /// A running box reads *running*, the release its flake pinned when it was
+    /// booted, and its disk image's size; once it has stopped it reads
+    /// *stopped* with that same release, and nothing is run inside to say so.
+    #[tokio::test]
+    async fn the_components_row_says_running_or_stopped_with_the_release_held_since_the_boot() {
+        let (backend, wsl, _powershell) = made();
+        std::fs::write(backend.disk().join("ext4.vhdx"), vec![0; 4096]).unwrap();
+
+        wsl.answers(
+            1,
+            "verkstead.url = \"github:tobico/verkstead/v0.9.1\";\n",
+            0,
+        )
+        .answers(2, utf16(ANSWERING_STATUS), 0)
+        .answers(3, utf16(&listed("Running")), 0)
+        .answers(4, utf16(ANSWERING_STATUS), 0)
+        .answers(5, utf16(&listed("Stopped")), 0);
+
+        let annexed = annexed(backend);
+        annexed.read_pinned().await;
+
+        let trouble = Some("The annex didn't answer.".to_owned());
+        assert_eq!(
+            annexed.reading(trouble.clone()),
+            AnnexComponent {
+                state: AnnexState::Running,
+                version: Some("0.9.1".to_owned()),
+                disk: Some(4096),
+                trouble,
+            }
+        );
+
+        assert_eq!(
+            annexed.reading(None),
+            AnnexComponent {
+                state: AnnexState::Stopped,
+                version: Some("0.9.1".to_owned()),
+                disk: Some(4096),
+                trouble: None,
+            }
+        );
+
+        let probing = vec![strings(&["--status"]), strings(&["--list", "--verbose"])];
+        let calls = wsl.calls();
+        assert_eq!(
+            calls[0],
+            inside("root", &["cat", "--", "/etc/nixos/flake.nix"])
+        );
+        assert_eq!(
+            calls[1..],
+            [probing.clone(), probing].concat(),
+            "nothing run inside"
+        );
+    }
 
     /// The row's line is one sentence, whatever the box said under its first
     /// line.

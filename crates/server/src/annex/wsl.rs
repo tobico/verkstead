@@ -54,6 +54,10 @@ const MADE: &str = "made";
 const RELEASES: &str = "https://github.com/nix-community/NixOS-WSL/releases/download";
 const IMAGE: &str = "nixos.wsl";
 
+/// The disk WSL makes a distro's filesystem in, in the directory it is
+/// imported into: what the box takes of the Keeper's disk.
+const DISK_IMAGE: &str = "ext4.vhdx";
+
 /// What turns WSL on, each raised in a dialog of its own: the optional
 /// features and WSL itself with no distro of anybody's, and then the newest
 /// WSL over whatever that put there. The restart after them is the human's.
@@ -227,17 +231,6 @@ impl Wsl {
         }
     }
 
-    /// The networking mode, from `wslinfo` inside the distro.
-    ///
-    /// A `wslinfo` that does not know the question is a WSL older than mirrored
-    /// networking, which is NAT.
-    fn networking(&self) -> Networking {
-        match self.run(Inside::Root, &["wslinfo", "--networking-mode"]) {
-            Ok(ran) if ran.status.success() => networking(&String::from_utf8_lossy(&ran.stdout)),
-            _ => Networking::Nat,
-        }
-    }
-
     /// What one command inside printed, which has to have succeeded.
     fn inside_text(&self, argv: &[&str]) -> anyhow::Result<String> {
         let ran = self.run(Inside::Root, argv)?;
@@ -280,10 +273,7 @@ impl Backend for Wsl {
         };
 
         match listed_state(&listed) {
-            Some(running) if self.disk.join(MADE).is_file() => Probed::Present {
-                running,
-                networking: self.networking(),
-            },
+            Some(running) if self.disk.join(MADE).is_file() => Probed::Present { running },
             Some(_) | None => Probed::NoDistro,
         }
     }
@@ -305,6 +295,12 @@ impl Backend for Wsl {
 
     fn disk(&self) -> &Path {
         &self.disk
+    }
+
+    fn taken(&self) -> Option<u64> {
+        std::fs::metadata(self.disk.join(DISK_IMAGE))
+            .ok()
+            .map(|image| image.len())
     }
 
     fn make(&self, image: &Path) -> anyhow::Result<()> {
@@ -402,6 +398,17 @@ impl Backend for Wsl {
         }
 
         self.must(&["--terminate", BOX_NAME])
+    }
+
+    /// The networking mode, from `wslinfo` inside the distro.
+    ///
+    /// A `wslinfo` that does not know the question is a WSL older than mirrored
+    /// networking, which is NAT.
+    fn networking(&self) -> Networking {
+        match self.run(Inside::Root, &["wslinfo", "--networking-mode"]) {
+            Ok(ran) if ran.status.success() => networking(&String::from_utf8_lossy(&ran.stdout)),
+            _ => Networking::Nat,
+        }
     }
 
     fn run(&self, who: Inside, argv: &[&str]) -> anyhow::Result<Output> {
@@ -735,7 +742,7 @@ pub(crate) mod tests {
 
     /// What the facts are on that same machine, which is a VM with a
     /// hypervisor under it: virtualization on, and the platform not.
-    const FACTS_NO_WSL: &str = "hypervisor=True\r\nfirmware=True\r\nplatform=2\r\n";
+    pub(crate) const FACTS_NO_WSL: &str = "hypervisor=True\r\nfirmware=True\r\nplatform=2\r\n";
 
     /// What a WSL that is installed and cannot start a machine says for
     /// `--status`, after `wsl --install --no-distribution` and before the
@@ -751,7 +758,7 @@ pub(crate) mod tests {
     /// What a WSL that answers says for `--status`, as WSL 3.0.3 on that same
     /// machine really printed it once it was on: the WSL 1 lines are about the
     /// optional component `--install --no-distribution` leaves off.
-    const ANSWERING_STATUS: &str = "Default Version: 2\r\n\
+    pub(crate) const ANSWERING_STATUS: &str = "Default Version: 2\r\n\
         WSL1 is not supported with your current machine configuration.\r\n\
         Please enable the \"Windows Subsystem for Linux\" optional component to use WSL1.\r\n";
 
@@ -761,7 +768,7 @@ pub(crate) mod tests {
 
     /// What it lists with the human's own distro beside Verkstead's, in the
     /// layout WSL 3.0.3 really lists in.
-    fn listed(state: &str) -> String {
+    pub(crate) fn listed(state: &str) -> String {
         format!(
             "  NAME         STATE           VERSION\r\n\
              * Ubuntu       Stopped         2\r\n  \
@@ -902,7 +909,7 @@ pub(crate) mod tests {
 
     /// A backend over a stub `wsl` and a stub PowerShell, its disk in the
     /// `wsl` stub's directory.
-    fn stubbed() -> (Wsl, Stub, Stub) {
+    pub(crate) fn stubbed() -> (Wsl, Stub, Stub) {
         let wsl = Stub::new();
         let powershell = Stub::new();
 
@@ -912,7 +919,7 @@ pub(crate) mod tests {
     }
 
     /// The same, with a distro that was made to the end.
-    fn made() -> (Wsl, Stub, Stub) {
+    pub(crate) fn made() -> (Wsl, Stub, Stub) {
         let (backend, wsl, powershell) = stubbed();
 
         std::fs::create_dir_all(backend.disk()).unwrap();
@@ -1040,66 +1047,76 @@ pub(crate) mod tests {
         );
     }
 
-    /// The distro listed in `state`, with `wslinfo` inside saying `mode`.
-    fn present(state: &str, mode: &str) -> (Probed, Vec<Vec<String>>) {
+    /// The distro made to the end and listed in `state`, probed: what it reads
+    /// as, and every call that made.
+    fn present(state: &str) -> (Probed, Vec<Vec<String>>) {
         let (backend, wsl, _powershell) = made();
         wsl.answers(1, utf16(ANSWERING_STATUS), 0)
-            .answers(2, utf16(&listed(state)), 0)
-            .answers(3, format!("{mode}\n"), 0);
+            .answers(2, utf16(&listed(state)), 0);
 
         (backend.probe(), wsl.calls())
     }
 
+    /// Stopped or running, it is read off the list alone: nothing is run
+    /// inside, which would boot a stopped one.
     #[test]
-    fn the_distro_is_present_stopped_or_running_under_nat_and_mirrored() {
+    fn the_distro_is_present_stopped_or_running_and_never_booted_to_say_so() {
         for (state, running) in [("Stopped", false), ("Running", true)] {
-            for (mode, networking) in [("nat", Networking::Nat), ("mirrored", Networking::Mirrored)]
-            {
-                let (probed, calls) = present(state, mode);
+            let (probed, calls) = present(state);
 
-                assert_eq!(
-                    probed,
-                    Probed::Present {
-                        running,
-                        networking
-                    },
-                    "{state} under {mode}"
-                );
-                assert_eq!(calls[2], inside("root", &["wslinfo", "--networking-mode"]));
-            }
+            assert_eq!(probed, Probed::Present { running }, "{state}");
+            assert_eq!(
+                calls,
+                vec![strings(&["--status"]), strings(&["--list", "--verbose"])],
+                "{state}: nothing is run inside"
+            );
+        }
+    }
+
+    /// And where its network is, asked of the box from inside once it is up.
+    #[test]
+    fn the_networking_is_wslinfos_nat_or_mirrored() {
+        for (mode, networking) in [("nat", Networking::Nat), ("mirrored", Networking::Mirrored)] {
+            let (backend, wsl, _powershell) = made();
+            wsl.answers(1, format!("{mode}\n"), 0);
+
+            assert_eq!(backend.networking(), networking, "{mode}");
+            assert_eq!(
+                wsl.calls(),
+                vec![inside("root", &["wslinfo", "--networking-mode"])]
+            );
         }
     }
 
     #[test]
     fn a_wslinfo_that_does_not_know_the_question_is_nat() {
         let (backend, wsl, _powershell) = made();
-        wsl.answers(1, utf16(ANSWERING_STATUS), 0)
-            .answers(2, utf16(&listed("Running")), 0)
-            .answers(3, "wslinfo: unknown option\n", 1);
+        wsl.answers(1, "wslinfo: unknown option\n", 1);
 
-        assert_eq!(
-            backend.probe(),
-            Probed::Present {
-                running: true,
-                networking: Networking::Nat
-            }
-        );
+        assert_eq!(backend.networking(), Networking::Nat);
     }
 
     #[test]
     fn a_list_in_utf8_reads_as_one_in_utf16_does() {
         let (backend, wsl, _powershell) = made();
         wsl.answers(1, ANSWERING_STATUS, 0)
-            .answers(2, listed("Running"), 0)
-            .answers(3, "mirrored\n", 0);
+            .answers(2, listed("Running"), 0);
 
-        assert_eq!(
-            backend.probe(),
-            Probed::Present {
-                running: true,
-                networking: Networking::Mirrored
-            }
-        );
+        assert_eq!(backend.probe(), Probed::Present { running: true });
+    }
+
+    /// What the box takes is its disk image's size, read beside it on the
+    /// Keeper's own disk — and nothing where WSL has made none there.
+    #[test]
+    fn what_the_box_takes_is_its_disk_images_size() {
+        let (backend, wsl, _powershell) = made();
+
+        assert_eq!(backend.taken(), None);
+
+        std::fs::write(backend.disk().join("ext4.vhdx"), vec![0; 4096]).unwrap();
+
+        assert_eq!(backend.taken(), Some(4096));
+        assert!(wsl.calls().is_empty(), "nothing asked of WSL");
     }
 
     #[test]

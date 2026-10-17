@@ -7,6 +7,7 @@
 import { vi } from "vitest";
 
 import type {
+  ComponentsView,
   DevicesView,
   ForwardsView,
   SetReading,
@@ -29,6 +30,10 @@ const FORWARDS = "/api/ui/forwards";
 /// And the cluster's one list of Authors, which the Git switcher, the Repos
 /// pane and the Brief all read — see the default below.
 const AUTHORS = "/api/ui/authors";
+
+/// And what this machine has installed beyond the wizard's checks, the fourth —
+/// see the default below.
+const COMPONENTS = "/api/ui/components";
 
 /// One answer per fetch in the order given. The last answer is repeated,
 /// because a page polls for as long as it is open and a test should not have to
@@ -71,6 +76,12 @@ export function serving(...answers: Array<Answer>) {
   // And the one list of Authors, empty: no Author and no member's mirror, which
   // a test about Authors answers with a `whenever` of its own.
   held.set(`GET ${AUTHORS}`, json([]));
+
+  // And what this machine has installed, which the settings page reads to say
+  // whether it draws a Components section at all — see
+  // `src/settings/Components.tsx`. A machine that cannot have an Annex, which
+  // draws none, and is what every test that has not said otherwise is about.
+  held.set(`GET ${COMPONENTS}`, json({ annex: null } satisfies ComponentsView));
 
   for (const answer of answers) {
     if (typeof answer === "function") {

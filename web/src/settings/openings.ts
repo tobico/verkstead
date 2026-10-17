@@ -10,18 +10,20 @@
 //! pane draws:
 //!
 //! - `desktop`, `git`, `sandbox`, `instructions`, `mcp-servers`, `scheduling`,
-//!   `cleanup`, `remote` and `repos` — what the desktop app does about its own
-//!   window, everything git is told, what a session's sandbox holds (the build
-//!   caches and the extra paths), the text every session is given, the MCP
-//!   servers a Conversation may attach, how much Verkstead runs at once, what
-//!   becomes of an archived Conversation, whether this
-//!   machine can be reached from a phone, and the Repos that are registered,
-//!   each named by a word. There is one of each of them, and a word says so.
+//!   `cleanup`, `remote`, `components` and `repos` — what the desktop app does
+//!   about its own window, everything git is told, what a session's sandbox
+//!   holds (the build caches and the extra paths), the text every session is
+//!   given, the MCP servers a Conversation may attach, how much Verkstead runs
+//!   at once, what becomes of an archived Conversation, whether this
+//!   machine can be reached from a phone, what it has installed beyond what the
+//!   wizard checks, and the Repos that are registered, each named by a word. There is one of each of them, and a word says so.
 //! - `profiles/:id` — an Agent Profile, which arrives with an id of its own,
 //!   and `profiles/new` for the blank form that adds one.
 //!
 //! `desktop` is a word here in every browser, while the section behind it is
-//! drawn only inside the Electron app — see `bridge.ts`. Which is not the
+//! drawn only inside the Electron app — see `bridge.ts` — and `components` is
+//! one on every machine, while its section is drawn only on one that can have
+//! an Annex. Which is not the
 //! asymmetry it looks like: the words are what this page *can* open, and a path
 //! naming a pane that draws nothing leaves the details bare, exactly as the
 //! paragraph below says a path naming no pane at all does.
@@ -50,7 +52,8 @@
 /// about its own window, everything git is told, what a session's sandbox holds,
 /// the text every session is given, the MCP servers a Conversation may attach,
 /// how much Verkstead runs at once, what becomes of an archived Conversation, how this
-/// machine is reached from a phone and which Repos are registered — the things
+/// machine is reached from a phone, what it has installed beyond the wizard's
+/// checks and which Repos are registered — the things
 /// there is exactly one of on this page.
 ///
 /// A list rather than a word written wherever one is needed, because three
@@ -73,6 +76,7 @@ export const WORDS = [
   "scheduling",
   "cleanup",
   "remote",
+  "components",
   "repos",
 ] as const;
 

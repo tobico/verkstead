@@ -39,21 +39,21 @@ use verkstead_render::{
     BranchRename, BriefEdit, CheckRollup, CleanupStepView, CleanupView, ClonableRepo, Cloning,
     CommentedOn, CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed,
     CompanionModeChoice, CompanionModeChosen, CompanionRemoved, CompanionView, CompileCaching,
-    Confirming, ConflictResolution, ConversationArchived, ConversationClosed, ConversationEntry,
-    ConversationMove, ConversationSteered, ConversationStopped, ConversationUnarchived,
-    ConversationView, Creation, Cursor, DevicesView, DiskUse, DroppedRow, Eviction, FileDeleted,
-    FileDeleting, FileListsView, FileMade, FileMaking, FileReading, FileRenamed, FileRenaming,
-    FileRootsView, FileStatusView, FileWrite, FileWritten, FolderListing, GrillingStarted,
-    HeaderEdit, IgnoreRule, IgnoredCommentsEdit, InstallPress, LanguageCleared, LanguageEdit,
-    LanguageView, Lifecycle, Locked, McpHeader, McpServer, McpServerEdit, McpServersEdit, Merging,
-    MissedOut, NewAdoption, NewAnnex, NewCompanion, NewConversation, NewJoin, NewRank,
-    OpenTerminal, PairingView, Parked, PendingSteerView, Permitting, Process, ProcessChoice,
-    ProcessPicked, ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration, RemoteBanner,
-    RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice, RuleField,
-    RuleRefused, Running, RunningOn, ServeEdit, ServePress, ServerAttached, ServerField,
-    ServerRefused, ServerRemoved, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView,
-    ShareCommented, SharePublished, SharedCommit, SharedConversation, ShowArchived,
-    ShowingArchived, SizeRefused, Standing, SteerCancelled, SteerForm, SteerOpened,
+    ComponentsView, Confirming, ConflictResolution, ConversationArchived, ConversationClosed,
+    ConversationEntry, ConversationMove, ConversationSteered, ConversationStopped,
+    ConversationUnarchived, ConversationView, Creation, Cursor, DevicesView, DiskUse, DroppedRow,
+    Eviction, FileDeleted, FileDeleting, FileListsView, FileMade, FileMaking, FileReading,
+    FileRenamed, FileRenaming, FileRootsView, FileStatusView, FileWrite, FileWritten,
+    FolderListing, GrillingStarted, HeaderEdit, IgnoreRule, IgnoredCommentsEdit, InstallPress,
+    LanguageCleared, LanguageEdit, LanguageView, Lifecycle, Locked, McpHeader, McpServer,
+    McpServerEdit, McpServersEdit, Merging, MissedOut, NewAdoption, NewAnnex, NewCompanion,
+    NewConversation, NewJoin, NewRank, OpenTerminal, PairingView, Parked, PendingSteerView,
+    Permitting, Process, ProcessChoice, ProcessPicked, ProfileChoice, ProfileEdit, ProfileEntry,
+    PushKey, Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved,
+    Resumed, RoleChoice, RuleField, RuleRefused, Running, RunningOn, ServeEdit, ServePress,
+    ServerAttached, ServerField, ServerRefused, ServerRemoved, SetReading, SetView, SettingsEdit,
+    SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedCommit, SharedConversation,
+    ShowArchived, ShowingArchived, SizeRefused, Standing, SteerCancelled, SteerForm, SteerOpened,
     SteerPairingView, SteerSaved, SteerSubmission, StoreView, Submitted, Subscribed, Subscription,
     TakenUp, TargetNamed, TargetRecorded, TerminalOpened, TimelineEvent, TokenEdit, TokenSaved,
     TransferredTo, Transferring, UnreadEntry, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
@@ -750,6 +750,12 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // happens to live, and everything a cluster relays later stands under
         // this same segment.
         .route("/api/ui/devices", get(devices))
+        // And what this machine has installed beyond what the wizard checks,
+        // which is the Components section: the Annex's row on a Windows Keeper,
+        // and nothing at all anywhere else. Read off the machine like the one
+        // above, and its own read because none of it is about the cluster — a
+        // box stopped or rebuilt is the Keeper's business alone.
+        .route("/api/ui/components", get(components))
         // And the ports of members' terminals this device is holding on its own
         // `localhost`, which the sidebar's foot counts: this device's own
         // reading, held back from the link — see [`crate::forwarding`].
@@ -7721,6 +7727,34 @@ async fn devices(State(state): State<AppState>) -> HttpResponse {
     };
 
     listed(&devices).await
+}
+
+/// `GET /api/ui/components` — what this machine has installed beyond what the
+/// wizard checks: the **Annex**'s row, on a Keeper with a way of having one,
+/// and `{"annex": null}` everywhere else, which is what says the settings page
+/// draws no Components card (ADR-0024).
+///
+/// **Read on every request and booting nothing** — see
+/// [`crate::annex::booting::Annexed::reading`]: the probe reads WSL's own list,
+/// the version is the one held since the Keeper booted the box, and the disk is
+/// a file's size on this machine.
+async fn components(State(state): State<AppState>) -> HttpResponse {
+    let annexed = state
+        .devices
+        .as_ref()
+        .and_then(|devices| Some((devices.annexed()?.clone(), devices.annex_trouble())));
+
+    let Some((annexed, trouble)) = annexed else {
+        return Json(ComponentsView { annex: None }).into_response();
+    };
+
+    match tokio::task::spawn_blocking(move || annexed.reading(trouble)).await {
+        Ok(annex) => Json(ComponentsView { annex: Some(annex) }).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, "reading this machine's components failed");
+            unavailable("What this machine has installed couldn't be read.")
+        }
+    }
 }
 
 /// `GET /api/ui/devices/discovered` — the devices nobody has typed an address

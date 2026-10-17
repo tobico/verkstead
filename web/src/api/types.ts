@@ -325,6 +325,43 @@ agent_type: AgentType | null, };
 export type AgentType = "Claude" | "Codex" | "Grok" | "OpenCode";
 
 /**
+ * The Annex's row: how its box stands, the release it runs and the disk it
+ * takes.
+ */
+export type AnnexComponent = { 
+/**
+ * How the box stands — see [`AnnexState`].
+ */
+state: AnnexState, 
+/**
+ * The Verkstead release the box is pinned to, as the Keeper read it off
+ * the box's flake when it last booted it: held since that start, and so
+ * drawn on a stopped box too. `None` until the first boot of this start
+ * has read it, which the row draws as no version rather than a guess.
+ */
+version: string | null, 
+/**
+ * What the box's disk image takes of the Keeper's disk, in bytes, or
+ * `None` where there is no image to measure.
+ */
+disk: number | null, 
+/**
+ * And why the box would not come up at this start, where it would not —
+ * the same line the Annex's row on the Devices list carries.
+ */
+trouble: string | null, };
+
+/**
+ * How the Annex's box stands.
+ *
+ * The wizard's three ways of having no box yet are told apart, because two of
+ * them are something the human does before Install can: a restart, and
+ * virtualization turned on in the firmware. The words for both are the
+ * viewer's, and the WSL row's own.
+ */
+export type AnnexState = "NotInstalled" | "NeedsRestart" | "VirtualizationOff" | "Running" | "Stopped" | "Updating";
+
+/**
  * One question's slot in a Response: either an Answer — a selected Option
  * and/or free text — or the Unanswered marker, saying the human chose to
  * leave the question open.
@@ -1352,6 +1389,16 @@ base_commit: string | null, };
  * one place a platform's answer is said.
  */
 export type CompileCaching = "Cached" | "NoSccache";
+
+/**
+ * Every row of the Components pane this machine can have.
+ */
+export type ComponentsView = { 
+/**
+ * The **Annex**'s row — *Linux development (WSL)* — or `None` on a machine
+ * that cannot have one, which is every machine but a Windows Keeper.
+ */
+annex: AnnexComponent | null, };
 
 /**
  * What a take-up's press says beyond which Draft is making it.
