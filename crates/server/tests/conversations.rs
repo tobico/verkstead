@@ -3510,6 +3510,34 @@ async fn starting_on_a_repo_whose_author_is_gone_is_refused_naming_the_repo() {
     }
 }
 
+/// And the way out the refusal names is open: the draft the Start was refused
+/// on has committed nothing, so it does not hold the Repos pane's repoint, and
+/// the Start pressed again lands as the Author picked.
+#[tokio::test]
+async fn a_start_refused_for_a_gone_author_lands_once_another_is_picked() {
+    let (elsewhere, _dir, app, _repo, repo_id) = under_a_vanished_author().await;
+
+    let id = ready(&app, elsewhere.path(), repo_id).await;
+
+    assert!(matches!(
+        grill(&app, id).await,
+        GrillingStarted::RepoAuthorGone { .. }
+    ));
+
+    let repointed: verkstead_render::Repointed = post(
+        &app,
+        &format!("/api/ui/repos/{repo_id}/author"),
+        &serde_json::json!({ "author": "work" }),
+    )
+    .await;
+    assert!(
+        matches!(repointed, verkstead_render::Repointed::Repointed(_)),
+        "the draft held the repoint: {repointed:?}"
+    );
+
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+}
+
 /// And the same at the other door, an adoption.
 #[tokio::test]
 async fn adopting_on_a_repo_whose_author_is_gone_is_refused_naming_the_repo() {

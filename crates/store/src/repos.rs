@@ -309,7 +309,11 @@ pub enum Repointing {
 /// **Live work beside it refuses too**, not only work on it: a Companion Repo
 /// is committed in by the Conversation that admitted it, and that admission was
 /// made against the Author it had. What counts as live is
-/// [`super::work_on_repo`]'s reading, by way of [`super::Lifecycle::read`].
+/// [`super::work_on_repo`]'s reading, by way of [`super::Lifecycle::read`] —
+/// **but for a Draft with no Worktree**, which has committed nothing as anybody
+/// and whose cut asks every companion's Author again. Otherwise the draft a
+/// start was refused on for its Repo's Author being gone would be what stops
+/// the human picking another.
 ///
 /// One transaction, the look and the write together, so a Conversation started
 /// on the Repo between the two cannot find itself under an Author it was not
@@ -332,8 +336,9 @@ pub async fn repoint_repo(pool: &SqlitePool, id: i64, author: &str) -> Result<Re
         return Ok(Repointing::NoSuchRepo);
     };
 
-    let rows: Vec<(String, String, bool)> = sqlx::query_as(
-        "SELECT COALESCE(c.named_branch, c.branch), c.state, c.repo_id = ?
+    let rows: Vec<(String, String, bool, bool)> = sqlx::query_as(
+        "SELECT COALESCE(c.named_branch, c.branch), c.state, c.repo_id = ?,
+                EXISTS (SELECT 1 FROM worktrees w WHERE w.conversation_id = c.id)
          FROM conversations c
          WHERE c.repo_id = ?
             OR c.id IN (SELECT conversation_id FROM companions WHERE repo_id = ?)
@@ -348,9 +353,12 @@ pub async fn repoint_repo(pool: &SqlitePool, id: i64, author: &str) -> Result<Re
 
     let (mut on, mut beside) = (Vec::new(), Vec::new());
 
-    for (branch, state, own) in rows {
+    for (branch, state, own, worktree) in rows {
         match super::Lifecycle::read(&state)? {
             super::Lifecycle::Done | super::Lifecycle::Closed => {}
+            // A draft with nowhere to work has committed nothing as anybody,
+            // and every cut asks its companions' Authors again.
+            super::Lifecycle::Draft if !worktree => {}
             _ if own => on.push(branch),
             _ => beside.push(branch),
         }

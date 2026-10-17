@@ -73,7 +73,11 @@ and the alternative named is what was turned down.
   Repo is neither Done nor Closed** — the rule unregistering already follows —
   because a branch half committed as one Author would otherwise carry on as
   another. Letting the next session pick up the change was turned down for that
-  reason.
+  reason. *Amended in stage 02's review*: a Draft with no Worktree does not hold
+  a repoint, having committed nothing as anybody, and its cut asks every
+  companion's Author again. Otherwise the draft a start was just refused on,
+  for its Repo's Author being gone, is what would refuse the repoint the
+  refusal sends the human to make.
 
 - **Removing an Author is refused while a registered Repo of this device
   points at it.** An unregistered Repo keeps its association as history and

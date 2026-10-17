@@ -1521,6 +1521,9 @@ async fn a_repo_in_live_work_is_refused_a_repoint_naming_the_work() {
         .unwrap()
         .unwrap();
     store::add_companion(&pool, going, beside.id).await.unwrap();
+    store::set_state(&pool, going, store::Lifecycle::Grilling)
+        .await
+        .unwrap();
 
     assert_eq!(
         repoint(&app, own.id, "personal").await,

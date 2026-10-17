@@ -648,6 +648,7 @@ async fn a_repo_in_live_work_is_not_repointed() {
         add_companion(&pool, on, beside.id).await.unwrap(),
         Adding::Added,
     );
+    set_state(&pool, on, Lifecycle::Grilling).await.unwrap();
 
     assert_eq!(
         repoint_repo(&pool, own.id, "home").await.unwrap(),
@@ -680,6 +681,75 @@ async fn a_repo_in_live_work_is_not_repointed() {
         repoint_repo(&pool, beside.id, "home").await.unwrap(),
         Repointing::Repointed(_),
     ));
+}
+
+/// A draft with nowhere to work yet holds nothing up: it has committed nothing
+/// as anybody, and its cut asks every companion's Author again. Once it has a
+/// Worktree it is live work like any other.
+#[tokio::test]
+async fn a_draft_holds_a_repoint_only_once_it_has_a_worktree() {
+    let (_dir, pool) = fresh_pool().await;
+
+    let own = register_repo_as(
+        &pool,
+        Path::new("/watched/verkstead"),
+        "verkstead",
+        "main",
+        Some("work"),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let beside = register_repo_as(
+        &pool,
+        Path::new("/watched/askance"),
+        "askance",
+        "main",
+        Some("work"),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    let drafting = start_conversation(&pool, own.id, "rate-limiting", THIS_DEVICE)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        add_companion(&pool, drafting, beside.id).await.unwrap(),
+        Adding::Added,
+    );
+
+    assert!(matches!(
+        repoint_repo(&pool, own.id, "home").await.unwrap(),
+        Repointing::Repointed(_),
+    ));
+    assert!(matches!(
+        repoint_repo(&pool, beside.id, "home").await.unwrap(),
+        Repointing::Repointed(_),
+    ));
+
+    sqlx::query("INSERT INTO worktrees (conversation_id, path) VALUES (?, ?)")
+        .bind(drafting)
+        .bind("/state/worktrees/verkstead-rate-limiting")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        repoint_repo(&pool, own.id, "work").await.unwrap(),
+        Repointing::InUse {
+            on: vec!["rate-limiting".to_owned()],
+            beside: vec![],
+        },
+    );
+    assert_eq!(
+        repoint_repo(&pool, beside.id, "work").await.unwrap(),
+        Repointing::InUse {
+            on: vec![],
+            beside: vec!["rate-limiting".to_owned()],
+        },
+    );
 }
 
 /// And a Repo nobody has registered, or one taken away, is nothing to repoint.
