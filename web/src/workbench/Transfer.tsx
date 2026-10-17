@@ -109,6 +109,30 @@ function lacking(said: Lacking, device: string): JSX.Element {
     );
   }
 
+  if ("RepoAuthor" in said) {
+    const { name, companion, here, there } = said.RepoAuthor;
+    return (
+      <>
+        {companion ? "The companion repo " : "The repo "}
+        {name} works as {there} on {device} and as {here} here. Pick {here} for
+        it under <strong>Repos</strong> in Settings on {device} to move the
+        work.
+      </>
+    );
+  }
+
+  if ("RepoAuthorUnpicked" in said) {
+    return (
+      <>
+        {said.RepoAuthorUnpicked.companion
+          ? "The companion repo "
+          : "The repo "}
+        {said.RepoAuthorUnpicked.name} has no author picked on {device}. Pick
+        one for it under <strong>Repos</strong> in Settings there.
+      </>
+    );
+  }
+
   return `${ROLE_NAME[said.Harness.role]} is paired with ${
     said.Harness.profile ?? DEFAULT_PROFILE
   }, which runs ${AGENT_NAME[said.Harness.agent_type]}. ${harnessAbsentOn(

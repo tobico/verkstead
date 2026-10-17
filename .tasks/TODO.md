@@ -22,4 +22,4 @@ Roadmap stage: [03: One list across the cluster](docs/roadmaps/authors/03-one-li
 - [x] 03: The token copy — [details](03-the-token-copy.md)
 - [x] 04: Edits, verification and removal relayed home — [details](04-edits-relayed-home.md)
 - [x] 05: Open repo and Create repo on a member offer its one list — [details](05-member-pickers.md)
-- [ ] 06: The preflight compares Authors — [details](06-preflight-compares-authors.md)
+- [x] 06: The preflight compares Authors — [details](06-preflight-compares-authors.md)

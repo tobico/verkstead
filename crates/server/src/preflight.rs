@@ -30,11 +30,12 @@
 //! repository itself — said as a different sentence, being a different thing to
 //! go and put right.
 
-use verkstead_render::{HarnessThere, Lacking, PairingRole, Preflight};
+use verkstead_render::{AuthorThere, HarnessThere, Lacking, PairingRole, Preflight};
 
 use crate::device::Devices;
 use crate::peer::harnesses::HARNESSES;
 use crate::relaying::{self, Refusal};
+use crate::settings::Config;
 use crate::store;
 
 /// The most a device's harnesses may be before the answer is dropped: **eight
@@ -47,7 +48,8 @@ use crate::store;
 /// along.
 const MOST_THE_HARNESSES_ARE: usize = 8 * 1024;
 
-/// What `device` lacks before `conversation` could be moved onto it.
+/// What `device` lacks before `conversation` could be moved onto it, `config`
+/// being what resolves this device's own Repos' Authors.
 ///
 /// `Err` is this device's own trouble — a store it could not read, a cluster it
 /// is not part of. A device that did not answer is not one of those: it is a
@@ -55,6 +57,7 @@ const MOST_THE_HARNESSES_ARE: usize = 8 * 1024;
 pub async fn of(
     devices: Option<&Devices>,
     pool: &sqlx::SqlitePool,
+    config: &Config,
     conversation: &store::Conversation,
     device: &str,
 ) -> Result<Preflight, Refusal> {
@@ -103,13 +106,42 @@ pub async fn of(
     let mut lacks = Vec::new();
 
     for (at, (repo, matched)) in repos.iter().zip(matched).enumerate() {
-        if matched.is_none() {
+        // The first of the list is the Conversation's own; everything after it
+        // came off the companions.
+        let companion = at > 0;
+
+        let Some(matched) = matched else {
             lacks.push(Lacking::Repo {
                 name: repo.name.clone(),
-                // The first of the list is the Conversation's own; everything
-                // after it came off the companions.
-                companion: at > 0,
+                companion,
             });
+            continue;
+        };
+
+        match matched.author {
+            AuthorThere::Unpicked => lacks.push(Lacking::RepoAuthorUnpicked {
+                name: repo.name.clone(),
+                companion,
+            }),
+
+            // Compared by uuid, which every device says alike: the mirror over
+            // there of this device's own Author is the same Author. Where this
+            // device's Repo works as nobody, there is nothing here to differ
+            // from, and its own start says so where it is.
+            AuthorThere::As { id, called } => {
+                if let Some(ours) = config.author_of(repo.author.as_deref())
+                    && ours.id() != id
+                {
+                    lacks.push(Lacking::RepoAuthor {
+                        name: repo.name.clone(),
+                        companion,
+                        here: ours.called().to_owned(),
+                        there: called,
+                    });
+                }
+            }
+
+            AuthorThere::Unsaid => {}
         }
     }
 

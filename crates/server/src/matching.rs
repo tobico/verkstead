@@ -232,6 +232,7 @@ mod tests {
             id: 1,
             name: name.to_owned(),
             path: format!("/srv/{name}"),
+            author: Default::default(),
             origin: origin.map(str::to_owned),
         }
     }

@@ -5238,7 +5238,15 @@ async fn preflight(
         }
     };
 
-    match crate::preflight::of(state.devices.as_ref(), &state.pool, &conversation, &device).await {
+    match crate::preflight::of(
+        state.devices.as_ref(),
+        &state.pool,
+        &state.settings.config(),
+        &conversation,
+        &device,
+    )
+    .await
+    {
         Ok(reading) => Json(reading).into_response(),
         Err(refusal) => {
             tracing::warn!("a transfer could not be preflighted: {}", refusal.saying);

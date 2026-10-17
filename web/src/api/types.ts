@@ -3260,7 +3260,15 @@ name: string,
  * repository the work itself is in. Both are refusals; they are not
  * the same sentence.
  */
-companion: boolean, } } | { "Harness": { role: PairingRole, 
+companion: boolean, } } | { "RepoAuthor": { name: string, companion: boolean, 
+/**
+ * What this device's Author for it is called.
+ */
+here: string, 
+/**
+ * And what that device's is called.
+ */
+there: string, } } | { "RepoAuthorUnpicked": { name: string, companion: boolean, } } | { "Harness": { role: PairingRole, 
 /**
  * The Agent Profile's name as it reads here, or nothing for the one
  * account on its harness that nobody named.

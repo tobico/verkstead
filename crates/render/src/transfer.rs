@@ -71,6 +71,25 @@ pub enum Lacking {
         companion: bool,
     },
 
+    /// That device's match for a repository works as another Author than this
+    /// device's does, compared by uuid (ADR-0025). A move would commit there as
+    /// somebody else, so it is refused; what puts it right is a repoint over
+    /// there rather than anything the move does.
+    RepoAuthor {
+        name: String,
+        companion: bool,
+
+        /// What this device's Author for it is called.
+        here: String,
+
+        /// And what that device's is called.
+        there: String,
+    },
+
+    /// That device's match for a repository has no Author picked among the
+    /// several it has, so nothing could be committed in it there.
+    RepoAuthorUnpicked { name: String, companion: bool },
+
     /// The harness a Pairing names is not on that device's `PATH`.
     Harness {
         role: PairingRole,

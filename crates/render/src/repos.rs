@@ -86,6 +86,34 @@ pub struct RepoAcross {
     /// repository has no origin — which is a repository that matches by name or
     /// not at all.
     pub origin: Option<String>,
+
+    /// The Author that device's Repo works as, as that device resolves it
+    /// (ADR-0025): what a transfer's preflight compares its own Repo's with.
+    ///
+    /// Defaulted, so a Verkstead older than this one reads as
+    /// [`AuthorThere::Unsaid`] rather than as an answer this end cannot read.
+    #[serde(default)]
+    pub author: AuthorThere,
+}
+
+/// Which Author a member's Repo works as, as that member answers it.
+///
+/// **The uuid is what is compared**, being the same on every device: a mirror
+/// over there and the local Author here are one Author. The name travels beside
+/// it only to be said.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AuthorThere {
+    /// The Author it works as: its uuid, and what it is called on a screen.
+    As { id: String, called: String },
+
+    /// Several Authors over there and none recorded for it, which is a Repo
+    /// nothing can be committed in until one is picked there.
+    Unpicked,
+
+    /// Nothing to compare: no Author configured over there at all, a recorded
+    /// one gone, or a Verkstead that does not say.
+    #[default]
+    Unsaid,
 }
 
 /// A repository the human is asking Verkstead to take on, named by its absolute

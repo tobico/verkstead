@@ -212,6 +212,23 @@ const NO_HARNESS = {
 
 const ASLEEP = { device: "laptop", lacks: ["Unreachable"] } satisfies Preflight;
 
+/// And the two about the far Repo's Author: another one than this device's,
+/// and none picked.
+const OTHER_AUTHOR = {
+  device: "laptop",
+  lacks: [
+    {
+      RepoAuthor: {
+        name: "askance",
+        companion: true,
+        here: "Work",
+        there: "Home",
+      },
+    },
+    { RepoAuthorUnpicked: { name: "verkstead", companion: false } },
+  ],
+} satisfies Preflight;
+
 /// Open the Conversation's action menu: press the trigger, and hand back what
 /// it drops.
 async function openActions(container: ParentNode): Promise<HTMLElement> {
@@ -500,6 +517,30 @@ describe("transferring a conversation to another device", () => {
     expect(said).toContain("Grilling");
     expect(said).toContain("fable");
     expect(said).toContain(harnessAbsentOn("Claude", "laptop"));
+    expect(go(card).disabled).toBe(true);
+  });
+
+  /// A far Repo under another Author is named with both, and one with none
+  /// picked over there says so — each pointing at Repos on that device.
+  it("names a far repo under another author with both, and one with none picked", async () => {
+    theCluster(
+      whenever(`/api/ui/conversations/${GRILLING.id}`, json(GRILLING)),
+      whenever(preflightOf(LAPTOP), json(OTHER_AUTHOR)),
+    );
+
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+    const card = await transferring(container);
+    pick("Device", "laptop");
+
+    await waitFor(() => expect(findings(card)).toHaveLength(2));
+
+    const [other, unpicked] = findings(card) as [string, string];
+    expect(other).toBe(
+      "The companion repo askance works as Home on laptop and as Work here. Pick Work for it under Repos in Settings on laptop to move the work.",
+    );
+    expect(unpicked).toBe(
+      "The repo verkstead has no author picked on laptop. Pick one for it under Repos in Settings there.",
+    );
     expect(go(card).disabled).toBe(true);
   });
 

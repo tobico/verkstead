@@ -192,8 +192,14 @@ pub(crate) async fn transfer(
         return Ok(Transferring::NotTransferable);
     }
 
-    let reading =
-        crate::preflight::of(state.devices.as_ref(), &state.pool, &conversation, device).await?;
+    let reading = crate::preflight::of(
+        state.devices.as_ref(),
+        &state.pool,
+        &state.settings.config(),
+        &conversation,
+        device,
+    )
+    .await?;
 
     if !reading.lacks.is_empty() {
         return Ok(Transferring::Lacking(reading));
@@ -355,9 +361,15 @@ async fn by_the_session(
         ));
     }
 
-    let reading = crate::preflight::of(Some(devices), &state.pool, &conversation, &device.device)
-        .await
-        .map_err(|refusal| refusal.saying)?;
+    let reading = crate::preflight::of(
+        Some(devices),
+        &state.pool,
+        &state.settings.config(),
+        &conversation,
+        &device.device,
+    )
+    .await
+    .map_err(|refusal| refusal.saying)?;
 
     if !reading.lacks.is_empty() {
         return Err(format!(
@@ -469,6 +481,23 @@ fn lacks(lacking: &verkstead_render::Lacking, device: &str) -> String {
 
         Lacking::Repo { name, companion } => format!(
             "The {repo} {name} is not on {device}. Open repo there to register it.",
+            repo = if *companion { "companion repo" } else { "repo" },
+        ),
+
+        Lacking::RepoAuthor {
+            name,
+            companion,
+            here,
+            there,
+        } => format!(
+            "The {repo} {name} works as {there} on {device} and as {here} here. Pick {here} for \
+             it under Repos in Settings on {device} to move the work.",
+            repo = if *companion { "companion repo" } else { "repo" },
+        ),
+
+        Lacking::RepoAuthorUnpicked { name, companion } => format!(
+            "The {repo} {name} has no author picked on {device}. Pick one for it under Repos in \
+             Settings there.",
             repo = if *companion { "companion repo" } else { "repo" },
         ),
 
@@ -1851,6 +1880,45 @@ mod tests {
         assert!(
             !movable(Lifecycle::Closed),
             "a Closed Conversation has no work left to move",
+        );
+    }
+
+    /// A match over there under another Author is said with both, the far
+    /// end's and this end's, and with where the repoint that clears it is made.
+    #[test]
+    fn a_repo_under_another_author_is_said_with_both() {
+        let said = lacks(
+            &verkstead_render::Lacking::RepoAuthor {
+                name: "widgets".to_owned(),
+                companion: true,
+                here: "Work".to_owned(),
+                there: "Home".to_owned(),
+            },
+            "the-laptop",
+        );
+
+        assert_eq!(
+            said,
+            "The companion repo widgets works as Home on the-laptop and as Work here. Pick Work \
+             for it under Repos in Settings on the-laptop to move the work.",
+        );
+    }
+
+    /// And one with no Author picked over there says so, and where to pick one.
+    #[test]
+    fn a_repo_with_no_author_picked_over_there_says_so() {
+        let said = lacks(
+            &verkstead_render::Lacking::RepoAuthorUnpicked {
+                name: "widgets".to_owned(),
+                companion: false,
+            },
+            "the-laptop",
+        );
+
+        assert_eq!(
+            said,
+            "The repo widgets has no author picked on the-laptop. Pick one for it under Repos in \
+             Settings there.",
         );
     }
 }
