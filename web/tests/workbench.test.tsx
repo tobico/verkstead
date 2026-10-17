@@ -27,6 +27,7 @@ import type {
   Adopted,
   AgentOutputEvent,
   AgentType,
+  AuthorEntry,
   BacklogPane,
   BriefEvent,
   Capture,
@@ -365,6 +366,7 @@ import {
   unreadable,
   whenever,
 } from "./serving";
+import { MIRRORED, oneList } from "./authors";
 // And the Nudge stream, for the one pane that follows it rather than the cache:
 // the Code pane's tree re-reads the folders it has open on a `files` Nudge, and
 // those listings are held above the pane rather than in a query — see
@@ -9031,6 +9033,7 @@ describe("the author on the brief", () => {
   async function briefWith(
     settings: SettingsView,
     author: string | null,
+    ...mirrors: AuthorEntry[]
   ): Promise<Element> {
     const fetching = theGrilling(
       whenever(
@@ -9038,6 +9041,7 @@ describe("the author on the brief", () => {
         json({ ...GRILLING, repo: { ...GRILLING.repo, author } }),
       ),
       whenever("/api/ui/settings", json(settings)),
+      whenever("/api/ui/authors", json(oneList(settings, ...mirrors))),
     );
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
@@ -9048,9 +9052,9 @@ describe("the author on the brief", () => {
       container,
       `.${shell.detailsPane} .${briefPane.configuration}`,
     );
-    // Read the settings before saying anything is or is not drawn off them.
+    // Read the list before saying anything is or is not drawn off it.
     await waitFor(() =>
-      expect(askedFor(fetching, "/api/ui/settings")).toBeGreaterThan(0),
+      expect(askedFor(fetching, "/api/ui/authors")).toBeGreaterThan(0),
     );
     await new Promise((settle) => setTimeout(settle, 0));
     return summary;
@@ -9084,6 +9088,14 @@ describe("the author on the brief", () => {
 
     expect(terms(summary)).toContain("Repo");
     expect(terms(summary)).not.toContain("Author");
+  });
+
+  /// A member's Author is one of the list, counted and named like this
+  /// device's own (ADR-0025).
+  it("names a mirrored author beside the repo", async () => {
+    const summary = await briefWith(ONE_AUTHOR, MIRRORED.id, MIRRORED);
+
+    await waitFor(() => expect(said(summary, "Author")).toBe("Client"));
   });
 
   it("says so where the repo's author is gone", async () => {

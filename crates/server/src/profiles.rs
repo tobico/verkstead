@@ -234,6 +234,12 @@ async fn homes_of(
         return Ok(HashMap::new());
     }
 
+    members_by_device(pool).await
+}
+
+/// Every member of this device's cluster, by its Device Id: what a mirror's
+/// device mark is drawn from — see [`whose`].
+pub(crate) async fn members_by_device(pool: &SqlitePool) -> Result<HashMap<String, store::Member>> {
     Ok(store::members(pool)
         .await?
         .into_iter()
@@ -275,7 +281,7 @@ fn lends(profile: &store::Profile) -> bool {
 /// [`crate::mirroring`]), so what this covers is the moment between the
 /// unlink and the next sweep — and a row with no name at all would be worse than
 /// one naming a machine by its id.
-fn whose(homes: &HashMap<String, store::Member>, device: &str) -> RowDevice {
+pub(crate) fn whose(homes: &HashMap<String, store::Member>, device: &str) -> RowDevice {
     match homes.get(device) {
         Some(member) => RowDevice {
             id: Some(member.device.clone()),

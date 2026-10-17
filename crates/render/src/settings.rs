@@ -749,6 +749,34 @@ pub struct AuthorSaved {
     pub github_token: Option<TokenSaved>,
 }
 
+/// One Author of the cluster's **one list**: this device's own, or a mirror of
+/// one a member holds at home (ADR-0025).
+///
+/// What `GET /api/ui/authors` answers, to this device's pages and to a member
+/// across the link alike — which is why there is **nothing of the token** here,
+/// not even its last four: whether one is held is all a row says about it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct AuthorEntry {
+    pub id: String,
+
+    /// What it is called in rows and pickers, empty where nobody named it and
+    /// the git name stands in.
+    pub display_name: String,
+
+    pub name: String,
+    pub email: String,
+
+    /// Whether the device it is at home on holds a GitHub token for it.
+    pub holds_token: bool,
+
+    /// The device it is at home on, or `null` for one of this device's own.
+    ///
+    /// A member taking this list in takes only the rows with none, so a mirror
+    /// is always one hop from its home and never a mirror of a mirror.
+    pub device: Option<crate::RowDevice>,
+}
+
 /// What became of removing an Author, from the Git section's switcher.
 ///
 /// Refused while a registered Repo points at it (ADR-0025): its next session

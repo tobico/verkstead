@@ -31,6 +31,7 @@ use verkstead_schema::{QuestionSet, Response, ResponseAccepted, ValidationError}
 mod archives;
 mod arrivals;
 mod attachments;
+mod author_mirrors;
 mod banners;
 mod births;
 mod captures;
@@ -86,6 +87,9 @@ pub use arrivals::{Arrival, ArrivingPicked, Replacing, arrive, arrived_checkout,
 pub use attachments::{
     Attachment, Origin, attach, attached_sets, attachment, attachments, detach, detach_from_set,
     set_attachment, set_attachments,
+};
+pub use author_mirrors::{
+    AuthorMirror, author_mirrors, forget_author_mirrors_of_departed, record_author_mirrors,
 };
 pub use banners::{dismiss_remote_banner, remote_banner_dismissed};
 pub use births::{
@@ -935,6 +939,11 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // nothing, being a fact about the person rather than about any Conversation
     // — see [`banners`].
     banners::apply_schema(pool).await?;
+
+    // And the Authors every member holds at home, one row apiece and keyed by
+    // the uuid that is the same everywhere — see [`author_mirrors`]. Hanging off
+    // nothing, the membership it is pruned against coming and going on its own.
+    author_mirrors::apply_schema(pool).await?;
 
     // And last of all, whatever a database written by an older Verkstead
     // still needs done to it. After every table above, because what a rewrite

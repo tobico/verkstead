@@ -675,6 +675,32 @@ id: string | null,
 display_name: string, name: string, email: string, };
 
 /**
+ * One Author of the cluster's **one list**: this device's own, or a mirror of
+ * one a member holds at home (ADR-0025).
+ *
+ * What `GET /api/ui/authors` answers, to this device's pages and to a member
+ * across the link alike — which is why there is **nothing of the token** here,
+ * not even its last four: whether one is held is all a row says about it.
+ */
+export type AuthorEntry = { id: string, 
+/**
+ * What it is called in rows and pickers, empty where nobody named it and
+ * the git name stands in.
+ */
+display_name: string, name: string, email: string, 
+/**
+ * Whether the device it is at home on holds a GitHub token for it.
+ */
+holds_token: boolean, 
+/**
+ * The device it is at home on, or `null` for one of this device's own.
+ *
+ * A member taking this list in takes only the rows with none, so a mirror
+ * is always one hop from its home and never a mirror of a mirror.
+ */
+device: RowDevice | null, };
+
+/**
  * What became of removing an Author, from the Git section's switcher.
  *
  * Refused while a registered Repo points at it (ADR-0025): its next session
@@ -3795,7 +3821,7 @@ name: string | null, };
  * the behaviour every kind used to get — so a new kind is safe to add and an
  * old page stays correct against a newer server.
  */
-export type Nudge = { "kind": "transcript", conversation: number, } | { "kind": "screen", conversation: number, } | { "kind": "commit", conversation: number, } | { "kind": "files", conversation: number, } | { "kind": "ports", conversation: number, } | { "kind": "terminals", conversation: number, } | { "kind": "forwards" } | { "kind": "set", conversation: number, } | { "kind": "liveness", conversation: number, } | { "kind": "conversation", conversation: number, } | { "kind": "conversations" } | { "kind": "repos" } | { "kind": "joins" } | { "kind": "devices" } | { "kind": "discovered" } | { "kind": "profiles" } | { "kind": "login", profile: number, } | { "kind": "everything" };
+export type Nudge = { "kind": "transcript", conversation: number, } | { "kind": "screen", conversation: number, } | { "kind": "commit", conversation: number, } | { "kind": "files", conversation: number, } | { "kind": "ports", conversation: number, } | { "kind": "terminals", conversation: number, } | { "kind": "forwards" } | { "kind": "set", conversation: number, } | { "kind": "liveness", conversation: number, } | { "kind": "conversation", conversation: number, } | { "kind": "conversations" } | { "kind": "repos" } | { "kind": "joins" } | { "kind": "devices" } | { "kind": "discovered" } | { "kind": "profiles" } | { "kind": "authors" } | { "kind": "login", profile: number, } | { "kind": "everything" };
 
 /**
  * One Nudge as it goes down a stream: what moved, and **whose news it is**.
@@ -3820,7 +3846,7 @@ export type Nudged = {
  * Device Id — absent for this device's own, which is every Nudge a
  * workbench has ever sent about its own work.
  */
-device?: string | null, } & ({ "kind": "transcript", conversation: number, } | { "kind": "screen", conversation: number, } | { "kind": "commit", conversation: number, } | { "kind": "files", conversation: number, } | { "kind": "ports", conversation: number, } | { "kind": "terminals", conversation: number, } | { "kind": "forwards" } | { "kind": "set", conversation: number, } | { "kind": "liveness", conversation: number, } | { "kind": "conversation", conversation: number, } | { "kind": "conversations" } | { "kind": "repos" } | { "kind": "joins" } | { "kind": "devices" } | { "kind": "discovered" } | { "kind": "profiles" } | { "kind": "login", profile: number, } | { "kind": "everything" });
+device?: string | null, } & ({ "kind": "transcript", conversation: number, } | { "kind": "screen", conversation: number, } | { "kind": "commit", conversation: number, } | { "kind": "files", conversation: number, } | { "kind": "ports", conversation: number, } | { "kind": "terminals", conversation: number, } | { "kind": "forwards" } | { "kind": "set", conversation: number, } | { "kind": "liveness", conversation: number, } | { "kind": "conversation", conversation: number, } | { "kind": "conversations" } | { "kind": "repos" } | { "kind": "joins" } | { "kind": "devices" } | { "kind": "discovered" } | { "kind": "profiles" } | { "kind": "authors" } | { "kind": "login", profile: number, } | { "kind": "everything" });
 
 /**
  * Whether a fresh Verkstead can do anything yet, and what it would take.

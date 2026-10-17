@@ -548,6 +548,9 @@ const ABOUT: Record<string, readonly string[]> = {
   // against the saved accounts. Once however many of them are mounted — one
   // key, one query, one re-read.
   profiles: [PROFILES],
+  // The one list of Authors, which the Brief's Author fact reads — a pane this
+  // sweep never opens — and the Git switcher and the Repos pane beside it.
+  authors: [],
   // The joins in flight, which move the list the modal is drawn from and the
   // Devices section of the Remote access pane. Neither is among the five: the
   // modal is read by the shell rather than by a page, and the Devices section

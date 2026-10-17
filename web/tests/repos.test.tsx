@@ -70,6 +70,7 @@ import {
   whenever,
   type Answer,
 } from "./serving";
+import { MIRRORED, oneList } from "./authors";
 import repos from "./fixtures/repos.json" with { type: "json" };
 import listing from "./fixtures/directories.json" with { type: "json" };
 import told from "./fixtures/settings.json" with { type: "json" };
@@ -547,13 +548,14 @@ describe("the author of a repo", () => {
     const fetching = serving(
       whenever("/api/ui/repos", json(recorded(WORK.id))),
       whenever("/api/ui/settings", json(ONE_AUTHOR)),
+      whenever("/api/ui/authors", json(oneList(ONE_AUTHOR))),
     );
     mountPane();
 
     await waitFor(() => screen.getByText(FIRST.name));
     // Read the settings before saying nothing is drawn off them.
     await waitFor(() =>
-      expect(askedFor(fetching, "/api/ui/settings")).toBeGreaterThan(0),
+      expect(askedFor(fetching, "/api/ui/authors")).toBeGreaterThan(0),
     );
     await new Promise((settle) => setTimeout(settle, 0));
 
@@ -568,6 +570,7 @@ describe("the author of a repo", () => {
     serving(
       whenever("/api/ui/repos", json(recorded(HOME.id))),
       whenever("/api/ui/settings", json(TWO_AUTHORS)),
+      whenever("/api/ui/authors", json(oneList(TWO_AUTHORS))),
     );
     mountPane();
 
@@ -588,6 +591,7 @@ describe("the author of a repo", () => {
     serving(
       whenever("/api/ui/repos", json(recorded(null))),
       whenever("/api/ui/settings", json(TWO_AUTHORS)),
+      whenever("/api/ui/authors", json(oneList(TWO_AUTHORS))),
     );
     const { unmount } = mountPane();
 
@@ -602,6 +606,7 @@ describe("the author of a repo", () => {
     serving(
       whenever("/api/ui/repos", json(recorded("a-uuid-nobody-holds"))),
       whenever("/api/ui/settings", json(TWO_AUTHORS)),
+      whenever("/api/ui/authors", json(oneList(TWO_AUTHORS))),
     );
     mountPane();
 
@@ -612,12 +617,36 @@ describe("the author of a repo", () => {
     );
   });
 
+  /// A member's Author counts towards the two, and a repo pointed at one is
+  /// named by it with the machine it is at home on (ADR-0025).
+  it("names a mirrored author with its machine", async () => {
+    serving(
+      whenever("/api/ui/repos", json(recorded(MIRRORED.id))),
+      whenever("/api/ui/settings", json(ONE_AUTHOR)),
+      whenever("/api/ui/authors", json(oneList(ONE_AUTHOR, MIRRORED))),
+    );
+    mountPane();
+
+    await waitFor(() => expect(authorOf(REPOS[1]!.name)).not.toBeNull());
+
+    expect(
+      authorOf(REPOS[1]!.name)!.selectedOptions[0]!.textContent,
+    ).toBe("Client · the-workstation");
+    expect(authorOf(FIRST.name)!.selectedOptions[0]!.textContent).toBe(
+      WORK.name,
+    );
+    expect(
+      screen.queryByText(/isn't configured any more/),
+    ).toBeNull();
+  });
+
   /// A start on a repo whose author was deleted by hand is sent here, so the
   /// row draws its picker with one author left too — and only that row.
   it("draws the picker for a gone author with one author left", async () => {
     serving(
       whenever("/api/ui/repos", json(recorded("a-uuid-nobody-holds"))),
       whenever("/api/ui/settings", json(ONE_AUTHOR)),
+      whenever("/api/ui/authors", json(oneList(ONE_AUTHOR))),
     );
     mountPane();
 
@@ -632,6 +661,7 @@ describe("the author of a repo", () => {
     const fetching = serving(
       whenever("/api/ui/repos", json(recorded(HOME.id))),
       whenever("/api/ui/settings", json(TWO_AUTHORS)),
+      whenever("/api/ui/authors", json(oneList(TWO_AUTHORS))),
       repointing(
         FIRST,
         json({ Repointed: { ...FIRST, author: HOME.id } }),
@@ -656,6 +686,7 @@ describe("the author of a repo", () => {
     serving(
       whenever("/api/ui/repos", json(recorded(HOME.id))),
       whenever("/api/ui/settings", json(TWO_AUTHORS)),
+      whenever("/api/ui/authors", json(oneList(TWO_AUTHORS))),
       repointing(
         FIRST,
         json({ InUse: { on: ["rate-limiting"], beside: ["docs-pass"] } }),

@@ -17,7 +17,7 @@ Roadmap stage: [03: One list across the cluster](docs/roadmaps/authors/03-one-li
 
 ## Tasks
 
-- [ ] 01: Mirror rows and seeing the one list — [details](01-mirror-rows.md)
+- [x] 01: Mirror rows and seeing the one list — [details](01-mirror-rows.md)
 - [ ] 02: A Repo pointed at a mirror — [details](02-a-repo-pointed-at-a-mirror.md)
 - [ ] 03: The token copy — [details](03-the-token-copy.md)
 - [ ] 04: Edits, verification and removal relayed home — [details](04-edits-relayed-home.md)

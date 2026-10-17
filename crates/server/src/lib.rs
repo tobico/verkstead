@@ -1233,6 +1233,40 @@ pub fn routers_answering_devices_telling(
     }
 }
 
+/// And the same two routers over a device that keeps its settings files in
+/// `data_dir`, which is what a suite about the Authors needs: an Author is at
+/// home in `config.yaml` and `secrets.yaml`, and a router handed nowhere to keep
+/// them has nowhere to save one (ADR-0025).
+pub fn routers_keeping_answering_devices_telling(
+    pool: SqlitePool,
+    data_dir: PathBuf,
+    devices: device::Devices,
+    nudges: nudge::Nudges,
+    machine: onboarding::Machine,
+) -> Routers {
+    let gate = key::Gate::open();
+
+    let state = standing(
+        pool,
+        updates::Updates::nothing_learned(),
+        nothing_bound(),
+        data_dir,
+        sessions::Sessions::none(),
+        Gh::on_path(),
+        tailnet(),
+        &gate,
+        machine,
+        None,
+        Some(devices),
+        nudges,
+    );
+
+    Routers {
+        workbench: serving(state.clone(), &gate),
+        over_the_link: peer::workbench::served(state),
+    }
+}
+
 /// And both of them over a device that **runs sessions**, keeping what it makes
 /// in `data_dir` and reaching GitHub through `gh`.
 ///
@@ -1642,6 +1676,11 @@ fn standing(
     // does, because what it keeps is rows in this store rather than a list in
     // this device's memory, and the two are refreshed by different news.
     mirroring::refreshing(&state);
+
+    // And the mirror rows of every member's Authors, on the Profiles' schedule
+    // and beside them, so every device draws one list of Authors (ADR-0025) —
+    // see [`mirroring::authors`].
+    mirroring::authors::refreshing(&state);
 
     // And what this device forwards, on the same channel again: a member's
     // `ports` Nudge is that Conversation's ports read over the link and held on

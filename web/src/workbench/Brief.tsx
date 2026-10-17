@@ -34,10 +34,10 @@
 
 import { For, Show, type JSX } from "solid-js";
 
-import { listProfiles, loadSettingsOf } from "../api/client";
+import { listProfiles } from "../api/client";
 import { Attachments } from "../Attaching";
 import type {
-  AuthorSaved,
+  AuthorEntry,
   BriefEvent,
   CompanionMode,
   CompanionView,
@@ -54,7 +54,7 @@ import { PaneSticky } from "../Panes";
 import { Empty } from "../notices";
 import { keyOf, useDevice } from "../reaching";
 import * as pairing from "../pairing";
-import { authorLabel } from "../settings/Git";
+import { authorLabel, useAuthors } from "../authors";
 import styles from "./Brief.module.css";
 import { chosen } from "./naming";
 import { PROCESS, ROLE, uses } from "./processes";
@@ -269,25 +269,21 @@ function Configuration(props: {
 /// its git name where it has none, as the Git section and the Repos pane label
 /// it.
 ///
-/// Drawn only once more than one Author is configured, there being nothing to
-/// tell apart with one — but a Repo with none picked, or one whose Author
-/// `config.yaml` no longer holds, says so whatever the count: a start on it is
-/// refused, and a blank here would be the pane hiding why.
+/// Drawn only once more than one Author is on the list, mirrors counted, there
+/// being nothing to tell apart with one — but a Repo with none picked, or one
+/// whose Author the list no longer holds, says so whatever the count: a start
+/// on it is refused, and a blank here would be the pane hiding why.
 ///
-/// The settings of the device holding the work, read the way the Repos pane
-/// reads them: an Author is named by a uuid in that machine's files, and this
-/// machine's list would call a member's Author gone.
+/// The one list of the device holding the work, read the way the Repos pane
+/// reads it: an Author is named by a uuid out of that machine's list, and this
+/// machine's would call a member's Author gone.
 function Author(props: { repo: RepoEntry }): JSX.Element {
   const device = useDevice();
 
-  const settings = useReading(() => ({
-    queryKey: keyOf(device(), "settings"),
-    queryFn: () => loadSettingsOf(device()),
-    freshness: { reconcile: "id" },
-  }));
+  const listed = useAuthors(device);
 
-  const authors = (): AuthorSaved[] | undefined => settings.data?.authors;
-  const holding = (): AuthorSaved | undefined =>
+  const authors = (): AuthorEntry[] | undefined => listed.data;
+  const holding = (): AuthorEntry | undefined =>
     authors()?.find(({ id }) => id === props.repo.author);
   const gone = (): boolean =>
     props.repo.author !== null &&

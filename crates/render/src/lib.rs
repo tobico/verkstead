@@ -99,9 +99,9 @@ pub use repos::{
     Repointed, Repointing,
 };
 pub use settings::{
-    AtOnceEdit, AtOnceView, Author, AuthorRemoved, AuthorSaved, BindEntry, CleanupEdit,
-    CleanupStepEdit, CleanupStepView, CleanupView, CompileCaching, ConflictResolution, DiskUse,
-    Eviction, HeaderEdit, IgnoreRule, IgnoredCommentsEdit, LanguageCleared, LanguageEdit,
+    AtOnceEdit, AtOnceView, Author, AuthorEntry, AuthorRemoved, AuthorSaved, BindEntry,
+    CleanupEdit, CleanupStepEdit, CleanupStepView, CleanupView, CompileCaching, ConflictResolution,
+    DiskUse, Eviction, HeaderEdit, IgnoreRule, IgnoredCommentsEdit, LanguageCleared, LanguageEdit,
     LanguageView, McpHeader, McpHeaderEdit, McpServer, McpServerEdit, McpServersEdit,
     PathResolution, PathSource, PathsView, RuleField, RuleRefused, Running, RunningOn, ServerField,
     ServerRefused, ServerTried, SettingsEdit, SettingsSaved, SettingsView, SizeRefused, StoreView,

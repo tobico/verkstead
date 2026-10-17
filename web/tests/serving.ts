@@ -26,6 +26,10 @@ const DEVICES = "/api/ui/devices";
 /// And what this machine is forwarding, the third — see the default below.
 const FORWARDS = "/api/ui/forwards";
 
+/// And the cluster's one list of Authors, which the Git switcher, the Repos
+/// pane and the Brief all read — see the default below.
+const AUTHORS = "/api/ui/authors";
+
 /// One answer per fetch in the order given. The last answer is repeated,
 /// because a page polls for as long as it is open and a test should not have to
 /// say how many times.
@@ -63,6 +67,10 @@ export function serving(...answers: Array<Answer>) {
   // Nothing, which is what a device that never opened a member's terminal
   // holds, and draws no item at all.
   held.set(`GET ${FORWARDS}`, json({ forwards: [] } satisfies ForwardsView));
+
+  // And the one list of Authors, empty: no Author and no member's mirror, which
+  // a test about Authors answers with a `whenever` of its own.
+  held.set(`GET ${AUTHORS}`, json([]));
 
   for (const answer of answers) {
     if (typeof answer === "function") {

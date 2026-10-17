@@ -57,6 +57,9 @@
     "kind": "profiles"
   },
   {
+    "kind": "authors"
+  },
+  {
     "kind": "everything"
   }
 ]

@@ -34,7 +34,13 @@ import {
   Route,
   createMemoryHistory,
 } from "@solidjs/router";
-import { fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@solidjs/testing-library";
 import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
 import type { JSX } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -77,6 +83,8 @@ import { rowKey } from "../src/reaching";
 import notices from "../src/notices.module.css";
 import { SET_UP, drawn } from "./bench";
 import { json, serving, whenever } from "./serving";
+import { MIRRORED, oneList } from "./authors";
+import { authorLabel } from "../src/authors";
 import conversations from "./fixtures/conversations.json" with { type: "json" };
 import profiles from "./fixtures/profiles.json" with { type: "json" };
 import repos from "./fixtures/repos.json" with { type: "json" };
@@ -1528,6 +1536,43 @@ describe("the authors", () => {
     await waitFor(() =>
       screen.getByText(/askance and verkstead are still this author's/),
     );
+  });
+
+  /// A member's Author is a row of the dropdown after this device's own,
+  /// marked with its machine, and picked it is drawn read-only, saying where
+  /// it is at home (ADR-0025).
+  it("lists a member's author read-only, marked with its machine", async () => {
+    serving(
+      whenever("/api/ui/settings", json(TOLD)),
+      whenever("/api/ui/authors", json(oneList(TOLD, MIRRORED))),
+    );
+    mountPane();
+    await waitFor(() => screen.getByRole("combobox", { name: "Author" }));
+
+    fireEvent.click(screen.getByRole("combobox", { name: "Author" }));
+    expect(
+      within(screen.getByRole("listbox"))
+        .getAllByRole("option")
+        .map((option) => option.textContent),
+    ).toEqual([
+      authorLabel(TOLD.authors[0]!),
+      "Client · the-workstation",
+      "Add author",
+      "Remove author",
+    ]);
+    fireEvent.click(
+      screen.getByRole("option", { name: "Client · the-workstation" }),
+    );
+
+    await waitFor(() =>
+      screen.getByText(/This author is at home on the-workstation/),
+    );
+    screen.getByText(/ada@client\.example/);
+    expect(screen.queryByLabelText("Email")).toBeNull();
+    expect(screen.queryByLabelText("Token")).toBeNull();
+
+    fireEvent.click(screen.getByRole("combobox", { name: "Author" }));
+    expect(screen.queryByRole("option", { name: "Remove author" })).toBeNull();
   });
 
   /// With one Author there is no dropdown, and so no way to remove it.

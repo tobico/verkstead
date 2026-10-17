@@ -44,6 +44,12 @@
 //! registered Repo points at it, the Repos named under the dropdown: their next
 //! session would have nobody to commit as (ADR-0025).
 //!
+//! **A member's Authors are rows of the same dropdown**, after this device's
+//! own and marked with the machine each is at home on, because a cluster draws
+//! one list of them (ADR-0025). One of those picked is drawn read-only, saying
+//! where it lives: what is edited here is this device's own files, and a mirror
+//! is in neither of them.
+//!
 //! Both halves read the one query. They are two views of the same two files, and
 //! a read apiece would be two reads of them — the cache is what makes the second
 //! caller free.
@@ -128,6 +134,8 @@ import { Modal } from "../Modal";
 import { PaneSticky } from "../Panes";
 import { QuietButton } from "../QuietButton";
 import { loadSettings, removeAuthor, saveSettings } from "../api/client";
+import { authorLabel, authorRow, useAuthors } from "../authors";
+import { osIcon } from "../devices";
 import { useReading } from "../freshness";
 import { Listbox, Picker } from "../picking";
 import type {
@@ -137,6 +145,7 @@ import type {
   ConflictResolution,
   IgnoreRule,
   IgnoredCommentsEdit,
+  RowDevice,
   RuleField,
   RuleRefused,
   SettingsEdit,
@@ -196,15 +205,9 @@ function authorless(author: Author | AuthorSaved): boolean {
   return author.name === "" || author.email === "";
 }
 
-/// What an Author is called in the dropdown's rows and on the card: the display
-/// name somebody gave it, or its git name where nobody did.
-///
-/// And something for an Author that has neither yet, which is the one **Add
-/// author** has just opened — a row reading as nothing would be a row nobody
-/// could find again.
-export function authorLabel(author: AuthorSaved): string {
-  return author.display_name || author.name || "New author";
-}
+/// One row of the switcher: an Author this device's files hold, or a mirror of
+/// a member's — the device it is at home on, and whether a token is held there.
+type Listed = AuthorSaved & { device: RowDevice | null; holds_token: boolean };
 
 /// What one Author is missing, in the card's words — or `null` where it has
 /// everything a session needs.
@@ -358,24 +361,51 @@ export function GitPane(props: {
 
   const told = (): SettingsView | undefined => settings.data;
 
-  /// Every Author there is to pick between: the ones the files hold, and the
-  /// one **Add author** opened on the end while it is still unsaved.
-  const authors = (): AuthorSaved[] => {
-    const saved = told()?.authors ?? [];
+  // And the cluster's one list, for the mirrors of every member's Authors.
+  const listed = useAuthors();
+
+  /// Every member's Author this device mirrors, as rows of the switcher.
+  const mirrors = (): Listed[] =>
+    (listed.data ?? [])
+      .filter((one) => one.device !== null)
+      .map((one) => ({
+        id: one.id,
+        display_name: one.display_name,
+        name: one.name,
+        email: one.email,
+        github_token: null,
+        device: one.device,
+        holds_token: one.holds_token,
+      }));
+
+  /// Every Author there is to pick between: the ones the files hold, the one
+  /// **Add author** opened on the end of them while it is still unsaved, and
+  /// then every member's.
+  const authors = (): Listed[] => {
+    const saved: Listed[] = (told()?.authors ?? []).map((one) => ({
+      ...one,
+      device: null,
+      holds_token: one.github_token !== null,
+    }));
     const minted = adding();
 
-    return minted === null || saved.some((one) => one.id === minted)
-      ? saved
-      : [
-          ...saved,
-          {
-            id: minted,
-            display_name: "",
-            name: "",
-            email: "",
-            github_token: null,
-          },
-        ];
+    const own: Listed[] =
+      minted === null || saved.some((one) => one.id === minted)
+        ? saved
+        : [
+            ...saved,
+            {
+              id: minted,
+              display_name: "",
+              name: "",
+              email: "",
+              github_token: null,
+              device: null,
+              holds_token: false,
+            },
+          ];
+
+    return [...own, ...mirrors()];
   };
 
   /// Whether there are two to choose between, which is what draws the
@@ -389,7 +419,7 @@ export function GitPane(props: {
   /// which is what the card is drawn from too — the pane reads exactly as it
   /// did before there could be two. Its uuid is empty on a Verkstead with no
   /// Author yet, which a save sends as none.
-  const author = (): AuthorSaved | undefined => {
+  const author = (): Listed | undefined => {
     if (several()) {
       return authors().find((one) => one.id === chosen()) ?? authors()[0];
     }
@@ -401,9 +431,15 @@ export function GitPane(props: {
         ...standing.git_author,
         id: standing.git_author.id ?? "",
         github_token: standing.github_token,
+        device: null,
+        holds_token: standing.github_token !== null,
       }
     );
   };
+
+  /// The device the Author the fields are about is at home on, where that is
+  /// not this one: a mirror, drawn read-only.
+  const mirror = (): RowDevice | null => author()?.device ?? null;
 
   /// Its uuid as a save names it: none, where there is no Author yet.
   const authorId = (): string | null => author()?.id || null;
@@ -701,7 +737,10 @@ export function GitPane(props: {
 
     save.mutate({
       git_author: about,
-      github_token: drafting() && !said(github_token) ? "Keep" : github_token,
+      github_token:
+        mirror() !== null || (drafting() && !said(github_token))
+          ? "Keep"
+          : github_token,
       share_on_done: sharing(),
       // And the ignore rules, which this pane is the one that owns: the whole
       // list where somebody has touched a row, and `Keep` where nobody has —
@@ -733,6 +772,10 @@ export function GitPane(props: {
   /// nothing is made out of nothing.
   const editing = (github_token: TokenEdit): Author => {
     if (drafting() && !said(github_token)) return heldAuthor(told());
+
+    // A mirror is in neither of this device's files, so a save made while one
+    // is picked is about the rest of the form and leaves the Authors alone.
+    if (mirror() !== null) return heldAuthor(told());
 
     return {
       id: authorId(),
@@ -813,14 +856,18 @@ export function GitPane(props: {
                   id="git-author-pick"
                   options={authors()}
                   value={(one) => one.id}
-                  label={authorLabel}
+                  label={authorRow}
+                  icon={(one) =>
+                    one.device === null ? undefined : osIcon(one.device.os ?? "")
+                  }
                   chosen={author()?.id ?? ""}
                   pick={pick}
                   actions={[
                     { label: "Add author", press: addAuthor },
                     // Not for one **Add author** opened, which is nowhere
-                    // but this page: switching away is what drops it.
-                    ...(drafting()
+                    // but this page: switching away is what drops it. Nor
+                    // for a mirror, which this device's files do not hold.
+                    ...(drafting() || mirror() !== null
                       ? []
                       : [{ label: "Remove author", press: askRemoval }]),
                   ]}
@@ -840,159 +887,185 @@ export function GitPane(props: {
               </section>
             </Show>
 
-            <section>
-              <h3>GitHub Token</h3>
-
-              {/* What a token has to be able to do, above everything about the
-                  one that is saved: this is the list to tick against before
-                  pasting one, and it stands whether or not anything has ever
-                  been saved here. */}
-              <TokenScopes class={styles.tokenScopes} />
-
-              <Show when={configured()}>{(saved) => standing(saved)}</Show>
-
-              {/* What GitHub said about the last token saved from here: the
-                  account it authenticates as, or why nobody could be asked.
-                  Both are worth showing — a token saved against the wrong
-                  account is the failure this form exists to catch. */}
-              <Show when={account()}>
-                {(login) => (
-                  <p class={styles.verified}>
-                    GitHub says it's <span class={styles.login}>{login()}</span>
-                    .
+            {/* A member's Author, picked: what it is, and where it can be
+                changed — read-only here, this device's files holding none of
+                it. */}
+            <Show when={mirror()}>
+              {(device) => (
+                <section>
+                  <h3>Git Author</h3>
+                  <p class={styles.athome}>
+                    This author is at home on {device().name}. Change or remove
+                    it there.
                   </p>
-                )}
-              </Show>
+                  <p class={styles.mirrored}>
+                    {author()?.name || "No name"} ·{" "}
+                    {author()?.email || "no email"}
+                  </p>
+                  <p class={styles.tokenStanding}>
+                    {author()?.holds_token
+                      ? `Its GitHub token is kept on ${device().name}.`
+                      : "No GitHub token."}
+                  </p>
+                </section>
+              )}
+            </Show>
 
-              {/* And what it may not do, on a token that authenticates
-                  perfectly and cannot publish a share. A line of its own rather
-                  than part of the one above, because it is a different thing to
-                  do about it: the account is right and the token needs re-
-                  issuing with another box ticked. */}
-              <Show when={missing().length > 0}>
-                <p class={styles.unscoped}>
-                  It can't publish a share without the{" "}
-                  <code class={styles.scope}>{missing().join(", ")}</code>{" "}
-                  scope. Re-issue the token on GitHub with it ticked, and save
-                  it here again.
-                </p>
-              </Show>
-              <Show when={refused()}>
+            <Show when={mirror() === null}>
+              <section>
+                <h3>GitHub Token</h3>
 
-                {(why) => (
-                  <ErrorLine class={styles.unverified}>
-                    It's saved, but GitHub wouldn't say whose it is. {why()}
-                  </ErrorLine>
-                )}
-              </Show>
+                {/* What a token has to be able to do, above everything about the
+                    one that is saved: this is the list to tick against before
+                    pasting one, and it stands whether or not anything has ever
+                    been saved here. */}
+                <TokenScopes class={styles.tokenScopes} />
 
-              <Show
-                when={typing()}
-                fallback={
-                  <div class={styles.tokenActions}>
-                    <button type="button" onClick={() => setReplacing(true)}>
-                      Replace
-                    </button>
-                    <button
-                      type="button"
-                      class={styles.clear}
-                      disabled={save.isPending}
-                      onClick={() => {
-                        setVerifiedAs(null);
-                        write("Clear");
-                      }}
-                    >
-                      Clear
-                    </button>
-                  </div>
-                }
-              >
-                <label for="github-token">Token</label>
-                <Note class={styles.stored}>Stored, and never shown again.</Note>
-                <input
-                  id="github-token"
-                  type="password"
-                  autocapitalize="off"
-                  autocorrect="off"
-                  autocomplete="off"
-                  spellcheck={false}
-                  placeholder="ghp_…"
-                  value={token()}
-                  onInput={(ev) => setToken(ev.currentTarget.value)}
-                />
-                {/* Only where there was one to go back to: with nothing
-                    configured, the field is the form rather than a detour
-                    from it. */}
-                <Show when={configured() !== null}>
-                  <div class={styles.tokenActions}>
-                    <button
-                      type="button"
-                      class={`${styles.keep} secondary`}
-                      onClick={() => {
-                        setReplacing(false);
-                        setToken("");
-                      }}
-                    >
-                      Keep the saved token
-                    </button>
-                  </div>
+                <Show when={configured()}>{(saved) => standing(saved)}</Show>
+
+                {/* What GitHub said about the last token saved from here: the
+                    account it authenticates as, or why nobody could be asked.
+                    Both are worth showing — a token saved against the wrong
+                    account is the failure this form exists to catch. */}
+                <Show when={account()}>
+                  {(login) => (
+                    <p class={styles.verified}>
+                      GitHub says it's <span class={styles.login}>{login()}</span>
+                      .
+                    </p>
+                  )}
                 </Show>
-              </Show>
-            </section>
 
-            <section>
-              <h3>Git Author</h3>
+                {/* And what it may not do, on a token that authenticates
+                    perfectly and cannot publish a share. A line of its own rather
+                    than part of the one above, because it is a different thing to
+                    do about it: the account is right and the token needs re-
+                    issuing with another box ticked. */}
+                <Show when={missing().length > 0}>
+                  <p class={styles.unscoped}>
+                    It can't publish a share without the{" "}
+                    <code class={styles.scope}>{missing().join(", ")}</code>{" "}
+                    scope. Re-issue the token on GitHub with it ticked, and save
+                    it here again.
+                  </p>
+                </Show>
+                <Show when={refused()}>
 
-              {/* What the dropdown's rows call this Author, which is the
-                  only place it is read — so drawn only where they are. */}
-              <Show when={several()}>
-                <label for="author-display-name">Display name</label>
+                  {(why) => (
+                    <ErrorLine class={styles.unverified}>
+                      It's saved, but GitHub wouldn't say whose it is. {why()}
+                    </ErrorLine>
+                  )}
+                </Show>
+
+                <Show
+                  when={typing()}
+                  fallback={
+                    <div class={styles.tokenActions}>
+                      <button type="button" onClick={() => setReplacing(true)}>
+                        Replace
+                      </button>
+                      <button
+                        type="button"
+                        class={styles.clear}
+                        disabled={save.isPending}
+                        onClick={() => {
+                          setVerifiedAs(null);
+                          write("Clear");
+                        }}
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  }
+                >
+                  <label for="github-token">Token</label>
+                  <Note class={styles.stored}>Stored, and never shown again.</Note>
+                  <input
+                    id="github-token"
+                    type="password"
+                    autocapitalize="off"
+                    autocorrect="off"
+                    autocomplete="off"
+                    spellcheck={false}
+                    placeholder="ghp_…"
+                    value={token()}
+                    onInput={(ev) => setToken(ev.currentTarget.value)}
+                  />
+                  {/* Only where there was one to go back to: with nothing
+                      configured, the field is the form rather than a detour
+                      from it. */}
+                  <Show when={configured() !== null}>
+                    <div class={styles.tokenActions}>
+                      <button
+                        type="button"
+                        class={`${styles.keep} secondary`}
+                        onClick={() => {
+                          setReplacing(false);
+                          setToken("");
+                        }}
+                      >
+                        Keep the saved token
+                      </button>
+                    </div>
+                  </Show>
+                </Show>
+              </section>
+
+              <section>
+                <h3>Git Author</h3>
+
+                {/* What the dropdown's rows call this Author, which is the
+                    only place it is read — so drawn only where they are. */}
+                <Show when={several()}>
+                  <label for="author-display-name">Display name</label>
+                  <input
+                    id="author-display-name"
+                    type="text"
+                    autocapitalize="words"
+                    autocorrect="off"
+                    spellcheck={false}
+                    placeholder={authorName() || "Work"}
+                    value={authorDisplayName()}
+                    onInput={(ev) => setDisplayName(ev.currentTarget.value)}
+                  />
+                </Show>
+
+                <label for="author-name">Name</label>
                 <input
-                  id="author-display-name"
+                  id="author-name"
                   type="text"
                   autocapitalize="words"
                   autocorrect="off"
                   spellcheck={false}
-                  placeholder={authorName() || "Work"}
-                  value={authorDisplayName()}
-                  onInput={(ev) => setDisplayName(ev.currentTarget.value)}
+                  placeholder="Ada Lovelace"
+                  value={authorName()}
+                  onInput={(ev) => setName(ev.currentTarget.value)}
                 />
-              </Show>
 
-              <label for="author-name">Name</label>
-              <input
-                id="author-name"
-                type="text"
-                autocapitalize="words"
-                autocorrect="off"
-                spellcheck={false}
-                placeholder="Ada Lovelace"
-                value={authorName()}
-                onInput={(ev) => setName(ev.currentTarget.value)}
-              />
+                <label for="author-email">Email</label>
+                <input
+                  id="author-email"
+                  type="email"
+                  inputmode="email"
+                  autocapitalize="off"
+                  autocorrect="off"
+                  spellcheck={false}
+                  placeholder="ada@example.com"
+                  value={authorEmail()}
+                  onInput={(ev) => setEmail(ev.currentTarget.value)}
+                />
 
-              <label for="author-email">Email</label>
-              <input
-                id="author-email"
-                type="email"
-                inputmode="email"
-                autocapitalize="off"
-                autocorrect="off"
-                spellcheck={false}
-                placeholder="ada@example.com"
-                value={authorEmail()}
-                onInput={(ev) => setEmail(ev.currentTarget.value)}
-              />
-
-              {/* With one Author, the way to a second: a quiet press under
-                  its fields rather than a dropdown with one row in it. Once
-                  there are two, it is the dropdown's own last row instead. */}
-              <Show when={!several() && authorId() !== null}>
-                <QuietButton class={styles.addAuthor} onClick={addAuthor}>
-                  Add author
-                </QuietButton>
-              </Show>
-            </section>
+                {/* With one Author, the way to a second: a quiet press under
+                    its fields rather than a dropdown with one row in it. Once
+                    there are two, it is the dropdown's own last row instead. */}
+                <Show when={!several() && authorId() !== null}>
+                  <QuietButton class={styles.addAuthor} onClick={addAuthor}>
+                    Add author
+                  </QuietButton>
+                </Show>
+              </section>
+            </Show>
 
             <section>
               {/* The subheading is the select's label rather than standing over

@@ -22,6 +22,7 @@ import type {
   AskingDevice,
   Attached,
   AttachmentRemoved,
+  AuthorEntry,
   AuthorRemoved,
   BacklogPane,
   Locked,
@@ -2205,15 +2206,6 @@ export function loadSettings(): Promise<SettingsView> {
   return get<SettingsView>("/api/ui/settings");
 }
 
-/// The same, of whichever device holds the work — which is what says, beside a
-/// Conversation on a member, whether its Repo's Author is one that machine still
-/// holds. A function of its own rather than a parameter on [`loadSettings`],
-/// which is handed to queries as it stands and so is called with the query's
-/// own context.
-export function loadSettingsOf(device: Device): Promise<SettingsView> {
-  return get<SettingsView>(on(device, "/api/ui/settings"));
-}
-
 /// Write both settings files back, which the page does in one press.
 ///
 /// The token's half of the edit is an action rather than a value — `"Keep"`,
@@ -2227,6 +2219,15 @@ export function loadSettingsOf(device: Device): Promise<SettingsView> {
 /// way.
 export function saveSettings(edit: SettingsEdit): Promise<SettingsSaved> {
   return post<SettingsSaved>("/api/ui/settings", edit);
+}
+
+/// The cluster's one list of Authors: this device's own, then a mirror of every
+/// member's, each marked with the device it is at home on.
+///
+/// Of whichever device is asked: a member's own list is what names an Author
+/// beside work on that member, a Repo there recording a uuid out of it.
+export function listAuthors(device: Device): Promise<AuthorEntry[]> {
+  return get<AuthorEntry[]>(on(device, "/api/ui/authors"));
 }
 
 /// Take one Author out of the settings, by its uuid: its entry and its token.

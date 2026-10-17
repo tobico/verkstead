@@ -113,9 +113,10 @@ whose Author is gone from `config.yaml` refuses a start by name and halts with a
 refused on the composer, read-only or read-write alike, a sandbox having one
 environment.
 **One list across a cluster**, the way the Profiles are one. An Author is at home
-on the device whose files hold it; every other device keeps a mirror row —
-the uuid, the display name, the git name, the email, whether a token is held,
-and the home device — refreshed over the **Relay** as the Profiles are, and a
+on the device whose files hold it; every other device keeps a mirror row in
+its database, keyed by the uuid — the display name, the git name, the email,
+whether a token is held, and the home device — read off each member's own list
+over the **Relay** as the Profiles are, and never a mirror of a mirror, and a
 copy of the token in its own `secrets.yaml` under the uuid, written and taken
 away as the mirrors refresh, so a home that is quiet does not stop a Repo here.
 A new Author is at home where it was made; a mirror is edited from wherever it
@@ -128,7 +129,8 @@ Author is refused by the **Preflight**, naming both; and **Create repo** on a
 member offers the one list.
 **On the settings page it is the Git section as it was**, with a dropdown at
 its head picking which Author the fields are about and **Add author** at its
-foot, the way the Repo dropdown carries its two presses. The onboarding wizard
+foot, the way the Repo dropdown carries its two presses. A member's Authors are
+rows of it after this device's own, marked with the machine each is at home on. The onboarding wizard
 asks for one. The first start moves a single `git_author` and `github_token`
 into the list as that one Author, and records every Repo as its, unregistered
 ones included, so no Repo is ever without one.

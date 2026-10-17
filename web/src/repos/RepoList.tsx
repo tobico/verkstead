@@ -105,6 +105,7 @@ import {
   repointRepo,
 } from "../api/client";
 import type {
+  AuthorEntry,
   AuthorSaved,
   Created,
   Registered,
@@ -119,7 +120,7 @@ import { Empty, ErrorLine, Note } from "../notices";
 import { keyOf, useDevice } from "../reaching";
 import { Picker } from "../picking";
 import { rowPress } from "../rows";
-import { authorLabel } from "../settings/Git";
+import { authorLabel, authorRow, useAuthors } from "../authors";
 import { useSettings } from "../settings/PathEditor";
 import { PaneHead } from "../workbench/PaneHead";
 import styles from "./RepoList.module.css";
@@ -413,15 +414,16 @@ export function ReposPane(props: {
     said: string | Live;
   } | null>(null);
 
-  // Who the Repos can be, read off the settings the way the Open repo card's
-  // pick is: with one Author or none, no row says anything about it.
-  const settings = useSettings();
-  const authors = (): AuthorSaved[] => settings.data?.authors ?? [];
+  // Who the Repos can be, read off the cluster's one list — this device's own
+  // Authors and a mirror of every member's: with one Author or none, no row
+  // says anything about it.
+  const listed = useAuthors();
+  const authors = (): AuthorEntry[] => listed.data ?? [];
   const asked = (): boolean => authors().length > 1;
 
-  // And a row whose Author `config.yaml` no longer holds, which is drawn with
-  // one Author as well: a start on it is refused and sent here to pick
-  // another, so here is where the picker has to be (ADR-0025).
+  // And a row whose Author the list no longer holds, which is drawn with one
+  // Author as well: a start on it is refused and sent here to pick another, so
+  // here is where the picker has to be (ADR-0025).
   const gone = (repo: RepoEntry): boolean =>
     repo.author !== null &&
     authors().length > 0 &&
@@ -598,7 +600,7 @@ export function ReposPane(props: {
 /// goes on saying what the server holds until the list is read again.
 function RowAuthor(props: {
   repo: RepoEntry;
-  authors: AuthorSaved[];
+  authors: AuthorEntry[];
   disabled: boolean;
   pick: (author: string) => void;
 }): JSX.Element {
@@ -608,14 +610,21 @@ function RowAuthor(props: {
     props.repo.author !== null &&
     !props.authors.some(({ id }) => id === props.repo.author);
 
+  // What can be picked: this device's own Authors, and the mirror the Repo
+  // already points at where it does, for the row to name it by.
+  const offered = (): AuthorEntry[] =>
+    props.authors.filter(
+      (author) => author.device === null || author.id === props.repo.author,
+    );
+
   return (
     <div class={styles.author}>
       <label for={id}>Author</label>
       <Picker
         id={id}
-        options={props.authors}
+        options={offered()}
         value={(author) => author.id}
-        label={authorLabel}
+        label={authorRow}
         chosen={props.repo.author ?? ""}
         disabled={props.disabled}
         pick={(author) => {

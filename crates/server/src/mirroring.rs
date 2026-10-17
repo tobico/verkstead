@@ -62,6 +62,7 @@
 //! [`removed`].
 
 pub mod account;
+pub(crate) mod authors;
 pub mod memory;
 
 use std::path::{Path, PathBuf};
