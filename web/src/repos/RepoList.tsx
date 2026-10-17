@@ -116,11 +116,10 @@ import type {
 import { repoParent, setRepoParent } from "../remembered";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine, Note } from "../notices";
-import { keyOf, useDevice } from "../reaching";
+import { keyOf, useDevice, type Device } from "../reaching";
 import { Picker } from "../picking";
 import { rowPress } from "../rows";
 import { authorLabel, authorRow, useAuthors } from "../authors";
-import { useSettings } from "../settings/PathEditor";
 import { PaneHead } from "../workbench/PaneHead";
 import styles from "./RepoList.module.css";
 import { SettingsCard } from "../settings/SettingsCard";
@@ -178,20 +177,22 @@ export const CREATE_REFUSAL: Record<CreateRefused, string> = {
 /// recorded as (ADR-0025): picked where the one list holds more than one, and
 /// the one there is, silently, where there is only one.
 ///
-/// Read off this device's one list — its own Authors and a mirror of every
-/// member's — the way the Repos pane's rows are. A read that has not answered,
-/// or failed, offers nothing to pick between, and the press goes out naming
+/// Read off the one list of the device the Repo lands on — its own Authors and
+/// a mirror of every member's, this device's among them where that is a
+/// member — over the Relay the way the card's browse goes. That device is the
+/// one that resolves the pick, so a list read here would offer an Author it
+/// has under another uuid or none at all. A read that has not answered, or
+/// failed, offers nothing to pick between, and the press goes out naming
 /// nobody — which the server records as the one Author, or refuses by name
 /// where there are several.
-function useAuthorPick() {
-  const listed = useAuthors();
+function useAuthorPick(device: () => Device) {
+  const listed = useAuthors(device);
 
-  /// Every Author, this device's own first.
+  /// Every Author, that device's own first.
   const authors = (): AuthorEntry[] => listed.data ?? [];
 
-  /// The only one there is, where it is a member's: the server's silent pick
-  /// is this device's own one, so a lone mirror is named rather than left to
-  /// it.
+  /// The only one there is, where it is a mirror: the server's silent pick is
+  /// that device's own one, so a lone mirror is named rather than left to it.
   const lone = (): string | undefined => {
     const [only, ...others] = authors();
 
@@ -208,6 +209,9 @@ function useAuthorPick() {
 
   return {
     authors,
+    /// Whether the list is still being read, which is neither one Author nor
+    /// several.
+    pending: (): boolean => listed.isPending,
     asked,
     chosen,
     setChosen,
@@ -752,8 +756,9 @@ export function RepoRegistration(props: {
   // path that was sent, and it stops being about the one being typed.
   const [refused, setRefused] = createSignal<RepoRefused | null>(null);
 
-  // Which Author it is recorded as, where there are several to pick between.
-  const author = useAuthorPick();
+  // Which Author it is recorded as, where there are several to pick between —
+  // off that machine's one list, it being the one that records the pick.
+  const author = useAuthorPick(device);
 
   const register = useMutation(() => ({
     mutationFn: (asked: string) =>
@@ -909,8 +914,10 @@ export function OpenRepo(props: {
 /// home, this browse going out under it like every other.
 ///
 /// **And a tick that makes the same repository on GitHub**, drawn only where a
-/// token is saved. The settings say whether there is one without ever handing it
-/// over, which is the whole of what this has to know. Where there is one the
+/// token is held for the Author it is made as, on the device it is made on —
+/// that device's own token or its copy of a member's. The one list says whether
+/// there is one without ever handing it over, which is the whole of what this
+/// has to know. Where there is one the
 /// tick is drawn and starts on, and what it makes is private: a repository made
 /// from here is somebody's work before it is anybody else's business, and public
 /// is a decision to take deliberately rather than by leaving a box alone.
@@ -922,9 +929,9 @@ export function OpenRepo(props: {
 /// local repository is still worth making, and the token can be saved
 /// afterwards.
 ///
-/// **And neither of them until the settings have answered**, which is a state of
-/// its own rather than the second one said early. Nothing else on either page
-/// this card opens over reads the settings, so that query is cold every time it
+/// **And neither of them until the one list has answered**, which is a state of
+/// its own rather than the second one said early. That device's list may not
+/// have been read on this page yet, so the query can be cold when the card
 /// opens: a card that took *not read yet* for *no token* would put the note in
 /// front of somebody who has one, every time, and swap it for the tick it was
 /// denying a moment later. So it says nothing about GitHub while it does not
@@ -933,7 +940,7 @@ export function OpenRepo(props: {
 ///
 /// A read that *failed* is an answer, though, and the answer is the same as no
 /// token: the local repository is still worth making, and a card that stayed
-/// shut because the settings were unreadable would be a create nobody could
+/// shut because the list was unreadable would be a create nobody could
 /// make for a reason that has nothing to do with creating.
 ///
 /// A refusal keeps the modal up with the reason under the fields, for the
@@ -958,18 +965,15 @@ export function CreateRepo(props: {
 }): JSX.Element {
   const queries = useQueryClient();
 
-  // What Verkstead has been told, for the one thing this card asks of it:
-  // whether a GitHub token is saved. Never the token itself — what comes back
-  // about it is that there is one and what its last four characters are.
+  // Whether the Author it is made as holds a GitHub token on the device it is
+  // made on — that device's own, or its copy of a member's — and `null` while
+  // that is not known. Never the token itself: the one list says there is one
+  // and nothing more.
   //
-  // Read from here rather than already in hand: nothing else on the compose
-  // page or on a draft's Repo panel reads the settings, so this card is always
-  // what starts that read — which is why the answer's absence has to be a state
-  // of its own below.
-  const settings = useSettings();
-
-  // Whether there is one — and `null` while the read above is still out, which
-  // is neither.
+  // Read off the one list rather than already in hand: nothing else on the
+  // compose page or on a draft's Repo panel reads it for the picked device, so
+  // this card is often what starts that read — which is why the answer's
+  // absence has to be a state of its own below.
   //
   // Three states rather than two, because a card that read an unanswered query
   // as *no token* would say so: the note under the fields would stand where the
@@ -977,23 +981,23 @@ export function CreateRepo(props: {
   // denying. What the card does while it does not know is say nothing about
   // GitHub and take no create — see the two `Show`s and the press below.
   //
-  // Pending rather than absent data, so that a settings read which *failed* is
-  // an answer like any other: false, which is the true one — a token nothing
-  // can read is a token nothing can make a repository as — and the local
+  // Pending rather than absent data, so that a read which *failed* is an
+  // answer like any other: false, which is the true one — a token nothing can
+  // read is a token nothing can make a repository as — and the local
   // repository is still worth making, which a card held shut would not be.
   //
   // **The picked Author's token, where there are several.** The repository is
   // made on GitHub as the Author it is made as or not at all, so the question
   // is whether *that one* holds a token — and it is not settled until one is
   // picked, which draws neither the tick nor the note in the meantime. With one
-  // Author it is the settings' own token, which is that Author's.
+  // Author it is that one's.
   const tokened = (): boolean | null => {
-    if (settings.isPending) {
+    if (author.pending()) {
       return null;
     }
 
     if (!author.asked()) {
-      return settings.data?.github_token != null;
+      return author.authors()[0]?.holds_token ?? false;
     }
 
     const picked = author.picked();
@@ -1006,14 +1010,15 @@ export function CreateRepo(props: {
   // tick being drawn afresh for the Author picked.
   const [onGithub, setOnGithub] = createSignal(true);
 
-  // And which Author it is made as, where there are several to pick between:
-  // the first commit is by it, the Repo is recorded as its, and the GitHub
-  // repository is made with its token.
-  const author = useAuthorPick();
-
-  // And which device it is being made on, for [`RepoRegistration`]'s reason:
-  // the dropdown this card was opened from may be a member's draft.
+  // Which device it is being made on, for [`RepoRegistration`]'s reason: the
+  // dropdown this card was opened from may be a member's draft.
   const device = useDevice();
+
+  // And which Author it is made as, where there are several to pick between —
+  // off that device's one list, for the registration's reason: the first
+  // commit is by it, the Repo is recorded as its, and the GitHub repository is
+  // made with its token there.
+  const author = useAuthorPick(device);
 
   // The heading's own id, for [`OpenRepo`]'s reason: two Repo dropdowns may be
   // drawn on one page, and an id is the page's to keep unique.
@@ -1135,7 +1140,7 @@ export function CreateRepo(props: {
 
     const where = parent().trim();
     const called = name().trim();
-    // Nothing while the settings are unread, for the press's own reason: what
+    // Nothing while the one list is unread, for the press's own reason: what
     // this card would ask of GitHub is not settled yet.
     if (
       where === "" ||
@@ -1221,7 +1226,7 @@ export function CreateRepo(props: {
 
           {/* And the third question, asked only where there is a token to answer
             it with — see the note below, which is what stands here instead.
-            Neither of them until the settings have answered: what is drawn there
+            Neither of them until the one list has answered: what is drawn there
             is what the card is about to do about GitHub, and it does not know
             yet. */}
           <Show when={tokened() === true}>
@@ -1255,7 +1260,7 @@ export function CreateRepo(props: {
           </Show>
 
           <div class={styles.buttons}>
-            {/* Held while the settings are unread as well as while a field is
+            {/* Held while the one list is unread as well as while a field is
                 empty, and for the same kind of reason: a create that went out
                 then would ask nothing of GitHub without the card ever having
                 said so, which is the sentence above going missing rather than

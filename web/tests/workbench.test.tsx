@@ -4858,11 +4858,11 @@ describe("switching a draft's repo", () => {
         json({ Made: { ...(repoView as RepoView), id: 4343 } }),
         "POST",
       ),
-      // The card asks the settings one thing — whether a GitHub token is saved
-      // — and says nothing about GitHub, and takes no create, until they
-      // answer. Which is a read this page makes nowhere else, so it is served
-      // here rather than left to the fallback.
-      whenever("/api/ui/settings", json(told)),
+      // The card asks the one list one thing — whether the Author it is made
+      // as holds a GitHub token — and says nothing about GitHub, and takes no
+      // create, until it answers. The fallback serves it empty, so it is
+      // served here.
+      whenever("/api/ui/authors", json(oneList(told as SettingsView))),
       json("Switched"),
     );
     const { container } = mount(`/conversations/${OPEN.id}`);
@@ -4876,7 +4876,7 @@ describe("switching a draft's repo", () => {
     );
 
     // Waited for, as the human filling the card in waits for it: what says the
-    // settings have answered is the card having something to say about GitHub.
+    // one list has answered is the card having something to say about GitHub.
     await waitFor(() =>
       expect(
         screen.getByLabelText("Create it on GitHub too, privately"),
@@ -4914,7 +4914,7 @@ describe("switching a draft's repo", () => {
         }),
         "POST",
       ),
-      whenever("/api/ui/settings", json(told)),
+      whenever("/api/ui/authors", json(oneList(told as SettingsView))),
       json("Switched"),
     );
     const { container } = mount(`/conversations/${OPEN.id}`);
