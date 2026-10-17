@@ -25,11 +25,11 @@ use verkstead_render::{
     Broken, CheckRollup, CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed,
     CompanionMode, CompanionModeChosen, CompanionRefusal, CompanionRemoved, ConversationArchived,
     ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
-    ConversationUnarchived, ConversationView, GrillingStarted, Lifecycle, Merging, PickedView,
-    PinnedEvent, Process, ProcessPicked, ProfileChosen, ProfileSaved, ProfileTrouble, Registered,
-    RepoEntry, RepoSwitched, Resolved, Resumed, RoadmapPane, ShowingArchived, StageState, Standing,
-    Started, SteerCancelled, SteerCompanionRefusal, SteerOpened, SteerPairingView, SteerSaved,
-    TakenUp, TargetRecorded, TimelineEvent, Uncommitted,
+    ConversationUnarchived, ConversationView, GrillingStarted, Lifecycle, Merging, OtherAuthor,
+    PickedView, PinnedEvent, Process, ProcessPicked, ProfileChosen, ProfileSaved, ProfileTrouble,
+    Registered, RepoEntry, RepoSwitched, Resolved, Resumed, RoadmapPane, ShowingArchived,
+    StageState, Standing, Started, SteerCancelled, SteerCompanionRefusal, SteerOpened,
+    SteerPairingView, SteerSaved, TakenUp, TargetRecorded, TimelineEvent, Uncommitted,
 };
 use verkstead_server::{Gh, open_database, router_asking_github, router_keeping, store};
 
@@ -3566,6 +3566,194 @@ async fn starting_on_a_repo_with_no_author_picked_among_two_is_refused_naming_it
         press_adopt(&app, id).await,
         Adopted::RepoAuthorUnpicked { repo: unpicked() }
     );
+}
+
+/// [`under_the_second_author`] with three more Repos beside `verkstead`, which
+/// is `home`'s: `askance`, recorded as `work`, and `notes` and `granit`, as
+/// `home`. Hands back the database too, for a repoint made behind the
+/// workbench's back — the hand edit ADR-0025 says an admitted companion can
+/// still be moved by.
+async fn beside_another_author() -> (
+    tempfile::TempDir,
+    tempfile::TempDir,
+    Router,
+    PathBuf,
+    SqlitePool,
+    [i64; 4],
+) {
+    let (elsewhere, dir, app, repo, repo_id) =
+        under_the_second_author("    name: Tobi at Home\n    email: tobi@example.com\n").await;
+
+    let mut ids = [repo_id; 4];
+    for (at, (name, author)) in [("askance", "work"), ("notes", "home"), ("granit", "home")]
+        .into_iter()
+        .enumerate()
+    {
+        let path = repository(elsewhere.path().join(name));
+        let registered: Registered = post(
+            &app,
+            "/api/ui/repos",
+            &serde_json::json!({ "path": path, "author": author }),
+        )
+        .await;
+        let Registered::Added(entry) = registered else {
+            panic!("{name} was registered as {author}: {registered:?}");
+        };
+        ids[at + 1] = entry.id;
+    }
+
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    (elsewhere, dir, app, repo, pool, ids)
+}
+
+/// Record the Repo `repo_id` as `author` straight into the store, as a repoint
+/// nobody pressed.
+async fn recorded_as(pool: &SqlitePool, repo_id: i64, author: &str) {
+    sqlx::query("UPDATE repo_authors SET author = ? WHERE repo_id = ?")
+        .bind(author)
+        .bind(repo_id)
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+/// The refusal naming `companion` as `companion_author`'s, beside a Repo of
+/// `author`'s.
+fn other_author(companion: &str, companion_author: &str, author: &str) -> OtherAuthor {
+    OtherAuthor {
+        companion: companion.to_owned(),
+        companion_author: companion_author.to_owned(),
+        author: author.to_owned(),
+    }
+}
+
+/// One sandbox is one `GH_TOKEN` and one git author, so a companion of another
+/// Author is refused on the composer naming it and both Authors — and one of
+/// the Repo's own Author is admitted as ever.
+#[tokio::test]
+async fn a_companion_of_another_author_is_refused_naming_both() {
+    let (_elsewhere, _dir, app, _repo, _pool, [repo_id, askance, notes, _]) =
+        beside_another_author().await;
+    let id = started(&app, repo_id).await;
+
+    assert_eq!(
+        add_companion(&app, id, askance).await,
+        CompanionAdded::OtherAuthor(other_author("askance", "Verkstead Test", "Tobi at Home")),
+    );
+    assert!(companions(&app, id).await.is_empty());
+
+    assert_eq!(add_companion(&app, id, notes).await, CompanionAdded::Added);
+    assert_eq!(companions(&app, id).await, ["notes"]);
+}
+
+/// And a steer widening a running Conversation is held to the same rule, in
+/// either mode: read-only companions of another Author were turned down too.
+#[tokio::test]
+async fn a_steer_adding_a_companion_of_another_author_is_refused_in_either_mode() {
+    for mode in ["ReadOnly", "ReadWrite"] {
+        let (elsewhere, _dir, app, _repo, _pool, [repo_id, askance, ..]) =
+            beside_another_author().await;
+        let id = ready(&app, elsewhere.path(), repo_id).await;
+
+        assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+        assert_eq!(steer(&app, id).await, SteerOpened::Opened);
+        assert_eq!(
+            steer_alongside(
+                &app,
+                id,
+                "Grilling",
+                serde_json::json!([alongside(askance, mode)])
+            )
+            .await,
+            ConversationSteered::Companion {
+                repo: "askance".to_owned(),
+                why: SteerCompanionRefusal::OtherAuthor {
+                    companion_author: "Verkstead Test".to_owned(),
+                    author: "Tobi at Home".to_owned(),
+                },
+            },
+            "{mode}",
+        );
+        assert!(companions(&app, id).await.is_empty(), "{mode}");
+    }
+}
+
+/// Switching a draft's Repo keeps its companions, so a switch onto a Repo of
+/// another Author than one of them is refused naming them — rather than the
+/// companion quietly dropped — and onto one of the same Author it lands.
+#[tokio::test]
+async fn switching_onto_a_repo_of_another_author_than_a_companion_is_refused() {
+    let (_elsewhere, _dir, app, _repo, _pool, [repo_id, askance, notes, granit]) =
+        beside_another_author().await;
+    let id = started(&app, repo_id).await;
+    assert_eq!(add_companion(&app, id, notes).await, CompanionAdded::Added);
+
+    let switch = |onto: i64| {
+        let app = app.clone();
+        async move {
+            post::<RepoSwitched>(
+                &app,
+                &format!("/api/ui/conversations/{id}/repo"),
+                &serde_json::json!({ "repo_id": onto }),
+            )
+            .await
+        }
+    };
+
+    assert_eq!(
+        switch(askance).await,
+        RepoSwitched::OtherAuthor(other_author("notes", "Tobi at Home", "Verkstead Test")),
+    );
+    assert_eq!(opened(&app, id).await.repo.id, repo_id, "it stayed put");
+
+    assert_eq!(switch(granit).await, RepoSwitched::Switched);
+    assert_eq!(opened(&app, id).await.repo.id, granit);
+    assert_eq!(companions(&app, id).await, ["notes"]);
+}
+
+/// A companion moved under another Author after it was admitted — by hand,
+/// here — makes the cut refuse naming it and both Authors, at a grilling's
+/// start and at an adoption alike, and nothing is made.
+#[tokio::test]
+async fn a_companion_repointed_since_its_add_refuses_the_cut() {
+    let (elsewhere, _dir, app, repo, pool, [repo_id, _, notes, _]) = beside_another_author().await;
+    roadmap(
+        &repo,
+        OPEN_AT_THREE,
+        &["03-implementation.md", "04-wrap-up.md"],
+    );
+    let refusal = || other_author("notes", "Verkstead Test", "Tobi at Home");
+
+    let id = ready(&app, elsewhere.path(), repo_id).await;
+    assert_eq!(add_companion(&app, id, notes).await, CompanionAdded::Added);
+
+    let adopting = ready_to_adopt_again(&app, repo_id, "mvp").await;
+    assert_eq!(
+        add_companion(&app, adopting, notes).await,
+        CompanionAdded::Added
+    );
+
+    recorded_as(&pool, notes, "work").await;
+
+    let branch = opened(&app, id).await.branch;
+    assert_eq!(
+        grill(&app, id).await,
+        GrillingStarted::OtherAuthor(refusal())
+    );
+
+    let view = opened(&app, id).await;
+    assert_eq!(view.state, Lifecycle::Draft, "the press did not happen");
+    assert_eq!(view.worktree, None);
+    assert!(!has_branch(&repo, &branch));
+
+    assert_eq!(
+        press_adopt(&app, adopting).await,
+        Adopted::OtherAuthor(refusal())
+    );
+    assert!(!has_branch(&repo, "roadmaps/mvp/03-implementation"));
 }
 
 /// A base carrying no list is started with nothing extra: no commit and no
@@ -8612,7 +8800,7 @@ async fn a_companion_a_steer_cannot_deliver_refuses_it_by_name() {
             steer_alongside(&app, id, "Grilling", serde_json::json!([row])).await,
             ConversationSteered::Companion {
                 repo: "askance".to_owned(),
-                why,
+                why: why.clone(),
             },
         );
 
@@ -8893,7 +9081,7 @@ async fn an_upgrade_git_will_not_make_refuses_the_steer_by_name() {
             steer_opening(&app, id, "Grilling", serde_json::json!([opening(reading)])).await,
             ConversationSteered::Companion {
                 repo: "askance".to_owned(),
-                why,
+                why: why.clone(),
             },
         );
 

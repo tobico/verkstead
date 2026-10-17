@@ -115,7 +115,7 @@ import {
   COMPANION_BASE_REFUSAL,
   COMPANION_BRANCH_REFUSAL,
   COMPANION_MODE_REFUSAL,
-  COMPANION_REFUSAL,
+  companionAddRefusal,
   CHOICE_REFUSAL,
   PROCESS_REFUSAL,
   RULE,
@@ -779,7 +779,7 @@ async function put(
   if (
     !said(
       added === "Added",
-      `A companion repo couldn't be added. ${COMPANION_REFUSAL[added]}`,
+      `A companion repo couldn't be added. ${companionAddRefusal(added)}`,
     )
   ) {
     return;

@@ -33,6 +33,7 @@ import { keyOf, useDevice } from "../reaching";
 import {
   authorGone,
   authorUnpicked,
+  otherAuthor,
   companionRefusal,
   profileRefusal,
 } from "./Timeline";
@@ -108,6 +109,10 @@ export function adoptRefusal(outcome: Adopted): string {
 
     if ("RepoAuthorUnpicked" in outcome) {
       return authorUnpicked(outcome.RepoAuthorUnpicked.repo);
+    }
+
+    if ("OtherAuthor" in outcome) {
+      return otherAuthor(outcome.OtherAuthor);
     }
 
     if ("Misdeclared" in outcome) {

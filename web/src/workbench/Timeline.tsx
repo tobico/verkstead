@@ -127,6 +127,7 @@ import type {
   MemoPressed,
   MovedEvent,
   NoticeEvent,
+  OtherAuthor,
   PendingSteerView,
   PinnedEvent,
   ProfileEntry,
@@ -272,6 +273,10 @@ export function grillRefusal(outcome: GrillingStarted): string {
       return authorUnpicked(outcome.RepoAuthorUnpicked.repo);
     }
 
+    if ("OtherAuthor" in outcome) {
+      return otherAuthor(outcome.OtherAuthor);
+    }
+
     return `${outcome.Companion.repo}: ${companionRefusal(outcome.Companion.why)}`;
   }
 
@@ -288,6 +293,19 @@ export function authorGone(repo: string): string {
 /// And over one with no author picked among several.
 export function authorUnpicked(repo: string): string {
   return `The ${repo} repo has no author picked, so Verkstead can't commit on the branch. Pick one under Repos in Settings first.`;
+}
+
+/// What a press says over a companion under another author than the repo the
+/// conversation is on: one sandbox is one GitHub token and one git author, so
+/// the two can't share it (ADR-0025).
+///
+/// `repo` is how that repo is spoken of — *this conversation's repo*, or *that
+/// repo* where the press was the switch onto it.
+export function otherAuthor(
+  other: OtherAuthor,
+  repo = "this conversation's repo",
+): string {
+  return `The ${other.companion} repo is ${other.companion_author}'s and ${repo} is ${other.author}'s. A conversation works as one author.`;
 }
 
 /// What to say about a press refused over a chosen profile, whichever press it

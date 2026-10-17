@@ -125,7 +125,7 @@ harness: boolean, };
  * watching says itself on a Timeline instead — see the server's `continuing`
  * module, which starts the same stage by the other route.
  */
-export type Adopted = "Adopted" | "NoSuchConversation" | "NotDrafting" | "NotAdopting" | "NoGrillingProfile" | "NoImplementationProfile" | "NoReviewProfile" | { "ProfileBroken": ProfileTrouble } | "NoGitAuthor" | { "RepoAuthorGone": { repo: string, } } | { "RepoAuthorUnpicked": { repo: string, } } | "FetchFailed" | "NoBaseCommit" | "NoRoadmap" | { "Misdeclared": { 
+export type Adopted = "Adopted" | "NoSuchConversation" | "NotDrafting" | "NotAdopting" | "NoGrillingProfile" | "NoImplementationProfile" | "NoReviewProfile" | { "ProfileBroken": ProfileTrouble } | "NoGitAuthor" | { "RepoAuthorGone": { repo: string, } } | { "RepoAuthorUnpicked": { repo: string, } } | { "OtherAuthor": OtherAuthor } | "FetchFailed" | "NoBaseCommit" | "NoRoadmap" | { "Misdeclared": { 
 /**
  * Why, as the judgement put it.
  */
@@ -1071,7 +1071,7 @@ diff: DiffView | null, };
  * different sentence to put in front of the human — and two of them are about
  * what a companion *is* rather than about anything that has gone wrong.
  */
-export type CompanionAdded = "Added" | "NoSuchConversation" | "NotDrafting" | "NoSuchRepo" | "OwnRepo" | "AlreadyAdded";
+export type CompanionAdded = "Added" | "NoSuchConversation" | "NotDrafting" | "NoSuchRepo" | "OwnRepo" | "AlreadyAdded" | { "OtherAuthor": OtherAuthor };
 
 /**
  * One registered Repo a steer puts on a Conversation, with everything a setup
@@ -3094,7 +3094,7 @@ export type FoundOn = "Lan" | "Tailscale";
  * the Repo they are about. Nothing gates the button on a companion: the
  * configuration is always complete, so refusal at the start is the whole story.
  */
-export type GrillingStarted = "Started" | "NoSuchConversation" | "NotDrafting" | "NoGrillingProfile" | "NoImplementationProfile" | "NoReviewProfile" | { "ProfileBroken": ProfileTrouble } | "EmptyBrief" | "NoGitAuthor" | { "RepoAuthorGone": { repo: string, } } | { "RepoAuthorUnpicked": { repo: string, } } | "FetchFailed" | "NoBaseCommit" | "BranchExists" | "WorktreeRefused" | { "Companion": { 
+export type GrillingStarted = "Started" | "NoSuchConversation" | "NotDrafting" | "NoGrillingProfile" | "NoImplementationProfile" | "NoReviewProfile" | { "ProfileBroken": ProfileTrouble } | "EmptyBrief" | "NoGitAuthor" | { "RepoAuthorGone": { repo: string, } } | { "RepoAuthorUnpicked": { repo: string, } } | { "OtherAuthor": OtherAuthor } | "FetchFailed" | "NoBaseCommit" | "BranchExists" | "WorktreeRefused" | { "Companion": { 
 /**
  * What the companion Repo is called, which is what the human picked it
  * by and what they will go and look at.
@@ -3934,6 +3934,28 @@ text_html: string, recommended: boolean,
  * and a block in one of its cells would break the row apart.
  */
 cells: Array<string>, };
+
+/**
+ * A companion whose Author is not the Conversation's own Repo's, named with
+ * both Authors: what every door that composes a sandbox refuses it with.
+ *
+ * The Authors by the name the Repos pane draws them under — the display name,
+ * or the git name where nobody gave one — because that pane is where the
+ * human goes to put one of them right.
+ */
+export type OtherAuthor = { 
+/**
+ * What the companion Repo is called.
+ */
+companion: string, 
+/**
+ * Who it is committed and pushed as.
+ */
+companion_author: string, 
+/**
+ * And who the Conversation's own Repo is.
+ */
+author: string, };
 
 /**
  * Which of a Conversation's three roles a Pairing is for.
@@ -4963,7 +4985,7 @@ export type RepoRemoved = "Removed" | "NoSuchRepo" | "InUse";
 /**
  * What became of moving a Conversation onto another Repo.
  */
-export type RepoSwitched = "Switched" | "NoSuchConversation" | "NotDrafting" | "Adopting" | "NoSuchRepo";
+export type RepoSwitched = "Switched" | "NoSuchConversation" | "NotDrafting" | "Adopting" | "NoSuchRepo" | { "OtherAuthor": OtherAuthor };
 
 /**
  * One registered Repo, whole: the row, and everything a reading of the
@@ -6400,7 +6422,7 @@ export type SteerCancelled = "Cancelled" | "NoSuchConversation";
  * be refused for and what a steer can be refused for are different lists, and
  * one list would say each press can be refused for things it never could.
  */
-export type SteerCompanionRefusal = "OwnRepo" | "AlreadyAdded" | "NotACompanion" | "AlreadyReadWrite" | "FetchFailed" | "NoBaseCommit" | "BranchExists" | "WorktreeRefused";
+export type SteerCompanionRefusal = "OwnRepo" | { "OtherAuthor": { companion_author: string, author: string, } } | "AlreadyAdded" | "NotACompanion" | "AlreadyReadWrite" | "FetchFailed" | "NoBaseCommit" | "BranchExists" | "WorktreeRefused";
 
 /**
  * A steer as the page receives it: when, where the human sent it, and what

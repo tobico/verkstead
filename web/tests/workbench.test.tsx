@@ -37,6 +37,7 @@ import type {
   ConversationClosed,
   ConversationEntry,
   ConversationSteered,
+  CompanionAdded,
   ConversationStopped,
   ConversationUnarchived,
   ConversationView,
@@ -2896,7 +2897,8 @@ describe("the page of a draft from before, holding a pull request", () => {
 
     // And every refusal the move can come back with has a sentence to be read
     // as, which is the list this draws them off.
-    const said: Record<RepoSwitched, string> = REPO_SWITCH_REFUSAL;
+    const said: Record<Extract<RepoSwitched, string>, string> =
+      REPO_SWITCH_REFUSAL;
     expect(said.Adopting).toContain("repo");
   });
 
@@ -5252,6 +5254,35 @@ describe("a conversation's companion repos", () => {
       ).toBe(COMPANION_REFUSAL.OwnRepo),
     );
     expect(container.querySelector(`.${dropdown.drop}`)).toBeTruthy();
+  });
+
+  /// And a repo under another author than this conversation's is refused
+  /// naming it and both authors, where the pick was made (ADR-0025).
+  it("says a companion of another author is refused, naming both", async () => {
+    theWorkbenchWith({ companions: [] }, whenever(
+      `/api/ui/conversations/${OPEN.id}/companions`,
+      json({
+        OtherAuthor: {
+          companion: "askance",
+          companion_author: "Work",
+          author: "Home",
+        },
+      } satisfies CompanionAdded),
+      "POST",
+    ));
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const adder = await theAdder(container);
+    fireEvent.change(adder, { target: { value: String(OPEN.repo.id) } });
+
+    await waitFor(() =>
+      expect(
+        container.querySelector(`.${setup.addCompanion} .${setup.failure}`)
+          ?.textContent,
+      ).toBe(
+        "The askance repo is Work's and this conversation's repo is Home's. A conversation works as one author.",
+      ),
+    );
   });
 
   /// A row apiece in the Repo panel, naming the repository.

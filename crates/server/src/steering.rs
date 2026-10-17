@@ -1689,6 +1689,22 @@ async fn additions(
             return Ok(Additions::Refused(ConversationSteered::NoSuchCompanionRepo));
         };
 
+        // And of the Conversation's own Repo's Author, for the add's reason:
+        // one sandbox works as one author (ADR-0025).
+        if let Some(other) = crate::conversations::other_author(
+            &state.settings.config(),
+            &conversation.repo,
+            [&repo],
+        ) {
+            return Ok(refused(
+                &other.companion,
+                SteerCompanionRefusal::OtherAuthor {
+                    companion_author: other.companion_author,
+                    author: other.author,
+                },
+            ));
+        }
+
         added.push(store::Companion {
             repo,
             mode: mode(addition.mode),

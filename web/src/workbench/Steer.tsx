@@ -132,6 +132,7 @@ import type {
   Uncommitted,
 } from "../api/types";
 import { useReading } from "../freshness";
+import { otherAuthor } from "./Timeline";
 import { Empty, ErrorLine, Note } from "../notices";
 import { rowPress } from "../rows";
 import { PaneSticky } from "../Panes";
@@ -213,7 +214,10 @@ export const STEER_SAVE_REFUSAL: Record<
 
 /// And each way one companion could not be put into the sandbox, which says the
 /// same kinds of thing about a different repository.
-const STEER_COMPANION_REFUSAL: Record<SteerCompanionRefusal, string> = {
+const STEER_COMPANION_REFUSAL: Record<
+  Extract<SteerCompanionRefusal, string>,
+  string
+> = {
   OwnRepo:
     "This is the conversation's own repo, so it can't go in beside itself.",
   AlreadyAdded: "It's already on this conversation.",
@@ -284,7 +288,18 @@ export function steerRefusal(outcome: ConversationSteered): string {
         .join(", ")} ${WOULD_DISCARD} Press Steer anyway to go ahead.`;
     }
 
-    return `${outcome.Companion.repo}: ${STEER_COMPANION_REFUSAL[outcome.Companion.why]}`;
+    const why = outcome.Companion.why;
+
+    // Under another author than this conversation's repo, said of the
+    // companion by name the way the composer's add says it.
+    if (typeof why === "object") {
+      return otherAuthor({
+        companion: outcome.Companion.repo,
+        ...why.OtherAuthor,
+      });
+    }
+
+    return `${outcome.Companion.repo}: ${STEER_COMPANION_REFUSAL[why]}`;
   }
 
   return STEER_REFUSAL[outcome];

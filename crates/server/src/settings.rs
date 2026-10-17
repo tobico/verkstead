@@ -1819,6 +1819,13 @@ impl Author {
         self.display_name.as_deref()
     }
 
+    /// What it is called on a screen: the display name, or the git name where
+    /// nobody gave one — and what the viewer's `authorLabel` calls one with
+    /// neither, so that a refusal and the row it sends the human to agree.
+    pub fn called(&self) -> &str {
+        self.display_name().or(self.name()).unwrap_or("New author")
+    }
+
     /// What `user.name` is inside a sandbox of one of its Repos.
     pub fn name(&self) -> Option<&str> {
         self.name.as_deref()

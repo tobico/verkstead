@@ -3951,7 +3951,7 @@ pub struct NewCompanion {
 /// Every refusal is named rather than collapsed into one, because each is a
 /// different sentence to put in front of the human — and two of them are about
 /// what a companion *is* rather than about anything that has gone wrong.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum CompanionAdded {
     /// Added, read-only, on the default-branch rule.
@@ -3974,6 +3974,31 @@ pub enum CompanionAdded {
 
     /// It is a companion of this Conversation already.
     AlreadyAdded,
+
+    /// It is under another Author than the Conversation's own Repo. One
+    /// sandbox is one `GH_TOKEN` and one git author, so a companion of
+    /// another account could neither be fetched inside nor committed in as
+    /// its own — refused in either mode (ADR-0025).
+    OtherAuthor(OtherAuthor),
+}
+
+/// A companion whose Author is not the Conversation's own Repo's, named with
+/// both Authors: what every door that composes a sandbox refuses it with.
+///
+/// The Authors by the name the Repos pane draws them under — the display name,
+/// or the git name where nobody gave one — because that pane is where the
+/// human goes to put one of them right.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct OtherAuthor {
+    /// What the companion Repo is called.
+    pub companion: String,
+
+    /// Who it is committed and pushed as.
+    pub companion_author: String,
+
+    /// And who the Conversation's own Repo is.
+    pub author: String,
 }
 
 /// And of taking one away.
@@ -4223,7 +4248,7 @@ pub enum AnswerAttachmentRemoved {
 }
 
 /// What became of moving a Conversation onto another Repo.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum RepoSwitched {
     /// Moved: the Conversation is on that Repo, its base is back on the
@@ -4249,6 +4274,12 @@ pub enum RepoSwitched {
     /// There is no registered Repo with that id — taken off the registry between
     /// the panel listing it and the press that picked it.
     NoSuchRepo,
+
+    /// A companion the switch would keep is under another Author than the
+    /// Repo switched onto — see [`CompanionAdded::OtherAuthor`]. Refused
+    /// rather than the companion dropped: what the human composed is theirs
+    /// to take apart.
+    OtherAuthor(OtherAuthor),
 }
 
 /// What became of naming the branch.
@@ -4371,6 +4402,12 @@ pub enum GrillingStarted {
     RepoAuthorUnpicked {
         repo: String,
     },
+
+    /// A companion is under another Author than the Repo, which it can only
+    /// have become since it was added — a hand edit of `config.yaml`, or a
+    /// repoint. Asked again at the cut for that reason, before anything is made:
+    /// see [`CompanionAdded::OtherAuthor`].
+    OtherAuthor(OtherAuthor),
 
     /// Git would not fetch from the Repo's remote, so what the work would come
     /// off cannot be trusted to be what the remote is holding. Refused rather
@@ -5124,13 +5161,21 @@ pub enum ConversationSteered {
 /// the reason [`SteerTarget`] is not [`crate::Lifecycle`]: what a grilling can
 /// be refused for and what a steer can be refused for are different lists, and
 /// one list would say each press can be refused for things it never could.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum SteerCompanionRefusal {
     /// The Repo named is the Conversation's own. It is already the work's
     /// repository, so adding it beside itself would be a second checkout of it
     /// in one sandbox.
     OwnRepo,
+
+    /// It is under another Author than the Conversation's own Repo, named with
+    /// both — see [`CompanionAdded::OtherAuthor`], the same rule a steer is
+    /// held to.
+    OtherAuthor {
+        companion_author: String,
+        author: String,
+    },
 
     /// It is a companion of this Conversation already.
     ///
@@ -5228,6 +5273,10 @@ pub enum Adopted {
     RepoAuthorUnpicked {
         repo: String,
     },
+
+    /// A companion is under another Author than the Repo — see
+    /// [`GrillingStarted::OtherAuthor`], the same refusal at the other door.
+    OtherAuthor(OtherAuthor),
 
     /// Git would not fetch from the Repo's remote, so the roadmap at the base
     /// commit cannot be trusted to be the roadmap origin is holding. Refused

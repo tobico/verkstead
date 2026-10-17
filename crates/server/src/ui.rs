@@ -4590,7 +4590,14 @@ async fn switch_repo(
         return Json(RepoSwitched::NoSuchConversation).into_response();
     };
 
-    match crate::conversations::switch_repo(&state.pool, id, choice.repo_id).await {
+    match crate::conversations::switch_repo(
+        &state.pool,
+        &state.settings.config(),
+        id,
+        choice.repo_id,
+    )
+    .await
+    {
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "switching a conversation's repo failed");
@@ -4694,7 +4701,14 @@ async fn add_companion(
         return Json(CompanionAdded::NoSuchConversation).into_response();
     };
 
-    match crate::conversations::add_companion(&state.pool, id, added.repo_id).await {
+    match crate::conversations::add_companion(
+        &state.pool,
+        &state.settings.config(),
+        id,
+        added.repo_id,
+    )
+    .await
+    {
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "adding a companion repo failed");

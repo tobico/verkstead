@@ -43,9 +43,9 @@ use verkstead_render::{
     Adopted, Attached, AttachedServerView, AttachmentRemoved, AttachmentView, BaseRecorded,
     BranchRenamed, BriefSaved, CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed,
     CompanionMode, CompanionModeChosen, CompanionRefusal, CompanionRemoved, ConversationClosed,
-    ConversationMove, GrillingStarted, PairingView, PickedView, Process, ProcessPicked,
-    ProfileEntry, ProfileTrouble, RepoPairingsView, RepoSwitched, ServerAttached, ServerRemoved,
-    Started, TakenUp, TargetRecorded, Uncommitted, Worktree,
+    ConversationMove, GrillingStarted, OtherAuthor, PairingView, PickedView, Process,
+    ProcessPicked, ProfileEntry, ProfileTrouble, RepoPairingsView, RepoSwitched, ServerAttached,
+    ServerRemoved, Started, TakenUp, TargetRecorded, Uncommitted, Worktree,
 };
 use verkstead_schema::{Direction, Nudge};
 
@@ -55,7 +55,7 @@ use crate::boundaries;
 
 use crate::handoffs::Handoffs;
 use crate::repos::git;
-use crate::settings::{Author, Signature, Unauthored};
+use crate::settings::{Author, Config, Signature, Unauthored};
 use crate::skills;
 use crate::stages::Startable;
 use crate::store;
@@ -1171,7 +1171,31 @@ pub(crate) async fn set_base_branch(
 /// are the ones saying something *has* been settled elsewhere: a worktree, which
 /// the store answers off the row it wrote, and an adoption, whose repository was
 /// settled by the roadmap — or by the pull request — rather than by the human.
-pub(crate) async fn switch_repo(pool: &SqlitePool, id: i64, repo_id: i64) -> Result<RepoSwitched> {
+///
+/// And one question that is not about the rows: whose the Repo switched onto
+/// is. Every companion is kept but the one it becomes, so one under another
+/// Author is refused by name rather than dropped — see [`other_author`].
+pub(crate) async fn switch_repo(
+    pool: &SqlitePool,
+    config: &Config,
+    id: i64,
+    repo_id: i64,
+) -> Result<RepoSwitched> {
+    if let (Some(conversation), Some(onto)) = (
+        store::load_conversation(pool, id).await?,
+        store::registered_repo(pool, repo_id).await?,
+    ) {
+        let kept = conversation
+            .companions
+            .iter()
+            .map(|companion| &companion.repo)
+            .filter(|companion| companion.id != onto.id);
+
+        if let Some(other) = other_author(config, &onto, kept) {
+            return Ok(RepoSwitched::OtherAuthor(other));
+        }
+    }
+
     Ok(match store::switch_repo(pool, id, repo_id).await? {
         store::Switched::Switched => RepoSwitched::Switched,
         store::Switched::NoSuchConversation => RepoSwitched::NoSuchConversation,
@@ -1241,9 +1265,23 @@ pub(crate) async fn pick_process(
 /// starts.
 pub(crate) async fn add_companion(
     pool: &SqlitePool,
+    config: &Config,
     id: i64,
     repo_id: i64,
 ) -> Result<CompanionAdded> {
+    // Whose it is, which is a question about `config.yaml` rather than the
+    // table, and so asked here: the store's refusals first where they apply —
+    // its own Repo and one gone from the registry say more than an Author
+    // would — and this beside them.
+    if let (Some(conversation), Some(added)) = (
+        store::load_conversation(pool, id).await?,
+        store::registered_repo(pool, repo_id).await?,
+    ) && added.id != conversation.repo.id
+        && let Some(other) = other_author(config, &conversation.repo, [&added])
+    {
+        return Ok(CompanionAdded::OtherAuthor(other));
+    }
+
     Ok(match store::add_companion(pool, id, repo_id).await? {
         store::Adding::Added => CompanionAdded::Added,
         store::Adding::NoSuchConversation => CompanionAdded::NoSuchConversation,
@@ -1251,6 +1289,36 @@ pub(crate) async fn add_companion(
         store::Adding::NoSuchRepo => CompanionAdded::NoSuchRepo,
         store::Adding::OwnRepo => CompanionAdded::OwnRepo,
         store::Adding::AlreadyAdded => CompanionAdded::AlreadyAdded,
+    })
+}
+
+/// The first of `companions` under another Author than `repo`, as
+/// [`Config::author_of`] resolves both, named with the two of them — or `None`
+/// where every one is the Repo's own Author's.
+///
+/// Only two Authors that are both there differ. A side with nobody resolved is
+/// a Repo whose Author is gone or unpicked, which the start refuses by name of
+/// its own (see [`Config::author_missing`]), or an installation with no Author
+/// at all, where nothing is anybody's.
+///
+/// One sandbox is one environment — one `GH_TOKEN`, one git author — so this
+/// is asked at every door that composes one: the add, the switch, and every cut
+/// that takes companions, a stage's carry-on included (ADR-0025).
+pub(crate) fn other_author<'a>(
+    config: &Config,
+    repo: &store::Repo,
+    companions: impl IntoIterator<Item = &'a store::Repo>,
+) -> Option<OtherAuthor> {
+    let author = config.author_of(repo.author.as_deref())?;
+
+    companions.into_iter().find_map(|companion| {
+        let theirs = config.author_of(companion.author.as_deref())?;
+
+        (theirs.id() != author.id()).then(|| OtherAuthor {
+            companion: companion.name.clone(),
+            companion_author: theirs.called().to_owned(),
+            author: author.called().to_owned(),
+        })
     })
 }
 
@@ -1548,14 +1616,26 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     //
     // The Repo's Author, which is who everything on its branches is by — and,
     // where it has none, whether that is its own record's doing, which is
-    // refused by name in the same place.
+    // refused by name in the same place. As is a companion under another
+    // Author, which only a hand edit or a repoint since its add can have made.
     let config = state.settings.config();
     let author = config
         .author_of(conversation.repo.author.as_deref())
         .and_then(Author::configured);
     let unauthored = config
         .author_missing(conversation.repo.author.as_deref())
-        .map(|why| unauthored_start(why, &conversation.repo.name));
+        .map(|why| unauthored_start(why, &conversation.repo.name))
+        .or_else(|| {
+            other_author(
+                &config,
+                &conversation.repo,
+                conversation
+                    .companions
+                    .iter()
+                    .map(|companion| &companion.repo),
+            )
+            .map(GrillingStarted::OtherAuthor)
+        });
 
     // What the work branches from, resolved here and nowhere earlier: what the
     // human picked is a branch, and what they meant by picking it is wherever it
@@ -2431,6 +2511,19 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
         Some(Unauthored::Gone) => return Ok(Adopted::RepoAuthorGone { repo: repo() }),
         Some(Unauthored::Unpicked) => return Ok(Adopted::RepoAuthorUnpicked { repo: repo() }),
         None => {}
+    }
+
+    // And a companion under another Author, which only a hand edit or a
+    // repoint since it was added can have made — see [`other_author`].
+    if let Some(other) = other_author(
+        &config,
+        &conversation.repo,
+        conversation
+            .companions
+            .iter()
+            .map(|companion| &companion.repo),
+    ) {
+        return Ok(Adopted::OtherAuthor(other));
     }
 
     let Some(author) = config

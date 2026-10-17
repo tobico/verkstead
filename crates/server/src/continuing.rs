@@ -922,6 +922,33 @@ async fn start(
         return;
     };
 
+    // And the companions it inherits, each still the Repo's own Author's: the
+    // set was admitted once, but a hand edit of `config.yaml` or a repoint
+    // since can have moved one under another — and one sandbox is one
+    // `GH_TOKEN` and one git author (ADR-0025). Before anything is made, for
+    // the author's reason.
+    if let Some(other) = crate::conversations::other_author(
+        &config,
+        &conversation.repo,
+        conversation
+            .companions
+            .iter()
+            .map(|companion| &companion.repo),
+    ) {
+        return halting(
+            state,
+            brought,
+            settled,
+            format!(
+                "Stage {} of the `{}` roadmap was ready to start, but its companion repo `{}` is \
+                 {}'s and its repo is {}'s, and one sandbox works as one author. Nothing was \
+                 started. Pick the same author for both under Repos, then continue the roadmap.",
+                stage.label, stage.roadmap, other.companion, other.companion_author, other.author,
+            ),
+        )
+        .await;
+    }
+
     // A branch by that name already is a stage somebody — or some earlier run —
     // has started already. Refused rather than worked around: the alternative is
     // a second Conversation quietly doing a stage that is already under way, on a

@@ -143,6 +143,7 @@ import {
 import { namesPullRequest } from "./targets";
 import styles from "./Setup.module.css";
 import { keeping } from "./settling";
+import { otherAuthor } from "./Timeline";
 
 /// What each way of being refused a branch name says.
 export const BRANCH_REFUSAL: Record<BranchRenamed, string> = {
@@ -154,7 +155,7 @@ export const BRANCH_REFUSAL: Record<BranchRenamed, string> = {
 };
 
 /// And moving the work onto another repo.
-export const REPO_SWITCH_REFUSAL: Record<RepoSwitched, string> = {
+export const REPO_SWITCH_REFUSAL: Record<Extract<RepoSwitched, string>, string> = {
   Switched: "",
   NoSuchConversation: "This conversation is gone.",
   NotDrafting:
@@ -163,6 +164,17 @@ export const REPO_SWITCH_REFUSAL: Record<RepoSwitched, string> = {
     "The stage being continued is in this repo, so the work can't move off it.",
   NoSuchRepo: "That repo isn't registered any more.",
 };
+
+/// What to say about a move that was refused: one of the sentences above, or
+/// a companion kept by the move being under another author than the repo it
+/// was onto.
+export function repoSwitchRefusal(outcome: RepoSwitched): string {
+  if (typeof outcome === "object") {
+    return otherAuthor(outcome.OtherAuthor, "that repo");
+  }
+
+  return REPO_SWITCH_REFUSAL[outcome];
+}
 
 /// And saying what kind of work it is.
 ///
@@ -201,7 +213,7 @@ export const BASE_REFUSAL: Record<BaseRecorded, string> = {
 };
 
 /// And adding a repo to work alongside.
-export const COMPANION_REFUSAL: Record<CompanionAdded, string> = {
+export const COMPANION_REFUSAL: Record<Extract<CompanionAdded, string>, string> = {
   Added: "",
   NoSuchConversation: "This conversation is gone.",
   NotDrafting:
@@ -210,6 +222,16 @@ export const COMPANION_REFUSAL: Record<CompanionAdded, string> = {
   OwnRepo: "That's this conversation's own repo. The work is in it already.",
   AlreadyAdded: "That repo is on this conversation already.",
 };
+
+/// What to say about an add that was refused: one of the sentences above, or
+/// the repo being under another author than this conversation's.
+export function companionAddRefusal(outcome: CompanionAdded): string {
+  if (typeof outcome === "object") {
+    return otherAuthor(outcome.OtherAuthor);
+  }
+
+  return COMPANION_REFUSAL[outcome];
+}
 
 /// And taking one away again.
 export const COMPANION_REMOVAL_REFUSAL: Record<CompanionRemoved, string> = {
@@ -1014,7 +1036,7 @@ function RepoPicker(props: {
       <Show when={refused()}>
         {(outcome) => (
           <ErrorLine class={styles.failure}>
-            {REPO_SWITCH_REFUSAL[outcome()]}
+            {repoSwitchRefusal(outcome())}
           </ErrorLine>
         )}
       </Show>
@@ -2221,7 +2243,7 @@ function AddCompanion(props: { conversation: ConversationView }): JSX.Element {
       <Show when={refused()}>
         {(outcome) => (
           <ErrorLine class={styles.failure}>
-            {COMPANION_REFUSAL[outcome()]}
+            {companionAddRefusal(outcome())}
           </ErrorLine>
         )}
       </Show>
