@@ -77,6 +77,7 @@ import type {
   SharePublished,
   Shown,
   ShowingArchived,
+  SettingsView,
   StageEntry,
   StageListEvent,
   StageState,
@@ -9008,6 +9009,89 @@ describe("the mark of the harness a session ran under", () => {
     // Nor as a tooltip, which is what the `<title>` lobehub ships would have
     // drawn — taken out of every one of the four files as they were copied.
     expect(mark.querySelector("title")).toBeNull();
+  });
+});
+
+/// The Author beside the Repo on the Brief's Configuration (ADR-0025): who the
+/// work is committed and pushed as, drawn under the Repos pane row's condition.
+describe("the author on the brief", () => {
+  const ONE_AUTHOR = told as SettingsView;
+  const WORK = ONE_AUTHOR.authors[0]!;
+  const HOME: SettingsView["authors"][number] = {
+    id: "9b1e7c2d-4a5f-4e8b-8c3d-2f1a0e9d8c7b",
+    display_name: "Home",
+    name: "A. L.",
+    email: "al@home.example",
+    github_token: null,
+  };
+  const TWO_AUTHORS: SettingsView = { ...ONE_AUTHOR, authors: [WORK, HOME] };
+
+  /// The grilling Conversation's Brief opened, its Repo recorded as `author`,
+  /// against `settings`.
+  async function briefWith(
+    settings: SettingsView,
+    author: string | null,
+  ): Promise<Element> {
+    const fetching = theGrilling(
+      whenever(
+        `/api/ui/conversations/${GRILLING.id}`,
+        json({ ...GRILLING, repo: { ...GRILLING.repo, author } }),
+      ),
+      whenever("/api/ui/settings", json(settings)),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.timelineEvent} > .${timeline.brief}`),
+    );
+    const summary = await drawn(
+      container,
+      `.${shell.detailsPane} .${briefPane.configuration}`,
+    );
+    // Read the settings before saying anything is or is not drawn off them.
+    await waitFor(() =>
+      expect(askedFor(fetching, "/api/ui/settings")).toBeGreaterThan(0),
+    );
+    await new Promise((settle) => setTimeout(settle, 0));
+    return summary;
+  }
+
+  const terms = (summary: Element): string[] =>
+    [...summary.querySelectorAll(`.${briefPane.fact} dt`)].map(
+      (term) => term.textContent!,
+    );
+
+  const said = (summary: Element, term: string): string | undefined =>
+    [...summary.querySelectorAll(`.${briefPane.fact}`)]
+      .find((fact) => fact.querySelector("dt")!.textContent === term)
+      ?.querySelector("dd")!.textContent ?? undefined;
+
+  it("names the second author beside the repo", async () => {
+    const summary = await briefWith(TWO_AUTHORS, HOME.id);
+
+    await waitFor(() => expect(said(summary, "Author")).toBe("Home"));
+    expect(terms(summary).slice(0, 2)).toEqual(["Repo", "Author"]);
+  });
+
+  it("names an author with no display name by its git name", async () => {
+    const summary = await briefWith(TWO_AUTHORS, WORK.id);
+
+    await waitFor(() => expect(said(summary, "Author")).toBe(WORK.name));
+  });
+
+  it("draws no author with one configured", async () => {
+    const summary = await briefWith(ONE_AUTHOR, WORK.id);
+
+    expect(terms(summary)).toContain("Repo");
+    expect(terms(summary)).not.toContain("Author");
+  });
+
+  it("says so where the repo's author is gone", async () => {
+    const summary = await briefWith(ONE_AUTHOR, "a-uuid-nobody-holds");
+
+    await waitFor(() =>
+      expect(said(summary, "Author")).toBe("Not configured any more."),
+    );
   });
 });
 

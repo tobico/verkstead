@@ -34,9 +34,10 @@
 
 import { For, Show, type JSX } from "solid-js";
 
-import { listProfiles } from "../api/client";
+import { listProfiles, loadSettingsOf } from "../api/client";
 import { Attachments } from "../Attaching";
 import type {
+  AuthorSaved,
   BriefEvent,
   CompanionMode,
   CompanionView,
@@ -44,6 +45,7 @@ import type {
   PairingView,
   PickedView,
   ProfileEntry,
+  RepoEntry,
   Worktree,
 } from "../api/types";
 import { useReading } from "../freshness";
@@ -52,6 +54,7 @@ import { PaneSticky } from "../Panes";
 import { Empty } from "../notices";
 import { keyOf, useDevice } from "../reaching";
 import * as pairing from "../pairing";
+import { authorLabel } from "../settings/Git";
 import styles from "./Brief.module.css";
 import { chosen } from "./naming";
 import { PROCESS, ROLE, uses } from "./processes";
@@ -170,6 +173,13 @@ function Configuration(props: {
 
       <dl class={styles.facts}>
         <Fact term="Repo">{props.conversation.repo.name}</Fact>
+        {/* And who its work is committed and pushed as, once there are two
+            Authors to tell apart — the Repos pane row's condition and its
+            label (ADR-0025). Off a share for the reason the half below is: it
+            is a read of this machine's settings, and a share makes none. */}
+        <Show when={!props.readOnly}>
+          <Author repo={props.conversation.repo} />
+        </Show>
         {/* And what kind of work it is, where the composer asked for it: the
             picker sits between the Repo and the Pairings, and this is the same
             two facts in the same order. In this half rather than the one below
@@ -252,6 +262,58 @@ function Configuration(props: {
         </ul>
       </Show>
     </section>
+  );
+}
+
+/// The Author the Repo's work is done as, beside the Repo: its display name, or
+/// its git name where it has none, as the Git section and the Repos pane label
+/// it.
+///
+/// Drawn only once more than one Author is configured, there being nothing to
+/// tell apart with one — but a Repo with none picked, or one whose Author
+/// `config.yaml` no longer holds, says so whatever the count: a start on it is
+/// refused, and a blank here would be the pane hiding why.
+///
+/// The settings of the device holding the work, read the way the Repos pane
+/// reads them: an Author is named by a uuid in that machine's files, and this
+/// machine's list would call a member's Author gone.
+function Author(props: { repo: RepoEntry }): JSX.Element {
+  const device = useDevice();
+
+  const settings = useReading(() => ({
+    queryKey: keyOf(device(), "settings"),
+    queryFn: () => loadSettingsOf(device()),
+    freshness: { reconcile: "id" },
+  }));
+
+  const authors = (): AuthorSaved[] | undefined => settings.data?.authors;
+  const holding = (): AuthorSaved | undefined =>
+    authors()?.find(({ id }) => id === props.repo.author);
+  const gone = (): boolean =>
+    props.repo.author !== null &&
+    (authors()?.length ?? 0) > 0 &&
+    holding() === undefined;
+
+  return (
+    <Show
+      when={
+        authors() !== undefined &&
+        (authors()!.length > 1 || gone() || props.repo.author_unpicked)
+      }
+    >
+      <Fact term="Author">
+        <Show
+          when={holding()}
+          fallback={
+            <span class={styles.rule}>
+              {gone() ? "Not configured any more." : "Not picked yet."}
+            </span>
+          }
+        >
+          {(author) => authorLabel(author())}
+        </Show>
+      </Fact>
+    </Show>
   );
 }
 

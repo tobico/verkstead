@@ -2205,6 +2205,15 @@ export function loadSettings(): Promise<SettingsView> {
   return get<SettingsView>("/api/ui/settings");
 }
 
+/// The same, of whichever device holds the work — which is what says, beside a
+/// Conversation on a member, whether its Repo's Author is one that machine still
+/// holds. A function of its own rather than a parameter on [`loadSettings`],
+/// which is handed to queries as it stands and so is called with the query's
+/// own context.
+export function loadSettingsOf(device: Device): Promise<SettingsView> {
+  return get<SettingsView>(on(device, "/api/ui/settings"));
+}
+
 /// Write both settings files back, which the page does in one press.
 ///
 /// The token's half of the edit is an action rather than a value — `"Keep"`,
