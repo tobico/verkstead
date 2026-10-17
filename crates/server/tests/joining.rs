@@ -1927,7 +1927,9 @@ async fn a_keepers_start_boots_its_annex_and_links_it() {
     let keeper = Verkstead::asking().await;
     let boxed = Arc::new(Boxed::of(&annex, KEEPER_AT));
 
-    Annexed::of(boxed.clone()).started(&keeper.devices()).await;
+    Annexed::of(boxed.clone(), keeper.settings())
+        .started(&keeper.devices())
+        .await;
 
     assert_eq!(boxed.booted.load(Ordering::SeqCst), 1);
 
@@ -1966,7 +1968,7 @@ async fn a_keepers_start_holds_the_release_its_annex_is_pinned_to() {
     let keeper = Verkstead::asking().await;
     let boxed = Arc::new(Boxed::of(&annex, KEEPER_AT));
 
-    let annexed = Annexed::of(boxed.clone());
+    let annexed = Annexed::of(boxed.clone(), keeper.settings());
     assert_eq!(annexed.reading(None).version, None, "nothing read yet");
 
     annexed.started(&keeper.devices()).await;
@@ -1994,7 +1996,9 @@ async fn a_keeper_of_the_same_release_boots_its_annex_without_rebuilding() {
     let boxed = Arc::new(Boxed::of(&annex, KEEPER_AT));
     let pinned = boxed.nixos(annex::flake::IN_THE_BOX);
 
-    Annexed::of(boxed.clone()).started(&keeper.devices()).await;
+    Annexed::of(boxed.clone(), keeper.settings())
+        .started(&keeper.devices())
+        .await;
 
     assert_eq!(boxed.ran(), ["addresses"], "nothing run but the link");
     assert_eq!(boxed.nixos(annex::flake::IN_THE_BOX), pinned);
@@ -2011,7 +2015,7 @@ async fn a_keeper_one_release_ahead_repins_its_annex_before_linking_it() {
     let keeper = Verkstead::asking().await;
     let boxed = Arc::new(Boxed::pinned_before(&annex, KEEPER_AT));
 
-    let annexed = Arc::new(Annexed::of(boxed.clone()));
+    let annexed = Arc::new(Annexed::of(boxed.clone(), keeper.settings()));
     boxed.under.set(Arc::downgrade(&annexed)).unwrap();
 
     annexed.started(&keeper.devices()).await;
@@ -2077,7 +2081,7 @@ async fn a_failed_repin_leaves_its_line_on_the_row_and_the_old_release() {
     });
 
     let devices = keeper.devices().waiting(PATIENCE);
-    let annexed = Annexed::of(boxed.clone());
+    let annexed = Annexed::of(boxed.clone(), keeper.settings());
     annexed.started(&devices).await;
 
     assert_eq!(
@@ -2134,7 +2138,7 @@ fn its_conversations(rows: &[(&str, bool, bool)]) -> Router {
 /// A Keeper whose Annex is over `boxed`, started — booted, pinned and linked
 /// — with the handle its workbench presses Update through.
 async fn kept_and_started(keeper: &Verkstead, boxed: &Arc<Boxed>) -> (Arc<Annexed>, Devices) {
-    let annexed = Arc::new(Annexed::of(boxed.clone()));
+    let annexed = Arc::new(Annexed::of(boxed.clone(), keeper.settings()));
     boxed.under.set(Arc::downgrade(&annexed)).unwrap();
 
     let devices = keeper.devices().keeping_an_annex(annexed.clone());
@@ -2250,7 +2254,7 @@ async fn update_on_an_annex_that_cannot_be_asked_is_refused() {
     let keeper = Verkstead::asking().await;
     let boxed = Arc::new(Boxed::of(&annex, KEEPER_AT));
 
-    let annexed = Arc::new(Annexed::of(boxed.clone()));
+    let annexed = Arc::new(Annexed::of(boxed.clone(), keeper.settings()));
     let devices = keeper.devices().keeping_an_annex(annexed);
 
     let (status, said) = press_update(&keeper, &devices).await;
@@ -2385,40 +2389,148 @@ async fn a_failed_update_leaves_its_line_on_the_row_and_the_annex_answering() {
     assert_eq!(kept.members[0].trouble.as_deref(), Some(line));
 }
 
-/// A Keeper's start hands its Annex nothing of its Authors: the Annex is a
-/// linked Member, so the Keeper's reach it as mirrors over the one list, token
-/// copies and all (ADR-0025), and its own files hold no Author and no token —
-/// only the link's own key.
+/// What a Keeper says about the work in its `config.yaml`: every key the
+/// Annex is handed, with the Instructions and the second MCP server as given.
+fn keepers_config(instructions: &str, second: &str) -> String {
+    format!(
+        "authors:\n  - id: work\n    name: Ada Lovelace\n    email: ada@example.com\n\
+         instructions: {instructions}\n\
+         mcp_servers:\n\
+         - name: docs\n  url: https://docs.example.com/mcp\n  headers: [Authorization]\n\
+         {second}\
+         at_once:\n  conversations: 2\n\
+         cleanup:\n  delete:\n    enabled: true\n    days: 9\n\
+         ignored_comments:\n- author: coderabbitai\n\
+         conflict_resolution: rebase\n\
+         share_on_done: true\n\
+         sandbox_binds:\n- /keepers/own\n"
+    )
+}
+
+/// The Annex has no settings of its own: everything in the Keeper's files
+/// about the work is handed in at every start — the Instructions, the MCP
+/// servers and their header values, how much runs at once, the Cleanup, the
+/// comments ignored, how a conflict is resolved and whether the record is
+/// shared on Done. Not its Authors or their tokens, which reach the Annex as
+/// mirrors over the one list (ADR-0025). A change on the Keeper reaches
+/// the Annex the next time the two start together, a server the Keeper no
+/// longer declares is gone from both files, and the Annex's own keys stand.
 #[tokio::test]
-async fn a_keepers_start_hands_its_annex_no_author_of_its_own() {
+async fn a_keepers_start_hands_its_annex_its_settings_about_the_work() {
     let annex = made_annex().await;
     let keeper = Verkstead::asking().await;
     let boxed = Arc::new(Boxed::of(&annex, KEEPER_AT));
 
+    let kept = Settings::in_data_dir(annex.dir.path());
+    std::fs::write(
+        kept.config_path(),
+        "sandbox_binds:\n- /annexes/own\ninstructions: The annex's own words.\n",
+    )
+    .unwrap();
+
     std::fs::write(
         keeper.settings().config_path(),
-        "authors:\n  - id: work\n    name: Ada Lovelace\n    email: ada@example.com\n",
+        keepers_config(
+            "Say it plainly.",
+            "- name: tracker\n  url: https://tracker.example.com/mcp\n  headers: [X-Api-Key]\n",
+        ),
     )
     .unwrap();
     std::fs::write(
         keeper.settings().secrets_path(),
-        "author_tokens:\n  work: ghp_first\n",
+        "author_tokens:\n  work: ghp_first\n\
+         mcp_headers:\n  docs:\n    Authorization: Bearer abc\n  tracker:\n    X-Api-Key: k1\n",
     )
     .unwrap();
 
-    Annexed::of(boxed.clone()).started(&keeper.devices()).await;
+    Annexed::of(boxed.clone(), keeper.settings())
+        .started(&keeper.devices())
+        .await;
 
-    let kept = Settings::in_data_dir(annex.dir.path());
-    assert_eq!(
-        kept.config().kept_by().map(KeptBy::device),
-        Some(A),
-        "the link's own key is written",
-    );
+    let config = kept.config();
     assert!(
-        kept.config().authors().is_empty(),
-        "and no Author of its own"
+        config.authors().is_empty(),
+        "the Keeper's Authors arrive as mirrors rather than copied"
     );
-    assert_eq!(kept.secrets().author_token("work"), None, "nor its token");
+    assert_eq!(config.instructions(), "Say it plainly.");
+    assert_eq!(
+        config
+            .mcp_servers()
+            .iter()
+            .map(|server| (server.name().unwrap(), server.headers().to_vec()))
+            .collect::<Vec<_>>(),
+        [
+            ("docs", vec!["Authorization".to_owned()]),
+            ("tracker", vec!["X-Api-Key".to_owned()]),
+        ]
+    );
+    assert_eq!(config.at_once().conversations_configured(), Some(2));
+    assert!(config.cleanup().deletes());
+    assert_eq!(config.cleanup().delete_after_configured(), Some(9));
+    assert_eq!(config.ignored_comments()[0].author(), Some("coderabbitai"));
+    assert_eq!(format!("{:?}", config.conflict_resolution()), "Rebase");
+    assert!(config.share_on_done());
+    assert_eq!(
+        config.sandbox_binds(),
+        ["/annexes/own"],
+        "the Annex's binds are its own"
+    );
+    assert_eq!(
+        config.kept_by().map(KeptBy::device),
+        Some(A),
+        "the link's own key stands beside them",
+    );
+
+    let secrets = kept.secrets();
+    assert_eq!(secrets.author_token("work"), None, "and so do their tokens");
+    assert_eq!(
+        secrets.mcp_header("docs", "Authorization"),
+        Some("Bearer abc")
+    );
+    assert_eq!(secrets.mcp_header("tracker", "X-Api-Key"), Some("k1"));
+
+    // And the Keeper's changed — new Instructions, the tracker gone — which
+    // the next start carries across.
+    std::fs::write(
+        keeper.settings().config_path(),
+        keepers_config("Say it at length.", ""),
+    )
+    .unwrap();
+    std::fs::write(
+        keeper.settings().secrets_path(),
+        "author_tokens:\n  work: ghp_second\nmcp_headers:\n  docs:\n    Authorization: Bearer abc\n",
+    )
+    .unwrap();
+
+    Annexed::of(boxed.clone(), keeper.settings())
+        .started(&keeper.devices())
+        .await;
+
+    let config = kept.config();
+    assert_eq!(config.instructions(), "Say it at length.");
+    assert_eq!(config.mcp_servers().len(), 1, "the tracker, gone");
+    assert_eq!(config.sandbox_binds(), ["/annexes/own"]);
+
+    let secrets = kept.secrets();
+    assert_eq!(secrets.author_token("work"), None);
+    assert_eq!(secrets.mcp_header("tracker", "X-Api-Key"), None);
+    assert_eq!(
+        secrets.mcp_header("docs", "Authorization"),
+        Some("Bearer abc")
+    );
+
+    // And a start with nothing changed since writes neither file.
+    boxed.ran.lock().unwrap().clear();
+
+    Annexed::of(boxed.clone(), keeper.settings())
+        .started(&keeper.devices())
+        .await;
+
+    let ran = boxed.ran.lock().unwrap().clone();
+    assert!(
+        !ran.iter().any(|ran| ran.starts_with("chown ")),
+        "nothing handed over, so nothing written: {ran:?}"
+    );
 }
 
 /// An Annex whose service never answers is a line on its row with what the
@@ -2428,7 +2540,7 @@ async fn an_annex_that_never_answers_is_a_line_on_its_row() {
     let annex = made_annex().await;
     let keeper = Verkstead::asking().await;
 
-    Annexed::of(Arc::new(Boxed::of(&annex, KEEPER_AT)))
+    Annexed::of(Arc::new(Boxed::of(&annex, KEEPER_AT)), keeper.settings())
         .started(&keeper.devices())
         .await;
 
@@ -2445,7 +2557,7 @@ async fn an_annex_that_never_answers_is_a_line_on_its_row() {
     };
 
     let devices = keeper.devices().waiting(PATIENCE);
-    Annexed::of(Arc::new(failing))
+    Annexed::of(Arc::new(failing), keeper.settings())
         .waiting(Duration::from_secs(1))
         .started(&devices)
         .await;
@@ -2482,7 +2594,7 @@ async fn an_annex_never_linked_that_never_answers_is_said_beside_this_device() {
     };
 
     let devices = keeper.devices().waiting(PATIENCE);
-    let came_up = Annexed::of(Arc::new(failing))
+    let came_up = Annexed::of(Arc::new(failing), keeper.settings())
         .waiting(Duration::from_secs(1))
         .up(&devices)
         .await;
@@ -2514,7 +2626,7 @@ async fn no_box_is_booted_where_none_was_made() {
         ..Boxed::of(&annex, KEEPER_AT)
     });
 
-    let annexed = Annexed::of(boxed.clone());
+    let annexed = Annexed::of(boxed.clone(), keeper.settings());
     annexed.started(&keeper.devices()).await;
     annexed.stopped().await;
 
@@ -2530,7 +2642,7 @@ async fn the_stop_terminates_the_box_the_start_booted() {
     let keeper = Verkstead::asking().await;
     let boxed = Arc::new(Boxed::of(&annex, KEEPER_AT));
 
-    let annexed = Annexed::of(boxed.clone());
+    let annexed = Annexed::of(boxed.clone(), keeper.settings());
     annexed.started(&keeper.devices()).await;
 
     annexed.stopped().await;

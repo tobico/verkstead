@@ -2676,7 +2676,7 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
         && annex_forward.is_some())
     .then(|| {
         Arc::new(
-            annex::booting::Annexed::of(Arc::new(annex::wsl::Wsl::here()))
+            annex::booting::Annexed::of(Arc::new(annex::wsl::Wsl::here()), settings.clone())
                 .running(annex::flake::Binary::from_env()),
         )
     });

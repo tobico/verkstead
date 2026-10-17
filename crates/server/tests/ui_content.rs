@@ -4069,8 +4069,11 @@ async fn a_components_app(boxed: StatedBox) -> (tempfile::TempDir, Router) {
     );
 
     let annexed = std::sync::Arc::new(
-        annex::booting::Annexed::of(std::sync::Arc::new(boxed))
-            .waiting(std::time::Duration::from_millis(10)),
+        annex::booting::Annexed::of(
+            std::sync::Arc::new(boxed),
+            verkstead_server::settings::Settings::in_data_dir(dir.path()),
+        )
+        .waiting(std::time::Duration::from_millis(10)),
     );
 
     let device = Device::stated(dir.path(), A_DEVICE).unwrap();

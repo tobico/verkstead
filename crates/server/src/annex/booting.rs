@@ -23,6 +23,13 @@
 //! up the dial finds nothing, and the first one that gets through is the
 //! answer.
 //!
+//! **And the Keeper's settings about the work handed in first**, at every
+//! start rather than at make alone: the Annex has no settings of its own, so
+//! its sessions are given the Keeper's Instructions, MCP servers, at-once limit
+//! and Cleanup, and a change on the Keeper reaches them the next time the two
+//! start together — see [`InTheBox::working_as`]. Not its Authors: those reach
+//! the Annex as mirrors over the one list, token copies and all (ADR-0025).
+//!
 //! **And pinned to the Keeper's own release before it is linked**, where its
 //! flake says another: the files written again, the Verkstead inputs alone
 //! relocked, and the box rebuilt, all before the link puts it to use — so the
@@ -61,7 +68,7 @@ use verkstead_render::{AnnexComponent, AnnexState};
 use super::flake::Binary;
 use super::{Backend, DATA_DIR, Inside, Probed, flake, pinning};
 use crate::device::{AnnexData, CERTIFICATE_FILE, Devices};
-use crate::settings::{Config, KeptBy};
+use crate::settings::{Config, KeptBy, Secrets, Settings};
 
 /// How long a box has to come up and be linked: the boot, the service's start,
 /// and the first dial that gets through. A cold WSL VM and a NixOS boot under
@@ -79,6 +86,10 @@ const SERVICE: &str = "verkstead";
 #[derive(Debug)]
 pub struct Annexed {
     annex: Arc<dyn Backend>,
+
+    /// The Keeper's own settings, whose keys about the work are handed to the
+    /// Annex at every start — see [`InTheBox::working_as`].
+    keeper: Settings,
 
     /// How long the box has to come up — [`BOOT_TIME`], but for a suite.
     patience: Duration,
@@ -107,10 +118,12 @@ pub struct Annexed {
 }
 
 impl Annexed {
-    /// The Annex whose box is `annex`.
-    pub fn of(annex: Arc<dyn Backend>) -> Annexed {
+    /// The Annex whose box is `annex`, kept by the device whose settings are
+    /// `keeper`.
+    pub fn of(annex: Arc<dyn Backend>, keeper: Settings) -> Annexed {
         Annexed {
             annex,
+            keeper,
             patience: BOOT_TIME,
             binary: Binary::Released,
             booted: AtomicBool::new(false),
@@ -433,8 +446,9 @@ impl Annexed {
         }
     }
 
-    /// One try at the link: the two addresses read off the box, and the
-    /// Keeper's Join run with them.
+    /// One try at the link: the Keeper's settings about the work handed in,
+    /// read off its files at this moment, the two addresses read off the box,
+    /// and the Keeper's Join run with them.
     ///
     /// Nothing of the Keeper's Authors is handed in: the Annex is a linked
     /// Member, so they reach it as mirrors over the one list, token copies and
@@ -445,6 +459,13 @@ impl Annexed {
         networking: super::Networking,
         port: u16,
     ) -> anyhow::Result<super::Addresses> {
+        let in_the_box = InTheBox(self.annex.clone());
+        let keeper = self.keeper.clone();
+        tokio::task::spawn_blocking(move || {
+            in_the_box.working_as(&keeper.config(), &keeper.secrets())
+        })
+        .await??;
+
         let annex = self.annex.clone();
         let addresses =
             tokio::task::spawn_blocking(move || annex.addresses(networking, port)).await??;
@@ -633,6 +654,49 @@ impl InTheBox {
         format!("{DATA_DIR}/config.yaml")
     }
 
+    fn secrets(&self) -> String {
+        format!("{DATA_DIR}/secrets.yaml")
+    }
+
+    /// The Annex's sessions working as the Keeper's would (ADR-0024, *The
+    /// Annex has no settings of its own*): everything in `keeper`'s
+    /// `config.yaml` and `secrets.yaml` that is about the work rather than the
+    /// machine written into the Annex's — see [`Config::working_as`] and
+    /// [`Secrets::working_as`] for which keys those are — every other key as it
+    /// stands.
+    ///
+    /// **At every start rather than at make alone**, so a change on the Keeper
+    /// reaches the Annex the next time the two start together. A file that
+    /// says so already is not written at all, so a start with nothing changed
+    /// touches neither.
+    pub fn working_as(&self, keeper: &Config, secret: &Secrets) -> anyhow::Result<()> {
+        let path = self.config();
+        let text = self.0.read(&path)?;
+
+        let config = Config::read(&String::from_utf8_lossy(&text))
+            .with_context(|| format!("{path} does not read as a config"))?;
+
+        let copied = config.working_as(keeper).text()?;
+
+        if copied != config.text()? {
+            self.handed(&path, copied.as_bytes(), 0o640)?;
+        }
+
+        let path = self.secrets();
+        let text = self.0.read(&path)?;
+
+        let secrets = Secrets::read(&String::from_utf8_lossy(&text))
+            .with_context(|| format!("{path} does not read as secrets"))?;
+
+        let copied = secrets.working_as(secret).text()?;
+
+        if copied != secrets.text()? {
+            self.handed(&path, copied.as_bytes(), 0o600)?;
+        }
+
+        Ok(())
+    }
+
     /// `bytes` written at `path` and handed to the service user — see the
     /// type's docs for why.
     fn handed(&self, path: &str, bytes: &[u8], mode: u32) -> anyhow::Result<()> {
@@ -688,9 +752,12 @@ mod tests {
         ANSWERING_STATUS, FACTS_NO_WSL, Stub, inside, listed, made, strings, utf16,
     };
 
-    /// An Annex over `backend`.
-    fn annexed(backend: Wsl) -> Annexed {
-        Annexed::of(Arc::new(backend))
+    /// An Annex over `backend`, kept by a Keeper with no settings of note.
+    fn annexed(backend: Wsl) -> (Annexed, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let annexed = Annexed::of(Arc::new(backend), Settings::in_data_dir(dir.path()));
+
+        (annexed, dir)
     }
 
     /// A machine with no WSL reads *not installed*, with nothing to say of a
@@ -701,7 +768,7 @@ mod tests {
         powershell.answers(1, FACTS_NO_WSL, 0);
 
         let missing = powershell.dir.path().join("no-such-wsl.exe");
-        let annexed = annexed(Wsl::at(missing, &powershell.program));
+        let (annexed, _dir) = annexed(Wsl::at(missing, &powershell.program));
 
         assert_eq!(
             annexed.reading(None),
@@ -732,7 +799,7 @@ mod tests {
         .answers(4, utf16(ANSWERING_STATUS), 0)
         .answers(5, utf16(&listed("Stopped")), 0);
 
-        let annexed = annexed(backend);
+        let (annexed, _dir) = annexed(backend);
         annexed.read_pinned().await;
 
         let trouble = Some("The annex didn't answer.".to_owned());
@@ -791,7 +858,7 @@ mod tests {
             .answers(2, format!("{}  /etc/nixos/verkstead\n", "0".repeat(64)), 0)
             .answers(3, &pinned, 0);
 
-        let annexed = annexed(backend);
+        let (annexed, _dir) = annexed(backend);
         let annexed = annexed.running(binary);
 
         assert_eq!(annexed.repinned().await, None);
@@ -833,7 +900,7 @@ mod tests {
         wsl.answers(1, &pinned, 0)
             .answers(2, format!("{digest}  /etc/nixos/verkstead\n"), 0);
 
-        let annexed = annexed(backend);
+        let (annexed, _dir) = annexed(backend);
         let annexed = annexed.running(binary);
 
         assert_eq!(annexed.repinned().await, None);
@@ -842,6 +909,91 @@ mod tests {
             [
                 inside("root", &["cat", "--", "/etc/nixos/flake.nix"]),
                 inside("root", &["sha256sum", "--", "/etc/nixos/verkstead"]),
+            ]
+        );
+    }
+
+    /// A Keeper with Instructions and an MCP server with an auth header, and
+    /// the Annex's files as a start that copied them leaves them: a bind and
+    /// its Keeper of its own beside what was copied.
+    fn keeper_and_copied() -> (tempfile::TempDir, Settings, String, String) {
+        let dir = tempfile::tempdir().unwrap();
+        let keeper = Settings::in_data_dir(dir.path());
+
+        std::fs::write(
+            keeper.config_path(),
+            "instructions: Say it plainly.\n\
+             mcp_servers:\n- name: docs\n  url: https://docs.example.com/mcp\n  headers: [Authorization]\n",
+        )
+        .unwrap();
+        std::fs::write(
+            keeper.secrets_path(),
+            "author_tokens:\n  work: ghp_keeper\nmcp_headers:\n  docs:\n    Authorization: Bearer abc\n",
+        )
+        .unwrap();
+
+        let annex =
+            Config::read("sandbox_binds:\n- /srv/data\nkept_by:\n  device: a\n  fingerprint: f\n")
+                .unwrap();
+        let config = annex.working_as(&keeper.config()).text().unwrap();
+        let secrets = Secrets::default()
+            .working_as(&keeper.secrets())
+            .text()
+            .unwrap();
+
+        (dir, keeper, config, secrets)
+    }
+
+    /// A start whose Annex already says what the Keeper says reads both files
+    /// and writes neither.
+    #[test]
+    fn a_start_with_nothing_changed_writes_neither_file() {
+        let (backend, wsl, _powershell) = made();
+        let (_dir, keeper, config, secrets) = keeper_and_copied();
+
+        wsl.answers(1, &config, 0).answers(2, &secrets, 0);
+
+        InTheBox(Arc::new(backend))
+            .working_as(&keeper.config(), &keeper.secrets())
+            .unwrap();
+
+        assert_eq!(
+            wsl.calls(),
+            [
+                inside("root", &["cat", "--", "/var/lib/verkstead/config.yaml"]),
+                inside("root", &["cat", "--", "/var/lib/verkstead/secrets.yaml"]),
+            ]
+        );
+    }
+
+    /// And one whose Keeper has changed since writes both, and hands each to
+    /// the service.
+    #[test]
+    fn a_start_after_a_change_on_the_keeper_writes_both_files() {
+        let (backend, wsl, _powershell) = made();
+        let (_dir, keeper, _config, _secrets) = keeper_and_copied();
+
+        wsl.answers(1, "instructions: Say it at length.\n", 0)
+            .answers(4, "author_tokens:\n  work: ghp_mirrored\n", 0);
+
+        InTheBox(Arc::new(backend))
+            .working_as(&keeper.config(), &keeper.secrets())
+            .unwrap();
+
+        let written = |mode: &str, path: &str| {
+            inside("root", &["install", "-D", "-m", mode, "/dev/stdin", path])
+        };
+        let handed = |path: &str| inside("root", &["chown", "verkstead:verkstead", path]);
+
+        assert_eq!(
+            wsl.calls(),
+            [
+                inside("root", &["cat", "--", "/var/lib/verkstead/config.yaml"]),
+                written("640", "/var/lib/verkstead/config.yaml"),
+                handed("/var/lib/verkstead/config.yaml"),
+                inside("root", &["cat", "--", "/var/lib/verkstead/secrets.yaml"]),
+                written("600", "/var/lib/verkstead/secrets.yaml"),
+                handed("/var/lib/verkstead/secrets.yaml"),
             ]
         );
     }
