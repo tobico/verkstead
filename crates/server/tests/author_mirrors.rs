@@ -760,6 +760,38 @@ async fn the_copy_goes_with_the_token_the_author_and_the_device() {
     assert_eq!(said, B_OWN, "every other secret as it was");
 }
 
+/// A `secrets.yaml` here that will not parse is left exactly as it is by the
+/// copy, rather than written over with nothing but the copy in it — and the
+/// copy arrives once the file is put right.
+#[tokio::test]
+async fn a_secrets_file_that_wont_parse_is_left_alone_by_the_copy() {
+    let (a, b, _holding) = linked_up().await;
+
+    let broken = format!("{B_OWN}author_tokens: [oh\n");
+    std::fs::write(b.dir.path().join("secrets.yaml"), &broken).unwrap();
+
+    a.holds_tokens(&format!("author_tokens:\n  {WORK}: ghp_thework\n"));
+    a.saves_author(WORK, "Work", "Ada Lovelace", "ada@work.example")
+        .await;
+
+    b.authors_saying(|rows| with(rows, WORK).is_some_and(|row| row.holds_token))
+        .await;
+    b.nudges.announce(Nudge::Devices);
+    tokio::time::sleep(SETTLING).await;
+
+    assert_eq!(
+        secrets_in(b.dir.path()),
+        broken,
+        "the human's file, typo and all"
+    );
+
+    std::fs::write(b.dir.path().join("secrets.yaml"), B_OWN).unwrap();
+    a.nudges.announce(Nudge::Authors);
+
+    let said = b.secrets_saying(|said| said.contains("ghp_thework")).await;
+    assert!(said.contains("Vk1-hunter2"), "B's own stays: {said}");
+}
+
 /// The token call hands over only the answering device's own Authors' tokens,
 /// and only to a member.
 #[tokio::test]

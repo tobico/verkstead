@@ -478,12 +478,19 @@ pub async fn token_at(
 ///
 /// **A uuid `config.yaml` holds is never touched**: that is this device's own
 /// Author, and the token under it is its own rather than a copy of anybody's.
+///
+/// **And a `secrets.yaml` that will not parse is not written at all**: read
+/// the forgiving way it would be nothing, and writing nothing but the copies
+/// back would take this device's own tokens and every other secret with it.
+/// The copies wait for a refresh after the human has put the file right.
 async fn copying(state: &AppState, copies: BTreeMap<String, Copy>) -> bool {
     let settings = state.settings.clone();
 
     let written = tokio::task::spawn_blocking(move || {
         let config = settings.config();
-        let mut secrets = settings.secrets();
+        let Some(mut secrets) = settings.secrets_as_written() else {
+            return Err(std::io::Error::other("secrets.yaml won't parse"));
+        };
         let mut moved = false;
 
         for (id, copy) in copies {

@@ -491,6 +491,18 @@ impl Settings {
         Ok(true)
     }
 
+    /// What `secrets.yaml` holds, nothing written counting as empty — or `None`
+    /// where it will not parse.
+    ///
+    /// **For a write nobody pressed**, which [`Settings::secrets`] would turn a
+    /// file with a typo in it into an empty one for: a background writer that
+    /// wrote that back would take every other secret in the file with it. See
+    /// [`crate::mirroring::authors`], whose copies of the members' tokens are
+    /// written this way.
+    pub(crate) fn secrets_as_written(&self) -> Option<Secrets> {
+        Self::parsed(&self.secrets_path(), Secrets::read)
+    }
+
     /// What the settings file at `path` says read by `read`, nothing written
     /// counting as the empty file — or `None` where it will not parse.
     fn parsed<T: Default>(
