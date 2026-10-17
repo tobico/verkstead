@@ -2240,9 +2240,6 @@ export function removeAuthor(id: string): Promise<AuthorRemoved> {
   return post<AuthorRemoved>(`/api/ui/authors/${encodeURIComponent(id)}/remove`);
 }
 
-/// Empty every store of one language — sccache's too, for Rust.
-///
-/// Refused while a session or a Conversation Terminal runs, which is an answer
 /// Rewrite one Author's fields and set or clear its token, by its uuid, and
 /// nothing else of the settings — what the Git section sends for a member's
 /// Author, which the server puts to the device it is at home on. A machine
@@ -2254,6 +2251,9 @@ export function editAuthor(
   return post<AuthorEdited>(`/api/ui/authors/${encodeURIComponent(id)}`, edit);
 }
 
+/// Empty every store of one language — sccache's too, for Rust.
+///
+/// Refused while a session or a Conversation Terminal runs, which is an answer
 /// rather than a failure: it says how many of each. Where it goes ahead, the
 /// answer carries the settings with that language's disk use measured again.
 export function clearLanguage(name: string): Promise<LanguageCleared> {

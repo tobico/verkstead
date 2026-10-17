@@ -970,15 +970,15 @@ export function GitPane(props: {
               <h3>GitHub Token</h3>
 
               {/* What a token has to be able to do, above everything about the
-                    one that is saved: this is the list to tick against before
-                    pasting one, and it stands whether or not anything has ever
-                    been saved here. */}
+                  one that is saved: this is the list to tick against before
+                  pasting one, and it stands whether or not anything has ever
+                  been saved here. */}
               <TokenScopes class={styles.tokenScopes} />
 
               <Show when={configured()}>{(saved) => standing(saved)}</Show>
 
               {/* A mirror's token is its home's, and nothing of it crosses
-                    but that there is one. */}
+                  but that there is one. */}
               <Show when={mirror() !== null && holding()}>
                 <p class={styles.tokenStanding}>
                   A token is saved on {mirror()!.name}.
@@ -986,9 +986,9 @@ export function GitPane(props: {
               </Show>
 
               {/* What GitHub said about the last token saved from here: the
-                    account it authenticates as, or why nobody could be asked.
-                    Both are worth showing — a token saved against the wrong
-                    account is the failure this form exists to catch. */}
+                  account it authenticates as, or why nobody could be asked.
+                  Both are worth showing — a token saved against the wrong
+                  account is the failure this form exists to catch. */}
               <Show when={account()}>
                 {(login) => (
                   <p class={styles.verified}>
@@ -999,10 +999,10 @@ export function GitPane(props: {
               </Show>
 
               {/* And what it may not do, on a token that authenticates
-                    perfectly and cannot publish a share. A line of its own rather
-                    than part of the one above, because it is a different thing to
-                    do about it: the account is right and the token needs re-
-                    issuing with another box ticked. */}
+                  perfectly and cannot publish a share. A line of its own rather
+                  than part of the one above, because it is a different thing to
+                  do about it: the account is right and the token needs re-
+                  issuing with another box ticked. */}
               <Show when={missing().length > 0}>
                 <p class={styles.unscoped}>
                   It can't publish a share without the{" "}
@@ -1012,6 +1012,7 @@ export function GitPane(props: {
                 </p>
               </Show>
               <Show when={refused()}>
+
                 {(why) => (
                   <ErrorLine class={styles.unverified}>
                     It's saved, but GitHub wouldn't say whose it is. {why()}
@@ -1041,9 +1042,7 @@ export function GitPane(props: {
                 }
               >
                 <label for="github-token">Token</label>
-                <Note class={styles.stored}>
-                  Stored, and never shown again.
-                </Note>
+                <Note class={styles.stored}>Stored, and never shown again.</Note>
                 <input
                   id="github-token"
                   type="password"
@@ -1056,8 +1055,8 @@ export function GitPane(props: {
                   onInput={(ev) => setToken(ev.currentTarget.value)}
                 />
                 {/* Only where there was one to go back to: with nothing
-                      configured, the field is the form rather than a detour
-                      from it. */}
+                    configured, the field is the form rather than a detour
+                    from it. */}
                 <Show when={holding()}>
                   <div class={styles.tokenActions}>
                     <button
@@ -1079,7 +1078,7 @@ export function GitPane(props: {
               <h3>Git Author</h3>
 
               {/* What the dropdown's rows call this Author, which is the
-                    only place it is read — so drawn only where they are. */}
+                  only place it is read — so drawn only where they are. */}
               <Show when={several()}>
                 <label for="author-display-name">Display name</label>
                 <input
@@ -1092,8 +1091,8 @@ export function GitPane(props: {
                   value={authorDisplayName()}
                   onInput={(ev) => setDisplayName(ev.currentTarget.value)}
                 />
-
               </Show>
+
               <label for="author-name">Name</label>
               <input
                 id="author-name"
@@ -1120,8 +1119,8 @@ export function GitPane(props: {
               />
 
               {/* With one Author, the way to a second: a quiet press under
-                    its fields rather than a dropdown with one row in it. Once
-                    there are two, it is the dropdown's own last row instead. */}
+                  its fields rather than a dropdown with one row in it. Once
+                  there are two, it is the dropdown's own last row instead. */}
               <Show when={!several() && authorId() !== null}>
                 <QuietButton class={styles.addAuthor} onClick={addAuthor}>
                   Add author
@@ -1334,10 +1333,10 @@ function InUse(props: {
 function ConfirmRemoval(props: {
   /// The Author asked about, or `null` while nothing is being asked.
   asked: AuthorSaved | null;
-  /// The way back, which Escape and a press on the backdrop come to as well.
   /// The machine it is at home on, where it is a member's, whose settings it
   /// comes out of — or `null` for this device's own.
   home: string | null;
+  /// The way back, which Escape and a press on the backdrop come to as well.
   keep: () => void;
   /// And the removal, made.
   remove: () => void;
