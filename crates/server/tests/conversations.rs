@@ -10879,6 +10879,33 @@ async fn a_review_draws_none_of_the_pull_requests_own_commits() {
     );
 }
 
+/// A take-up is a start like any other, and refused for everything a grill
+/// start refuses over the Author: one `config.yaml` no longer holds, named by
+/// the Repo, and no git author at all — before anything is checked out.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_take_up_is_refused_over_the_repos_author_as_a_start_is() {
+    for (config, refusal) in [
+        (
+            "authors:\n  - id: home\n    name: Tobi\n    email: tobi@example.com\n",
+            TakenUp::RepoAuthorGone {
+                repo: "verkstead".to_owned(),
+            },
+        ),
+        ("", TakenUp::NoGitAuthor),
+    ] {
+        let (elsewhere, dir, app, repo, upstream, repo_id) = workbench_reviewing().await;
+        head_on_origin(&upstream, "rate-limiting");
+        opened_on_github(&repo, 41, "rate-limiting");
+
+        let id = reviewing(&app, elsewhere.path(), repo_id, 41).await;
+        std::fs::write(dir.path().join(CONFIG), config).unwrap();
+
+        assert_eq!(press_take_up(&app, id).await, refusal);
+        nothing_taken_up(&app, id, &repo).await;
+    }
+}
+
 /// And the pull request it recorded carries the head branch GitHub named, which
 /// nothing used to write down.
 ///

@@ -1,12 +1,14 @@
-//! What a start and an adoption say over a repo with no author of its own: one
-//! `config.yaml` no longer holds, or none picked among several (ADR-0025).
+//! What a start, an adoption and a take-up say over a repo with no author of its
+//! own: one `config.yaml` no longer holds, or none picked among several
+//! (ADR-0025).
 //!
-//! The same sentence at both doors, naming the repo and sending the human to
+//! The same sentence at every door, naming the repo and sending the human to
 //! where another is picked.
 
 import { describe, expect, it } from "vitest";
 
 import { adoptRefusal } from "../src/workbench/Adoption";
+import { takeUpRefusal } from "../src/workbench/TakeUp";
 import { grillRefusal } from "../src/workbench/Timeline";
 
 describe("a repo with no author of its own", () => {
@@ -17,6 +19,7 @@ describe("a repo with no author of its own", () => {
       "The verkstead repo's author isn't configured any more, so Verkstead can't commit on the branch. Pick another under Repos in Settings first.",
     );
     expect(adoptRefusal({ RepoAuthorGone: { repo: "verkstead" } })).toBe(said);
+    expect(takeUpRefusal({ RepoAuthorGone: { repo: "verkstead" } })).toBe(said);
   });
 
   it("is told to pick one where none is picked", () => {
@@ -28,5 +31,12 @@ describe("a repo with no author of its own", () => {
     expect(adoptRefusal({ RepoAuthorUnpicked: { repo: "verkstead" } })).toBe(
       said,
     );
+    expect(takeUpRefusal({ RepoAuthorUnpicked: { repo: "verkstead" } })).toBe(
+      said,
+    );
+  });
+
+  it("is told to set a git author at a take-up, as at a start", () => {
+    expect(takeUpRefusal("NoGitAuthor")).toBe(grillRefusal("NoGitAuthor"));
   });
 });

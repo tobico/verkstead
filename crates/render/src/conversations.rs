@@ -5492,6 +5492,25 @@ pub enum TakenUp {
     /// Profile's own row says it.
     ProfileBroken(crate::ProfileTrouble),
 
+    /// No git author is configured, so there is nobody for the sessions that
+    /// fix what is found on the branch to commit and push as — see
+    /// [`GrillingStarted::NoGitAuthor`], the same refusal at the other door.
+    NoGitAuthor,
+
+    /// The Repo's Author is gone or unpicked — see
+    /// [`GrillingStarted::RepoAuthorGone`], the same refusals at the other
+    /// door.
+    RepoAuthorGone {
+        repo: String,
+    },
+    RepoAuthorUnpicked {
+        repo: String,
+    },
+
+    /// A companion is under another Author than the Repo — see
+    /// [`GrillingStarted::OtherAuthor`], the same refusal at the other door.
+    OtherAuthor(OtherAuthor),
+
     /// Git would not fetch from the Repo's remote, so what origin holds on the
     /// head branch cannot be known. Refused rather than taken up against refs
     /// that may be a week old.

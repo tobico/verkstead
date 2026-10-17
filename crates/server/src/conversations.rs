@@ -1465,6 +1465,36 @@ fn unauthored_start(why: Unauthored, repo: &str) -> GrillingStarted {
     }
 }
 
+/// Why a take-up of `conversation` has nobody to commit and push as, in the
+/// order [`start_grilling`] asks: the Repo's own record first, then a companion
+/// under another Author, then an Author with no git name or email.
+fn unauthored_take_up(config: &Config, conversation: &store::Conversation) -> Option<TakenUp> {
+    let repo = || conversation.repo.name.clone();
+
+    match config.author_missing(conversation.repo.author.as_deref()) {
+        Some(Unauthored::Gone) => return Some(TakenUp::RepoAuthorGone { repo: repo() }),
+        Some(Unauthored::Unpicked) => return Some(TakenUp::RepoAuthorUnpicked { repo: repo() }),
+        None => {}
+    }
+
+    if let Some(other) = other_author(
+        config,
+        &conversation.repo,
+        conversation
+            .companions
+            .iter()
+            .map(|companion| &companion.repo),
+    ) {
+        return Some(TakenUp::OtherAuthor(other));
+    }
+
+    config
+        .author_of(conversation.repo.author.as_deref())
+        .and_then(Author::configured)
+        .is_none()
+        .then_some(TakenUp::NoGitAuthor)
+}
+
 /// Give a drafting Conversation somewhere to work: a branch off its base commit
 /// and a worktree of its Repo, and the move onto the Timeline that says so.
 ///
@@ -3410,6 +3440,13 @@ pub(crate) async fn take_up(state: &AppState, id: i64, discarding: &[i64]) -> Re
     // wrap up.
     if !takes_a_target(conversation.process) {
         return Ok(TakenUp::NotHoldingOne);
+    }
+
+    // Who the sessions it sends commit and push as, refused for everything a
+    // grill start refuses over it — see [`start_grilling`]. Asked of the files
+    // alone, so before anything that costs a call.
+    if let Some(refusal) = unauthored_take_up(&state.settings.config(), &conversation) {
+        return Ok(refusal);
     }
 
     // Whether each Claude account it would run under is logged in, asked

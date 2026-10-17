@@ -6910,7 +6910,7 @@ conversation: number, } } | { "WouldDiscard": {
  * every Conversation standing on a link of it is closed by the one
  * press.
  */
-uncommitted: Array<Uncommitted>, } } | "NoImplementationProfile" | "NoReviewProfile" | { "ProfileBroken": ProfileTrouble } | "FetchFailed" | "NoHeadBranch" | "BranchAhead" | "BranchDiverged" | "FastForwardFailed" | { "CheckedOutElsewhere": { 
+uncommitted: Array<Uncommitted>, } } | "NoImplementationProfile" | "NoReviewProfile" | { "ProfileBroken": ProfileTrouble } | "NoGitAuthor" | { "RepoAuthorGone": { repo: string, } } | { "RepoAuthorUnpicked": { repo: string, } } | { "OtherAuthor": OtherAuthor } | "FetchFailed" | "NoHeadBranch" | "BranchAhead" | "BranchDiverged" | "FastForwardFailed" | { "CheckedOutElsewhere": { 
 /**
  * Where it is checked out, as git named it.
  */
