@@ -756,6 +756,12 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // above, and its own read because none of it is about the cluster — a
         // box stopped or rebuilt is the Keeper's business alone.
         .route("/api/ui/components", get(components))
+        // And Install on its row, which is the wizard's run for the WSL row
+        // alone, taken after the wizard is over: a machine that skipped the row
+        // at setup. It answers with the wizard's reading, the run now on it,
+        // because what the pane draws while it goes is the wizard's own install
+        // and hint screens — and it is stopped by the wizard's own cancel.
+        .route("/api/ui/components/install", post(install_annex))
         // And the ports of members' terminals this device is holding on its own
         // `localhost`, which the sidebar's foot counts: this device's own
         // reading, held back from the link — see [`crate::forwarding`].
@@ -7754,6 +7760,34 @@ async fn components(State(state): State<AppState>) -> HttpResponse {
             tracing::error!(error = ?error, "reading this machine's components failed");
             unavailable("What this machine has installed couldn't be read.")
         }
+    }
+}
+
+/// `POST /api/ui/components/install` — **Install** on the Components pane's
+/// Annex row: the wizard's install run for the WSL row alone (ADR-0024).
+///
+/// **The wizard's press in everything but the gate.** The same plan, the same
+/// units and the same run, answered with the same reading — so the pane draws
+/// the install screen and the hint screen off what the wizard draws them off.
+/// What it does not ask is whether the wizard is the page there is: a machine
+/// that skipped the row at setup is pressing for it from the settings page,
+/// long after.
+///
+/// **Refused while any run is going**, as the wizard's is: one run at a time,
+/// and the pane reads the one already there.
+async fn install_annex(State(state): State<AppState>) -> HttpResponse {
+    match state
+        .onboarding
+        .annex(&state.settings, state.devices.as_ref())
+        .await
+    {
+        Ok(()) => onboarding(State(state)).await,
+        // The one refusal this press has: the wizard being over is what it is
+        // for.
+        Err(Refusal::Going | Refusal::Over) => refused(
+            StatusCode::CONFLICT,
+            ApiError::new("An install is already running."),
+        ),
     }
 }
 

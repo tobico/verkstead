@@ -1995,6 +1995,16 @@ export function loadComponents(): Promise<ComponentsView> {
   return get<ComponentsView>("/api/ui/components");
 }
 
+/// **Install** on the Components pane's Annex row: the wizard's install run
+/// for the WSL row alone, taken after the wizard is over.
+///
+/// Answered with the wizard's reading, the run on it, as [`startInstall`] is —
+/// the pane draws the wizard's own install and hint screens off it — and
+/// refused while any run is going.
+export function installAnnex(): Promise<OnboardingView> {
+  return post<OnboardingView>("/api/ui/components/install");
+}
+
 /// What this device is forwarding: every port of a member's terminal held on
 /// this machine's own `localhost`, and every one it could not hold.
 ///

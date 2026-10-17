@@ -20,7 +20,7 @@ Roadmap stage: [04: Keeping the Annex](docs/roadmaps/wsl-annex/04-keeping-the-an
 ## Tasks
 
 - [x] 01: The Components card and pane — [details](01-the-components-card-and-pane.md)
-- [ ] 02: Install from the pane — [details](02-install-from-the-pane.md)
+- [x] 02: Install from the pane — [details](02-install-from-the-pane.md)
 - [ ] 03: The re-pin at start — [details](03-the-re-pin-at-start.md)
 - [ ] 04: Update — [details](04-update.md)
 - [ ] 05: The settings copied at boot — [details](05-the-settings-copied-at-boot.md)

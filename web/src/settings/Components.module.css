@@ -22,6 +22,48 @@
   min-width: 0;
 }
 
+/* The name and its word on one line, and Install at its end where there is
+   one — set as the Devices list sets a row's press across from its name. */
+.head {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+/* Install, drawn as the Devices list's Add is: an outline in the accent, this
+   being the press that *does*. */
+.install {
+  flex: none;
+  margin-inline-start: auto;
+  padding: 0.3rem 0.7rem;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--accent);
+  background: none;
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.install:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+@media (hover: hover) {
+  .install:not(:disabled):hover {
+    border-color: var(--accent);
+  }
+}
+
+/* The wizard's install and hint screens, drawn in this pane while Install is
+   going or has something left to say — see `Dependencies.tsx`, whose own
+   styles they bring. */
+.screen {
+  margin-top: 0.85rem;
+}
+
 .name {
   margin: 0;
   font-size: 0.95rem;
