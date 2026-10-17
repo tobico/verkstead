@@ -2112,15 +2112,26 @@ async fn a_failed_repin_leaves_its_line_on_the_row_and_the_old_release() {
 /// Where the Components pane presses Update.
 const UPDATE: &str = "/api/ui/components/update";
 
+/// How a row of [`its_conversations`] came by its branch: typed by the human,
+/// named by its first session, or still being named — which last the sidebar
+/// calls a draft.
+enum Named {
+    Typed,
+    Session,
+    Naming,
+}
+
 /// An Annex's workbench as its Keeper reads it over the link: its sidebar
-/// list, one row per `(branch, branch_named, working)`, and nothing else.
-fn its_conversations(rows: &[(&str, bool, bool)]) -> Router {
+/// list, one row per `(branch, named, working)`, and nothing else.
+fn its_conversations(rows: &[(&str, Named, bool)]) -> Router {
     let rows: Vec<serde_json::Value> = rows
         .iter()
-        .map(|(branch, branch_named, working)| {
+        .map(|(branch, named, working)| {
             serde_json::json!({
                 "branch": branch,
-                "branch_named": branch_named,
+                "branch_named": matches!(named, Named::Typed),
+                "state": "Implementing",
+                "naming": matches!(named, Named::Naming),
                 "working": working,
             })
         })
@@ -2191,8 +2202,8 @@ async fn update_over(annexed: &Annexed) {
 #[tokio::test]
 async fn update_with_a_session_running_in_the_annex_is_refused_naming_it() {
     let annex = made_annex_serving(its_conversations(&[
-        ("old-work", true, false),
-        ("solid-viewer", true, true),
+        ("old-work", Named::Typed, false),
+        ("solid-viewer", Named::Session, true),
     ]))
     .await;
     let keeper = Verkstead::asking().await;
@@ -2225,9 +2236,9 @@ async fn update_with_a_session_running_in_the_annex_is_refused_naming_it() {
 #[tokio::test]
 async fn update_with_sessions_running_names_the_first_and_counts_the_rest() {
     let annex = made_annex_serving(its_conversations(&[
-        ("solid-viewer", true, true),
-        ("draft", false, true),
-        ("pwa-and-push", true, true),
+        ("solid-viewer", Named::Session, true),
+        ("draft", Named::Naming, true),
+        ("pwa-and-push", Named::Typed, true),
     ]))
     .await;
     let keeper = Verkstead::asking().await;
@@ -2242,6 +2253,25 @@ async fn update_with_sessions_running_names_the_first_and_counts_the_rest() {
             "The annex can't be updated while sessions run on solid-viewer and 2 more \
              conversations. Stop them first."
         ),
+        "{said}"
+    );
+}
+
+/// And one whose first session is still naming its branch is called a draft,
+/// as the sidebar calls it, rather than by a name nobody chose.
+#[tokio::test]
+async fn update_with_a_session_still_naming_its_branch_calls_it_a_draft() {
+    let annex =
+        made_annex_serving(its_conversations(&[("grand-otter", Named::Naming, true)])).await;
+    let keeper = Verkstead::asking().await;
+    let boxed = Arc::new(Boxed::of(&annex, KEEPER_AT));
+
+    let (_annexed, devices) = kept_and_started(&keeper, &boxed).await;
+    let (status, said) = press_update(&keeper, &devices).await;
+
+    assert_eq!(status, StatusCode::CONFLICT, "{said}");
+    assert!(
+        said.contains("The annex can't be updated while a session runs on a draft. Stop it first."),
         "{said}"
     );
 }
@@ -2273,7 +2303,7 @@ async fn update_on_an_annex_that_cannot_be_asked_is_refused() {
 /// its server.
 #[tokio::test]
 async fn update_on_an_idle_annex_moves_every_input_but_nixos_wsl_and_links_it_again() {
-    let annex = made_annex_serving(its_conversations(&[("old-work", true, false)])).await;
+    let annex = made_annex_serving(its_conversations(&[("old-work", Named::Typed, false)])).await;
     let keeper = Verkstead::asking().await;
     let boxed = Arc::new(Boxed::of(&annex, KEEPER_AT));
 

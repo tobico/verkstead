@@ -553,13 +553,15 @@ type Rebuild =
 /// archived ones in it too — see [`crate::ui::conversations`].
 const ITS_CONVERSATIONS: &str = "/api/ui/conversations?archived=true";
 
-/// What [`running_there`] reads of each row of the Annex's list: the three
-/// fields of a [`verkstead_render::ConversationEntry`] that say whether a
-/// session runs on it and what it is called, and nothing else of it.
+/// What [`running_there`] reads of each row of the Annex's list: the fields of
+/// a [`verkstead_render::ConversationEntry`] that say whether a session runs
+/// on it and what it is called, and nothing else of it.
 #[derive(Debug, serde::Deserialize)]
 struct Running {
     branch: String,
     branch_named: bool,
+    state: verkstead_render::Lifecycle,
+    naming: bool,
     working: bool,
 }
 
@@ -602,7 +604,8 @@ async fn running_there(devices: &Devices) -> Result<(), String> {
         return Ok(());
     };
 
-    let named = match first.branch_named {
+    // Called what the sidebar calls it — see [`crate::merging::settled`].
+    let named = match crate::merging::settled(first.branch_named, first.state, first.naming) {
         true => first.branch.clone(),
         false => "a draft".to_owned(),
     };

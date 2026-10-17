@@ -220,10 +220,7 @@ impl MemberLists {
         let held = self.held();
         let row = held.get(device)?.rows.iter().find(|row| row.id == id)?;
 
-        let settled =
-            row.branch_named || (row.state != verkstead_render::Lifecycle::Draft && !row.naming);
-
-        Some(match settled {
+        Some(match settled(row.branch_named, row.state, row.naming) {
             true => row.branch.clone(),
             false => "Draft".to_owned(),
         })
@@ -764,6 +761,18 @@ pub(crate) async fn anything_archived(state: &AppState, own: bool) -> bool {
     };
 
     state.merged.anything_archived_of(&members)
+}
+
+/// Whether a Conversation's branch is the name it is called by, as the sidebar
+/// calls it (see `titled` in `web/src/workbench/naming.ts`): somebody typed it,
+/// or the work has started and the first session has finished naming it. It is
+/// a *Draft* otherwise, its branch Verkstead's own invention.
+pub(crate) fn settled(
+    branch_named: bool,
+    state: verkstead_render::Lifecycle,
+    naming: bool,
+) -> bool {
+    branch_named || (state != verkstead_render::Lifecycle::Draft && !naming)
 }
 
 #[cfg(test)]
