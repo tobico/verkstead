@@ -402,7 +402,11 @@ async fn both() -> (Verkstead, Verkstead, PathBuf) {
 
     paired(&b, b.dir.path(), conversation).await;
 
-    let worktree = b.dir.path().join("worktrees/verkstead-following");
+    // Beside the Data Directory's own `worktrees/` rather than in it: B is
+    // already up, and its startup sweep reclaims a directory there that no
+    // Conversation has recorded yet — which this one is, until the grilling
+    // below records it.
+    let worktree = b.dir.path().join("checkouts/verkstead-following");
     let base = git(&repo, &["rev-parse", "HEAD"]).trim().to_owned();
 
     git(
