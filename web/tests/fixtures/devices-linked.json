@@ -1,4 +1,5 @@
 {
+  "annex_trouble": null,
   "members": [
     {
       "identity": {
@@ -8,10 +9,12 @@
         ],
         "device": "0011223344556677889900aabbccddee",
         "fingerprint": "AA:BB:CC:DD:0011223344556677889900aabbccddee",
+        "kept_by": null,
         "name": "laptop",
         "os": "macOS"
       },
-      "reachable": true
+      "reachable": true,
+      "trouble": null
     },
     {
       "identity": {
@@ -20,10 +23,12 @@
         ],
         "device": "ffeeddccbbaa00998877665544332211",
         "fingerprint": "AA:BB:CC:DD:ffeeddccbbaa00998877665544332211",
+        "kept_by": null,
         "name": "workbench",
         "os": "Linux (WSL)"
       },
-      "reachable": false
+      "reachable": false,
+      "trouble": null
     }
   ],
   "pending": [],
@@ -34,6 +39,7 @@
     ],
     "device": "aa00bb11cc22dd33ee44ff5566778899",
     "fingerprint": "3A:7B:1F:04:C8:92:6D:5E:AA:11:B0:47:9C:3D:2E:88:F5:60:71:1C:D4:09:B6:3F:82:5A:0E:97:44:CB:2D:16",
+    "kept_by": null,
     "name": "workbench",
     "os": "Linux"
   }

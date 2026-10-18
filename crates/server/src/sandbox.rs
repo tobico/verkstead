@@ -591,11 +591,27 @@ fn separator(platform: Platform) -> &'static str {
 /// not, and nothing there reaches for one: what a Windows program reads is
 /// `TEMP`, which points inside the session's own profile — so that one is said
 /// with the rest of the profile rather than here. See [`temporary_inside`].
+///
+/// **And on Linux the resolver's file is bound wherever it really is.**
+/// `/etc/resolv.conf` is often a link out of `/etc`: WSL's points at a file it
+/// writes under `/mnt/wsl`, and systemd-resolved's into `/run`. Neither is on
+/// the floor, so a session behind one has a network and no names on it — every
+/// harness's first request fails `EAI_AGAIN`, which reads as the internet being
+/// down. What is bound is that one file, read-only, at its own path, so the
+/// link resolves inside the sandbox the way it does outside.
 pub(crate) fn on_the_machine(platform: Platform, chdir: PathBuf) -> Surface {
     let mut surface = Surface::starting_in(chdir);
 
     for path in SYSTEM.iter().map(Path::new).filter(|path| path.exists()) {
         surface.own(path, Reach::ReadOnly);
+    }
+
+    if platform == Platform::Linux
+        && let Some(real) = std::fs::canonicalize(RESOLVER)
+            .ok()
+            .and_then(|real| off_the_floor(&real, LINUX_SYSTEM))
+    {
+        surface.own(real, Reach::ReadOnly);
     }
 
     surface.made(Access::ProcessTable).made(Access::Devices);
@@ -608,6 +624,19 @@ pub(crate) fn on_the_machine(platform: Platform, chdir: PathBuf) -> Surface {
     }
 
     surface
+}
+
+/// Where a program looks for the name servers.
+const RESOLVER: &str = "/etc/resolv.conf";
+
+/// `real`, where it is somewhere none of `floor` reaches — the resolver's file
+/// that [`on_the_machine`] has to bind by itself.
+fn off_the_floor(real: &Path, floor: &[&str]) -> Option<PathBuf> {
+    let reached = floor
+        .iter()
+        .any(|directory| within(real.as_os_str(), OsStr::new(directory)));
+
+    (!reached).then(|| real.to_owned())
 }
 
 /// A directory that is really there and really empty.
@@ -5300,22 +5329,37 @@ impl Sandbox {
             config.push(("user.email".to_owned(), email.to_owned()));
         }
 
-        config.push((
-            format!("credential.{GITHUB}.helper"),
-            // The `!` is what makes git run it as a command rather than look for
-            // a `git-credential-` binary of that name.
-            "!gh auth git-credential".to_owned(),
-        ));
-
-        // Both spellings of the same remote, as two values of the one
-        // multi-valued key — which is what repeating it in the environment
-        // means, the counted pairs being read as one more configuration file.
-        for ssh in ["git@github.com:", "ssh://git@github.com/"] {
-            config.push((format!("url.{GITHUB}/.insteadOf"), ssh.to_owned()));
-        }
+        config.extend(github_credentials());
 
         config
     }
+}
+
+/// How git proves who it is to GitHub, and which URLs that proof is any use for:
+/// `gh`'s credential helper answering out of `GH_TOKEN`, and the two SSH
+/// spellings of github.com rewritten to HTTPS — see [`Sandbox::git_config`],
+/// which says why each is there.
+///
+/// Its own function because a session is not the only git that needs it: a
+/// clone onto this device (see [`crate::repos::clone`]) is git run with this
+/// device's token, and set up any other way it would be one more way of
+/// authenticating to keep in step with this one.
+pub(crate) fn github_credentials() -> Vec<(String, String)> {
+    let mut config = vec![(
+        format!("credential.{GITHUB}.helper"),
+        // The `!` is what makes git run it as a command rather than look for
+        // a `git-credential-` binary of that name.
+        "!gh auth git-credential".to_owned(),
+    )];
+
+    // Both spellings of the same remote, as two values of the one
+    // multi-valued key — which is what repeating it in the environment
+    // means, the counted pairs being read as one more configuration file.
+    for ssh in ["git@github.com:", "ssh://git@github.com/"] {
+        config.push((format!("url.{GITHUB}/.insteadOf"), ssh.to_owned()));
+    }
+
+    config
 }
 
 /// What a Conversation's companion repos put inside the sandbox: each one's
@@ -5497,6 +5541,26 @@ mod tests {
         std::fs::write(bin.join(name), "an ELF\n").unwrap();
 
         Executable::at(Platform::HERE, bin.join(name), data_dir)
+    }
+
+    /// WSL's resolver is a link out of `/etc` to a file it writes under
+    /// `/mnt/wsl`, and systemd-resolved's is one into `/run`: neither is
+    /// anywhere the floor binds, so each is bound where it really is. NixOS's
+    /// own, through `/etc/static` into the store, is reached already.
+    #[test]
+    fn a_resolver_linked_off_the_floor_is_bound_where_it_really_is() {
+        for (real, bound) in [
+            ("/mnt/wsl/resolv.conf", true),
+            ("/run/systemd/resolve/stub-resolv.conf", true),
+            ("/nix/store/abc-etc-resolv.conf/resolv.conf", false),
+            ("/etc/resolv.conf", false),
+        ] {
+            assert_eq!(
+                off_the_floor(Path::new(real), LINUX_SYSTEM),
+                bound.then(|| PathBuf::from(real)),
+                "{real}"
+            );
+        }
     }
 
     /// The bind puts the executable in one directory and `PATH` sends a session

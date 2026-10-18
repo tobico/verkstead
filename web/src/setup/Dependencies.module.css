@@ -254,14 +254,15 @@ label.head {
 }
 
 /* What the run made of a row, in the machine's own words: a dismissed dialog, a
-   package manager's refusal, or a row no archive here carries. Quiet rather
-   than alarming — the screen it is drawn on is the one that says what to do
-   about it. */
+   package manager's refusal, a rebuild's last lines, or a row no archive here
+   carries, its line breaks kept. Quiet rather than alarming — the screen it is
+   drawn on is the one that says what to do about it. */
 .failed {
   margin: 0.35rem 0 0;
   font-size: 0.85rem;
   color: var(--ink-soft);
   overflow-wrap: anywhere;
+  white-space: pre-line;
 }
 
 /* How far the run has got: the bar and the count beside it, which say the same

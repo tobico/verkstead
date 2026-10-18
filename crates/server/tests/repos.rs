@@ -39,9 +39,9 @@ use serde::de::DeserializeOwned;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_render::{
-    AuthorRemoved, Created, Registered, RepoEntry, RepoRemoved, RepoView, Repointed,
+    AuthorRemoved, Cloned, Created, Registered, RepoEntry, RepoRemoved, RepoView, Repointed,
 };
-use verkstead_server::settings::Settings;
+use verkstead_server::settings::{Author, Mirrored, Settings};
 use verkstead_server::{Gh, open_database, router_asking_github, router_keeping, store};
 
 /// The device every Conversation started here is ranked by, named the way a
@@ -1652,5 +1652,106 @@ async fn an_author_repos_point_at_is_refused_removal_naming_them() {
     assert_eq!(
         remove_author(&app, "personal").await,
         AuthorRemoved::NoSuchAuthor
+    );
+}
+
+/// Ask to clone `origin` under `parent`, as the Author with the uuid `author`
+/// or as nobody named — the way a clonable row presses it, carrying the Author
+/// of the member's Repo it was found on.
+async fn clone_as(app: &Router, origin: &Path, parent: &Path, author: Option<&str>) -> Cloned {
+    post(
+        app,
+        "/api/ui/repos/clone",
+        &serde_json::json!({ "origin": origin, "parent": parent, "author": author }),
+    )
+    .await
+}
+
+/// A clone is recorded as the Author the member's Repo works as — the second
+/// of two as readily as the first — which is the one it was fetched as.
+#[tokio::test]
+async fn a_clone_is_recorded_as_the_author_its_row_carried() {
+    let src = tempfile::tempdir().unwrap();
+    let into = tempfile::tempdir().unwrap();
+    let (dir, app) = workbench().await;
+    two_authors(&dir);
+    let origin = repository(src.path().join("widgets"));
+
+    let Cloned::Cloned(repo) = clone_as(&app, &origin, into.path(), Some("personal")).await else {
+        panic!("the clone lands");
+    };
+
+    assert_eq!(repo.author.as_deref(), Some("personal"));
+    assert!(!repo.author_unpicked);
+    assert_eq!(listed(&app).await, vec![repo]);
+}
+
+/// Among two Authors, a clone whose row carried none is refused by name, and so
+/// is one naming a uuid the one list does not hold — and neither clones or
+/// registers anything.
+#[tokio::test]
+async fn a_clone_among_two_authors_names_one_that_is_configured() {
+    let src = tempfile::tempdir().unwrap();
+    let into = tempfile::tempdir().unwrap();
+    let (dir, app) = workbench().await;
+    two_authors(&dir);
+    let origin = repository(src.path().join("widgets"));
+
+    assert_eq!(
+        clone_as(&app, &origin, into.path(), None).await,
+        Cloned::AuthorUnpicked
+    );
+    assert_eq!(
+        clone_as(&app, &origin, into.path(), Some("nobody-of-that-uuid")).await,
+        Cloned::NoSuchAuthor
+    );
+    assert!(listed(&app).await.is_empty(), "nothing was registered");
+    assert!(
+        !into.path().join("widgets").exists(),
+        "and nothing was cloned"
+    );
+}
+
+/// With one Author, a clone whose row carried none is that Author's, the way a
+/// registration naming none is.
+#[tokio::test]
+async fn a_clone_naming_no_author_is_the_one_authors() {
+    let src = tempfile::tempdir().unwrap();
+    let into = tempfile::tempdir().unwrap();
+    let (_dir, app) = workbench_authored().await;
+    let origin = repository(src.path().join("widgets"));
+
+    let Cloned::Cloned(repo) = clone_as(&app, &origin, into.path(), None).await else {
+        panic!("the clone lands");
+    };
+
+    assert_eq!(repo.author.as_deref(), Some("work"));
+}
+
+/// A device with no Author of its own and one mirror — an Annex, which its
+/// Keeper gives no Author and which sees the Keeper's over the one list — has
+/// a registration naming nobody recorded as that mirror: there is still nobody
+/// else it could be (ADR-0024).
+#[tokio::test]
+async fn a_repo_registered_with_only_a_mirror_is_recorded_as_it() {
+    let src = tempfile::tempdir().unwrap();
+    let (dir, app) = workbench().await;
+
+    Settings::in_data_dir(dir.path()).holding_mirrors(vec![Mirrored::of(
+        Author::of(
+            "keepers".to_owned(),
+            None,
+            Some("Ada Lovelace".to_owned()),
+            Some("ada@work.example".to_owned()),
+        ),
+        "the-keeper".to_owned(),
+        false,
+    )]);
+
+    let repo = repository(src.path().join("verkstead"));
+
+    assert_eq!(
+        added(register(&app, &repo).await).author.as_deref(),
+        Some("keepers")
     );
 }

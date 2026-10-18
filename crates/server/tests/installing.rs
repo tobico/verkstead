@@ -1418,6 +1418,82 @@ async fn the_press_is_refused_twice_over_and_after_the_wizard() {
     );
 }
 
+/// The Components pane's Install, which is the wizard's run for the WSL row
+/// alone (ADR-0024): taken once the wizard is over, which the wizard's own
+/// press is not — and refused, as the wizard's is, while any run is going.
+#[tokio::test]
+async fn the_components_press_is_taken_after_the_wizard_but_not_beside_a_run() {
+    let (dir, pool) = ready().await;
+    a_package_manager(dir.path());
+
+    let held = Arc::new(AtomicBool::new(false));
+    let dialog = Dialog::held(dir.path(), &held);
+    let app = served(dir.path(), &pool, Some(dialog.clone()));
+
+    install(&app, TICKED).await;
+    dialog.wait();
+
+    let (status, said) = annexing(&app).await;
+
+    assert_eq!(
+        status,
+        StatusCode::CONFLICT,
+        "a press while the wizard's run is going is a second run, and there is one",
+    );
+    assert!(
+        String::from_utf8_lossy(&said).contains("already running"),
+        "{said:?}",
+    );
+
+    held.store(true, Ordering::SeqCst);
+    over(&app).await;
+    finished(&app).await;
+
+    let (status, said) = annexing(&app).await;
+
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "the wizard being over is what the pane's press is for: {said:?}",
+    );
+
+    let pressed: OnboardingView = serde_json::from_slice(&said).unwrap();
+    let run = pressed
+        .run
+        .expect("the press is a run, on the wizard's reading");
+
+    // The WSL row and nothing else, which this stated Linux has no box for: the
+    // run is over before it started, raising nothing, and says so.
+    assert_eq!((run.done, run.total), (1, 1), "{run:?}");
+    assert_eq!(run.phase, RunPhase::Done);
+    assert_eq!(
+        dialog.commands().len(),
+        1,
+        "the wizard's press, and nothing for a row this machine cannot have",
+    );
+}
+
+/// Install on the Components pane's Annex row, with whatever it was answered
+/// with.
+async fn annexing(app: &Router) -> (StatusCode, axum::body::Bytes) {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/ui/components/install")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let status = response.status();
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+
+    (status, body)
+}
+
 /// Where the golden fixtures are written, relative to this crate — the same
 /// directory the wizard's own suite writes its readings to.
 const FIXTURES: &str = "../../web/tests/fixtures";

@@ -67,6 +67,10 @@
 //!       - Authorization
 //! instructions: |
 //!   Prefer the smallest change that does the job.
+//! kept_by:
+//!   device: 86f1933fecb070cbee865fbb84819d14
+//!   fingerprint: "3F:0A:…"
+//!   at: 172.24.80.1:8423
 //! ```
 //!
 //! Who a session commits as is said here for the reason the token is: it used
@@ -147,6 +151,13 @@
 //! under their own account and comments on a pull request other people read,
 //! and neither is a thing to do to somebody who has never been to the settings
 //! page — see [`Config::share_on_done`].
+//!
+//! And `kept_by` is the one key here that says what this Verkstead *is* rather
+//! than how it works: an **Annex**, and which device is its **Keeper**
+//! (ADR-0024). An Annex is told that and never finds it out, so it is written
+//! into the file before the Annex first starts, by the one party that can read
+//! both Data Directories — and never drawn on the settings page, which keeps it
+//! through a save the way it keeps `session_path`. See [`KeptBy`].
 
 use std::collections::{BTreeMap, HashMap};
 use std::io::Write;
@@ -345,19 +356,14 @@ impl Settings {
     /// will hold, which is why the two ways of building one are both `with_` on
     /// the secrets already there — see [`Secrets::with_author_token`].
     pub fn save_secrets(&self, secrets: &Secrets) -> std::io::Result<()> {
-        let text = match secrets.anything_set() {
-            true => yaml(secrets)?,
-            false => String::new(),
-        };
-
-        write_atomically(&self.secrets_path(), &text, SECRET_MODE)
+        write_atomically(&self.secrets_path(), &secrets.text()?, SECRET_MODE)
     }
 
     /// And write `config.yaml`, the same way but readable: there is nothing in
     /// it that is anybody's secret, and a name and an address the machine's
     /// owner cannot read back would be an odd thing to insist on.
     pub fn save_config(&self, config: &Config) -> std::io::Result<()> {
-        write_atomically(&self.config_path(), &yaml(config)?, ORDINARY_MODE)
+        write_atomically(&self.config_path(), &config.text()?, ORDINARY_MODE)
     }
 
     /// Move the one `git_author` and `github_token` an installation from before
@@ -516,6 +522,41 @@ impl Settings {
         read(&text)
             .inspect_err(|error| unreadable(path, error))
             .ok()
+    }
+
+    /// Write `keeper` into this `config.yaml` as `kept_by`, every other key as
+    /// it stands — which is a **Keeper** telling its **Annex** whose it is
+    /// (ADR-0024, *The Keeper's Join*). `false` is a file that already said so,
+    /// left untouched.
+    ///
+    /// Called by the Keeper on the Annex's Data Directory, which it owns, at
+    /// every link: the Annex re-reads its config on every call, so this is what
+    /// keeps the pin good across the Keeper's own certificate renewals.
+    ///
+    /// **A file that is there and will not read is refused rather than written
+    /// over.** [`Settings::config`] reads one as nothing configured, which is
+    /// right for a reading and wrong for a write: saving that nothing would
+    /// throw away whatever the file held, in the one place a human cannot see
+    /// it happen.
+    pub fn keep_by(&self, keeper: &KeptBy) -> std::io::Result<bool> {
+        let path = self.config_path();
+
+        let mut config = match std::fs::read_to_string(&path) {
+            Ok(text) => Config::read(&text).map_err(|error| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("{} does not read as a config: {error}", path.display()),
+                )
+            })?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Config::default(),
+            Err(error) => return Err(error),
+        };
+
+        if !config.keep_by(keeper) {
+            return Ok(false);
+        }
+
+        self.save_config(&config).map(|()| true)
     }
 }
 
@@ -744,7 +785,7 @@ impl Secrets {
     /// An empty file is not a parse failure and must not be logged as one: it is
     /// what a settings page leaves behind after the token is cleared, and it says
     /// exactly what a missing file says.
-    fn read(text: &str) -> Result<Secrets, serde_saphyr::Error> {
+    pub(crate) fn read(text: &str) -> Result<Secrets, serde_saphyr::Error> {
         if text.trim().is_empty() {
             return Ok(Secrets::default());
         }
@@ -859,6 +900,32 @@ impl Secrets {
         Secrets {
             mcp_headers: written,
             ..self.clone()
+        }
+    }
+
+    /// And these secrets with every MCP server's header values as `keeper`'s
+    /// are — the half of [`Config::working_as`] that is secret, handed to an
+    /// Annex at every start. A server's values arrive with its declaration,
+    /// which without them is one its far end refuses. The session account's
+    /// password stands, being the machine's own, and so do the Authors'
+    /// tokens: the copies of the Keeper's arrive with its mirrors (ADR-0025).
+    pub fn working_as(&self, keeper: &Secrets) -> Secrets {
+        Secrets {
+            mcp_headers: keeper.mcp_headers.clone(),
+            ..self.clone()
+        }
+    }
+
+    /// The whole of `secrets.yaml` as these secrets write it: an empty text
+    /// where nothing is set — see [`Settings::save_secrets`].
+    ///
+    /// The text rather than a write, for the one place these files are put
+    /// that is not this machine's Data Directory: a Keeper puts its Annex's
+    /// inside the Annex's box — see [`crate::annex::flake`].
+    pub fn text(&self) -> std::io::Result<String> {
+        match self.anything_set() {
+            true => yaml(self),
+            false => Ok(String::new()),
         }
     }
 
@@ -1144,6 +1211,26 @@ pub struct Config {
     /// reshaped would be one the human did not write.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     instructions: Option<String>,
+
+    /// And the Keeper this Verkstead is the Annex of, where it is one: the
+    /// Keeper's Device Id and its certificate's fingerprint (ADR-0024).
+    ///
+    /// **Not a field on the settings page**, for the reason `session_path` is
+    /// not: what is written here was written by the Keeper, the one party that
+    /// can read both Data Directories, and a page that drew it would be offering
+    /// the human a way to tell an Annex something only its Keeper knows. A save
+    /// carries it through untouched — see
+    /// [`Config::keeping_what_the_page_never_drew`].
+    ///
+    /// Read the way everything else here is: an absent key, an absent file and
+    /// one nothing can parse all mean a Verkstead nobody keeps, and so does an
+    /// entry missing either half — see [`kept_written`].
+    #[serde(
+        default,
+        deserialize_with = "kept_written",
+        skip_serializing_if = "Option::is_none"
+    )]
+    kept_by: Option<KeptBy>,
 }
 
 impl Config {
@@ -1192,6 +1279,7 @@ impl Config {
             // Whitespace and all, bar a text that is nothing but whitespace —
             // see [`prose_written`].
             instructions: config.instructions.and_then(prose_written),
+            kept_by: config.kept_by,
         })
     }
 
@@ -1274,6 +1362,11 @@ impl Config {
             // there is nothing to configure in an empty text, and a key holding
             // one would read as a setting somebody made.
             instructions: prose_written(instructions),
+            // And nothing for the Keeper, which the page never draws: what
+            // keeps a save from taking it away is
+            // [`Config::keeping_what_the_page_never_drew`], as it is for
+            // `session_path`.
+            kept_by: None,
         }
     }
 
@@ -1398,6 +1491,25 @@ impl Config {
         self
     }
 
+    /// The config a **Keeper** writes for its **Annex** before the Annex first
+    /// starts: whose it is, and nothing else, so every other section reads as
+    /// nobody having said. **No Author of its own**: the Annex is a linked
+    /// Member, so the Keeper's Authors reach it as mirrors over the one list,
+    /// token copies and all (ADR-0025), and a copy at home here too would be one
+    /// Author at home on two devices.
+    pub fn of_an_annex(kept_by: KeptBy) -> Config {
+        Config {
+            kept_by: Some(kept_by),
+            ..Config::default()
+        }
+    }
+
+    /// The whole of `config.yaml` as this config writes it — see
+    /// [`Secrets::text`] for why a text.
+    pub fn text(&self) -> std::io::Result<String> {
+        yaml(self)
+    }
+
     /// And what this file says about the languages: the map an installer
     /// writes, with `rust_build_cache` read underneath it as Rust's `enabled`
     /// and `size`.
@@ -1467,6 +1579,55 @@ impl Config {
         &self.session_path
     }
 
+    /// And the Keeper this Verkstead is the Annex of, or `None` for one nobody
+    /// keeps — which is every Verkstead but an Annex.
+    pub fn kept_by(&self) -> Option<&KeptBy> {
+        self.kept_by.as_ref()
+    }
+
+    /// The same config with `keeper` as its `kept_by` — see
+    /// [`Settings::keep_by`], and [`crate::annex::booting::InTheBox`], which writes one
+    /// into a box rather than a directory. `false` is a config that said so
+    /// already, left as it was.
+    pub fn keep_by(&mut self, keeper: &KeptBy) -> bool {
+        if self.kept_by.as_ref() == Some(keeper) {
+            return false;
+        }
+
+        self.kept_by = Some(keeper.clone());
+        true
+    }
+
+    /// The same config with everything about the work rather than the machine
+    /// as `keeper` says it — what a Keeper hands its Annex at every start, so a
+    /// change on the Keeper reaches the Annex's sessions at its next (see
+    /// [`crate::annex::booting`]).
+    ///
+    /// **The Keeper's values, not a merge** (ADR-0024, *The Annex has no
+    /// settings of its own*): the Instructions, the MCP servers with their
+    /// header names, how much runs at once, the Cleanup, the comments Wrapping
+    /// ignores, how a conflict is resolved and whether the record is shared on
+    /// Done — each one as the Keeper's file has it, so a server the Keeper no
+    /// longer declares is gone here too. Everything about the Annex's own
+    /// machine stands as it was: its sandbox binds, `session_path`,
+    /// `languages` and `kept_by`.
+    ///
+    /// **And not the Authors**: the Annex is a linked Member, so the Keeper's
+    /// reach it as mirrors over the one list (ADR-0025), and a copy here too
+    /// would be one Author at home on two devices.
+    pub fn working_as(&self, keeper: &Config) -> Config {
+        Config {
+            cleanup: keeper.cleanup.clone(),
+            at_once: keeper.at_once.clone(),
+            conflict_resolution: keeper.conflict_resolution,
+            share_on_done: keeper.share_on_done,
+            ignored_comments: keeper.ignored_comments.clone(),
+            mcp_servers: keeper.mcp_servers.clone(),
+            instructions: keeper.instructions.clone(),
+            ..self.clone()
+        }
+    }
+
     /// The same config with the keys the settings page never drew as they
     /// already stand.
     ///
@@ -1478,6 +1639,9 @@ impl Config {
     ///   writes it and a hand-edit changes it, and a config built out of what
     ///   was sent would write the file with the key gone and a harness
     ///   Verkstead installed unreachable.
+    /// - `kept_by`, which the page has no field for either — the Keeper writes
+    ///   it, and a save that dropped it would leave an Annex that has forgotten
+    ///   who keeps it.
     /// - the descriptor half of every `languages` entry. The page draws
     ///   `enabled` and `size` and writes those two, so what the file already
     ///   holds is kept underneath and what the page sent is written over it —
@@ -1493,6 +1657,7 @@ impl Config {
     ///   sends alone.
     pub fn keeping_what_the_page_never_drew(mut self, kept: &Config) -> Config {
         self.session_path = kept.session_path.clone();
+        self.kept_by = kept.kept_by.clone();
         self.languages = kept.languages.under_the_page(&self.languages);
 
         // And every Author the page did not draw, the one it did written over
@@ -1903,7 +2068,7 @@ fn limit_typed(places: String) -> Option<usize> {
 /// gets the one they filled in, and git says what is still missing. Nothing here
 /// substitutes a default — a commit by `verkstead@localhost` is worse than a
 /// commit that would not be made, because it is the one nobody notices.
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
 pub struct GitAuthor {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     name: Option<String>,
@@ -2074,6 +2239,96 @@ impl Author {
     pub(crate) fn configured(&self) -> Option<Signature> {
         Signature::configured(&self.git_author())
     }
+}
+
+/// The Keeper a Verkstead is the Annex of: its Device Id, and its device
+/// certificate's fingerprint in the spelling a fingerprint is printed in —
+/// uppercase hex pairs joined by `:`, over the SHA-256 of the certificate's DER
+/// (ADR-0024, *The Keeper's Join*).
+///
+/// Both halves or neither: an id with no fingerprint is a Keeper nothing could
+/// tell from an impostor, and a fingerprint with no id is one no record could
+/// name — see [`kept_written`].
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct KeptBy {
+    device: String,
+    fingerprint: String,
+
+    /// And where the Annex dials its Keeper, where the Keeper said: an address
+    /// that does not move with the Keeper's network — the Windows host's side
+    /// of WSL's NAT at the Keeper's peer port, or the loopback at it under
+    /// mirrored networking (ADR-0024, *The Keeper and its Annex reach each
+    /// other directly*). Not a half of the pair above: a Keeper that names
+    /// none is one its Annex reaches at what it advertises.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    at: Option<String>,
+}
+
+impl KeptBy {
+    /// The Keeper `device`, presenting the certificate `fingerprint` names —
+    /// which is what a Keeper writes of itself into its Annex's config.
+    pub fn of(device: &str, fingerprint: &str) -> KeptBy {
+        KeptBy {
+            device: device.to_owned(),
+            fingerprint: fingerprint.to_owned(),
+            at: None,
+        }
+    }
+
+    /// The same, reached by its Annex at `at` — see [`KeptBy::at`].
+    pub fn reached_at(self, at: Option<&str>) -> KeptBy {
+        KeptBy {
+            at: at.map(str::to_owned),
+            ..self
+        }
+    }
+
+    /// The Keeper's Device Id.
+    pub fn device(&self) -> &str {
+        &self.device
+    }
+
+    /// And the fingerprint of the certificate it presents.
+    pub fn fingerprint(&self) -> &str {
+        &self.fingerprint
+    }
+
+    /// And where its Annex dials it directly, where it said.
+    pub fn at(&self) -> Option<&str> {
+        self.at.as_deref()
+    }
+}
+
+/// A `kept_by` as somebody left it: both halves, or nobody at all.
+///
+/// Each half is read as nullable and blank-is-nothing, the way a git author's
+/// are, and an entry missing either comes to no Keeper rather than refusing the
+/// file — under this module's own rule a half-written entry would otherwise
+/// throw the author and every other setting away with it.
+fn kept_written<'de, D: serde::Deserializer<'de>>(kept: D) -> Result<Option<KeptBy>, D::Error> {
+    #[derive(Deserialize)]
+    struct Written {
+        #[serde(default)]
+        device: Option<String>,
+        #[serde(default)]
+        fingerprint: Option<String>,
+        #[serde(default)]
+        at: Option<String>,
+    }
+
+    let Some(written) = Option::<Written>::deserialize(kept)? else {
+        return Ok(None);
+    };
+
+    Ok(written
+        .device
+        .and_then(blank_is_nothing)
+        .zip(written.fingerprint.and_then(blank_is_nothing))
+        .map(|(device, fingerprint)| KeptBy {
+            device,
+            fingerprint,
+            at: written.at.and_then(blank_is_nothing),
+        }))
 }
 
 /// A [`GitAuthor`] with both halves filled in, which is the only shape git will
@@ -2725,8 +2980,8 @@ mod tests {
 
     use super::{
         AtOnce, AttachedServer, Author, Cleanup, CleanupStep, Config, ConflictResolution,
-        GitAuthor, HeaderValue, IgnoreRule, Languages, McpServer, Mirrored, RuleTrouble, Secrets,
-        ServerTrouble, Settings, Signature, Unauthored, trouble_among,
+        GitAuthor, HeaderValue, IgnoreRule, KeptBy, Languages, McpServer, Mirrored, RuleTrouble,
+        Secrets, ServerTrouble, Settings, Signature, Unauthored, trouble_among, yaml,
     };
 
     /// The Author the tests here write and read back, keyed `work` — any
@@ -4542,6 +4797,87 @@ mod tests {
             "and what the page did send is what the file holds",
         );
     }
+
+    /// `kept_by` is read as both halves or not at all: a half-written entry
+    /// is a Verkstead nobody keeps, rather than a file nothing reads.
+    #[test]
+    fn kept_by_is_both_halves_or_nobody() {
+        let config = Config::read(KEPT).unwrap();
+        let kept = config.kept_by().expect("both halves are written");
+
+        assert_eq!(kept.device(), "86f1933fecb070cbee865fbb84819d14");
+        assert_eq!(kept.fingerprint(), "3F:0A");
+        assert_eq!(kept.at(), None, "where the Annex dials it is not a half");
+
+        let reached = Config::read(&format!("{KEPT}  at: 172.24.80.1:8423\n")).unwrap();
+        assert_eq!(
+            reached.kept_by().and_then(KeptBy::at),
+            Some("172.24.80.1:8423"),
+        );
+        assert_eq!(
+            Config::read(&yaml(&reached).unwrap()).unwrap().kept_by(),
+            reached.kept_by(),
+            "and it is written back as it was read",
+        );
+
+        assert!(
+            Config::read("kept_by:\n  device: 86f1933fecb070cbee865fbb84819d14\n")
+                .unwrap()
+                .kept_by()
+                .is_none(),
+            "an id with no fingerprint is a Keeper nothing could tell from an impostor",
+        );
+        assert!(
+            Config::read("kept_by:\n  device: ' '\n  fingerprint: \"3F:0A\"\n")
+                .unwrap()
+                .kept_by()
+                .is_none(),
+            "and a blank half is no half",
+        );
+        assert!(Config::read("kept_by:\n").unwrap().kept_by().is_none());
+        assert!(Config::read("").unwrap().kept_by().is_none());
+    }
+
+    /// And a save from the settings page keeps it, the page having no field for
+    /// it: what the Keeper wrote is still what the file says.
+    #[test]
+    fn a_save_from_the_settings_page_keeps_the_keeper_it_was_not_told_about() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+
+        std::fs::write(settings.config_path(), KEPT).unwrap();
+
+        let page = Config::of(
+            author(Some("Ada".to_owned()), Some("ada@example.com".to_owned())),
+            Languages::default(),
+            Cleanup::default(),
+            AtOnce::default(),
+            ConflictResolution::Merge,
+            false,
+            vec![],
+            vec![],
+            vec![],
+            String::new(),
+        );
+
+        settings
+            .save_config(&page.keeping_what_the_page_never_drew(&settings.config()))
+            .unwrap();
+
+        let config = settings.config();
+
+        assert_eq!(
+            config.kept_by(),
+            Config::read(KEPT).unwrap().kept_by(),
+            "the page said nothing about the Keeper, so the save said nothing about it \
+             either",
+        );
+        assert_eq!(config.authors()[0].git_author().name(), Some("Ada"));
+    }
+
+    /// A `kept_by` as the Keeper writes one.
+    const KEPT: &str =
+        "kept_by:\n  device: 86f1933fecb070cbee865fbb84819d14\n  fingerprint: \"3F:0A\"\n";
 
     /// A `config.yaml` the released version wrote reads as it always did:
     /// `rust_build_cache` is Rust's entry, switch and size both.

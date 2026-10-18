@@ -455,8 +455,11 @@ function standsFor(device: Device, moved: Nudge): readonly QueryKey[] | null {
     // device on it. The server prunes the lists it holds against the membership
     // every time a sidebar is asked for — see `merging.rs` — so what was missing
     // was anything asking it.
+    //
+    // **And the Components row**, whose release is the one the Keeper's start
+    // reads off its Annex as it links it, which is announced as this kind.
     case "devices":
-      return [["devices"], ["conversations"]];
+      return [["devices"], ["conversations"], ["components"]];
 
     // And what is *out there* moving, which is a different list and a different
     // question: a device nobody has typed an address for was heard advertising

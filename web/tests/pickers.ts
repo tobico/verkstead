@@ -47,11 +47,16 @@ export function opened(label: string): HTMLElement {
 ///
 /// The rows under the rule at the foot are not among them: they press rather
 /// than pick, and a test asking what a control offers is not asking about those.
-/// They are [`actions`], one function along.
+/// They are [`actions`], one function along — and the Repo dropdown's
+/// repositories to clone are not among them either: see [`clonables`].
 export function offered(label: string): HTMLElement[] {
   return [
     ...opened(label).querySelectorAll<HTMLElement>('[role="option"]'),
-  ].filter((row) => !row.classList.contains(styles.action!));
+  ].filter(
+    (row) =>
+      !row.classList.contains(styles.action!) &&
+      !row.classList.contains(styles.clonable!),
+  );
 }
 
 /// And what each of them reads as.
@@ -68,6 +73,22 @@ export function actions(label: string): HTMLElement[] {
 /// And what each of those reads as.
 export function actionRows(label: string): string[] {
   return actions(label).map(words);
+}
+
+/// The rows of the Repo dropdown's second group — the repositories the rest of
+/// the cluster holds that the device lacks — which press rather than pick too.
+export function clonables(label: string): HTMLElement[] {
+  return [
+    ...opened(label).querySelectorAll<HTMLElement>(`.${styles.clonable}`),
+  ];
+}
+
+/// And what each of those reads as: the name, and where its origin is.
+export function clonableRows(label: string): Array<[string, string]> {
+  return clonables(label).map((row) => [
+    words(row),
+    row.querySelector(`.${styles.says}`)?.textContent ?? "",
+  ]);
 }
 
 /// Pick the row that reads as `reading`.

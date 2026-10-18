@@ -7,6 +7,7 @@
 import { vi } from "vitest";
 
 import type {
+  ComponentsView,
   DevicesView,
   ForwardsView,
   SetReading,
@@ -29,6 +30,10 @@ const FORWARDS = "/api/ui/forwards";
 /// And the cluster's one list of Authors, which the Git switcher, the Repos
 /// pane and the Brief all read — see the default below.
 const AUTHORS = "/api/ui/authors";
+
+/// And what this machine has installed beyond the wizard's checks, the fourth —
+/// see the default below.
+const COMPONENTS = "/api/ui/components";
 
 /// One answer per fetch in the order given. The last answer is repeated,
 /// because a page polls for as long as it is open and a test should not have to
@@ -72,6 +77,12 @@ export function serving(...answers: Array<Answer>) {
   // a test about Authors answers with a `whenever` of its own.
   held.set(`GET ${AUTHORS}`, json([]));
 
+  // And what this machine has installed, which the settings page reads to say
+  // whether it draws a Components section at all — see
+  // `src/settings/Components.tsx`. A machine that cannot have an Annex, which
+  // draws none, and is what every test that has not said otherwise is about.
+  held.set(`GET ${COMPONENTS}`, json({ annex: null } satisfies ComponentsView));
+
   for (const answer of answers) {
     if (typeof answer === "function") {
       asked.push(answer);
@@ -84,7 +95,9 @@ export function serving(...answers: Array<Answer>) {
   // Typed as `fetch` is called rather than as a bare thunk, so a test can read
   // back what a page put on the wire and not just that it asked.
   const fetching = vi.fn((path: RequestInfo | URL, init?: RequestInit) => {
-    const answer = held.get(`${init?.method ?? "GET"} ${String(path)}`);
+    const answer =
+      held.get(`${init?.method ?? "GET"} ${String(path)}`) ??
+      nothingClonable(path, init);
     // Handed what the page put on the wire, for the answer that has to behave
     // like the network rather than like a value — see [`hangs`], which needs
     // the signal to know when the caller gave up.
@@ -92,6 +105,24 @@ export function serving(...answers: Array<Answer>) {
   });
   vi.stubGlobal("fetch", fetching);
   return fetching;
+}
+
+/// What the cluster could clone onto a device, wherever a test has not said:
+/// nothing — a device in no cluster, which is what every test that has not said
+/// otherwise is about.
+///
+/// Read wherever a Repo dropdown is drawn, on whichever device it is for, so it
+/// is matched by the path's end rather than seeded per device the way the reads
+/// above are: a file drawing a member's dropdown and forgetting it would have its
+/// mounts fall through to the positional answers meant for something else.
+function nothingClonable(
+  path: RequestInfo | URL,
+  init?: RequestInit,
+): ((init?: RequestInit) => Promise<Response>) | undefined {
+  return (init?.method ?? "GET") === "GET" &&
+    String(path).endsWith("/repos/clonable")
+    ? json([])
+    : undefined;
 }
 
 /// How many times a page asked for one path.

@@ -21,6 +21,7 @@
 
 mod answering;
 mod browsing;
+mod components;
 mod conversations;
 mod device;
 mod files;
@@ -41,6 +42,7 @@ mod view;
 
 pub use answering::{Locked, Submitted};
 pub use browsing::{DirectoryEntry, DirectoryListing, EntryKind};
+pub use components::{AnnexComponent, AnnexState, ComponentsView};
 pub use conversations::{
     AbandonedRepo, AbandonedRoadmap, Adopted, AdoptedStage, AdoptionView, AgentOutputEvent,
     AgentSession, AnswerAttached, AnswerAttachmentRemoved, Attached, AttachedServerView,
@@ -81,11 +83,12 @@ pub use files::{
     FileWrite, FileWritten, FolderEntry, FolderListing, Marked,
 };
 pub use forwarding::{ForwardSkip, ForwardStanding, ForwardView, ForwardsView};
-pub use joining::{AskingDevice, JoinHeld, JoinSettled, NewJoin, PendingJoin};
+pub use joining::{AskingDevice, JoinHeld, JoinKept, JoinSettled, NewAnnex, NewJoin, PendingJoin};
 pub use logins::{LoginClosed, LoginCode, LoginOpened, LoginState};
 pub use onboarding::{
-    AccountView, Dependency, DependencyState, DependencyView, Distro, InstallPress, InstallState,
-    OnboardingView, Platform, PrefillView, Prefilled, RunPhase, RunView, Seen, Source, StepsView,
+    AccountView, Barred, Dependency, DependencyState, DependencyView, Distro, InstallPress,
+    InstallState, OnboardingView, Owed, Platform, PrefillView, Prefilled, RunPhase, RunView, Seen,
+    Source, StepsView,
 };
 pub use profiles::{
     AccountFile, AccountLogin, AgentType, Broken, MemoryFile, MemoryLeft, MemoryWanted,
@@ -95,8 +98,8 @@ pub use profiles::{
 pub use push::{PushKey, RelayedNews, Subscribed, Subscription, Unsubscribe};
 pub use remote::{RemoteBanner, RemoteView, ServeEdit, ServePress, ServeView};
 pub use repos::{
-    AuthorThere, Created, Creation, Registered, Registration, RepoAcross, RepoEntry, RepoRemoved,
-    RepoView, Repointed, Repointing,
+    AuthorThere, ClonableRepo, Cloned, Cloning, Created, Creation, Registered, Registration,
+    RepoAcross, RepoEntry, RepoRemoved, RepoView, Repointed, Repointing,
 };
 pub use settings::{
     AtOnceEdit, AtOnceView, Author, AuthorEdit, AuthorEdited, AuthorEntry, AuthorRemoved,

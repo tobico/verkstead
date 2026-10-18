@@ -36,30 +36,31 @@ use tokio_util::io::ReaderStream;
 use verkstead_render::{
     Adopted, AnswerAttached, AnswerAttachmentRemoved, AskingDevice, AtOnceView, Attached,
     AttachmentRemoved, Author, AuthorEdit, AuthorEdited, AuthorSaved, BaseBranchChoice,
-    BranchRename, BriefEdit, CheckRollup, CleanupStepView, CleanupView, CommentedOn,
-    CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed, CompanionModeChoice,
-    CompanionModeChosen, CompanionRemoved, CompanionView, CompileCaching, Confirming,
-    ConflictResolution, ConversationArchived, ConversationClosed, ConversationEntry,
-    ConversationMove, ConversationSteered, ConversationStopped, ConversationUnarchived,
-    ConversationView, Creation, Cursor, DevicesView, DiskUse, DroppedRow, Eviction, FileDeleted,
-    FileDeleting, FileListsView, FileMade, FileMaking, FileReading, FileRenamed, FileRenaming,
-    FileRootsView, FileStatusView, FileWrite, FileWritten, FolderListing, GrillingStarted,
-    HeaderEdit, IgnoreRule, IgnoredCommentsEdit, InstallPress, LanguageCleared, LanguageEdit,
-    LanguageView, Lifecycle, Locked, McpHeader, McpServer, McpServerEdit, McpServersEdit, Merging,
-    MissedOut, NewAdoption, NewCompanion, NewConversation, NewJoin, NewRank, OpenTerminal,
-    PairingView, Parked, PendingSteerView, Permitting, Process, ProcessChoice, ProcessPicked,
-    ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration, RemoteBanner, RemoteView,
-    RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice, RuleField, RuleRefused,
-    Running, RunningOn, ServeEdit, ServePress, ServerAttached, ServerField, ServerRefused,
-    ServerRemoved, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView, ShareCommented,
-    SharePublished, SharedCommit, SharedConversation, ShowArchived, ShowingArchived, SizeRefused,
-    Standing, SteerCancelled, SteerForm, SteerOpened, SteerPairingView, SteerSaved,
-    SteerSubmission, StoreView, Submitted, Subscribed, Subscription, TakenUp, TargetNamed,
-    TargetRecorded, TerminalOpened, TimelineEvent, TokenEdit, TokenSaved, TransferredTo,
-    Transferring, UnreadEntry, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
+    BranchRename, BriefEdit, CheckRollup, CleanupStepView, CleanupView, ClonableRepo, Cloning,
+    CommentedOn, CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed,
+    CompanionModeChoice, CompanionModeChosen, CompanionRemoved, CompanionView, CompileCaching,
+    ComponentsView, Confirming, ConflictResolution, ConversationArchived, ConversationClosed,
+    ConversationEntry, ConversationMove, ConversationSteered, ConversationStopped,
+    ConversationUnarchived, ConversationView, Creation, Cursor, DevicesView, DiskUse, DroppedRow,
+    Eviction, FileDeleted, FileDeleting, FileListsView, FileMade, FileMaking, FileReading,
+    FileRenamed, FileRenaming, FileRootsView, FileStatusView, FileWrite, FileWritten,
+    FolderListing, GrillingStarted, HeaderEdit, IgnoreRule, IgnoredCommentsEdit, InstallPress,
+    LanguageCleared, LanguageEdit, LanguageView, Lifecycle, Locked, McpHeader, McpServer,
+    McpServerEdit, McpServersEdit, Merging, MissedOut, NewAdoption, NewAnnex, NewCompanion,
+    NewConversation, NewJoin, NewRank, OpenTerminal, PairingView, Parked, PendingSteerView,
+    Permitting, Process, ProcessChoice, ProcessPicked, ProfileChoice, ProfileEdit, ProfileEntry,
+    PushKey, Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved,
+    Resumed, RoleChoice, RuleField, RuleRefused, Running, RunningOn, ServeEdit, ServePress,
+    ServerAttached, ServerField, ServerRefused, ServerRemoved, SetReading, SetView, SettingsEdit,
+    SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedCommit, SharedConversation,
+    ShowArchived, ShowingArchived, SizeRefused, Standing, SteerCancelled, SteerForm, SteerOpened,
+    SteerPairingView, SteerSaved, SteerSubmission, StoreView, Submitted, Subscribed, Subscription,
+    TakenUp, TargetNamed, TargetRecorded, TerminalOpened, TimelineEvent, TokenEdit, TokenSaved,
+    TransferredTo, Transferring, UnreadEntry, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
+use crate::device::Unlinkable;
 use crate::onboarding::Refusal;
 use crate::peer::workbench::OverTheLink;
 use crate::settings::{AtOnce, Cleanup, CleanupStep, Config, RuleTrouble};
@@ -104,6 +105,16 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // what it is given is a parent and a name rather than a path, and what
         // it can answer is a different set of sentences.
         .route("/api/ui/repos/new", post(create_repo))
+        // And what the rest of the cluster holds that this device does not: the
+        // Repo dropdown's second group, read beside the first and reached on a
+        // member over the Relay the way the list itself is. A word of its own
+        // under the list rather than a field on it, because it dials every
+        // member and the list is read off this device's own registry alone.
+        .route("/api/ui/repos/clonable", get(clonable_repos))
+        // And cloning one of those here, which is the third way a Repo
+        // arrives: an origin and a parent rather than a path or a name, and
+        // git's own words where it refuses.
+        .route("/api/ui/repos/clone", post(clone_repo))
         // What one Repo's branches are, which is what a drafting Conversation
         // picks the one it comes off out of. Under the Repo rather than under
         // the Conversation: the branches are the repository's, and two
@@ -739,6 +750,19 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // happens to live, and everything a cluster relays later stands under
         // this same segment.
         .route("/api/ui/devices", get(devices))
+        // And what this machine has installed beyond what the wizard checks,
+        // which is the Components section: the Annex's row on a Windows Keeper,
+        // and nothing at all anywhere else. Read off the machine like the one
+        // above, and its own read because none of it is about the cluster — a
+        // box stopped or rebuilt is the Keeper's business alone.
+        .route("/api/ui/components", get(components))
+        // And Install on its row, which is the wizard's run for the WSL row
+        // alone, taken after the wizard is over: a machine that skipped the row
+        // at setup. It answers with the wizard's reading, the run now on it,
+        // because what the pane draws while it goes is the wizard's own install
+        // and hint screens — and it is stopped by the wizard's own cancel.
+        .route("/api/ui/components/install", post(install_annex))
+        .route("/api/ui/components/update", post(update_annex))
         // And the ports of members' terminals this device is holding on its own
         // `localhost`, which the sidebar's foot counts: this device's own
         // reading, held back from the link — see [`crate::forwarding`].
@@ -771,6 +795,11 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // Dismiss on one that has run out. One route, because they are one act
         // seen at two moments — see [`crate::device::Devices::take_back`].
         .route("/api/ui/devices/joins/{request}/cancel", post(cancel_join))
+        // And linking this device's Annex, which is a join of its own kind with
+        // no button: a Keeper calls it at its start, naming the Annex's Data
+        // Directory and the address its peer listener answers at — see
+        // [`crate::device::Devices::keep`].
+        .route("/api/ui/devices/annexes", post(keep_annex))
         // And the other side of a join: the devices asking to be let into *this*
         // one's cluster, which is what the modal in every open workbench is
         // drawn from. A read of its own beside the section above rather than a
@@ -1063,6 +1092,34 @@ async fn repos(State(state): State<AppState>) -> HttpResponse {
     Json(rows).into_response()
 }
 
+/// `GET /api/ui/repos/clonable` — every **Clonable Repo**: what the other
+/// members have registered, by origin, that this device lacks (ADR-0024,
+/// *Clonable repos*). See [`crate::matching::clonable`].
+///
+/// A Verkstead with no device identity is linked to nobody, so nothing in the
+/// cluster could be cloned to it: an empty list rather than a refusal.
+async fn clonable_repos(State(state): State<AppState>) -> HttpResponse {
+    let repos = match store::registered_repos(&state.pool).await {
+        Ok(repos) => repos,
+        Err(error) => {
+            tracing::error!(error = ?error, "reading the registered Repos failed");
+            return unavailable("The registered repos couldn't be read.");
+        }
+    };
+
+    let Some(devices) = state.devices.as_ref() else {
+        return Json(Vec::<ClonableRepo>::new()).into_response();
+    };
+
+    match crate::matching::clonable(devices, &repos).await {
+        Ok(rows) => Json(rows).into_response(),
+        Err(refusal) => {
+            tracing::warn!("what could be cloned here was not read: {}", refusal.saying);
+            refused(refusal.status, ApiError::new(refusal.saying))
+        }
+    }
+}
+
 /// `GET /api/ui/repos/{id}/branches` — every branch of one registered Repo,
 /// local and remote-tracking, for the dropdown that picks what the work comes
 /// off.
@@ -1185,6 +1242,27 @@ async fn create_repo(
         Err(error) => {
             tracing::error!(error = ?error, "making a Repo failed");
             unavailable("The repo couldn't be made.")
+        }
+    }
+}
+
+/// `POST /api/ui/repos/clone` — clone a **Clonable Repo** onto this device, and
+/// take it on (ADR-0024, *Clonable repos*).
+///
+/// This device's own operation, which a browser on another one reaches over the
+/// Relay the way it reaches **Create repo**: git runs here, as the Author the
+/// member's Repo works as, with that Author's token read at the moment of the
+/// call. See [`crate::repos::clone`].
+///
+/// Every refusal is a named outcome in the body, the way a create's are.
+async fn clone_repo(State(state): State<AppState>, Json(cloning): Json<Cloning>) -> HttpResponse {
+    let config = state.settings.config();
+
+    match crate::repos::clone(&state.pool, &config, &state.github, &cloning).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, "cloning a Repo failed");
+            unavailable("The repo couldn't be cloned.")
         }
     }
 }
@@ -7447,9 +7525,11 @@ async fn onboarding_install(
     State(state): State<AppState>,
     Json(press): Json<InstallPress>,
 ) -> HttpResponse {
+    // With this device, which the Annex a ticked WSL row makes is told of and
+    // is booted and linked by.
     match state
         .onboarding
-        .install(&state.settings, press.dependencies)
+        .install(&state.settings, press.dependencies, state.devices.as_ref())
         .await
     {
         Ok(()) => onboarding(State(state)).await,
@@ -7656,6 +7736,91 @@ async fn devices(State(state): State<AppState>) -> HttpResponse {
     listed(&devices).await
 }
 
+/// `GET /api/ui/components` — what this machine has installed beyond what the
+/// wizard checks: the **Annex**'s row, on a Keeper with a way of having one,
+/// and `{"annex": null}` everywhere else, which is what says the settings page
+/// draws no Components card (ADR-0024).
+///
+/// **Read on every request and booting nothing** — see
+/// [`crate::annex::booting::Annexed::reading`]: the probe reads WSL's own list,
+/// the version is the one held since the Keeper booted the box, and the disk is
+/// a file's size on this machine.
+async fn components(State(state): State<AppState>) -> HttpResponse {
+    let annexed = state
+        .devices
+        .as_ref()
+        .and_then(|devices| Some((devices.annexed()?.clone(), devices.annex_trouble())));
+
+    let Some((annexed, trouble)) = annexed else {
+        return Json(ComponentsView { annex: None }).into_response();
+    };
+
+    match tokio::task::spawn_blocking(move || annexed.reading(trouble)).await {
+        Ok(annex) => Json(ComponentsView { annex: Some(annex) }).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, "reading this machine's components failed");
+            unavailable("What this machine has installed couldn't be read.")
+        }
+    }
+}
+
+/// `POST /api/ui/components/install` — **Install** on the Components pane's
+/// Annex row: the wizard's install run for the WSL row alone (ADR-0024).
+///
+/// **The wizard's press in everything but the gate.** The same plan, the same
+/// units and the same run, answered with the same reading — so the pane draws
+/// the install screen and the hint screen off what the wizard draws them off.
+/// What it does not ask is whether the wizard is the page there is: a machine
+/// that skipped the row at setup is pressing for it from the settings page,
+/// long after.
+///
+/// **Refused while any run is going**, as the wizard's is: one run at a time,
+/// and the pane reads the one already there.
+async fn install_annex(State(state): State<AppState>) -> HttpResponse {
+    match state
+        .onboarding
+        .annex(&state.settings, state.devices.as_ref())
+        .await
+    {
+        Ok(()) => onboarding(State(state)).await,
+        // The one refusal this press has: the wizard being over is what it is
+        // for.
+        Err(Refusal::Going | Refusal::Over) => refused(
+            StatusCode::CONFLICT,
+            ApiError::new("An install is already running."),
+        ),
+    }
+}
+
+/// `POST /api/ui/components/update` — **Update** on the Components pane's
+/// Annex row: the box's inputs moved, every one but `nixos-wsl`, and the box
+/// rebuilt and linked again in the background (ADR-0024). Answered with the
+/// Components reading, which reads *updating* from here until it is linked.
+///
+/// **Refused while a session runs in the Annex**, naming the Conversation —
+/// see [`crate::annex::booting::Annexed::update`]. A press while an Update or
+/// the start's re-pin is going is taken, and reads the one there is.
+async fn update_annex(State(state): State<AppState>) -> HttpResponse {
+    let Some(devices) = state.devices.clone() else {
+        return refused(
+            StatusCode::NOT_FOUND,
+            ApiError::new("There's no annex on this machine to update."),
+        );
+    };
+
+    let Some(annexed) = devices.annexed().cloned() else {
+        return refused(
+            StatusCode::NOT_FOUND,
+            ApiError::new("There's no annex on this machine to update."),
+        );
+    };
+
+    match annexed.update(devices).await {
+        Ok(()) => components(State(state)).await,
+        Err(why) => refused(StatusCode::CONFLICT, ApiError::new(why)),
+    }
+}
+
 /// `GET /api/ui/devices/discovered` — the devices nobody has typed an address
 /// for, which is the **Discovered** list under those rows (ADR-0020,
 /// *Discovery*).
@@ -7769,6 +7934,43 @@ async fn add_found(State(state): State<AppState>, Path(device): Path<String>) ->
     moved(&state, &devices).await
 }
 
+/// `POST /api/ui/devices/annexes` — link this device's **Annex** by the
+/// **Keeper's Join** (ADR-0024).
+///
+/// **No page presses this.** A Keeper calls it at its own start, which is why it
+/// is idempotent — see [`crate::device::Devices::keep`]. It answers with the
+/// Devices section read again all the same, the way every press beside it does,
+/// so the Annex's row arrives out of the answer.
+///
+/// An Annex that could not be linked is refused in the words the link put it in:
+/// a certificate that is not the one in its `device.pem`, a Data Directory with
+/// no certificate in it, or an Annex not answering yet.
+async fn keep_annex(State(state): State<AppState>, Json(new): Json<NewAnnex>) -> HttpResponse {
+    let Some(devices) = state.devices.clone() else {
+        return unavailable("This server holds no device identity to keep an Annex with.");
+    };
+
+    if let Err(why) = devices
+        .keep(
+            std::sync::Arc::new(std::path::PathBuf::from(&new.data_dir)),
+            &new.address,
+            new.keeper_at.as_deref(),
+        )
+        .await
+    {
+        tracing::info!(
+            data_dir = %new.data_dir,
+            address = %new.address,
+            %why,
+            "an Annex was not linked",
+        );
+
+        return refused(StatusCode::BAD_GATEWAY, ApiError::new(format!("{why:#}")));
+    }
+
+    moved(&state, &devices).await
+}
+
 /// `POST /api/ui/devices/joins/{request}/cancel` — **Cancel** on a pending row,
 /// and **Dismiss** on one whose ten minutes have run out.
 ///
@@ -7802,13 +8004,38 @@ async fn cancel_join(State(state): State<AppState>, Path(request): Path<String>)
 /// member that answers is told, and the ones that do not are owed the telling
 /// — so this answers with the section read again rather than with what some
 /// third machine made of it. See [`crate::device::Devices::unlink`].
+///
+/// **Refused by name on an Annex, and on an Annex's own Keeper** (ADR-0024):
+/// the membership is the Keeper's, and nothing is forgotten anywhere.
 async fn unlink_device(State(state): State<AppState>, Path(device): Path<String>) -> HttpResponse {
     let Some(devices) = state.devices.clone() else {
         return unavailable("This server holds no device identity to answer for.");
     };
 
-    if let Err(why) = devices.unlink(&device).await {
-        return unavailable(&format!("The device couldn't be unlinked: {why:#}."));
+    match devices.unlink(&device).await {
+        Ok(()) => {}
+
+        Err(Unlinkable::Annex { name, keeper }) => {
+            return refused(
+                StatusCode::CONFLICT,
+                ApiError::new(format!(
+                    "{name} is the annex of {keeper}, so it can't be unlinked."
+                )),
+            );
+        }
+
+        Err(Unlinkable::Keeper { name }) => {
+            return refused(
+                StatusCode::CONFLICT,
+                ApiError::new(format!(
+                    "{name} is this device's keeper, so it can't be unlinked."
+                )),
+            );
+        }
+
+        Err(Unlinkable::Failed(why)) => {
+            return unavailable(&format!("The device couldn't be unlinked: {why:#}."));
+        }
     }
 
     moved(&state, &devices).await

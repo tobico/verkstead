@@ -101,10 +101,11 @@ use anyhow::Result;
 use sqlx::SqlitePool;
 use tokio::sync::OnceCell;
 use verkstead_render::{
-    AccountView, Dependency, DependencyState, DependencyView, Distro, InstallState, OnboardingView,
-    PrefillView, Prefilled, RunView, Seen, Source, StepsView,
+    AccountView, Barred, Dependency, DependencyState, DependencyView, Distro, InstallState,
+    OnboardingView, Owed, PrefillView, Prefilled, RunView, Seen, Source, StepsView,
 };
 
+use crate::annex::{self, Backend};
 use crate::github::Gh;
 use crate::platform::{Environment, Platform, hostname};
 use crate::remote::Elevate;
@@ -363,6 +364,14 @@ pub struct Machine {
     /// process that cannot say what it is running, which is a machine the
     /// account cannot be made on from here.
     verkstead: Option<PathBuf>,
+
+    /// And the box an **Annex** would run in on this machine, which is what
+    /// the WSL row is probed through — see [`annex::Backend`].
+    ///
+    /// WSL on the Windows this server is running on, and nothing anywhere
+    /// else: no other platform has a backend yet. A stated machine has what
+    /// its suite stood it up with.
+    annex: Option<Arc<dyn Backend>>,
 }
 
 impl Machine {
@@ -392,6 +401,12 @@ impl Machine {
         // And which Mac this is, where it is one — the one read here that is a
         // command rather than a file or a variable.
         .arm64(sysctl(Platform::HERE))
+        // And the box an Annex would run in, on the one platform there is a
+        // way of having one.
+        .annexing(
+            (Platform::HERE == Platform::Windows)
+                .then(|| Arc::new(annex::wsl::Wsl::here()) as Arc<dyn Backend>),
+        )
     }
 
     /// A machine stated rather than read, which is what a test stands a server
@@ -462,6 +477,12 @@ impl Machine {
         }
     }
 
+    /// And the same, with `annex` as the box an Annex would run in — see
+    /// [`Machine::annex`].
+    pub fn annexing(self, annex: Option<Arc<dyn Backend>>) -> Machine {
+        Machine { annex, ..self }
+    }
+
     /// The two ways of making one, said once: a `PATH` a caller stated, or none
     /// at all for the machine that composes its own.
     #[allow(clippy::too_many_arguments)]
@@ -492,6 +513,7 @@ impl Machine {
             data_dir: None,
             verkstead: None,
             arm64: None,
+            annex: None,
         }
     }
 
@@ -538,6 +560,14 @@ impl Machine {
         self.verkstead.as_deref()
     }
 
+    /// And the box an Annex would run in, on a Windows machine that has a way
+    /// of having one — which is the whole of where the WSL row is drawn.
+    fn annex(&self) -> Option<&dyn Backend> {
+        self.annex
+            .as_deref()
+            .filter(|_| self.platform == Platform::Windows)
+    }
+
     /// And which of the wizard's nine tabs it is, which is also which package
     /// manager an install run raises — see [`install`].
     fn distro(&self) -> Distro {
@@ -562,7 +592,7 @@ impl Machine {
     }
 
     /// Every row of the dependencies step, in the order it is drawn: the
-    /// sandbox, `git`, the four harnesses, and `gh`.
+    /// sandbox, `git`, the four harnesses, `gh`, and WSL on Windows.
     ///
     /// Blocks: a `PATH` walk apiece, one `bwrap` run on Linux, and one
     /// `xcode-select` on a Mac whose `git` is Apple's.
@@ -583,6 +613,12 @@ impl Machine {
         }));
 
         rows.push(row(Dependency::Gh, self.installed(sandbox::GH)));
+
+        // And WSL last, on Windows alone: it never gates, and it is the one
+        // row a session on this machine has no use for.
+        if let Some(annex) = self.annex() {
+            rows.push(row(Dependency::Wsl, annexed(annex.probe())));
+        }
 
         rows
     }
@@ -1127,8 +1163,12 @@ impl Onboarding {
 
         let (run, dependencies) = installing(probed.dependencies, going);
 
+        // And whether this Verkstead is somebody's Annex, which the verdict is
+        // never reached over — see [`Onboarding::mode`].
+        let kept = settings.config().kept_by().is_some();
+
         Ok(OnboardingView {
-            mode: self.mode(steps).await,
+            mode: self.mode(steps, kept).await,
             platform: shown(self.machine.platform),
             distro: self.machine.distro(),
             dependencies,
@@ -1154,14 +1194,61 @@ impl Onboarding {
     ///
     /// **And while one is going**, which is the same press twice — see
     /// [`Refusal::Going`].
+    ///
+    /// `devices` is this device as the Annex a ticked WSL row makes is told of
+    /// it, and what boots and links that Annex once it is made — see
+    /// [`crate::annex::booting::Annexed::up`] — and `None` on a server with no
+    /// identity to keep one by.
     pub(crate) async fn install(
         &self,
         settings: &Settings,
         ticked: Vec<Dependency>,
+        devices: Option<&crate::device::Devices>,
     ) -> Result<(), Refusal> {
         if !self.wizarding() {
             return Err(Refusal::Over);
         }
+
+        self.run(settings, ticked, devices).await
+    }
+
+    /// Start the wizard's run for the WSL row alone, from the Components pane
+    /// (ADR-0024: *Install from the pane is the wizard's run*).
+    ///
+    /// **Taken whether or not the wizard is the page there is**, which is the
+    /// whole of how it differs from [`Onboarding::install`]: this is a machine
+    /// that skipped the row at setup, and the press is the settings page's.
+    /// Everything else is that press's — the same plan, the same units, and the
+    /// same [`install::Installer`], so a press while any run is going is
+    /// refused as [`Refusal::Going`] and there is still one run at a time.
+    pub(crate) async fn annex(
+        &self,
+        settings: &Settings,
+        devices: Option<&crate::device::Devices>,
+    ) -> Result<(), Refusal> {
+        self.run(settings, vec![Dependency::Wsl], devices).await
+    }
+
+    /// Start a run over `ticked`, whoever pressed for it.
+    async fn run(
+        &self,
+        settings: &Settings,
+        ticked: Vec<Dependency>,
+        devices: Option<&crate::device::Devices>,
+    ) -> Result<(), Refusal> {
+        let keeping = devices.map(crate::device::Devices::keeping);
+
+        // The run is a thread of its own rather than a task, so the boot and
+        // the link it ends with are waited on through this runtime.
+        let linking = devices.and_then(|devices| {
+            let annexed = devices.annexed()?.clone();
+            let devices = devices.clone();
+            let runtime = tokio::runtime::Handle::current();
+
+            Some(install::Linking::by(move || {
+                runtime.block_on(annexed.up(&devices))
+            }))
+        });
 
         // Off the runtime, being a `PATH` walk and a thread spawned. It answers
         // as soon as the run is going rather than when it is over: what is on
@@ -1175,7 +1262,7 @@ impl Onboarding {
         tokio::task::spawn_blocking(move || {
             installing
                 .installer
-                .start(&installing.machine, &settings, &ticked)
+                .start(&installing.machine, &settings, &ticked, keeping, linking)
         })
         .await
         .unwrap_or(Ok(()))
@@ -1241,11 +1328,18 @@ impl Onboarding {
 
     /// Whether the mode is on: the verdict, settled off `steps` where nothing
     /// has settled it yet, and off for good once the wizard has finished.
-    async fn mode(&self, steps: StepsView) -> bool {
+    ///
+    /// **A `kept` server is never in it** (ADR-0024): an Annex is a Verkstead
+    /// whose `config.yaml` names a Keeper, and its workbench is a viewer nobody
+    /// opens — the human drives its work from the Keeper's. The mode only
+    /// redirects such a viewer, and a mode nothing will ever clear is worse than
+    /// none, so the verdict is settled off whatever the steps say. Settled
+    /// rather than skipped, so that it is as fixed for the run as any other.
+    async fn mode(&self, steps: StepsView, kept: bool) -> bool {
         let unmet = self
             .mode
             .settled
-            .get_or_init(|| async { !met(steps) })
+            .get_or_init(|| async { !kept && !met(steps) })
             .await;
 
         *unmet && !self.mode.finished.load(Ordering::SeqCst)
@@ -1508,6 +1602,37 @@ fn row(dependency: Dependency, state: DependencyState) -> DependencyView {
         dependency,
         state,
         install: InstallState::Idle,
+    }
+}
+
+/// What the WSL row says, which is the probe of the box an Annex runs in read
+/// as a row.
+///
+/// **Five answers and four states.** No WSL is a row to tick, like any other
+/// absent one. WSL turned on with its restart still to come, and WSL answering
+/// with no Annex in it, are each part of the way there — see [`Owed`] — and a
+/// firmware with virtualization off is a row nothing here can do anything
+/// about. An Annex that is there is present whether it is running or not:
+/// whether it is up is the Keeper's business at its start, not the wizard's.
+fn annexed(probed: annex::Probed) -> DependencyState {
+    match probed {
+        annex::Probed::NoWsl => DependencyState::Absent {
+            trouble: None,
+            seen: None,
+        },
+        annex::Probed::NeedsRestart => DependencyState::Owed {
+            owed: Owed::Restart,
+        },
+        annex::Probed::NoDistro | annex::Probed::Unread => {
+            DependencyState::Owed { owed: Owed::Annex }
+        }
+        annex::Probed::VirtualizationOff => DependencyState::Refused {
+            barred: Barred::Virtualization,
+        },
+        annex::Probed::Present { .. } => DependencyState::Present {
+            at: None,
+            target: None,
+        },
     }
 }
 
@@ -2515,6 +2640,82 @@ echo {token}
         );
     }
 
+    /// `machine` with a box that probes `probed`.
+    fn annexed(machine: Machine, probed: annex::Probed) -> Machine {
+        machine.annexing(Some(Arc::new(annex::Probing(probed))))
+    }
+
+    /// The WSL row is drawn on Windows, last, and nowhere else — not on a
+    /// Linux handed a box, and not on a Windows with no way of having one.
+    #[test]
+    fn the_wsl_row_is_windows_own_and_drawn_last() {
+        let dir = tempfile::tempdir().unwrap();
+        let wsl = |machine: &Machine| {
+            machine
+                .rows()
+                .iter()
+                .position(|row| row.dependency == Dependency::Wsl)
+        };
+
+        let windows = annexed(machine(Platform::Windows, dir.path()), annex::Probed::NoWsl);
+        assert_eq!(wsl(&windows), Some(windows.rows().len() - 1));
+
+        for platform in [Platform::Linux, Platform::MacOs] {
+            let elsewhere = annexed(machine(platform, dir.path()), annex::Probed::NoWsl);
+            assert_eq!(wsl(&elsewhere), None, "{platform:?}");
+        }
+
+        assert_eq!(wsl(&machine(Platform::Windows, dir.path())), None);
+    }
+
+    /// And what it says is the probe, read as a row: no WSL is a row to tick,
+    /// a restart owed and no Annex are each owed, virtualization off is
+    /// refused, and an Annex that is there is present, running or not.
+    #[test]
+    fn the_wsl_row_reads_the_probe() {
+        let dir = tempfile::tempdir().unwrap();
+        let reads = |probed| {
+            state(
+                &annexed(machine(Platform::Windows, dir.path()), probed),
+                Dependency::Wsl,
+            )
+        };
+
+        assert_eq!(
+            reads(annex::Probed::NoWsl),
+            DependencyState::Absent {
+                trouble: None,
+                seen: None,
+            },
+        );
+        assert_eq!(
+            reads(annex::Probed::NeedsRestart),
+            DependencyState::Owed {
+                owed: Owed::Restart
+            },
+        );
+        assert_eq!(
+            reads(annex::Probed::NoDistro),
+            DependencyState::Owed { owed: Owed::Annex },
+        );
+        assert_eq!(
+            reads(annex::Probed::VirtualizationOff),
+            DependencyState::Refused {
+                barred: Barred::Virtualization
+            },
+        );
+
+        for running in [false, true] {
+            assert_eq!(
+                reads(annex::Probed::Present { running }),
+                DependencyState::Present {
+                    at: None,
+                    target: None,
+                },
+            );
+        }
+    }
+
     /// The sandbox row on a Mac ticks whatever is on that machine's `PATH`:
     /// `sandbox-exec` is Apple's own and there is nothing to find.
     #[test]
@@ -3278,9 +3479,12 @@ echo {token}
             None,
         );
 
-        assert!(onboarding.mode(unmet).await, "the objective was not met");
         assert!(
-            onboarding.mode(met).await,
+            onboarding.mode(unmet, false).await,
+            "the objective was not met"
+        );
+        assert!(
+            onboarding.mode(met, false).await,
             "and a Profile made since is a step that ticks under a mode that stays on",
         );
     }
@@ -3307,14 +3511,80 @@ echo {token}
             None,
         );
 
-        assert!(onboarding.mode(unmet).await);
+        assert!(onboarding.mode(unmet, false).await);
 
         onboarding.finished();
 
         assert!(
-            !onboarding.mode(unmet).await,
+            !onboarding.mode(unmet, false).await,
             "the steps still stand unmet, and the mode is off all the same: what \
              the wizard saved is what the next start will read",
         );
+    }
+
+    /// And a kept server never enters it, whatever its steps say: nothing
+    /// would ever clear it.
+    #[tokio::test]
+    async fn a_kept_server_settles_the_mode_off_over_steps_that_stand_unmet() {
+        let unmet = StepsView {
+            dependencies: false,
+            accounts: false,
+            git: false,
+        };
+
+        let onboarding = Onboarding::probing(
+            Machine::stated(
+                Platform::Linux,
+                OsString::new(),
+                OsString::new(),
+                None,
+                None,
+                &Environment::default(),
+            ),
+            None,
+        );
+
+        assert!(!onboarding.mode(unmet, true).await);
+        assert!(
+            !onboarding.wizarding(),
+            "and a press is answered the way the reading is: there is no wizard here",
+        );
+    }
+
+    /// The Components pane's press is the wizard's run for the WSL row, taken
+    /// once the wizard is over, where the wizard's own press is not — and
+    /// refused beside a run that is going, the way the wizard's is.
+    #[tokio::test]
+    async fn the_components_press_is_taken_after_the_wizard_is_over() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+
+        let onboarding = Onboarding::probing(
+            Machine::stated(
+                Platform::Linux,
+                OsString::new(),
+                OsString::new(),
+                None,
+                None,
+                &Environment::default(),
+            ),
+            None,
+        );
+
+        onboarding.finished();
+
+        assert_eq!(
+            onboarding
+                .install(&settings, vec![Dependency::Git], None)
+                .await,
+            Err(Refusal::Over),
+        );
+        assert_eq!(onboarding.annex(&settings, None).await, Ok(()));
+
+        let (run, rows) = onboarding.installer.reading().expect("the press's run");
+
+        assert_eq!(rows.len(), 1, "the WSL row alone: {rows:?}");
+        assert_eq!(rows[0].0, Dependency::Wsl);
+        assert_eq!(run.phase, verkstead_render::RunPhase::Done);
     }
 }

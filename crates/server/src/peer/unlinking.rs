@@ -29,6 +29,11 @@
 //! dropped would be refused at the leaver's own gate. See
 //! [`crate::device::Devices::unlink`], where that order is kept.
 //!
+//! **Bar a Keeper and its Annex** (ADR-0024): the pair's membership is the
+//! Keeper's, so a leaver keeps its Annexes, or its Keeper, and a device told
+//! that one of those has left keeps it too. Unlinking a Keeper takes its Annex
+//! out with it — see [`crate::device::Devices::unlink`], which tells both.
+//!
 //! **Nothing here is refused for the device not being there.** An unlink twice
 //! is an unlink, and a member told to drop a device it never heard of is a
 //! member that has already got what the call is for — the stance
@@ -41,6 +46,7 @@ use axum::response::{IntoResponse, Response};
 use verkstead_schema::Nudge;
 
 use crate::device::Device;
+use crate::device::reading::Reading;
 
 use super::Members;
 
@@ -59,6 +65,10 @@ pub(crate) struct Dropping {
     /// machine being told it has left, and any other is a device leaving this
     /// machine's list.
     pub(crate) device: Device,
+
+    /// And whose **Annex** this device is, where it is one — the one member
+    /// an unlink never takes from it (ADR-0024).
+    pub(crate) reading: Reading,
 
     /// Where the row goes from.
     pub(crate) members: Members,
@@ -94,13 +104,51 @@ pub(crate) async fn dropped(
             .into_response();
     }
 
+    // This device's Keeper and its Annexes, which no unlink takes from it: the
+    // pair's membership is the Keeper's, so it leaves with whichever of the two
+    // is told it has left, and nobody else's word drops one end of it
+    // (ADR-0024, *The Keeper's Join*). A Keeper forgetting its Annex is a path
+    // that is not this one, though it ends here on every other member — see
+    // [`crate::device::Devices::forget_annex`].
+    let pair = match dropping.members.rows().await {
+        Ok(rows) => rows
+            .into_iter()
+            .filter(|member| member.kept_by.as_deref() == Some(dropping.device.id()))
+            .map(|annex| annex.device)
+            .chain(
+                dropping
+                    .reading
+                    .keeper()
+                    .map(|keeper| keeper.device().to_owned()),
+            )
+            .collect::<Vec<_>>(),
+
+        Err(why) => {
+            tracing::error!(%why, "who this device is linked to could not be read");
+
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "this device could not read who it is linked to\n",
+            )
+                .into_response();
+        }
+    };
+
     let done = if leaving == dropping.device.id() {
         tracing::info!(
             "a member says this device has been unlinked from its cluster, so every device \
-             it held is let go of",
+             it held is let go of, bar its Keeper and its Annexes",
         );
 
-        dropping.members.forget_everybody().await
+        dropping.members.forget_everybody(&pair).await
+    } else if pair.iter().any(|kept| kept == leaving) {
+        tracing::info!(
+            device = %leaving,
+            "a member says this device's Keeper or Annex is out of its cluster, which leaves \
+             it on this one's list: the two leave together",
+        );
+
+        return StatusCode::NO_CONTENT.into_response();
     } else {
         tracing::info!(
             device = %leaving,

@@ -16,15 +16,15 @@
 //! all.
 //!
 //! **And *unreachable* is never *no match*.** They are two different things to
-//! tell a human — no match sends somebody to **Open repo** on a machine that
-//! may already have the repository, and a machine that is asleep will answer
+//! tell a human — no match offers to put the repository on a machine that may
+//! already have it, and a machine that is asleep will answer
 //! perfectly well tomorrow — so a device that did not answer is the whole of
 //! its own preflight, named, rather than a list of everything it failed to
 //! confirm.
 
 use serde::{Deserialize, Serialize};
 
-use crate::AgentType;
+use crate::{AgentType, ClonableRepo};
 
 #[cfg(feature = "typescript")]
 use ts_rs::TS;
@@ -69,6 +69,13 @@ pub enum Lacking {
         /// repository the work itself is in. Both are refusals; they are not
         /// the same sentence.
         companion: bool,
+
+        /// The repository as a **Clonable Repo**, off its origin as git reads it
+        /// on the device holding the work — what the Transfer dialog's *clone it
+        /// there* is pressed with, the far device cloning it as its own Repo
+        /// dropdown would. Nothing for a repository with no origin, which is
+        /// not clonable and is pointed at **Open repo** there instead.
+        clonable: Option<ClonableRepo>,
     },
 
     /// That device's match for a repository works as another Author than this

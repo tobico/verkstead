@@ -297,3 +297,21 @@ dialog .backdrop {
 .action .words {
   color: var(--ink-soft);
 }
+
+/* And a row of the group above those, a repository another device holds: its
+   name over where its origin is. The place is a URL, which has no spaces to
+   wrap at, so it breaks wherever it has to rather than widening the list past
+   a phone's edge. See `Clonable` in `picking.tsx`. */
+.clonable .says {
+  overflow-wrap: anywhere;
+}
+
+/* And a clonable row held while a clone is out: quieter, and not a press. The
+   row that started it says *Cloning…* where its place was. */
+.clonable[aria-disabled="true"] {
+  cursor: default;
+}
+
+.clonable[aria-disabled="true"] .words {
+  color: var(--ink-soft);
+}

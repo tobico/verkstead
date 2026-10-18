@@ -38,6 +38,8 @@
 //! this file chose.
 
 use std::net::SocketAddr;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use axum::Router;
@@ -48,6 +50,7 @@ use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_render::{AskingDevice, DevicesView};
 use verkstead_schema::Nudge;
+use verkstead_server::annex::{self, booting::Annexed};
 use verkstead_server::device::reading::Reading;
 use verkstead_server::device::{Device, Devices};
 use verkstead_server::nudge::Nudges;
@@ -58,6 +61,7 @@ use verkstead_server::peer::{self, Members};
 use verkstead_server::platform::{self, Platform};
 use verkstead_server::remote::Tailscale;
 use verkstead_server::router_answering_devices_telling;
+use verkstead_server::settings::{Config, KeptBy, Secrets, Settings};
 use verkstead_store::{
     AskedJoin, HeldJoin, ask_join, asked_joins, held_join, held_joins, hold_join,
 };
@@ -125,9 +129,10 @@ struct Verkstead {
     /// a Verkstead that only ever does the asking.
     address: Option<SocketAddr>,
 
-    /// Held for the length of the test: the identity and the database both live
-    /// in it.
-    _dir: tempfile::TempDir,
+    /// Its Data Directory, held for the length of the test: the identity, the
+    /// database and the `config.yaml` an Annex is told it is kept in all live
+    /// in it — and a Keeper links an Annex by naming it.
+    dir: tempfile::TempDir,
 }
 
 impl Verkstead {
@@ -147,7 +152,7 @@ impl Verkstead {
             reading,
             pool,
             address: None,
-            _dir: dir,
+            dir,
         }
     }
 
@@ -180,8 +185,41 @@ impl Verkstead {
         asked
     }
 
+    /// And the device asked as a running server reads itself: told by its own
+    /// `config.yaml` whether it is somebody's **Annex**, which is what a Keeper
+    /// links it by writing.
+    async fn annex() -> Verkstead {
+        Verkstead::annex_serving(Router::new()).await
+    }
+
+    /// The same, serving `workbench` to its members over the link.
+    async fn annex_serving(workbench: Router) -> Verkstead {
+        let mut annex = Verkstead::called(
+            B,
+            Reading::stated(no_tailscale(), Platform::HERE, None, Vec::new()),
+        )
+        .await;
+
+        annex.reading = annex
+            .reading
+            .clone()
+            .told_by(Settings::in_data_dir(annex.dir.path()));
+
+        annex.answer_with(workbench);
+        annex
+    }
+
     /// Stand the peer listener up, serving what a Verkstead serves.
     fn answer(&mut self) {
+        // And none of the workbench over the link: what these suites ask
+        // about is the link itself — see `tests/relayed.rs`, which is the
+        // suite about what a member reaches through one.
+        self.answer_with(Router::new());
+    }
+
+    /// The same, serving `workbench` to its members over the link — what a
+    /// Keeper reads its Annex's Conversations out of.
+    fn answer_with(&mut self, workbench: Router) {
         let listener = peer::Listener::bound("127.0.0.1:0".parse().unwrap(), &self.device)
             .expect("the loopback on a port the machine picked is free");
 
@@ -193,10 +231,7 @@ impl Verkstead {
             self.members.clone(),
             self.joins.clone(),
             self.nudges.clone(),
-            // And none of the workbench over the link: what these suites ask
-            // about is the link itself — see `tests/relayed.rs`, which is the
-            // suite about what a member reaches through one.
-            Router::new(),
+            workbench,
         )));
     }
 
@@ -235,6 +270,12 @@ impl Verkstead {
             self.members.clone(),
             self.joins.clone(),
         )
+    }
+
+    /// Its settings files, which a Keeper hands its Annex its settings about
+    /// the work out of.
+    fn settings(&self) -> Settings {
+        Settings::in_data_dir(self.dir.path())
     }
 
     /// How it dials, for the questions that are about a call rather than about a
@@ -1265,4 +1306,1515 @@ async fn a_push_that_cannot_be_sent_costs_the_notification_and_not_the_request()
     press(&over_here, &request, "allow").await;
 
     assert_eq!(listing(&over_here).await.members.len(), 1);
+}
+
+// The Keeper's Join (ADR-0024): an Annex linked by the one device that can read
+// both Data Directories, with nobody asked.
+
+/// Where a Keeper links its Annex — a route with no button, which a Keeper's
+/// start calls.
+const ANNEXES: &str = "/api/ui/devices/annexes";
+
+/// Link the Annex whose Data Directory is `data_dir` and whose peer listener is
+/// at `address`, through `app`, and hand back what the workbench answered.
+async fn keep(app: &Router, data_dir: &std::path::Path, address: &str) -> (StatusCode, String) {
+    let body = serde_json::to_vec(&serde_json::json!({
+        "data_dir": data_dir.to_str().unwrap(),
+        "address": address,
+    }))
+    .unwrap();
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(ANNEXES)
+                .header("content-type", "application/json")
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let status = response.status();
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+
+    (status, String::from_utf8_lossy(&bytes).into_owned())
+}
+
+/// The Keeper's Join settles in one round trip: the Keeper holds the Annex,
+/// marked as its own, and the Annex holds the Keeper — with no question held
+/// on the Annex, no Nudge of the joins there, and no pending row on the Keeper.
+#[tokio::test]
+async fn a_keepers_join_settles_in_one_round_trip() {
+    let annex = Verkstead::annex().await;
+    let keeper = Verkstead::asking().await;
+
+    let mut annex_page = Listening::open(&annex.workbench()).await;
+
+    let (status, said) = keep(&keeper.workbench(), annex.dir.path(), &annex.at()).await;
+    assert_eq!(status, StatusCode::OK, "POST {ANNEXES}: {said}");
+
+    // The Keeper's side: the Annex, marked as this device's, and nothing
+    // pending — the reply was the whole of the link.
+    let kept = listing(&keeper.workbench()).await;
+
+    assert_eq!(kept.members.len(), 1);
+    assert_eq!(kept.members[0].identity.device, B);
+    assert_eq!(
+        kept.members[0].identity.kept_by.as_deref(),
+        Some(A),
+        "the Annex says whose it is, and the Keeper's row for it keeps that",
+    );
+    assert_eq!(
+        kept.members[0].identity.fingerprint,
+        annex.device.fingerprint()
+    );
+    assert!(kept.pending.is_empty(), "no pending row on the Keeper");
+    assert!(asked_joins(&keeper.pool).await.unwrap().is_empty());
+
+    // The Annex's side: the Keeper, under the certificate it presented, and no
+    // question held about it.
+    let keeping = listing(&annex.workbench()).await;
+
+    assert_eq!(keeping.members.len(), 1);
+    assert_eq!(keeping.members[0].identity.device, A);
+    assert_eq!(
+        keeping.members[0].identity.fingerprint,
+        keeper.device.fingerprint()
+    );
+    assert_eq!(
+        keeping.this.kept_by.as_deref(),
+        Some(A),
+        "the Annex answers for itself as its Keeper's",
+    );
+    assert!(
+        held_joins(&annex.pool).await.unwrap().is_empty(),
+        "nothing held, so nothing for a modal or a push to be raised about",
+    );
+
+    assert_eq!(
+        annex_page.nudge().await,
+        Nudge::Devices,
+        "the Annex's pages hear the Devices list move, and not a question arrive",
+    );
+
+    // And the Keeper wrote itself into the Annex's config, current fingerprint
+    // and all, before it dialled.
+    assert_eq!(
+        Settings::in_data_dir(annex.dir.path()).config().kept_by(),
+        Some(&KeptBy::of(A, keeper.device.fingerprint())),
+    );
+}
+
+/// Any join but the Keeper's is held and asked about as before: one from a
+/// device the config does not name, and one from the Keeper's id presenting a
+/// certificate that is not the Keeper's.
+#[tokio::test]
+async fn a_join_the_annex_is_not_kept_by_is_held_as_before() {
+    let annex = Verkstead::annex().await;
+    let keeper = Verkstead::asking().await;
+
+    Settings::in_data_dir(annex.dir.path())
+        .keep_by(&KeptBy::of(A, keeper.device.fingerprint()))
+        .unwrap();
+
+    // A third device, named nowhere in the config.
+    let stranger = Verkstead::called(
+        "ffeeddccbbaa99887766554433221100",
+        Reading::stated(no_tailscale(), Platform::Linux, None, Vec::new()),
+    )
+    .await;
+
+    let (status, said) = add(&stranger.workbench(), &annex.at()).await;
+    assert_eq!(status, StatusCode::OK, "POST {ADD}: {said}");
+
+    // And the Keeper's own id under a certificate made afresh, which is the
+    // Keeper's id said by a device the config does not name.
+    let impostor = Verkstead::called(
+        A,
+        Reading::stated(no_tailscale(), Platform::Linux, None, Vec::new()),
+    )
+    .await;
+
+    assert_ne!(impostor.device.fingerprint(), keeper.device.fingerprint());
+
+    let (status, said) = add(&impostor.workbench(), &annex.at()).await;
+    assert_eq!(status, StatusCode::OK, "POST {ADD}: {said}");
+
+    assert_eq!(
+        held_joins(&annex.pool).await.unwrap().len(),
+        2,
+        "both are questions for the Annex's human",
+    );
+    assert!(
+        listing(&annex.workbench()).await.members.is_empty(),
+        "and neither is a member until somebody answers",
+    );
+    assert_eq!(listing(&stranger.workbench()).await.pending.len(), 1);
+    assert_eq!(listing(&impostor.workbench()).await.pending.len(), 1);
+}
+
+/// A Data Directory whose `device.pem` is not the certificate the address
+/// answers with is refused at the handshake, and nothing is recorded on either
+/// side.
+#[tokio::test]
+async fn a_link_whose_device_pem_is_not_the_annexs_is_refused() {
+    let annex = Verkstead::annex().await;
+    let keeper = Verkstead::asking().await;
+
+    // Some other device's directory, with a certificate of its own in it.
+    let elsewhere = tempfile::tempdir().unwrap();
+    Device::stated(elsewhere.path(), "ffeeddccbbaa99887766554433221100").unwrap();
+
+    let (status, said) = keep(&keeper.workbench(), elsewhere.path(), &annex.at()).await;
+
+    assert_eq!(status, StatusCode::BAD_GATEWAY, "{said}");
+    assert!(
+        said.contains(annex.device.fingerprint()),
+        "the refusal names the certificate that answered: {said}",
+    );
+
+    assert!(listing(&keeper.workbench()).await.members.is_empty());
+    assert!(asked_joins(&keeper.pool).await.unwrap().is_empty());
+    assert!(listing(&annex.workbench()).await.members.is_empty());
+    assert!(held_joins(&annex.pool).await.unwrap().is_empty());
+}
+
+/// An Annex that does not take the join as its Keeper's — here one whose config
+/// it never reads — holds it as a question, and the Keeper takes the question
+/// straight back and refuses the link rather than leaving a pending row.
+#[tokio::test]
+async fn a_keepers_join_held_as_a_question_is_taken_back() {
+    let unkept = Verkstead::answering().await;
+    let keeper = Verkstead::asking().await;
+
+    let (status, said) = keep(&keeper.workbench(), unkept.dir.path(), &unkept.at()).await;
+
+    assert_eq!(status, StatusCode::BAD_GATEWAY, "{said}");
+    assert!(said.contains("Keeper"), "{said}");
+
+    assert!(listing(&keeper.workbench()).await.members.is_empty());
+    assert!(asked_joins(&keeper.pool).await.unwrap().is_empty());
+    assert!(
+        held_joins(&unkept.pool).await.unwrap().is_empty(),
+        "the question was taken back",
+    );
+}
+
+/// Linking is idempotent — a Keeper runs it at every start — and follows the
+/// Keeper's certificate: run again after it changes, `kept_by` is rewritten
+/// and the join is still taken.
+#[tokio::test]
+async fn linking_again_leaves_one_row_each_and_follows_a_new_certificate() {
+    let annex = Verkstead::annex().await;
+    let keeper = Verkstead::asking().await;
+    let config = Settings::in_data_dir(annex.dir.path());
+
+    for _ in 0..2 {
+        let (status, said) = keep(&keeper.workbench(), annex.dir.path(), &annex.at()).await;
+        assert_eq!(status, StatusCode::OK, "POST {ANNEXES}: {said}");
+    }
+
+    assert_eq!(listing(&keeper.workbench()).await.members.len(), 1);
+    assert_eq!(listing(&annex.workbench()).await.members.len(), 1);
+    assert_eq!(
+        config.config().kept_by(),
+        Some(&KeptBy::of(A, keeper.device.fingerprint())),
+    );
+
+    // The same Keeper with its certificate made again, over the same store.
+    let renewed_dir = tempfile::tempdir().unwrap();
+    let renewed = Verkstead {
+        device: Device::stated(renewed_dir.path(), A).unwrap(),
+        ..keeper
+    };
+
+    assert_ne!(
+        Some(renewed.device.fingerprint()),
+        config.config().kept_by().map(KeptBy::fingerprint),
+    );
+
+    let (status, said) = keep(&renewed.workbench(), annex.dir.path(), &annex.at()).await;
+    assert_eq!(status, StatusCode::OK, "POST {ANNEXES}: {said}");
+
+    assert_eq!(
+        config.config().kept_by(),
+        Some(&KeptBy::of(A, renewed.device.fingerprint())),
+        "the pin follows the Keeper's certificate",
+    );
+
+    let keeping = listing(&annex.workbench()).await.members;
+
+    assert_eq!(keeping.len(), 1);
+    assert_eq!(
+        keeping[0].identity.fingerprint,
+        renewed.device.fingerprint()
+    );
+    assert_eq!(listing(&renewed.workbench()).await.members.len(), 1);
+}
+
+/// An identity dial that refreshes the Annex's row on the Keeper leaves the mark
+/// in place: the refresh is rebuilt from what the Annex says, and it says whose
+/// it is.
+#[tokio::test]
+async fn an_identity_dial_leaves_the_mark_in_place() {
+    let annex = Verkstead::annex().await;
+    let keeper = Verkstead::asking().await;
+
+    let (status, said) = keep(&keeper.workbench(), annex.dir.path(), &annex.at()).await;
+    assert_eq!(status, StatusCode::OK, "POST {ANNEXES}: {said}");
+
+    let row = verkstead_store::members(&keeper.pool)
+        .await
+        .unwrap()
+        .pop()
+        .unwrap();
+
+    // Dialled where it is listening: the Annex here is stated with no addresses
+    // of its own, and what is being asked is what the answer does to the row.
+    let dialled = verkstead_store::Member {
+        addresses: vec![annex.at()],
+        ..row.clone()
+    };
+
+    keeper.peers().identity(&dialled).await.unwrap();
+
+    let refreshed = verkstead_store::members(&keeper.pool)
+        .await
+        .unwrap()
+        .pop()
+        .unwrap();
+
+    assert_ne!(refreshed.last_seen, row.last_seen, "the row was refreshed");
+    assert_eq!(refreshed.kept_by.as_deref(), Some(A));
+}
+
+// The Keeper's start (ADR-0024, *Boot with the Keeper, terminate with it*): the
+// box booted, the two addresses read off it, and the Keeper's Join run with
+// them — over a box that is the Annex's own Data Directory, read and written
+// the way the real one is from inside, and a peer listener on this loopback.
+
+/// A box standing in for the distro: what its probe says, where it says the
+/// pair dial each other, what its service says of itself, how many times it
+/// was booted and terminated, what is in its `/etc/nixos`, and what was run in
+/// it.
+#[derive(Debug)]
+struct Boxed {
+    probed: annex::Probed,
+    data_dir: std::path::PathBuf,
+    annex_at: SocketAddr,
+    keeper_at: SocketAddr,
+    service: &'static str,
+    booted: AtomicUsize,
+    terminated: AtomicUsize,
+
+    /// `/etc/nixos`, by path.
+    nixos: std::sync::Mutex<std::collections::HashMap<String, Vec<u8>>>,
+
+    /// Every command run in the box, and every read of where the pair dial
+    /// each other as `addresses`, in order — which is what says the rebuild
+    /// came before the link.
+    ran: std::sync::Mutex<Vec<String>>,
+
+    /// What the rebuild prints, and whether it succeeds.
+    rebuild: (&'static str, bool),
+
+    /// The Annex this box is under, whose Components row is read while it is
+    /// rebuilt, and what it read.
+    under: std::sync::OnceLock<std::sync::Weak<Annexed>>,
+    read_while_rebuilt: std::sync::Mutex<Vec<verkstead_render::AnnexState>>,
+}
+
+impl Boxed {
+    /// The same box, running — what Update finds once the Keeper's start has
+    /// booted it, and asks about what runs in it.
+    fn running(annex: &Verkstead, keeper_at: &str) -> Boxed {
+        Boxed {
+            probed: annex::Probed::Present { running: true },
+            ..Boxed::of(annex, keeper_at)
+        }
+    }
+
+    /// A box made to the end, whose Annex is `annex` and whose Keeper is
+    /// reached at `keeper_at`, pinned to this Keeper's own release.
+    fn of(annex: &Verkstead, keeper_at: &str) -> Boxed {
+        let pinned = annex::flake::system("winvm", &annex::flake::Binary::Released).flake;
+
+        Boxed {
+            probed: annex::Probed::Present { running: false },
+            data_dir: annex.dir.path().to_owned(),
+            annex_at: annex.at().parse().unwrap(),
+            keeper_at: keeper_at.parse().unwrap(),
+            service: "active",
+            booted: AtomicUsize::new(0),
+            terminated: AtomicUsize::new(0),
+            nixos: std::sync::Mutex::new(
+                [
+                    (annex::flake::IN_THE_BOX.to_owned(), pinned.into_bytes()),
+                    (
+                        annex::flake::LOCK_IN_THE_BOX.to_owned(),
+                        LOCK.as_bytes().to_vec(),
+                    ),
+                ]
+                .into(),
+            ),
+            ran: std::sync::Mutex::new(Vec::new()),
+            rebuild: ("activating the configuration...\n", true),
+            under: std::sync::OnceLock::new(),
+            read_while_rebuilt: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+
+    /// The same, pinned to a release that is not this build's — what a Keeper
+    /// updated since finds.
+    fn pinned_before(annex: &Verkstead, keeper_at: &str) -> Boxed {
+        let boxed = Boxed::of(annex, keeper_at);
+        boxed.put(annex::flake::IN_THE_BOX, OLD_FLAKE);
+        boxed
+    }
+
+    /// The file at `path` inside, which is the Data Directory's own.
+    fn inside(&self, path: &str) -> std::path::PathBuf {
+        let name = path
+            .strip_prefix(annex::DATA_DIR)
+            .expect("only the Data Directory and /etc/nixos are read or written");
+
+        self.data_dir.join(name.trim_start_matches('/'))
+    }
+
+    fn put(&self, path: &str, text: &str) {
+        self.nixos
+            .lock()
+            .unwrap()
+            .insert(path.to_owned(), text.as_bytes().to_vec());
+    }
+
+    /// The file at `path` in `/etc/nixos`, as text.
+    fn nixos(&self, path: &str) -> Option<String> {
+        self.nixos
+            .lock()
+            .unwrap()
+            .get(path)
+            .map(|bytes| String::from_utf8_lossy(bytes).into_owned())
+    }
+
+    /// What was run in the box, but the `chown` the link hands its settings
+    /// files over with.
+    fn ran(&self) -> Vec<String> {
+        self.ran
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|ran| !ran.starts_with("chown "))
+            .cloned()
+            .collect()
+    }
+}
+
+/// What a box pinned to another release has for its flake: the `verkstead`
+/// input as the Keeper writes it, at a release that is not this build's.
+const OLD_FLAKE: &str = "{
+  inputs.verkstead = {
+    url = \"github:tobico/verkstead/v0.9.1\";
+  };
+}
+";
+
+/// And the lock beside it, every input the flake declares at a revision of its
+/// own: a re-pin moves the Verkstead two, and an Update every one but
+/// `nixos-wsl`.
+const LOCK: &str = r#"{
+  "nodes": {
+    "nixos-wsl": { "locked": { "rev": "5e1c2a90" } },
+    "nixpkgs": { "locked": { "rev": "0b4defa2" } },
+    "nixpkgs-unstable": { "locked": { "rev": "9d7e31c4" } },
+    "verkstead": { "locked": { "rev": "a1b2c3d4" } },
+    "verkstead-binary": { "locked": { "rev": "e5f6a7b8" } }
+  }
+}
+"#;
+
+/// The revision `lock` holds for `input`.
+fn rev(lock: &str, input: &str) -> String {
+    let lock: serde_json::Value = serde_json::from_str(lock).unwrap();
+
+    lock["nodes"][input]["locked"]["rev"]
+        .as_str()
+        .unwrap()
+        .to_owned()
+}
+
+/// The revision of `input` in [`LOCK`] once `nix flake update` has moved it,
+/// as the box's `nix` moves it.
+fn moved(input: &str) -> String {
+    format!("{}-moved", rev(LOCK, input))
+}
+
+/// A program that ran to its end, having said `out`.
+fn ran(out: &str) -> std::process::Output {
+    #[cfg(unix)]
+    let status = std::os::unix::process::ExitStatusExt::from_raw(0);
+    #[cfg(windows)]
+    let status = std::os::windows::process::ExitStatusExt::from_raw(0);
+
+    std::process::Output {
+        status,
+        stdout: out.as_bytes().to_vec(),
+        stderr: Vec::new(),
+    }
+}
+
+impl annex::Backend for Boxed {
+    fn probe(&self) -> annex::Probed {
+        self.probed
+    }
+
+    fn turning_on(&self) -> &'static [annex::Step] {
+        &[]
+    }
+
+    fn image(&self) -> annex::Image {
+        unreachable!("a booted box is not made")
+    }
+
+    fn disk(&self) -> &std::path::Path {
+        &self.data_dir
+    }
+
+    fn taken(&self) -> Option<u64> {
+        None
+    }
+
+    fn make(&self, _: &std::path::Path) -> anyhow::Result<()> {
+        unreachable!("a booted box is not made")
+    }
+
+    fn made(&self) -> anyhow::Result<()> {
+        unreachable!("a booted box is not made")
+    }
+
+    fn opening(&self, _: u16) -> Option<String> {
+        None
+    }
+
+    fn boot(&self) -> anyhow::Result<()> {
+        self.booted.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+
+    fn terminate(&self) -> anyhow::Result<()> {
+        self.terminated.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+
+    fn networking(&self) -> annex::Networking {
+        annex::Networking::Nat
+    }
+
+    fn run(&self, _: annex::Inside, argv: &[&str]) -> anyhow::Result<std::process::Output> {
+        self.ran.lock().unwrap().push(argv.join(" "));
+
+        // `nix flake update --flake /etc/nixos <input>…` moves each input it
+        // names in the lock, and nothing else.
+        if let Some(at) = argv.windows(2).position(|pair| pair == ["flake", "update"]) {
+            let mut nixos = self.nixos.lock().unwrap();
+            let lock = &nixos[annex::flake::LOCK_IN_THE_BOX];
+            let mut lock: serde_json::Value = serde_json::from_slice(lock).unwrap();
+
+            for input in &argv[at + 4..] {
+                let rev = &mut lock["nodes"][*input]["locked"]["rev"];
+                *rev = format!("{}-moved", rev.as_str().unwrap()).into();
+            }
+
+            nixos.insert(
+                annex::flake::LOCK_IN_THE_BOX.to_owned(),
+                serde_json::to_vec_pretty(&lock).unwrap(),
+            );
+
+            return Ok(ran(""));
+        }
+
+        Ok(match argv[0] {
+            "systemctl" => ran(self.service),
+            "journalctl" => ran("verkstead: the peer listener could not be bound\n"),
+            _ => ran(""),
+        })
+    }
+
+    fn follow(
+        &self,
+        _: annex::Inside,
+        argv: &[&str],
+        line: &mut dyn FnMut(&str),
+    ) -> anyhow::Result<std::process::ExitStatus> {
+        self.ran.lock().unwrap().push(argv.join(" "));
+
+        if let Some(annexed) = self.under.get().and_then(std::sync::Weak::upgrade) {
+            self.read_while_rebuilt
+                .lock()
+                .unwrap()
+                .push(annexed.reading(None).state);
+        }
+
+        let (said, succeeds) = self.rebuild;
+        said.lines().for_each(&mut *line);
+
+        let code = if succeeds { 0 } else { 1 };
+        #[cfg(unix)]
+        let status = std::os::unix::process::ExitStatusExt::from_raw(code << 8);
+        #[cfg(windows)]
+        let status = std::os::windows::process::ExitStatusExt::from_raw(code as u32);
+
+        Ok(status)
+    }
+
+    fn write(&self, path: &str, bytes: &[u8], _: u32) -> anyhow::Result<()> {
+        if path.starts_with(annex::flake::NIXOS) {
+            self.nixos
+                .lock()
+                .unwrap()
+                .insert(path.to_owned(), bytes.to_vec());
+            return Ok(());
+        }
+
+        Ok(std::fs::write(self.inside(path), bytes)?)
+    }
+
+    fn read(&self, path: &str) -> anyhow::Result<Vec<u8>> {
+        if path.starts_with(annex::flake::NIXOS) {
+            return self
+                .nixos
+                .lock()
+                .unwrap()
+                .get(path)
+                .cloned()
+                .ok_or_else(|| anyhow::anyhow!("cat: {path}: No such file or directory"));
+        }
+
+        Ok(std::fs::read(self.inside(path))?)
+    }
+
+    fn addresses(&self, _: annex::Networking, _: u16) -> anyhow::Result<annex::Addresses> {
+        self.ran.lock().unwrap().push("addresses".to_owned());
+
+        Ok(annex::Addresses {
+            annex: self.annex_at,
+            keeper_at: self.keeper_at,
+        })
+    }
+}
+
+/// An Annex as the install run leaves one: a `config.yaml` and a
+/// `secrets.yaml` written in, which are what the link rewrites.
+async fn made_annex() -> Verkstead {
+    made_annex_serving(Router::new()).await
+}
+
+/// The same, serving `workbench` to its Keeper over the link.
+async fn made_annex_serving(workbench: Router) -> Verkstead {
+    let annex = Verkstead::annex_serving(workbench).await;
+
+    let settings = Settings::in_data_dir(annex.dir.path());
+    settings.save_config(&Config::default()).unwrap();
+    settings.save_secrets(&Secrets::default()).unwrap();
+
+    annex
+}
+
+/// Where the Annex reaches the Keeper in these tests: the Windows side of a
+/// WSL NAT, as a probe reads it.
+const KEEPER_AT: &str = "172.24.16.1:8423";
+
+/// At a Keeper's start, a box made to the end is booted and linked with the
+/// two addresses read off it: the Keeper holds the Annex at the one, and the
+/// Annex is told the other as its `kept_by`'s `at` — and nothing is pressed.
+#[tokio::test]
+async fn a_keepers_start_boots_its_annex_and_links_it() {
+    let annex = made_annex().await;
+    let keeper = Verkstead::asking().await;
+    let boxed = Arc::new(Boxed::of(&annex, KEEPER_AT));
+
+    Annexed::of(boxed.clone(), keeper.settings())
+        .started(&keeper.devices())
+        .await;
+
+    assert_eq!(boxed.booted.load(Ordering::SeqCst), 1);
+
+    let kept = listing(&keeper.workbench()).await;
+
+    assert_eq!(kept.members.len(), 1, "the Annex, linked");
+    assert_eq!(kept.members[0].identity.device, B);
+    assert_eq!(kept.members[0].identity.kept_by.as_deref(), Some(A));
+    assert!(kept.members[0].reachable);
+    assert_eq!(kept.members[0].trouble, None);
+
+    assert_eq!(
+        verkstead_store::members(&keeper.pool).await.unwrap()[0]
+            .direct
+            .as_deref(),
+        Some(annex.at().as_str()),
+        "the Keeper holds the Annex at the address the probe read",
+    );
+
+    assert_eq!(
+        Settings::in_data_dir(annex.dir.path())
+            .config()
+            .kept_by()
+            .and_then(KeptBy::at),
+        Some(KEEPER_AT),
+        "the Annex reaches its Keeper at the address the probe read",
+    );
+}
+
+/// The release the box's flake pins is read at the start that boots it and
+/// held: the Components row draws it of a box that has stopped since, and
+/// reading the row boots nothing.
+#[tokio::test]
+async fn a_keepers_start_holds_the_release_its_annex_is_pinned_to() {
+    let annex = made_annex().await;
+    let keeper = Verkstead::asking().await;
+    let boxed = Arc::new(Boxed::of(&annex, KEEPER_AT));
+
+    let annexed = Annexed::of(boxed.clone(), keeper.settings());
+    assert_eq!(annexed.reading(None).version, None, "nothing read yet");
+
+    annexed.started(&keeper.devices()).await;
+
+    let reading = annexed.reading(None);
+    assert_eq!(reading.version.as_deref(), Some(annex::flake::VERSION));
+    assert_eq!(
+        reading.state,
+        verkstead_render::AnnexState::Stopped,
+        "the box probes stopped, and is drawn so"
+    );
+    assert_eq!(
+        boxed.booted.load(Ordering::SeqCst),
+        1,
+        "booted by the start alone"
+    );
+}
+
+/// An Annex pinned to the Keeper's own release is booted and linked with
+/// nothing written into `/etc/nixos` and nothing rebuilt.
+#[tokio::test]
+async fn a_keeper_of_the_same_release_boots_its_annex_without_rebuilding() {
+    let annex = made_annex().await;
+    let keeper = Verkstead::asking().await;
+    let boxed = Arc::new(Boxed::of(&annex, KEEPER_AT));
+    let pinned = boxed.nixos(annex::flake::IN_THE_BOX);
+
+    Annexed::of(boxed.clone(), keeper.settings())
+        .started(&keeper.devices())
+        .await;
+
+    assert_eq!(boxed.ran(), ["addresses"], "nothing run but the link");
+    assert_eq!(boxed.nixos(annex::flake::IN_THE_BOX), pinned);
+    assert_eq!(listing(&keeper.workbench()).await.members.len(), 1);
+}
+
+/// A Keeper one release ahead of its Annex pins it to its own before the
+/// link: the flake and configuration written again, the Verkstead inputs alone
+/// relocked, and the box rebuilt with the Components row reading *updating* —
+/// and then linked, reporting the Keeper's own release.
+#[tokio::test]
+async fn a_keeper_one_release_ahead_repins_its_annex_before_linking_it() {
+    let annex = made_annex().await;
+    let keeper = Verkstead::asking().await;
+    let boxed = Arc::new(Boxed::pinned_before(&annex, KEEPER_AT));
+
+    let annexed = Arc::new(Annexed::of(boxed.clone(), keeper.settings()));
+    boxed.under.set(Arc::downgrade(&annexed)).unwrap();
+
+    annexed.started(&keeper.devices()).await;
+
+    let flakes = "NIX_CONFIG=experimental-features = nix-command flakes";
+    assert_eq!(
+        boxed.ran(),
+        [
+            format!("{flakes} nix flake update --flake /etc/nixos verkstead verkstead-binary"),
+            format!("{flakes} nixos-rebuild switch --flake /etc/nixos#verkstead"),
+            "addresses".to_owned(),
+        ],
+        "relocked and rebuilt, and then linked"
+    );
+
+    let system = annex::flake::system(&platform::hostname(), &annex::flake::Binary::Released);
+    assert_eq!(
+        boxed.nixos(annex::flake::IN_THE_BOX).as_deref(),
+        Some(system.flake.as_str())
+    );
+    assert_eq!(
+        boxed
+            .nixos(annex::flake::CONFIGURATION_IN_THE_BOX)
+            .as_deref(),
+        Some(system.configuration.as_str())
+    );
+    let lock = boxed.nixos(annex::flake::LOCK_IN_THE_BOX).unwrap();
+    for input in ["verkstead", "verkstead-binary"] {
+        assert_eq!(rev(&lock, input), moved(input), "{input} moved");
+    }
+    for input in ["nixpkgs", "nixpkgs-unstable", "nixos-wsl"] {
+        assert_eq!(rev(&lock, input), rev(LOCK, input), "{input} where it was");
+    }
+
+    assert_eq!(
+        *boxed.read_while_rebuilt.lock().unwrap(),
+        [verkstead_render::AnnexState::Updating]
+    );
+
+    let reading = annexed.reading(None);
+    assert_eq!(reading.version.as_deref(), Some(annex::flake::VERSION));
+    assert_eq!(reading.state, verkstead_render::AnnexState::Stopped);
+
+    let kept = listing(&keeper.workbench()).await;
+    assert_eq!(kept.members.len(), 1, "linked once it was rebuilt");
+    assert_eq!(kept.members[0].trouble, None);
+}
+
+/// A re-pin whose rebuild fails leaves the box on its old release, its files
+/// as they were, and the rebuild's last line on the Annex's row — and the
+/// Annex is linked on what it ran, for the next start to try again.
+#[tokio::test]
+async fn a_failed_repin_leaves_its_line_on_the_row_and_the_old_release() {
+    let annex = made_annex().await;
+    let keeper = Verkstead::asking().await;
+    let boxed = Arc::new(Boxed {
+        rebuild: (
+            "building the system configuration...\n\
+             error: builder for '/nix/store/abc-verkstead.drv' failed with exit code 1\n",
+            false,
+        ),
+        ..Boxed::pinned_before(&annex, KEEPER_AT)
+    });
+
+    let devices = keeper.devices().waiting(PATIENCE);
+    let annexed = Annexed::of(boxed.clone(), keeper.settings());
+    annexed.started(&devices).await;
+
+    assert_eq!(
+        boxed.nixos(annex::flake::IN_THE_BOX).as_deref(),
+        Some(OLD_FLAKE)
+    );
+    assert_eq!(
+        boxed.nixos(annex::flake::LOCK_IN_THE_BOX).as_deref(),
+        Some(LOCK)
+    );
+
+    let line = "The annex couldn't be updated: error: builder for \
+                '/nix/store/abc-verkstead.drv' failed with exit code 1.";
+
+    let reading = annexed.reading(devices.annex_trouble());
+    assert_eq!(reading.version.as_deref(), Some("0.9.1"));
+    assert_eq!(reading.trouble.as_deref(), Some(line));
+
+    let app = router_answering_devices_telling(keeper.pool.clone(), devices, keeper.nudges.clone());
+    let kept = listing(&app).await;
+    assert_eq!(kept.members.len(), 1, "linked on the release it ran");
+    assert_eq!(kept.members[0].trouble.as_deref(), Some(line));
+}
+
+// Update on the Components row (ADR-0024): every input but `nixos-wsl` moved
+// and the box rebuilt and linked again, refused while a session runs there.
+
+/// Where the Components pane presses Update.
+const UPDATE: &str = "/api/ui/components/update";
+
+/// How a row of [`its_conversations`] came by its branch: typed by the human,
+/// named by its first session, or still being named — which last the sidebar
+/// calls a draft.
+enum Named {
+    Typed,
+    Session,
+    Naming,
+}
+
+/// An Annex's workbench as its Keeper reads it over the link: its sidebar
+/// list, one row per `(branch, named, working)`, and nothing else.
+fn its_conversations(rows: &[(&str, Named, bool)]) -> Router {
+    let rows: Vec<serde_json::Value> = rows
+        .iter()
+        .map(|(branch, named, working)| {
+            serde_json::json!({
+                "branch": branch,
+                "branch_named": matches!(named, Named::Typed),
+                "state": "Implementing",
+                "naming": matches!(named, Named::Naming),
+                "working": working,
+            })
+        })
+        .collect();
+
+    Router::new().route(
+        "/api/ui/conversations",
+        axum::routing::get(move || {
+            let rows = rows.clone();
+            async move { axum::Json(rows) }
+        }),
+    )
+}
+
+/// A Keeper whose Annex is over `boxed`, started — booted, pinned and linked
+/// — with the handle its workbench presses Update through.
+async fn kept_and_started(keeper: &Verkstead, boxed: &Arc<Boxed>) -> (Arc<Annexed>, Devices) {
+    let annexed = Arc::new(Annexed::of(boxed.clone(), keeper.settings()));
+    boxed.under.set(Arc::downgrade(&annexed)).unwrap();
+
+    let devices = keeper.devices().keeping_an_annex(annexed.clone());
+    annexed.started(&devices).await;
+
+    (annexed, devices)
+}
+
+/// Press Update through `devices`' workbench, and hand back what it answered.
+async fn press_update(keeper: &Verkstead, devices: &Devices) -> (StatusCode, String) {
+    let app = router_answering_devices_telling(
+        keeper.pool.clone(),
+        devices.clone(),
+        keeper.nudges.clone(),
+    );
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(UPDATE)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let status = response.status();
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+
+    (status, String::from_utf8_lossy(&bytes).into_owned())
+}
+
+/// Wait out the Update going in the background, which is over once the row
+/// no longer reads *updating*.
+async fn update_over(annexed: &Annexed) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+
+    while annexed.reading(None).state == verkstead_render::AnnexState::Updating {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the Update never ended"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+/// Update with a session running in the Annex is refused with a line naming
+/// its Conversation, and nothing is written, relocked or rebuilt.
+#[tokio::test]
+async fn update_with_a_session_running_in_the_annex_is_refused_naming_it() {
+    let annex = made_annex_serving(its_conversations(&[
+        ("old-work", Named::Typed, false),
+        ("solid-viewer", Named::Session, true),
+    ]))
+    .await;
+    let keeper = Verkstead::asking().await;
+    let boxed = Arc::new(Boxed::running(&annex, KEEPER_AT));
+
+    let (annexed, devices) = kept_and_started(&keeper, &boxed).await;
+    let before = boxed.ran();
+
+    let (status, said) = press_update(&keeper, &devices).await;
+
+    assert_eq!(status, StatusCode::CONFLICT, "{said}");
+    assert!(
+        said.contains(
+            "The annex can't be updated while a session runs on solid-viewer. Stop it first."
+        ),
+        "{said}"
+    );
+    assert_eq!(boxed.ran(), before, "nothing run in the box");
+    assert_eq!(
+        boxed.nixos(annex::flake::LOCK_IN_THE_BOX).as_deref(),
+        Some(LOCK)
+    );
+    assert_ne!(
+        annexed.reading(None).state,
+        verkstead_render::AnnexState::Updating
+    );
+}
+
+/// And with several, the first is named and the rest counted.
+#[tokio::test]
+async fn update_with_sessions_running_names_the_first_and_counts_the_rest() {
+    let annex = made_annex_serving(its_conversations(&[
+        ("solid-viewer", Named::Session, true),
+        ("draft", Named::Naming, true),
+        ("pwa-and-push", Named::Typed, true),
+    ]))
+    .await;
+    let keeper = Verkstead::asking().await;
+    let boxed = Arc::new(Boxed::running(&annex, KEEPER_AT));
+
+    let (_annexed, devices) = kept_and_started(&keeper, &boxed).await;
+    let (status, said) = press_update(&keeper, &devices).await;
+
+    assert_eq!(status, StatusCode::CONFLICT, "{said}");
+    assert!(
+        said.contains(
+            "The annex can't be updated while sessions run on solid-viewer and 2 more \
+             conversations. Stop them first."
+        ),
+        "{said}"
+    );
+}
+
+/// And one whose first session is still naming its branch is called a draft,
+/// as the sidebar calls it, rather than by a name nobody chose.
+#[tokio::test]
+async fn update_with_a_session_still_naming_its_branch_calls_it_a_draft() {
+    let annex =
+        made_annex_serving(its_conversations(&[("grand-otter", Named::Naming, true)])).await;
+    let keeper = Verkstead::asking().await;
+    let boxed = Arc::new(Boxed::running(&annex, KEEPER_AT));
+
+    let (_annexed, devices) = kept_and_started(&keeper, &boxed).await;
+    let (status, said) = press_update(&keeper, &devices).await;
+
+    assert_eq!(status, StatusCode::CONFLICT, "{said}");
+    assert!(
+        said.contains("The annex can't be updated while a session runs on a draft. Stop it first."),
+        "{said}"
+    );
+}
+
+/// A stopped box runs no session, so Update on one is taken without asking
+/// it anything: booted, relocked, rebuilt and linked.
+#[tokio::test]
+async fn update_on_a_stopped_box_boots_and_updates_it_without_asking() {
+    let annex =
+        made_annex_serving(its_conversations(&[("solid-viewer", Named::Typed, true)])).await;
+    let keeper = Verkstead::asking().await;
+    let boxed = Arc::new(Boxed::of(&annex, KEEPER_AT));
+
+    let annexed = Arc::new(Annexed::of(boxed.clone(), keeper.settings()));
+    let devices = keeper.devices().keeping_an_annex(annexed.clone());
+
+    let (status, said) = press_update(&keeper, &devices).await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+
+    update_over(&annexed).await;
+
+    let flakes = "NIX_CONFIG=experimental-features = nix-command flakes";
+    assert_eq!(boxed.booted.load(Ordering::SeqCst), 1, "booted first");
+    assert_eq!(
+        boxed.ran()[..2],
+        [
+            format!(
+                "{flakes} nix flake update --flake /etc/nixos \
+                 nixpkgs nixpkgs-unstable verkstead verkstead-binary"
+            ),
+            format!("{flakes} nixos-rebuild switch --flake /etc/nixos#verkstead"),
+        ],
+    );
+    assert!(boxed.ran().contains(&"addresses".to_owned()), "and linked");
+}
+
+/// An Annex that cannot be asked what it is running — never linked here — is
+/// refused rather than guessed about.
+#[tokio::test]
+async fn update_on_an_annex_that_cannot_be_asked_is_refused() {
+    let annex = made_annex().await;
+    let keeper = Verkstead::asking().await;
+    let boxed = Arc::new(Boxed::running(&annex, KEEPER_AT));
+
+    let annexed = Arc::new(Annexed::of(boxed.clone(), keeper.settings()));
+    let devices = keeper.devices().keeping_an_annex(annexed);
+
+    let (status, said) = press_update(&keeper, &devices).await;
+
+    assert_eq!(status, StatusCode::CONFLICT, "{said}");
+    assert!(
+        said.contains("The annex couldn't be asked what it's running, so it wasn't updated."),
+        "{said}"
+    );
+    assert!(boxed.ran().is_empty(), "nothing run in the box");
+}
+
+/// Update on an idle Annex moves both nixpkgs with the Verkstead inputs and
+/// leaves `nixos-wsl` where it was, rebuilds with the row reading *updating*,
+/// and links the Annex again once it is back — the rebuild having restarted
+/// its server.
+#[tokio::test]
+async fn update_on_an_idle_annex_moves_every_input_but_nixos_wsl_and_links_it_again() {
+    let annex = made_annex_serving(its_conversations(&[("old-work", Named::Typed, false)])).await;
+    let keeper = Verkstead::asking().await;
+    let boxed = Arc::new(Boxed::running(&annex, KEEPER_AT));
+
+    let (annexed, devices) = kept_and_started(&keeper, &boxed).await;
+    assert_eq!(
+        boxed.ran(),
+        ["addresses"],
+        "pinned already, so linked alone"
+    );
+
+    let (status, said) = press_update(&keeper, &devices).await;
+
+    assert_eq!(status, StatusCode::OK, "{said}");
+    let reading: verkstead_render::ComponentsView = serde_json::from_str(&said).unwrap();
+    assert_eq!(
+        reading.annex.unwrap().state,
+        verkstead_render::AnnexState::Updating,
+        "the press is answered with the row reading updating"
+    );
+
+    update_over(&annexed).await;
+
+    let flakes = "NIX_CONFIG=experimental-features = nix-command flakes";
+    assert_eq!(
+        boxed.ran(),
+        [
+            "addresses".to_owned(),
+            format!(
+                "{flakes} nix flake update --flake /etc/nixos \
+                 nixpkgs nixpkgs-unstable verkstead verkstead-binary"
+            ),
+            format!("{flakes} nixos-rebuild switch --flake /etc/nixos#verkstead"),
+            "addresses".to_owned(),
+        ],
+        "relocked, rebuilt, and linked again"
+    );
+
+    let lock = boxed.nixos(annex::flake::LOCK_IN_THE_BOX).unwrap();
+    for input in [
+        "nixpkgs",
+        "nixpkgs-unstable",
+        "verkstead",
+        "verkstead-binary",
+    ] {
+        assert_eq!(rev(&lock, input), moved(input), "{input} moved");
+    }
+    assert_eq!(
+        rev(&lock, "nixos-wsl"),
+        rev(LOCK, "nixos-wsl"),
+        "nixos-wsl where it was"
+    );
+
+    assert_eq!(
+        *boxed.read_while_rebuilt.lock().unwrap(),
+        [verkstead_render::AnnexState::Updating]
+    );
+
+    let reading = annexed.reading(devices.annex_trouble());
+    assert_eq!(reading.state, verkstead_render::AnnexState::Running);
+    assert_eq!(reading.version.as_deref(), Some(annex::flake::VERSION));
+    assert_eq!(reading.trouble, None);
+
+    let kept = listing(&keeper.workbench()).await;
+    assert_eq!(kept.members.len(), 1, "one row, linked again");
+    assert!(kept.members[0].reachable);
+}
+
+/// An Update whose rebuild fails leaves its line on the row and the box on
+/// what it ran before, its files put back — and the Annex linked again on it.
+#[tokio::test]
+async fn a_failed_update_leaves_its_line_on_the_row_and_the_annex_answering() {
+    let annex = made_annex_serving(its_conversations(&[])).await;
+    let keeper = Verkstead::asking().await;
+    let boxed = Arc::new(Boxed {
+        rebuild: (
+            "building the system configuration...\n\
+             error: builder for '/nix/store/abc-verkstead.drv' failed with exit code 1\n",
+            false,
+        ),
+        ..Boxed::running(&annex, KEEPER_AT)
+    });
+    let pinned = boxed.nixos(annex::flake::IN_THE_BOX);
+
+    let (annexed, devices) = kept_and_started(&keeper, &boxed).await;
+
+    let (status, said) = press_update(&keeper, &devices).await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+
+    update_over(&annexed).await;
+
+    assert_eq!(boxed.nixos(annex::flake::IN_THE_BOX), pinned);
+    assert_eq!(
+        boxed.nixos(annex::flake::LOCK_IN_THE_BOX).as_deref(),
+        Some(LOCK),
+        "the lock it had, put back"
+    );
+    assert_eq!(
+        boxed.ran().last().map(String::as_str),
+        Some("addresses"),
+        "linked again after the rebuild that failed"
+    );
+
+    let line = "The annex couldn't be updated: error: builder for \
+                '/nix/store/abc-verkstead.drv' failed with exit code 1.";
+
+    let reading = annexed.reading(devices.annex_trouble());
+    assert_eq!(reading.trouble.as_deref(), Some(line));
+    assert_eq!(reading.version.as_deref(), Some(annex::flake::VERSION));
+
+    let app = router_answering_devices_telling(keeper.pool.clone(), devices, keeper.nudges.clone());
+    let kept = listing(&app).await;
+    assert_eq!(kept.members.len(), 1);
+    assert_eq!(kept.members[0].trouble.as_deref(), Some(line));
+}
+
+/// What a Keeper says about the work in its `config.yaml`: every key the
+/// Annex is handed, with the Instructions and the second MCP server as given.
+fn keepers_config(instructions: &str, second: &str) -> String {
+    format!(
+        "authors:\n  - id: work\n    name: Ada Lovelace\n    email: ada@example.com\n\
+         instructions: {instructions}\n\
+         mcp_servers:\n\
+         - name: docs\n  url: https://docs.example.com/mcp\n  headers: [Authorization]\n\
+         {second}\
+         at_once:\n  conversations: 2\n\
+         cleanup:\n  delete:\n    enabled: true\n    days: 9\n\
+         ignored_comments:\n- author: coderabbitai\n\
+         conflict_resolution: rebase\n\
+         share_on_done: true\n\
+         sandbox_binds:\n- /keepers/own\n"
+    )
+}
+
+/// The Annex has no settings of its own: everything in the Keeper's files
+/// about the work is handed in at every start — the Instructions, the MCP
+/// servers and their header values, how much runs at once, the Cleanup, the
+/// comments ignored, how a conflict is resolved and whether the record is
+/// shared on Done. Not its Authors or their tokens, which reach the Annex as
+/// mirrors over the one list (ADR-0025). A change on the Keeper reaches
+/// the Annex the next time the two start together, a server the Keeper no
+/// longer declares is gone from both files, and the Annex's own keys stand.
+#[tokio::test]
+async fn a_keepers_start_hands_its_annex_its_settings_about_the_work() {
+    let annex = made_annex().await;
+    let keeper = Verkstead::asking().await;
+    let boxed = Arc::new(Boxed::of(&annex, KEEPER_AT));
+
+    let kept = Settings::in_data_dir(annex.dir.path());
+    std::fs::write(
+        kept.config_path(),
+        "sandbox_binds:\n- /annexes/own\ninstructions: The annex's own words.\n",
+    )
+    .unwrap();
+
+    std::fs::write(
+        keeper.settings().config_path(),
+        keepers_config(
+            "Say it plainly.",
+            "- name: tracker\n  url: https://tracker.example.com/mcp\n  headers: [X-Api-Key]\n",
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        keeper.settings().secrets_path(),
+        "author_tokens:\n  work: ghp_first\n\
+         mcp_headers:\n  docs:\n    Authorization: Bearer abc\n  tracker:\n    X-Api-Key: k1\n",
+    )
+    .unwrap();
+
+    Annexed::of(boxed.clone(), keeper.settings())
+        .started(&keeper.devices())
+        .await;
+
+    let config = kept.config();
+    assert!(
+        config.authors().is_empty(),
+        "the Keeper's Authors arrive as mirrors rather than copied"
+    );
+    assert_eq!(config.instructions(), "Say it plainly.");
+    assert_eq!(
+        config
+            .mcp_servers()
+            .iter()
+            .map(|server| (server.name().unwrap(), server.headers().to_vec()))
+            .collect::<Vec<_>>(),
+        [
+            ("docs", vec!["Authorization".to_owned()]),
+            ("tracker", vec!["X-Api-Key".to_owned()]),
+        ]
+    );
+    assert_eq!(config.at_once().conversations_configured(), Some(2));
+    assert!(config.cleanup().deletes());
+    assert_eq!(config.cleanup().delete_after_configured(), Some(9));
+    assert_eq!(config.ignored_comments()[0].author(), Some("coderabbitai"));
+    assert_eq!(format!("{:?}", config.conflict_resolution()), "Rebase");
+    assert!(config.share_on_done());
+    assert_eq!(
+        config.sandbox_binds(),
+        ["/annexes/own"],
+        "the Annex's binds are its own"
+    );
+    assert_eq!(
+        config.kept_by().map(KeptBy::device),
+        Some(A),
+        "the link's own key stands beside them",
+    );
+
+    let secrets = kept.secrets();
+    assert_eq!(secrets.author_token("work"), None, "and so do their tokens");
+    assert_eq!(
+        secrets.mcp_header("docs", "Authorization"),
+        Some("Bearer abc")
+    );
+    assert_eq!(secrets.mcp_header("tracker", "X-Api-Key"), Some("k1"));
+
+    // And the Keeper's changed — new Instructions, the tracker gone — which
+    // the next start carries across.
+    std::fs::write(
+        keeper.settings().config_path(),
+        keepers_config("Say it at length.", ""),
+    )
+    .unwrap();
+    std::fs::write(
+        keeper.settings().secrets_path(),
+        "author_tokens:\n  work: ghp_second\nmcp_headers:\n  docs:\n    Authorization: Bearer abc\n",
+    )
+    .unwrap();
+
+    Annexed::of(boxed.clone(), keeper.settings())
+        .started(&keeper.devices())
+        .await;
+
+    let config = kept.config();
+    assert_eq!(config.instructions(), "Say it at length.");
+    assert_eq!(config.mcp_servers().len(), 1, "the tracker, gone");
+    assert_eq!(config.sandbox_binds(), ["/annexes/own"]);
+
+    let secrets = kept.secrets();
+    assert_eq!(secrets.author_token("work"), None);
+    assert_eq!(secrets.mcp_header("tracker", "X-Api-Key"), None);
+    assert_eq!(
+        secrets.mcp_header("docs", "Authorization"),
+        Some("Bearer abc")
+    );
+
+    // And a start with nothing changed since writes neither file.
+    boxed.ran.lock().unwrap().clear();
+
+    Annexed::of(boxed.clone(), keeper.settings())
+        .started(&keeper.devices())
+        .await;
+
+    let ran = boxed.ran.lock().unwrap().clone();
+    assert!(
+        !ran.iter().any(|ran| ran.starts_with("chown ")),
+        "nothing handed over, so nothing written: {ran:?}"
+    );
+}
+
+/// An Annex whose service never answers is a line on its row with what the
+/// service says of itself, and the Keeper's workbench goes on answering.
+#[tokio::test]
+async fn an_annex_that_never_answers_is_a_line_on_its_row() {
+    let annex = made_annex().await;
+    let keeper = Verkstead::asking().await;
+
+    Annexed::of(Arc::new(Boxed::of(&annex, KEEPER_AT)), keeper.settings())
+        .started(&keeper.devices())
+        .await;
+
+    // And at the next start the service will not come up: nothing is on the
+    // port it would answer at.
+    let nobody = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let nowhere = nobody.local_addr().unwrap();
+    drop(nobody);
+
+    let failing = Boxed {
+        annex_at: nowhere,
+        service: "failed",
+        ..Boxed::of(&annex, KEEPER_AT)
+    };
+
+    let devices = keeper.devices().waiting(PATIENCE);
+    Annexed::of(Arc::new(failing), keeper.settings())
+        .waiting(Duration::from_secs(1))
+        .started(&devices)
+        .await;
+
+    let app = router_answering_devices_telling(keeper.pool.clone(), devices, keeper.nudges.clone());
+    let kept = listing(&app).await;
+
+    assert_eq!(kept.members.len(), 1, "the Annex's row stays");
+    assert_eq!(
+        kept.members[0].trouble.as_deref(),
+        Some(
+            "The annex didn't answer: its service is failed. \
+             verkstead: the peer listener could not be bound."
+        ),
+    );
+    assert_eq!(kept.annex_trouble, None, "said once, on the Annex's row");
+}
+
+/// An Annex that has never been linked has no row to carry the line, so it is
+/// said beside this device's own instead — never only in the log.
+#[tokio::test]
+async fn an_annex_never_linked_that_never_answers_is_said_beside_this_device() {
+    let annex = made_annex().await;
+    let keeper = Verkstead::asking().await;
+
+    let nobody = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let nowhere = nobody.local_addr().unwrap();
+    drop(nobody);
+
+    let failing = Boxed {
+        annex_at: nowhere,
+        service: "failed",
+        ..Boxed::of(&annex, KEEPER_AT)
+    };
+
+    let devices = keeper.devices().waiting(PATIENCE);
+    let came_up = Annexed::of(Arc::new(failing), keeper.settings())
+        .waiting(Duration::from_secs(1))
+        .up(&devices)
+        .await;
+
+    let line = "The annex didn't answer: its service is failed. \
+                verkstead: the peer listener could not be bound.";
+    assert_eq!(
+        came_up,
+        Err(line.to_owned()),
+        "and the install run's reason"
+    );
+
+    let app = router_answering_devices_telling(keeper.pool.clone(), devices, keeper.nudges.clone());
+    let kept = listing(&app).await;
+
+    assert!(kept.members.is_empty(), "no row was ever made");
+    assert_eq!(kept.annex_trouble.as_deref(), Some(line));
+}
+
+/// A machine with no box made to the end has nothing booted at the start, and
+/// nothing terminated at the stop.
+#[tokio::test]
+async fn no_box_is_booted_where_none_was_made() {
+    let annex = made_annex().await;
+    let keeper = Verkstead::asking().await;
+
+    let boxed = Arc::new(Boxed {
+        probed: annex::Probed::NoDistro,
+        ..Boxed::of(&annex, KEEPER_AT)
+    });
+
+    let annexed = Annexed::of(boxed.clone(), keeper.settings());
+    annexed.started(&keeper.devices()).await;
+    annexed.stopped().await;
+
+    assert_eq!(boxed.booted.load(Ordering::SeqCst), 0);
+    assert_eq!(boxed.terminated.load(Ordering::SeqCst), 0);
+    assert!(listing(&keeper.workbench()).await.members.is_empty());
+}
+
+/// A third device, beside the Keeper and its Annex.
+const C: &str = "ffeeddccbbaa99887766554433221100";
+
+/// A distro unregistered by hand is forgotten at the Keeper's next start, on
+/// every member: the Annex's row is gone from the Keeper's list and from the
+/// third device's, whose open page is told, and the Components row reads *not
+/// installed*. The Annex itself is not dialled — it is gone.
+#[tokio::test]
+async fn a_keepers_start_with_its_box_gone_forgets_its_annex_on_every_member() {
+    let annex = made_annex().await;
+    let keeper = Verkstead::asking().await;
+
+    Annexed::of(Arc::new(Boxed::of(&annex, KEEPER_AT)), keeper.settings())
+        .started(&keeper.devices())
+        .await;
+
+    let mut laptop = Verkstead::called(
+        C,
+        Reading::stated(no_tailscale(), Platform::HERE, None, Vec::new()),
+    )
+    .await;
+    laptop.answer();
+
+    let linking =
+        |of: &Verkstead, addresses: Vec<String>, kept_by: Option<&str>| verkstead_store::Linking {
+            device: of.device.id().to_owned(),
+            name: of.device.id().to_owned(),
+            os: "Linux".to_owned(),
+            addresses,
+            fingerprint: of.device.fingerprint().to_owned(),
+            kept_by: kept_by.map(str::to_owned),
+        };
+
+    verkstead_store::record_member(&keeper.pool, &linking(&laptop, vec![laptop.at()], None))
+        .await
+        .unwrap();
+    for (member, kept_by) in [(&keeper, None), (&annex, Some(A))] {
+        verkstead_store::record_member(&laptop.pool, &linking(member, Vec::new(), kept_by))
+            .await
+            .unwrap();
+    }
+
+    let mut listening = Listening::open(&laptop.workbench()).await;
+
+    let gone = Arc::new(Boxed {
+        probed: annex::Probed::NoDistro,
+        ..Boxed::of(&annex, KEEPER_AT)
+    });
+    let annexed = Annexed::of(gone.clone(), keeper.settings());
+    annexed.started(&keeper.devices().waiting(PATIENCE)).await;
+
+    let ids = |view: DevicesView| -> Vec<String> {
+        view.members
+            .into_iter()
+            .map(|member| member.identity.device)
+            .collect()
+    };
+
+    assert_eq!(ids(listing(&keeper.workbench()).await), [C]);
+    assert_eq!(listening.nudge().await, Nudge::Devices);
+    assert_eq!(ids(listing(&laptop.workbench()).await), [A]);
+    assert_eq!(
+        annexed.reading(None).state,
+        verkstead_render::AnnexState::NotInstalled
+    );
+
+    assert_eq!(gone.booted.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        ids(listing(&annex.workbench()).await),
+        [A],
+        "the Annex was told nothing",
+    );
+}
+
+/// A probe that could not be read is not a box gone: the Annex's row stays.
+#[tokio::test]
+async fn a_keepers_start_whose_probe_could_not_be_read_keeps_its_annex() {
+    let annex = made_annex().await;
+    let keeper = Verkstead::asking().await;
+
+    Annexed::of(Arc::new(Boxed::of(&annex, KEEPER_AT)), keeper.settings())
+        .started(&keeper.devices())
+        .await;
+
+    let unread = Arc::new(Boxed {
+        probed: annex::Probed::Unread,
+        ..Boxed::of(&annex, KEEPER_AT)
+    });
+    Annexed::of(unread, keeper.settings())
+        .started(&keeper.devices())
+        .await;
+
+    let kept = listing(&keeper.workbench()).await;
+    assert_eq!(kept.members.len(), 1);
+    assert_eq!(kept.members[0].identity.device, B);
+}
+
+/// The ordered stop terminates the box this start booted, once.
+#[tokio::test]
+async fn the_stop_terminates_the_box_the_start_booted() {
+    let annex = made_annex().await;
+    let keeper = Verkstead::asking().await;
+    let boxed = Arc::new(Boxed::of(&annex, KEEPER_AT));
+
+    let annexed = Annexed::of(boxed.clone(), keeper.settings());
+    annexed.started(&keeper.devices()).await;
+
+    annexed.stopped().await;
+    annexed.stopped().await;
+
+    assert_eq!(boxed.terminated.load(Ordering::SeqCst), 1);
 }

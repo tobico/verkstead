@@ -1327,3 +1327,154 @@ describe("the step over the page's own interval", () => {
     );
   });
 });
+
+describe("the WSL row", () => {
+  /// `reading` with the WSL row on the end of it, which is where a Windows
+  /// server draws it — see `Machine::rows` in `crates/server/src/onboarding.rs`.
+  /// None of the served fixtures is a Windows machine, so the row is put on.
+  function wsl(
+    reading: OnboardingView,
+    state: DependencyState,
+    install: InstallState = { install: "Idle" },
+  ): OnboardingView {
+    return {
+      ...reading,
+      dependencies: [
+        ...reading.dependencies.filter((row) => row.dependency !== "Wsl"),
+        { dependency: "Wsl", state, install },
+      ],
+    };
+  }
+
+  const NO_WSL: DependencyState = { state: "Absent", trouble: null, seen: null };
+  const RESTART: DependencyState = { state: "Owed", owed: "Restart" };
+  const NO_ANNEX: DependencyState = { state: "Owed", owed: "Annex" };
+  const VIRTUALIZATION: DependencyState = {
+    state: "Refused",
+    barred: "Virtualization",
+  };
+
+  it("draws the row unticked on Windows, under the human's own words", () => {
+    const { container } = mount(wsl(WINDOWS, NO_WSL));
+
+    expect(drawn(container).at(-1)).toBe("Wsl");
+    expect(row(container, "Wsl").textContent).toContain(
+      "Linux development (WSL)",
+    );
+    expect(box(container, "Wsl")!.checked).toBe(false);
+  });
+
+  /// The served readings are a Linux's, and a Linux server draws no WSL row.
+  it("is not drawn on a machine that is not Windows", () => {
+    const { container } = mount(FRESH);
+
+    expect(drawn(container)).not.toContain("Wsl");
+  });
+
+  /// It never holds the step up: a session on this machine needs none of it.
+  it("leaves Next to what a session needs", () => {
+    const { container } = mount(wsl(stating(WINDOWS, "Claude", THERE), NO_WSL));
+
+    expect(onwards(container).disabled).toBe(false);
+  });
+
+  /// WSL answering after the restart is somebody who ticked the row once, and
+  /// the poll that reads it is the whole of what ticks it.
+  it("ticks itself once WSL answers with no Annex in it", () => {
+    const { container, read } = mount(wsl(WINDOWS, NO_WSL));
+
+    expect(box(container, "Wsl")!.checked).toBe(false);
+
+    read(wsl(WINDOWS, NO_ANNEX));
+
+    expect(box(container, "Wsl")!.checked).toBe(true);
+  });
+
+  it("draws the row refused with the reason and no box when virtualization is off", async () => {
+    const fetching = serving(
+      whenever(INSTALL, json(INSTALLING), "POST"),
+      json(FRESH),
+    );
+    const { container } = mount(wsl(WINDOWS, VIRTUALIZATION));
+    const refused = row(container, "Wsl");
+
+    expect(box(container, "Wsl")).toBeNull();
+    expect(refused.querySelector("[data-barred]")!.textContent).toContain(
+      "Virtualization is off in this PC's firmware settings",
+    );
+
+    // And a press cannot carry it.
+    fireEvent.click(box(container, "Claude")!);
+    fireEvent.click(onwards(container));
+
+    await waitFor(() => expect(fetching).toHaveBeenCalled());
+    expect(JSON.parse(String(fetching.mock.calls[0]![1]?.body))).toEqual({
+      dependencies: ["Sandbox", "Git", "Claude"],
+    });
+  });
+
+  /// The run turned WSL on, and the restart that finishes it is the human's:
+  /// the row lands on the hint screen with that instruction and no command.
+  it("lands a restart owed on the hint screen with its own instruction", () => {
+    const run: RunView = { ...OVER, phase: "Installing", done: 0, total: 1 };
+    const { container, read } = mount(
+      running(wsl(WINDOWS, NO_WSL, { install: "Installing" }), run),
+    );
+
+    read(running(wsl(WINDOWS, RESTART), { ...OVER, done: 1, total: 1 }));
+
+    expect(drawn(container)).toEqual(["Wsl"]);
+    expect(row(container, "Wsl").textContent).toContain(
+      "Restart Windows to finish turning WSL on",
+    );
+    expect(row(container, "Wsl").querySelector("code")).toBeNull();
+    expect(onwards(container).disabled).toBe(true);
+  });
+
+  /// And a server that cannot raise the dialog sends it there with both
+  /// commands, the way it sends every other row.
+  it("gives both commands on the hint screen where nothing could raise them", () => {
+    localStorage.setItem(SETUP_SCREEN, "hints");
+
+    const { container } = mount(
+      wsl(WINDOWS, NO_WSL, {
+        install: "Failed",
+        why: "Verkstead has no way to ask this machine for a password.",
+      }),
+    );
+
+    expect(drawn(container)).toContain("Wsl");
+    expect(row(container, "Wsl").textContent).toContain(
+      "wsl --install --no-distribution; wsl --update",
+    );
+  });
+});
+
+describe("what the WSL row is told to run", () => {
+  it("turns WSL on and updates it on the Windows tab, as an administrator", () => {
+    const windows = GUIDES.Windows.rows.Wsl;
+
+    expect(windows.command).toBe(
+      "wsl --install --no-distribution; wsl --update",
+    );
+    expect(windows.note).toContain("Run as administrator");
+    expect(windows.note).toContain("restart Windows");
+  });
+
+  it("names no command on a tab that is not Windows", () => {
+    for (const distro of DISTROS.filter((distro) => distro !== "Windows")) {
+      expect(GUIDES[distro].rows.Wsl.command, distro).toBeUndefined();
+    }
+  });
+
+  it("says to restart on every tab where the restart is owed", () => {
+    for (const distro of DISTROS) {
+      expect(
+        instructionFor(distro, "Wsl", null, { state: "Owed", owed: "Restart" }),
+        distro,
+      ).toEqual({
+        note: "Restart Windows to finish turning WSL on, then come back to this step.",
+      });
+    }
+  });
+});

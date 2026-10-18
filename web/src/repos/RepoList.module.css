@@ -332,3 +332,16 @@
   margin: 0.5rem 0 0;
   font-size: 0.9rem;
 }
+
+/* And the clone a clonable row asks where no parent is remembered: the create's
+   card with one field, and a line above it naming what is about to be cloned
+   and from where. The place is a URL, which has no spaces to wrap at. */
+.cloneRepo h3 {
+  margin: 0 0 0.85rem;
+  font-size: 1rem;
+}
+
+.form .from {
+  margin: 0 0 0.85rem;
+  overflow-wrap: anywhere;
+}

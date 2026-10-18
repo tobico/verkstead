@@ -99,6 +99,7 @@ async fn linked(pool: &SqlitePool, device: &str, name: &str, os: &str, addresses
                 .map(|address| (*address).to_owned())
                 .collect(),
             fingerprint: format!("AA:BB:{device}"),
+            kept_by: None,
         },
     )
     .await

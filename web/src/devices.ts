@@ -22,6 +22,8 @@ import type { IconDefinition } from "@fortawesome/free-solid-svg-icons";
 import { loadDevices } from "./api/client";
 import type { DeviceIdentity, DevicesView } from "./api/types";
 import { useReading } from "./freshness";
+import type { Device } from "./reaching";
+import { repoParent } from "./remembered";
 
 /// Which mark stands beside a device's name, off the word for its operating
 /// system.
@@ -89,6 +91,16 @@ export function useDevices(on?: () => boolean) {
     enabled: on === undefined || on(),
     freshness: { reconcile: "device" },
   }));
+}
+
+/// Where a new repository on a device starts its browse — see `repoParent` in
+/// `remembered.ts` — with whether that device is an **Annex** read off the
+/// cluster, an Annex's repositories having a place of their own to go.
+export function useRepoParent(): (device: Device) => string {
+  const devices = useDevices();
+
+  return (device) =>
+    repoParent(device, deviceShown(devices.data, device)?.kept_by != null);
 }
 
 /// Which device a page is about, as something drawing it needs one: the name

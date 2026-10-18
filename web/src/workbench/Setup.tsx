@@ -70,13 +70,14 @@ import {
   type JSX,
 } from "solid-js";
 
+import { AnnexMark, keeperOf } from "../AnnexMark";
 import { HarnessMark } from "../HarnessMark";
 import { Check } from "../Check";
 import { Icon } from "../Icon";
 import { Menu } from "../Menu";
 import { Switch as Toggle } from "../Switch";
 import { DEFAULT_PROFILE, type AgentType } from "../agents";
-import { deviceShown, osIcon, useDevices } from "../devices";
+import { deviceShown, osIcon, useDevices, useRepoParent } from "../devices";
 import {
   addCompanion,
   chooseGrillingPairing,
@@ -84,6 +85,7 @@ import {
   chooseReviewPairing,
   listBranches,
   listProfiles,
+  listClonable,
   listRepos,
   pickProcess,
   removeCompanion,
@@ -107,6 +109,7 @@ import type {
   CompanionRemoved,
   CompanionView,
   BriefEvent,
+  ClonableRepo,
   ConversationView,
   DeviceIdentity,
   PairingView,
@@ -123,11 +126,11 @@ import { brokenReading } from "../broken";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine, Note } from "../notices";
 import * as pairing from "../pairing";
-import { Listbox, Picker, type Action } from "../picking";
+import { Listbox, Picker, type Action, type Clonable } from "../picking";
 import { Moving } from "./Moving";
 import { keyOf, useDevice } from "../reaching";
 import type { Device } from "../reaching";
-import { CreateRepo, OpenRepo } from "../repos/RepoList";
+import { CloneRepo, CreateRepo, OpenRepo, useCloning } from "../repos/RepoList";
 import { reading, type Picked } from "./agent";
 import { AUTOMATIC, chosen } from "./naming";
 import {
@@ -631,6 +634,23 @@ export function DeviceSelect(props: {
     return props.chosen ?? view.this.device;
   };
 
+  /// What an **Annex**'s row says after its name: the Annex mark, and its OS
+  /// word as a quiet second word. An Annex carries its Keeper's hostname, so
+  /// without these the two rows would read as one machine twice. Nothing on
+  /// any other row, whose name and mark have always been the whole of it.
+  const annexed = (device: DeviceIdentity): JSX.Element | undefined => {
+    const view = devices.data;
+    const keeper = view === undefined ? null : keeperOf(view, device);
+    if (keeper === null) return undefined;
+
+    return (
+      <>
+        <AnnexMark keeper={keeper} />
+        <span class={styles.deviceOs}>{device.os}</span>
+      </>
+    );
+  };
+
   // And the correction, which runs whether or not the control is drawn: a pick
   // this browser is holding for a device that has left the cluster is a page
   // pointed at a machine nothing can reach, and taking the select away — which
@@ -664,6 +684,7 @@ export function DeviceSelect(props: {
           value={(device) => device.device}
           label={(device) => device.name}
           icon={(device) => osIcon(device.os)}
+          after={annexed}
           nothing={props.nothing}
           chosen={showing()}
           disabled={props.disabled}
@@ -885,7 +906,7 @@ export function RepoSelect(props: {
     freshness: { reconcile: "id" },
   }));
 
-  const { rows, modal } = repoRows((repoId) => props.pick(repoId));
+  const { rows, clonable, modal } = repoRows((repoId) => props.pick(repoId));
 
   return (
     <div class={styles.repoSelect}>
@@ -902,6 +923,7 @@ export function RepoSelect(props: {
         chosen={props.chosen}
         disabled={props.disabled}
         pick={(repo) => props.pick(Number(repo))}
+        clonable={clonable()}
         actions={rows}
       />
 
@@ -933,18 +955,37 @@ export function RepoSelect(props: {
 /// what to call the directory rather than where it ends up, and the path a
 /// registration was given is not the one it is recorded under, so there is
 /// nothing here to match against the list either way.
+///
+/// **And the clonable group above them**, which lands the same way: a press
+/// clones the repository on the device the dropdown is for and picks the Repo
+/// it made. Straight away where **Create repo** has a parent remembered for that
+/// device, the row saying *Cloning…* and the group held while it runs; through
+/// [`CloneRepo`]'s card where none is, and where a clone sent straight off is
+/// refused — the reason under the field, where another parent can be picked.
 function repoRows(pick: (repoId: number) => void): {
   /// The rows themselves, for the [`Listbox`] to draw behind its rule.
   rows: Action[];
+  /// The clonable group, for the [`Listbox`] to draw above them.
+  clonable: () => Clonable[];
   /// And what they open, which outlives the rows: the dropdown is shut by the
-  /// press that opened the modal.
+  /// press that opened the modal. A clone sent straight off is said here too,
+  /// under the control, while it runs.
   modal: () => JSX.Element;
 } {
-  // Which of the two is up, or `null` while neither is. One signal rather than
-  // two, because they are two cards over one page and the second is opened from
-  // the same shut dropdown as the first: a pair of booleans could say both were
-  // up, which is a state there is no way to reach and no way to draw.
-  const [opening, setOpening] = createSignal<"create" | "open" | null>(null);
+  const device = useDevice();
+  const parentOf = useRepoParent();
+
+  // Which card is up, or `null` while none is. One signal rather than one per
+  // card, because they are cards over one page opened from the same shut
+  // dropdown: separate booleans could say two were up, which is a state there
+  // is no way to reach and no way to draw. A clone's card carries the row it is
+  // for, and what a clone already sent was refused with.
+  const [opening, setOpening] = createSignal<
+    | "create"
+    | "open"
+    | { clone: ClonableRepo; refused: string | null }
+    | null
+  >(null);
 
   const shut = () => setOpening(null);
 
@@ -953,22 +994,115 @@ function repoRows(pick: (repoId: number) => void): {
     pick(repoId);
   };
 
+  const clonable = useClonable();
+  const cloning = useCloning();
+
+  // Which row's clone is out, by its origin, while one is.
+  const [out, setOut] = createSignal<ClonableRepo | null>(null);
+
+  const clone = (repo: ClonableRepo) => {
+    const parent = parentOf(device());
+
+    if (parent === "") {
+      setOpening({ clone: repo, refused: null });
+      return;
+    }
+
+    setOut(repo);
+    cloning.mutate(
+      { origin: repo.origin, parent, author: repo.author },
+      {
+        onSuccess: (landing) => {
+          if ("refused" in landing) {
+            setOpening({ clone: repo, refused: landing.refused });
+            return;
+          }
+
+          landed(landing.repo.id);
+        },
+        onSettled: () => setOut(null),
+      },
+    );
+  };
+
+  /// What a row says while a clone is out — see `doing` on [`Clonable`].
+  const doing = (repo: ClonableRepo): string | null | undefined => {
+    const running = out();
+
+    if (running === null) return undefined;
+    return running.origin === repo.origin ? "Cloning…" : null;
+  };
+
+  const cloneCard = () => {
+    const up = opening();
+    return typeof up === "object" ? up : null;
+  };
+
   return {
     rows: [
       { label: "Create repo", press: () => setOpening("create") },
       { label: "Open repo", press: () => setOpening("open") },
     ],
+    clonable: () =>
+      clonable().map((repo) => ({
+        name: repo.name,
+        place: repo.place,
+        press: () => clone(repo),
+        doing: doing(repo),
+      })),
     modal: () => (
       <>
+        <Show when={out()}>
+          {(repo) => <Note>Cloning {repo().name}…</Note>}
+        </Show>
+        <Show when={cloning.isError}>
+          <ErrorLine class={styles.failure}>
+            The repo couldn't be cloned. {cloning.error?.message}
+          </ErrorLine>
+        </Show>
         <Show when={opening() === "create"}>
           <CreateRepo close={shut} landed={(repo) => landed(repo.id)} />
         </Show>
         <Show when={opening() === "open"}>
           <OpenRepo close={shut} landed={(repo) => landed(repo.id)} />
         </Show>
+        <Show when={cloneCard()}>
+          {(card) => (
+            <CloneRepo
+              repo={card().clone}
+              refused={card().refused}
+              close={shut}
+              landed={(repo) => landed(repo.id)}
+            />
+          )}
+        </Show>
       </>
     ),
   };
+}
+
+/// The Repo dropdown's second group: the repositories the rest of the cluster
+/// holds, by origin, that the device the dropdown is for lacks.
+///
+/// Read of that device rather than of this one — a member's is reached over the
+/// Relay like its Repo list — and keyed under that list, so the Nudge that says
+/// its Repos moved reads this again too: a Repo registered there is one fewer
+/// thing to clone. A reading that fails is a group not drawn, for the reason a
+/// member that does not answer adds nothing to it: the rows above are what the
+/// human came for, and they are said to be missing on their own.
+function useClonable(): () => ClonableRepo[] {
+  const device = useDevice();
+
+  const clonable = useReading(() => ({
+    queryKey: keyOf(device(), "repos", "clonable"),
+    queryFn: () => listClonable(device()),
+
+    // Merged by the origin, which is what one row is: a list re-read while the
+    // human has the rows down keeps every row it still holds where it was.
+    freshness: { reconcile: "origin" },
+  }));
+
+  return () => clonable.data ?? [];
 }
 
 /// Which Repo the work is in at all: the first thing in the Repo panel, and the
@@ -1100,7 +1234,7 @@ export function RepoChoice(props: {
       : [held, ...listed];
   };
 
-  const { rows, modal } = repoRows((repoId) => props.pick(repoId));
+  const { rows, clonable, modal } = repoRows((repoId) => props.pick(repoId));
 
   return (
     <div class={styles.repoPick}>
@@ -1125,6 +1259,7 @@ export function RepoChoice(props: {
             chosen={props.chosen}
             disabled={props.disabled}
             pick={(repo) => props.pick(Number(repo))}
+            clonable={clonable()}
             actions={rows}
           />
         </Match>

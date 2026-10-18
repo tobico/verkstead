@@ -479,9 +479,18 @@ fn lacks(lacking: &verkstead_render::Lacking, device: &str) -> String {
              awake."
         ),
 
-        Lacking::Repo { name, companion } => format!(
-            "The {repo} {name} is not on {device}. Open repo there to register it.",
+        Lacking::Repo {
+            name,
+            companion,
+            clonable,
+        } => format!(
+            "The {repo} {name} is not on {device}. {errand}",
             repo = if *companion { "companion repo" } else { "repo" },
+            errand = if clonable.is_some() {
+                "The Transfer dialog can clone it there."
+            } else {
+                "Open repo there to register it."
+            },
         ),
 
         Lacking::RepoAuthor {
@@ -1760,6 +1769,8 @@ mod tests {
             reachable: true,
             renewing_from: None,
             acknowledged: None,
+            kept_by: None,
+            direct: None,
         }
     }
 

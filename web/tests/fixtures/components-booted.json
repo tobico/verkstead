@@ -1,0 +1,8 @@
+{
+  "annex": {
+    "disk": 12884901888,
+    "state": "Running",
+    "trouble": "The annex didn't answer: its service is failed.",
+    "version": "0.9.1"
+  }
+}

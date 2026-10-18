@@ -43,7 +43,7 @@
 //! `crates/render/src/onboarding.rs`, which carries the rows and the distro and
 //! no prose at all.
 
-import type { Dependency, Distro } from "../api/types";
+import type { Dependency, DependencyState, Distro } from "../api/types";
 
 /// One row's instruction, on one operating system.
 ///
@@ -78,7 +78,7 @@ export type Instruction = {
 };
 
 /// One operating system's answers: what the tab is called, and an instruction
-/// for each of the seven rows.
+/// for each of the eight rows.
 ///
 /// Where a session looks is not among them. That was a sentence per tab naming
 /// the fixed list a session's `PATH` used to be; a session's `PATH` is now the
@@ -283,6 +283,32 @@ function nixos(attribute: string, note?: string): Instruction {
   };
 }
 
+/// Turning WSL on by hand, which is what the WSL row runs where Windows will
+/// raise its dialog: both commands, in one terminal with an administrator's
+/// rights, and the restart after them.
+const WSL_ON_WINDOWS: Instruction = {
+  command: "wsl --install --no-distribution; wsl --update",
+  note:
+    "Run this from a terminal opened with Run as administrator, then " +
+    "restart Windows.",
+};
+
+/// And on every other tab, where there is no WSL: the row is drawn on Windows
+/// alone, and these tabs are only a press away from it.
+const WSL_ELSEWHERE: Instruction = {
+  note: "WSL is part of Windows. There's nothing to install on this machine.",
+};
+
+/// What is left on a machine where WSL is on and its restart is still to come,
+/// which the Components pane says of its row in these same words.
+export const WSL_RESTART_OWED = "Restart Windows to finish turning WSL on";
+
+/// And the WSL row's hint on such a machine, whichever tab is open: that
+/// machine's restart, and no command.
+const WSL_RESTART: Instruction = {
+  note: `${WSL_RESTART_OWED}, then come back to this step.`,
+};
+
 /// The nine tabs' own answers.
 ///
 /// Written out one tab at a time rather than composed out of a package manager
@@ -344,6 +370,7 @@ export const GUIDES: Record<Distro, Guide> = {
       Grok: GROK_UNIX,
       OpenCode: { command: "brew install opencode" },
       Gh: { command: "brew install gh" },
+      Wsl: WSL_ELSEWHERE,
     },
   },
 
@@ -403,6 +430,7 @@ export const GUIDES: Record<Distro, Guide> = {
           "GitHub ships a zip for this Mac, not a package. Unpack gh into " +
           "~/.local/bin, which is on every Mac session's PATH.",
       },
+      Wsl: WSL_ELSEWHERE,
     },
   },
 
@@ -427,6 +455,7 @@ export const GUIDES: Record<Distro, Guide> = {
       Grok: GROK_WINDOWS,
       OpenCode: windowsNpm("opencode-ai"),
       Gh: { command: "winget install --id GitHub.cli" },
+      Wsl: WSL_ON_WINDOWS,
     },
   },
 
@@ -445,6 +474,7 @@ export const GUIDES: Record<Distro, Guide> = {
       Grok: GROK_UNIX,
       OpenCode: nixos("opencode"),
       Gh: nixos("gh"),
+      Wsl: WSL_ELSEWHERE,
     },
   },
 
@@ -461,6 +491,7 @@ export const GUIDES: Record<Distro, Guide> = {
       Grok: GROK_UNIX,
       OpenCode: npm("opencode-ai", "sudo apt install nodejs npm"),
       Gh: { command: "sudo apt install gh" },
+      Wsl: WSL_ELSEWHERE,
     },
   },
 
@@ -477,6 +508,7 @@ export const GUIDES: Record<Distro, Guide> = {
       Grok: GROK_UNIX,
       OpenCode: npm("opencode-ai", "sudo dnf install nodejs npm"),
       Gh: { command: "sudo dnf install gh" },
+      Wsl: WSL_ELSEWHERE,
     },
   },
 
@@ -493,6 +525,7 @@ export const GUIDES: Record<Distro, Guide> = {
       Grok: GROK_UNIX,
       OpenCode: npm("opencode-ai", "sudo apt install nodejs npm"),
       Gh: { command: "sudo apt install gh" },
+      Wsl: WSL_ELSEWHERE,
     },
   },
 
@@ -509,6 +542,7 @@ export const GUIDES: Record<Distro, Guide> = {
       Grok: GROK_UNIX,
       OpenCode: npm("opencode-ai", "sudo pacman -S npm"),
       Gh: { command: "sudo pacman -S github-cli" },
+      Wsl: WSL_ELSEWHERE,
     },
   },
 
@@ -539,6 +573,7 @@ export const GUIDES: Record<Distro, Guide> = {
           "Install your distribution's GitHub CLI package, which is gh or " +
           "github-cli.",
       },
+      Wsl: WSL_ELSEWHERE,
     },
   },
 };
@@ -571,13 +606,19 @@ function theAccount(directory: string | null): Instruction {
 
 /// The instruction for one row on one tab, as this machine reads it.
 ///
-/// The written-down answer for every row but one — see [`theAccount`], which is
-/// the row this server has a word about.
+/// The written-down answer for every row but two — see [`theAccount`], which is
+/// the row this server has a word about, and [`WSL_RESTART`], which is what the
+/// WSL row is told on a machine whose `state` says its restart is still owed.
 export function instructionFor(
   distro: Distro,
   dependency: Dependency,
   directory: string | null,
+  state?: DependencyState,
 ): Instruction {
+  if (state?.state === "Owed" && state.owed === "Restart") {
+    return WSL_RESTART;
+  }
+
   return distro === "Windows" && dependency === "Sandbox"
     ? theAccount(directory)
     : GUIDES[distro].rows[dependency];

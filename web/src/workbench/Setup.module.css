@@ -196,6 +196,16 @@
   max-width: min(20rem, calc(100vw - 2.5rem));
 }
 
+/* An Annex's OS word after its mark — *Linux (WSL)* — quiet and a size down,
+   the mark beside it being the louder of the two. Never the thing to cut: the
+   name before them is. */
+.deviceOs {
+  font-size: 0.8rem;
+  font-weight: normal;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+
 /* The panel behind the Repo trigger: the branch, the base, what the work runs
    alongside and the rows those are configured on. A card rather than part of
    the row, so it is the one thing here drawn with a surface of its own — the

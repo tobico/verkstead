@@ -172,6 +172,27 @@ pub struct Member {
     /// and a device that joined in the middle of a changeover, which is why this
     /// is a record of what *was* acknowledged rather than the absence of a debt.
     pub acknowledged: Option<String>,
+
+    /// And the Device Id of its **Keeper**, where it is an **Annex**: the mark
+    /// its row is drawn with (ADR-0024).
+    ///
+    /// What the member said about itself when its row was first written, and
+    /// kept through every recording after — see [`Linking::kept_by`]. `None` is
+    /// every member but an Annex.
+    pub kept_by: Option<String>,
+
+    /// And an address this device reaches the member at that the member never
+    /// advertised: dialled before any of the [`Member::addresses`], and never
+    /// written by what the far end says (ADR-0024, *The Keeper and its Annex
+    /// reach each other directly*).
+    ///
+    /// **A Keeper's and its Annex's alone.** The Keeper holds its Annex at the
+    /// address the Annex Forward points at, and the Annex holds its Keeper at
+    /// the address its `kept_by` says — each the one road between them that
+    /// does not move with the Keeper's network. Nothing that tells a third
+    /// device about a member carries it, so no third device holds it. `None` is
+    /// every other row. See [`member_reached_at`].
+    pub direct: Option<String>,
 }
 
 /// What a member has yet to be told about a device.
@@ -241,6 +262,17 @@ pub struct Linking {
     pub os: String,
     pub addresses: Vec<String>,
     pub fingerprint: String,
+
+    /// And whose Annex it says it is, where it says so: the mark, **taken on a
+    /// row's first recording and never after** — see [`record_member`].
+    ///
+    /// Unlink is refused on a marked row everywhere, so a mark a refresh could
+    /// add would be a member that could make itself impossible to unlink by
+    /// editing its own `config.yaml` — a stolen laptop, say, which is the case
+    /// Unlink is for. An Annex is first recorded off the Keeper's Join, the
+    /// roster or an announcement, all of which carry it, so it is marked from
+    /// its first row on; a device linked as an ordinary member stays one.
+    pub kept_by: Option<String>,
 }
 
 /// And a member that has made its certificate again, saying so: the same five
@@ -281,7 +313,9 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
              last_seen     TEXT NOT NULL,
              reachable     INTEGER NOT NULL DEFAULT 1,
              renewing_from TEXT,
-             acknowledged  TEXT
+             acknowledged  TEXT,
+             kept_by       TEXT,
+             direct        TEXT
          ) STRICT",
     )
     .execute(pool)
@@ -318,7 +352,12 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // acknowledged one of this device's. A database written by the stage that
     // made the changeover and read by this one is a device that is owed every
     // announcement it never made, which is the right answer to have arrived at.
-    for column in ["renewing_from", "acknowledged"] {
+    //
+    // And the mark an Annex's row wears, by the same rule again: arriving null,
+    // there being no Annex before the column. See [`Member::kept_by`]. And the
+    // direct address a Keeper and its Annex hold each other at, null for the
+    // same reason — see [`Member::direct`].
+    for column in ["renewing_from", "acknowledged", "kept_by", "direct"] {
         let there: Option<(String,)> =
             sqlx::query_as("SELECT name FROM pragma_table_info('members') WHERE name = ?")
                 .bind(column)
@@ -328,7 +367,7 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
 
         if there.is_none() {
             // Interpolated rather than bound, because a column name is not a
-            // value and `ALTER TABLE` takes no parameters. The two names are
+            // value and `ALTER TABLE` takes no parameters. The names are
             // written above rather than passed in from anywhere.
             sqlx::query(&format!("ALTER TABLE members ADD COLUMN {column} TEXT"))
                 .execute(pool)
@@ -434,12 +473,15 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
 /// why this is also what puts a dimmed row back: the exchange behind it *is*
 /// the member answering, so a row that was marked unreachable is reachable
 /// again by the same fact that moves the moment.
+///
+/// **Except the mark**, which a new row takes and an existing one keeps,
+/// whatever this recording says — see [`Linking::kept_by`].
 pub async fn record_member(pool: &SqlitePool, linking: &Linking) -> Result<()> {
     let mut tx = writing(pool, "recording a member").await?;
 
     sqlx::query(
-        "INSERT INTO members (device, name, os, fingerprint, last_seen, reachable)
-         VALUES (?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), 1)
+        "INSERT INTO members (device, name, os, fingerprint, last_seen, reachable, kept_by)
+         VALUES (?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), 1, ?)
          ON CONFLICT (device) DO UPDATE
            SET name        = excluded.name,
                os          = excluded.os,
@@ -451,6 +493,7 @@ pub async fn record_member(pool: &SqlitePool, linking: &Linking) -> Result<()> {
     .bind(&linking.name)
     .bind(&linking.os)
     .bind(&linking.fingerprint)
+    .bind(&linking.kept_by)
     .execute(&mut *tx)
     .await
     .with_context(|| format!("recording device {} as a member", linking.device))?;
@@ -489,11 +532,12 @@ pub async fn record_member(pool: &SqlitePool, linking: &Linking) -> Result<()> {
 /// One member row as the query hands it back, in the order the `SELECT` names the
 /// columns: the device, its name, its OS, the fingerprint it is keyed on, when it
 /// was last heard from, whether the last dial got through, what it is changing over
-/// from, and what it has acknowledged of this device.
+/// from, what it has acknowledged of this device, whose Annex it is, and where this
+/// device reaches it directly.
 ///
-/// Named because eight columns written out at the call site is a type nobody reads
-/// — and the two nullable ones at the end are exactly the pair it would be easiest
-/// to read the wrong way round.
+/// Named because ten columns written out at the call site is a type nobody reads
+/// — and the nullable ones at the end are exactly the ones it would be easiest
+/// to read in the wrong order.
 type Row = (
     String,
     String,
@@ -501,6 +545,8 @@ type Row = (
     String,
     String,
     bool,
+    Option<String>,
+    Option<String>,
     Option<String>,
     Option<String>,
 );
@@ -515,7 +561,8 @@ type Row = (
 /// cluster mode was written for.
 pub async fn members(pool: &SqlitePool) -> Result<Vec<Member>> {
     let rows: Vec<Row> = sqlx::query_as(
-        "SELECT device, name, os, fingerprint, last_seen, reachable, renewing_from, acknowledged
+        "SELECT device, name, os, fingerprint, last_seen, reachable, renewing_from, acknowledged,
+                kept_by, direct
          FROM members
          ORDER BY name, device",
     )
@@ -542,18 +589,29 @@ pub async fn members(pool: &SqlitePool) -> Result<Vec<Member>> {
     Ok(rows
         .into_iter()
         .map(
-            |(device, name, os, fingerprint, last_seen, reachable, renewing_from, acknowledged)| {
-                Member {
-                    addresses: addresses.remove(&device).unwrap_or_default(),
-                    device,
-                    name,
-                    os,
-                    fingerprint,
-                    last_seen,
-                    reachable,
-                    renewing_from,
-                    acknowledged,
-                }
+            |(
+                device,
+                name,
+                os,
+                fingerprint,
+                last_seen,
+                reachable,
+                renewing_from,
+                acknowledged,
+                kept_by,
+                direct,
+            )| Member {
+                addresses: addresses.remove(&device).unwrap_or_default(),
+                device,
+                name,
+                os,
+                fingerprint,
+                last_seen,
+                reachable,
+                renewing_from,
+                acknowledged,
+                kept_by,
+                direct,
             },
         )
         .collect())
@@ -657,6 +715,32 @@ pub async fn member_unreachable(pool: &SqlitePool, device: &str) -> Result<()> {
     tx.commit()
         .await
         .with_context(|| format!("marking device {device} as answering nothing"))
+}
+
+/// Write down where this device reaches `device` directly, or that it reaches
+/// it nowhere but at what it advertises — see [`Member::direct`].
+///
+/// **Its own write, apart from [`record_member`]**, because the two are about
+/// different things: a recording is what the far end said of itself, and this
+/// is what this device knows of the road to it. So no refresh moves it, and a
+/// device that is not a member is nothing to write and nothing to fail.
+pub async fn member_reached_at(
+    pool: &SqlitePool,
+    device: &str,
+    direct: Option<&str>,
+) -> Result<()> {
+    let mut tx = writing(pool, "recording where a member is reached directly").await?;
+
+    sqlx::query("UPDATE members SET direct = ? WHERE device = ?")
+        .bind(direct)
+        .bind(device)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("recording where device {device} is reached directly"))?;
+
+    tx.commit()
+        .await
+        .with_context(|| format!("recording where device {device} is reached directly"))
 }
 
 /// Write down that a member has made its certificate again: the fingerprint to
@@ -999,17 +1083,42 @@ pub async fn forget_member(pool: &SqlitePool, device: &str) -> Result<()> {
 /// Nothing is refused. A device that holds no members is one that has already
 /// forgotten everybody, and being told twice is not a thing to fail.
 pub async fn forget_every_member(pool: &SqlitePool) -> Result<()> {
+    forget_every_member_but(pool, &[]).await
+}
+
+/// The same, keeping the members `keeping` names — what a leaver does that is
+/// a **Keeper** or an **Annex** (ADR-0024): the pair's membership is the
+/// Keeper's, so it goes with the leaver rather than staying behind with the
+/// cluster it left.
+///
+/// What is owed between the kept is kept too, and every debt naming anybody
+/// else goes, for [`forget_every_member`]'s reason.
+pub async fn forget_every_member_but(pool: &SqlitePool, keeping: &[String]) -> Result<()> {
     let mut tx = writing(pool, "forgetting every member").await?;
 
+    // SQLite reads an empty list as one nothing is in, so keeping nobody is
+    // every row.
+    let kept = vec!["?"; keeping.len()].join(", ");
+
     for statement in [
-        "DELETE FROM owed_announcements",
-        "DELETE FROM member_addresses",
-        "DELETE FROM members",
+        format!(
+            "DELETE FROM owed_announcements WHERE device NOT IN ({kept}) OR about NOT IN ({kept})"
+        ),
+        format!("DELETE FROM member_addresses WHERE device NOT IN ({kept})"),
+        format!("DELETE FROM members WHERE device NOT IN ({kept})"),
         // And every tick, which named machines this one is no longer linked
         // to — see [`forget_member`].
-        "DELETE FROM permitted_devices",
+        format!("DELETE FROM permitted_devices WHERE device NOT IN ({kept})"),
     ] {
-        sqlx::query(statement)
+        let mut query = sqlx::query(&statement);
+
+        for _ in 0..statement.matches("NOT IN").count() {
+            for device in keeping {
+                query = query.bind(device);
+            }
+        }
+
+        query
             .execute(&mut *tx)
             .await
             .context("forgetting every device this one was linked to")?;

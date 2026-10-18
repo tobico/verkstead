@@ -271,6 +271,13 @@
   color: var(--ink-soft);
 }
 
+/* And *annex of …*, on an Annex's row: whose it is, which is why it has no
+   Unlink. The same kind of thing said again — a fact about the row — so it
+   sits where the two words above do; what it looks like is `AnnexMark`'s. */
+.annex {
+  margin-inline-start: 0.4rem;
+}
+
 /* And the row it is on, dimmed whole. What it says is that a press on this row
    would find nobody — so the name, the mark and the addresses all go quiet
    together, rather than the row growing a mark of its own to be read beside
@@ -562,5 +569,21 @@
   .field button:not(:disabled):hover {
     background: var(--accent-deep);
     border-color: var(--accent-deep);
+  }
+}
+
+/* And the row that is pressed whole — this device's own Annex's, which opens
+   the Components pane. The surface every pressable card is: a fill under the
+   pointer, and a pointer. */
+.opens {
+  margin: -0.4rem;
+  padding: 0.4rem;
+  border-radius: 0.6rem;
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .opens:hover {
+    background: var(--card);
   }
 }

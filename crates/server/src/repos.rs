@@ -22,6 +22,10 @@
 //! very call a typed path goes through — see [`create`]. And, where it was asked
 //! for, `gh` puts the same repository on GitHub and pushes to it, which is the
 //! one thing here that can fail without the create failing.
+//!
+//! And the third way one arrives is a clone of a **Clonable Repo**: git, run as
+//! this device with its own token, into a directory named off the origin, and
+//! then that same registration — see [`clone`].
 
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
@@ -30,7 +34,8 @@ use std::process::{Command, Stdio};
 use anyhow::{Context, Result};
 use sqlx::SqlitePool;
 use verkstead_render::{
-    AuthorRemoved, Created, Creation, Registered, RepoEntry, RepoRemoved, RepoView, Repointed,
+    AuthorRemoved, Cloned, Created, Creation, Registered, RepoEntry, RepoRemoved, RepoView,
+    Repointed,
 };
 
 use crate::github::Gh;
@@ -76,8 +81,12 @@ pub(crate) async fn register(
 /// that has since changed. A member's mirror is an Author like this device's
 /// own here — see [`Config::one_list`]. **None named is the one Author** where
 /// this device has exactly one — there is nobody else it could be (ADR-0025)
-/// — nobody where there is none, and a refusal where there are several, there
-/// being no saying which.
+/// — and a refusal where there are several, there being no saying which.
+///
+/// **And where it has none of its own, the one mirror**, where the one list
+/// holds exactly one: an **Annex** is given no Author by its Keeper and sees
+/// the Keeper's as mirrors, and with one there is still nobody else it could
+/// be (ADR-0024). Nobody where the one list is empty or holds several.
 fn picked<'a>(config: &'a Config, asked: Option<&str>) -> Result<Option<&'a Author>, Unpicked> {
     match (asked, config.authors()) {
         (Some(id), _) => config
@@ -85,7 +94,15 @@ fn picked<'a>(config: &'a Config, asked: Option<&str>) -> Result<Option<&'a Auth
             .find(|author| author.id() == id)
             .map(Some)
             .ok_or(Unpicked::NoSuchAuthor),
-        (None, authors @ ([] | [_])) => Ok(authors.first()),
+        (None, []) => {
+            let mut mirrors = config.one_list();
+
+            Ok(match (mirrors.next(), mirrors.next()) {
+                (Some(only), None) => Some(only),
+                _ => None,
+            })
+        }
+        (None, [only]) => Ok(Some(only)),
         (None, _) => Err(Unpicked::AuthorUnpicked),
     }
 }
@@ -102,6 +119,15 @@ impl From<Unpicked> for Registered {
         match unpicked {
             Unpicked::AuthorUnpicked => Registered::AuthorUnpicked,
             Unpicked::NoSuchAuthor => Registered::NoSuchAuthor,
+        }
+    }
+}
+
+impl From<Unpicked> for Cloned {
+    fn from(unpicked: Unpicked) -> Cloned {
+        match unpicked {
+            Unpicked::AuthorUnpicked => Cloned::AuthorUnpicked,
+            Unpicked::NoSuchAuthor => Cloned::NoSuchAuthor,
         }
     }
 }
@@ -507,6 +533,199 @@ fn is_a_name(name: &str) -> bool {
     !name.is_empty() && name != "." && name != ".." && !name.contains(['/', '\\', '\0'])
 }
 
+/// Clone `origin` under `parent`, register it, and hand back the Repo — or say
+/// why there is none (ADR-0024, *Clonable repos*).
+///
+/// **The directory is named off the origin**, the way the clonable row was
+/// named — see [`crate::matching::clone_name`] — so what the human picked and
+/// what lands are called the same thing.
+///
+/// **Nothing registers twice.** Where a Repo is registered at that path
+/// already, it is the answer and nothing is cloned, the way **Open repo**
+/// answers a registered path. A directory that is there and *not* registered is
+/// git's to refuse, and it does, in its own words: the clone never adopts what
+/// somebody else put there.
+///
+/// **It is the Author the member's Repo works as** — `cloning.author`, which
+/// the clonable row carried — settled by [`picked`] the way a registration's
+/// is: a uuid this device's one list holds, or the one Author where none was
+/// said. The Repo is recorded as it, and git fetches as its token, read at the
+/// moment of the call — see [`cloning`]. A mirror whose token's copy has not
+/// arrived refuses by name rather than leave the fetch to the host's login.
+///
+/// **And a clone that failed leaves nothing behind**: no registration, and no
+/// directory where there was none before, git's own words being the answer.
+/// One that cloned and would not register — an empty repository has no branch
+/// to call its default — is taken back too, there being no Repo for it to be.
+///
+/// There is no deadline on any of it. A big repository takes as long as it
+/// takes, and the relayed call that reaches here has none either — see
+/// [`crate::peer::dialling`] — so what bounds the wait is the browser's own
+/// patience, as it is for a local press.
+pub(crate) async fn clone(
+    pool: &SqlitePool,
+    config: &Config,
+    gh: &Gh,
+    cloning: &verkstead_render::Cloning,
+) -> Result<Cloned> {
+    let authors = config.authors();
+
+    let picked = match picked(config, cloning.author.as_deref()) {
+        Ok(picked) => picked,
+        Err(refusal) => return Ok(refusal.into()),
+    };
+
+    let awaited = picked
+        .and_then(|author| config.mirror(author.id()))
+        .filter(|mirror| mirror.awaited());
+
+    if let Some(mirror) = awaited {
+        return Ok(Cloned::Refused(crate::github::awaited(mirror.device())));
+    }
+
+    let credential = gh.as_author(picked.map(Author::id)).credential();
+
+    let parent = PathBuf::from(&cloning.parent);
+    let origin = cloning.origin.trim().to_owned();
+    let name = crate::matching::clone_name(&origin);
+
+    let parent = match resolve(&parent) {
+        Resolved::At(parent) if parent.is_dir() => parent,
+        Resolved::At(_) | Resolved::NotAbsolute | Resolved::Missing => {
+            return Ok(Cloned::ParentMissing);
+        }
+    };
+
+    if !is_a_name(&name) {
+        return Ok(Cloned::Refused(
+            "That origin doesn't name a directory to clone into.".to_owned(),
+        ));
+    }
+
+    let path = parent.join(&name);
+
+    // Asked of the resolved path, which is how the store records one: a parent
+    // reached through a symlink still finds the Repo under it.
+    if let Resolved::At(there) = resolve(&path)
+        && let Some(held) = store::registered_repo_at(pool, &there).await?
+    {
+        return Ok(Cloned::AlreadyRegistered(entry(held, authors)));
+    }
+
+    let into = path.clone();
+    let cloned = tokio::task::spawn_blocking(move || {
+        // Looked at before git runs rather than after, because what is taken
+        // back on a failure is only ever a directory this call made.
+        let there_before = into.symlink_metadata().is_ok();
+        let answered = cloned_by(&origin, &parent, &name, &credential).output();
+
+        let why = match answered {
+            Ok(output) if output.status.success() => return Ok(()),
+            Ok(output) => crate::publishing::said(&String::from_utf8_lossy(&output.stderr)),
+            Err(error) => format!("Git couldn't be run: {error}."),
+        };
+
+        if !there_before {
+            taken_back(&into);
+        }
+
+        Err(why)
+    })
+    .await?;
+
+    if let Err(why) = cloned {
+        return Ok(Cloned::Refused(why));
+    }
+
+    Ok(
+        match registering(pool, authors, picked.map(Author::id), path.clone()).await? {
+            Registered::Added(repo) => Cloned::Cloned(repo),
+            Registered::AlreadyRegistered(repo) => Cloned::AlreadyRegistered(repo),
+            refusal => {
+                tracing::warn!(
+                    path = %path.display(),
+                    refusal = ?refusal,
+                    "a repository that was cloned could not be registered",
+                );
+
+                let gone = path.clone();
+                tokio::task::spawn_blocking(move || taken_back(&gone)).await?;
+
+                Cloned::Refused(match refusal {
+                    Registered::NoDefaultBranch => {
+                        "That repository has no branch to work from yet.".to_owned()
+                    }
+                    _ => "The repository was cloned but couldn't be registered.".to_owned(),
+                })
+            }
+        },
+    )
+}
+
+/// The `git clone` a clone onto this device runs: `origin` into `name` under
+/// `parent`, as `credential`.
+///
+/// **Run in the parent with the bare name as where it goes**, the way a create
+/// runs git inside the directory it made: a resolved path on Windows is spelled
+/// `\\?\C:\…`, which the process can stand in and git cannot be handed.
+///
+/// **Authenticated the way the rest of Verkstead's own git is** — see
+/// [`crate::github::Credential`]: the Author's token and no other, the host's
+/// login where it holds none. And GitHub's SSH spellings rewritten to HTTPS, as
+/// a session's are — see [`crate::sandbox::github_credentials`] — so an origin a
+/// member cloned over SSH is fetched here with the token rather than with keys
+/// this machine may not have. Only the rewrites of those: the helper there
+/// answers out of `gh`'s own login where `GH_TOKEN` is missing, which is the
+/// host's login a [`Credential`](crate::github::Credential) exists to keep out.
+/// Said as `-c` on the command line rather than in the environment, which may
+/// be carrying counted pairs of its own.
+///
+/// And nothing is asked of anybody — no terminal prompt, and a null stdin — so a
+/// missing credential is a refusal rather than a clone waiting for ever.
+fn cloned_by(
+    origin: &str,
+    parent: &Path,
+    name: &str,
+    credential: &crate::github::Credential,
+) -> Command {
+    let mut command = Command::new("git");
+
+    for (key, value) in crate::sandbox::github_credentials() {
+        if key.ends_with(".insteadOf") {
+            command.arg("-c").arg(format!("{key}={value}"));
+        }
+    }
+
+    credential.on(&mut command);
+
+    command
+        .args(["clone", "--quiet", "--", origin, name])
+        .current_dir(parent)
+        .unseen()
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped());
+
+    command
+}
+
+/// Take back a directory a clone made, logging rather than failing where it
+/// will not go: the refusal the human reads is the clone's, and this is
+/// tidying after it.
+fn taken_back(path: &Path) {
+    if path.symlink_metadata().is_err() {
+        return;
+    }
+
+    if let Err(error) = std::fs::remove_dir_all(path) {
+        tracing::error!(
+            error = ?error,
+            path = %path.display(),
+            "taking back the directory of a clone that did not land failed",
+        );
+    }
+}
+
 /// One git command in `dir`, or what it said about why not.
 ///
 /// Its own runner rather than [`git`] above, which is for the reads: what a read
@@ -908,4 +1127,88 @@ pub(crate) fn feeding(dir: &Path, args: &[&str], input: &str, ok: &[i32]) -> Opt
     }
 
     Some(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::ffi::OsStr;
+
+    use super::*;
+
+    /// What one variable is set to on `command`, where it sets one.
+    fn set<'a>(command: &'a Command, name: &str) -> Option<Option<&'a OsStr>> {
+        command
+            .get_envs()
+            .find(|(key, _)| *key == OsStr::new(name))
+            .map(|(_, value)| value)
+    }
+
+    /// The Author's token reaches a clone's git the way it reaches the rest of
+    /// Verkstead's own: as `GH_TOKEN` under [`Credential`]'s helper, behind the
+    /// SSH rewrites a session's sandbox configures, with nobody asked for
+    /// anything — and never `gh`'s own helper, which would answer as the host.
+    ///
+    /// [`Credential`]: crate::github::Credential
+    #[test]
+    fn a_clone_authenticates_as_its_author() {
+        let command = cloned_by(
+            "git@github.com:you/widgets.git",
+            Path::new("/srv/repos"),
+            "widgets",
+            &crate::github::Credential::token("ghp_thetoken"),
+        );
+
+        assert_eq!(
+            set(&command, "GH_TOKEN"),
+            Some(Some(OsStr::new("ghp_thetoken")))
+        );
+        assert_eq!(
+            set(&command, "GIT_TERMINAL_PROMPT"),
+            Some(Some(OsStr::new("0")))
+        );
+
+        let args: Vec<String> = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+
+        assert!(
+            args.contains(&"url.https://github.com/.insteadOf=git@github.com:".to_owned()),
+            "its SSH spelling is fetched over HTTPS: {args:?}",
+        );
+        assert!(
+            !args
+                .iter()
+                .any(|arg| arg.contains("gh auth git-credential")),
+            "gh's own helper is left out: {args:?}",
+        );
+        assert!(
+            args.contains(&"credential.helper=".to_owned()),
+            "the host's helpers are cleared: {args:?}",
+        );
+        assert!(
+            args.ends_with(&[
+                "clone".to_owned(),
+                "--quiet".to_owned(),
+                "--".to_owned(),
+                "git@github.com:you/widgets.git".to_owned(),
+                "widgets".to_owned(),
+            ]),
+            "{args:?}",
+        );
+    }
+
+    /// An Author with no token leaves git to the host's own credentials, and
+    /// sets no `GH_TOKEN`: present and empty is a login `gh` fails on obscurely.
+    #[test]
+    fn no_token_sets_no_gh_token() {
+        let command = cloned_by(
+            "https://github.com/you/widgets",
+            Path::new("/srv"),
+            "w",
+            &crate::github::Credential::host(),
+        );
+
+        assert_eq!(set(&command, "GH_TOKEN"), None);
+    }
 }

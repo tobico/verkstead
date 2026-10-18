@@ -70,8 +70,8 @@ end sends what git said while the device that asked applies the rule, which is
 what keeps two Verksteads one version apart from disagreeing about which
 repository the work is in. **No match is an answer** and the caller decides what
 to do without one; **a device that is not answering is refused by name** instead,
-those being two different things to say — one sends the human to **Open repo**
-and the other to the machine.
+those being two different things to say — one offers to clone the repository
+there, as a **Clonable Repo**, and the other sends the human to the machine.
 _Avoid_: project, codebase, checkout
 
 **Author**:
@@ -145,6 +145,27 @@ into the list as that one Author, and records every Repo as its, unregistered
 ones included, so no Repo is ever without one.
 _Avoid_: identity, persona, account (that is a Profile's), git user, committer,
 credentials (the token is one part of an Author)
+
+**Clonable Repo**:
+A repository another **Member** has registered, by its origin, that this
+device lacks — the rule above saying which of a member's Repos is this
+repository is what says it is lacking. **The Repo dropdown lists them as a
+second group after the device's own**, behind a rule and above the two rows
+that act, each row the repository's name with where its origin is; a Repo
+this device already matches is not among them, and a repository with no
+origin anywhere is not clonable at all. **Picking one clones it on the device
+the dropdown is for** — into the parent **Create repo** remembers there, over
+a path field where none is remembered yet, as the **Author** the member's
+Repo works as and with that Author's token — registers it as that Author,
+and it is the draft's Repo from that moment, as a pick on a registered row
+is. A member's Repo that names no Author is the one Author's here, and is
+refused by name where there are several: a clone carries no picker. The **Transfer** dialog's **Preflight** offers the
+same where it finds no match on the device picked, reading *clone it there*
+rather than sending anybody to Open repo. Cluster-wide rather than an
+**Annex**'s: the problem is the same on any device that is not this one. A
+row taking a URL was rejected for this list — the cluster knows the origins,
+so nobody types one (ADR-0024).
+_Avoid_: remote repo, available repo, clone target
 
 **Conversation**:
 The core entity: a Repo, a base commit, a Brief, a **Process**, one branch and
@@ -418,14 +439,16 @@ Verksteads one version apart cannot disagree about which repository the work is
 in. Everything else only that machine can look at, so it answers about itself:
 which harnesses are on its `PATH`, and whether it is answering at all.
 **What it holds is named rather than counted.** A repository with no match names
-the repository and points at **Open repo** on that device; a harness that is not
-there is named against the **Pairing** that wants it, in the onboarding probe's
-own words; and a device that answered nothing is *unreachable*, named. Each is a
-different errand — a repository to open over there, a harness to install over
+the repository and offers *clone it there*, cloning it on that device from the
+origin read here — or, for a repository with no origin, which is not clonable,
+points at **Open repo** on that device; a harness that is not there is named
+against the **Pairing** that wants it, in the onboarding probe's own words; and
+a device that answered nothing is *unreachable*, named. Each is a different
+errand — a repository to clone or open over there, a harness to install over
 there, or a machine to go and wake — and a count would be none of them.
 **And *unreachable* is never *no match*.** A machine that said nothing has failed
 none of the questions under it, so it is the whole of its own preflight: no match
-sends somebody to open a repository on a machine that may already have it, and a
+offers to clone a repository onto a machine that may already have it, and a
 machine that is asleep will answer perfectly well tomorrow.
 _Avoid_: check, validation, dry run, health check
 
@@ -2157,6 +2180,85 @@ challenge, the credential being a certificate already asked for and already
 given or withheld.
 _Avoid_: peer auth, mutual TLS gate, the cluster gate, peer middleware
 
+**Annex**:
+A **Device** that another device on the same machine makes, runs and keeps
+under virtualization — a NixOS inside WSL beside a Windows Verkstead first,
+and the same word for a Docker or Lima box beside a Mac or a Windows VM beside
+a Linux desktop when those come (ADR-0024). It is a Verkstead like any other:
+its own **Device Id** and certificate, its own **Data Directory**, its own
+Repos and Worktrees and sessions. What is different is who it belongs to.
+**It is a Member of the whole cluster, and its membership is its Keeper's.**
+It joins by the **Keeper's Join** rather than by a press, its row on every
+**Devices** list wears the mark saying whose it is and offers no Unlink, and it
+never unlinks its Keeper. What removes an Annex is removing the box, which
+its Keeper notices at its next start and tells the roster, and what unlinks a
+Keeper takes its Annex out of the cluster with it.
+**It runs only while its Keeper runs**: booted in the background at the
+Keeper's start, terminated at its stop, never waited on — a workbench opens
+on the Keeper while the Annex is still coming up, and its rows read
+*unreachable* until it answers. It is reached through the **Annex Forward**,
+and it has no settings of its own: what is about the work rather than the
+machine — the Instructions, the MCP servers and their header values, the
+at-once limit, Cleanup, the ignored comments, the conflict resolution and
+sharing on Done — is copied in from its Keeper at every boot. **Its Authors
+are not copied**: it holds none of its own, and the Keeper's reach it as
+mirrors over the one list, token copies and all, the way they reach any
+member — so with one, a Repo there is that one's.
+**And it never enters Onboarding Mode**: a kept Annex is told so in its
+config and skips the verdict, its objective being met by the mirrors its
+Keeper's Profiles arrive as.
+**On Windows it is a NixOS-WSL distro named `Verkstead`**, disk under
+`%LOCALAPPDATA%\Verkstead\wsl`, built from a flake its Keeper writes and
+pinned to the Keeper's own release; the wizard row that makes it reads
+*Linux development (WSL)*, and **Components** is where it is kept.
+_Avoid_: guest, VM, WSL box, Linux box, managed device, sidecar device,
+container
+
+**Keeper**:
+The **Device** an **Annex** belongs to: the one that made it, boots and
+terminates it, links it by the **Keeper's Join**, forwards for it, copies its
+settings in, and re-pins it to its own release at every start. A device with
+no Annex is nobody's Keeper, and an Annex has exactly one. The relation
+travels with the roster — on the exchange and on every announcement — so every
+device draws it, and it is read off the record rather than off which machine
+the two share.
+_Avoid_: host (a word CONTEXT.md avoids for a device, two installs sharing one
+machine being the whole point here), parent, owner
+
+**Keeper's Join**:
+How an **Annex** is linked, distinct from a **Join** on purpose: the Keeper
+writes its own Device Id and fingerprint into the Annex's `config.yaml` as
+`kept_by` before the Annex first starts; a join presenting that fingerprint is
+accepted with no request held, no modal and no push, and recorded as the
+Keeper's; the Keeper, for its part, reads the Annex's `device.pem` out of the
+data directory it owns and pins it before it dials — the one join that never
+accepts whatever certificate is there. The trust is the human's comparison by
+eye, done by the one party that can read both files. Any other join an Annex
+receives is held and asked about as every join is. Idempotent, so a Keeper
+runs it at every boot.
+_Avoid_: auto-join, trusted join, pre-shared key
+
+**Annex Forward**:
+A listener of the Keeper's own, **8424** by default, that forwards raw TCP to
+its **Annex**'s **Peer Listener**. TLS stays end to end on the Annex's own
+certificate; the Keeper never terminates it and never reads a byte. It exists
+because an Annex inside WSL has an address only its Keeper can dial, the
+loopback is never advertised and a bare address is always dialled at 8423 —
+so **the Annex advertises its Keeper's addresses at the forward port** rather
+than its own interfaces, asked from the Keeper at each **Device Reading**, and
+a third device records it at an address it can reach. An Annex is never
+advertised over mDNS and never discovered: its address is its Keeper's.
+**The Annex listens on ports of its own** — peer 8425, workbench 8426 — so
+that WSL's mirrored networking, where it shares the Keeper's loopback, cannot
+collide them with the Keeper's; the forward points at the loopback there and
+at the Annex's NAT address otherwise.
+**The Keeper and its Annex dial each other directly**, never at what they
+advertise of each other: the Keeper at the address the forward points at, the
+Annex at the address its `kept_by` names — so a laptop changing networks or
+going offline loses neither of them the other. Nobody else is told either.
+_Avoid_: proxy, tunnel, port forward (as a noun for this), relay (which is the
+**Relay**, and is HTTP)
+
 **Relay**:
 The device the browser opened putting a call to one of its **Members** and
 handing the answer back untouched, which is how a **Member**'s whole workbench
@@ -2444,6 +2546,22 @@ first. That one settles a piece of work and is answered again for every one;
 this settles the machine, once, before there is any work to settle.
 _Avoid_: first-run wizard as the name of the state (the mode is the state, the
 wizard is the page), setup mode, install wizard, onboarding flow, skip
+
+**Components**:
+A settings card, and the pane behind it, for what Verkstead installs onto
+this machine after the wizard has done its one pass — the place a harness
+added later will live, and today the one row that is there: the **Annex**,
+reading *Linux development (WSL)* on a Windows machine (ADR-0024). The row
+carries its status — running or stopped, the release it runs, the disk it
+takes — **Install** where there is none, which is the wizard's own install run
+started from here, and **Update**, which moves both nixpkgs inputs — NixOS-WSL
+moves with Verkstead's own release, through the re-pin at the Keeper's start —
+and is **refused while a session runs in the Annex**,
+naming the Conversation: a rebuild restarts the Annex's server and every
+session with it. There is no Stop, no Start and no Remove. A distro removed
+by hand is forgotten at the Keeper's next start, and the row reads not
+installed. The Annex's row on the **Devices** list opens this pane.
+_Avoid_: add-ons, extras, plugins, modules, integrations
 
 **Companion Repo**:
 Another registered Repo a Conversation is given to work alongside its own,

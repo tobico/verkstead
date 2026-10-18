@@ -44,8 +44,10 @@ use tokio::sync::Mutex;
 use verkstead_render::DeviceIdentity;
 
 use crate::device::Device;
+use crate::peer::dialling::Peers;
 use crate::platform::{self, Platform};
 use crate::remote::Tailscale;
+use crate::settings::{KeptBy, Settings};
 
 /// How long the tailnet half of the addresses stands before it is read again.
 ///
@@ -112,6 +114,35 @@ pub struct Reading {
     /// hold on its own would not do, and the half that matters when the asking
     /// is somebody else's.
     held: Arc<Mutex<Option<Held>>>,
+
+    /// And where this device is told whether it is an **Annex**: its own
+    /// `config.yaml`, read at each answer for the reason everything here is —
+    /// see [`Reading::told_by`]. `None` is a reading nobody tells anything,
+    /// which is a device nobody keeps.
+    told: Option<Settings>,
+
+    /// And how an Annex asks its Keeper what to advertise — see
+    /// [`Reading::asking_its_keeper`]. `None` on every device that is not an
+    /// Annex, and on a suite's reading that only asks who keeps it.
+    asking: Option<Peers>,
+
+    /// The Keeper's last answer and when it came, which is what an Annex
+    /// advertises between two asks and once its Keeper cannot be reached.
+    ///
+    /// Shared by every clone for the reason the tailnet hold is, and held
+    /// across the ask for the same one: two readings arriving together cost
+    /// one dial between them.
+    answered: Arc<Mutex<Option<Held>>>,
+
+    /// How long that answer stands before the Keeper is asked again —
+    /// [`HELD_FOR`] on a running server.
+    answer_held_for: Duration,
+
+    /// And where this device's own **Annex Forward** listens, which is the
+    /// port it tells its Annex to advertise its addresses at — see
+    /// [`Reading::forwarded`]. `None` on a reading of a device that forwards
+    /// nothing.
+    forwarding_at: Option<u16>,
 }
 
 /// The tailnet addresses as they were last read, and when.
@@ -147,7 +178,10 @@ enum Lan {
     /// running server nothing ever says otherwise; in a suite where two devices
     /// really dial each other the port is the one the operating system picked,
     /// and there is nowhere else to put it.
-    Advertised(Vec<String>),
+    ///
+    /// Shared by every clone, so a suite can move the machine under a running
+    /// server — see [`Reading::moving_to`].
+    Advertised(Arc<std::sync::RwLock<Vec<String>>>),
 }
 
 impl Reading {
@@ -160,6 +194,11 @@ impl Reading {
             kernel: platform::kernel_release(),
             lan: Lan::OfThisMachine,
             held: Arc::default(),
+            told: None,
+            asking: None,
+            answered: Arc::default(),
+            answer_held_for: HELD_FOR,
+            forwarding_at: None,
         }
     }
 
@@ -181,6 +220,11 @@ impl Reading {
             kernel,
             lan: Lan::Stated(lan),
             held: Arc::default(),
+            told: None,
+            asking: None,
+            answered: Arc::default(),
+            answer_held_for: HELD_FOR,
+            forwarding_at: None,
         }
     }
 
@@ -203,13 +247,116 @@ impl Reading {
             tailscale,
             platform,
             kernel,
-            lan: Lan::Advertised(advertised),
+            lan: Lan::Advertised(Arc::new(std::sync::RwLock::new(advertised))),
             held: Arc::default(),
+            told: None,
+            asking: None,
+            answered: Arc::default(),
+            answer_held_for: HELD_FOR,
+            forwarding_at: None,
         }
     }
 
+    /// The same, told by `settings` whether it is an **Annex** — which a
+    /// running server always is, over its own Data Directory.
+    ///
+    /// The one thing a reading says that is configured rather than read off the
+    /// machine, and configured by somebody else: a Keeper writes `kept_by` into
+    /// its Annex's `config.yaml`, and an Annex is told it is kept rather than
+    /// finding out (ADR-0024). Read at each answer rather than once, because the
+    /// Keeper rewrites it whenever its own certificate moves.
+    pub fn told_by(self, settings: Settings) -> Reading {
+        Reading {
+            told: Some(settings),
+            ..self
+        }
+    }
+
+    /// The same, asking its Keeper what to advertise through `peers` — which a
+    /// running server always does, and which only an Annex ever acts on.
+    ///
+    /// **An Annex's address is its Keeper's** (ADR-0024, *advertise as told*).
+    /// Inside WSL it has interfaces only its Keeper can dial, so what it
+    /// advertises is wherever the Keeper forwards for it: the Keeper's own
+    /// addresses at the forward's port, asked of the Keeper over a member's
+    /// route — see [`crate::peer::annex_forward::FORWARDED`]. Asked rather than
+    /// worked out here, because a laptop's addresses move and the Keeper's own
+    /// reading is what already keeps up with them.
+    pub fn asking_its_keeper(self, peers: Peers) -> Reading {
+        Reading {
+            asking: Some(peers),
+            ..self
+        }
+    }
+
+    /// The same, holding its Keeper's answer for `held_for` rather than
+    /// [`HELD_FOR`].
+    ///
+    /// For a suite asking what an Annex advertises once its Keeper has gone:
+    /// an answer that still stood would be the hold answering rather than the
+    /// fallback.
+    pub fn holding_its_keepers_answer_for(self, held_for: Duration) -> Reading {
+        Reading {
+            answer_held_for: held_for,
+            ..self
+        }
+    }
+
+    /// The same, with its own **Annex Forward** listening on `port` — which a
+    /// running server's always is, on wherever its start bound it.
+    pub fn forwarding_at(self, port: u16) -> Reading {
+        Reading {
+            forwarding_at: Some(port),
+            ..self
+        }
+    }
+
+    /// Say `advertised` from now on, in place of the list this reading was
+    /// stated with — for every clone of it at once.
+    ///
+    /// For a suite moving a machine between networks under a running server:
+    /// a laptop's addresses change with nothing restarted, and what is being
+    /// asked is what the cluster makes of that. A reading of the machine's own
+    /// interfaces moves by itself, and one stated any other way is left as it
+    /// was.
+    pub fn moving_to(&self, advertised: Vec<String>) {
+        if let Lan::Advertised(standing) = &self.lan {
+            *standing
+                .write()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = advertised;
+        }
+    }
+
+    /// What this device tells its Annex to advertise: its own addresses, each
+    /// at the forward's port — or `None` for a device that forwards nothing.
+    ///
+    /// Its own addresses as it would advertise them itself, in the same order,
+    /// so a third device tries the Annex where it would try the Keeper. A bare
+    /// address gains the port and one that carries a port has it replaced,
+    /// which is the shape [`crate::peer::dialling`] already reads.
+    pub(crate) async fn forwarded(&self) -> Option<Vec<String>> {
+        let port = self.forwarding_at?;
+
+        Some(
+            self.own_addresses()
+                .await
+                .iter()
+                .map(|address| at_port(address, port))
+                .collect(),
+        )
+    }
+
+    /// Whose Annex this device is, as its `config.yaml` says now — or `None`
+    /// for a device nobody keeps, which is every device but an Annex.
+    pub(crate) fn keeper(&self) -> Option<KeptBy> {
+        self.told
+            .as_ref()
+            .and_then(|settings| settings.config().kept_by().cloned())
+    }
+
     /// What `device` answers a caller who asked who it is: the id and the
-    /// fingerprint it keeps, and the three things read off the machine now.
+    /// fingerprint it keeps, the three things read off the machine now, and
+    /// whose Annex it is where it is one.
     ///
     /// Assembled here rather than in the route, because the route is the one
     /// place with nothing to say about any of this: what it knows is that a
@@ -221,6 +368,7 @@ impl Reading {
             name: self.name(),
             os: self.os(),
             addresses: self.addresses().await,
+            kept_by: self.keeper().map(|keeper| keeper.device().to_owned()),
         }
     }
 
@@ -251,12 +399,28 @@ impl Reading {
     /// reaches the machine on its first try wherever both devices are — and a
     /// machine with no Tailscale still answers with a list rather than with a
     /// failure.
+    ///
+    /// **An Annex advertises none of that**, but what its Keeper told it —
+    /// see [`Reading::asking_its_keeper`].
     async fn addresses(&self) -> Vec<String> {
+        if let (Some(keeper), Some(peers)) = (self.keeper(), &self.asking) {
+            return self.as_told(keeper.device(), peers).await;
+        }
+
+        self.own_addresses().await
+    }
+
+    /// The addresses of this device's own, which is everything above but an
+    /// Annex's.
+    async fn own_addresses(&self) -> Vec<String> {
         // Said outright, which is the whole list rather than a half of it: the
         // daemon is not asked, there being nothing for its answer to be added
         // to.
         if let Lan::Advertised(advertised) = &self.lan {
-            return advertised.clone();
+            return advertised
+                .read()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone();
         }
 
         let tailnet = self.tailnet().await;
@@ -298,6 +462,82 @@ impl Reading {
 
         addresses
     }
+
+    /// What an Annex advertises: what `keeper` last said it forwards at, asked
+    /// afresh once the answer has stood for its hold.
+    ///
+    /// **The last answer when the Keeper cannot be asked, and nothing before
+    /// the first.** A Keeper that is off is a forward that is off, so the
+    /// address it last gave is no worse than any other — and it is still the
+    /// right one the moment the Keeper is back. An Annex that has never had an
+    /// answer has no address anybody outside could use: its own interfaces are
+    /// the ones only its Keeper can dial.
+    ///
+    /// A failed ask is not held, unlike the tailnet half's. That hold is
+    /// against a stranger's requests costing a process each; an Annex's peer
+    /// listener is reached through its Keeper's forward, so while the Keeper
+    /// cannot be asked nobody outside can reach this reading either — and the
+    /// ask made while the Keeper's Join is still in flight, which the Keeper
+    /// refuses for not holding this device yet, would otherwise stand over the
+    /// one made a moment later that it answers.
+    async fn as_told(&self, keeper: &str, peers: &Peers) -> Vec<String> {
+        let mut answered = self.answered.lock().await;
+
+        if let Some(standing) = answered
+            .as_ref()
+            .filter(|standing| standing.taken.elapsed() < self.answer_held_for)
+        {
+            return standing.addresses.clone();
+        }
+
+        match peers.forwarded_by(keeper).await {
+            Ok(addresses) => {
+                *answered = Some(Held {
+                    taken: Instant::now(),
+                    addresses: addresses.clone(),
+                });
+
+                addresses
+            }
+
+            Err(why) => {
+                tracing::debug!(
+                    %keeper,
+                    %why,
+                    "this Annex could not ask its Keeper what to advertise, so it advertises \
+                     the last answer it had",
+                );
+
+                answered
+                    .as_ref()
+                    .map(|last| last.addresses.clone())
+                    .unwrap_or_default()
+            }
+        }
+    }
+}
+
+/// `address` at `port`: a bare one gains it, and one carrying a port of its own
+/// has it replaced — `[ip]:port` for IPv6, as a URL authority writes it.
+///
+/// What a Keeper's addresses become in its Annex's advertisement, every one of
+/// them pointing at the Annex Forward rather than the peer listener.
+fn at_port(address: &str, port: u16) -> String {
+    let host = if let Ok(ip) = address.parse::<IpAddr>() {
+        ip
+    } else if let Ok(socket) = address.parse::<std::net::SocketAddr>() {
+        socket.ip()
+    } else {
+        // A name, with or without a port of its own.
+        let name = match address.rsplit_once(':') {
+            Some((name, port)) if !name.is_empty() && port.parse::<u16>().is_ok() => name,
+            _ => address,
+        };
+
+        return format!("{name}:{port}");
+    };
+
+    std::net::SocketAddr::new(host, port).to_string()
 }
 
 /// The two halves in the order a peer should try them, with nothing said twice.
@@ -456,6 +696,28 @@ mod tests {
         ];
 
         assert_eq!(addresses(Vec::new(), &lan), vec!["192.168.1.24"]);
+    }
+
+    /// A Keeper's addresses at its forward: a bare address of either family
+    /// gains the port, one carrying the peer port has it replaced, and the
+    /// tailnet name is a name with a port.
+    #[test]
+    fn a_keepers_addresses_are_said_at_the_forward() {
+        assert_eq!(at_port("100.64.0.1", 8424), "100.64.0.1:8424");
+        assert_eq!(
+            at_port("fd7a:115c:a1e0::1", 8424),
+            "[fd7a:115c:a1e0::1]:8424"
+        );
+        assert_eq!(at_port("127.0.0.1:53000", 8424), "127.0.0.1:8424");
+        assert_eq!(at_port("[::1]:53000", 8424), "[::1]:8424");
+        assert_eq!(
+            at_port("workbench.tailnet-name.ts.net", 8424),
+            "workbench.tailnet-name.ts.net:8424",
+        );
+        assert_eq!(
+            at_port("workbench.tailnet-name.ts.net:8423", 8424),
+            "workbench.tailnet-name.ts.net:8424",
+        );
     }
 
     /// And a device on neither a tailnet nor a network answers with an empty

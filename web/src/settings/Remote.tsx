@@ -107,6 +107,11 @@
 //! but take the device out of the cluster for everybody, which is what the
 //! card says in the sentence under the name.
 //!
+//! **Save an Annex's row, which reads *annex of* its Keeper and has none**
+//! (ADR-0024) — *annex of this device* on the Keeper itself — and its Keeper's
+//! row on the Annex, which has none either: the membership is the Keeper's,
+//! and the server refuses the press on both.
+//!
 //! **A member the last dial could not reach is the same row, dimmed, reading
 //! *unreachable*.** It is not taken off the list and nothing about it is left
 //! out: a machine with its lid shut is still one of this cluster, and what the
@@ -183,6 +188,7 @@ import {
 
 import { faChevronDown, faHourglassHalf } from "@fortawesome/free-solid-svg-icons";
 
+import { AnnexMark, keeperOf } from "../AnnexMark";
 import { Check } from "../Check";
 import { Copy } from "../Copy";
 import { Icon } from "../Icon";
@@ -433,6 +439,9 @@ export function RemoteCard(props: {
 export function RemotePane(props: {
   /// The way back to the settings, which is the pane this one was entered from.
   back: () => void;
+  /// And the way to the Components pane, which a press on this device's own
+  /// Annex's row opens — the settings page's to say, where it has one.
+  components?: () => void;
 }): JSX.Element {
   const queries = useQueryClient();
   const remote = useRemote();
@@ -596,7 +605,7 @@ export function RemotePane(props: {
                   Tailscale at all still has an identity of its own, and a list
                   that vanished on one would be a cluster feature that appeared
                   to need a tailnet. */}
-              <Devices />
+              <Devices components={props.components} />
             </div>
           )}
         </Match>
@@ -721,7 +730,10 @@ function TheKey(): JSX.Element {
 /// the Repos pane keeps it above its list: the card names the device it is
 /// about, and one card over a list is one thing on the page at a time. The
 /// device a press asked about is held here and given to it.
-function Devices(): JSX.Element {
+function Devices(props: {
+  /// What a press on this device's own Annex's row does — see [`List`].
+  components?: () => void;
+}): JSX.Element {
   const devices = useDevices();
 
   // The device a press on Unlink asked about, while the card asking is up — or
@@ -761,7 +773,12 @@ function Devices(): JSX.Element {
         </Match>
         <Match when={devices.data}>
           {(here) => (
-            <List of={here()} unlink={setAsking} unlinking={drop.isPending} />
+            <List
+              of={here()}
+              unlink={setAsking}
+              unlinking={drop.isPending}
+              components={props.components}
+            />
           )}
         </Match>
       </Choose>
@@ -864,6 +881,11 @@ function Confirm(props: {
 /// given to the members alone rather than to [`Row`] for every row to decide:
 /// there is nothing to unlink this machine from itself, and a row that has no
 /// press is a row that is handed none.
+///
+/// **And an Annex's row has none either, nor its Keeper's on the Annex**
+/// (ADR-0024, *The Keeper's Join*): the membership is the Keeper's, and the
+/// server refuses the press on both. An Annex's row says whose it is instead —
+/// see [`keeperOf`].
 function List(props: {
   of: DevicesView;
   /// What a press on a member's row asks about, which is the whole of what a
@@ -873,17 +895,36 @@ function List(props: {
   /// while it is: the list is about to be read again and a second press would
   /// be about the list before it.
   unlinking: boolean;
+  /// What a press on this device's own Annex's row does: open the Components
+  /// pane, where the box is kept. An Annex of another device's has none.
+  components?: () => void;
 }): JSX.Element {
   return (
     <ul class={styles.list}>
-      <Row of={props.of.this} here />
+      <Row
+        of={props.of.this}
+        here
+        trouble={props.of.annex_trouble}
+        keeper={keeperOf(props.of, props.of.this)}
+      />
 
       <For each={props.of.members}>
         {(member: LinkedDevice) => (
           <Row
             of={member.identity}
             unreachable={!member.reachable}
-            unlink={() => props.unlink(member.identity)}
+            trouble={member.trouble}
+            keeper={keeperOf(props.of, member.identity)}
+            open={
+              member.identity.kept_by === props.of.this.device
+                ? props.components
+                : undefined
+            }
+            unlink={
+              unlinkable(props.of, member.identity)
+                ? () => props.unlink(member.identity)
+                : undefined
+            }
             unlinking={props.unlinking}
           />
         )}
@@ -900,6 +941,12 @@ function List(props: {
       </For>
     </ul>
   );
+}
+
+/// Whether a member's row is offered an Unlink: not an Annex's, and not
+/// the Keeper's on its own Annex.
+function unlinkable(list: DevicesView, of: DeviceIdentity): boolean {
+  return of.kept_by === null && of.device !== list.this.kept_by;
 }
 
 /// One row: the OS mark, the name, and every address a peer could reach that
@@ -923,15 +970,28 @@ function List(props: {
 /// stopped being true, and the row is where the Unlink is pressed.
 ///
 /// **And the Unlink is drawn wherever one was given**, which is every member's
-/// row and no other: this device's row has none, there being nothing to unlink
-/// this machine from itself. A dimmed row's press is drawn exactly as a live
+/// row but an Annex's and its Keeper's on the Annex: this device's row has
+/// none, there being nothing to unlink this machine from itself. A dimmed row's press is drawn exactly as a live
 /// one's and works exactly as one — the machine that is never coming back is
 /// most of what an Unlink is for, and a press that greyed itself out on the one
 /// row somebody needs it on would be the feature refusing its own case.
+///
+/// **And this device's own Annex's row is pressed whole**, opening the
+/// Components pane where the box is kept. On any other device the same row has
+/// no press: Components is the Keeper's.
 function Row(props: {
   of: DeviceIdentity;
   here?: boolean;
   unreachable?: boolean;
+  /// And why its box would not come up, on a Keeper's row for its own Annex
+  /// that would not — drawn under the addresses, as the server said it. On
+  /// the Keeper's own row where the Annex has no row yet to carry it.
+  trouble?: string | null;
+  /// Whose Annex this is, where it is one — see [`keeperOf`].
+  keeper?: string | null;
+  /// What pressing the row itself does, where it opens something: this
+  /// device's own Annex's row opens the Components pane.
+  open?: () => void;
   /// What a press asks about, where this row has one to press.
   unlink?: () => void;
   /// And whether one is already going through.
@@ -940,7 +1000,20 @@ function Row(props: {
   return (
     <li
       class={styles.device}
-      classList={{ [styles.unreachable!]: props.unreachable }}
+      classList={{
+        [styles.unreachable!]: props.unreachable,
+        [styles.opens!]: props.open !== undefined,
+      }}
+      role={props.open ? "button" : undefined}
+      tabindex={props.open ? 0 : undefined}
+      onClick={() => props.open?.()}
+      onKeyDown={(event) => {
+        // What a button would have done for nothing: Enter and Space press it.
+        if (props.open && (event.key === "Enter" || event.key === " ")) {
+          event.preventDefault();
+          props.open();
+        }
+      }}
     >
       <Icon of={osIcon(props.of.os)} label={props.of.os} class={styles.os} />
 
@@ -951,6 +1024,10 @@ function Row(props: {
             {" "}
             <span class={styles.here}>this device</span>
           </Show>
+          <Show when={props.keeper != null}>
+            {" "}
+            <AnnexMark keeper={props.keeper!} class={styles.annex} />
+          </Show>
           <Show when={props.unreachable}>
             {" "}
             <span class={styles.away}>unreachable</span>
@@ -959,6 +1036,10 @@ function Row(props: {
 
         <Show when={props.of.addresses.length > 0}>
           <p class={styles.addresses}>{props.of.addresses.join(", ")}</p>
+        </Show>
+
+        <Show when={props.trouble}>
+          {(trouble) => <p class={styles.trouble}>{trouble()}</p>}
         </Show>
       </div>
 

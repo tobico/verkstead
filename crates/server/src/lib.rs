@@ -17,6 +17,10 @@ use verkstead_store::{Settlements, Waits};
 /// Answer to a Question Set rather than on the Brief.
 mod answer_files;
 
+/// What a Keeper does to its Annex's box, said once for every way of having
+/// one, and the WSL distro that is the first of them (ADR-0024).
+pub mod annex;
+
 /// The files the human put on a Conversation for its sessions to read: where
 /// the bytes are kept, and what a file is called once they are there.
 ///
@@ -728,6 +732,22 @@ pub struct Config {
     )]
     pub peer_listen: SocketAddr,
 
+    /// Address and port the Annex Forward binds — the listener a Keeper puts a
+    /// third device through to its Annex's peer listener on, forwarding raw
+    /// TCP and never terminating the TLS inside it (ADR-0024).
+    ///
+    /// Every interface by default, for the peer listener's reason: the device
+    /// reaching an Annex through here may be on the LAN or on the tailnet. A
+    /// connection is closed as soon as it is accepted until an Annex is linked,
+    /// so a device that keeps none forwards nothing. A second Verkstead on this
+    /// machine wants a port of its own here too.
+    #[arg(
+        long,
+        env = "VERKSTEAD_ANNEX_FORWARD_LISTEN",
+        default_value_t = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), peer::ANNEX_FORWARD_PORT),
+    )]
+    pub annex_forward_listen: SocketAddr,
+
     /// An extra read-write bind every sandbox gets. Repeat the flag, or separate
     /// several in the environment variable the way the platform writes `PATH`.
     ///
@@ -829,6 +849,18 @@ impl Config {
     /// above is for.
     pub fn advertises(&self) -> bool {
         !self.no_advertising
+    }
+
+    /// And whether it does once `told` — what its `config.yaml` says — has had
+    /// its word: never for an Annex, whatever the switch says.
+    ///
+    /// A kept device's address is its Keeper's (ADR-0024, *The Keeper forwards
+    /// for its Annex*), so an advertisement of its own would be a row on
+    /// another machine's Discovered list that dials the one place it cannot be
+    /// reached. Only the advertising half: what it hears of others is the
+    /// browse's, and that is untouched.
+    pub fn advertises_over(&self, told: &settings::Config) -> bool {
+        self.advertises() && told.kept_by().is_none()
     }
 
     /// The Data Directory this configuration comes to, made where it is not
@@ -2296,6 +2328,30 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
     // to stop at the file a human could delete.
     let peer = peer::Listener::bound(config.peer_listen, &device)?;
 
+    // And the Annex Forward beside it, taken for the same reason: a third
+    // address this start claims, and one somebody else is on is a start to
+    // refuse rather than a Keeper whose Annex nobody can reach (ADR-0024) — see
+    // [`peer::annex_forward`]. Pointed nowhere until the Keeper's Join points
+    // it, which is what the handle is for.
+    //
+    // **Not on an Annex**, whose `config.yaml` names a Keeper: a forward is a
+    // Keeper's, and an Annex keeps nothing. Under WSL's mirrored networking an
+    // Annex shares its Keeper's interfaces, so the port is the Keeper's already
+    // and binding it would refuse the Annex's start (ADR-0024, *The Keeper
+    // forwards for its Annex*).
+    let annex_forward = if settings::Settings::in_data_dir(&data_dir)
+        .config()
+        .kept_by()
+        .is_some()
+    {
+        None
+    } else {
+        Some(peer::annex_forward::Listener::bound(
+            config.annex_forward_listen,
+        )?)
+    };
+    let annex_pointing = peer::annex_forward::Pointing::at_nothing();
+
     // And where a session's HOME comes from, which wants the Data Directory
     // above on the platform that makes a real one under it — see
     // [`sandbox::Homes`]. Refused for the reason the binds are: a HOME the unit
@@ -2452,6 +2508,13 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
     #[cfg(windows)]
     pipe::hold_the_grant(pipe.regranting());
 
+    // Whether this device says what it is on the LAN: the switch, and then
+    // whether `config.yaml` names a Keeper — an Annex is never advertised
+    // (ADR-0024), its address being its Keeper's. Read once here, the
+    // advertisement being registered once below and the line under this one
+    // saying which it was.
+    let advertising = config.advertises_over(&settings.config());
+
     // The one line an operator reads as Verkstead comes up — and, on the
     // install where it is the handing over, the login link itself: the address
     // with the key on it, which is what a browser has to be pointed at to be
@@ -2481,12 +2544,15 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
     tracing::info!(
         listen = %config.listen,
         peer_listen = %peer.address(),
+        annex_forward = %annex_forward
+            .as_ref()
+            .map_or_else(|| "none".to_owned(), |forward| forward.address().to_string()),
         workbench = %hands_over.startup_line(config.listen, &key),
         data_dir = %data_dir.display(),
         device = %device.id(),
         fingerprint = %device.fingerprint(),
         update_check = config.releases().is_some(),
-        advertising = config.advertises(),
+        advertising,
         home = %homes.servers().display(),
         sandbox_binds = binds.count(),
         build_cache = ?cache.dir(),
@@ -2563,8 +2629,19 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
     // One handle rather than one per listener, because the two listeners
     // describe one machine: what a peer reads off the identity endpoint and
     // what the Devices section of the Remote access pane draws are the same
-    // answer told to two different askers.
-    let reading = device::reading::Reading::of_this_machine(tailscale.clone());
+    // answer told to two different askers. Told by this Data Directory's own
+    // config whether it is an Annex, which is part of what it answers — and,
+    // being one, asking its Keeper what to advertise rather than reading its
+    // own interfaces (ADR-0024, *advertise as told*). And knowing where its
+    // own Annex Forward landed, which is the port it tells an Annex of its own
+    // to advertise at.
+    let reading = device::reading::Reading::of_this_machine(tailscale.clone())
+        .told_by(settings.clone())
+        .asking_its_keeper(peer::dialling::Peers::of(device.clone(), members.clone()));
+    let reading = match &annex_forward {
+        Some(forward) => reading.forwarding_at(forward.address().port()),
+        None => reading,
+    };
 
     // And what this device says about itself on the LAN, so that a Verkstead on
     // the next desk can draw a row for it with nobody typing an address
@@ -2578,7 +2655,7 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
     // reading is: the machine a discovered row draws and the machine the
     // identity endpoint answers for are one answer told to two askers.
     let advertisement = discovery::Advertisement::of_this_device(
-        config.advertises(),
+        advertising,
         &discovery::Announcement::of(&device, &reading, peer.address().port()),
     );
 
@@ -2588,6 +2665,21 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
     // the goodbye that takes the row above off every other machine's list at
     // once — see [`discovery::ToldToStop`].
     let mut stopping = discovery::ToldToStop::listening();
+
+    // And this device's Annex, where it can have one: a Keeper only — an Annex
+    // keeps nothing, which is what its forward being absent says — and on
+    // Windows only, the one platform with a way of having a box. Booted below,
+    // and held on the devices handle so that the wizard's install run, which
+    // makes the box, boots and links it through the same one — see
+    // [`annex::booting::Annexed::up`].
+    let annexed = (platform::Platform::HERE == platform::Platform::Windows
+        && annex_forward.is_some())
+    .then(|| {
+        Arc::new(
+            annex::booting::Annexed::of(Arc::new(annex::wsl::Wsl::here()), settings.clone())
+                .running(annex::flake::Binary::from_env()),
+        )
+    });
 
     // And this device's cluster as something to *do* things to rather than to
     // read: the Devices section's presses go through it, and so does the one thing
@@ -2627,7 +2719,22 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
     // Not behind the advertising switch either, and for the same reason the browse
     // is not: what that turns off is what this machine *says* about itself, and a
     // machine told to keep quiet has not been told to stop looking.
-    .probing(discovery::Probe::of_this_tailnet(tailscale));
+    .probing(discovery::Probe::of_this_tailnet(tailscale))
+    // And the Annex Forward's handle, which linking an Annex points — see
+    // [`device::Devices::keep`].
+    .forwarding_for_the_annex(annex_pointing.clone())
+    // And the port this start bound its peer listener on, which an Annex it
+    // makes is told to dial it at — see [`device::Devices::keeping`].
+    .peering_on(peer.address().port())
+    // And the pages to tell when the list moves with nobody pressing anything,
+    // which is this start forgetting an Annex whose box has gone — see
+    // [`device::Devices::forget_annex`].
+    .nudging(nudges.clone());
+
+    let devices = match &annexed {
+        Some(annexed) => devices.keeping_an_annex(annexed.clone()),
+        None => devices,
+    };
 
     // Which is where the changeover above is picked up. A start that re-issued the
     // certificate owes every member the new fingerprint, and until they hold it
@@ -2674,6 +2781,24 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
     // [`push::hold_the_cluster`], which says why it is held rather than threaded
     // through a session's relay loop.
     push::hold_the_cluster(&pool, &devices);
+
+    // And this device's Annex booted and linked again, where it has one: a
+    // Keeper's start boots the box and runs the Keeper's Join with the two
+    // addresses read off it, and its stop terminates it (ADR-0024) — see
+    // [`annex::booting`].
+    //
+    // **In a task rather than waited on**, and before the serve, for the
+    // reasons the two above are: a box is most of a minute from up, and the
+    // serve never returns. The handle itself was made before the devices, so
+    // the install run that makes the box boots and links it the same way.
+    if let Some(annexed) = &annexed {
+        tokio::spawn({
+            let annexed = annexed.clone();
+            let devices = devices.clone();
+
+            async move { annexed.started(&devices).await }
+        });
+    }
 
     let Routers {
         workbench: app,
@@ -2748,7 +2873,8 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
             served = axum::serve(listener, app.clone()) => served.context("serving Verkstead"),
             served = axum::serve(pipe, app) => served.context("serving Verkstead over its named pipe"),
             served = peer.serving(peers) => served,
-            signal = stopping.told() => stopped(signal, &advertisement).await,
+            served = peer::annex_forward::serving(annex_forward, annex_pointing) => served,
+            signal = stopping.told() => stopped(signal, &advertisement, annexed.as_deref()).await,
         }
     }
 
@@ -2759,22 +2885,33 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
         tokio::select! {
             served = axum::serve(listener, app) => served.context("serving Verkstead"),
             served = peer.serving(peers) => served,
-            signal = stopping.told() => stopped(signal, &advertisement).await,
+            served = peer::annex_forward::serving(annex_forward, annex_pointing) => served,
+            signal = stopping.told() => stopped(signal, &advertisement, annexed.as_deref()).await,
         }
     }
 }
 
-/// The ordered stop: the advertisement withdrawn, and then this server ending
-/// the way it always did.
+/// The ordered stop: this device's Annex terminated, the advertisement
+/// withdrawn, and then this server ending the way it always did.
 ///
-/// **The one thing this process does on its way out, and the only reason it has
-/// a way out at all.** A row on another machine's **Discovered** list runs out
-/// on its own TTL, which is what covers a killed server and a lid that shut —
-/// this is what makes a restart tidy rather than what makes a stale row
-/// impossible. Nothing else is drained, stopped or closed in order: no request
-/// waits, no session is asked to finish, and the listeners go with the process.
-async fn stopped(signal: &str, advertisement: &discovery::Advertisement) -> Result<()> {
+/// **The two things this process does on its way out, and the only reason it
+/// has a way out at all.** A row on another machine's **Discovered** list runs
+/// out on its own TTL, which is what covers a killed server and a lid that shut
+/// — this is what makes a restart tidy rather than what makes a stale row
+/// impossible. An Annex's box is the same: a killed Keeper's goes on WSL's idle
+/// timeout (see [`annex::booting`]), and this stops it at once. Nothing else is
+/// drained, stopped or closed in order: no request waits, no session is asked
+/// to finish, and the listeners go with the process.
+async fn stopped(
+    signal: &str,
+    advertisement: &discovery::Advertisement,
+    annexed: Option<&annex::booting::Annexed>,
+) -> Result<()> {
     tracing::info!(signal, "verkstead has been asked to stop");
+
+    if let Some(annexed) = annexed {
+        annexed.stopped().await;
+    }
 
     advertisement.withdrawn().await;
 

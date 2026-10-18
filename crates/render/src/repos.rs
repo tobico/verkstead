@@ -116,6 +116,91 @@ pub enum AuthorThere {
     Unsaid,
 }
 
+/// One **Clonable Repo**: a repository another member has registered, by its
+/// origin, that this device lacks — a row of the Repo dropdown's second group.
+///
+/// **Named off the origin rather than off any member's row**, because two members
+/// can hold one origin under two directory names and the row is one repository:
+/// `name` is the origin's last path segment, which is what `git clone` would call
+/// the directory, and `place` is the URL with its scheme, its user and its `.git`
+/// taken off — where the repository is, in the words somebody would say it in.
+///
+/// **And the origin travels as a member reported it**, which is what a clone is
+/// made from: the two readings above are for a person to read, and neither is a
+/// URL git could be handed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct ClonableRepo {
+    pub name: String,
+    pub place: String,
+    pub origin: String,
+
+    /// The uuid of the Author the member's Repo works as (ADR-0025), which is
+    /// the one a clone of it is recorded as and fetched with — the member met
+    /// first, as the origin's spelling is. `None` where that member says none:
+    /// the clone is then the one Author's, as a registration naming none is.
+    pub author: Option<String>,
+}
+
+/// A **Clonable Repo** the human is asking this device to clone, and where.
+///
+/// The origin as the clonable reading carried it, which is a URL git can be
+/// handed, and the parent the clone goes under: the directory itself is named
+/// off the origin on the device that clones, the way the reading named the row,
+/// so the two can never disagree about what the clone is called.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct Cloning {
+    pub origin: String,
+
+    /// The directory the clone goes in. Absolute, and somewhere the server can
+    /// write — the one **Create repo** remembers for this device.
+    pub parent: String,
+
+    /// The uuid of the Author the clone is recorded as and fetched with: the
+    /// clonable row's own, sent back as it came. With none, the one Author
+    /// where there is one — see [`Registration::author`].
+    #[serde(default)]
+    #[cfg_attr(feature = "typescript", ts(optional))]
+    pub author: Option<String>,
+}
+
+/// What became of a clone.
+///
+/// Shaped like [`Registered`], because a clone ends in the very registration
+/// **Open repo** makes, and the two outcomes that leave a Repo carry it for the
+/// same reason: whoever asked is about to put a draft on it.
+///
+/// A refusal registers nothing, and a directory the clone made on the way is
+/// taken back.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum Cloned {
+    /// Cloned and registered.
+    Cloned(RepoEntry),
+
+    /// A Repo is registered at the path the clone would land on already, and
+    /// this is it. Nothing was cloned: nothing registers twice.
+    AlreadyRegistered(RepoEntry),
+
+    /// Nothing is at the parent, or what was sent was not an absolute path — the
+    /// same sentence [`Created::ParentMissing`] is.
+    ParentMissing,
+
+    /// More than one Author is configured here and the clone named none — the
+    /// member's Repo saying none — so there is no saying whose it is.
+    AuthorUnpicked,
+
+    /// The clone named an Author this device's one list does not hold: a
+    /// mirror that has not arrived yet, or one since removed at its home.
+    NoSuchAuthor,
+
+    /// Anything else, in git's own words where git is what refused: an origin
+    /// that cannot be reached, a credential that is missing, a directory that is
+    /// there already.
+    Refused(String),
+}
+
 /// A repository the human is asking Verkstead to take on, named by its absolute
 /// path.
 ///

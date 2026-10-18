@@ -13,8 +13,10 @@
 //! session is given, then the MCP servers a Conversation may attach, then how
 //! much of the machine Verkstead helps itself to, then what becomes of a
 //! Conversation once it is archived, then whether this machine can be reached
-//! from a phone, then the Agent Profiles and the Repos a Conversation is settled
-//! against, and last the extra directories a sandbox is given.
+//! from a phone, then what it has installed beyond the wizard's checks (on a
+//! machine that can have anything there), then the Agent Profiles and the
+//! Repos a Conversation is settled against, and last the extra directories a
+//! sandbox is given.
 //!
 //! **And one section above all of those that is not the server's at all**: what
 //! the desktop app does about its own window, drawn only where the page is being
@@ -54,6 +56,7 @@ import { Route, useLocation, useNavigate } from "@solidjs/router";
 import { Match, Switch, createMemo, createSignal, type JSX } from "solid-js";
 
 import { Panes, PaneSticky, type Pane } from "../Panes";
+import type { ComponentsView } from "../api/types";
 import { ProfileList, ProfilePane } from "../profiles/ProfileList";
 import { Notifications } from "../push/Notifications";
 import { ReposCard, ReposPane } from "../repos/RepoList";
@@ -63,6 +66,7 @@ import { PaneHead } from "../workbench/PaneHead";
 import { pathOf } from "../workbench/openings";
 import { AtOnceCard, AtOncePane } from "./AtOnce";
 import { CleanupCard, CleanupPane } from "./Cleanup";
+import { ComponentsCard, ComponentsPane, useComponents } from "./Components";
 import { DesktopCard, DesktopPane } from "./Desktop";
 import { GitCard, GitPane } from "./Git";
 import { InstructionsCard, InstructionsPane } from "./Instructions";
@@ -120,12 +124,14 @@ export function panes(): JSX.Element {
 
 /// What a path says is open, of the sections this page actually has.
 ///
-/// One of them is not always there: the Desktop section is drawn only where the
+/// Two of them are not always there: the Desktop section is drawn only where the
 /// page is being read inside the desktop app, so `/settings/desktop` names
-/// nothing in a browser — and a path naming a pane this build does not have
-/// leaves the details bare, which is what `openings.ts` says every one of them
-/// comes to. The URL is left alone: it is a record of what was picked rather
-/// than a promise that it is still there.
+/// nothing in a browser — and the Components section only on a machine that can
+/// have an Annex, so `/settings/components` names nothing anywhere else. A path
+/// naming a pane this build does not have leaves the details bare, which is
+/// what `openings.ts` says every one of them comes to. The URL is left alone:
+/// it is a record of what was picked rather than a promise that it is still
+/// there.
 ///
 /// Read here rather than in `openings.ts`, because the two are different kinds
 /// of question: where a pane stands is arithmetic over a path, and which
@@ -134,8 +140,17 @@ export function panes(): JSX.Element {
 /// because what a narrow window does on a cold load hangs off it: an opening
 /// nothing draws would walk the human into a details pane with no way back out
 /// of it, that way back being the pane's own head.
-function drawn(opening: Opening | null): Opening | null {
+function drawn(
+  opening: Opening | null,
+  components: ComponentsView | undefined,
+): Opening | null {
   if (opening === "desktop" && bridge() === null) {
+    return null;
+  }
+
+  // And the Components section, which is drawn only on a machine the server
+  // says can have one. Until it has said, the pane stands and reads the machine.
+  if (opening === "components" && components?.annex === null) {
     return null;
   }
 
@@ -149,7 +164,10 @@ export function SettingsPage(): JSX.Element {
 
   /// What the details pane is showing, read off the path rather than held
   /// beside it, so there is one account of what is open.
-  const opening = createMemo(() => drawn(openingAt(where.pathname)));
+  const components = useComponents();
+  const opening = createMemo(() =>
+    drawn(openingAt(where.pathname), components.data),
+  );
 
   /// Which level a narrow window is showing. The settings themselves when the
   /// page is entered, and the details straight away where the path names one —
@@ -208,6 +226,7 @@ export function SettingsPage(): JSX.Element {
       details={
         <Details
           opening={opening()}
+          select={select}
           back={() => setPane("middle")}
           done={shut}
         />
@@ -324,6 +343,16 @@ function Settings(props: {
           open={props.opening === "remote"}
           press={() => props.select("remote")}
         />
+        {/* And what Verkstead has installed onto this machine beyond what the
+            wizard checks: the Annex's row today, and the place a harness added
+            later will live. Beside Remote access, because both are about what
+            this machine is doing rather than what Verkstead was told — and drawn
+            only on a machine that can have the row, so everywhere else the order
+            is what it always was. See `Components.tsx`. */}
+        <ComponentsCard
+          open={props.opening === "components"}
+          press={() => props.select("components")}
+        />
         {/* Told which of its own things is open rather than the whole opening:
             where a Profile's pane stands is this page's arithmetic, and a
             section that knew the settings' paths would be a second opinion
@@ -350,6 +379,9 @@ function Settings(props: {
 /// nothing is.
 function Details(props: {
   opening: Opening | null;
+  /// Opening another details pane from inside this one, which is what the
+  /// Annex's row on the Devices list does: the same navigation a card makes.
+  select: (opening: Opening) => void;
   /// The way back out to the settings, which is a change of level rather than a
   /// navigation: what is open stays open, and the URL goes on saying so.
   back: () => void;
@@ -396,7 +428,13 @@ function Details(props: {
         <CleanupPane back={props.back} />
       </Match>
       <Match when={props.opening === "remote"}>
-        <RemotePane back={props.back} />
+        <RemotePane
+          back={props.back}
+          components={() => props.select("components")}
+        />
+      </Match>
+      <Match when={props.opening === "components"}>
+        <ComponentsPane back={props.back} />
       </Match>
       <Match when={props.opening === "repos"}>
         <ReposPane back={props.back} />

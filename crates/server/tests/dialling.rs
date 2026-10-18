@@ -112,6 +112,7 @@ impl FarEnd {
                 name: "laptop".to_owned(),
                 os: "macOS".to_owned(),
                 addresses: vec![format!("127.0.0.1:{}", address.port())],
+                kept_by: None,
             },
             address,
             device,
@@ -275,6 +276,7 @@ impl ThisDevice {
                 os: "Linux".to_owned(),
                 addresses: addresses.to_vec(),
                 fingerprint: fingerprint.to_owned(),
+                kept_by: None,
             },
         )
         .await

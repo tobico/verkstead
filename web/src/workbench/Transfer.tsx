@@ -14,14 +14,23 @@
 //! **The preflight is a reading of the far end**, made the moment a device is
 //! picked and drawn as it arrives. What it holds is what would stop the move,
 //! and **Go** is refused while it holds anything — by name rather than by count,
-//! because each finding is an errand somewhere: a repository to open over there,
-//! a harness to install over there, or a machine to go and wake. See
-//! `crate::preflight` on the server, which is where the questions are asked and
-//! which end answers each of them.
+//! because each finding is an errand somewhere: a repository to clone or open
+//! over there, a harness to install over there, or a machine to go and wake.
+//! See `crate::preflight` on the server, which is where the questions are asked
+//! and which end answers each of them.
+//!
+//! **No match offers the clone** (ADR-0024, *Clonable repos*). A repository
+//! with an origin that the far device has no Repo for reads *clone it there*,
+//! as a press: the far device clones it the way its own Repo dropdown would —
+//! into the parent **Create repo** remembers there, or through the same path
+//! card where none is — and once it lands the preflight is read again, Go
+//! unlocking if nothing else is in the way. A refusal brings up that card, in
+//! the far end's words, so another parent can be picked. A repository with no
+//! origin is not clonable, and still points at **Open repo** there.
 //!
 //! **And *unreachable* is never *no match*.** A machine that did not answer is
-//! said as that, named — a device asleep will answer perfectly well tomorrow,
-//! where no match is somebody being sent to **Open repo** on a machine that may
+//! said as that, named, and offers no clone — a device asleep will answer
+//! perfectly well tomorrow, where no match is a clone onto a machine that may
 //! already have the repository.
 //!
 //! **And Go writes the move down rather than making it.** The session's turn
@@ -43,6 +52,7 @@ import { Modal } from "../Modal";
 import { AGENT_NAME, DEFAULT_PROFILE } from "../agents";
 import { preflight, transfer } from "../api/client";
 import type {
+  ClonableRepo,
   ConversationView,
   Lacking,
   PairingRole,
@@ -50,10 +60,11 @@ import type {
   Transferring,
 } from "../api/types";
 import { UNREACHABLE, harnessAbsentOn } from "../broken";
-import { useDevices } from "../devices";
+import { useDevices, useRepoParent } from "../devices";
 import { useReading } from "../freshness";
 import { ErrorLine } from "../notices";
-import { keyOf, useDevice, type Device } from "../reaching";
+import { Reaching, keyOf, useDevice, type Device } from "../reaching";
+import { CloneRepo, useCloning } from "../repos/RepoList";
 import { DeviceSelect, useConversationTicks } from "./Setup";
 import styles from "./Transfer.module.css";
 
@@ -87,11 +98,16 @@ const ROLE_NAME: Record<PairingRole, string> = {
 
 /// One finding of the preflight, said.
 ///
-/// A node rather than a string for the one that points somewhere: **Open repo**
+/// A node rather than a string for the two that point somewhere. **Open repo**
 /// is a press on the far device's own Repo dropdown, and a sentence that named
 /// it in the same voice as the rest of the words would be a sentence the human
-/// has to find the press in.
-function lacking(said: Lacking, device: string): JSX.Element {
+/// has to find the press in; *clone it there* is a press of its own — see
+/// [`CloneThere`] — and `cloned` is what it says once the clone has landed.
+function lacking(
+  said: Lacking,
+  device: string,
+  cloned: () => void,
+): JSX.Element {
   if (said === "Unreachable") {
     return (
       `${device} is ${UNREACHABLE}, so it can't say what it has. ` +
@@ -100,11 +116,26 @@ function lacking(said: Lacking, device: string): JSX.Element {
   }
 
   if ("Repo" in said) {
-    return (
+    const missing = (
       <>
         {said.Repo.companion ? "The companion repo " : "The repo "}
-        {said.Repo.name} isn't on {device}. <strong>Open repo</strong> there to
-        register it.
+        {said.Repo.name} isn't on {device}.
+      </>
+    );
+
+    const clonable = said.Repo.clonable;
+
+    if (clonable === null) {
+      return (
+        <>
+          {missing} <strong>Open repo</strong> there to register it.
+        </>
+      );
+    }
+
+    return (
+      <>
+        {missing} <CloneThere repo={clonable} cloned={cloned} />
       </>
     );
   }
@@ -139,6 +170,91 @@ function lacking(said: Lacking, device: string): JSX.Element {
     said.Harness.agent_type,
     device,
   )}`;
+}
+
+/// *Clone it there*: a no-match finding's press, cloning the repository on the
+/// device picked (ADR-0024, *Clonable repos*).
+///
+/// The Repo dropdown's own clone, run on the far device by the [`Reaching`] the
+/// findings are drawn inside: straight into the parent **Create repo**
+/// remembers there, or through [`CloneRepo`]'s card where none is. What lands
+/// is not picked by anything here — the preflight read again is what notices
+/// it, the far end's registry now holding a match.
+///
+/// A straight clone that is refused comes back as that card, the far end's
+/// words under the parent it was sent to, the way the Repo dropdown's does:
+/// what answers a refusal is usually another parent, and the card is where one
+/// is picked.
+function CloneThere(props: {
+  repo: ClonableRepo;
+  cloned: () => void;
+}): JSX.Element {
+  const device = useDevice();
+  const parentOf = useRepoParent();
+  const cloning = useCloning();
+
+  /// The parent card while it is up — for a device nothing is remembered on,
+  /// or a straight clone that was refused, with what it was refused with — and
+  /// `null` while it is not.
+  const [asking, setAsking] = createSignal<{ refused: string | null } | null>(
+    null,
+  );
+
+  const clone = () => {
+    const parent = parentOf(device());
+
+    if (parent === "") {
+      setAsking({ refused: null });
+      return;
+    }
+
+    cloning.mutate(
+      { origin: props.repo.origin, parent, author: props.repo.author },
+      {
+        onSuccess: (landing) => {
+          if ("refused" in landing) {
+            setAsking({ refused: landing.refused });
+            return;
+          }
+
+          props.cloned();
+        },
+      },
+    );
+  };
+
+  return (
+    <>
+      <button
+        type="button"
+        class={`${styles.clone!} secondary`}
+        disabled={cloning.isPending}
+        onClick={clone}
+      >
+        {cloning.isPending ? "Cloning…" : "Clone it there"}
+      </button>
+
+      <Show when={cloning.isError}>
+        <ErrorLine class={styles.refused}>
+          The repo couldn't be cloned. {cloning.error?.message}
+        </ErrorLine>
+      </Show>
+
+      <Show when={asking()}>
+        {(card) => (
+          <CloneRepo
+            repo={props.repo}
+            refused={card().refused}
+            close={() => setAsking(null)}
+            landed={() => {
+              setAsking(null);
+              props.cloned();
+            }}
+          />
+        )}
+      </Show>
+    </>
+  );
 }
 
 /// The dialog itself, over whichever Conversation the row was pressed on.
@@ -265,6 +381,24 @@ function Picking(props: {
 
   const queries = useQueryClient();
 
+  /// A clone a finding offered has landed on the device picked: the preflight
+  /// is read again, which is what finds the far end holding a match now and
+  /// unlocks Go if nothing else is in the way.
+  ///
+  /// The press's own reading goes with it, being about a world before the
+  /// clone.
+  const cloned = () => {
+    setAgain(null);
+    void queries.invalidateQueries({
+      queryKey: keyOf(
+        here(),
+        "conversation",
+        String(props.conversation.id),
+        "preflight",
+      ),
+    });
+  };
+
   /// Pressing Go: the move is written down, and the card shuts on it.
   ///
   /// What is read again afterwards is the conversation and the list, because
@@ -361,9 +495,17 @@ function Picking(props: {
                     something to go and put right somewhere, and the somewhere
                     is in the sentence. */}
                 <ul class={styles.lacks}>
-                  <For each={reading().lacks}>
-                    {(said) => <li>{lacking(said, reading().device)}</li>}
-                  </For>
+                  {/* Inside the picked device's reaching, so that a clone
+                      offered by a finding runs over there — with that
+                      device's remembered parent, its token and its git
+                      author. */}
+                  <Reaching.Provider value={() => picked() ?? null}>
+                    <For each={reading().lacks}>
+                      {(said) => (
+                        <li>{lacking(said, reading().device, cloned)}</li>
+                      )}
+                    </For>
+                  </Reaching.Provider>
                 </ul>
               </Show>
             )}

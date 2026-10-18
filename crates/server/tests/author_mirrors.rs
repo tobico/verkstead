@@ -154,6 +154,7 @@ impl Verkstead {
                 os: os.to_owned(),
                 addresses,
                 fingerprint: other.fingerprint().to_owned(),
+                kept_by: None,
             },
         )
         .await

@@ -325,6 +325,43 @@ agent_type: AgentType | null, };
 export type AgentType = "Claude" | "Codex" | "Grok" | "OpenCode";
 
 /**
+ * The Annex's row: how its box stands, the release it runs and the disk it
+ * takes.
+ */
+export type AnnexComponent = { 
+/**
+ * How the box stands — see [`AnnexState`].
+ */
+state: AnnexState, 
+/**
+ * The Verkstead release the box is pinned to, as the Keeper read it off
+ * the box's flake when it last booted it: held since that start, and so
+ * drawn on a stopped box too. `None` until the first boot of this start
+ * has read it, which the row draws as no version rather than a guess.
+ */
+version: string | null, 
+/**
+ * What the box's disk image takes of the Keeper's disk, in bytes, or
+ * `None` where there is no image to measure.
+ */
+disk: number | null, 
+/**
+ * And why the box would not come up at this start, where it would not —
+ * the same line the Annex's row on the Devices list carries.
+ */
+trouble: string | null, };
+
+/**
+ * How the Annex's box stands.
+ *
+ * The wizard's three ways of having no box yet are told apart, because two of
+ * them are something the human does before Install can: a restart, and
+ * virtualization turned on in the firmware. The words for both are the
+ * viewer's, and the WSL row's own.
+ */
+export type AnnexState = "NotInstalled" | "NeedsRestart" | "VirtualizationOff" | "Running" | "Stopped" | "Updating";
+
+/**
  * One question's slot in a Response: either an Answer — a selected Option
  * and/or free text — or the Unanswered marker, saying the human chose to
  * leave the question open.
@@ -778,6 +815,11 @@ tasks: Array<TaskDocument>,
 diagrams: boolean, };
 
 /**
+ * Why a row cannot be had on this machine.
+ */
+export type Barred = "Virtualization";
+
+/**
  * The branch to come off, or `null` to go back to the default-branch rule.
  */
 export type BaseBranchChoice = { 
@@ -990,6 +1032,62 @@ trim: CleanupStepView,
  * forgets.
  */
 delete: CleanupStepView, };
+
+/**
+ * One **Clonable Repo**: a repository another member has registered, by its
+ * origin, that this device lacks — a row of the Repo dropdown's second group.
+ *
+ * **Named off the origin rather than off any member's row**, because two members
+ * can hold one origin under two directory names and the row is one repository:
+ * `name` is the origin's last path segment, which is what `git clone` would call
+ * the directory, and `place` is the URL with its scheme, its user and its `.git`
+ * taken off — where the repository is, in the words somebody would say it in.
+ *
+ * **And the origin travels as a member reported it**, which is what a clone is
+ * made from: the two readings above are for a person to read, and neither is a
+ * URL git could be handed.
+ */
+export type ClonableRepo = { name: string, place: string, origin: string, 
+/**
+ * The uuid of the Author the member's Repo works as (ADR-0025), which is
+ * the one a clone of it is recorded as and fetched with — the member met
+ * first, as the origin's spelling is. `None` where that member says none:
+ * the clone is then the one Author's, as a registration naming none is.
+ */
+author: string | null, };
+
+/**
+ * What became of a clone.
+ *
+ * Shaped like [`Registered`], because a clone ends in the very registration
+ * **Open repo** makes, and the two outcomes that leave a Repo carry it for the
+ * same reason: whoever asked is about to put a draft on it.
+ *
+ * A refusal registers nothing, and a directory the clone made on the way is
+ * taken back.
+ */
+export type Cloned = { "Cloned": RepoEntry } | { "AlreadyRegistered": RepoEntry } | "ParentMissing" | "AuthorUnpicked" | "NoSuchAuthor" | { "Refused": string };
+
+/**
+ * A **Clonable Repo** the human is asking this device to clone, and where.
+ *
+ * The origin as the clonable reading carried it, which is a URL git can be
+ * handed, and the parent the clone goes under: the directory itself is named
+ * off the origin on the device that clones, the way the reading named the row,
+ * so the two can never disagree about what the clone is called.
+ */
+export type Cloning = { origin: string, 
+/**
+ * The directory the clone goes in. Absolute, and somewhere the server can
+ * write — the one **Create repo** remembers for this device.
+ */
+parent: string, 
+/**
+ * The uuid of the Author the clone is recorded as and fetched with: the
+ * clonable row's own, sent back as it came. With none, the one Author
+ * where there is one — see [`Registration::author`].
+ */
+author?: string, };
 
 /**
  * One pull request the comment landed on.
@@ -1291,6 +1389,16 @@ base_commit: string | null, };
  * one place a platform's answer is said.
  */
 export type CompileCaching = "Cached" | "NoSccache";
+
+/**
+ * Every row of the Components pane this machine can have.
+ */
+export type ComponentsView = { 
+/**
+ * The **Annex**'s row — *Linux development (WSL)* — or `None` on a machine
+ * that cannot have one, which is every machine but a Windows Keeper.
+ */
+annex: AnnexComponent | null, };
 
 /**
  * What a take-up's press says beyond which Draft is making it.
@@ -2270,10 +2378,10 @@ author?: string, };
  * What a row is about.
  *
  * Flat rather than a harness variant carrying an [`crate::AgentType`]: the
- * step draws seven rows with an instruction apiece, and which of them are
+ * step draws eight rows with an instruction apiece, and which of them are
  * harnesses is a fact about the objective rather than about the drawing.
  */
-export type Dependency = "Sandbox" | "Git" | "Claude" | "Codex" | "Grok" | "OpenCode" | "Gh";
+export type Dependency = "Sandbox" | "Git" | "Claude" | "Codex" | "Grok" | "OpenCode" | "Gh" | "Wsl";
 
 /**
  * And whether the machine has it.
@@ -2311,7 +2419,15 @@ trouble: string | null,
  * cannot use it — see [`Seen`]. Nothing where it is on no `PATH` at
  * all, which is a row with nothing to say beyond *install one*.
  */
-seen: Seen | null, };
+seen: Seen | null, } | { "state": "Owed", 
+/**
+ * What is still owed.
+ */
+owed: Owed, } | { "state": "Refused", 
+/**
+ * Why, which the viewer words.
+ */
+barred: Barred, };
 
 /**
  * One row of the dependencies step: a thing a session needs, and whether this
@@ -2399,7 +2515,21 @@ os: string,
  * rather than a failure: it still has an id and a fingerprint, and those
  * are what somebody looking at this is comparing.
  */
-addresses: Array<string>, };
+addresses: Array<string>, 
+/**
+ * And the Device Id of its **Keeper**, where it is an **Annex** — the
+ * mark saying whose it is (ADR-0024, *The Keeper's Join*).
+ *
+ * **Said by the Annex about itself** rather than asserted by anybody about
+ * it: an Annex is told in its own `config.yaml` that it is kept, and every
+ * answer it gives says so. A member row takes it when it is first written
+ * and keeps it through every refresh after, so a device linked as an
+ * ordinary member cannot later say itself out of being unlinked.
+ *
+ * `None` is every device but an Annex, and what a Verkstead from before
+ * the Annex existed answers by saying nothing.
+ */
+kept_by: string | null, };
 
 /**
  * The **Devices** list, as the Remote access pane reads it off this machine.
@@ -2453,7 +2583,15 @@ members: Array<LinkedDevice>,
  * whose ten minutes ran out a second ago reads expired on this answer and
  * waiting on the one before it, and both are true when they are given.
  */
-pending: Array<PendingJoin>, };
+pending: Array<PendingJoin>, 
+/**
+ * And why this device's **Annex** would not come up at this start, where
+ * there is no row of the Annex's in `members` to carry it — an Annex that
+ * has never been linked. Drawn under this device's own row. Where the
+ * Annex has a row, the line is on it instead — see
+ * [`LinkedDevice::trouble`] — and this is `None`.
+ */
+annex_trouble: string | null, };
 
 /**
  * The Diff as the browser receives it: the HTML the server rendered, and the
@@ -3279,7 +3417,15 @@ name: string,
  * repository the work itself is in. Both are refusals; they are not
  * the same sentence.
  */
-companion: boolean, } } | { "RepoAuthor": { name: string, companion: boolean, 
+companion: boolean, 
+/**
+ * The repository as a **Clonable Repo**, off its origin as git reads it
+ * on the device holding the work — what the Transfer dialog's *clone it
+ * there* is pressed with, the far device cloning it as its own Repo
+ * dropdown would. Nothing for a repository with no origin, which is
+ * not clonable and is pointed at **Open repo** there instead.
+ */
+clonable: ClonableRepo | null, } } | { "RepoAuthor": { name: string, companion: boolean, 
 /**
  * What this device's Author for it is called.
  */
@@ -3477,7 +3623,17 @@ identity: DeviceIdentity,
  * dimmed, reading *unreachable* — it stays on the list, with everything
  * about it, and an Unlink on it still works.
  */
-reachable: boolean, };
+reachable: boolean, 
+/**
+ * And, on a Keeper's row for its own **Annex**, why the box it runs in
+ * would not come up at this start: it would not boot, answer or link.
+ * Drawn under the row, which reads *unreachable* beside it until the
+ * Annex answers (ADR-0024).
+ *
+ * The Keeper's own finding, like the flag above, and only a Keeper has
+ * one: `None` on every other row, and on an Annex that came up.
+ */
+trouble: string | null, };
 
 /**
  * What a Set still waiting on the human says about itself: whether an agent is
@@ -4037,6 +4193,14 @@ companion_author: string,
  * And who the Conversation's own Repo is.
  */
 author: string, };
+
+/**
+ * What a row that is part of the way there is still owed.
+ *
+ * The WSL row's alone, and its wording is the viewer's, the way [`Seen`]'s
+ * is: what is here is what the machine is.
+ */
+export type Owed = "Restart" | "Annex";
 
 /**
  * Which of a Conversation's three roles a Pairing is for.
