@@ -145,7 +145,7 @@ pub(crate) async fn defer(conn: &mut SqliteConnection, set_id: i64, idled: bool)
 /// Only the Sets with a row, so a Set this does not name was asked blocking —
 /// which is what [`kind`] reads a missing entry as.
 pub async fn stored_on_timeline(
-    pool: &SqlitePool,
+    connection: &mut sqlx::SqliteConnection,
     conversation_id: i64,
 ) -> Result<HashMap<i64, Ask>> {
     let rows: Vec<(i64, bool)> = sqlx::query_as(
@@ -156,7 +156,7 @@ pub async fn stored_on_timeline(
          WHERE e.conversation_id = ?",
     )
     .bind(conversation_id)
-    .fetch_all(pool)
+    .fetch_all(&mut *connection)
     .await
     .with_context(|| format!("reading Conversation {conversation_id}'s stored asks"))?;
 

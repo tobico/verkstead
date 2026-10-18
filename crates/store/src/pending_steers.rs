@@ -277,6 +277,8 @@ pub async fn pending_steer(
     pool: &SqlitePool,
     conversation_id: i64,
 ) -> Result<Option<PendingSteer>> {
+    let mut tx = super::reading(pool, "reading a pending steer").await?;
+
     type Row = (
         String,
         Option<String>,
@@ -296,7 +298,7 @@ pub async fn pending_steer(
          FROM pending_steers WHERE conversation_id = ?",
     )
     .bind(conversation_id)
-    .fetch_optional(pool)
+    .fetch_optional(&mut *tx)
     .await
     .with_context(|| format!("reading the pending steer of Conversation {conversation_id}"))?
     else {
@@ -326,7 +328,7 @@ pub async fn pending_steer(
          FROM pending_steer_additions WHERE conversation_id = ? ORDER BY repo_id",
     )
     .bind(conversation_id)
-    .fetch_all(pool)
+    .fetch_all(&mut *tx)
     .await
     .with_context(|| {
         format!("reading what a pending steer of Conversation {conversation_id} would add")
@@ -337,7 +339,7 @@ pub async fn pending_steer(
          FROM pending_steer_upgrades WHERE conversation_id = ? ORDER BY repo_id",
     )
     .bind(conversation_id)
-    .fetch_all(pool)
+    .fetch_all(&mut *tx)
     .await
     .with_context(|| {
         format!("reading what a pending steer of Conversation {conversation_id} would open up")

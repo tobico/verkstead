@@ -111,13 +111,17 @@ pub async fn nothing_else(
     conversation_id: i64,
     within: Lifecycle,
 ) -> Result<bool> {
-    let found: Option<(i64,)> = sqlx::query_as(
-        "SELECT q.id
+    // The mark in the same query as the Set it is looked for on, rather than a
+    // second read by the Set's id: a record landing again between the two
+    // would have renumbered it.
+    let found: Option<(bool,)> = sqlx::query_as(
+        "SELECT n.set_id IS NOT NULL
          FROM question_sets q
          JOIN set_events s ON s.set_id = q.id
          JOIN timeline_events e ON e.id = s.event_id
          JOIN responses r ON r.set_id = q.id
          LEFT JOIN deferrals d ON d.set_id = q.id
+         LEFT JOIN endings n ON n.set_id = q.id
          WHERE e.conversation_id = ?
            AND (d.set_id IS NULL OR d.idled)
            AND e.id > COALESCE(
@@ -140,9 +144,5 @@ pub async fn nothing_else(
         )
     })?;
 
-    let Some((set_id,)) = found else {
-        return Ok(false);
-    };
-
-    ended_on(pool, set_id).await
+    Ok(found.is_some_and(|(marked,)| marked))
 }

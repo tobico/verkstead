@@ -2382,6 +2382,17 @@ pub async fn conversation_rank(pool: &SqlitePool, id: i64) -> Result<Option<Stri
 /// spelling only [`Lifecycle::read`] knows about, and a list of words in a query
 /// would be a second opinion about what "finished" means.
 pub async fn work_on_repo(pool: &SqlitePool, repo_id: i64) -> Result<Work> {
+    let mut connection = pool
+        .acquire()
+        .await
+        .with_context(|| format!("counting the Conversations on Repo {repo_id}"))?;
+
+    work_on(&mut connection, repo_id).await
+}
+
+/// And the same inside a transaction already open, for the unregistering that
+/// refuses on it — see [`super::unregister_repo`].
+pub(crate) async fn work_on(tx: &mut sqlx::SqliteConnection, repo_id: i64) -> Result<Work> {
     let rows: Vec<(String, i64)> = sqlx::query_as(
         "SELECT state, COUNT(*)
          FROM conversations
@@ -2389,7 +2400,7 @@ pub async fn work_on_repo(pool: &SqlitePool, repo_id: i64) -> Result<Work> {
          GROUP BY state",
     )
     .bind(repo_id)
-    .fetch_all(pool)
+    .fetch_all(&mut *tx)
     .await
     .with_context(|| format!("counting the Conversations on Repo {repo_id}"))?;
 
@@ -2898,11 +2909,13 @@ pub async fn process(pool: &SqlitePool, id: i64) -> Result<Process> {
 /// Conversation by the primary key, and a second pick is the human changing
 /// their mind rather than a second Process.
 pub async fn set_process(pool: &SqlitePool, id: i64, process: Process) -> Result<Edited> {
-    if let Some(refusal) = not_drafting(pool, id).await? {
+    let mut tx = super::writing(pool, "setting a Conversation's Process").await?;
+
+    if let Some(refusal) = not_drafting(&mut tx, id).await? {
         return Ok(refusal);
     }
 
-    if branch_made(pool, id).await? {
+    if branch_made(&mut tx, id).await? {
         return Ok(Edited::NotDrafting);
     }
 
@@ -2912,9 +2925,13 @@ pub async fn set_process(pool: &SqlitePool, id: i64, process: Process) -> Result
     )
     .bind(id)
     .bind(process.stored())
-    .execute(pool)
+    .execute(&mut *tx)
     .await
     .with_context(|| format!("recording the Process picked on Conversation {id}"))?;
+
+    tx.commit()
+        .await
+        .context("setting a Conversation's Process")?;
 
     Ok(Edited::Saved)
 }
@@ -2969,11 +2986,13 @@ pub async fn target(pool: &SqlitePool, id: i64) -> Result<Option<String>> {
 /// origin and a URL of another repository are both refused at the press, where
 /// there is a GitHub and a git to ask; this is a field being typed into.
 pub async fn set_target(pool: &SqlitePool, id: i64, target: Option<&str>) -> Result<Edited> {
-    if let Some(refusal) = not_drafting(pool, id).await? {
+    let mut tx = super::writing(pool, "pointing a Conversation at a target").await?;
+
+    if let Some(refusal) = not_drafting(&mut tx, id).await? {
         return Ok(refusal);
     }
 
-    if branch_made(pool, id).await? {
+    if branch_made(&mut tx, id).await? {
         return Ok(Edited::NotDrafting);
     }
 
@@ -2985,18 +3004,22 @@ pub async fn set_target(pool: &SqlitePool, id: i64, target: Option<&str>) -> Res
             )
             .bind(id)
             .bind(target)
-            .execute(pool)
+            .execute(&mut *tx)
             .await
             .with_context(|| format!("recording what Conversation {id} is pointed at"))?;
         }
         None => {
             sqlx::query("DELETE FROM targets WHERE conversation_id = ?")
                 .bind(id)
-                .execute(pool)
+                .execute(&mut *tx)
                 .await
                 .with_context(|| format!("clearing what Conversation {id} is pointed at"))?;
         }
     }
+
+    tx.commit()
+        .await
+        .context("pointing a Conversation at a target")?;
 
     Ok(Edited::Saved)
 }
@@ -3032,10 +3055,21 @@ pub async fn fill_target(pool: &SqlitePool, id: i64, target: &str) -> Result<()>
 /// almost no Conversation has one, and a `LEFT JOIN`'s worth of column would
 /// say nothing this small read does not.
 pub async fn adopting(pool: &SqlitePool, id: i64) -> Result<Option<String>> {
+    let mut connection = pool
+        .acquire()
+        .await
+        .with_context(|| format!("reading what Conversation {id} is adopting"))?;
+
+    adopting_on(&mut connection, id).await
+}
+
+/// And the same inside a transaction already open, for a write that refuses on
+/// it — see [`switch_repo`].
+async fn adopting_on(tx: &mut sqlx::SqliteConnection, id: i64) -> Result<Option<String>> {
     let row: Option<(String,)> =
         sqlx::query_as("SELECT roadmap FROM adoptions WHERE conversation_id = ?")
             .bind(id)
-            .fetch_optional(pool)
+            .fetch_optional(&mut *tx)
             .await
             .with_context(|| format!("reading what Conversation {id} is adopting"))?;
 
@@ -3202,14 +3236,14 @@ pub async fn skip_review(pool: &SqlitePool, id: i64) -> Result<Chosen> {
 /// the human picking one row of the one list, on a Conversation that is still
 /// drafting.
 async fn skip(pool: &SqlitePool, id: i64, role: Role) -> Result<Chosen> {
-    if let Some(refusal) = not_drafting(pool, id).await? {
+    let mut tx = super::writing(pool, "picking a role away from a Conversation").await?;
+
+    if let Some(refusal) = not_drafting(&mut tx, id).await? {
         return Ok(match refusal {
             Edited::NoSuchConversation => Chosen::NoSuchConversation,
             _ => Chosen::NotDrafting,
         });
     }
-
-    let mut tx = super::writing(pool, "picking a role away from a Conversation").await?;
 
     sqlx::query(&format!(
         "UPDATE conversations SET {} = NULL WHERE id = ?",
@@ -3265,14 +3299,14 @@ async fn choose(
     profile_id: i64,
     model: Option<&str>,
 ) -> Result<Chosen> {
-    if let Some(refusal) = not_drafting(pool, id).await? {
+    let mut tx = super::writing(pool, "choosing a Profile for a Conversation").await?;
+
+    if let Some(refusal) = not_drafting(&mut tx, id).await? {
         return Ok(match refusal {
             Edited::NoSuchConversation => Chosen::NoSuchConversation,
             _ => Chosen::NotDrafting,
         });
     }
-
-    let mut tx = super::writing(pool, "choosing a Profile for a Conversation").await?;
 
     if !settle(&mut tx, id, role, profile_id, model).await? {
         return Ok(Chosen::NoSuchProfile);
@@ -3399,6 +3433,13 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
         Option<String>,
     );
 
+    // One moment of the record for all the reads below, because each of them
+    // is joined onto the one above: an Event read here whose Capture is gone by
+    // the read of the Captures is a session's output with nothing beside it,
+    // and that is what a record landing again between the two leaves — see
+    // [`super::reading`].
+    let mut tx = super::reading(pool, "reading a Timeline").await?;
+
     let rows: Vec<Row> = sqlx::query_as(
         "SELECT e.id, e.at, e.kind, e.body,
                 q.id, q.body, r.submitted_at, r.body, a.archived_at AS locked_at,
@@ -3415,7 +3456,7 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
          ORDER BY e.id",
     )
     .bind(conversation_id)
-    .fetch_all(pool)
+    .fetch_all(&mut *tx)
     .await
     .with_context(|| format!("reading the Timeline of Conversation {conversation_id}"))?;
 
@@ -3428,46 +3469,46 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
     // The Capture summaries first, which is the one of the three that is on
     // nearly every Timeline: how much a session printed, how many turns its
     // conversation took, and the last thing it said.
-    let mut summaries = super::captures::on_timeline(pool, conversation_id).await?;
+    let mut summaries = super::captures::on_timeline(&mut tx, conversation_id).await?;
 
     // And the pull request, for the same arithmetic and a cheaper read still:
     // there is one per Conversation, and until the finish step has run there is
     // none.
-    let mut pull_requests = super::pull_requests::on_timeline(pool, conversation_id).await?;
+    let mut pull_requests = super::pull_requests::on_timeline(&mut tx, conversation_id).await?;
 
     // And what each commit carries that the query above has no column left for,
     // for the same arithmetic: what the agent wrote under its subject, and
     // whether the commit is a merge. One read for both, since it is one join
     // either way — see [`super::commits::beside_commits_on_timeline`].
     let mut beside_commits =
-        super::commits::beside_commits_on_timeline(pool, conversation_id).await?;
+        super::commits::beside_commits_on_timeline(&mut tx, conversation_id).await?;
 
     // And the Pauses, for the arithmetic again and at the pull request's cost:
     // an account running out of window is the rare Event, so this is one more
     // query that nearly always comes back with nothing.
-    let mut pauses = super::pauses::on_timeline(pool, conversation_id).await?;
+    let mut pauses = super::pauses::on_timeline(&mut tx, conversation_id).await?;
 
     // And what each steer settled beside the target and body its Event carries
     // — the ticks, the Pairing and the companion rows — for the arithmetic
     // again. A Conversation nobody has steered answers with nothing, and one
     // steered before this was written down answers with nothing for that steer.
-    let mut steers = super::steers::on_timeline(pool, conversation_id).await?;
+    let mut steers = super::steers::on_timeline(&mut tx, conversation_id).await?;
 
     // And who left each Memo and whether it has been taken back, for the
     // arithmetic again: one read, and a Timeline nobody left a Memo on answers
     // with nothing.
-    let mut memos = super::memos::on_timeline(pool, conversation_id).await?;
+    let mut memos = super::memos::on_timeline(&mut tx, conversation_id).await?;
 
     // And how each of the Sets above was asked, for the arithmetic again — see
     // [`super::deferrals::stored_on_timeline`]. Cheaper than any of them: one
     // indexed column, and most Conversations have no stored ask at all, which
     // is what a Set this does not name comes back as.
-    let stored = super::deferrals::stored_on_timeline(pool, conversation_id).await?;
+    let stored = super::deferrals::stored_on_timeline(&mut tx, conversation_id).await?;
 
     // And what each of those sessions ran under, for the arithmetic again and
     // at the Capture summaries' cost: one row per session, and a Timeline with
     // no session on it answers with nothing.
-    let mut ran_under = super::session_pairings::on_timeline(pool, conversation_id).await?;
+    let mut ran_under = super::session_pairings::on_timeline(&mut tx, conversation_id).await?;
 
     rows.into_iter()
         .map(|row| {
@@ -3959,7 +4000,9 @@ pub async fn state(pool: &SqlitePool, id: i64) -> Result<Option<Lifecycle>> {
 /// what keeps this to the round nobody has grilled yet. A Conversation on its
 /// first round has one Brief, and the newest is it.
 pub async fn save_brief(pool: &SqlitePool, id: i64, markdown: &str) -> Result<Edited> {
-    if let Some(refusal) = not_drafting(pool, id).await? {
+    let mut tx = super::writing(pool, "saving a Brief").await?;
+
+    if let Some(refusal) = not_drafting(&mut tx, id).await? {
         return Ok(refusal);
     }
 
@@ -3974,9 +4017,11 @@ pub async fn save_brief(pool: &SqlitePool, id: i64, markdown: &str) -> Result<Ed
     .bind(markdown)
     .bind(id)
     .bind(Event::Brief(String::new()).kind())
-    .execute(pool)
+    .execute(&mut *tx)
     .await
     .with_context(|| format!("saving the Brief of Conversation {id}"))?;
+
+    tx.commit().await.context("saving a Brief")?;
 
     Ok(Edited::Saved)
 }
@@ -3998,20 +4043,26 @@ pub async fn save_brief(pool: &SqlitePool, id: i64, markdown: &str) -> Result<Ed
 /// about all the same, because what the work branched from is a fact from the
 /// moment there is a branch and no field of the human's rewrites one.
 pub async fn rename_branch(pool: &SqlitePool, id: i64, branch: Option<&str>) -> Result<Edited> {
-    if let Some(refusal) = not_drafting(pool, id).await? {
+    let mut tx = super::writing(pool, "renaming a Conversation's branch").await?;
+
+    if let Some(refusal) = not_drafting(&mut tx, id).await? {
         return Ok(refusal);
     }
 
-    if branch_made(pool, id).await? {
+    if branch_made(&mut tx, id).await? {
         return Ok(Edited::NotDrafting);
     }
 
     sqlx::query("UPDATE conversations SET named_branch = ? WHERE id = ?")
         .bind(branch)
         .bind(id)
-        .execute(pool)
+        .execute(&mut *tx)
         .await
         .with_context(|| format!("renaming the branch of Conversation {id}"))?;
+
+    tx.commit()
+        .await
+        .context("renaming a Conversation's branch")?;
 
     Ok(Edited::Saved)
 }
@@ -4137,20 +4188,26 @@ pub async fn reinvent_branch(pool: &SqlitePool, id: i64, branch: &str) -> Result
 /// resolved to a commit when the work branched, and a second round carries on
 /// from what was built rather than branching again.
 pub async fn set_base_commit(pool: &SqlitePool, id: i64, commit: Option<&str>) -> Result<Edited> {
-    if let Some(refusal) = not_drafting(pool, id).await? {
+    let mut tx = super::writing(pool, "setting a Conversation's base commit").await?;
+
+    if let Some(refusal) = not_drafting(&mut tx, id).await? {
         return Ok(refusal);
     }
 
-    if branch_made(pool, id).await? {
+    if branch_made(&mut tx, id).await? {
         return Ok(Edited::NotDrafting);
     }
 
     sqlx::query("UPDATE conversations SET base_commit = ? WHERE id = ?")
         .bind(commit)
         .bind(id)
-        .execute(pool)
+        .execute(&mut *tx)
         .await
         .with_context(|| format!("recording the base commit of Conversation {id}"))?;
+
+    tx.commit()
+        .await
+        .context("setting a Conversation's base commit")?;
 
     Ok(Edited::Saved)
 }
@@ -4224,18 +4281,20 @@ pub enum Switched {
 ///   is about the work rather than about the repository, and so is every
 ///   account chosen to run it.
 pub async fn switch_repo(pool: &SqlitePool, id: i64, repo_id: i64) -> Result<Switched> {
-    if let Some(refusal) = not_drafting(pool, id).await? {
+    let mut tx = super::writing(pool, "moving a Conversation onto another Repo").await?;
+
+    if let Some(refusal) = not_drafting(&mut tx, id).await? {
         return Ok(match refusal {
             Edited::NoSuchConversation => Switched::NoSuchConversation,
             _ => Switched::NotDrafting,
         });
     }
 
-    if branch_made(pool, id).await? {
+    if branch_made(&mut tx, id).await? {
         return Ok(Switched::NotDrafting);
     }
 
-    if adopting(pool, id).await?.is_some() {
+    if adopting_on(&mut tx, id).await?.is_some() {
         return Ok(Switched::Adopting);
     }
 
@@ -4243,14 +4302,12 @@ pub async fn switch_repo(pool: &SqlitePool, id: i64, repo_id: i64) -> Result<Swi
     // companion is: what a Conversation may be moved onto is what the human has
     // registered, and one taken off it is no more choosable than one that was
     // never there.
-    if super::registered_repo(pool, repo_id).await?.is_none() {
+    if super::repos::registered_on(&mut tx, repo_id)
+        .await?
+        .is_none()
+    {
         return Ok(Switched::NoSuchRepo);
     }
-
-    let mut tx = pool
-        .begin()
-        .await
-        .with_context(|| format!("moving Conversation {id} onto Repo {repo_id}"))?;
 
     sqlx::query("UPDATE conversations SET repo_id = ?, base_commit = NULL WHERE id = ?")
         .bind(repo_id)
@@ -4276,14 +4333,20 @@ pub async fn switch_repo(pool: &SqlitePool, id: i64, repo_id: i64) -> Result<Swi
 /// The reason this Conversation is not the human's to edit, or `None` where it
 /// is.
 ///
-/// Read before the write rather than guarded inside it, unlike the Set tables:
-/// there is one human at the workbench, and what would be raced for here is
-/// their own two tabs editing one Brief. What matters is that a Conversation
-/// past drafting refuses, and that a Conversation that is not there says so.
-pub(crate) async fn not_drafting(pool: &SqlitePool, id: i64) -> Result<Option<Edited>> {
+/// **Read inside the writing transaction it guards**, through [`super::writing`]:
+/// what moves a Conversation out of drafting is not only the human's other tab
+/// but a press that starts the work, and an edit that looked a moment before it
+/// and wrote a moment after would land on work already under way. Taken under
+/// the write lock, the look and the write are one moment. What matters is that
+/// a Conversation past drafting refuses, and that a Conversation that is not
+/// there says so.
+pub(crate) async fn not_drafting(
+    tx: &mut sqlx::SqliteConnection,
+    id: i64,
+) -> Result<Option<Edited>> {
     let row: Option<(String,)> = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
         .bind(id)
-        .fetch_optional(pool)
+        .fetch_optional(&mut *tx)
         .await
         .with_context(|| format!("reading the state of Conversation {id}"))?;
 
@@ -4307,11 +4370,11 @@ pub(crate) async fn not_drafting(pool: &SqlitePool, id: i64) -> Result<Option<Ed
 /// is whether there is a branch behind it. What is refused off this is the
 /// branch name and the base commit — a record that has both settled is not one
 /// a field should rewrite, whatever its state column says.
-pub(crate) async fn branch_made(pool: &SqlitePool, id: i64) -> Result<bool> {
+pub(crate) async fn branch_made(tx: &mut sqlx::SqliteConnection, id: i64) -> Result<bool> {
     let row: Option<(i64,)> =
         sqlx::query_as("SELECT conversation_id FROM worktrees WHERE conversation_id = ?")
             .bind(id)
-            .fetch_optional(pool)
+            .fetch_optional(&mut *tx)
             .await
             .with_context(|| format!("looking for the worktree of Conversation {id}"))?;
 

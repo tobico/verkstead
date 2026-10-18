@@ -1014,7 +1014,7 @@ pub async fn pull_request_repo(
 /// own. A Repo taken off the registry is nothing to draw either, which is the
 /// same unlabeled card.
 pub(crate) async fn on_timeline(
-    pool: &SqlitePool,
+    connection: &mut sqlx::SqliteConnection,
     conversation_id: i64,
 ) -> Result<HashMap<i64, PullRequest>> {
     /// The columns in the order the query below selects them: the Event, the pull
@@ -1038,7 +1038,7 @@ pub(crate) async fn on_timeline(
          WHERE p.conversation_id = ?",
     )
     .bind(conversation_id)
-    .fetch_all(pool)
+    .fetch_all(&mut *connection)
     .await
     .with_context(|| format!("reading the pull requests of Conversation {conversation_id}"))?;
 

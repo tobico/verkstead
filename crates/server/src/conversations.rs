@@ -790,7 +790,10 @@ pub(crate) async fn set_target(pool: &SqlitePool, id: i64, target: &str) -> Resu
 ///
 /// Refused off the state the Brief is refused off, which is the same freeze:
 /// attachments are attached and removed while the round drafts, and fixed once
-/// the work starts.
+/// the work starts. Asked twice: once before the bytes are written, so that the
+/// ordinary refusal writes nothing, and again where the row is, under the lock
+/// it is written under — see [`store::attach_to_draft`]. A start pressed between
+/// the two is refused there, and the file already written is taken away again.
 pub(crate) async fn attach(state: &AppState, id: i64, name: &str, body: &[u8]) -> Result<Attached> {
     if body.len() > attachments::MAX_BYTES {
         return Ok(Attached::TooLarge);
@@ -817,26 +820,29 @@ pub(crate) async fn attach(state: &AppState, id: i64, name: &str, body: &[u8]) -
         tokio::task::spawn_blocking(move || directories.keep(id, &name, &body)).await??
     };
 
-    let attachment = store::attach(
-        &state.pool,
-        id,
-        store::Origin::Brief,
-        &kept,
-        body.len() as i64,
-    )
-    .await?;
+    let refused = match store::attach_to_draft(&state.pool, id, &kept, body.len() as i64).await? {
+        store::Attaching::Attached(attachment) => {
+            return Ok(Attached::Attached {
+                attachment: attachments::view(attachment),
+            });
+        }
+        store::Attaching::NoSuchConversation => Attached::NoSuchConversation,
+        store::Attaching::NotDrafting => Attached::NotDrafting,
+    };
 
-    Ok(Attached::Attached {
-        attachment: attachments::view(attachment),
-    })
+    let directories = Attachments::under(&state.data_dir);
+    tokio::task::spawn_blocking(move || directories.drop_file(id, &kept)).await??;
+
+    Ok(refused)
 }
 
 /// And take one off again, file and row together.
 ///
-/// The row is read first for the name — it is the only thing that says which
-/// file in the directory this is — and written last, for [`attach`]'s reason
-/// the other way round: a row taken away before the file would leave a file
-/// nothing names.
+/// The row first, refused off the freeze under the lock it is taken under — see
+/// [`store::detach_from_draft`] — and handing back the name, which is the only
+/// thing that says which file in the directory this is. The file after it, for
+/// [`attach`]'s reason: a file left with no row is a stray the Cleanup takes,
+/// where a row left with no file is a pill that opens nothing.
 ///
 /// An attachment that is not there is [`AttachmentRemoved::Removed`] rather
 /// than a refusal, the way a companion's removal is: what the press asked for
@@ -846,21 +852,16 @@ pub(crate) async fn detach(
     id: i64,
     attachment: i64,
 ) -> Result<AttachmentRemoved> {
-    if let Some(refusal) = not_drafting(&state.pool, id).await? {
-        return Ok(match refusal {
-            Frozen::NoSuchConversation => AttachmentRemoved::NoSuchConversation,
-            Frozen::NotDrafting => AttachmentRemoved::NotDrafting,
-        });
-    }
-
-    let Some(found) = store::attachment(&state.pool, id, attachment).await? else {
-        return Ok(AttachmentRemoved::Removed);
+    let found = match store::detach_from_draft(&state.pool, id, attachment).await? {
+        store::Detaching::Detached(found) => found,
+        store::Detaching::NoSuchConversation => return Ok(AttachmentRemoved::NoSuchConversation),
+        store::Detaching::NotDrafting => return Ok(AttachmentRemoved::NotDrafting),
     };
 
-    let directories = Attachments::under(&state.data_dir);
-    tokio::task::spawn_blocking(move || directories.drop_file(id, &found.name)).await??;
-
-    store::detach(&state.pool, id, attachment).await?;
+    if let Some(found) = found {
+        let directories = Attachments::under(&state.data_dir);
+        tokio::task::spawn_blocking(move || directories.drop_file(id, &found.name)).await??;
+    }
 
     Ok(AttachmentRemoved::Removed)
 }
@@ -977,23 +978,21 @@ pub(crate) async fn attached(pool: &SqlitePool, id: i64) -> Result<Vec<Attachmen
 /// afterwards, that one being a reference the human made while it meant
 /// something.
 pub(crate) async fn attach_server(state: &AppState, id: i64, name: &str) -> Result<ServerAttached> {
-    if let Some(refusal) = not_drafting(&state.pool, id).await? {
-        return Ok(match refusal {
-            Frozen::NoSuchConversation => ServerAttached::NoSuchConversation,
-            Frozen::NotDrafting => ServerAttached::NotDrafting,
-        });
-    }
-
     if !declared_servers(state).iter().any(|held| held == name) {
         return Ok(ServerAttached::NoSuchServer);
     }
 
     // Whether there was one to put on is nothing to report: a name the
     // Conversation holds already is the state the press asked for — see
-    // [`store::attach_mcp_server`].
-    store::attach_mcp_server(&state.pool, id, name).await?;
-
-    Ok(ServerAttached::Attached)
+    // [`store::attach_mcp_server`]. The freeze is asked under the lock the row
+    // is written under, as the Brief's is.
+    Ok(
+        match store::attach_mcp_server_to_draft(&state.pool, id, name).await? {
+            store::Edited::Saved => ServerAttached::Attached,
+            store::Edited::NoSuchConversation => ServerAttached::NoSuchConversation,
+            store::Edited::NotDrafting => ServerAttached::NotDrafting,
+        },
+    )
 }
 
 /// And take one off again, which is the × on its chip.
@@ -1003,16 +1002,13 @@ pub(crate) async fn attach_server(state: &AppState, id: i64, name: &str) -> Resu
 /// and a removal that needed the server to still exist would be the one press
 /// that could not undo the state it is complaining about.
 pub(crate) async fn detach_server(state: &AppState, id: i64, name: &str) -> Result<ServerRemoved> {
-    if let Some(refusal) = not_drafting(&state.pool, id).await? {
-        return Ok(match refusal {
-            Frozen::NoSuchConversation => ServerRemoved::NoSuchConversation,
-            Frozen::NotDrafting => ServerRemoved::NotDrafting,
-        });
-    }
-
-    store::detach_mcp_server(&state.pool, id, name).await?;
-
-    Ok(ServerRemoved::Removed)
+    Ok(
+        match store::detach_mcp_server_from_draft(&state.pool, id, name).await? {
+            store::Edited::Saved => ServerRemoved::Removed,
+            store::Edited::NoSuchConversation => ServerRemoved::NoSuchConversation,
+            store::Edited::NotDrafting => ServerRemoved::NotDrafting,
+        },
+    )
 }
 
 /// The Conversation's MCP servers, in the shape the workbench draws them: each
@@ -1056,9 +1052,10 @@ fn declared_servers(state: &AppState) -> Vec<String> {
 ///
 /// The Brief's own guard, asked of the state alone: a Conversation past drafting
 /// has a frozen Brief, and what freezes with it freezes at the same moment.
-/// Read before the writes rather than guarded inside them, for the reason the
-/// store's own reading is — there is one human at the workbench, and what would
-/// be raced here is their own two tabs.
+/// **Only the early word** — what [`attach`] asks before it writes any bytes.
+/// The answer that counts is the store's, asked under the lock the row is
+/// written under, because a start pressed after this look would otherwise have
+/// the file land on work already under way.
 enum Frozen {
     NoSuchConversation,
     NotDrafting,

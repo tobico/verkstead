@@ -378,13 +378,15 @@ pub async fn hold_join(pool: &SqlitePool, held: &HeldJoin) -> Result<()> {
 /// two are told apart by reading the moment rather than by the read coming back
 /// empty.
 pub async fn held_join(pool: &SqlitePool, request: &str) -> Result<Option<HeldJoin>> {
+    let mut tx = super::reading(pool, "reading a held join").await?;
+
     let row: Option<(String, String, String, String, String, String)> = sqlx::query_as(
         "SELECT device, name, os, fingerprint, asked_at, expires_at
          FROM joins_held
          WHERE request = ?",
     )
     .bind(request)
-    .fetch_optional(pool)
+    .fetch_optional(&mut *tx)
     .await
     .with_context(|| format!("reading the join held under {request}"))?;
 
@@ -395,7 +397,7 @@ pub async fn held_join(pool: &SqlitePool, request: &str) -> Result<Option<HeldJo
     let advertised: Vec<(String,)> =
         sqlx::query_as("SELECT address FROM join_addresses WHERE request = ? ORDER BY position")
             .bind(request)
-            .fetch_all(pool)
+            .fetch_all(&mut *tx)
             .await
             .with_context(|| {
                 format!("reading the addresses the join under {request} advertised")
@@ -424,18 +426,20 @@ pub async fn held_join(pool: &SqlitePool, request: &str) -> Result<Option<HeldJo
 /// a device is asked to link by a handful of machines at most, and a query per
 /// request would be a query per row of a list that is nearly always empty.
 pub async fn held_joins(pool: &SqlitePool) -> Result<Vec<HeldJoin>> {
+    let mut tx = super::reading(pool, "listing the held joins").await?;
+
     let rows: Vec<(String, String, String, String, String, String, String)> = sqlx::query_as(
         "SELECT request, device, name, os, fingerprint, asked_at, expires_at
          FROM joins_held
          ORDER BY asked_at, request",
     )
-    .fetch_all(pool)
+    .fetch_all(&mut *tx)
     .await
     .context("listing the joins this device is holding")?;
 
     let advertised: Vec<(String, String)> =
         sqlx::query_as("SELECT request, address FROM join_addresses ORDER BY request, position")
-            .fetch_all(pool)
+            .fetch_all(&mut *tx)
             .await
             .context("listing the addresses those joins advertised")?;
 

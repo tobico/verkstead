@@ -811,7 +811,8 @@ testers.runNixOSTest {
         shown as — which is what leaves the build cache's size the default the
         sandbox probe reads further down — and the installation's own binds are
         filtered out, being the unit's word rather than anything this file
-        holds.
+        holds. The Author's uuid and display name go back as read too: a `null`
+        uuid, on a machine with no Author yet, is the save that makes the first.
         """
         stood = json.loads(
             machine.succeed("curl -sf http://127.0.0.1:8422/api/ui/settings")
@@ -831,7 +832,12 @@ testers.runNixOSTest {
             post(
                 "/api/ui/settings",
                 {
-                    "git_author": {"name": name, "email": email},
+                    "git_author": {
+                        "id": stood["git_author"]["id"],
+                        "display_name": stood["git_author"]["display_name"],
+                        "name": name,
+                        "email": email,
+                    },
                     "github_token": "Keep",
                     "languages": [
                         {
@@ -868,7 +874,8 @@ testers.runNixOSTest {
             )
         )
 
-        assert saved["settings"]["git_author"] == {"name": name, "email": email}, (
+        author = saved["settings"]["git_author"]
+        assert (author["name"], author["email"]) == (name, email), (
             f"the author was saved as {saved['settings']['git_author']}"
         )
 

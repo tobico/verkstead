@@ -989,3 +989,43 @@ async fn an_unlinked_member_is_owed_no_certificate() {
          the one the human unlinks",
     );
 }
+
+/// The Devices section read while a member comes and goes is the membership at
+/// one moment: every member on it comes with the addresses it advertised.
+///
+/// The members and their addresses are two reads, and a member forgotten
+/// between the first and the second would be listed with none — a device
+/// nothing can dial, drawn as though it had said nothing about where it is.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_members_read_while_one_comes_and_goes_have_their_addresses() {
+    let (_dir, pool) = fresh_pool().await;
+
+    let churning = tokio::spawn({
+        let pool = pool.clone();
+
+        async move {
+            for _ in 0..300 {
+                record_member(&pool, &advertising(B, "the-laptop", B_FINGERPRINT))
+                    .await
+                    .unwrap();
+                forget_member(&pool, B).await.unwrap();
+            }
+        }
+    });
+
+    let mut reads = 0;
+
+    while !churning.is_finished() {
+        for member in members(&pool).await.unwrap() {
+            assert!(
+                !member.addresses.is_empty(),
+                "read {reads} listed {} with no addresses",
+                member.device,
+            );
+        }
+
+        reads += 1;
+    }
+
+    churning.await.unwrap();
+}

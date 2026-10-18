@@ -263,7 +263,7 @@ async fn write_summary(
 /// Timeline either way — what is not done here is a read per Event, which is
 /// the whole reason the summary is held rather than derived.
 pub(crate) async fn on_timeline(
-    pool: &SqlitePool,
+    connection: &mut sqlx::SqliteConnection,
     conversation_id: i64,
 ) -> Result<HashMap<i64, Summary>> {
     let rows: Vec<(i64, i64, Option<i64>, String)> = sqlx::query_as(
@@ -274,7 +274,7 @@ pub(crate) async fn on_timeline(
          WHERE e.conversation_id = ?",
     )
     .bind(conversation_id)
-    .fetch_all(pool)
+    .fetch_all(&mut *connection)
     .await
     .with_context(|| format!("reading the Captures of Conversation {conversation_id}"))?;
 
@@ -304,6 +304,8 @@ pub async fn capture(
     conversation_id: i64,
     event_id: i64,
 ) -> Result<Option<String>> {
+    let mut tx = super::reading(pool, "reading a Capture").await?;
+
     let found: Option<(i64,)> = sqlx::query_as(
         "SELECT c.event_id
          FROM captures c
@@ -312,7 +314,7 @@ pub async fn capture(
     )
     .bind(event_id)
     .bind(conversation_id)
-    .fetch_optional(pool)
+    .fetch_optional(&mut *tx)
     .await
     .with_context(|| format!("looking for the Capture of Event {event_id}"))?;
 
@@ -323,7 +325,7 @@ pub async fn capture(
     let chunks: Vec<(String,)> =
         sqlx::query_as("SELECT text FROM capture_chunks WHERE event_id = ? ORDER BY seq")
             .bind(event_id)
-            .fetch_all(pool)
+            .fetch_all(&mut *tx)
             .await
             .with_context(|| format!("reading the Capture of Event {event_id}"))?;
 

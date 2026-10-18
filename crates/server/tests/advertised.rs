@@ -61,6 +61,18 @@ const PORT: u16 = 8422;
 /// How long a dial in this suite gives an address nothing answers at.
 const PATIENCE: Duration = Duration::from_millis(300);
 
+/// And how long a workbench here gives a dial, which is always to a listener
+/// that is up.
+///
+/// **Not [`PATIENCE`], because some of these answers are a dial of their own.**
+/// An Annex answers its Keeper's Join with its identity, and an Annex that
+/// already holds its Keeper reads that identity by asking the Keeper back — so
+/// the Keeper's dial has to outlast a whole second one, handshake and all, as a
+/// running server's ten seconds of answering outlast its two of reaching. At
+/// [`PATIENCE`] for both, a loaded Windows runner timed the Keeper's second
+/// Join out.
+const ANSWERED_WITHIN: Duration = Duration::from_secs(10);
+
 fn no_tailscale() -> Tailscale {
     Tailscale::running(vec!["verkstead-no-such-tailscale".to_owned()], PORT)
 }
@@ -199,7 +211,7 @@ impl Verkstead {
             self.members.clone(),
             self.joins.clone(),
         )
-        .waiting(PATIENCE);
+        .waiting(ANSWERED_WITHIN);
 
         let devices = match &self.forward {
             Some((pointing, _)) => devices.forwarding_for_the_annex(pointing.clone()),

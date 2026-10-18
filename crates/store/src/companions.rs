@@ -467,7 +467,9 @@ pub(crate) async fn forget_worktrees(tx: &mut Transaction<'_, Sqlite>, id: i64) 
 /// its branch has been made. A configuration frozen at grill start is one no
 /// press of the setup card rewrites.
 pub async fn add_companion(pool: &SqlitePool, id: i64, repo_id: i64) -> Result<Adding> {
-    if let Some(refusal) = editable(pool, id).await? {
+    let mut tx = super::writing(pool, "adding a companion to a Conversation").await?;
+
+    if let Some(refusal) = editable(&mut tx, id).await? {
         return Ok(refusal);
     }
 
@@ -477,7 +479,7 @@ pub async fn add_companion(pool: &SqlitePool, id: i64, repo_id: i64) -> Result<A
     // same thing less usefully.
     let own: Option<(i64,)> = sqlx::query_as("SELECT repo_id FROM conversations WHERE id = ?")
         .bind(id)
-        .fetch_optional(pool)
+        .fetch_optional(&mut *tx)
         .await
         .with_context(|| format!("reading which Repo Conversation {id} is in"))?;
 
@@ -488,7 +490,10 @@ pub async fn add_companion(pool: &SqlitePool, id: i64, repo_id: i64) -> Result<A
     // On the registry rather than merely in the table: what a Conversation may
     // compose is what the human has put in the registry, so a Repo that has been
     // taken off it is no more a companion than one that was never registered.
-    if super::registered_repo(pool, repo_id).await?.is_none() {
+    if super::repos::registered_on(&mut tx, repo_id)
+        .await?
+        .is_none()
+    {
         return Ok(Adding::NoSuchRepo);
     }
 
@@ -501,9 +506,13 @@ pub async fn add_companion(pool: &SqlitePool, id: i64, repo_id: i64) -> Result<A
     .bind(id)
     .bind(repo_id)
     .bind(CompanionMode::ReadOnly.stored())
-    .fetch_optional(pool)
+    .fetch_optional(&mut *tx)
     .await
     .with_context(|| format!("adding Repo {repo_id} to Conversation {id}"))?;
+
+    tx.commit()
+        .await
+        .context("adding a companion to a Conversation")?;
 
     Ok(match added {
         Some(_) => Adding::Added,
@@ -513,7 +522,9 @@ pub async fn add_companion(pool: &SqlitePool, id: i64, repo_id: i64) -> Result<A
 
 /// Take one away again, for as long as the Conversation is still drafting.
 pub async fn remove_companion(pool: &SqlitePool, id: i64, repo_id: i64) -> Result<Removing> {
-    if let Some(refusal) = editable(pool, id).await? {
+    let mut tx = super::writing(pool, "removing a companion from a Conversation").await?;
+
+    if let Some(refusal) = editable(&mut tx, id).await? {
         return Ok(match refusal {
             Adding::NoSuchConversation => Removing::NoSuchConversation,
             _ => Removing::NotDrafting,
@@ -523,9 +534,13 @@ pub async fn remove_companion(pool: &SqlitePool, id: i64, repo_id: i64) -> Resul
     sqlx::query("DELETE FROM companions WHERE conversation_id = ? AND repo_id = ?")
         .bind(id)
         .bind(repo_id)
-        .execute(pool)
+        .execute(&mut *tx)
         .await
         .with_context(|| format!("taking Repo {repo_id} off Conversation {id}"))?;
+
+    tx.commit()
+        .await
+        .context("removing a companion from a Conversation")?;
 
     Ok(Removing::Removed)
 }
@@ -591,7 +606,9 @@ pub async fn configure_companion(
     repo_id: i64,
     change: Change<'_>,
 ) -> Result<Configured> {
-    if let Some(refusal) = editable(pool, id).await? {
+    let mut tx = super::writing(pool, "configuring a companion of a Conversation").await?;
+
+    if let Some(refusal) = editable(&mut tx, id).await? {
         return Ok(match refusal {
             Adding::NoSuchConversation => Configured::NoSuchConversation,
             _ => Configured::NotDrafting,
@@ -623,9 +640,13 @@ pub async fn configure_companion(
     let done = update
         .bind(id)
         .bind(repo_id)
-        .execute(pool)
+        .execute(&mut *tx)
         .await
         .with_context(|| format!("configuring Repo {repo_id} on Conversation {id}"))?;
+
+    tx.commit()
+        .await
+        .context("configuring a companion of a Conversation")?;
 
     Ok(match done.rows_affected() {
         0 => Configured::NoSuchCompanion,
@@ -713,15 +734,15 @@ pub async fn companions(pool: &SqlitePool, id: i64) -> Result<Vec<Companion>> {
 /// The same two questions the branch name and the base commit are refused off,
 /// asked here as one because the answers are the same sentence: the
 /// configuration froze when grilling started.
-async fn editable(pool: &SqlitePool, id: i64) -> Result<Option<Adding>> {
-    if let Some(refusal) = not_drafting(pool, id).await? {
+async fn editable(tx: &mut sqlx::SqliteConnection, id: i64) -> Result<Option<Adding>> {
+    if let Some(refusal) = not_drafting(tx, id).await? {
         return Ok(Some(match refusal {
             Edited::NoSuchConversation => Adding::NoSuchConversation,
             _ => Adding::NotDrafting,
         }));
     }
 
-    if branch_made(pool, id).await? {
+    if branch_made(tx, id).await? {
         return Ok(Some(Adding::NotDrafting));
     }
 

@@ -85,8 +85,8 @@ pub use archives::{
 };
 pub use arrivals::{Arrival, ArrivingPicked, Replacing, arrive, arrived_checkout, replace};
 pub use attachments::{
-    Attachment, Origin, attach, attached_sets, attachment, attachments, detach, detach_from_set,
-    set_attachment, set_attachments,
+    Attaching, Attachment, Detaching, Origin, attach, attach_to_draft, attached_sets, attachment,
+    attachments, detach, detach_from_draft, detach_from_set, set_attachment, set_attachments,
 };
 pub use author_mirrors::{
     AuthorMirror, author_mirrors, forget_author_mirrors_of_departed, record_author_mirrors,
@@ -140,7 +140,10 @@ pub use joins::{
     held_join_count, held_joins, hold_join, let_go_of_expired_joins, let_go_of_join,
     refuse_asked_join,
 };
-pub use mcp_servers::{attach_mcp_server, detach_mcp_server, mcp_servers};
+pub use mcp_servers::{
+    attach_mcp_server, attach_mcp_server_to_draft, detach_mcp_server, detach_mcp_server_from_draft,
+    mcp_servers,
+};
 pub use members::{
     Linking, Member, Renewal, Telling, announcement_made, announcements_owed,
     announcements_owed_to, changeover_over, forget_every_member, forget_every_member_but,
@@ -664,8 +667,8 @@ pub async fn open_database(path: &Path) -> Result<SqlitePool> {
 /// failure of it is reported under.
 ///
 /// `BEGIN IMMEDIATE` rather than the plain `BEGIN` sqlx opens, and every
-/// transaction in the store goes through here, because every transaction in the
-/// store writes. What each of them does is read the record, decide on it, and
+/// transaction in the store that writes goes through here — the only other kind
+/// is a read made at one moment, which is [`reading`]'s. What each of them does is read the record, decide on it, and
 /// write — a state read before the move it authorises, a count read before the
 /// row that changes it — and that shape is the one SQLite handles worst.
 ///
@@ -695,6 +698,31 @@ pub(crate) async fn writing(
     doing: &'static str,
 ) -> Result<sqlx::Transaction<'static, sqlx::Sqlite>> {
     pool.begin_with("BEGIN IMMEDIATE").await.context(doing)
+}
+
+/// Open a transaction that only reads, with `doing` as the words any failure
+/// of it is reported under: **one moment of the record** for a read made of
+/// several queries.
+///
+/// A query at a time off the pool is a moment apiece, and the work does not
+/// stop for a read — a session's commit is an Event and the row beside it, and
+/// a record landing again takes every Event away and writes it under a new id.
+/// A read across either sees one half without the other, which reads as a
+/// database somebody has been in by hand. Under WAL a read transaction reads
+/// the database as it stood at its first statement, whatever is committed
+/// beside it, and blocks no writer while it does.
+///
+/// The plain deferred `BEGIN`, unlike [`writing`]'s: nothing here is ever
+/// promoted to a write, so there is no promotion to fail.
+///
+/// **Never committed.** Nothing was written, so the rollback dropping it does
+/// is the whole of ending it — and a read that returns early returns without
+/// anything to finish.
+pub(crate) async fn reading(
+    pool: &SqlitePool,
+    doing: &'static str,
+) -> Result<sqlx::Transaction<'static, sqlx::Sqlite>> {
+    pool.begin().await.context(doing)
 }
 
 /// Bring an opened database up to the shape the server expects. Safe to run
