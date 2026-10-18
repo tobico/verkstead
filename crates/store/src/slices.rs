@@ -844,12 +844,6 @@ pub async fn slice(pool: &sqlx::SqlitePool, conversation_id: i64) -> Result<Slic
 
     let marks = marked(&mut tx, conversation_id).await?;
 
-    // Nothing was written, so there is nothing to keep: this only lets the
-    // snapshot go.
-    tx.commit()
-        .await
-        .with_context(|| format!("finishing reading Conversation {conversation_id}"))?;
-
     Ok(Slice { tables, marks })
 }
 

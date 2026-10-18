@@ -1072,9 +1072,11 @@ fn placeholders(many: usize) -> String {
 /// before every string — which is where a harness's default belongs on a list
 /// its named accounts are the exceptions on.
 pub async fn profiles(pool: &SqlitePool) -> Result<Vec<Profile>> {
+    let mut tx = super::reading(pool, "listing the Profiles").await?;
+
     let rows: Vec<Row> =
         sqlx::query_as(&format!("SELECT {COLUMNS} FROM profiles ORDER BY name, id",))
-            .fetch_all(pool)
+            .fetch_all(&mut *tx)
             .await
             .context("listing the Agent Profiles")?;
 
@@ -1084,7 +1086,7 @@ pub async fn profiles(pool: &SqlitePool) -> Result<Vec<Profile>> {
     let listed: Vec<(i64, String)> = sqlx::query_as(
         "SELECT profile_id, model FROM profile_models ORDER BY profile_id, position",
     )
-    .fetch_all(pool)
+    .fetch_all(&mut *tx)
     .await
     .context("listing the models the Agent Profiles run")?;
 
@@ -1097,7 +1099,7 @@ pub async fn profiles(pool: &SqlitePool) -> Result<Vec<Profile>> {
     // Empty for a list of Claude Profiles, which is what most installations
     // hold.
     let kept: Vec<(i64, String)> = sqlx::query_as("SELECT profile_id, home FROM profile_homes")
-        .fetch_all(pool)
+        .fetch_all(&mut *tx)
         .await
         .context("listing the homes the Agent Profiles keep their accounts under")?;
 
@@ -1114,12 +1116,9 @@ pub async fn profiles(pool: &SqlitePool) -> Result<Vec<Profile>> {
 
 /// One Profile, or `None` if there is no such Profile.
 pub async fn load_profile(pool: &SqlitePool, id: i64) -> Result<Option<Profile>> {
-    let mut connection = pool
-        .acquire()
-        .await
-        .with_context(|| format!("loading Profile {id}"))?;
+    let mut tx = super::reading(pool, "loading a Profile").await?;
 
-    profile_on(&mut connection, id).await
+    profile_on(&mut tx, id).await
 }
 
 /// And the same off a connection already held, which is how a read that has to

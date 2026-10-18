@@ -560,13 +560,15 @@ type Row = (
 /// hostname — a Windows and the WSL on it, which is the case the whole of
 /// cluster mode was written for.
 pub async fn members(pool: &SqlitePool) -> Result<Vec<Member>> {
+    let mut tx = super::reading(pool, "listing the Members").await?;
+
     let rows: Vec<Row> = sqlx::query_as(
         "SELECT device, name, os, fingerprint, last_seen, reachable, renewing_from, acknowledged,
                 kept_by, direct
          FROM members
          ORDER BY name, device",
     )
-    .fetch_all(pool)
+    .fetch_all(&mut *tx)
     .await
     .context("listing the devices this one is linked to")?;
 
@@ -575,7 +577,7 @@ pub async fn members(pool: &SqlitePool) -> Result<Vec<Member>> {
     // machines, and one hop is the shape of the answer.
     let advertised: Vec<(String, String)> =
         sqlx::query_as("SELECT device, address FROM member_addresses ORDER BY device, position")
-            .fetch_all(pool)
+            .fetch_all(&mut *tx)
             .await
             .context("listing the addresses those devices advertised")?;
 

@@ -3476,8 +3476,6 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
     // no session on it answers with nothing.
     let mut ran_under = super::session_pairings::on_timeline(&mut tx, conversation_id).await?;
 
-    tx.commit().await.context("finishing reading a Timeline")?;
-
     rows.into_iter()
         .map(|row| {
             let (

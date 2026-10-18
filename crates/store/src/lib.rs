@@ -711,6 +711,10 @@ pub(crate) async fn writing(
 ///
 /// The plain deferred `BEGIN`, unlike [`writing`]'s: nothing here is ever
 /// promoted to a write, so there is no promotion to fail.
+///
+/// **Never committed.** Nothing was written, so the rollback dropping it does
+/// is the whole of ending it — and a read that returns early returns without
+/// anything to finish.
 pub(crate) async fn reading(
     pool: &SqlitePool,
     doing: &'static str,

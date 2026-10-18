@@ -116,6 +116,8 @@ pub async fn transcript_after(
     event_id: i64,
     after: i64,
 ) -> Result<Option<Vec<String>>> {
+    let mut tx = super::reading(pool, "reading a Transcript").await?;
+
     // Against the Timeline rather than against the lines, because there is no
     // row here until a session has said something — a Transcript with nothing on
     // it is an ordinary answer, and an Event on somebody else's Conversation is
@@ -124,7 +126,7 @@ pub async fn transcript_after(
         sqlx::query_as("SELECT id FROM timeline_events WHERE id = ? AND conversation_id = ?")
             .bind(event_id)
             .bind(conversation_id)
-            .fetch_optional(pool)
+            .fetch_optional(&mut *tx)
             .await
             .with_context(|| format!("looking for the Transcript of Event {event_id}"))?;
 
@@ -138,7 +140,7 @@ pub async fn transcript_after(
     let (end,): (i64,) =
         sqlx::query_as("SELECT COALESCE(MAX(seq), 0) FROM transcript_lines WHERE event_id = ?")
             .bind(event_id)
-            .fetch_one(pool)
+            .fetch_one(&mut *tx)
             .await
             .with_context(|| format!("finding the end of the Transcript of Event {event_id}"))?;
 
@@ -151,7 +153,7 @@ pub async fn transcript_after(
     )
     .bind(event_id)
     .bind(after)
-    .fetch_all(pool)
+    .fetch_all(&mut *tx)
     .await
     .with_context(|| format!("reading the Transcript of Event {event_id}"))?;
 
