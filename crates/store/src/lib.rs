@@ -85,8 +85,8 @@ pub use archives::{
 };
 pub use arrivals::{Arrival, ArrivingPicked, Replacing, arrive, arrived_checkout, replace};
 pub use attachments::{
-    Attachment, Origin, attach, attached_sets, attachment, attachments, detach, detach_from_set,
-    set_attachment, set_attachments,
+    Attaching, Attachment, Detaching, Origin, attach, attach_to_draft, attached_sets, attachment,
+    attachments, detach, detach_from_draft, detach_from_set, set_attachment, set_attachments,
 };
 pub use author_mirrors::{
     AuthorMirror, author_mirrors, forget_author_mirrors_of_departed, record_author_mirrors,
@@ -140,7 +140,10 @@ pub use joins::{
     held_join_count, held_joins, hold_join, let_go_of_expired_joins, let_go_of_join,
     refuse_asked_join,
 };
-pub use mcp_servers::{attach_mcp_server, detach_mcp_server, mcp_servers};
+pub use mcp_servers::{
+    attach_mcp_server, attach_mcp_server_to_draft, detach_mcp_server, detach_mcp_server_from_draft,
+    mcp_servers,
+};
 pub use members::{
     Linking, Member, Renewal, Telling, announcement_made, announcements_owed,
     announcements_owed_to, changeover_over, forget_every_member, forget_every_member_but,

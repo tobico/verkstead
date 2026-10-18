@@ -35,6 +35,8 @@
 use anyhow::{Context, Result, bail};
 use sqlx::SqlitePool;
 
+use super::conversations::{Edited, not_drafting};
+
 /// One attached file, as the record holds it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Attachment {
@@ -201,6 +203,68 @@ pub async fn attach(
     })
 }
 
+/// What became of putting a file on a drafting Conversation's Brief — see
+/// [`attach_to_draft`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Attaching {
+    /// Recorded, and this is the row as it now stands.
+    Attached(Attachment),
+
+    /// There is no Conversation with that id.
+    NoSuchConversation,
+
+    /// It is past drafting, so nothing more is put on its Brief.
+    NotDrafting,
+}
+
+/// [`attach`] for the Brief's composer, refused once the Conversation is past
+/// drafting.
+///
+/// **The look and the write under one lock**, through [`super::writing`], the
+/// way every other edit of a draft is made: what moves a Conversation out of
+/// drafting is a press that starts the work as well as the human's other tab,
+/// and a file recorded a moment after a look that saw a draft would be on work
+/// already under way. The file is on disk by the time this is asked, so a
+/// refusal here is the caller's to clear away.
+pub async fn attach_to_draft(
+    pool: &SqlitePool,
+    conversation_id: i64,
+    name: &str,
+    bytes: i64,
+) -> Result<Attaching> {
+    let mut tx = super::writing(pool, "attaching a file to a Brief").await?;
+
+    if let Some(refusal) = not_drafting(&mut tx, conversation_id).await? {
+        return Ok(match refusal {
+            Edited::NoSuchConversation => Attaching::NoSuchConversation,
+            _ => Attaching::NotDrafting,
+        });
+    }
+
+    let row: (i64, String) = sqlx::query_as(
+        "INSERT INTO attachments (conversation_id, origin, name, bytes, added_at)
+         VALUES (?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+         RETURNING id, added_at",
+    )
+    .bind(conversation_id)
+    .bind(Origin::Brief.stored())
+    .bind(name)
+    .bind(bytes)
+    .fetch_one(&mut *tx)
+    .await
+    .with_context(|| format!("attaching {name:?} to Conversation {conversation_id}"))?;
+
+    tx.commit().await.context("attaching a file to a Brief")?;
+
+    Ok(Attaching::Attached(Attachment {
+        id: row.0,
+        origin: Origin::Brief,
+        name: name.to_owned(),
+        bytes,
+        added_at: row.1,
+    }))
+}
+
 /// One row as every reading below selects it: the columns in one order, so that
 /// what a row is made of is said once — see [`made`].
 type Row = (
@@ -356,6 +420,61 @@ pub async fn detach(pool: &SqlitePool, conversation_id: i64, id: i64) -> Result<
         .rows_affected();
 
     Ok(taken > 0)
+}
+
+/// What became of taking a file off a drafting Conversation — see
+/// [`detach_from_draft`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Detaching {
+    /// Off the record, and this is the row that was taken — whose file is the
+    /// caller's to remove — or `None` where there was none to take.
+    Detached(Option<Attachment>),
+
+    /// There is no Conversation with that id.
+    NoSuchConversation,
+
+    /// It is past drafting, so what is on it stays.
+    NotDrafting,
+}
+
+/// [`detach`] for the Brief's composer, refused once the Conversation is past
+/// drafting, for [`attach_to_draft`]'s reason: the look and the write under one
+/// lock.
+///
+/// The row is taken first and handed back, and the file is the caller's to
+/// remove after: a refusal then leaves the file where it was, and a removal
+/// that fails leaves a stray with no row, which is the leftover the Cleanup
+/// takes anyway.
+pub async fn detach_from_draft(
+    pool: &SqlitePool,
+    conversation_id: i64,
+    id: i64,
+) -> Result<Detaching> {
+    let mut tx = super::writing(pool, "detaching a file from a Brief").await?;
+
+    if let Some(refusal) = not_drafting(&mut tx, conversation_id).await? {
+        return Ok(match refusal {
+            Edited::NoSuchConversation => Detaching::NoSuchConversation,
+            _ => Detaching::NotDrafting,
+        });
+    }
+
+    let taken: Option<Row> = sqlx::query_as(
+        "DELETE FROM attachments
+         WHERE conversation_id = ? AND id = ?
+         RETURNING id, origin, name, bytes, added_at, set_id, label",
+    )
+    .bind(conversation_id)
+    .bind(id)
+    .fetch_optional(&mut *tx)
+    .await
+    .with_context(|| format!("detaching attachment {id} from Conversation {conversation_id}"))?;
+
+    let taken = taken.map(made).transpose()?;
+
+    tx.commit().await.context("detaching a file from a Brief")?;
+
+    Ok(Detaching::Detached(taken))
 }
 
 /// And the same for a file put on a Set, scoped the way [`set_attachment`] is.

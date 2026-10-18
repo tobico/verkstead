@@ -6,12 +6,13 @@ use std::path::{Path, PathBuf};
 use sqlx::SqlitePool;
 use verkstead_schema::Direction;
 use verkstead_store::{
-    Account, AdoptedPullRequest, Archiving, Closing, Decision, Driven, Edited, Event, Grilling,
-    Joined, Lifecycle, Planned, ProfileFacts, PullRequest, Queued, Recorded, RoadmapStage,
-    RowState, StageOf, StageStanding, Staged, Steer, Switched, Unarchiving, add_companion,
-    adopted_pull_request, adopting, any_archived, archive_conversation, archived, clear_stop,
-    close_conversation, conversation_branch, conversations, create_profile, driven_roadmaps,
-    follow_branch, hold_pull_request, join_queue, load_conversation, open_database, pick_direction,
+    Account, AdoptedPullRequest, Archiving, Attaching, Closing, Decision, Driven, Edited, Event,
+    Grilling, Joined, Lifecycle, Planned, ProfileFacts, PullRequest, Queued, Recorded,
+    RoadmapStage, RowState, StageOf, StageStanding, Staged, Steer, Switched, Unarchiving,
+    add_companion, adopted_pull_request, adopting, any_archived, archive_conversation, archived,
+    attach_mcp_server_to_draft, attach_to_draft, attachments, clear_stop, close_conversation,
+    conversation_branch, conversations, create_profile, driven_roadmaps, follow_branch,
+    hold_pull_request, join_queue, load_conversation, mcp_servers, open_database, pick_direction,
     queue_to_join, record_another_pull_request, record_pull_request, record_roadmap, register_repo,
     reinvent_branch, rename_branch, roadmap_planner, save_brief, set_base_commit,
     set_grilling_pairing, set_state, set_target, settle_naming, show_archived, showing_archived,
@@ -2801,5 +2802,69 @@ async fn an_edit_made_while_the_work_starts_waits_and_is_refused() {
         brief(&pool, id).await,
         "",
         "and the Brief is as the start found it",
+    );
+}
+
+/// And the same for what the composer puts beside the Brief — a file and an MCP
+/// server, both put on while the work is being started — which wait for the
+/// start and are refused, with nothing written.
+///
+/// The start is held open across both, as above, so each is in flight across
+/// it every time.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn what_is_put_beside_the_brief_while_the_work_starts_waits_and_is_refused() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo = repo(&pool, "verkstead").await;
+    let id = start_conversation(&pool, repo, "rate-limiting", THIS_DEVICE)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let mut starting = pool.begin_with("BEGIN IMMEDIATE").await.unwrap();
+
+    sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")
+        .bind("grilling")
+        .bind(id)
+        .execute(&mut *starting)
+        .await
+        .unwrap();
+
+    let attaching = tokio::spawn({
+        let pool = pool.clone();
+
+        async move {
+            attach_to_draft(&pool, id, "wireframe.png", 48_112)
+                .await
+                .unwrap()
+        }
+    });
+
+    let serving = tokio::spawn({
+        let pool = pool.clone();
+
+        async move { attach_mcp_server_to_draft(&pool, id, "docs").await.unwrap() }
+    });
+
+    // Long enough for both to have looked, if they are going to look first.
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    starting.commit().await.unwrap();
+
+    assert_eq!(
+        attaching.await.unwrap(),
+        Attaching::NotDrafting,
+        "the file waited for the start and saw it",
+    );
+    assert_eq!(
+        serving.await.unwrap(),
+        Edited::NotDrafting,
+        "and so did the server",
+    );
+    assert!(
+        attachments(&pool, id).await.unwrap().is_empty(),
+        "no file is on the record",
+    );
+    assert!(
+        mcp_servers(&pool, id).await.unwrap().is_empty(),
+        "and no server either",
     );
 }

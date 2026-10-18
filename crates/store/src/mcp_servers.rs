@@ -21,13 +21,16 @@
 //! insert refuses rather than something a read-then-write has to notice in
 //! time — the companions' primary key, for its reason.
 //!
-//! Nothing here asks whether the Conversation may still be changed, or whether
-//! anything of that name is declared. Both are the server's: the freeze is the
-//! Brief's own and is read where the file uploads read it, and the declarations
-//! are in a file this crate has never heard of.
+//! **The freeze is asked here**, in [`attach_mcp_server_to_draft`] and
+//! [`detach_mcp_server_from_draft`]: the Brief's own, read under the lock the
+//! write is made under, as every other edit of a draft is. Whether anything of
+//! that name is declared is the server's, the declarations being in a file this
+//! crate has never heard of.
 
 use anyhow::{Context, Result};
 use sqlx::SqlitePool;
+
+use super::conversations::{Edited, not_drafting};
 
 /// The table the references live in.
 ///
@@ -106,6 +109,70 @@ pub async fn detach_mcp_server(
             .rows_affected();
 
     Ok(taken > 0)
+}
+
+/// [`attach_mcp_server`] for the Brief's composer, refused once the
+/// Conversation is past drafting.
+///
+/// The look and the write under one lock, through [`super::writing`]: a press
+/// that starts the work between the two would otherwise have a server put on
+/// work already under way. A name on it already is [`Edited::Saved`] all the
+/// same — see [`attach_mcp_server`].
+pub async fn attach_mcp_server_to_draft(
+    pool: &SqlitePool,
+    conversation_id: i64,
+    name: &str,
+) -> Result<Edited> {
+    let mut tx = super::writing(pool, "attaching an MCP server to a Brief").await?;
+
+    if let Some(refusal) = not_drafting(&mut tx, conversation_id).await? {
+        return Ok(refusal);
+    }
+
+    sqlx::query(
+        "INSERT INTO conversation_mcp_servers (conversation_id, name, attached_at)
+         VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+         ON CONFLICT (conversation_id, name) DO NOTHING",
+    )
+    .bind(conversation_id)
+    .bind(name)
+    .execute(&mut *tx)
+    .await
+    .with_context(|| format!("attaching MCP server {name:?} to Conversation {conversation_id}"))?;
+
+    tx.commit()
+        .await
+        .context("attaching an MCP server to a Brief")?;
+
+    Ok(Edited::Saved)
+}
+
+/// And [`detach_mcp_server`] the same way, under the same lock.
+pub async fn detach_mcp_server_from_draft(
+    pool: &SqlitePool,
+    conversation_id: i64,
+    name: &str,
+) -> Result<Edited> {
+    let mut tx = super::writing(pool, "taking an MCP server off a Brief").await?;
+
+    if let Some(refusal) = not_drafting(&mut tx, conversation_id).await? {
+        return Ok(refusal);
+    }
+
+    sqlx::query("DELETE FROM conversation_mcp_servers WHERE conversation_id = ? AND name = ?")
+        .bind(conversation_id)
+        .bind(name)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| {
+            format!("taking MCP server {name:?} off Conversation {conversation_id}")
+        })?;
+
+    tx.commit()
+        .await
+        .context("taking an MCP server off a Brief")?;
+
+    Ok(Edited::Saved)
 }
 
 /// Every MCP server one Conversation has attached, in the order they were
