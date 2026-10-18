@@ -414,6 +414,8 @@ describe("a press on a conversation that lives on another device", () => {
       name: "verkstead",
       path: "/srv/repos/verkstead",
       default_branch: "main",
+      author: null,
+      author_unpicked: false,
     };
     const fetching = theMember(
       whenever("/api/ui/devices", json(KEEPING)),
