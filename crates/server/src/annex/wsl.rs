@@ -805,12 +805,13 @@ pub(crate) mod tests {
         pub(crate) fn new() -> Stub {
             let dir = tempfile::tempdir().unwrap();
 
+            // Written through `stand_ins`, as every stand-in is: one written
+            // from this thread meets `ETXTBSY` whenever a sibling test forks
+            // during the write — see [`crate::stand_ins::program`].
             #[cfg(unix)]
             let program = {
-                use std::os::unix::fs::PermissionsExt;
-
                 let program = dir.path().join("stub");
-                std::fs::write(
+                crate::stand_ins::program(
                     &program,
                     "#!/bin/sh\n\
                      here=$(dirname \"$0\")\n\
@@ -820,9 +821,7 @@ pub(crate) mod tests {
                      printf '\\n' >> \"$here/calls\"\n\
                      cat \"$here/out$n\" 2>/dev/null\n\
                      exit \"$(cat \"$here/code$n\" 2>/dev/null || echo 0)\"\n",
-                )
-                .unwrap();
-                std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+                );
                 program
             };
 
