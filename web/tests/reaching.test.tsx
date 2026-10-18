@@ -513,6 +513,7 @@ describe("the merged sidebar", () => {
       name: "the-desk",
       os: "Linux",
       addresses: [],
+      kept_by: null,
     },
     members: [
       {
@@ -522,6 +523,7 @@ describe("the merged sidebar", () => {
           name: "the-laptop",
           os: "macOS 15.1",
           addresses: [],
+          kept_by: null,
         },
         reachable: true,
       },
@@ -946,6 +948,7 @@ describe("a device with no cluster", () => {
       name: "the-desk",
       os: "Linux",
       addresses: [],
+      kept_by: null,
     },
     members: [],
     pending: [],

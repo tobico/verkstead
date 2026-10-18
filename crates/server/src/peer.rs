@@ -75,6 +75,7 @@
 //! and every address that row carries tried in the order it was advertised.
 
 pub mod account;
+pub mod annex_forward;
 pub mod announcing;
 pub mod authors;
 pub mod checkouts;
@@ -132,6 +133,14 @@ use joining::Joins;
 /// one thing to remember, and the pair reads as an installation rather than as
 /// two unrelated numbers.
 pub const PEER_PORT: u16 = 8423;
+
+/// The port a Keeper's **Annex Forward** listens on when nobody has said otherwise
+/// (ADR-0024) — see [`annex_forward`].
+///
+/// One past the peer port, for the reason that is one past the workbench's: the
+/// three read as one installation. It is what an Annex advertises in place of
+/// its own addresses, so it is what a third device dials to reach one.
+pub const ANNEX_FORWARD_PORT: u16 = 8424;
 
 /// Where a device answers for itself — the one route on this listener that asks
 /// the caller for nothing at all.
@@ -292,8 +301,9 @@ impl Listener {
 /// goes the other way, inside [`members_only`] with the gate over it, and so
 /// does every call the stages after this one add — the announcement in
 /// [`announcing`], where a member names a newcomer to this one, the news in
-/// [`news`], where one tells this device something worth a phone, and the whole
-/// of the viewer's own namespace, which is what `workbench` is.
+/// [`news`], where one tells this device something worth a phone, the question
+/// in [`annex_forward`], where an Annex asks its Keeper what to advertise, and
+/// the whole of the viewer's own namespace, which is what `workbench` is.
 ///
 /// `workbench` is that namespace over this device's state, built outside for the
 /// reason `nudges` is made outside: it is the state the *other* listener answers
@@ -350,7 +360,7 @@ pub fn router(
                 .route(joining::CANCEL, post(joining::cancel))
                 .with_state(joining::Holding {
                     device: device.clone(),
-                    reading,
+                    reading: reading.clone(),
                     joins: joins.clone(),
                     nudges: nudges.clone(),
 
@@ -358,6 +368,10 @@ pub fn router(
                     // asked it — see [`joining::asked`], which is the one place
                     // a join ends with nobody standing in front of it.
                     peers: dialling::Peers::of(device.clone(), members.clone()),
+
+                    // And where a Keeper's Join is written, it being taken
+                    // with nobody asked — see [`joining::join`].
+                    members: members.clone(),
                 }),
         )
         .merge(
@@ -392,8 +406,18 @@ pub fn router(
                             .route(unlinking::MEMBER, delete(unlinking::dropped))
                             .with_state(unlinking::Dropping {
                                 device: device.clone(),
+                                reading: reading.clone(),
                                 members: members.clone(),
                                 nudges: nudges.clone(),
+                            }),
+                    )
+                    .merge(
+                        Router::new()
+                            .route(annex_forward::FORWARDED, get(annex_forward::forwarded))
+                            .with_state(annex_forward::Forwarding {
+                                device: device.clone(),
+                                reading: reading.clone(),
+                                members: members.clone(),
                             }),
                     )
                     .merge(
@@ -686,6 +710,7 @@ impl Members {
                     name: member.name,
                     os: member.os,
                     addresses: member.addresses,
+                    kept_by: member.kept_by,
                 },
             })
             .collect())
@@ -768,6 +793,19 @@ impl Members {
             Recorded::InTheStore(pool) => verkstead_store::member_unreachable(pool, device)
                 .await
                 .with_context(|| format!("marking device {device} as answering nothing")),
+
+            Recorded::Stated(_) => Ok(()),
+        }
+    }
+
+    /// And write down where one is reached directly, which is what a Keeper
+    /// and its Annex hold each other at — see
+    /// [`verkstead_store::member_reached_at`] and [`Member::direct`].
+    pub(crate) async fn reached_at(&self, device: &str, direct: Option<&str>) -> Result<()> {
+        match &self.recorded {
+            Recorded::InTheStore(pool) => verkstead_store::member_reached_at(pool, device, direct)
+                .await
+                .with_context(|| format!("recording where device {device} is reached directly")),
 
             Recorded::Stated(_) => Ok(()),
         }
@@ -857,9 +895,13 @@ impl Members {
     /// this one, so every one of them would refuse it at the gate; what is left
     /// here is a list of machines that no longer hold this device, and holding
     /// it would be a Devices section that lied.
-    pub(crate) async fn forget_everybody(&self) -> Result<()> {
+    ///
+    /// **Bar `keeping`**: a Keeper's Annexes and an Annex's Keeper, whose
+    /// membership leaves with the leaver (ADR-0024) — see
+    /// [`verkstead_store::forget_every_member_but`].
+    pub(crate) async fn forget_everybody(&self, keeping: &[String]) -> Result<()> {
         match &self.recorded {
-            Recorded::InTheStore(pool) => verkstead_store::forget_every_member(pool)
+            Recorded::InTheStore(pool) => verkstead_store::forget_every_member_but(pool, keeping)
                 .await
                 .context("forgetting every device this one was linked to"),
 

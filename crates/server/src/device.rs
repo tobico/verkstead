@@ -638,6 +638,32 @@ pub(crate) enum Unrelayed {
     Unreadable(anyhow::Error),
 }
 
+/// Why an **Unlink** was not made — see [`Devices::unlink`], and the workbench
+/// route that turns each of these into a refusal naming the device.
+///
+/// **Two refusals and a failure.** An **Annex**'s membership is its Keeper's
+/// (ADR-0024, *The Keeper's Join*), so the press is refused on it on every
+/// device, and an Annex refuses it on its Keeper. Neither is anything going
+/// wrong: they are the relation said back, and nothing is forgotten anywhere.
+pub(crate) enum Unlinkable {
+    /// The device named is an Annex: `name` is what it is shown under, and
+    /// `keeper` its Keeper's, or *this device* on the Keeper itself.
+    Annex { name: String, keeper: String },
+
+    /// And the device named is this one's own Keeper.
+    Keeper { name: String },
+
+    /// The unlink itself failed — the membership unreadable or the row not
+    /// forgotten.
+    Failed(anyhow::Error),
+}
+
+impl From<anyhow::Error> for Unlinkable {
+    fn from(why: anyhow::Error) -> Unlinkable {
+        Unlinkable::Failed(why)
+    }
+}
+
 /// What the **Devices** section of the Remote access pane reads: this device,
 /// and every other device in its cluster (ADR-0020).
 ///
@@ -713,6 +739,12 @@ pub struct Devices {
     /// **Forward** listens on — see [`crate::forwarding`]. Both loopbacks unless
     /// said otherwise, see [`Devices::forwarding_on`].
     forwarding_on: Vec<std::net::IpAddr>,
+
+    /// And where its **Annex Forward** puts a connection through to, which the
+    /// Keeper's Join points at the Annex it links — see
+    /// [`crate::peer::annex_forward`]. Pointed nowhere unless a start said
+    /// otherwise, see [`Devices::forwarding_for_the_annex`].
+    annex_forward: crate::peer::annex_forward::Pointing,
 }
 
 impl Devices {
@@ -738,6 +770,7 @@ impl Devices {
             probe: Probe::asked_nothing(),
             peers,
             forwarding_on: crate::forwarding::LOOPBACKS.to_vec(),
+            annex_forward: crate::peer::annex_forward::Pointing::at_nothing(),
         }
     }
 
@@ -815,6 +848,22 @@ impl Devices {
     pub fn forwarding_on(self, forwarding_on: Vec<std::net::IpAddr>) -> Devices {
         Devices {
             forwarding_on,
+            ..self
+        }
+    }
+
+    /// The same, pointing `annex_forward` at the Annex it links rather than a
+    /// handle nothing serves — see [`crate::peer::annex_forward`].
+    ///
+    /// **Handed over rather than made here**, because the listener reading it is
+    /// the start's: a router stood up to answer a question about a membership
+    /// forwards nothing.
+    pub fn forwarding_for_the_annex(
+        self,
+        annex_forward: crate::peer::annex_forward::Pointing,
+    ) -> Devices {
+        Devices {
+            annex_forward,
             ..self
         }
     }
@@ -945,6 +994,193 @@ impl Devices {
         self.asked(address, held).await
     }
 
+    /// Link this device's **Annex** by the **Keeper's Join**: the Annex whose
+    /// Data Directory is `data_dir`, answering at `address` (ADR-0024, *The
+    /// Keeper's Join*).
+    ///
+    /// **Four steps, in the order the trust runs.** The Annex's certificate is
+    /// read out of its `device.pem` and fingerprinted, which is the
+    /// compare-by-eye done by the one party that can read both files. This
+    /// device's own id and *current* fingerprint are written into the Annex's
+    /// `config.yaml` as `kept_by` where it says anything else — which is what
+    /// keeps the pin good across this device's own renewals, the Annex reading
+    /// its config at every call. The join is dialled pinned to the certificate
+    /// read in the first step. And the Annex's answer — itself, marked as this
+    /// device's, and its roster — is recorded here, with no pending row: the
+    /// whole link is the one round trip.
+    ///
+    /// **And then the Annex Forward**, pointed at `address` once the join has
+    /// gone through it — see [`crate::peer::annex_forward`].
+    ///
+    /// **And each end holds the other directly** (ADR-0024, *The Keeper and its
+    /// Annex reach each other directly*): this device holds the Annex at
+    /// `address`, the forward's own target, and `keeper_at` — where the Annex
+    /// reaches this device, which only this device's probe of the box can say —
+    /// goes into the `kept_by` the Annex records its Keeper's row from. Neither
+    /// moves with this device's network, which is what the two advertise of
+    /// each other, and neither is told to anybody else.
+    ///
+    /// **Idempotent**, so a Keeper runs it at every start: nothing unchanged is
+    /// rewritten, the join is taken again, and each side's row for the other is
+    /// the same row said again, and the one forward is pointed again.
+    ///
+    /// No page presses this — see [`crate::ui`], where it is a route with no
+    /// button, and stage 03 of the WSL roadmap, which calls it at every boot.
+    pub async fn keep(
+        &self,
+        data_dir: &Path,
+        address: &str,
+        keeper_at: Option<&str>,
+    ) -> Result<()> {
+        let address = address.trim();
+        let keeper_at = keeper_at.map(str::trim).filter(|at| !at.is_empty());
+
+        if address.is_empty() {
+            bail!("an address the Annex answers at is one of the two things linking it takes");
+        }
+
+        let certificate = data_dir.join(CERTIFICATE_FILE);
+
+        let pem = std::fs::read_to_string(&certificate).with_context(|| {
+            format!(
+                "reading the Annex's certificate at {}",
+                certificate.display()
+            )
+        })?;
+
+        let expecting = held(&pem)
+            .with_context(|| {
+                format!(
+                    "reading the Annex's certificate at {}",
+                    certificate.display()
+                )
+            })?
+            .fingerprint;
+
+        if expecting == self.device.fingerprint() {
+            bail!(
+                "{} is this device's own Data Directory, and a device is not its own Annex",
+                data_dir.display(),
+            );
+        }
+
+        crate::settings::Settings::in_data_dir(data_dir)
+            .keep_by(
+                &crate::settings::KeptBy::of(self.device.id(), self.device.fingerprint())
+                    .reached_at(keeper_at),
+            )
+            .with_context(|| {
+                format!(
+                    "writing this device into the config.yaml in {} as its Keeper",
+                    data_dir.display(),
+                )
+            })?;
+
+        let saying = self.reading.identity(&self.device).await;
+        let kept = self.peers.keep(address, &expecting, &saying).await?;
+
+        // And the Annex Forward pointed at the address the join just went
+        // through, in place of wherever it pointed before: one forward, at
+        // the one Annex — see [`crate::peer::annex_forward`].
+        self.annex_forward.point_at(address);
+
+        let annex = kept.introducer.device.clone();
+
+        // Who this device was linked to before the Annex's answer was written
+        // down, for the announcing below — read first for the reason an Allow
+        // reads its roster first: a member written down between the two would
+        // be told about itself.
+        let already: Vec<_> = self
+            .members
+            .rows()
+            .await?
+            .into_iter()
+            .filter(|member| member.device != annex)
+            .collect();
+
+        // And of the Annex's roster, only the devices this one does not hold
+        // already. The Annex runs only while its Keeper does, so what it holds
+        // of a member is what it last heard, which can be behind what this
+        // device heard since: a member that renewed while the Annex was off is
+        // its old certificate there. Recorded over this device's own row, that
+        // would put the old fingerprint back at every start, and this device
+        // would stop talking to that member.
+        let unheard_of: Vec<_> = kept
+            .members
+            .into_iter()
+            .filter(|member| !already.iter().any(|held| held.device == member.device))
+            .collect();
+
+        let recorded = crate::peer::exchange::record(
+            &self.members,
+            self.device.id(),
+            &kept.introducer,
+            unheard_of,
+        )
+        .await?;
+
+        tracing::info!(
+            device = %annex,
+            %address,
+            recorded,
+            "this device has linked its Annex by the Keeper's Join",
+        );
+
+        // And the Annex held at the address the join went through, which is
+        // the forward's target and the one road to it that does not move with
+        // this device's network — written beside the row rather than in it, so
+        // no refresh of what the Annex advertises takes it away.
+        self.members.reached_at(&annex, Some(address)).await?;
+
+        // And the Annex read again, now that each side holds the other. What an
+        // Annex advertises is this device's own addresses at the Annex Forward,
+        // asked of this device over a member's route — which it could not ask
+        // while the join was in flight, this device not yet holding it — so its
+        // answer to the join carried none. The dial writes down what the Annex
+        // says now, which is what the members below are told. A refresh that
+        // fails leaves the row as the join wrote it.
+        if let Some(row) = self
+            .members
+            .rows()
+            .await?
+            .into_iter()
+            .find(|member| member.device == annex)
+            && let Err(why) = self.peers.identity(&row).await
+        {
+            tracing::warn!(
+                device = %annex,
+                %why,
+                "this device's Annex could not be read again once it was linked, so it \
+                 is held at what its answer to the join said",
+            );
+        }
+
+        // And now the rest of the cluster, the way an Allow joins a newcomer to
+        // everybody: each member this device already had is told about the
+        // Annex — marked, the mark being part of what it says about itself —
+        // and the Annex is told about each of them, over the link both ends
+        // have just proved. A member that answers nothing is owed the telling,
+        // and is told when it next answers, mark and all.
+        let Some(row) = self
+            .members
+            .rows()
+            .await?
+            .into_iter()
+            .find(|member| member.device == annex)
+        else {
+            return Ok(());
+        };
+
+        self.announce(&already, &presenting(&row)).await;
+
+        for member in &already {
+            self.announce(std::slice::from_ref(&row), &presenting(member))
+                .await;
+        }
+
+        Ok(())
+    }
+
     /// **Add** on a **Discovered** row: ask the device that row is about, with
     /// nothing typed (ADR-0020, *Discovery*).
     ///
@@ -1003,7 +1239,7 @@ impl Devices {
             // A device that spoke is a device that is there, whether what it said
             // was a question held or a refusal: the row stays exactly as it was,
             // and the press is refused in the far end's own terms.
-            Reached::Answered(answered) => answered?,
+            Reached::Answered(answered) => (*answered)?,
 
             Reached::Nobody(why) => {
                 // Nothing answered anywhere, so the row was wrong and this press
@@ -1211,6 +1447,7 @@ impl Devices {
                 // whole of what will prove it at this device's gate from now
                 // on: a member *is* a fingerprint.
                 fingerprint: held.fingerprint.clone(),
+                kept_by: None,
             })
             .await?;
 
@@ -1256,6 +1493,7 @@ impl Devices {
                 name: held.name.clone(),
                 os: held.os.clone(),
                 addresses: held.addresses.clone(),
+                kept_by: None,
             },
         )
         .await;
@@ -1689,66 +1927,79 @@ impl Devices {
     /// a member is one this machine has already unlinked, and saying so twice
     /// is not a failure — the stance [`verkstead_store::forget_member`] takes,
     /// for its reason.
-    pub(crate) async fn unlink(&self, device: &str) -> Result<()> {
+    ///
+    /// **And an Annex is not unlinked, nor is an Annex's Keeper by the Annex**
+    /// (ADR-0024): the membership is the Keeper's, so the press is refused
+    /// naming the device, before anybody is told anything — see
+    /// [`Unlinkable`]. A Keeper forgetting its own Annex is a path that is not
+    /// this one. **A Keeper unlinked takes its Annexes with it**: each is told
+    /// it has left and forgotten here, and every member is told to drop all of
+    /// them, while the pair keep each other.
+    pub(crate) async fn unlink(&self, device: &str) -> std::result::Result<(), Unlinkable> {
         let held = self.members.rows().await?;
 
         let Some(leaver) = held.iter().find(|member| member.device == device).cloned() else {
             return Ok(());
         };
 
-        // Told while it is still a member here and this device is still one
-        // there. A laptop that is not there is told nothing, and nothing waits
-        // on it — the cluster it was in has moved on without it, and its own
-        // list is wrong until somebody presses Add again.
-        if let Err(why) = self.peers.unlink(&leaver, device).await {
+        if let Some(keeper) = &leaver.kept_by {
+            return Err(Unlinkable::Annex {
+                name: leaver.name,
+                keeper: self.called(keeper, &held),
+            });
+        }
+
+        if self
+            .reading
+            .keeper()
+            .is_some_and(|keeper| keeper.device() == device)
+        {
+            return Err(Unlinkable::Keeper { name: leaver.name });
+        }
+
+        // And its Annexes with it: the pair's membership is the Keeper's, so a
+        // Keeper taken out of the cluster takes its Annexes along, each keeping
+        // the other — see [`crate::peer::unlinking`]. Left behind, an Annex
+        // would be a row nobody could ever unlink, kept by a device nobody here
+        // holds any more.
+        let leavers: Vec<_> = std::iter::once(leaver)
+            .chain(
+                held.iter()
+                    .filter(|member| member.kept_by.as_deref() == Some(device))
+                    .cloned(),
+            )
+            .collect();
+
+        for leaver in &leavers {
+            // Told while it is still a member here and this device is still one
+            // there. A laptop that is not there is told nothing, and nothing
+            // waits on it — the cluster it was in has moved on without it, and
+            // its own list is wrong until somebody presses Add again.
+            if let Err(why) = self.peers.unlink(leaver, &leaver.device).await {
+                tracing::info!(
+                    %why,
+                    device = %leaver.device,
+                    "a device that was unlinked could not be told, so it goes on holding a \
+                     cluster that no longer holds it",
+                );
+            }
+
+            self.members.forget(&leaver.device).await?;
+
             tracing::info!(
-                %why,
-                device = %device,
-                "a device that was unlinked could not be told, so it goes on holding a \
-                 cluster that no longer holds it",
+                device = %leaver.device,
+                name = %leaver.name,
+                "a device has been taken out of this one's cluster",
             );
         }
 
-        self.members.forget(device).await?;
+        let staying = held
+            .iter()
+            .filter(|member| !leavers.iter().any(|leaver| leaver.device == member.device));
 
-        tracing::info!(
-            device = %device,
-            name = %leaver.name,
-            "a device has been taken out of this one's cluster",
-        );
-
-        for member in held.iter().filter(|member| member.device != device) {
-            match self.peers.unlink(member, device).await {
-                Ok(()) => {
-                    tracing::info!(
-                        device = %member.device,
-                        leaver = %device,
-                        "a member has been told to drop the device that was unlinked",
-                    );
-
-                    self.caught_up(member).await;
-                }
-
-                Err(why) => {
-                    tracing::info!(
-                        %why,
-                        device = %member.device,
-                        leaver = %device,
-                        "a member could not be told to drop the device that was unlinked, so \
-                         it is owed the telling until it answers again",
-                    );
-
-                    if let Err(why) = self
-                        .members
-                        .owed(&member.device, device, Telling::Removed)
-                        .await
-                    {
-                        tracing::error!(
-                            %why,
-                            "a removal that was not made could not be written down as owed",
-                        );
-                    }
-                }
+        for member in staying {
+            for leaver in &leavers {
+                self.dropping(member, &leaver.device).await;
             }
         }
 
@@ -1760,6 +2011,56 @@ impl Devices {
         self.changeover_settled().await;
 
         Ok(())
+    }
+
+    /// Tell `member` to drop `leaver`, or write down that it is owed the
+    /// telling where it does not answer — see [`Devices::unlink`].
+    async fn dropping(&self, member: &verkstead_store::Member, leaver: &str) {
+        match self.peers.unlink(member, leaver).await {
+            Ok(()) => {
+                tracing::info!(
+                    device = %member.device,
+                    %leaver,
+                    "a member has been told to drop the device that was unlinked",
+                );
+
+                self.caught_up(member).await;
+            }
+
+            Err(why) => {
+                tracing::info!(
+                    %why,
+                    device = %member.device,
+                    %leaver,
+                    "a member could not be told to drop the device that was unlinked, so \
+                     it is owed the telling until it answers again",
+                );
+
+                if let Err(why) = self
+                    .members
+                    .owed(&member.device, leaver, Telling::Removed)
+                    .await
+                {
+                    tracing::error!(
+                        %why,
+                        "a removal that was not made could not be written down as owed",
+                    );
+                }
+            }
+        }
+    }
+
+    /// What `device` is called here: *this device* where it is this one, the
+    /// name the cluster holds for it where it is a member, and its id where it
+    /// is neither — the words the Devices row draws a Keeper in.
+    fn called(&self, device: &str, held: &[verkstead_store::Member]) -> String {
+        if device == self.device.id() {
+            return "this device".to_owned();
+        }
+
+        held.iter()
+            .find(|member| member.device == device)
+            .map_or_else(|| device.to_owned(), |member| member.name.clone())
     }
 
     /// Say to `member` everything it has yet to be told, which is what a dial
@@ -1970,7 +2271,7 @@ impl Devices {
 /// One function rather than the mapping written at each place that hands a member
 /// over, because it is one judgement and the places are two: the roster an Allow
 /// hands to a newcomer, and the announcement made to each member about it.
-fn presenting(member: &verkstead_store::Member) -> DeviceIdentity {
+pub(crate) fn presenting(member: &verkstead_store::Member) -> DeviceIdentity {
     DeviceIdentity {
         device: member.device.clone(),
         fingerprint: member
@@ -1980,6 +2281,7 @@ fn presenting(member: &verkstead_store::Member) -> DeviceIdentity {
         name: member.name.clone(),
         os: member.os.clone(),
         addresses: member.addresses.clone(),
+        kept_by: member.kept_by.clone(),
     }
 }
 

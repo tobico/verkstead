@@ -2191,7 +2191,8 @@ Repos and Worktrees and sessions. What is different is who it belongs to.
 It joins by the **Keeper's Join** rather than by a press, its row on every
 **Devices** list wears the mark saying whose it is and offers no Unlink, and it
 never unlinks its Keeper. What removes an Annex is removing the box, which
-its Keeper notices at its next start and tells the roster.
+its Keeper notices at its next start and tells the roster, and what unlinks a
+Keeper takes its Annex out of the cluster with it.
 **It runs only while its Keeper runs**: booted in the background at the
 Keeper's start, terminated at its stop, never waited on — a workbench opens
 on the Keeper while the Annex is still coming up, and its rows read
@@ -2247,6 +2248,10 @@ advertised over mDNS and never discovered: its address is its Keeper's.
 that WSL's mirrored networking, where it shares the Keeper's loopback, cannot
 collide them with the Keeper's; the forward points at the loopback there and
 at the Annex's NAT address otherwise.
+**The Keeper and its Annex dial each other directly**, never at what they
+advertise of each other: the Keeper at the address the forward points at, the
+Annex at the address its `kept_by` names — so a laptop changing networks or
+going offline loses neither of them the other. Nobody else is told either.
 _Avoid_: proxy, tunnel, port forward (as a noun for this), relay (which is the
 **Relay**, and is HTTP)
 

@@ -107,6 +107,11 @@
 //! but take the device out of the cluster for everybody, which is what the
 //! card says in the sentence under the name.
 //!
+//! **Save an Annex's row, which reads *annex of* its Keeper and has none**
+//! (ADR-0024) — *annex of this device* on the Keeper itself — and its Keeper's
+//! row on the Annex, which has none either: the membership is the Keeper's,
+//! and the server refuses the press on both.
+//!
 //! **A member the last dial could not reach is the same row, dimmed, reading
 //! *unreachable*.** It is not taken off the list and nothing about it is left
 //! out: a machine with its lid shut is still one of this cluster, and what the
@@ -864,6 +869,11 @@ function Confirm(props: {
 /// given to the members alone rather than to [`Row`] for every row to decide:
 /// there is nothing to unlink this machine from itself, and a row that has no
 /// press is a row that is handed none.
+///
+/// **And an Annex's row has none either, nor its Keeper's on the Annex**
+/// (ADR-0024, *The Keeper's Join*): the membership is the Keeper's, and the
+/// server refuses the press on both. An Annex's row says whose it is instead —
+/// see [`keeperOf`].
 function List(props: {
   of: DevicesView;
   /// What a press on a member's row asks about, which is the whole of what a
@@ -876,14 +886,23 @@ function List(props: {
 }): JSX.Element {
   return (
     <ul class={styles.list}>
-      <Row of={props.of.this} here />
+      <Row
+        of={props.of.this}
+        here
+        keeper={keeperOf(props.of, props.of.this)}
+      />
 
       <For each={props.of.members}>
         {(member: LinkedDevice) => (
           <Row
             of={member.identity}
             unreachable={!member.reachable}
-            unlink={() => props.unlink(member.identity)}
+            keeper={keeperOf(props.of, member.identity)}
+            unlink={
+              unlinkable(props.of, member.identity)
+                ? () => props.unlink(member.identity)
+                : undefined
+            }
             unlinking={props.unlinking}
           />
         )}
@@ -900,6 +919,30 @@ function List(props: {
       </For>
     </ul>
   );
+}
+
+/// What an **Annex**'s row says whose it is: its Keeper's name as the cluster
+/// holds it, or *this device* on the Keeper itself — `null` on every row that
+/// is not an Annex's.
+///
+/// A Keeper this list holds no row for — a cluster still settling — leaves the
+/// row reading *annex* alone rather than naming a device by its id.
+function keeperOf(list: DevicesView, of: DeviceIdentity): string | null {
+  const keeper = of.kept_by;
+
+  if (keeper === null) return null;
+  if (keeper === list.this.device) return "this device";
+
+  return (
+    list.members.find((member) => member.identity.device === keeper)?.identity
+      .name ?? ""
+  );
+}
+
+/// And whether a member's row is offered an Unlink: not an Annex's, and not
+/// the Keeper's on its own Annex.
+function unlinkable(list: DevicesView, of: DeviceIdentity): boolean {
+  return of.kept_by === null && of.device !== list.this.kept_by;
 }
 
 /// One row: the OS mark, the name, and every address a peer could reach that
@@ -923,8 +966,8 @@ function List(props: {
 /// stopped being true, and the row is where the Unlink is pressed.
 ///
 /// **And the Unlink is drawn wherever one was given**, which is every member's
-/// row and no other: this device's row has none, there being nothing to unlink
-/// this machine from itself. A dimmed row's press is drawn exactly as a live
+/// row but an Annex's and its Keeper's on the Annex: this device's row has
+/// none, there being nothing to unlink this machine from itself. A dimmed row's press is drawn exactly as a live
 /// one's and works exactly as one — the machine that is never coming back is
 /// most of what an Unlink is for, and a press that greyed itself out on the one
 /// row somebody needs it on would be the feature refusing its own case.
@@ -932,6 +975,8 @@ function Row(props: {
   of: DeviceIdentity;
   here?: boolean;
   unreachable?: boolean;
+  /// Whose Annex this is, where it is one — see [`keeperOf`].
+  keeper?: string | null;
   /// What a press asks about, where this row has one to press.
   unlink?: () => void;
   /// And whether one is already going through.
@@ -950,6 +995,12 @@ function Row(props: {
           <Show when={props.here}>
             {" "}
             <span class={styles.here}>this device</span>
+          </Show>
+          <Show when={props.keeper != null}>
+            {" "}
+            <span class={styles.annex}>
+              {props.keeper ? `annex of ${props.keeper}` : "annex"}
+            </span>
           </Show>
           <Show when={props.unreachable}>
             {" "}

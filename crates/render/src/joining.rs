@@ -16,6 +16,11 @@
 //! [`AskingDevice`] is the question the device that was asked is holding, which
 //! is what its modal is drawn from.
 //!
+//! **And two more for the Keeper's Join** (ADR-0024): [`NewAnnex`], which is
+//! what a Keeper hands its own workbench to link its Annex, and [`JoinKept`],
+//! which is what an Annex answers that join with in place of a [`JoinHeld`] —
+//! the roster an Allow would have dialled back, said in the reply.
+//!
 //! **The asking device says what it is with the same type it would answer a
 //! stranger with**, rather than with a shape of its own. A join is a device
 //! introducing itself, and there is one description of a device in this tree:
@@ -84,6 +89,47 @@ pub struct JoinHeld {
     /// names one certificate and presents another is not the device it says it
     /// is.
     pub identity: DeviceIdentity,
+}
+
+/// What an **Annex** answers its **Keeper's Join** with: what an Allow would
+/// have dialled back, said in the join's own reply (ADR-0024, *The Keeper's
+/// Join*).
+///
+/// **Not a viewer type.** It crosses the peer listener beside [`JoinHeld`], and
+/// is the other thing a join post can come back as: an Annex whose `config.yaml`
+/// names the device posting takes the join outright, with no question held and
+/// nobody asked, so there is no request to name and no dial back to wait for.
+/// The Keeper records the Annex and its roster from this, in one round trip.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JoinKept {
+    /// The Annex, as it answers for itself — with its Keeper's Device Id in it,
+    /// which is the mark — checked by the Keeper against the certificate it
+    /// pinned out of the Annex's `device.pem`.
+    pub introducer: DeviceIdentity,
+
+    /// And every other device the Annex is linked to, the shape
+    /// [`JoinSettled::Joined`] hands a newcomer.
+    pub members: Vec<DeviceIdentity>,
+}
+
+/// What a **Keeper** posts to link its **Annex**: the Annex's Data Directory,
+/// which it can read, and the address its peer listener answers at.
+///
+/// **Not a viewer type.** Nothing on any page presses this — a Keeper calls it
+/// at its own start — so it goes over the workbench route without being drawn.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NewAnnex {
+    pub data_dir: String,
+    pub address: String,
+
+    /// And where the Annex reaches its Keeper in turn, which does not move with
+    /// the Keeper's network: the Windows host's side of WSL's NAT at the
+    /// Keeper's peer port, or the loopback at it under mirrored networking.
+    /// Written into the Annex's `kept_by` (ADR-0024, *The Keeper and its Annex
+    /// reach each other directly*); absent, the Annex reaches its Keeper at
+    /// what the Keeper advertises.
+    #[serde(default)]
+    pub keeper_at: Option<String>,
 }
 
 /// And what it says when its human has settled the question: the dial back

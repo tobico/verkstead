@@ -48,7 +48,7 @@ use axum::response::{IntoResponse, Response};
 use sqlx::SqlitePool;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
-use verkstead_render::{AskingDevice, DeviceIdentity, JoinHeld, PendingJoin};
+use verkstead_render::{AskingDevice, DeviceIdentity, JoinHeld, JoinKept, PendingJoin};
 use verkstead_schema::Nudge;
 use verkstead_store::{AskedJoin, HeldJoin};
 
@@ -164,6 +164,10 @@ pub(crate) struct Holding {
     /// side — see [`crate::device::Devices`] — and this is the third way a
     /// question ends, which is the one nobody is standing in front of.
     pub(crate) peers: super::dialling::Peers,
+
+    /// And who this device is linked to, which one join writes into directly:
+    /// the **Keeper's Join**, taken with nobody asked — see [`kept`].
+    pub(crate) members: super::Members,
 }
 
 /// The joins in flight, as the things that ask after them do: the post that
@@ -316,6 +320,7 @@ impl Joins {
                     name: held.name,
                     os: held.os,
                     addresses: held.addresses,
+                    kept_by: None,
                 },
             })
             .collect())
@@ -476,6 +481,17 @@ pub(crate) async fn join(
         return refused(StatusCode::BAD_REQUEST, why);
     }
 
+    // The **Keeper's Join**: this device is an Annex, and the device posting is
+    // the one its `config.yaml` names — under that certificate and that id both.
+    // Taken outright rather than held, with nobody asked (ADR-0024). Anything
+    // else an Annex is posted is held and asked about like any join, below.
+    if let Some(keeper) = holding.reading.keeper()
+        && keeper.fingerprint() == presented
+        && keeper.device() == saying.device
+    {
+        return kept(&holding, saying, presented).await;
+    }
+
     let now = OffsetDateTime::now_utc();
 
     let (asked_at, expires_at) = match (stamp(now), stamp(now + HELD)) {
@@ -562,6 +578,96 @@ pub(crate) async fn join(
         request: held.request,
         expires: expires_at,
         identity: holding.reading.identity(&holding.device).await,
+    })
+    .into_response()
+}
+
+/// The **Keeper's Join**, taken: the Keeper recorded as a member here, and the
+/// answer an Allow would have dialled back given in this reply instead
+/// (ADR-0024, *The Keeper's Join*).
+///
+/// **No question held, no Nudge of the joins, no push and no timer** — there is
+/// nothing for anybody to answer. Which is also why the answer comes back on
+/// the post itself: with no request there is nothing a dial back could be
+/// matched against, and the Keeper is the one party that pinned this device's
+/// certificate before it dialled, so the reply goes down a link both ends have
+/// already proved.
+///
+/// **The roster rather than this device alone**, the shape
+/// [`super::exchange::settled`] takes on an Allow: this device as it answers for
+/// itself — its Keeper's id in it, which is the mark — and every other member
+/// it holds. Read before the Keeper is written, and leaving the Keeper out
+/// whichever way, so that a Keeper linking again at its next start is not
+/// handed itself.
+///
+/// Recorded keyed on the Device Id, so a Keeper that links at every start is the
+/// same row said again — see [`verkstead_store::record_member`].
+async fn kept(holding: &Holding, saying: DeviceIdentity, presented: String) -> Response {
+    let roster = match holding.members.rows().await {
+        Ok(rows) => rows
+            .iter()
+            .filter(|member| member.device != saying.device)
+            .map(crate::device::presenting)
+            .collect(),
+
+        Err(why) => {
+            tracing::error!(%why, "the members a Keeper's Join hands over could not be read");
+
+            return unreadable("this device could not read who it is linked to");
+        }
+    };
+
+    let keeper = verkstead_store::Linking {
+        device: saying.device,
+        name: saying.name,
+        os: saying.os,
+        addresses: saying.addresses,
+
+        // The handshake's certificate, which is the one `kept_by` named — the
+        // two were matched before this was called.
+        fingerprint: presented,
+        kept_by: saying.kept_by,
+    };
+
+    // And where this device reaches its Keeper directly, as the Keeper wrote
+    // into `kept_by` before it dialled — or nowhere but what it advertises,
+    // where it named nothing (ADR-0024, *The Keeper and its Annex reach each
+    // other directly*). Said again at every link, so a Keeper whose address on
+    // this side moved puts it right by linking again.
+    let direct = holding
+        .reading
+        .keeper()
+        .and_then(|kept| kept.at().map(str::to_owned));
+
+    let written = async {
+        holding.members.refreshed(&keeper).await?;
+
+        holding
+            .members
+            .reached_at(&keeper.device, direct.as_deref())
+            .await
+    }
+    .await;
+
+    if let Err(why) = written {
+        tracing::error!(%why, "a Keeper's Join could not be written down");
+
+        return unreadable("this device could not write the membership down");
+    }
+
+    tracing::info!(
+        device = %keeper.device,
+        name = %keeper.name,
+        "this device's Keeper has linked it, and it is recorded as a member",
+    );
+
+    // The Devices list moved, and nothing else did: there is no question for a
+    // modal to raise.
+    holding.nudges.announce(Nudge::Devices);
+
+    Json(JoinKept {
+        introducer: holding.reading.identity(&holding.device).await,
+        members: roster,
     })
     .into_response()
 }
@@ -842,6 +948,7 @@ mod tests {
                     "100.64.0.1".to_owned(),
                     "192.168.1.24".to_owned(),
                 ],
+                kept_by: None,
             }),
             None,
         );
@@ -856,6 +963,7 @@ mod tests {
             name: "workbench".to_owned(),
             os: "Linux".to_owned(),
             addresses: vec!["192.168.1.24".to_owned()],
+            kept_by: None,
         };
 
         let said = |saying: DeviceIdentity| too_much(&saying).unwrap_or_default().to_owned();

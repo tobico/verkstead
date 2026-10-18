@@ -60,6 +60,9 @@ than a regular join driven from both sides:
   travels with the roster — on the exchange and on every announcement — so no
   device offers Unlink on an Annex's row, and an Annex never unlinks its
   Keeper. What removes an Annex is removing the box, which its Keeper notices.
+  **A Keeper that is unlinked takes its Annex with it**: the pair keep each
+  other, and every other device drops both — an Annex left behind would be a
+  row nobody could unlink, kept by a device nobody there holds.
 
 Driving the ordinary join over both workbench keys — the Keeper posting the
 join and then pressing Allow through the Annex's own API — was the
@@ -107,6 +110,56 @@ it would cost every Annex.
 
 An Annex is never advertised over mDNS and never discovered: its address is
 its Keeper's.
+
+## The Keeper and its Annex reach each other directly
+
+*Amended 2026-10-15, after the review of stage 01.* Advertising the Keeper's
+addresses serves a third device, but as written the Keeper and its Annex used
+the same addresses to reach **each other**: every dial overwrites a member's
+addresses with what it advertises, so the Keeper held its Annex at its own
+LAN and tailnet addresses at 8424 — dialling itself through its own forward —
+and the Annex held its Keeper at the addresses the Keeper's Join carried.
+Offline the Keeper advertises nothing, after a network move it advertises
+somewhere else, and either way the pair lost each other until the Keeper next
+started. The one road between them that does not move with the Keeper's
+network was the forward's own target, and no dial used it.
+
+So **each holds the other at a direct address**, a column of the member row
+that this device writes from what it knows of the machine and that no
+refresh touches — the far end's advertisement is the far end's word, and this
+is not. **Every dial to a member tries the direct address first**, then the
+advertised ones, an advertised address that is the same place not tried
+twice. Every other member has none.
+
+- **The Keeper holds its Annex at the address the forward points at**: the
+  Annex's NAT address under NAT, the loopback at the Annex's peer port under
+  mirrored networking — the address the linking operation is given, written
+  as it points the forward.
+- **The Annex holds its Keeper where the Keeper says**, which the Keeper hands
+  over in `kept_by` as `at` beside its id and fingerprint, and the Annex
+  records from its own config when it takes the Keeper's Join. Under NAT that
+  is the Windows host's side of WSL's network at the Keeper's peer port, under
+  mirrored the loopback at it — the same probe that says where the forward
+  points is the one that says this, and it is the Keeper's. **The Annex
+  working it out** from its default route was rejected: it cannot tell NAT
+  from mirrored, does not know the port its Keeper listens on, and would be a
+  second reading of one fact the Keeper already has. And `kept_by` is
+  rewritten at every link, so a host address that moved across a reboot is
+  right again at the next one.
+- **The Annex follows its Keeper at each reading**, as it already asked: the
+  ask goes down the direct address now, so a move is advertised from the
+  first reading after the answer's hold — five seconds — with nothing
+  restarted. **The Keeper re-telling its Annex when its addresses change** was
+  rejected as a second mechanism for what the reading already does.
+- **A third device is told at the next link**, which re-reads the Annex before
+  it announces it, and every start runs. Between two, a member holding a
+  Keeper's old addresses holds its Annex's old addresses too, which is the
+  ordinary cluster's lot when a laptop moves rather than an Annex's: the
+  tailnet half of what is advertised is the half that does not.
+- **The direct address is the pair's alone.** It is not in an identity, an
+  exchange, a roster or an announcement — the advertised list is what those
+  carry — so no third device is ever handed the Annex's NAT address or its
+  loopback.
 
 ## The box on Windows
 
@@ -208,8 +261,9 @@ the origins, so nobody should type one.
 - The peer listener gains a sibling on 8424 that forwards and never
   terminates TLS. The NixOS module gains nothing for it: an Annex's Keeper is
   never a NixOS daemon in the first version, and a forward is a Keeper's.
-- `config.yaml` gains the Annex's `kept_by` — the Keeper's id and fingerprint
-  — and the Annex's refusals name its Keeper by the name it last advertised.
+- `config.yaml` gains the Annex's `kept_by` — the Keeper's id and fingerprint,
+  and where the Annex reaches it directly — the members table a direct
+  address the Keeper and its Annex hold each other at, and the Annex's refusals name its Keeper by the name it last advertised.
 - The Repo dropdown has three kinds of row: the device's own, the clonable,
   and the two that act.
 - The Electron app is untouched, the msi does not grow, and `desktop/src`

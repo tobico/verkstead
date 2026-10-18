@@ -12,9 +12,9 @@ use sqlx::SqlitePool;
 
 use verkstead_store::{
     Linking, Renewal, Telling, announcement_made, announcements_owed, announcements_owed_to,
-    changeover_over, forget_every_member, forget_member, member_count, member_holding,
-    member_unreachable, members, members_yet_to_acknowledge, open_database, owe_announcement,
-    record_member, record_renewal, renewal_acknowledged,
+    changeover_over, forget_every_member, forget_every_member_but, forget_member, member_count,
+    member_holding, member_reached_at, member_unreachable, members, members_yet_to_acknowledge,
+    open_database, owe_announcement, record_member, record_renewal, renewal_acknowledged,
 };
 
 /// The two devices these tests link to, named by the ids a cluster names them
@@ -64,6 +64,7 @@ fn advertising(device: &str, name: &str, fingerprint: &str) -> Linking {
             "192.168.1.31".to_owned(),
         ],
         fingerprint: fingerprint.to_owned(),
+        kept_by: None,
     }
 }
 
@@ -222,6 +223,106 @@ async fn a_device_recorded_again_is_the_same_member() {
         !member_holding(&pool, B_FINGERPRINT).await.unwrap(),
         "and the certificate it has stopped presenting is nobody's again",
     );
+}
+
+/// The Annex mark is the one thing a device recorded again does not rewrite: a
+/// row takes it when it is first written and keeps it (ADR-0024).
+///
+/// Unlink is refused on a marked row, so a member linked as an ordinary one
+/// that later said it was an Annex would have made itself impossible to unlink
+/// — and an Annex that once answered without its mark would have lost it.
+#[tokio::test]
+async fn the_annex_mark_is_taken_once_and_kept() {
+    let (_dir, pool) = fresh_pool().await;
+
+    record_member(&pool, &advertising(B, "workbench", B_FINGERPRINT))
+        .await
+        .unwrap();
+    record_member(
+        &pool,
+        &Linking {
+            kept_by: Some(A.to_owned()),
+            ..advertising(B, "workbench", B_FINGERPRINT)
+        },
+    )
+    .await
+    .unwrap();
+
+    record_member(
+        &pool,
+        &Linking {
+            kept_by: Some(A.to_owned()),
+            ..advertising(C, "annex", C_FINGERPRINT)
+        },
+    )
+    .await
+    .unwrap();
+    record_member(&pool, &advertising(C, "annex", C_FINGERPRINT))
+        .await
+        .unwrap();
+
+    let listed = members(&pool).await.unwrap();
+    let kept = |device: &str| {
+        listed
+            .iter()
+            .find(|member| member.device == device)
+            .unwrap()
+            .kept_by
+            .clone()
+    };
+
+    assert_eq!(
+        kept(B),
+        None,
+        "an ordinary member saying it is an Annex later is still an ordinary member",
+    );
+    assert_eq!(
+        kept(C).as_deref(),
+        Some(A),
+        "and an Annex recorded again without its mark still has it",
+    );
+}
+
+/// Where a member is reached directly is this device's own record: written on
+/// its own, and kept through every recording of what the member says after
+/// (ADR-0024, *The Keeper and its Annex reach each other directly*).
+#[tokio::test]
+async fn a_direct_address_outlives_every_recording() {
+    let (_dir, pool) = fresh_pool().await;
+
+    record_member(&pool, &advertising(B, "annex", B_FINGERPRINT))
+        .await
+        .unwrap();
+    assert_eq!(members(&pool).await.unwrap()[0].direct, None);
+
+    member_reached_at(&pool, B, Some("172.24.80.2:8425"))
+        .await
+        .unwrap();
+    record_member(
+        &pool,
+        &Linking {
+            addresses: Vec::new(),
+            ..advertising(B, "annex", B_FINGERPRINT)
+        },
+    )
+    .await
+    .unwrap();
+
+    let row = members(&pool).await.unwrap().remove(0);
+    assert_eq!(row.direct.as_deref(), Some("172.24.80.2:8425"));
+    assert!(
+        row.addresses.is_empty(),
+        "the advertised list is the far end's"
+    );
+
+    member_reached_at(&pool, B, None).await.unwrap();
+    assert_eq!(members(&pool).await.unwrap()[0].direct, None);
+
+    // And a device that is no member is nothing to write.
+    member_reached_at(&pool, C, Some("127.0.0.1:8423"))
+        .await
+        .unwrap();
+    assert_eq!(members(&pool).await.unwrap().len(), 1);
 }
 
 /// A member a dial found nothing at is marked, and nothing else about the row
@@ -563,6 +664,55 @@ async fn a_device_told_it_has_left_forgets_everybody() {
     // And being told twice is not a thing to fail: a device that holds no
     // members has already forgotten everybody.
     forget_every_member(&pool).await.unwrap();
+}
+
+/// A leaver that is a Keeper or an Annex keeps the other half of the pair, and
+/// what is owed between the two, and lets go of everybody else.
+#[tokio::test]
+async fn a_device_told_it_has_left_keeps_the_members_it_is_told_to() {
+    let (_dir, pool) = fresh_pool().await;
+
+    record_member(&pool, &advertising(B, "workbench", B_FINGERPRINT))
+        .await
+        .unwrap();
+    record_member(&pool, &advertising(C, "laptop", C_FINGERPRINT))
+        .await
+        .unwrap();
+
+    record_member(&pool, &advertising(D, "annex", RENEWED))
+        .await
+        .unwrap();
+
+    owe_announcement(&pool, B, C, Telling::Joined)
+        .await
+        .unwrap();
+    owe_announcement(&pool, B, D, Telling::Joined)
+        .await
+        .unwrap();
+
+    forget_every_member_but(&pool, &[B.to_owned(), D.to_owned()])
+        .await
+        .unwrap();
+
+    let mut left: Vec<_> = members(&pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|member| member.device)
+        .collect();
+    left.sort();
+
+    assert_eq!(left, vec![B.to_owned(), D.to_owned()]);
+    assert!(!member_holding(&pool, C_FINGERPRINT).await.unwrap());
+    assert_eq!(
+        announcements_owed_to(&pool, B).await.unwrap().len(),
+        1,
+        "a debt between the kept stays, and one naming a forgotten device goes",
+    );
+    assert_eq!(
+        announcements_owed(&pool, D).await.unwrap(),
+        vec![B.to_owned()]
+    );
 }
 
 // ---------------------------------------------------------------------------

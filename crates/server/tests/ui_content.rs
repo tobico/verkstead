@@ -3724,6 +3724,52 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         &a_stated_machine(&get(&linked, "/api/ui/devices").await),
     );
 
+    // And the three ways an **Annex** stands on the list (ADR-0024): on its
+    // Keeper, reading *annex of this device*; on another member, reading
+    // *annex of* the Keeper's name; and on the Annex itself, where its own row
+    // says whose it is and its Keeper's row offers no Unlink. Written straight
+    // into the table, the way the members above are — the Keeper's Join is
+    // `tests/joining.rs`'s subject, and what is fed to the viewer here is the
+    // shape each of the three answers with.
+    let (_dir, keeping) = an_annexed_devices_app(
+        &[
+            (A_MEMBER, "laptop", "macOS", None),
+            (ANOTHER_MEMBER, "workbench", "Linux", Some(A_DEVICE)),
+        ],
+        false,
+    )
+    .await;
+    write(
+        "devices-keeping.json",
+        &a_stated_machine(&get(&keeping, "/api/ui/devices").await),
+    );
+
+    let (_dir, beside) = an_annexed_devices_app(
+        &[
+            (A_MEMBER, "laptop", "Windows", None),
+            (ANOTHER_MEMBER, "workbench", "Linux", Some(A_MEMBER)),
+        ],
+        false,
+    )
+    .await;
+    write(
+        "devices-beside-an-annex.json",
+        &a_stated_machine(&get(&beside, "/api/ui/devices").await),
+    );
+
+    let (_dir, kept) = an_annexed_devices_app(
+        &[
+            (A_MEMBER, "laptop", "Windows", None),
+            (ANOTHER_MEMBER, "studio", "macOS", None),
+        ],
+        true,
+    )
+    .await;
+    write(
+        "devices-kept.json",
+        &a_stated_machine(&get(&kept, "/api/ui/devices").await),
+    );
+
     // And a fourth, with three joins asked for and none of them a link: the
     // section draws a pending row apiece under the members, and the three ways
     // such a row is drawn — still waiting, run out, and refused by the far end
@@ -3900,6 +3946,7 @@ async fn a_linked_devices_app() -> (tempfile::TempDir, Router) {
                 os: os.to_owned(),
                 addresses: addresses.into_iter().map(str::to_owned).collect(),
                 fingerprint: format!("AA:BB:CC:DD:{device}"),
+                kept_by: None,
             },
         )
         .await
@@ -3911,6 +3958,67 @@ async fn a_linked_devices_app() -> (tempfile::TempDir, Router) {
         .unwrap();
 
     (dir, app)
+}
+
+/// A router whose members are `members` — each an id, a name, an OS word and
+/// whose Annex it is — and which, where `kept` says so, is itself the Annex of
+/// the first of them, told so by its own `config.yaml` (ADR-0024).
+#[cfg(unix)]
+async fn an_annexed_devices_app(
+    members: &[(&str, &str, &str, Option<&str>)],
+    kept: bool,
+) -> (tempfile::TempDir, Router) {
+    let dir = tempfile::tempdir().unwrap();
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    let settings = verkstead_server::settings::Settings::in_data_dir(dir.path());
+
+    if kept {
+        settings
+            .keep_by(&verkstead_server::settings::KeptBy::of(
+                members[0].0,
+                &format!("AA:BB:CC:DD:{}", members[0].0),
+            ))
+            .unwrap();
+    }
+
+    let reading = Reading::stated(
+        Tailscale::running(vec!["verkstead-no-such-tailscale".to_owned()], WORKBENCH),
+        Platform::Linux,
+        None,
+        vec!["192.168.1.24".parse().unwrap(), "10.0.0.7".parse().unwrap()],
+    )
+    .told_by(settings);
+
+    let device = Device::stated(dir.path(), A_DEVICE).unwrap();
+    let devices = Devices::of(
+        device,
+        reading,
+        Members::recorded(pool.clone()),
+        Joins::recorded(pool.clone()),
+    )
+    .browsing(Browse::heard_nothing())
+    .probing(Probe::asked_nothing());
+
+    for (device, name, os, kept_by) in members {
+        verkstead_store::record_member(
+            &pool,
+            &verkstead_store::Linking {
+                device: (*device).to_owned(),
+                name: (*name).to_owned(),
+                os: (*os).to_owned(),
+                addresses: vec!["192.168.1.31".to_owned()],
+                fingerprint: format!("AA:BB:CC:DD:{device}"),
+                kept_by: kept_by.map(str::to_owned),
+            },
+        )
+        .await
+        .unwrap();
+    }
+
+    (dir, router_answering_devices(pool, devices))
 }
 
 /// And the ids those two are written down under, for the reason this device's
@@ -3972,6 +4080,7 @@ async fn a_shared_profiles_app() -> (tempfile::TempDir, Router) {
             os: "macOS".to_owned(),
             addresses: vec!["100.64.0.2".to_owned()],
             fingerprint: format!("AA:BB:CC:DD:{A_MEMBER}"),
+            kept_by: None,
         },
     )
     .await

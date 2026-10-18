@@ -37,6 +37,7 @@ use verkstead_server::peer::{self, Members};
 use verkstead_server::platform::Platform;
 use verkstead_server::remote::Tailscale;
 use verkstead_server::router_answering_devices_telling;
+use verkstead_server::settings::Settings;
 use verkstead_store::Linking;
 
 /// Where the pane reads the section, and where its presses go.
@@ -89,15 +90,27 @@ struct Verkstead {
     /// advertises.
     address: SocketAddr,
 
-    /// Held for the length of the test: the identity and the database both live
-    /// in it.
-    _dir: tempfile::TempDir,
+    /// Its Data Directory, held for the length of the test: the identity and
+    /// the database both live in it, and the `config.yaml` an Annex is told it
+    /// is kept in — which a Keeper links it by naming.
+    dir: tempfile::TempDir,
 }
 
 impl Verkstead {
     /// A Verkstead with a store of its own, an identity in it, and its peer
     /// listener up on a port the machine picked.
     async fn answering(id: &str) -> Verkstead {
+        Verkstead::standing(id, false).await
+    }
+
+    /// And one that reads itself the way a running server does: told by its own
+    /// `config.yaml` whether it is somebody's **Annex**, which is what a Keeper
+    /// links it by writing (ADR-0024).
+    async fn annex(id: &str) -> Verkstead {
+        Verkstead::standing(id, true).await
+    }
+
+    async fn standing(id: &str, told: bool) -> Verkstead {
         let dir = tempfile::tempdir().unwrap();
         let pool = open_database(&dir.path().join("verkstead.db"))
             .await
@@ -117,6 +130,12 @@ impl Verkstead {
             vec![format!("127.0.0.1:{}", address.port())],
         );
 
+        let reading = if told {
+            reading.told_by(Settings::in_data_dir(dir.path()))
+        } else {
+            reading
+        };
+
         let standing = Verkstead {
             device,
             members: Members::recorded(pool.clone()),
@@ -125,7 +144,7 @@ impl Verkstead {
             reading,
             pool,
             address,
-            _dir: dir,
+            dir,
         };
 
         tokio::spawn(listener.serving(peer::router(
@@ -187,6 +206,7 @@ impl Verkstead {
             name: "somewhere".to_owned(),
             os: "Linux".to_owned(),
             addresses: vec![self.at()],
+            kept_by: None,
         }
     }
 
@@ -524,6 +544,7 @@ async fn a_member_that_answers_nothing_is_dimmed_and_owed_the_telling() {
             os: "Linux (WSL)".to_owned(),
             addresses: vec!["127.0.0.1:1".to_owned()],
             fingerprint: "AA:BB:CC:DD:EE:FF".to_owned(),
+            kept_by: None,
         },
     )
     .await
@@ -589,6 +610,300 @@ async fn a_telling_that_got_through_is_owed_by_nobody() {
 }
 
 // ---------------------------------------------------------------------------
+// An Annex on the roster
+// ---------------------------------------------------------------------------
+
+/// Where a Keeper links its Annex, and where Unlink is pressed.
+const ANNEXES: &str = "/api/ui/devices/annexes";
+
+/// `keeper` links `annex` by the **Keeper's Join**, through the workbench
+/// `app` — the route a Keeper's start calls, naming the Annex's Data Directory
+/// and the address its peer listener answers at.
+async fn kept(app: &Router, annex: &Verkstead) {
+    let body = serde_json::to_vec(&serde_json::json!({
+        "data_dir": annex.dir.path().to_str().unwrap(),
+        "address": annex.at(),
+    }))
+    .unwrap();
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(ANNEXES)
+                .header("content-type", "application/json")
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let status = response.status();
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "POST {ANNEXES}: {}",
+        String::from_utf8_lossy(&bytes),
+    );
+}
+
+/// Press Unlink on `device`, and hand back what the workbench answered.
+async fn unlink(app: &Router, device: &str) -> (StatusCode, String) {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("{DEVICES}/members/{device}/unlink"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let status = response.status();
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+
+    (status, String::from_utf8_lossy(&bytes).into_owned())
+}
+
+/// The row `listing` draws for `device`.
+async fn row_for(listing_on: &Verkstead, device: &str) -> verkstead_render::LinkedDevice {
+    listing(&listing_on.workbench())
+        .await
+        .members
+        .into_iter()
+        .find(|member| member.identity.device == device)
+        .unwrap_or_else(|| panic!("{device} is on the list"))
+}
+
+/// A Keeper already linked to a third device links its Annex, and the third
+/// device lists the Annex marked as the Keeper's — the mark travelling with the
+/// announcement, and nobody on that machine having pressed anything.
+///
+/// **The stage's own demonstration, the three-server half of it.** A is linked
+/// to C the ordinary way; then A keeps B. A announces B to C over the link it
+/// already holds, and tells B about C over the link the Keeper's Join just
+/// made, so all three lists hold the other two.
+#[tokio::test]
+async fn a_third_device_lists_a_keepers_annex_with_its_mark() {
+    let a = Verkstead::answering(A).await;
+    let b = Verkstead::annex(B).await;
+    let c = Verkstead::answering(C).await;
+
+    linked(&c, &a).await;
+    kept(&a.workbench(), &b).await;
+
+    assert_eq!(a.cluster().await, sorted(&[B, C]));
+    assert_eq!(
+        b.cluster().await,
+        sorted(&[A, C]),
+        "the Annex was told about the Keeper's members, as a newcomer is",
+    );
+    assert_eq!(
+        c.cluster().await,
+        sorted(&[A, B]),
+        "C was never pressed for B: the Keeper announced its Annex",
+    );
+
+    assert_eq!(
+        row_for(&a, B).await.identity.kept_by.as_deref(),
+        Some(A),
+        "the Keeper lists it as this device's",
+    );
+    assert_eq!(
+        row_for(&c, B).await.identity.kept_by.as_deref(),
+        Some(A),
+        "and C lists it as A's",
+    );
+    assert_eq!(
+        row_for(&b, C).await.identity.kept_by,
+        None,
+        "while the ordinary member is an ordinary row on the Annex",
+    );
+}
+
+/// Linking again, as a Keeper does at every start, leaves the Keeper's own rows
+/// as they are: what the Annex holds of a member it already has is what the
+/// Annex last heard, and can be behind.
+#[tokio::test]
+async fn linking_again_keeps_the_keepers_own_rows_over_the_annexes() {
+    let a = Verkstead::answering(A).await;
+    let b = Verkstead::annex(B).await;
+    let c = Verkstead::answering(C).await;
+
+    linked(&c, &a).await;
+    kept(&a.workbench(), &b).await;
+
+    // C as the Annex holds it, out of date: a certificate it has since
+    // renewed away from, at an address it has since left.
+    verkstead_store::record_member(
+        &b.pool,
+        &Linking {
+            device: C.to_owned(),
+            name: "somewhere".to_owned(),
+            os: "Linux".to_owned(),
+            addresses: vec!["127.0.0.1:1".to_owned()],
+            fingerprint: "00:11:22".to_owned(),
+            kept_by: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    kept(&a.workbench(), &b).await;
+
+    let held = row_for(&a, C).await.identity;
+
+    assert_eq!(
+        held.fingerprint,
+        c.device.fingerprint(),
+        "the Keeper still holds C under the certificate C presents",
+    );
+    assert_eq!(held.addresses, vec![c.at()]);
+}
+
+/// A member that was away when its Keeper linked an Annex is owed the
+/// announcement, and the one it is told when it next answers carries the mark.
+#[tokio::test]
+async fn an_annex_announced_after_it_was_owed_carries_its_mark() {
+    let a = Verkstead::answering(A).await;
+    let b = Verkstead::annex(B).await;
+    let c = Verkstead::answering(C).await;
+    let d = Verkstead::answering(STRANGER).await;
+
+    linked(&c, &a).await;
+
+    // C as A holds it, moved somewhere nothing answers: the same certificate,
+    // an address nobody is at.
+    let away = |address: String| Linking {
+        device: C.to_owned(),
+        name: "somewhere".to_owned(),
+        os: "Linux".to_owned(),
+        addresses: vec![address],
+        fingerprint: c.device.fingerprint().to_owned(),
+        kept_by: None,
+    };
+
+    verkstead_store::record_member(&a.pool, &away("127.0.0.1:1".to_owned()))
+        .await
+        .unwrap();
+
+    kept(&a.workbench_in_a_hurry(), &b).await;
+
+    assert_eq!(
+        verkstead_store::announcements_owed(&a.pool, B)
+            .await
+            .unwrap(),
+        vec![C.to_owned()],
+        "C was not there, so it is owed the Annex",
+    );
+    assert_eq!(c.cluster().await, sorted(&[A]));
+
+    // C back where it listens, and something else for A to tell it: a fourth
+    // device let in through A, whose announcement reaching C is what pays
+    // the rest of what C is owed.
+    verkstead_store::record_member(&a.pool, &away(c.at()))
+        .await
+        .unwrap();
+
+    linked(&d, &a).await;
+
+    assert_eq!(c.cluster().await, sorted(&[A, B, STRANGER]));
+    assert_eq!(
+        row_for(&c, B).await.identity.kept_by.as_deref(),
+        Some(A),
+        "the announcement said again is the Annex as the Keeper holds it, mark and all",
+    );
+}
+
+/// Unlink is refused on an Annex by name on its Keeper and on every other
+/// member, and on an Annex's own Keeper by the Annex — and nothing is forgotten
+/// on any of them.
+#[tokio::test]
+async fn unlinking_an_annex_or_its_keeper_is_refused_everywhere() {
+    let a = Verkstead::answering(A).await;
+    let b = Verkstead::annex(B).await;
+    let c = Verkstead::answering(C).await;
+
+    linked(&c, &a).await;
+    kept(&a.workbench(), &b).await;
+
+    let annex = row_for(&a, B).await.identity.name;
+    let keeper = row_for(&c, A).await.identity.name;
+
+    let (status, said) = unlink(&a.workbench(), B).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{said}");
+    assert!(
+        said.contains(&format!(
+            "{annex} is the annex of this device, so it can't be unlinked."
+        )),
+        "the Keeper refuses it by name: {said}",
+    );
+
+    let (status, said) = unlink(&c.workbench(), B).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{said}");
+    assert!(
+        said.contains(&format!(
+            "{annex} is the annex of {keeper}, so it can't be unlinked."
+        )),
+        "and so does every other member, naming the Keeper: {said}",
+    );
+
+    let (status, said) = unlink(&b.workbench(), A).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{said}");
+    assert!(
+        said.contains(&format!(
+            "{keeper} is this device's keeper, so it can't be unlinked."
+        )),
+        "and the Annex refuses it on its Keeper: {said}",
+    );
+
+    assert_eq!(a.cluster().await, sorted(&[B, C]));
+    assert_eq!(b.cluster().await, sorted(&[A, C]));
+    assert_eq!(
+        c.cluster().await,
+        sorted(&[A, B]),
+        "nothing forgotten anywhere"
+    );
+}
+
+/// A Keeper unlinked by a third device takes its Annex with it: the pair keep
+/// each other, and the third device holds neither.
+#[tokio::test]
+async fn unlinking_a_keeper_takes_its_annex_with_it() {
+    let a = Verkstead::answering(A).await;
+    let b = Verkstead::annex(B).await;
+    let c = Verkstead::answering(C).await;
+
+    linked(&c, &a).await;
+    kept(&a.workbench(), &b).await;
+
+    let (status, said) = unlink(&c.workbench(), A).await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+
+    assert_eq!(
+        c.cluster().await,
+        Vec::<String>::new(),
+        "C holds neither the Keeper nor its Annex, so no row is left it cannot unlink",
+    );
+    assert_eq!(
+        a.cluster().await,
+        sorted(&[B]),
+        "the Keeper, told it has left, keeps its Annex",
+    );
+    assert_eq!(
+        b.cluster().await,
+        sorted(&[A]),
+        "and the Annex keeps its Keeper, through being told it has left and being told \
+         its Keeper has",
+    );
+}
+
+// ---------------------------------------------------------------------------
 // The plumbing
 // ---------------------------------------------------------------------------
 
@@ -617,5 +932,7 @@ fn member_at(listening: &Verkstead, device: &str) -> verkstead_store::Member {
         reachable: true,
         renewing_from: None,
         acknowledged: None,
+        kept_by: None,
+        direct: None,
     }
 }

@@ -194,6 +194,7 @@ impl Verkstead {
             name: "somewhere".to_owned(),
             os: "Linux".to_owned(),
             addresses: vec![self.at()],
+            kept_by: None,
         }
     }
 
@@ -674,6 +675,7 @@ async fn a_member_that_is_not_there_is_unlinked_all_the_same() {
             os: "Linux (WSL)".to_owned(),
             addresses: vec!["127.0.0.1:1".to_owned()],
             fingerprint: "AA:BB:CC:DD:EE:FF".to_owned(),
+            kept_by: None,
         },
     )
     .await
@@ -755,6 +757,7 @@ async fn a_member_that_was_away_is_told_the_removal_when_it_answers() {
             os: "Linux".to_owned(),
             addresses: vec!["127.0.0.1:1".to_owned()],
             fingerprint: b.device.fingerprint().to_owned(),
+            kept_by: None,
         },
     )
     .await
@@ -803,6 +806,7 @@ async fn a_member_that_was_away_is_told_the_removal_when_it_answers() {
             os: "Linux".to_owned(),
             addresses: vec![b.at()],
             fingerprint: b.device.fingerprint().to_owned(),
+            kept_by: None,
         },
     )
     .await
@@ -854,5 +858,7 @@ fn member_at(listening: &Verkstead, device: &str) -> verkstead_store::Member {
         reachable: true,
         renewing_from: None,
         acknowledged: None,
+        kept_by: None,
+        direct: None,
     }
 }

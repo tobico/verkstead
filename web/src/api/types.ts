@@ -2455,7 +2455,21 @@ os: string,
  * rather than a failure: it still has an id and a fingerprint, and those
  * are what somebody looking at this is comparing.
  */
-addresses: Array<string>, };
+addresses: Array<string>, 
+/**
+ * And the Device Id of its **Keeper**, where it is an **Annex** — the
+ * mark saying whose it is (ADR-0024, *The Keeper's Join*).
+ *
+ * **Said by the Annex about itself** rather than asserted by anybody about
+ * it: an Annex is told in its own `config.yaml` that it is kept, and every
+ * answer it gives says so. A member row takes it when it is first written
+ * and keeps it through every refresh after, so a device linked as an
+ * ordinary member cannot later say itself out of being unlinked.
+ *
+ * `None` is every device but an Annex, and what a Verkstead from before
+ * the Annex existed answers by saying nothing.
+ */
+kept_by: string | null, };
 
 /**
  * The **Devices** list, as the Remote access pane reads it off this machine.

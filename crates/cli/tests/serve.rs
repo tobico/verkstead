@@ -97,6 +97,9 @@ impl Serve {
             // and before the caller's own so that a test about the variable
             // still wins.
             .env("VERKSTEAD_PEER_LISTEN", "127.0.0.1:0")
+            // And the Annex Forward the same way and for the same reason: its
+            // default is `0.0.0.0:8424`, and every server here binds one.
+            .env("VERKSTEAD_ANNEX_FORWARD_LISTEN", "127.0.0.1:0")
             // And nothing advertised on the LAN, which is on by default and is
             // one thing a test has no business doing: what a real Verkstead
             // three desks away would hear is a device with a fresh id and a
@@ -828,6 +831,86 @@ fn the_peer_address_comes_from_the_environment_too() {
     );
 }
 
+/// The Annex Forward's address is said by its flag and by its environment
+/// variable, the way the peer listener's is, and the startup line says where it
+/// landed (ADR-0024).
+#[test]
+fn the_annex_forward_address_comes_from_its_flag_and_the_environment() {
+    let tmp = tempfile::tempdir().unwrap();
+
+    for (named, told_by_flag) in [("forward-flag", true), ("forward-env", false)] {
+        let data_dir = tmp.path().join(named);
+        let port = free_port();
+        let forward_port = free_port();
+        let forward = format!("127.0.0.1:{forward_port}");
+        let listen = format!("127.0.0.1:{port}");
+
+        let mut args = vec![
+            "--listen",
+            &listen,
+            "--data-dir",
+            data_dir.to_str().unwrap(),
+        ];
+        let mut env = Vec::new();
+
+        if told_by_flag {
+            args.extend(["--annex-forward-listen", forward.as_str()]);
+        } else {
+            env.push(("VERKSTEAD_ANNEX_FORWARD_LISTEN", forward.as_str()));
+        }
+
+        let mut serving = Serve::start(tmp.path(), port, &args, &env);
+        let logged = uncoloured(&serving.stop());
+
+        assert!(
+            logged.contains(&format!("annex_forward={forward}")),
+            "the {} says where the Annex Forward is, got:\n{logged}",
+            if told_by_flag { "flag" } else { "variable" },
+        );
+    }
+}
+
+/// And an Annex binds no forward at all, a forward being a Keeper's: started
+/// with `kept_by` in its config and the forward's port already taken — which is
+/// its Keeper's under WSL's mirrored networking — it comes up regardless, and
+/// the startup line says it forwards nothing (ADR-0024).
+#[test]
+fn an_annex_binds_no_forward() {
+    let tmp = tempfile::tempdir().unwrap();
+    let data_dir = tmp.path().join("annex");
+    std::fs::create_dir_all(&data_dir).unwrap();
+    std::fs::write(
+        data_dir.join("config.yaml"),
+        "kept_by:\n  device: 86f1933fecb070cbee865fbb84819d14\n  fingerprint: \"3F:0A\"\n",
+    )
+    .unwrap();
+
+    // The Keeper's forward, holding the port the Annex would be told to bind.
+    let keepers = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let taken = keepers.local_addr().unwrap().to_string();
+
+    let port = free_port();
+    let listen = format!("127.0.0.1:{port}");
+
+    let mut serving = Serve::start(
+        tmp.path(),
+        port,
+        &[
+            "--listen",
+            &listen,
+            "--data-dir",
+            data_dir.to_str().unwrap(),
+        ],
+        &[("VERKSTEAD_ANNEX_FORWARD_LISTEN", taken.as_str())],
+    );
+    let logged = uncoloured(&serving.stop());
+
+    assert!(
+        logged.contains("annex_forward=none"),
+        "an Annex says it forwards nothing, got:\n{logged}",
+    );
+}
+
 /// A signal is an ordered stop: the server ends of its own accord, saying so,
 /// rather than dying where it stands (ADR-0020, *Discovery*).
 ///
@@ -884,6 +967,9 @@ fn the_help_describes_the_flags_and_their_defaults() {
         "--peer-listen",
         "VERKSTEAD_PEER_LISTEN",
         "0.0.0.0:8423",
+        "--annex-forward-listen",
+        "VERKSTEAD_ANNEX_FORWARD_LISTEN",
+        "0.0.0.0:8424",
         "--no-advertising",
         "VERKSTEAD_NO_ADVERTISING",
         "verkstead.db",

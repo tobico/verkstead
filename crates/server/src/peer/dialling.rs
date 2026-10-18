@@ -40,6 +40,11 @@
 //! for the dial as a whole, which is what keeps a list whose first three
 //! addresses are gone from costing the fourth anything — see [`REACHING`].
 //!
+//! **And one address before all of them, between a Keeper and its Annex.** Each
+//! holds the other at a direct address too, which no refresh writes and no
+//! third device is told — see [`dialled_at`] (ADR-0024, *The Keeper and its
+//! Annex reach each other directly*).
+//!
 //! **What a dial that got through writes is the member itself.** The moment it
 //! answered, and the name, the OS and the addresses that machine now says it
 //! has: this end cannot read another machine's hostname for itself, so what a
@@ -66,7 +71,8 @@ use rustls::crypto::{WebPkiSupportedAlgorithms, verify_tls12_signature, verify_t
 use rustls::{ClientConfig, DigitallySignedStruct, SignatureScheme};
 use rustls_pki_types::pem::PemObject;
 use rustls_pki_types::{CertificateDer, PrivateKeyDer, ServerName, UnixTime};
-use verkstead_render::{DeviceIdentity, DiscoveredDevice, JoinHeld, JoinSettled};
+use serde::Deserialize;
+use verkstead_render::{DeviceIdentity, DiscoveredDevice, JoinHeld, JoinKept, JoinSettled};
 use verkstead_store::{HeldJoin, Linking, Member};
 
 use crate::device::{Device, fingerprint_of_der};
@@ -139,7 +145,9 @@ pub enum Reached {
     /// it: the address that answered with the question now held over there, or
     /// this device's account of why it is not held. Either way that device is
     /// there.
-    Answered(Result<(String, JoinHeld)>),
+    ///
+    /// Boxed, the device in it being the far larger half of the two.
+    Answered(Box<Result<(String, JoinHeld)>>),
 
     /// And nothing answered at any of them, which is a row that went stale
     /// between being drawn and being pressed.
@@ -289,7 +297,7 @@ impl Peers {
         let dialling = self.dialling(accepted(member), &met)?;
         let mut nothing_at = Vec::new();
 
-        for address in &member.addresses {
+        for address in dialled_at(member) {
             let at = reaching(address, IDENTITY);
 
             match dialling.get(&at).send().await {
@@ -435,6 +443,11 @@ impl Peers {
                 // is a certificate this end has met, and the string in a payload
                 // is the far end's word for it.
                 fingerprint: member.fingerprint.clone(),
+
+                // And the mark, as the member says it of itself — which a
+                // refresh never adds to a row, the store keeping whatever the
+                // row was first recorded with. See [`Linking::kept_by`].
+                kept_by: identity.kept_by.clone(),
             })
             .await?;
 
@@ -449,6 +462,71 @@ impl Peers {
         }
 
         Ok(identity)
+    }
+
+    /// Ask `keeper`, this device's **Keeper**, what this device advertises:
+    /// the Keeper's own addresses at its Annex Forward (ADR-0024, *advertise
+    /// as told*) — see [`crate::peer::annex_forward::FORWARDED`], which
+    /// answers, and [`crate::device::reading::Reading::asking_its_keeper`],
+    /// which asks.
+    ///
+    /// **A member's own call**, pinned on the Keeper's certificate and made at
+    /// the address its `kept_by` names first and then the ones it advertised —
+    /// see [`dialled_at`] — so that a Keeper whose network moved is still
+    /// asked. The same walk [`Peers::identity`] makes, and the same reading of a Keeper that
+    /// answers nowhere. A Keeper this device holds no row for yet has nowhere
+    /// to be asked, which is an Annex whose Keeper's Join has not landed.
+    pub async fn forwarded_by(&self, keeper: &str) -> Result<Vec<String>> {
+        let Some(member) = self
+            .members
+            .rows()
+            .await?
+            .into_iter()
+            .find(|member| member.device == keeper)
+        else {
+            bail!("device {keeper} keeps this one, and is not yet one of its members");
+        };
+
+        let met = Arc::new(Mutex::new(None));
+        let dialling = self.dialling(accepted(&member), &met)?;
+        let mut nothing_at = Vec::new();
+
+        for address in dialled_at(&member) {
+            let at = reaching(address, crate::peer::annex_forward::FORWARDED);
+
+            match dialling.get(&at).send().await {
+                Ok(answered) => {
+                    let status = answered.status();
+
+                    if !status.is_success() {
+                        let said = answered.text().await.unwrap_or_default();
+
+                        bail!(
+                            "device {keeper} answered {status} to being asked where it forwards \
+                             for this one: {}",
+                            said.trim(),
+                        );
+                    }
+
+                    return answered.json().await.with_context(|| {
+                        format!("reading where device {keeper} says it forwards for this one")
+                    });
+                }
+
+                Err(why) => {
+                    tracing::debug!(
+                        device = %keeper,
+                        %address,
+                        %why,
+                        "a member did not answer at one of its addresses, so the next is tried",
+                    );
+
+                    nothing_at.push(address.as_str());
+                }
+            }
+        }
+
+        Err(self.nowhere(&member, &met, &nothing_at).await)
     }
 
     /// Tell `member` about `newcomer`, which is what an introducer does the
@@ -626,7 +704,7 @@ impl Peers {
         let dialling = self.dialling(accepted(member), &met)?;
         let mut nothing_at = Vec::new();
 
-        for address in &member.addresses {
+        for address in dialled_at(member) {
             match build(&dialling, address).send().await {
                 Ok(answered) => {
                     let status = answered.status();
@@ -697,7 +775,7 @@ impl Peers {
         let (dialling, met) = self.held_for(member)?;
         let mut nothing_at = Vec::new();
 
-        for address in &member.addresses {
+        for address in dialled_at(member) {
             let mut attempt = dialling
                 .request(call.method.clone(), reaching(address, &call.onwards))
                 .headers(call.headers.clone());
@@ -763,6 +841,108 @@ impl Peers {
         }
     }
 
+    /// The **Keeper's Join**: link this device's **Annex** at `address`, pinned
+    /// to `expecting` — the certificate read out of the Annex's own
+    /// `device.pem` (ADR-0024, *The Keeper's Join*).
+    ///
+    /// **The one join that is pinned.** [`Peers::join`] takes whatever turns up,
+    /// there being nothing yet to compare it with; a Keeper has something,
+    /// having read the Annex's certificate off the disk it owns, so a machine
+    /// answering at that address with any other certificate is refused at the
+    /// handshake and is told nothing.
+    ///
+    /// **Answered in the join's own reply** — see [`JoinKept`] — because an
+    /// Annex whose config names this device takes the join outright. One that
+    /// held it as a question instead does not: its config does not say this
+    /// device keeps it, so the question is taken straight back rather than left
+    /// for a human nobody will show it to, and the link is refused.
+    pub async fn keep(
+        &self,
+        address: &str,
+        expecting: &str,
+        saying: &DeviceIdentity,
+    ) -> Result<JoinKept> {
+        /// The two things a join post can come back as.
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Answered {
+            Kept(JoinKept),
+            Held(JoinHeld),
+        }
+
+        let met = Arc::new(Mutex::new(None));
+        let dialling = self.dialling(vec![expecting.to_owned()], &met)?;
+
+        let answered = match dialling
+            .post(reaching(address, JOIN))
+            .json(saying)
+            .send()
+            .await
+        {
+            Ok(answered) => answered,
+
+            Err(why) => {
+                if let Some(met) = met.lock().expect("nothing panics holding this").take() {
+                    bail!(
+                        "the Annex's device.pem is {expecting}, and the machine answering at \
+                         {address} presented {met} instead",
+                    );
+                }
+
+                return Err(
+                    anyhow::Error::new(why).context(format!("linking the Annex at {address}"))
+                );
+            }
+        };
+
+        let status = answered.status();
+
+        if !status.is_success() {
+            let said = answered.text().await.unwrap_or_default();
+
+            bail!(
+                "the Annex at {address} answered {status} to its Keeper's Join: {}",
+                said.trim(),
+            );
+        }
+
+        let answered: Answered = answered
+            .json()
+            .await
+            .with_context(|| format!("reading what the Annex at {address} said to the join"))?;
+
+        let kept = match answered {
+            Answered::Kept(kept) => kept,
+
+            Answered::Held(held) => {
+                if let Err(why) = self.cancel(address, &held.request, expecting).await {
+                    tracing::info!(
+                        %why,
+                        request = %held.request,
+                        "a Keeper's Join held as a question could not be taken back, which \
+                         lets go of it when its ten minutes run out",
+                    );
+                }
+
+                bail!(
+                    "the device at {address} held the join as a question for its human rather \
+                     than taking it as its Keeper's: its config.yaml does not name this device \
+                     as its Keeper",
+                );
+            }
+        };
+
+        if kept.introducer.fingerprint != expecting {
+            bail!(
+                "the Annex at {address} presented {expecting} and named {} as its certificate, \
+                 which is a device that is not the one it says it is",
+                kept.introducer.fingerprint,
+            );
+        }
+
+        Ok(kept)
+    }
+
     /// The same question put to a device a discovery found, which is a **list**
     /// of addresses rather than one (ADR-0020, *Discovery*) — and the address it
     /// turned out to answer at, which is what the pending row is left naming.
@@ -794,7 +974,7 @@ impl Peers {
         for address in &found.addresses {
             match self.knocked(address, saying).await {
                 Knocked::Answered(held) => {
-                    return Reached::Answered(held.map(|held| (address.clone(), held)));
+                    return Reached::Answered(Box::new(held.map(|held| (address.clone(), held))));
                 }
 
                 Knocked::Nobody(why) => {
@@ -1305,6 +1485,24 @@ fn accepted(member: &Member) -> Vec<String> {
     accepted
 }
 
+/// The addresses a dial to `member` works down, in order: where this device
+/// reaches it directly, where it does, and then every address it advertised.
+///
+/// **The direct one first because it is the one that does not move.** It is a
+/// Keeper's road to its Annex and an Annex's to its Keeper — see
+/// [`Member::direct`] — and what the two advertise of each other is the
+/// Keeper's own network, which a laptop changing networks or going offline
+/// takes away. Dialled first, the pair reach each other whatever that network
+/// does, and an advertised address that is the same place is not tried twice.
+fn dialled_at(member: &Member) -> impl Iterator<Item = &String> {
+    member.direct.iter().chain(
+        member
+            .addresses
+            .iter()
+            .filter(|address| member.direct.as_ref() != Some(*address)),
+    )
+}
+
 /// Where a call goes: `path` on the peer listener of whatever is at `address`.
 ///
 /// One function for all three of them — the identity read, the join and the
@@ -1329,7 +1527,7 @@ fn reaching(address: &str, path: &str) -> String {
 /// listener is on, so a device that is not on the default one is reachable only
 /// by an address that says which — and an address with a port on it is also the
 /// shape of the one somebody types when they link two machines.
-fn authority(address: &str) -> String {
+pub(crate) fn authority(address: &str) -> String {
     // A bare IP, which is most of what a device advertises. The brackets are
     // what makes a v6 address a URL authority rather than an address with a
     // port already in it.
@@ -1565,6 +1763,8 @@ mod tests {
             reachable: true,
             renewing_from: None,
             acknowledged: None,
+            kept_by: None,
+            direct: None,
         }
     }
 
@@ -1729,6 +1929,31 @@ mod tests {
         assert_eq!(
             authority("workbench.tailnet-name.ts.net:9000"),
             "workbench.tailnet-name.ts.net:9000",
+        );
+    }
+
+    /// A member held at a direct address is dialled there first, and an
+    /// advertised address that is the same place is not dialled twice.
+    #[test]
+    fn a_direct_address_is_dialled_before_the_advertised_ones() {
+        let member = Member {
+            addresses: vec![
+                "192.168.1.24:8424".to_owned(),
+                "172.24.80.2:8425".to_owned(),
+            ],
+            direct: Some("172.24.80.2:8425".to_owned()),
+            ..a_member("0011223344556677889900aabbccddee", "3A:7B")
+        };
+
+        assert_eq!(
+            dialled_at(&member).collect::<Vec<_>>(),
+            ["172.24.80.2:8425", "192.168.1.24:8424"],
+        );
+
+        let advertised = a_member("0011223344556677889900aabbccddee", "3A:7B");
+        assert_eq!(
+            dialled_at(&advertised).collect::<Vec<_>>(),
+            ["192.168.1.24"]
         );
     }
 }
