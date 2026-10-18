@@ -255,14 +255,18 @@ pub enum Unregistering {
 /// every other count of the work on a Repo is made from, rather than a second
 /// opinion about what "finished" means.
 pub async fn unregister_repo(pool: &SqlitePool, id: i64) -> Result<Unregistering> {
+    // The look and the write under one lock: work started on the Repo between
+    // them would otherwise be left on a Repo nothing lists.
+    let mut tx = super::writing(pool, "unregistering a Repo").await?;
+
     // Through the same read the list behind the press is drawn from, so that
     // what counts as being on the registry is said in one place rather than
     // spelled again here.
-    if registered_repo(pool, id).await?.is_none() {
+    if registered_on(&mut tx, id).await?.is_none() {
         return Ok(Unregistering::NoSuchRepo);
     }
 
-    if super::work_on_repo(pool, id).await?.live > 0 {
+    if super::conversations::work_on(&mut tx, id).await?.live > 0 {
         return Ok(Unregistering::InUse);
     }
 
@@ -272,9 +276,11 @@ pub async fn unregister_repo(pool: &SqlitePool, id: i64) -> Result<Unregistering
          ON CONFLICT (repo_id) DO NOTHING",
     )
     .bind(id)
-    .execute(pool)
+    .execute(&mut *tx)
     .await
     .with_context(|| format!("unregistering the Repo {id}"))?;
+
+    tx.commit().await.context("unregistering a Repo")?;
 
     Ok(Unregistering::Unregistered)
 }
@@ -453,13 +459,28 @@ pub async fn load_repo(pool: &SqlitePool, id: i64) -> Result<Option<Repo>> {
 /// wrong one — which is exactly how a Repo that had been taken away came to open
 /// its own pane and be started on.
 pub async fn registered_repo(pool: &SqlitePool, id: i64) -> Result<Option<Repo>> {
+    let mut connection = pool
+        .acquire()
+        .await
+        .with_context(|| format!("reading the registered Repo {id}"))?;
+
+    registered_on(&mut connection, id).await
+}
+
+/// And the same inside a transaction already open, for a write that refuses on
+/// it: a Repo unregistered between the look and the write is otherwise written
+/// against anyway.
+pub(crate) async fn registered_on(
+    tx: &mut sqlx::SqliteConnection,
+    id: i64,
+) -> Result<Option<Repo>> {
     let row: Option<RepoRow> = sqlx::query_as(
         "SELECT id, path, name, default_branch, author
          FROM repos LEFT JOIN repo_authors ON repo_authors.repo_id = repos.id
          WHERE id = ? AND id NOT IN (SELECT repo_id FROM unregistered_repos)",
     )
     .bind(id)
-    .fetch_optional(pool)
+    .fetch_optional(&mut *tx)
     .await
     .with_context(|| format!("reading the registered Repo {id}"))?;
 

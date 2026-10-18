@@ -2751,3 +2751,55 @@ async fn an_event_of_an_unknown_kind_reads_as_a_notice_naming_it() {
         .unwrap();
     assert_eq!(kind, "whatever", "nothing is written over the row");
 }
+
+/// An edit that arrives while the work is being started waits for the start and
+/// is refused, rather than looking at a draft and writing into what is no longer
+/// one.
+///
+/// The start is held open here, its write lock taken and the Conversation moved
+/// on but not yet committed, so the edit is in flight across it every time. An
+/// edit that looks before taking the lock reads the draft, then waits for the
+/// lock only to write — and lands on work already under way.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_edit_made_while_the_work_starts_waits_and_is_refused() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo = repo(&pool, "verkstead").await;
+    let id = start_conversation(&pool, repo, "rate-limiting", THIS_DEVICE)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let mut starting = pool.begin_with("BEGIN IMMEDIATE").await.unwrap();
+
+    sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")
+        .bind("grilling")
+        .bind(id)
+        .execute(&mut *starting)
+        .await
+        .unwrap();
+
+    let editing = tokio::spawn({
+        let pool = pool.clone();
+
+        async move {
+            save_brief(&pool, id, "# Rate limiting, late\n")
+                .await
+                .unwrap()
+        }
+    });
+
+    // Long enough for the edit to have looked, if it is going to look first.
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    starting.commit().await.unwrap();
+
+    assert_eq!(
+        editing.await.unwrap(),
+        Edited::NotDrafting,
+        "the edit waited for the start and saw it",
+    );
+    assert_eq!(
+        brief(&pool, id).await,
+        "",
+        "and the Brief is as the start found it",
+    );
+}

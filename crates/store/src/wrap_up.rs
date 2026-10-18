@@ -1349,9 +1349,11 @@ pub(crate) async fn forget_the_round(
 /// pull request that would not merge, and a press that only forgave one of them
 /// would be a Resume that stopped again on the other.
 pub async fn forget_fix_attempts(pool: &SqlitePool, conversation_id: i64) -> Result<()> {
+    let mut tx = super::writing(pool, "forgetting what has been tried").await?;
+
     sqlx::query("DELETE FROM check_fix_attempts WHERE conversation_id = ?")
         .bind(conversation_id)
-        .execute(pool)
+        .execute(&mut *tx)
         .await
         .with_context(|| {
             format!("forgetting what has been tried about Conversation {conversation_id}'s checks")
@@ -1359,13 +1361,17 @@ pub async fn forget_fix_attempts(pool: &SqlitePool, conversation_id: i64) -> Res
 
     sqlx::query("DELETE FROM conflict_fix_attempts WHERE conversation_id = ?")
         .bind(conversation_id)
-        .execute(pool)
+        .execute(&mut *tx)
         .await
         .with_context(|| {
             format!(
                 "forgetting what has been tried about Conversation {conversation_id}'s conflicts"
             )
         })?;
+
+    tx.commit()
+        .await
+        .context("forgetting what has been tried")?;
 
     Ok(())
 }
