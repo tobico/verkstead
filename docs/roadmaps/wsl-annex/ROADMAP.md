@@ -25,5 +25,5 @@ but nothing in 03 or 04 calls into it, so it is not declared under either.
 
 - [x] 01: The Annex and its Keeper — [brief](01-the-annex-and-its-keeper.md) — no dependencies
 - [x] 02: Clonable repos — [brief](02-clonable-repos.md) — no dependencies
-- [ ] 03: Making the Annex — [brief](03-making-the-annex.md) — after 01 — on windows
+- [x] 03: Making the Annex — [brief](03-making-the-annex.md) — after 01 — on windows
 - [ ] 04: Keeping the Annex — [brief](04-keeping-the-annex.md) — after 03 — on windows

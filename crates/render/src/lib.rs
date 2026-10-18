@@ -84,8 +84,9 @@ pub use forwarding::{ForwardSkip, ForwardStanding, ForwardView, ForwardsView};
 pub use joining::{AskingDevice, JoinHeld, JoinKept, JoinSettled, NewAnnex, NewJoin, PendingJoin};
 pub use logins::{LoginClosed, LoginCode, LoginOpened, LoginState};
 pub use onboarding::{
-    AccountView, Dependency, DependencyState, DependencyView, Distro, InstallPress, InstallState,
-    OnboardingView, Platform, PrefillView, Prefilled, RunPhase, RunView, Seen, Source, StepsView,
+    AccountView, Barred, Dependency, DependencyState, DependencyView, Distro, InstallPress,
+    InstallState, OnboardingView, Owed, Platform, PrefillView, Prefilled, RunPhase, RunView, Seen,
+    Source, StepsView,
 };
 pub use profiles::{
     AccountFile, AccountLogin, AgentType, Broken, MemoryFile, MemoryLeft, MemoryWanted,

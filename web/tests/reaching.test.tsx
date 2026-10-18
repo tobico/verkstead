@@ -402,7 +402,91 @@ describe("a press on a conversation that lives on another device", () => {
     ]);
     expect(repoParent(MEMBER)).toBe("/srv/repos");
   });
+
+  /// And on an **Annex** nothing has to be remembered first: its repositories
+  /// go in `/srv/repos`, so the clone is sent straight there with nothing
+  /// asked — and nothing written down, the absence already answering it.
+  it("clones a repo on an Annex into /srv/repos with nothing asked", async () => {
+    localStorage.clear();
+
+    const cloned: RepoEntry = {
+      id: 4344,
+      name: "verkstead",
+      path: "/srv/repos/verkstead",
+      default_branch: "main",
+      author: null,
+      author_unpicked: false,
+    };
+    const fetching = theMember(
+      whenever("/api/ui/devices", json(KEEPING)),
+      whenever(
+        at("/repos/clonable"),
+        json([
+          {
+            name: "verkstead",
+            place: "github.com/tobico/verkstead",
+            origin: "https://github.com/tobico/verkstead",
+          },
+        ]),
+      ),
+      whenever(at("/repos/clone"), json({ Cloned: cloned }), "POST"),
+      whenever(at(`/conversations/${OPEN.id}/repo`), json("Switched"), "POST"),
+      whenever(at(`/conversations/${OPEN.id}/seen`), json({}), "POST"),
+      ...OPEN.companions.map((companion) =>
+        whenever(at(`/repos/${companion.repo.id}/branches`), json(BRANCHES)),
+      ),
+    );
+    const { container } = mount(on(`/conversations/${OPEN.id}`));
+
+    fireEvent.click(
+      await drawn<HTMLButtonElement>(container, `.${setup.repoOption} > button`),
+    );
+    await waitFor(() => expect(clonables("Repo")).toHaveLength(1));
+    fireEvent.click(clonables("Repo")[0]!);
+
+    await waitFor(() =>
+      expect(
+        fetching.mock.calls
+          .filter(
+            ([asked, init]) =>
+              String(asked) === at("/repos/clone") && init?.method === "POST",
+          )
+          .map(([, init]) => JSON.parse(String(init?.body)) as unknown),
+      ).toEqual([
+        { origin: "https://github.com/tobico/verkstead", parent: "/srv/repos" },
+      ]),
+    );
+  });
 });
+
+/// This device keeping [`MEMBER`] as its **Annex**, which is the reading an
+/// Annex's rows are told apart by.
+const KEEPING: DevicesView = {
+  this: {
+    addresses: [],
+    device: "aa00bb11cc22dd33ee44ff5566778899",
+    fingerprint: "AA:00",
+    kept_by: null,
+    name: "winvm",
+    os: "Windows",
+  },
+  members: [
+    {
+      identity: {
+        addresses: [],
+        device: MEMBER,
+        fingerprint: "8F:2A",
+        kept_by: "aa00bb11cc22dd33ee44ff5566778899",
+        name: "winvm",
+        os: "Linux (WSL)",
+      },
+      reachable: true,
+      trouble: null,
+    },
+  ],
+  pending: [],
+  annex_trouble: null,
+};
 
 /// The two setup controls that once went to this device whatever page they
 /// stood on: the Process picker and the Target field. A draft's id is the
@@ -526,9 +610,11 @@ describe("the merged sidebar", () => {
           kept_by: null,
         },
         reachable: true,
+        trouble: null,
       },
     ],
     pending: [],
+    annex_trouble: null,
   };
 
   /// The member's Conversation under the id it shares with this device's first
@@ -952,6 +1038,7 @@ describe("a device with no cluster", () => {
     },
     members: [],
     pending: [],
+    annex_trouble: null,
   };
 
   function alone() {

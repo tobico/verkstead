@@ -704,6 +704,7 @@ impl Members {
             .into_iter()
             .map(|member| LinkedDevice {
                 reachable: member.reachable,
+                trouble: None,
                 identity: DeviceIdentity {
                     device: member.device,
                     fingerprint: member.fingerprint,

@@ -239,7 +239,7 @@ pub enum InstallState {
 /// What a row is about.
 ///
 /// Flat rather than a harness variant carrying an [`crate::AgentType`]: the
-/// step draws seven rows with an instruction apiece, and which of them are
+/// step draws eight rows with an instruction apiece, and which of them are
 /// harnesses is a fact about the objective rather than about the drawing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
@@ -261,6 +261,12 @@ pub enum Dependency {
     /// The one row that never gates, GitHub being a choice rather than a
     /// dependency — see the objective in ADR-0016.
     Gh,
+
+    /// And the row that is no program at all: WSL, and the **Annex**
+    /// Verkstead makes in it (ADR-0024). Drawn on Windows alone, unticked
+    /// until WSL answers, and it never gates — a session on this machine
+    /// needs none of it.
+    Wsl,
 }
 
 /// And whether the machine has it.
@@ -307,6 +313,46 @@ pub enum DependencyState {
         /// all, which is a row with nothing to say beyond *install one*.
         seen: Option<Seen>,
     },
+
+    /// It is not there, and this machine is part of the way to it: the WSL
+    /// row's two middle states, each of them a row still to be ticked.
+    Owed {
+        /// What is still owed.
+        owed: Owed,
+    },
+
+    /// It cannot be had on this machine as it stands, and no press here
+    /// changes that: a row with the reason under it and no checkbox.
+    Refused {
+        /// Why, which the viewer words.
+        barred: Barred,
+    },
+}
+
+/// What a row that is part of the way there is still owed.
+///
+/// The WSL row's alone, and its wording is the viewer's, the way [`Seen`]'s
+/// is: what is here is what the machine is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum Owed {
+    /// WSL is turned on and the restart that finishes turning it on is still
+    /// to come. That is the human's to do, so the row goes to the hint screen.
+    Restart,
+
+    /// WSL answers and there is no Annex in it yet, which is Verkstead's to
+    /// make — so the row starts ticked.
+    Annex,
+}
+
+/// Why a row cannot be had on this machine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum Barred {
+    /// The firmware has virtualization turned off, so WSL can start no
+    /// machine. It is turned on in the firmware's own settings, never from
+    /// here.
+    Virtualization,
 }
 
 /// Where a program was seen that a session still cannot run.

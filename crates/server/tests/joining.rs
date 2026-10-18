@@ -38,6 +38,8 @@
 //! this file chose.
 
 use std::net::SocketAddr;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use axum::Router;
@@ -48,6 +50,7 @@ use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_render::{AskingDevice, DevicesView};
 use verkstead_schema::Nudge;
+use verkstead_server::annex::{self, booting::Annexed};
 use verkstead_server::device::reading::Reading;
 use verkstead_server::device::{Device, Devices};
 use verkstead_server::nudge::Nudges;
@@ -58,7 +61,7 @@ use verkstead_server::peer::{self, Members};
 use verkstead_server::platform::{self, Platform};
 use verkstead_server::remote::Tailscale;
 use verkstead_server::router_answering_devices_telling;
-use verkstead_server::settings::{KeptBy, Settings};
+use verkstead_server::settings::{Config, KeptBy, Secrets, Settings};
 use verkstead_store::{
     AskedJoin, HeldJoin, ask_join, asked_joins, held_join, held_joins, hold_join,
 };
@@ -256,6 +259,12 @@ impl Verkstead {
             self.members.clone(),
             self.joins.clone(),
         )
+    }
+
+    /// Its settings files, which a Keeper hands its Annex's git author and
+    /// GitHub token out of.
+    fn settings(&self) -> Settings {
+        Settings::in_data_dir(self.dir.path())
     }
 
     /// How it dials, for the questions that are about a call rather than about a
@@ -1569,4 +1578,346 @@ async fn an_identity_dial_leaves_the_mark_in_place() {
 
     assert_ne!(refreshed.last_seen, row.last_seen, "the row was refreshed");
     assert_eq!(refreshed.kept_by.as_deref(), Some(A));
+}
+
+// The Keeper's start (ADR-0024, *Boot with the Keeper, terminate with it*): the
+// box booted, the two addresses read off it, and the Keeper's Join run with
+// them — over a box that is the Annex's own Data Directory, read and written
+// the way the real one is from inside, and a peer listener on this loopback.
+
+/// A box standing in for the distro: what its probe says, where it says the
+/// pair dial each other, what its service says of itself, and how many times
+/// it was booted and terminated.
+#[derive(Debug)]
+struct Boxed {
+    probed: annex::Probed,
+    data_dir: std::path::PathBuf,
+    annex_at: SocketAddr,
+    keeper_at: SocketAddr,
+    service: &'static str,
+    booted: AtomicUsize,
+    terminated: AtomicUsize,
+}
+
+impl Boxed {
+    /// A box made to the end, whose Annex is `annex` and whose Keeper is
+    /// reached at `keeper_at`.
+    fn of(annex: &Verkstead, keeper_at: &str) -> Boxed {
+        Boxed {
+            probed: annex::Probed::Present {
+                running: false,
+                networking: annex::Networking::Nat,
+            },
+            data_dir: annex.dir.path().to_owned(),
+            annex_at: annex.at().parse().unwrap(),
+            keeper_at: keeper_at.parse().unwrap(),
+            service: "active",
+            booted: AtomicUsize::new(0),
+            terminated: AtomicUsize::new(0),
+        }
+    }
+
+    /// The file at `path` inside, which is the Data Directory's own.
+    fn inside(&self, path: &str) -> std::path::PathBuf {
+        let name = path
+            .strip_prefix(annex::DATA_DIR)
+            .expect("only the Data Directory is read or written");
+
+        self.data_dir.join(name.trim_start_matches('/'))
+    }
+}
+
+/// A program that ran to its end, having said `out`.
+fn ran(out: &str) -> std::process::Output {
+    #[cfg(unix)]
+    let status = std::os::unix::process::ExitStatusExt::from_raw(0);
+    #[cfg(windows)]
+    let status = std::os::windows::process::ExitStatusExt::from_raw(0);
+
+    std::process::Output {
+        status,
+        stdout: out.as_bytes().to_vec(),
+        stderr: Vec::new(),
+    }
+}
+
+impl annex::Backend for Boxed {
+    fn probe(&self) -> annex::Probed {
+        self.probed
+    }
+
+    fn turning_on(&self) -> &'static [annex::Step] {
+        &[]
+    }
+
+    fn image(&self) -> annex::Image {
+        unreachable!("a booted box is not made")
+    }
+
+    fn disk(&self) -> &std::path::Path {
+        &self.data_dir
+    }
+
+    fn make(&self, _: &std::path::Path) -> anyhow::Result<()> {
+        unreachable!("a booted box is not made")
+    }
+
+    fn made(&self) -> anyhow::Result<()> {
+        unreachable!("a booted box is not made")
+    }
+
+    fn opening(&self, _: u16) -> Option<String> {
+        None
+    }
+
+    fn boot(&self) -> anyhow::Result<()> {
+        self.booted.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+
+    fn terminate(&self) -> anyhow::Result<()> {
+        self.terminated.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+
+    fn run(&self, _: annex::Inside, argv: &[&str]) -> anyhow::Result<std::process::Output> {
+        Ok(match argv[0] {
+            "systemctl" => ran(self.service),
+            "journalctl" => ran("verkstead: the peer listener could not be bound\n"),
+            _ => ran(""),
+        })
+    }
+
+    fn follow(
+        &self,
+        _: annex::Inside,
+        _: &[&str],
+        _: &mut dyn FnMut(&str),
+    ) -> anyhow::Result<std::process::ExitStatus> {
+        unreachable!("nothing is followed at a boot")
+    }
+
+    fn write(&self, path: &str, bytes: &[u8], _: u32) -> anyhow::Result<()> {
+        Ok(std::fs::write(self.inside(path), bytes)?)
+    }
+
+    fn read(&self, path: &str) -> anyhow::Result<Vec<u8>> {
+        Ok(std::fs::read(self.inside(path))?)
+    }
+
+    fn addresses(&self, _: annex::Networking, _: u16) -> anyhow::Result<annex::Addresses> {
+        Ok(annex::Addresses {
+            annex: self.annex_at,
+            keeper_at: self.keeper_at,
+        })
+    }
+}
+
+/// An Annex as the install run leaves one: a `config.yaml` and a
+/// `secrets.yaml` written in, which are what the link rewrites.
+async fn made_annex() -> Verkstead {
+    let annex = Verkstead::annex().await;
+
+    let settings = Settings::in_data_dir(annex.dir.path());
+    settings.save_config(&Config::default()).unwrap();
+    settings.save_secrets(&Secrets::default()).unwrap();
+
+    annex
+}
+
+/// Where the Annex reaches the Keeper in these tests: the Windows side of a
+/// WSL NAT, as a probe reads it.
+const KEEPER_AT: &str = "172.24.16.1:8423";
+
+/// At a Keeper's start, a box made to the end is booted and linked with the
+/// two addresses read off it: the Keeper holds the Annex at the one, and the
+/// Annex is told the other as its `kept_by`'s `at` — and nothing is pressed.
+#[tokio::test]
+async fn a_keepers_start_boots_its_annex_and_links_it() {
+    let annex = made_annex().await;
+    let keeper = Verkstead::asking().await;
+    let boxed = Arc::new(Boxed::of(&annex, KEEPER_AT));
+
+    Annexed::of(boxed.clone()).started(&keeper.devices()).await;
+
+    assert_eq!(boxed.booted.load(Ordering::SeqCst), 1);
+
+    let kept = listing(&keeper.workbench()).await;
+
+    assert_eq!(kept.members.len(), 1, "the Annex, linked");
+    assert_eq!(kept.members[0].identity.device, B);
+    assert_eq!(kept.members[0].identity.kept_by.as_deref(), Some(A));
+    assert!(kept.members[0].reachable);
+    assert_eq!(kept.members[0].trouble, None);
+
+    assert_eq!(
+        verkstead_store::members(&keeper.pool).await.unwrap()[0]
+            .direct
+            .as_deref(),
+        Some(annex.at().as_str()),
+        "the Keeper holds the Annex at the address the probe read",
+    );
+
+    assert_eq!(
+        Settings::in_data_dir(annex.dir.path())
+            .config()
+            .kept_by()
+            .and_then(KeptBy::at),
+        Some(KEEPER_AT),
+        "the Annex reaches its Keeper at the address the probe read",
+    );
+}
+
+/// A Keeper's start hands its Annex nothing of its Authors: the Annex is a
+/// linked Member, so the Keeper's reach it as mirrors over the one list, token
+/// copies and all (ADR-0025), and its own files hold no Author and no token —
+/// only the link's own key.
+#[tokio::test]
+async fn a_keepers_start_hands_its_annex_no_author_of_its_own() {
+    let annex = made_annex().await;
+    let keeper = Verkstead::asking().await;
+    let boxed = Arc::new(Boxed::of(&annex, KEEPER_AT));
+
+    std::fs::write(
+        keeper.settings().config_path(),
+        "authors:\n  - id: work\n    name: Ada Lovelace\n    email: ada@example.com\n",
+    )
+    .unwrap();
+    std::fs::write(
+        keeper.settings().secrets_path(),
+        "author_tokens:\n  work: ghp_first\n",
+    )
+    .unwrap();
+
+    Annexed::of(boxed.clone()).started(&keeper.devices()).await;
+
+    let kept = Settings::in_data_dir(annex.dir.path());
+    assert_eq!(
+        kept.config().kept_by().map(KeptBy::device),
+        Some(A),
+        "the link's own key is written",
+    );
+    assert!(
+        kept.config().authors().is_empty(),
+        "and no Author of its own"
+    );
+    assert_eq!(kept.secrets().author_token("work"), None, "nor its token");
+}
+
+/// An Annex whose service never answers is a line on its row with what the
+/// service says of itself, and the Keeper's workbench goes on answering.
+#[tokio::test]
+async fn an_annex_that_never_answers_is_a_line_on_its_row() {
+    let annex = made_annex().await;
+    let keeper = Verkstead::asking().await;
+
+    Annexed::of(Arc::new(Boxed::of(&annex, KEEPER_AT)))
+        .started(&keeper.devices())
+        .await;
+
+    // And at the next start the service will not come up: nothing is on the
+    // port it would answer at.
+    let nobody = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let nowhere = nobody.local_addr().unwrap();
+    drop(nobody);
+
+    let failing = Boxed {
+        annex_at: nowhere,
+        service: "failed",
+        ..Boxed::of(&annex, KEEPER_AT)
+    };
+
+    let devices = keeper.devices().waiting(PATIENCE);
+    Annexed::of(Arc::new(failing))
+        .waiting(Duration::from_secs(1))
+        .started(&devices)
+        .await;
+
+    let app = router_answering_devices_telling(keeper.pool.clone(), devices, keeper.nudges.clone());
+    let kept = listing(&app).await;
+
+    assert_eq!(kept.members.len(), 1, "the Annex's row stays");
+    assert_eq!(
+        kept.members[0].trouble.as_deref(),
+        Some(
+            "The annex didn't answer: its service is failed. \
+             verkstead: the peer listener could not be bound."
+        ),
+    );
+    assert_eq!(kept.annex_trouble, None, "said once, on the Annex's row");
+}
+
+/// An Annex that has never been linked has no row to carry the line, so it is
+/// said beside this device's own instead — never only in the log.
+#[tokio::test]
+async fn an_annex_never_linked_that_never_answers_is_said_beside_this_device() {
+    let annex = made_annex().await;
+    let keeper = Verkstead::asking().await;
+
+    let nobody = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let nowhere = nobody.local_addr().unwrap();
+    drop(nobody);
+
+    let failing = Boxed {
+        annex_at: nowhere,
+        service: "failed",
+        ..Boxed::of(&annex, KEEPER_AT)
+    };
+
+    let devices = keeper.devices().waiting(PATIENCE);
+    let came_up = Annexed::of(Arc::new(failing))
+        .waiting(Duration::from_secs(1))
+        .up(&devices)
+        .await;
+
+    let line = "The annex didn't answer: its service is failed. \
+                verkstead: the peer listener could not be bound.";
+    assert_eq!(
+        came_up,
+        Err(line.to_owned()),
+        "and the install run's reason"
+    );
+
+    let app = router_answering_devices_telling(keeper.pool.clone(), devices, keeper.nudges.clone());
+    let kept = listing(&app).await;
+
+    assert!(kept.members.is_empty(), "no row was ever made");
+    assert_eq!(kept.annex_trouble.as_deref(), Some(line));
+}
+
+/// A machine with no box made to the end has nothing booted at the start, and
+/// nothing terminated at the stop.
+#[tokio::test]
+async fn no_box_is_booted_where_none_was_made() {
+    let annex = made_annex().await;
+    let keeper = Verkstead::asking().await;
+
+    let boxed = Arc::new(Boxed {
+        probed: annex::Probed::NoDistro,
+        ..Boxed::of(&annex, KEEPER_AT)
+    });
+
+    let annexed = Annexed::of(boxed.clone());
+    annexed.started(&keeper.devices()).await;
+    annexed.stopped().await;
+
+    assert_eq!(boxed.booted.load(Ordering::SeqCst), 0);
+    assert_eq!(boxed.terminated.load(Ordering::SeqCst), 0);
+    assert!(listing(&keeper.workbench()).await.members.is_empty());
+}
+
+/// The ordered stop terminates the box this start booted, once.
+#[tokio::test]
+async fn the_stop_terminates_the_box_the_start_booted() {
+    let annex = made_annex().await;
+    let keeper = Verkstead::asking().await;
+    let boxed = Arc::new(Boxed::of(&annex, KEEPER_AT));
+
+    let annexed = Annexed::of(boxed.clone());
+    annexed.started(&keeper.devices()).await;
+
+    annexed.stopped().await;
+    annexed.stopped().await;
+
+    assert_eq!(boxed.terminated.load(Ordering::SeqCst), 1);
 }

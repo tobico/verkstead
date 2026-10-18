@@ -1,4 +1,5 @@
 {
+  "annex_trouble": null,
   "members": [
     {
       "identity": {
@@ -12,7 +13,8 @@
         "name": "laptop",
         "os": "macOS"
       },
-      "reachable": true
+      "reachable": true,
+      "trouble": null
     },
     {
       "identity": {
@@ -25,7 +27,8 @@
         "name": "workbench",
         "os": "Linux (WSL)"
       },
-      "reachable": false
+      "reachable": false,
+      "trouble": null
     }
   ],
   "pending": [],

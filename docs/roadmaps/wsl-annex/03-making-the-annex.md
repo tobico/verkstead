@@ -13,8 +13,8 @@ NixOS-WSL is downloaded at a pinned release, imported as `Verkstead` under
 rebuilt, booted, and linked by the **Keeper's Join** with the forward up.
 The compose page's device select lists *Linux (WSL)* with the Annex mark; a
 Conversation drafted onto it runs its session under bwrap, under a Profile
-mirrored from the Keeper, and commits as the Keeper's git author with its
-GitHub token. Quitting the app terminates the distro; starting it boots the
+mirrored from the Keeper, and commits as the Keeper's Author, mirrored to it
+with its token's copy. Quitting the app terminates the distro; starting it boots the
 Annex in the background and links it again. A machine whose virtualization
 is off says so on the row and cannot tick it. Demonstrable end to end on
 Windows.
@@ -49,9 +49,9 @@ Windows.
   reads as the same machine rather than NixOS's default `nixos`,
   bwrap, git, gh, nix, sccache, and `claude-code`, `codex`, `opencode` and
   `grok` from the unstable input where nixpkgs has them; `kept_by` with the
-  Keeper's id and fingerprint in `config.yaml`; the Keeper's git author in
-  `config.yaml` and its GitHub token in `secrets.yaml`. The rest of the
-  settings are stage 04's.
+  Keeper's id and fingerprint in `config.yaml`, and no Author: the Keeper's
+  reach the Annex as mirrors (ADR-0025). The rest of the settings are stage
+  04's.
 - **Repos in `/srv/repos`**; the remembered parent for Create repo and for
   stage 02's clone on the Annex is preset to it.
 - **Boot with the Keeper, terminate with it.** The Keeper's startup boots the
@@ -102,7 +102,7 @@ Windows.
      them, and the Annex stays reachable with the Keeper offline.
 5. **A session in the Annex** — the end-to-end proof: a Conversation drafted
    onto *Linux (WSL)* with a mirrored Profile runs under bwrap and commits.
-   - The Keeper's git author is on the commit.
+   - The Keeper's Author, mirrored, is on the commit.
 
 ## Re-verify at start
 

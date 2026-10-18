@@ -81,8 +81,12 @@ pub(crate) async fn register(
 /// that has since changed. A member's mirror is an Author like this device's
 /// own here — see [`Config::one_list`]. **None named is the one Author** where
 /// this device has exactly one — there is nobody else it could be (ADR-0025)
-/// — nobody where there is none, and a refusal where there are several, there
-/// being no saying which.
+/// — and a refusal where there are several, there being no saying which.
+///
+/// **And where it has none of its own, the one mirror**, where the one list
+/// holds exactly one: an **Annex** is given no Author by its Keeper and sees
+/// the Keeper's as mirrors, and with one there is still nobody else it could
+/// be (ADR-0024). Nobody where the one list is empty or holds several.
 fn picked<'a>(config: &'a Config, asked: Option<&str>) -> Result<Option<&'a Author>, Unpicked> {
     match (asked, config.authors()) {
         (Some(id), _) => config
@@ -90,7 +94,15 @@ fn picked<'a>(config: &'a Config, asked: Option<&str>) -> Result<Option<&'a Auth
             .find(|author| author.id() == id)
             .map(Some)
             .ok_or(Unpicked::NoSuchAuthor),
-        (None, authors @ ([] | [_])) => Ok(authors.first()),
+        (None, []) => {
+            let mut mirrors = config.one_list();
+
+            Ok(match (mirrors.next(), mirrors.next()) {
+                (Some(only), None) => Some(only),
+                _ => None,
+            })
+        }
+        (None, [only]) => Ok(Some(only)),
         (None, _) => Err(Unpicked::AuthorUnpicked),
     }
 }

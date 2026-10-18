@@ -6,13 +6,16 @@
 //! beside the open step and for the same reason.
 //!
 //! **The checkbox screen** is where the step opens. Every row the server drew is
-//! on it — the sandbox, `git`, the four harnesses and `gh` — and a row this
-//! machine has not got carries a checkbox where its mark would be, with the
-//! row's name as the label. The sandbox and `git` start ticked, those being the
-//! two rows nothing can run without; the harnesses and `gh` start unticked,
-//! because one harness is enough and GitHub is a choice. Next is pressable once
-//! the rows that are there plus the rows that are ticked would be a machine a
-//! session could start on, and what it does is start the run.
+//! on it — the sandbox, `git`, the four harnesses, `gh` and, on Windows, WSL —
+//! and a row this machine has not got carries a checkbox where its mark would
+//! be, with the row's name as the label. The sandbox and `git` start ticked,
+//! those being the two rows nothing can run without; the harnesses and `gh`
+//! start unticked, because one harness is enough and GitHub is a choice. WSL
+//! starts unticked too, being a large download and maybe a restart, until the
+//! machine is part of the way to it — see [`ticksItself`] — and a machine whose
+//! firmware has virtualization off draws it refused, with no box. Next is
+//! pressable once the rows that are there plus the rows that are ticked would
+//! be a machine a session could start on, and what it does is start the run.
 //!
 //! **Nothing here says in advance which rows cannot be installed.** What a
 //! package manager carries is a fact about the distribution rather than about
@@ -71,6 +74,7 @@ import { HarnessMark } from "../HarnessMark";
 import { AGENT_NAME, type AgentType } from "../agents";
 import { cancelInstall, startInstall } from "../api/client";
 import type {
+  Barred,
   Dependency,
   DependencyState,
   DependencyView,
@@ -110,6 +114,7 @@ const NAMES: Record<Dependency, string> = {
   Grok: AGENT_NAME.Grok,
   OpenCode: AGENT_NAME.OpenCode,
   Gh: "gh",
+  Wsl: "Linux development (WSL)",
 };
 
 /// And what each is for, which is also which of them hold the step up.
@@ -121,6 +126,17 @@ const WHY: Record<Dependency, string> = {
   Grok: "One harness is enough",
   OpenCode: "One harness is enough",
   Gh: "Optional: pull requests and reviews",
+  Wsl: "Optional: sessions on Linux, on this PC",
+};
+
+/// What a row that cannot be had here says, in place of a box.
+///
+/// The WSL row's alone: a firmware with virtualization off is nothing a press
+/// here can change, so the row says what is wrong and where it is put right.
+const BARRED: Record<Barred, string> = {
+  Virtualization:
+    "Virtualization is off in this PC's firmware settings, so WSL can't run. " +
+    "Turn it on there, then restart.",
 };
 
 /// What the list of directories above the hint screen's rows is.
@@ -168,6 +184,13 @@ const HARNESS = Object.keys(HARNESSES) as Dependency[];
 /// is theirs to say, and a wizard that ticked one for them would install an
 /// agent nobody asked for.
 const GATING: Dependency[] = ["Sandbox", "Git"];
+
+/// Whether a row starts ticked: one of those two, or a row this machine is
+/// already part of the way to — WSL turned on, or answering with no Annex in it
+/// yet, which is somebody who ticked it once.
+function ticksItself(row: DependencyView): boolean {
+  return GATING.includes(row.dependency) || row.state.state === "Owed";
+}
 
 /// The step, over the reading the page last had.
 export function Dependencies(props: {
@@ -235,7 +258,7 @@ export function Dependencies(props: {
   /// row that has just been installed has no tick to carry.
   const ticked = (row: DependencyView): boolean =>
     absent(row.state) &&
-    (chosen()[row.dependency] ?? GATING.includes(row.dependency));
+    (chosen()[row.dependency] ?? ticksItself(row));
 
   /// The rows a press would install — which, a tick being an absent row's, are
   /// also the ones the run has not delivered yet.
@@ -448,10 +471,11 @@ function touched(
   );
 }
 
-/// Whether a row is one this machine has not got — which is the one state that
-/// carries a checkbox, and the one the objective is not met by.
+/// Whether a row is one this machine has not got — which is what carries a
+/// checkbox, and what the objective is not met by. A row part of the way there
+/// is one of these too; a row that cannot be had here is not, and has no box.
 function absent(state: DependencyState): boolean {
-  return state.state === "Absent";
+  return state.state === "Absent" || state.state === "Owed";
 }
 
 /// The checkbox screen: every row, a tick to put on the ones that are missing,
@@ -595,7 +619,12 @@ function Hints(props: {
   /// makes an account named after a Data Directory, and the line has to name the
   /// one this machine keeps.
   const instruction = (row: DependencyView): Instruction =>
-    instructionFor(showing(), row.dependency, props.reading.data_directory);
+    instructionFor(
+      showing(),
+      row.dependency,
+      props.reading.data_directory,
+      row.state,
+    );
 
   /// Whether every row this screen is about has since been found.
   const met = (): boolean => props.detected === props.rows.length;
@@ -733,6 +762,13 @@ function Row(props: {
     return made.install === "Failed" ? made.why : null;
   };
 
+  /// And why a row cannot be had here, where it cannot.
+  const barred = (): string | null => {
+    const said = state();
+
+    return said.state === "Refused" ? BARRED[said.barred] : null;
+  };
+
   /// Which file a row that is there found, where it named one at all.
   const found = (): Found | null => {
     const said = state();
@@ -808,6 +844,14 @@ function Row(props: {
 
       <Show when={trouble()}>
         {(said) => <pre class={styles.trouble}>{said()}</pre>}
+      </Show>
+
+      <Show when={barred()}>
+        {(why) => (
+          <p class={styles.failed} data-barred>
+            {why()}
+          </p>
+        )}
       </Show>
 
       <Show when={found()}>{(file) => <Where of={file()} />}</Show>

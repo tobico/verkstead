@@ -193,6 +193,14 @@ pub struct DevicesView {
     /// whose ten minutes ran out a second ago reads expired on this answer and
     /// waiting on the one before it, and both are true when they are given.
     pub pending: Vec<PendingJoin>,
+
+    /// And why this device's **Annex** would not come up at this start, where
+    /// there is no row of the Annex's in `members` to carry it — an Annex that
+    /// has never been linked. Drawn under this device's own row. Where the
+    /// Annex has a row, the line is on it instead — see
+    /// [`LinkedDevice::trouble`] — and this is `None`.
+    #[serde(default)]
+    pub annex_trouble: Option<String>,
 }
 
 /// One device linked to this one: what it says it is, and whether the last dial
@@ -215,6 +223,16 @@ pub struct LinkedDevice {
     /// dimmed, reading *unreachable* — it stays on the list, with everything
     /// about it, and an Unlink on it still works.
     pub reachable: bool,
+
+    /// And, on a Keeper's row for its own **Annex**, why the box it runs in
+    /// would not come up at this start: it would not boot, answer or link.
+    /// Drawn under the row, which reads *unreachable* beside it until the
+    /// Annex answers (ADR-0024).
+    ///
+    /// The Keeper's own finding, like the flag above, and only a Keeper has
+    /// one: `None` on every other row, and on an Annex that came up.
+    #[serde(default)]
+    pub trouble: Option<String>,
 }
 
 /// One device nobody has typed an address for, as the **Discovered** list under

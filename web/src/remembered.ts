@@ -86,9 +86,20 @@ function parentKey(device: Device): string {
 /// field standing empty browses the server's own home, and through the Relay
 /// that is the picked device's home, so nothing here has to know what that home
 /// is.
-export function repoParent(device: Device): string {
-  return read(parentKey(device)) ?? "";
+///
+/// **Save on an Annex**, whose repositories have a home of their own: the box
+/// Verkstead made declares `/srv/repos` its one path (ADR-0024), so a device
+/// that is somebody's Annex starts there where nothing is remembered — and the
+/// human's own answer, once there is one, wins as it does everywhere else.
+/// Whether the device is one is the cluster's to say, so the caller passes it;
+/// see `useRepoParent` in `devices.ts`.
+export function repoParent(device: Device, annex = false): string {
+  return read(parentKey(device)) ?? (annex ? ANNEX_REPOS : "");
 }
+
+/// Where an Annex keeps its repositories: the `paths` the configuration
+/// Verkstead writes for it declares (see `annex/flake.rs` in the server).
+export const ANNEX_REPOS = "/srv/repos";
 
 /// Remember where a repo was just made on that device, for the next one made
 /// there.

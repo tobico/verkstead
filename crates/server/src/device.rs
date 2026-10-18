@@ -102,7 +102,7 @@ const ID_FILE: &str = "device.id";
 /// thing: a certificate whose key is gone proves nothing, and a key whose
 /// certificate is gone names nobody, so there is no state in which having one
 /// of the two is better than having neither.
-const CERTIFICATE_FILE: &str = "device.pem";
+pub(crate) const CERTIFICATE_FILE: &str = "device.pem";
 
 /// And where the certificate made to replace it waits, while any member has
 /// still to be told its fingerprint — see [`Changeover`].
@@ -664,6 +664,48 @@ impl From<anyhow::Error> for Unlinkable {
     }
 }
 
+/// An **Annex**'s Data Directory, as linking it reads one file of it and writes
+/// another — see [`Devices::keep`].
+///
+/// **A seam rather than a path**, because the one Annex there is lives in a
+/// box whose files this machine's user cannot read: the certificate and the
+/// config are the service user's, and what `\\wsl.localhost` reads and writes
+/// is the distro's default user's. So the Keeper's start reads and writes
+/// them from inside the box instead — see [`crate::annex::booting::InTheBox`] — and a
+/// directory this machine can open, which is what the route and the suites
+/// name, is a [`PathBuf`].
+///
+/// Both calls block, and are made off the runtime.
+pub trait AnnexData: Send + Sync + 'static {
+    /// Where it is, as a message names it.
+    fn shown(&self) -> String;
+
+    /// The certificate in it, as the PEM its `device.pem` holds.
+    fn certificate(&self) -> Result<String>;
+
+    /// Its `config.yaml` naming `keeper` as `kept_by`, every other key as it
+    /// stands — see [`crate::settings::Settings::keep_by`].
+    fn keep_by(&self, keeper: &crate::settings::KeptBy) -> Result<()>;
+}
+
+impl AnnexData for PathBuf {
+    fn shown(&self) -> String {
+        self.display().to_string()
+    }
+
+    fn certificate(&self) -> Result<String> {
+        let certificate = self.join(CERTIFICATE_FILE);
+
+        std::fs::read_to_string(&certificate)
+            .with_context(|| format!("reading {}", certificate.display()))
+    }
+
+    fn keep_by(&self, keeper: &crate::settings::KeptBy) -> Result<()> {
+        crate::settings::Settings::in_data_dir(self).keep_by(keeper)?;
+        Ok(())
+    }
+}
+
 /// What the **Devices** section of the Remote access pane reads: this device,
 /// and every other device in its cluster (ADR-0020).
 ///
@@ -745,6 +787,23 @@ pub struct Devices {
     /// [`crate::peer::annex_forward`]. Pointed nowhere unless a start said
     /// otherwise, see [`Devices::forwarding_for_the_annex`].
     annex_forward: crate::peer::annex_forward::Pointing,
+
+    /// And the port its own **Peer Listener** is on, which is what an Annex it
+    /// keeps dials it at. The default port unless a start said otherwise, see
+    /// [`Devices::peering_on`].
+    peer_port: u16,
+
+    /// And why its **Annex**'s box would not come up at this start, where it
+    /// would not — held here, every clone of this handle sharing it, for the
+    /// Annex's row to be drawn with. See [`Devices::annex_troubled`].
+    annex_trouble: std::sync::Arc<std::sync::Mutex<Option<String>>>,
+
+    /// And the Annex it keeps, booted at its start and terminated at its stop,
+    /// where it is a Keeper with a way of having one — held here so that the
+    /// install run that makes the box boots and links it through the same
+    /// handle (see [`crate::annex::booting::Annexed::up`]). `None` everywhere
+    /// else.
+    annexed: Option<std::sync::Arc<crate::annex::booting::Annexed>>,
 }
 
 impl Devices {
@@ -771,6 +830,9 @@ impl Devices {
             peers,
             forwarding_on: crate::forwarding::LOOPBACKS.to_vec(),
             annex_forward: crate::peer::annex_forward::Pointing::at_nothing(),
+            peer_port: crate::peer::PEER_PORT,
+            annex_trouble: std::sync::Arc::default(),
+            annexed: None,
         }
     }
 
@@ -868,6 +930,40 @@ impl Devices {
         }
     }
 
+    /// The same, its peer listener on `port` — the one a start bound.
+    pub fn peering_on(self, port: u16) -> Devices {
+        Devices {
+            peer_port: port,
+            ..self
+        }
+    }
+
+    /// The same, keeping `annexed` — see [`Devices::annexed`].
+    pub fn keeping_an_annex(
+        self,
+        annexed: std::sync::Arc<crate::annex::booting::Annexed>,
+    ) -> Devices {
+        Devices {
+            annexed: Some(annexed),
+            ..self
+        }
+    }
+
+    /// The Annex this device keeps, where it keeps one.
+    pub fn annexed(&self) -> Option<&std::sync::Arc<crate::annex::booting::Annexed>> {
+        self.annexed.as_ref()
+    }
+
+    /// This device as the Annex it keeps is told of it: its id and current
+    /// fingerprint, and the port its peer listener is on — see
+    /// [`crate::annex::Keeping`].
+    pub fn keeping(&self) -> crate::annex::Keeping {
+        crate::annex::Keeping {
+            kept_by: crate::settings::KeptBy::of(self.device.id(), self.device.fingerprint()),
+            port: self.peer_port,
+        }
+    }
+
     /// Where a Forward listens — see [`Devices::forwarding_on`].
     pub(crate) fn forwarding_loopbacks(&self) -> &[std::net::IpAddr] {
         &self.forwarding_on
@@ -899,12 +995,55 @@ impl Devices {
     /// a database and the identity is two files already in hand. A pane that
     /// drew this device alone when the members could not be read would be a
     /// cluster that looked dissolved.
+    ///
+    /// **And the Annex's row carries what its box last said**, where it would
+    /// not come up at this start — see [`Devices::annex_troubled`]. Where there
+    /// is no row to carry it, an Annex that has never been linked, it is said
+    /// beside this device's own instead.
     pub(crate) async fn listing(&self) -> Result<DevicesView> {
+        let mut members = self.members.listed().await?;
+
+        let mut annex_trouble = self.annex_trouble();
+
+        if let Some(trouble) = annex_trouble.take() {
+            let mut carried = false;
+
+            for member in &mut members {
+                if member.identity.kept_by.as_deref() == Some(self.device.id()) {
+                    member.trouble = Some(trouble.clone());
+                    carried = true;
+                }
+            }
+
+            if !carried {
+                annex_trouble = Some(trouble);
+            }
+        }
+
         Ok(DevicesView {
             this: self.reading.identity(&self.device).await,
-            members: self.members.listed().await?,
+            members,
             pending: self.joins.pending(OffsetDateTime::now_utc()).await?,
+            annex_trouble,
         })
+    }
+
+    /// Say why this device's Annex would not come up at this start, or that it
+    /// did with `None` — see [`crate::annex::booting`], the one caller.
+    pub(crate) fn annex_troubled(&self, why: Option<String>) {
+        *self
+            .annex_trouble
+            .lock()
+            .expect("the Annex's trouble is never poisoned") = why;
+    }
+
+    /// And what was last said, which the Annex's row on the Devices list is
+    /// drawn with.
+    pub fn annex_trouble(&self) -> Option<String> {
+        self.annex_trouble
+            .lock()
+            .expect("the Annex's trouble is never poisoned")
+            .clone()
     }
 
     /// The **Discovered** list as the pane draws it: every device this one has
@@ -1024,11 +1163,16 @@ impl Devices {
     /// rewritten, the join is taken again, and each side's row for the other is
     /// the same row said again, and the one forward is pointed again.
     ///
+    /// **The Data Directory is a seam** — see [`AnnexData`]: a directory this
+    /// machine can open, which is what the route and the suites hand over, or
+    /// the box's own, read and written from inside it, which is what the
+    /// Keeper's start hands over (see [`crate::annex::booting`]).
+    ///
     /// No page presses this — see [`crate::ui`], where it is a route with no
-    /// button, and stage 03 of the WSL roadmap, which calls it at every boot.
+    /// button, and [`crate::annex::booting`], which calls it at every boot.
     pub async fn keep(
         &self,
-        data_dir: &Path,
+        data_dir: std::sync::Arc<dyn AnnexData>,
         address: &str,
         keeper_at: Option<&str>,
     ) -> Result<()> {
@@ -1039,42 +1183,38 @@ impl Devices {
             bail!("an address the Annex answers at is one of the two things linking it takes");
         }
 
-        let certificate = data_dir.join(CERTIFICATE_FILE);
+        let shown = data_dir.shown();
 
-        let pem = std::fs::read_to_string(&certificate).with_context(|| {
-            format!(
-                "reading the Annex's certificate at {}",
-                certificate.display()
-            )
-        })?;
+        // Off the runtime, the two of them: a box's files are a program run
+        // apiece — see [`crate::annex::booting::InTheBox`].
+        let pem = tokio::task::spawn_blocking({
+            let data_dir = data_dir.clone();
+            move || data_dir.certificate()
+        })
+        .await
+        .context("reading the Annex's certificate")?
+        .with_context(|| format!("reading the Annex's certificate in {shown}"))?;
 
         let expecting = held(&pem)
-            .with_context(|| {
-                format!(
-                    "reading the Annex's certificate at {}",
-                    certificate.display()
-                )
-            })?
+            .with_context(|| format!("reading the Annex's certificate in {shown}"))?
             .fingerprint;
 
         if expecting == self.device.fingerprint() {
-            bail!(
-                "{} is this device's own Data Directory, and a device is not its own Annex",
-                data_dir.display(),
-            );
+            bail!("{shown} is this device's own Data Directory, and a device is not its own Annex");
         }
 
-        crate::settings::Settings::in_data_dir(data_dir)
-            .keep_by(
-                &crate::settings::KeptBy::of(self.device.id(), self.device.fingerprint())
-                    .reached_at(keeper_at),
-            )
-            .with_context(|| {
-                format!(
-                    "writing this device into the config.yaml in {} as its Keeper",
-                    data_dir.display(),
-                )
-            })?;
+        let keeper = crate::settings::KeptBy::of(self.device.id(), self.device.fingerprint())
+            .reached_at(keeper_at);
+
+        tokio::task::spawn_blocking({
+            let data_dir = data_dir.clone();
+            move || data_dir.keep_by(&keeper)
+        })
+        .await
+        .context("writing this device into the Annex's config.yaml")?
+        .with_context(|| {
+            format!("writing this device into the config.yaml in {shown} as its Keeper")
+        })?;
 
         let saying = self.reading.identity(&self.device).await;
         let kept = self.peers.keep(address, &expecting, &saying).await?;

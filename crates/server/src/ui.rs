@@ -7512,9 +7512,11 @@ async fn onboarding_install(
     State(state): State<AppState>,
     Json(press): Json<InstallPress>,
 ) -> HttpResponse {
+    // With this device, which the Annex a ticked WSL row makes is told of and
+    // is booted and linked by.
     match state
         .onboarding
-        .install(&state.settings, press.dependencies)
+        .install(&state.settings, press.dependencies, state.devices.as_ref())
         .await
     {
         Ok(()) => onboarding(State(state)).await,
@@ -7852,7 +7854,7 @@ async fn keep_annex(State(state): State<AppState>, Json(new): Json<NewAnnex>) ->
 
     if let Err(why) = devices
         .keep(
-            std::path::Path::new(&new.data_dir),
+            std::sync::Arc::new(std::path::PathBuf::from(&new.data_dir)),
             &new.address,
             new.keeper_at.as_deref(),
         )

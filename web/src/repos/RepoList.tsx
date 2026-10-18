@@ -116,7 +116,8 @@ import type {
   RepoView,
   Repointed,
 } from "../api/types";
-import { repoParent, setRepoParent } from "../remembered";
+import { useRepoParent } from "../devices";
+import { setRepoParent } from "../remembered";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine, Note } from "../notices";
 import { keyOf, useDevice, type Device } from "../reaching";
@@ -1014,10 +1015,11 @@ export function CloneRepo(props: {
   landed: (repo: RepoEntry) => void;
 }): JSX.Element {
   const device = useDevice();
+  const parentOf = useRepoParent();
   const id = createUniqueId();
 
   // Read once, as the card is built, for [`CreateRepo`]'s reason.
-  const remembered = repoParent(device());
+  const remembered = parentOf(device());
 
   const [parent, setParent] = createSignal(remembered);
   const [refused, setRefused] = createSignal<string | null>(
@@ -1225,6 +1227,7 @@ export function CreateRepo(props: {
   // Which device it is being made on, for [`RepoRegistration`]'s reason: the
   // dropdown this card was opened from may be a member's draft.
   const device = useDevice();
+  const parentOf = useRepoParent();
 
   // And which Author it is made as, where there are several to pick between —
   // off that device's one list, for the registration's reason: the first
@@ -1245,7 +1248,7 @@ export function CreateRepo(props: {
   // Read once, as the card is built: the device is the one the dropdown this was
   // opened from is drawn for, and a pick made behind an open modal is not a thing
   // there is.
-  const remembered = repoParent(device());
+  const remembered = parentOf(device());
 
   const [parent, setParent] = createSignal(remembered);
 

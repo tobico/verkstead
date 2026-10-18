@@ -1,0 +1,58 @@
+# The Annex's box, written whole by its Keeper — see
+# `crates/server/src/annex/flake.rs`, which fills in every placeholder below.
+# Nothing here is the human's to edit: the Keeper writes it again, and what was
+# changed by hand goes with it.
+{
+  description = "The Annex a Verkstead keeps";
+
+  inputs = {
+    # The stable channel the Keeper's own repository pins, so the box runs on
+    # what the module was proven against.
+    nixpkgs.url = "github:NixOS/nixpkgs/@channel@";
+
+    # The harnesses alone come from here: a package on this channel lags its
+    # vendor by days, where the stable one's would lag by months.
+    nixpkgs-unstable.url = "github:NixOS/nixpkgs/nixos-unstable";
+
+    # At the release whose image the box was imported from: the image and the
+    # module move together.
+    nixos-wsl = {
+      url = "github:nix-community/NixOS-WSL/@nixosWsl@";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
+    # The Keeper's own release, for its NixOS module and nothing else.
+    verkstead = {
+      url = "github:tobico/verkstead/v@version@";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+@binaryInput@  };
+
+  outputs =
+    {
+      nixpkgs,
+      nixpkgs-unstable,
+      nixos-wsl,
+      verkstead,
+      ...
+    }@inputs:
+    {
+      nixosConfigurations.@configuration@ = nixpkgs.lib.nixosSystem {
+        system = "@system@";
+        specialArgs = {
+          # Unfree is allowed for the one harness that is, and nothing else.
+          unstable = import nixpkgs-unstable {
+            system = "@system@";
+            config.allowUnfreePredicate = package: nixpkgs.lib.getName package == "claude-code";
+          };
+          binary = @binary@;
+          version = "@version@";
+        };
+        modules = [
+          nixos-wsl.nixosModules.default
+          verkstead.nixosModules.default
+          ./configuration.nix
+        ];
+      };
+    };
+}

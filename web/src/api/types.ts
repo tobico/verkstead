@@ -778,6 +778,11 @@ tasks: Array<TaskDocument>,
 diagrams: boolean, };
 
 /**
+ * Why a row cannot be had on this machine.
+ */
+export type Barred = "Virtualization";
+
+/**
  * The branch to come off, or `null` to go back to the default-branch rule.
  */
 export type BaseBranchChoice = { 
@@ -2326,10 +2331,10 @@ author?: string, };
  * What a row is about.
  *
  * Flat rather than a harness variant carrying an [`crate::AgentType`]: the
- * step draws seven rows with an instruction apiece, and which of them are
+ * step draws eight rows with an instruction apiece, and which of them are
  * harnesses is a fact about the objective rather than about the drawing.
  */
-export type Dependency = "Sandbox" | "Git" | "Claude" | "Codex" | "Grok" | "OpenCode" | "Gh";
+export type Dependency = "Sandbox" | "Git" | "Claude" | "Codex" | "Grok" | "OpenCode" | "Gh" | "Wsl";
 
 /**
  * And whether the machine has it.
@@ -2367,7 +2372,15 @@ trouble: string | null,
  * cannot use it — see [`Seen`]. Nothing where it is on no `PATH` at
  * all, which is a row with nothing to say beyond *install one*.
  */
-seen: Seen | null, };
+seen: Seen | null, } | { "state": "Owed", 
+/**
+ * What is still owed.
+ */
+owed: Owed, } | { "state": "Refused", 
+/**
+ * Why, which the viewer words.
+ */
+barred: Barred, };
 
 /**
  * One row of the dependencies step: a thing a session needs, and whether this
@@ -2523,7 +2536,15 @@ members: Array<LinkedDevice>,
  * whose ten minutes ran out a second ago reads expired on this answer and
  * waiting on the one before it, and both are true when they are given.
  */
-pending: Array<PendingJoin>, };
+pending: Array<PendingJoin>, 
+/**
+ * And why this device's **Annex** would not come up at this start, where
+ * there is no row of the Annex's in `members` to carry it — an Annex that
+ * has never been linked. Drawn under this device's own row. Where the
+ * Annex has a row, the line is on it instead — see
+ * [`LinkedDevice::trouble`] — and this is `None`.
+ */
+annex_trouble: string | null, };
 
 /**
  * The Diff as the browser receives it: the HTML the server rendered, and the
@@ -3555,7 +3576,17 @@ identity: DeviceIdentity,
  * dimmed, reading *unreachable* — it stays on the list, with everything
  * about it, and an Unlink on it still works.
  */
-reachable: boolean, };
+reachable: boolean, 
+/**
+ * And, on a Keeper's row for its own **Annex**, why the box it runs in
+ * would not come up at this start: it would not boot, answer or link.
+ * Drawn under the row, which reads *unreachable* beside it until the
+ * Annex answers (ADR-0024).
+ *
+ * The Keeper's own finding, like the flag above, and only a Keeper has
+ * one: `None` on every other row, and on an Annex that came up.
+ */
+trouble: string | null, };
 
 /**
  * What a Set still waiting on the human says about itself: whether an agent is
@@ -4115,6 +4146,14 @@ companion_author: string,
  * And who the Conversation's own Repo is.
  */
 author: string, };
+
+/**
+ * What a row that is part of the way there is still owed.
+ *
+ * The WSL row's alone, and its wording is the viewer's, the way [`Seen`]'s
+ * is: what is here is what the machine is.
+ */
+export type Owed = "Restart" | "Annex";
 
 /**
  * Which of a Conversation's three roles a Pairing is for.

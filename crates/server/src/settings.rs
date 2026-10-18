@@ -356,19 +356,14 @@ impl Settings {
     /// will hold, which is why the two ways of building one are both `with_` on
     /// the secrets already there — see [`Secrets::with_author_token`].
     pub fn save_secrets(&self, secrets: &Secrets) -> std::io::Result<()> {
-        let text = match secrets.anything_set() {
-            true => yaml(secrets)?,
-            false => String::new(),
-        };
-
-        write_atomically(&self.secrets_path(), &text, SECRET_MODE)
+        write_atomically(&self.secrets_path(), &secrets.text()?, SECRET_MODE)
     }
 
     /// And write `config.yaml`, the same way but readable: there is nothing in
     /// it that is anybody's secret, and a name and an address the machine's
     /// owner cannot read back would be an odd thing to insist on.
     pub fn save_config(&self, config: &Config) -> std::io::Result<()> {
-        write_atomically(&self.config_path(), &yaml(config)?, ORDINARY_MODE)
+        write_atomically(&self.config_path(), &config.text()?, ORDINARY_MODE)
     }
 
     /// Move the one `git_author` and `github_token` an installation from before
@@ -557,11 +552,10 @@ impl Settings {
             Err(error) => return Err(error),
         };
 
-        if config.kept_by.as_ref() == Some(keeper) {
+        if !config.keep_by(keeper) {
             return Ok(false);
         }
 
-        config.kept_by = Some(keeper.clone());
         self.save_config(&config).map(|()| true)
     }
 }
@@ -791,7 +785,7 @@ impl Secrets {
     /// An empty file is not a parse failure and must not be logged as one: it is
     /// what a settings page leaves behind after the token is cleared, and it says
     /// exactly what a missing file says.
-    fn read(text: &str) -> Result<Secrets, serde_saphyr::Error> {
+    pub(crate) fn read(text: &str) -> Result<Secrets, serde_saphyr::Error> {
         if text.trim().is_empty() {
             return Ok(Secrets::default());
         }
@@ -906,6 +900,19 @@ impl Secrets {
         Secrets {
             mcp_headers: written,
             ..self.clone()
+        }
+    }
+
+    /// The whole of `secrets.yaml` as these secrets write it: an empty text
+    /// where nothing is set — see [`Settings::save_secrets`].
+    ///
+    /// The text rather than a write, for the one place these files are put
+    /// that is not this machine's Data Directory: a Keeper puts its Annex's
+    /// inside the Annex's box — see [`crate::annex::flake`].
+    pub fn text(&self) -> std::io::Result<String> {
+        match self.anything_set() {
+            true => yaml(self),
+            false => Ok(String::new()),
         }
     }
 
@@ -1471,6 +1478,25 @@ impl Config {
         self
     }
 
+    /// The config a **Keeper** writes for its **Annex** before the Annex first
+    /// starts: whose it is, and nothing else, so every other section reads as
+    /// nobody having said. **No Author of its own**: the Annex is a linked
+    /// Member, so the Keeper's Authors reach it as mirrors over the one list,
+    /// token copies and all (ADR-0025), and a copy at home here too would be one
+    /// Author at home on two devices.
+    pub fn of_an_annex(kept_by: KeptBy) -> Config {
+        Config {
+            kept_by: Some(kept_by),
+            ..Config::default()
+        }
+    }
+
+    /// The whole of `config.yaml` as this config writes it — see
+    /// [`Secrets::text`] for why a text.
+    pub fn text(&self) -> std::io::Result<String> {
+        yaml(self)
+    }
+
     /// And what this file says about the languages: the map an installer
     /// writes, with `rust_build_cache` read underneath it as Rust's `enabled`
     /// and `size`.
@@ -1544,6 +1570,19 @@ impl Config {
     /// keeps — which is every Verkstead but an Annex.
     pub fn kept_by(&self) -> Option<&KeptBy> {
         self.kept_by.as_ref()
+    }
+
+    /// The same config with `keeper` as its `kept_by` — see
+    /// [`Settings::keep_by`], and [`crate::annex::booting::InTheBox`], which writes one
+    /// into a box rather than a directory. `false` is a config that said so
+    /// already, left as it was.
+    pub fn keep_by(&mut self, keeper: &KeptBy) -> bool {
+        if self.kept_by.as_ref() == Some(keeper) {
+            return false;
+        }
+
+        self.kept_by = Some(keeper.clone());
+        true
     }
 
     /// The same config with the keys the settings page never drew as they
@@ -1986,7 +2025,7 @@ fn limit_typed(places: String) -> Option<usize> {
 /// gets the one they filled in, and git says what is still missing. Nothing here
 /// substitutes a default — a commit by `verkstead@localhost` is worse than a
 /// commit that would not be made, because it is the one nobody notices.
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
 pub struct GitAuthor {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     name: Option<String>,
