@@ -24,6 +24,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type {
   AbandonedRepo,
+  ClonableRepo,
+  Cloned,
   Adopted,
   ConversationEntry,
   ConversationView,
@@ -100,6 +102,8 @@ import { carrying, drag, dropOn } from "./dragging";
 import { browse, held, listingAt, rows as browsed } from "./fields";
 import {
   actionRows,
+  clonableRows,
+  clonables,
   offered,
   opened,
   pick,
@@ -6141,5 +6145,286 @@ describe("what a device holds between visits", () => {
     );
 
     expect(stored()).toEqual(blank());
+  });
+});
+
+/// The Repo dropdown's second group: the repositories the rest of the cluster
+/// holds, by origin, that the device the dropdown is for lacks — behind a rule,
+/// between that device's own Repos and the two rows that act.
+describe("the repositories the cluster could clone", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    leaveRefusals(null, 0, [], null);
+  });
+
+  /// What the cluster could clone onto this device, and what it could clone onto
+  /// the member — two different lists, so a dropdown drawn off the wrong one is
+  /// an assertable reading.
+  const CLONABLE_HERE: ClonableRepo[] = [
+    {
+      name: "gadgets",
+      place: "github.com/you/gadgets",
+      origin: "git@github.com:you/gadgets.git",
+      author: null,
+    },
+    {
+      name: "widgets",
+      place: "github.com/you/widgets",
+      origin: "https://github.com/you/widgets.git",
+      author: null,
+    },
+  ];
+
+  const CLONABLE_THERE: ClonableRepo[] = [
+    {
+      name: "verkstead",
+      place: "github.com/tobico/verkstead",
+      origin: "https://github.com/tobico/verkstead",
+      author: "work",
+    },
+  ];
+
+  it("draws them behind a rule, between the device's own Repos and the two rows", async () => {
+    theWorkbench(whenever("/api/ui/repos/clonable", json(CLONABLE_HERE)));
+    const { container } = mount("/compose");
+    await composing(container);
+
+    await waitFor(() => expect(clonableRows("Repo")).toHaveLength(2));
+
+    expect(rows("Repo")).toEqual(REPOS.map((repo) => repo.name));
+    expect(clonableRows("Repo")).toEqual([
+      ["gadgets", "github.com/you/gadgets"],
+      ["widgets", "github.com/you/widgets"],
+    ]);
+    expect(actionRows("Repo")).toEqual(["Create repo", "Open repo"]);
+
+    // In that order down the list, a rule before the group and another after it.
+    const list = opened("Repo");
+    const order = [
+      ...list.querySelectorAll<HTMLElement>('[role="option"], [role="separator"]'),
+    ].map((row) =>
+      row.getAttribute("role") === "separator"
+        ? "rule"
+        : clonables("Repo").includes(row)
+          ? "clonable"
+          : offered("Repo").includes(row)
+            ? "repo"
+            : "action",
+    );
+    expect(order).toEqual([
+      ...REPOS.map(() => "repo"),
+      "rule",
+      "clonable",
+      "clonable",
+      "rule",
+      "action",
+      "action",
+    ]);
+  });
+
+  /// Never a choice: nothing in the group is selected, a press picks nothing,
+  /// and the closed control goes on saying what it said.
+  it("is never shown as the chosen value", async () => {
+    theWorkbench(whenever("/api/ui/repos/clonable", json(CLONABLE_HERE)));
+    const { container } = mount("/compose");
+    await composing(container);
+
+    await waitFor(() => expect(clonableRows("Repo")).toHaveLength(2));
+    expect(
+      clonables("Repo").map((row) => row.getAttribute("aria-selected")),
+    ).toEqual(["false", "false"]);
+
+    fireEvent.click(clonables("Repo")[0]!);
+
+    expect(showing("Repo")).toBe("Select");
+    expect(stored().repo).toBeNull();
+  });
+
+  /// Read of the device the dropdown is for: picking the member reads the
+  /// member's list over the Relay, and draws that one.
+  it("is read for the device the dropdown is for", async () => {
+    const fetching = theCluster(
+      whenever("/api/ui/repos/clonable", json(CLONABLE_HERE)),
+      whenever(at("/repos/clonable"), json(CLONABLE_THERE)),
+    );
+    const { container } = mount("/compose");
+
+    await draftingOnTheMember(container);
+
+    await waitFor(() =>
+      expect(clonableRows("Repo")).toEqual([
+        ["verkstead", "github.com/tobico/verkstead"],
+      ]),
+    );
+    expect(askedFor(fetching, at("/repos/clonable"))).toBeGreaterThan(0);
+  });
+
+  /// And an empty reading draws no group and no rule of its own: the one rule
+  /// left is the one the two rows that act stand behind.
+  it("draws nothing when there is nothing to clone", async () => {
+    theWorkbench(whenever("/api/ui/repos/clonable", json([])));
+    const { container } = mount("/compose");
+    await composing(container);
+
+    await waitFor(() => expect(rows("Repo")).toHaveLength(REPOS.length));
+
+    expect(clonables("Repo")).toEqual([]);
+    expect(opened("Repo").querySelectorAll('[role="separator"]')).toHaveLength(1);
+  });
+
+  /// What a clone on the member made there: a Repo none of its registered ones
+  /// are, so a draft landing on it is the answer's doing.
+  const CLONED_THERE: RepoEntry = {
+    id: 6161,
+    name: "verkstead",
+    path: "/mnt/code/verkstead",
+    default_branch: "main",
+    author: "work",
+    author_unpicked: false,
+  };
+
+  /// The cluster with the member offering one repository to clone, and whatever
+  /// the clone is answered with.
+  const offeringThere = (...answers: Parameters<typeof serving>) =>
+    theCluster(
+      whenever(at("/repos/clonable"), json(CLONABLE_THERE)),
+      whenever(at(`/repos/${CLONED_THERE.id}/pairings`), json(NO_PAIRINGS)),
+      whenever(at(`/repos/${CLONED_THERE.id}/branches`), json(BRANCHES)),
+      ...answers,
+    );
+
+  /// Draft onto the member and wait for its clonable group to be drawn.
+  async function clonableThere(container: ParentNode): Promise<void> {
+    await draftingOnTheMember(container);
+    await waitFor(() => expect(clonables("Repo")).toHaveLength(1));
+  }
+
+  /// Where a parent is remembered for the member, the press clones there at
+  /// once — saying so on the row it was pressed on, which takes no second press —
+  /// and the draft lands on the Repo the clone made over there.
+  it("clones on the member into the remembered parent, and lands the draft there", async () => {
+    setRepoParent(null, "/home/ada/src");
+    setRepoParent(MEMBER.device, "/mnt/code");
+
+    let answer: (cloned: Cloned) => void = () => {};
+    const fetching = offeringThere(
+      whenever(
+        at("/repos/clone"),
+        () =>
+          new Promise<Response>((resolve) => {
+            answer = (cloned) =>
+              resolve(
+                new Response(JSON.stringify(cloned), {
+                  headers: { "content-type": "application/json" },
+                }),
+              );
+          }),
+        "POST",
+      ),
+    );
+    const { container } = mount("/compose");
+
+    await clonableThere(container);
+    fireEvent.click(clonables("Repo")[0]!);
+
+    // Out, and said so: under the control, and on the row, which a second
+    // press does nothing to. No card: there was nothing to ask.
+    await waitFor(() => screen.getByText("Cloning verkstead…"));
+    expect(screen.queryByLabelText(WHERE)).toBeNull();
+    expect(clonableRows("Repo")).toEqual([["verkstead", "Cloning…"]]);
+    expect(clonables("Repo")[0]!.getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(clonables("Repo")[0]!);
+    expect(writes(fetching, at("/repos/clone"))).toBe(1);
+
+    expect(sent(fetching, at("/repos/clone"))).toEqual({
+      origin: "https://github.com/tobico/verkstead",
+      parent: "/mnt/code",
+      author: "work",
+    });
+
+    answer({ Cloned: CLONED_THERE });
+
+    await waitFor(() => expect(stored().repo).toBe(CLONED_THERE.id));
+    expect(writes(fetching, "/api/ui/repos/clone")).toBe(0);
+    expect(repoParent(MEMBER.device)).toBe("/mnt/code");
+    expect(repoParent(null)).toBe("/home/ada/src");
+  });
+
+  /// Where nothing is remembered for that device, a card asks where the clone
+  /// goes; the parent it went in is remembered there afterwards, the way a
+  /// create remembers it.
+  it("asks for a parent where none is remembered, and remembers it", async () => {
+    setRepoParent(null, "/home/ada/src");
+
+    const fetching = offeringThere(
+      whenever(at("/repos/clone"), json({ Cloned: CLONED_THERE }), "POST"),
+    );
+    const { container } = mount("/compose");
+
+    await clonableThere(container);
+    fireEvent.click(clonables("Repo")[0]!);
+
+    const field = await waitFor(() => screen.getByLabelText(WHERE));
+    expect((field as HTMLInputElement).value).toBe("");
+    expect(writes(fetching, at("/repos/clone"))).toBe(0);
+
+    fireEvent.input(field, { target: { value: "/mnt/code" } });
+    fireEvent.click(screen.getByRole("button", { name: "Clone" }));
+
+    await waitFor(() => expect(stored().repo).toBe(CLONED_THERE.id));
+    expect(sent(fetching, at("/repos/clone"))).toEqual({
+      origin: "https://github.com/tobico/verkstead",
+      parent: "/mnt/code",
+      author: "work",
+    });
+    expect(screen.queryByLabelText(WHERE)).toBeNull();
+    expect(repoParent(MEMBER.device)).toBe("/mnt/code");
+    expect(repoParent(null)).toBe("/home/ada/src");
+  });
+
+  /// A Windows member answers its paths with backslashes alone, resolved as
+  /// `\\?\C:\…`: the parent remembered is the directory the clone went in, not
+  /// `/`, which the next clone would be sent straight to and refused at.
+  it("remembers a Windows member's parent from a path with no slash in it", async () => {
+    const landed: RepoEntry = {
+      ...CLONED_THERE,
+      path: "\\\\?\\C:\\src\\verkstead",
+    };
+
+    offeringThere(
+      whenever(at("/repos/clone"), json({ Cloned: landed }), "POST"),
+    );
+    const { container } = mount("/compose");
+
+    await clonableThere(container);
+    fireEvent.click(clonables("Repo")[0]!);
+
+    const field = await waitFor(() => screen.getByLabelText(WHERE));
+    fireEvent.input(field, { target: { value: "C:\\src" } });
+    fireEvent.click(screen.getByRole("button", { name: "Clone" }));
+
+    await waitFor(() => expect(stored().repo).toBe(landed.id));
+    expect(repoParent(MEMBER.device)).toBe("\\\\?\\C:\\src");
+  });
+
+  /// A refusal is the far end's own words, in front of the human, and the draft
+  /// is left as it was: a clone sent straight off comes back as the card, with
+  /// the reason under the parent it was sent to.
+  it("says a refused clone in git's words and leaves the draft alone", async () => {
+    setRepoParent(MEMBER.device, "/mnt/code");
+
+    const said =
+      "fatal: destination path 'verkstead' already exists and is not an empty directory.";
+    offeringThere(
+      whenever(at("/repos/clone"), json({ Refused: said } satisfies Cloned), "POST"),
+    );
+    const { container } = mount("/compose");
+
+    await clonableThere(container);
+    fireEvent.click(clonables("Repo")[0]!);
+
+    await waitFor(() => screen.getByText(said));
+    expect(held(WHERE)).toBe("/mnt/code");
+    expect(stored().repo).toBeNull();
   });
 });

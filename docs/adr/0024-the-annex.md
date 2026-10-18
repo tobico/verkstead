@@ -193,7 +193,8 @@ cluster already knows what could be cloned where.
 repositories other members have registered by origin that the named device
 lacks. Picking one clones it on that device, into the parent **Create repo**
 remembers there — asked for where none is remembered, and preset to
-`/srv/repos` on an Annex — with that device's own GitHub token, registers it,
+`/srv/repos` on an Annex — as the **Author** the member's Repo works as,
+fetched with that Author's token (ADR-0025), registers it as that Author,
 and it becomes the draft's Repo. **The Transfer dialog's *no match* offers
 the same clone** rather than pointing at Open repo. A *Clone repo* row taking
 a URL was the recommendation and was rejected for a list: the cluster knows

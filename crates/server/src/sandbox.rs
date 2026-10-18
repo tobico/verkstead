@@ -5300,22 +5300,37 @@ impl Sandbox {
             config.push(("user.email".to_owned(), email.to_owned()));
         }
 
-        config.push((
-            format!("credential.{GITHUB}.helper"),
-            // The `!` is what makes git run it as a command rather than look for
-            // a `git-credential-` binary of that name.
-            "!gh auth git-credential".to_owned(),
-        ));
-
-        // Both spellings of the same remote, as two values of the one
-        // multi-valued key — which is what repeating it in the environment
-        // means, the counted pairs being read as one more configuration file.
-        for ssh in ["git@github.com:", "ssh://git@github.com/"] {
-            config.push((format!("url.{GITHUB}/.insteadOf"), ssh.to_owned()));
-        }
+        config.extend(github_credentials());
 
         config
     }
+}
+
+/// How git proves who it is to GitHub, and which URLs that proof is any use for:
+/// `gh`'s credential helper answering out of `GH_TOKEN`, and the two SSH
+/// spellings of github.com rewritten to HTTPS — see [`Sandbox::git_config`],
+/// which says why each is there.
+///
+/// Its own function because a session is not the only git that needs it: a
+/// clone onto this device (see [`crate::repos::clone`]) is git run with this
+/// device's token, and set up any other way it would be one more way of
+/// authenticating to keep in step with this one.
+pub(crate) fn github_credentials() -> Vec<(String, String)> {
+    let mut config = vec![(
+        format!("credential.{GITHUB}.helper"),
+        // The `!` is what makes git run it as a command rather than look for
+        // a `git-credential-` binary of that name.
+        "!gh auth git-credential".to_owned(),
+    )];
+
+    // Both spellings of the same remote, as two values of the one
+    // multi-valued key — which is what repeating it in the environment
+    // means, the counted pairs being read as one more configuration file.
+    for ssh in ["git@github.com:", "ssh://git@github.com/"] {
+        config.push((format!("url.{GITHUB}/.insteadOf"), ssh.to_owned()));
+    }
+
+    config
 }
 
 /// What a Conversation's companion repos put inside the sandbox: each one's

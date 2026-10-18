@@ -29,6 +29,8 @@ import { art, marked } from "./marking";
 import {
   actionRows,
   actions,
+  clonableRows,
+  clonables,
   expanded,
   offered,
   opened,
@@ -794,6 +796,97 @@ describe("the rows that press rather than pick", () => {
 
     expect(actions(UNDER)).toEqual([]);
     expect(opened(UNDER).querySelector('[role="separator"]')).toBeNull();
+  });
+});
+
+/// The rows between the choices and the actions — the Repo dropdown's
+/// repositories to clone, which press rather than pick as well.
+describe("the rows of repositories to clone", () => {
+  function cloning(at = ""): {
+    chosen: () => string;
+    pressed: () => string[];
+  } {
+    const [chosen, setChosen] = createSignal(at);
+    const [pressed, setPressed] = createSignal<string[]>([]);
+
+    const acts = (label: string) => () =>
+      setPressed((was) => [...was, label]);
+
+    render(() => (
+      <>
+        <label for="under">Run it under</label>
+        <Listbox
+          id="under"
+          options={ROWS}
+          value={(row) => row.value}
+          label={(row) => row.label}
+          chosen={chosen()}
+          pick={setChosen}
+          clonable={[
+            {
+              name: "widgets",
+              place: "github.com/you/widgets",
+              press: acts("widgets"),
+            },
+          ]}
+          actions={[{ label: "Open repo", press: acts("Open repo") }]}
+        />
+      </>
+    ));
+
+    return { chosen, pressed };
+  }
+
+  it("draws them after the choices and before the actions, each behind a rule", () => {
+    cloning();
+
+    const list = opened(UNDER);
+    const rules = [...list.querySelectorAll('[role="separator"]')];
+    const [row] = clonables(UNDER);
+
+    expect(clonableRows(UNDER)).toEqual([["widgets", "github.com/you/widgets"]]);
+    expect(rules).toHaveLength(2);
+    expect(
+      rules[0]!.compareDocumentPosition(row!) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      rules[1]!.compareDocumentPosition(row!) & Node.DOCUMENT_POSITION_PRECEDING,
+    ).toBeTruthy();
+
+    // Named by its name, with where it is as the description.
+    expect(row!.getAttribute("aria-selected")).toBe("false");
+    expect(
+      document.getElementById(row!.getAttribute("aria-labelledby")!)!.textContent,
+    ).toBe("widgets");
+    expect(
+      document.getElementById(row!.getAttribute("aria-describedby")!)!
+        .textContent,
+    ).toBe("github.com/you/widgets");
+  });
+
+  /// Walked with the rest, between the two: the row before the last is the
+  /// clonable one, and Enter on it presses rather than picks.
+  it("is walked with the rest, and pressed rather than picked", () => {
+    const { chosen, pressed } = cloning("2:grok-4.6");
+
+    fireEvent.keyDown(control(), { key: "ArrowDown" });
+    fireEvent.keyDown(control(), { key: "End" });
+
+    expect(control().getAttribute("aria-activedescendant")).toBe(
+      actions(UNDER)[0]!.id,
+    );
+
+    fireEvent.keyDown(control(), { key: "ArrowUp" });
+
+    expect(control().getAttribute("aria-activedescendant")).toBe(
+      clonables(UNDER)[0]!.id,
+    );
+
+    fireEvent.keyDown(control(), { key: "Enter" });
+
+    expect(pressed()).toEqual(["widgets"]);
+    expect(chosen()).toBe("2:grok-4.6");
+    expect(showing(UNDER)).toBe("Grok 4.6");
   });
 });
 

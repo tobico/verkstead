@@ -36,10 +36,10 @@ use tokio_util::io::ReaderStream;
 use verkstead_render::{
     Adopted, AnswerAttached, AnswerAttachmentRemoved, AskingDevice, AtOnceView, Attached,
     AttachmentRemoved, Author, AuthorEdit, AuthorEdited, AuthorSaved, BaseBranchChoice,
-    BranchRename, BriefEdit, CheckRollup, CleanupStepView, CleanupView, CommentedOn,
-    CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed, CompanionModeChoice,
-    CompanionModeChosen, CompanionRemoved, CompanionView, CompileCaching, Confirming,
-    ConflictResolution, ConversationArchived, ConversationClosed, ConversationEntry,
+    BranchRename, BriefEdit, CheckRollup, CleanupStepView, CleanupView, ClonableRepo, Cloning,
+    CommentedOn, CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed,
+    CompanionModeChoice, CompanionModeChosen, CompanionRemoved, CompanionView, CompileCaching,
+    Confirming, ConflictResolution, ConversationArchived, ConversationClosed, ConversationEntry,
     ConversationMove, ConversationSteered, ConversationStopped, ConversationUnarchived,
     ConversationView, Creation, Cursor, DevicesView, DiskUse, DroppedRow, Eviction, FileDeleted,
     FileDeleting, FileListsView, FileMade, FileMaking, FileReading, FileRenamed, FileRenaming,
@@ -104,6 +104,16 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // what it is given is a parent and a name rather than a path, and what
         // it can answer is a different set of sentences.
         .route("/api/ui/repos/new", post(create_repo))
+        // And what the rest of the cluster holds that this device does not: the
+        // Repo dropdown's second group, read beside the first and reached on a
+        // member over the Relay the way the list itself is. A word of its own
+        // under the list rather than a field on it, because it dials every
+        // member and the list is read off this device's own registry alone.
+        .route("/api/ui/repos/clonable", get(clonable_repos))
+        // And cloning one of those here, which is the third way a Repo
+        // arrives: an origin and a parent rather than a path or a name, and
+        // git's own words where it refuses.
+        .route("/api/ui/repos/clone", post(clone_repo))
         // What one Repo's branches are, which is what a drafting Conversation
         // picks the one it comes off out of. Under the Repo rather than under
         // the Conversation: the branches are the repository's, and two
@@ -1063,6 +1073,34 @@ async fn repos(State(state): State<AppState>) -> HttpResponse {
     Json(rows).into_response()
 }
 
+/// `GET /api/ui/repos/clonable` — every **Clonable Repo**: what the other
+/// members have registered, by origin, that this device lacks (ADR-0024,
+/// *Clonable repos*). See [`crate::matching::clonable`].
+///
+/// A Verkstead with no device identity is linked to nobody, so nothing in the
+/// cluster could be cloned to it: an empty list rather than a refusal.
+async fn clonable_repos(State(state): State<AppState>) -> HttpResponse {
+    let repos = match store::registered_repos(&state.pool).await {
+        Ok(repos) => repos,
+        Err(error) => {
+            tracing::error!(error = ?error, "reading the registered Repos failed");
+            return unavailable("The registered repos couldn't be read.");
+        }
+    };
+
+    let Some(devices) = state.devices.as_ref() else {
+        return Json(Vec::<ClonableRepo>::new()).into_response();
+    };
+
+    match crate::matching::clonable(devices, &repos).await {
+        Ok(rows) => Json(rows).into_response(),
+        Err(refusal) => {
+            tracing::warn!("what could be cloned here was not read: {}", refusal.saying);
+            refused(refusal.status, ApiError::new(refusal.saying))
+        }
+    }
+}
+
 /// `GET /api/ui/repos/{id}/branches` — every branch of one registered Repo,
 /// local and remote-tracking, for the dropdown that picks what the work comes
 /// off.
@@ -1185,6 +1223,27 @@ async fn create_repo(
         Err(error) => {
             tracing::error!(error = ?error, "making a Repo failed");
             unavailable("The repo couldn't be made.")
+        }
+    }
+}
+
+/// `POST /api/ui/repos/clone` — clone a **Clonable Repo** onto this device, and
+/// take it on (ADR-0024, *Clonable repos*).
+///
+/// This device's own operation, which a browser on another one reaches over the
+/// Relay the way it reaches **Create repo**: git runs here, as the Author the
+/// member's Repo works as, with that Author's token read at the moment of the
+/// call. See [`crate::repos::clone`].
+///
+/// Every refusal is a named outcome in the body, the way a create's are.
+async fn clone_repo(State(state): State<AppState>, Json(cloning): Json<Cloning>) -> HttpResponse {
+    let config = state.settings.config();
+
+    match crate::repos::clone(&state.pool, &config, &state.github, &cloning).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, "cloning a Repo failed");
+            unavailable("The repo couldn't be cloned.")
         }
     }
 }
