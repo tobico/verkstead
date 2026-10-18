@@ -765,7 +765,15 @@ pub fn carried_tables() -> Vec<&'static str> {
 /// **Refused whole past [`MOST_A_SLICE_IS`]**, naming the Conversation. Half a
 /// record is a Timeline that stops in the middle and a Transcript that ends
 /// mid-sentence, and neither is better than a move that did not happen.
+///
+/// **One transaction, and so one moment of the record.** The work can still be
+/// writing while it is read — a session recording a commit, which is an Event
+/// and the row hanging off it — and a table at a time read as separate moments
+/// is a slice holding that commit without its Event, which the far end refuses
+/// the whole move over. See [`super::reading`].
 pub async fn slice(pool: &sqlx::SqlitePool, conversation_id: i64) -> Result<Slice> {
+    let mut tx = super::reading(pool, "reading a Conversation's record to move it").await?;
+
     let mut tables = Vec::with_capacity(CARRIED.len());
     let mut held = 0usize;
 
@@ -781,7 +789,7 @@ pub async fn slice(pool: &sqlx::SqlitePool, conversation_id: i64) -> Result<Slic
 
         let read = sqlx::query(&sql)
             .bind(conversation_id)
-            .fetch_all(pool)
+            .fetch_all(&mut *tx)
             .await
             .with_context(|| {
                 format!(
@@ -834,7 +842,13 @@ pub async fn slice(pool: &sqlx::SqlitePool, conversation_id: i64) -> Result<Slic
         });
     }
 
-    let marks = marked(pool, conversation_id).await?;
+    let marks = marked(&mut tx, conversation_id).await?;
+
+    // Nothing was written, so there is nothing to keep: this only lets the
+    // snapshot go.
+    tx.commit()
+        .await
+        .with_context(|| format!("finishing reading Conversation {conversation_id}"))?;
 
     Ok(Slice { tables, marks })
 }
@@ -856,7 +870,7 @@ fn read_cell(row: &sqlx::sqlite::SqliteRow, at: usize) -> Result<Cell> {
 }
 
 /// The stop and the escalation off the Conversation's own row.
-async fn marked(pool: &sqlx::SqlitePool, conversation_id: i64) -> Result<Marks> {
+async fn marked(connection: &mut sqlx::SqliteConnection, conversation_id: i64) -> Result<Marks> {
     /// The five columns, in the order they are read.
     type Read = (
         Option<String>,
@@ -872,7 +886,7 @@ async fn marked(pool: &sqlx::SqlitePool, conversation_id: i64) -> Result<Marks> 
          WHERE id = ?",
     )
     .bind(conversation_id)
-    .fetch_optional(pool)
+    .fetch_optional(&mut *connection)
     .await
     .with_context(|| format!("reading how things stand with Conversation {conversation_id}"))?;
 

@@ -1114,9 +1114,24 @@ pub async fn profiles(pool: &SqlitePool) -> Result<Vec<Profile>> {
 
 /// One Profile, or `None` if there is no such Profile.
 pub async fn load_profile(pool: &SqlitePool, id: i64) -> Result<Option<Profile>> {
+    let mut connection = pool
+        .acquire()
+        .await
+        .with_context(|| format!("loading Profile {id}"))?;
+
+    profile_on(&mut connection, id).await
+}
+
+/// And the same off a connection already held, which is how a read that has to
+/// see one moment of the record — the Timeline's — reads the Profile a steer
+/// names inside its own transaction rather than off a second connection.
+pub(crate) async fn profile_on(
+    connection: &mut sqlx::SqliteConnection,
+    id: i64,
+) -> Result<Option<Profile>> {
     let row: Option<Row> = sqlx::query_as(&format!("SELECT {COLUMNS} FROM profiles WHERE id = ?",))
         .bind(id)
-        .fetch_optional(pool)
+        .fetch_optional(&mut *connection)
         .await
         .with_context(|| format!("loading Profile {id}"))?;
 
@@ -1127,14 +1142,14 @@ pub async fn load_profile(pool: &SqlitePool, id: i64) -> Result<Option<Profile>>
     let listed: Vec<(String,)> =
         sqlx::query_as("SELECT model FROM profile_models WHERE profile_id = ? ORDER BY position")
             .bind(id)
-            .fetch_all(pool)
+            .fetch_all(&mut *connection)
             .await
             .with_context(|| format!("loading the models Profile {id} runs"))?;
 
     let home: Option<(String,)> =
         sqlx::query_as("SELECT home FROM profile_homes WHERE profile_id = ?")
             .bind(id)
-            .fetch_optional(pool)
+            .fetch_optional(&mut *connection)
             .await
             .with_context(|| format!("loading the home Profile {id} keeps its account under"))?;
 

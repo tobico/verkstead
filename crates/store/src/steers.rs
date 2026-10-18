@@ -467,7 +467,7 @@ pub async fn scratch(pool: &SqlitePool, event_id: i64) -> Result<HashMap<i64, Ve
 ///
 /// A Conversation nobody has steered answers all three with nothing.
 pub(crate) async fn on_timeline(
-    pool: &SqlitePool,
+    connection: &mut sqlx::SqliteConnection,
     conversation_id: i64,
 ) -> Result<HashMap<i64, SteerRecord>> {
     /// The row's own columns, in the order the query below selects them: the
@@ -480,15 +480,15 @@ pub(crate) async fn on_timeline(
          FROM steers WHERE conversation_id = ?",
     )
     .bind(conversation_id)
-    .fetch_all(pool)
+    .fetch_all(&mut *connection)
     .await
     .with_context(|| {
         format!("reading what the steers of Conversation {conversation_id} settled")
     })?;
 
-    let mut added = additions(pool, conversation_id).await?;
-    let mut upgraded = upgrades(pool, conversation_id).await?;
-    let mut sources = sources(pool, conversation_id).await?;
+    let mut added = additions(&mut *connection, conversation_id).await?;
+    let mut upgraded = upgrades(&mut *connection, conversation_id).await?;
+    let mut sources = sources(&mut *connection, conversation_id).await?;
 
     let mut records = HashMap::with_capacity(rows.len());
 
@@ -501,13 +501,15 @@ pub(crate) async fn on_timeline(
         // steer on it asks nothing at all.
         let pairing = match profile_id {
             None => RecordedPairing::Nothing,
-            Some(profile_id) => match super::load_profile(pool, profile_id).await? {
-                Some(profile) => RecordedPairing::Under(Pairing { profile, model }),
-                // Named an account the Profile list no longer holds, which is a
-                // pick the human made and has since finished with rather than a
-                // pick they never made.
-                None => RecordedPairing::Removed,
-            },
+            Some(profile_id) => {
+                match super::profiles::profile_on(&mut *connection, profile_id).await? {
+                    Some(profile) => RecordedPairing::Under(Pairing { profile, model }),
+                    // Named an account the Profile list no longer holds, which is a
+                    // pick the human made and has since finished with rather than a
+                    // pick they never made.
+                    None => RecordedPairing::Removed,
+                }
+            }
         };
 
         records.insert(
@@ -541,7 +543,7 @@ pub(crate) async fn on_timeline(
 /// in — a record read back in the order it is drawn is one the human can hold
 /// against the form they filled.
 async fn additions(
-    pool: &SqlitePool,
+    connection: &mut sqlx::SqliteConnection,
     conversation_id: i64,
 ) -> Result<HashMap<i64, Vec<SteerAddition>>> {
     let rows: Vec<(i64, String, String, Option<String>, String)> = sqlx::query_as(
@@ -553,7 +555,7 @@ async fn additions(
          ORDER BY r.name",
     )
     .bind(conversation_id)
-    .fetch_all(pool)
+    .fetch_all(&mut *connection)
     .await
     .with_context(|| {
         format!("reading what the steers of Conversation {conversation_id} took in")
@@ -585,7 +587,10 @@ async fn additions(
 /// A steer with no row is one recorded before any of this was written down,
 /// which is why nothing here fills a gap in: the map has no entry for it, and
 /// the record reads back as the steer it is.
-async fn sources(pool: &SqlitePool, conversation_id: i64) -> Result<HashMap<i64, Lifecycle>> {
+async fn sources(
+    connection: &mut sqlx::SqliteConnection,
+    conversation_id: i64,
+) -> Result<HashMap<i64, Lifecycle>> {
     let rows: Vec<(i64, String)> = sqlx::query_as(
         "SELECT f.event_id, f.state
          FROM steer_sources f
@@ -593,7 +598,7 @@ async fn sources(pool: &SqlitePool, conversation_id: i64) -> Result<HashMap<i64,
          WHERE s.conversation_id = ?",
     )
     .bind(conversation_id)
-    .fetch_all(pool)
+    .fetch_all(&mut *connection)
     .await
     .with_context(|| {
         format!("reading what the steers of Conversation {conversation_id} came out of")
@@ -609,7 +614,7 @@ async fn sources(pool: &SqlitePool, conversation_id: i64) -> Result<HashMap<i64,
 
 /// And the ones each opened up, read the same way and in the same order.
 async fn upgrades(
-    pool: &SqlitePool,
+    connection: &mut sqlx::SqliteConnection,
     conversation_id: i64,
 ) -> Result<HashMap<i64, Vec<SteerUpgrade>>> {
     let rows: Vec<(i64, String, String)> = sqlx::query_as(
@@ -621,7 +626,7 @@ async fn upgrades(
          ORDER BY r.name",
     )
     .bind(conversation_id)
-    .fetch_all(pool)
+    .fetch_all(&mut *connection)
     .await
     .with_context(|| {
         format!("reading what the steers of Conversation {conversation_id} opened up")

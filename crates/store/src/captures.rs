@@ -263,7 +263,7 @@ async fn write_summary(
 /// Timeline either way — what is not done here is a read per Event, which is
 /// the whole reason the summary is held rather than derived.
 pub(crate) async fn on_timeline(
-    pool: &SqlitePool,
+    connection: &mut sqlx::SqliteConnection,
     conversation_id: i64,
 ) -> Result<HashMap<i64, Summary>> {
     let rows: Vec<(i64, i64, Option<i64>, String)> = sqlx::query_as(
@@ -274,7 +274,7 @@ pub(crate) async fn on_timeline(
          WHERE e.conversation_id = ?",
     )
     .bind(conversation_id)
-    .fetch_all(pool)
+    .fetch_all(&mut *connection)
     .await
     .with_context(|| format!("reading the Captures of Conversation {conversation_id}"))?;
 

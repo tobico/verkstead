@@ -3399,6 +3399,13 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
         Option<String>,
     );
 
+    // One moment of the record for all the reads below, because each of them
+    // is joined onto the one above: an Event read here whose Capture is gone by
+    // the read of the Captures is a session's output with nothing beside it,
+    // and that is what a record landing again between the two leaves — see
+    // [`super::reading`].
+    let mut tx = super::reading(pool, "reading a Timeline").await?;
+
     let rows: Vec<Row> = sqlx::query_as(
         "SELECT e.id, e.at, e.kind, e.body,
                 q.id, q.body, r.submitted_at, r.body, a.archived_at AS locked_at,
@@ -3415,7 +3422,7 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
          ORDER BY e.id",
     )
     .bind(conversation_id)
-    .fetch_all(pool)
+    .fetch_all(&mut *tx)
     .await
     .with_context(|| format!("reading the Timeline of Conversation {conversation_id}"))?;
 
@@ -3428,46 +3435,48 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
     // The Capture summaries first, which is the one of the three that is on
     // nearly every Timeline: how much a session printed, how many turns its
     // conversation took, and the last thing it said.
-    let mut summaries = super::captures::on_timeline(pool, conversation_id).await?;
+    let mut summaries = super::captures::on_timeline(&mut tx, conversation_id).await?;
 
     // And the pull request, for the same arithmetic and a cheaper read still:
     // there is one per Conversation, and until the finish step has run there is
     // none.
-    let mut pull_requests = super::pull_requests::on_timeline(pool, conversation_id).await?;
+    let mut pull_requests = super::pull_requests::on_timeline(&mut tx, conversation_id).await?;
 
     // And what each commit carries that the query above has no column left for,
     // for the same arithmetic: what the agent wrote under its subject, and
     // whether the commit is a merge. One read for both, since it is one join
     // either way — see [`super::commits::beside_commits_on_timeline`].
     let mut beside_commits =
-        super::commits::beside_commits_on_timeline(pool, conversation_id).await?;
+        super::commits::beside_commits_on_timeline(&mut tx, conversation_id).await?;
 
     // And the Pauses, for the arithmetic again and at the pull request's cost:
     // an account running out of window is the rare Event, so this is one more
     // query that nearly always comes back with nothing.
-    let mut pauses = super::pauses::on_timeline(pool, conversation_id).await?;
+    let mut pauses = super::pauses::on_timeline(&mut tx, conversation_id).await?;
 
     // And what each steer settled beside the target and body its Event carries
     // — the ticks, the Pairing and the companion rows — for the arithmetic
     // again. A Conversation nobody has steered answers with nothing, and one
     // steered before this was written down answers with nothing for that steer.
-    let mut steers = super::steers::on_timeline(pool, conversation_id).await?;
+    let mut steers = super::steers::on_timeline(&mut tx, conversation_id).await?;
 
     // And who left each Memo and whether it has been taken back, for the
     // arithmetic again: one read, and a Timeline nobody left a Memo on answers
     // with nothing.
-    let mut memos = super::memos::on_timeline(pool, conversation_id).await?;
+    let mut memos = super::memos::on_timeline(&mut tx, conversation_id).await?;
 
     // And how each of the Sets above was asked, for the arithmetic again — see
     // [`super::deferrals::stored_on_timeline`]. Cheaper than any of them: one
     // indexed column, and most Conversations have no stored ask at all, which
     // is what a Set this does not name comes back as.
-    let stored = super::deferrals::stored_on_timeline(pool, conversation_id).await?;
+    let stored = super::deferrals::stored_on_timeline(&mut tx, conversation_id).await?;
 
     // And what each of those sessions ran under, for the arithmetic again and
     // at the Capture summaries' cost: one row per session, and a Timeline with
     // no session on it answers with nothing.
-    let mut ran_under = super::session_pairings::on_timeline(pool, conversation_id).await?;
+    let mut ran_under = super::session_pairings::on_timeline(&mut tx, conversation_id).await?;
+
+    tx.commit().await.context("finishing reading a Timeline")?;
 
     rows.into_iter()
         .map(|row| {

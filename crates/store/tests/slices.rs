@@ -23,11 +23,11 @@ use std::path::PathBuf;
 use sqlx::SqlitePool;
 use verkstead_schema::Response;
 use verkstead_store::{
-    Account, Arrival, ArrivingPicked, Ask, Birth, Event, Lifecycle, Memo, ProfileFacts, Renaming,
-    STAYS_BEHIND, Settlements, Submission, arrive, ask, capture, carried_tables, create_profile,
-    deleted_tables, land, load_conversation, load_response, queue_to_join, register_repo,
-    session_id, sets_as_they_landed, slice, standing_previews, start_conversation, submit_response,
-    timeline, transcript,
+    Account, Arrival, ArrivingPicked, Ask, Birth, Cell, Commit, Event, Lifecycle, Memo,
+    ProfileFacts, Renaming, STAYS_BEHIND, Settlements, Slice, Submission, arrive, ask, capture,
+    carried_tables, create_profile, deleted_tables, land, load_conversation, load_response,
+    queue_to_join, record_commit, register_repo, session_id, sets_as_they_landed, slice,
+    standing_previews, start_conversation, submit_response, timeline, transcript,
 };
 
 mod owning;
@@ -189,6 +189,86 @@ async fn the_record_lands_on_the_far_end_reading_as_it_read_here() {
     );
 }
 
+/// A slice taken while the work is still committing reads the record at one
+/// moment: every commit in it comes with the Event it hangs off.
+///
+/// **What the round trips of the server's `tests/transfer.rs` kept tripping
+/// over.** A slice is a table at a time, and the session behind the work can
+/// still be recording a commit while one is read — an Event and its commit
+/// written together between the read of the Events and the read of the
+/// commits. Read as separate moments, that slice carries the commit without
+/// its Event, and the far end refuses the whole move for it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_slice_taken_while_commits_land_carries_the_event_of_every_commit_in_it() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo = owning::repo(&pool).await;
+    let id = start_conversation(&pool, repo, "rate-limiting", BORN_ON)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let committing = tokio::spawn({
+        let pool = pool.clone();
+
+        async move {
+            for n in 0..300 {
+                let commit = Commit {
+                    sha: format!("{n:040x}"),
+                    subject: format!("feat: step {n}"),
+                    files: 1,
+                    insertions: 1,
+                    deletions: 0,
+                    summary: None,
+                    repo: None,
+                    merge: false,
+                };
+
+                record_commit(&pool, id, repo, &commit).await.unwrap();
+            }
+        }
+    });
+
+    let mut slices = 0;
+
+    while !committing.is_finished() {
+        let read = slice(&pool, id).await.unwrap();
+        let events = ids_in(&read, "timeline_events", "id");
+        let named = ids_in(&read, "commits", "event_id");
+
+        assert!(
+            named.is_subset(&events),
+            "slice {slices} carries commits naming Events it does not carry: {:?}",
+            named.difference(&events).collect::<Vec<_>>(),
+        );
+
+        slices += 1;
+    }
+
+    committing.await.unwrap();
+}
+
+/// The ids one column of one carried table holds in a slice.
+fn ids_in(slice: &Slice, table: &str, column: &str) -> BTreeSet<i64> {
+    let rows = slice
+        .tables
+        .iter()
+        .find(|rows| rows.table == table)
+        .unwrap_or_else(|| panic!("a slice carries {table}"));
+
+    let Some(at) = rows.columns.iter().position(|named| named == column) else {
+        // No rows read, so no columns named either.
+        return BTreeSet::new();
+    };
+
+    rows.rows
+        .iter()
+        .filter_map(|row| match row[at] {
+            Cell::Int(id) => Some(id),
+            _ => None,
+        })
+        .collect()
+}
+
 /// A Preview crosses with its command and its stamp, under the id the far end
 /// gave the Conversation.
 #[tokio::test]
@@ -292,6 +372,55 @@ async fn a_record_landing_again_takes_the_one_that_was_here_with_it() {
         second.iter().all(|event| !first.contains(event)),
         "every Event on it is one this landing wrote: {second:?} against {first:?}",
     );
+}
+
+/// The Timeline read while the record lands again reads one record or the
+/// other, never the Events of the first with the Captures of the second.
+///
+/// **What the round trips of the server's `tests/transfer.rs` tripped over once
+/// the slice was read at one moment.** A return lands against the record
+/// already there, taking it away and writing every Event under a new id in one
+/// transaction — and the Timeline is a query for the Events and one more for
+/// each kind joined in beside them. Read across that landing, its Events are
+/// the old ones and its Captures the new, so every session's output on it has
+/// none, which fails the whole Conversation's page.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_timeline_read_while_the_record_lands_again_reads_one_record() {
+    let moved = moved("rate-limiting").await;
+
+    let read = slice(&moved.here.pool, moved.worked.id).await.unwrap();
+
+    let renaming = Renaming {
+        repos: repos(&moved.here.pool)
+            .await
+            .into_iter()
+            .zip(repos(&moved.there.pool).await)
+            .collect(),
+        ..Renaming::default()
+    };
+
+    let landing = tokio::spawn({
+        let pool = moved.there.pool.clone();
+        let to = moved.to;
+
+        async move {
+            for _ in 0..30 {
+                land(&pool, to, &read, &renaming).await.unwrap();
+            }
+        }
+    });
+
+    let mut reads = 0;
+
+    while !landing.is_finished() {
+        timeline(&moved.there.pool, moved.to)
+            .await
+            .unwrap_or_else(|why| panic!("read {reads} of the Timeline failed: {why:#}"));
+
+        reads += 1;
+    }
+
+    landing.await.unwrap();
 }
 
 /// A stage that crosses queued to join its roadmap's chain arrives queued, at a

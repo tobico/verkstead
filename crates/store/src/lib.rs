@@ -664,8 +664,8 @@ pub async fn open_database(path: &Path) -> Result<SqlitePool> {
 /// failure of it is reported under.
 ///
 /// `BEGIN IMMEDIATE` rather than the plain `BEGIN` sqlx opens, and every
-/// transaction in the store goes through here, because every transaction in the
-/// store writes. What each of them does is read the record, decide on it, and
+/// transaction in the store that writes goes through here — the only other kind
+/// is a read made at one moment, which is [`reading`]'s. What each of them does is read the record, decide on it, and
 /// write — a state read before the move it authorises, a count read before the
 /// row that changes it — and that shape is the one SQLite handles worst.
 ///
@@ -695,6 +695,27 @@ pub(crate) async fn writing(
     doing: &'static str,
 ) -> Result<sqlx::Transaction<'static, sqlx::Sqlite>> {
     pool.begin_with("BEGIN IMMEDIATE").await.context(doing)
+}
+
+/// Open a transaction that only reads, with `doing` as the words any failure
+/// of it is reported under: **one moment of the record** for a read made of
+/// several queries.
+///
+/// A query at a time off the pool is a moment apiece, and the work does not
+/// stop for a read — a session's commit is an Event and the row beside it, and
+/// a record landing again takes every Event away and writes it under a new id.
+/// A read across either sees one half without the other, which reads as a
+/// database somebody has been in by hand. Under WAL a read transaction reads
+/// the database as it stood at its first statement, whatever is committed
+/// beside it, and blocks no writer while it does.
+///
+/// The plain deferred `BEGIN`, unlike [`writing`]'s: nothing here is ever
+/// promoted to a write, so there is no promotion to fail.
+pub(crate) async fn reading(
+    pool: &SqlitePool,
+    doing: &'static str,
+) -> Result<sqlx::Transaction<'static, sqlx::Sqlite>> {
+    pool.begin().await.context(doing)
 }
 
 /// Bring an opened database up to the shape the server expects. Safe to run

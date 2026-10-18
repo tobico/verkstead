@@ -141,7 +141,7 @@ type Row = (i64, Option<String>, Option<String>, Option<String>);
 /// row is simply absent from the map, and one whose agent was never written down
 /// is in it without one.
 pub(crate) async fn on_timeline(
-    pool: &SqlitePool,
+    connection: &mut sqlx::SqliteConnection,
     conversation_id: i64,
 ) -> Result<HashMap<i64, RanUnder>> {
     let rows: Vec<Row> = sqlx::query_as(
@@ -152,7 +152,7 @@ pub(crate) async fn on_timeline(
          WHERE e.conversation_id = ?",
     )
     .bind(conversation_id)
-    .fetch_all(pool)
+    .fetch_all(&mut *connection)
     .await
     .with_context(|| {
         format!("reading what the sessions of Conversation {conversation_id} ran under")

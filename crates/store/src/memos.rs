@@ -150,7 +150,7 @@ pub async fn leave_memo(
 /// here is read by: the Timeline's query is at the columns a tuple can be read
 /// back as.
 pub(crate) async fn on_timeline(
-    pool: &SqlitePool,
+    connection: &mut sqlx::SqliteConnection,
     conversation_id: i64,
 ) -> Result<HashMap<i64, Memo>> {
     type Row = (
@@ -168,7 +168,7 @@ pub(crate) async fn on_timeline(
          FROM memos WHERE conversation_id = ?",
     )
     .bind(conversation_id)
-    .fetch_all(pool)
+    .fetch_all(&mut *connection)
     .await
     .with_context(|| format!("reading the Memos of Conversation {conversation_id}"))?;
 
@@ -349,7 +349,12 @@ pub async fn memo_of(
         return Ok(None);
     };
 
-    Ok(on_timeline(pool, conversation_id)
+    let mut connection = pool
+        .acquire()
+        .await
+        .with_context(|| format!("reading who left Memo {memo_id}"))?;
+
+    Ok(on_timeline(&mut connection, conversation_id)
         .await?
         .remove(&memo_id)
         .map(|memo| (at, markdown, memo)))

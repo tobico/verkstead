@@ -80,7 +80,7 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
 /// query is already at the sixteen positions a tuple can be read back as. It costs little where the join would not have —
 /// most Conversations answer this with nothing.
 pub(crate) async fn on_timeline(
-    pool: &SqlitePool,
+    connection: &mut sqlx::SqliteConnection,
     conversation_id: i64,
 ) -> Result<std::collections::HashMap<i64, Pause>> {
     type Row = (i64, String, String);
@@ -91,7 +91,7 @@ pub(crate) async fn on_timeline(
          WHERE conversation_id = ?",
     )
     .bind(conversation_id)
-    .fetch_all(pool)
+    .fetch_all(&mut *connection)
     .await
     .with_context(|| format!("reading the Pauses of Conversation {conversation_id}"))?;
 

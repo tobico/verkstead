@@ -542,7 +542,7 @@ pub(crate) struct BesideCommit {
 /// is a column of the commit and every commit has one: the summary is what is
 /// left-joined, and most of them come back without.
 pub(crate) async fn beside_commits_on_timeline(
-    pool: &SqlitePool,
+    connection: &mut sqlx::SqliteConnection,
     conversation_id: i64,
 ) -> Result<HashMap<i64, BesideCommit>> {
     let rows: Vec<(i64, Option<String>, bool)> = sqlx::query_as(
@@ -552,7 +552,7 @@ pub(crate) async fn beside_commits_on_timeline(
          WHERE c.conversation_id = ?",
     )
     .bind(conversation_id)
-    .fetch_all(pool)
+    .fetch_all(&mut *connection)
     .await
     .with_context(|| {
         format!("reading the commits on the Timeline of Conversation {conversation_id}")
