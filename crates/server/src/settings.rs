@@ -1585,19 +1585,6 @@ impl Config {
         true
     }
 
-    /// The same config with `author` as its `git_author` — what a Keeper hands
-    /// its Annex at every start, so a change on the Keeper reaches the Annex's
-    /// sessions at its next (see [`crate::annex::booting`]). `false` is a
-    /// config that said so already, left as it was.
-    pub fn commit_as(&mut self, author: &GitAuthor) -> bool {
-        if &self.git_author == author {
-            return false;
-        }
-
-        self.git_author = author.clone();
-        true
-    }
-
     /// The same config with the keys the settings page never drew as they
     /// already stand.
     ///

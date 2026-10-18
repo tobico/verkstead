@@ -1738,9 +1738,7 @@ async fn a_keepers_start_boots_its_annex_and_links_it() {
     let keeper = Verkstead::asking().await;
     let boxed = Arc::new(Boxed::of(&annex, KEEPER_AT));
 
-    Annexed::of(boxed.clone(), keeper.settings())
-        .started(&keeper.devices())
-        .await;
+    Annexed::of(boxed.clone()).started(&keeper.devices()).await;
 
     assert_eq!(boxed.booted.load(Ordering::SeqCst), 1);
 
@@ -1770,59 +1768,40 @@ async fn a_keepers_start_boots_its_annex_and_links_it() {
     );
 }
 
-/// The Annex's sessions commit as the Keeper's git author and authenticate
-/// with its GitHub token, handed in at every start: a change on the Keeper
-/// reaches the Annex the next time the two start together, and the rest of
-/// the Annex's files stand as they were.
+/// A Keeper's start hands its Annex nothing of its Authors: the Annex is a
+/// linked Member, so the Keeper's reach it as mirrors over the one list, token
+/// copies and all (ADR-0025), and its own files hold no Author and no token —
+/// only the link's own key.
 #[tokio::test]
-async fn a_keepers_start_hands_its_annex_the_git_author_and_token() {
+async fn a_keepers_start_hands_its_annex_no_author_of_its_own() {
     let annex = made_annex().await;
     let keeper = Verkstead::asking().await;
     let boxed = Arc::new(Boxed::of(&annex, KEEPER_AT));
 
     std::fs::write(
         keeper.settings().config_path(),
-        "git_author:\n  name: Ada Lovelace\n  email: ada@example.com\n",
+        "authors:\n  - id: work\n    name: Ada Lovelace\n    email: ada@example.com\n",
     )
     .unwrap();
     std::fs::write(
         keeper.settings().secrets_path(),
-        "github_token: ghp_first\n",
+        "author_tokens:\n  work: ghp_first\n",
     )
     .unwrap();
 
-    Annexed::of(boxed.clone(), keeper.settings())
-        .started(&keeper.devices())
-        .await;
+    Annexed::of(boxed.clone()).started(&keeper.devices()).await;
 
     let kept = Settings::in_data_dir(annex.dir.path());
-    assert_eq!(kept.config().git_author().name(), Some("Ada Lovelace"));
-    assert_eq!(kept.config().git_author().email(), Some("ada@example.com"));
-    assert_eq!(kept.secrets().github_token(), Some("ghp_first"));
     assert_eq!(
         kept.config().kept_by().map(KeptBy::device),
         Some(A),
-        "the link's own key stands beside them",
+        "the link's own key is written",
     );
-
-    // And the Keeper's changed, which the next start carries across.
-    std::fs::write(
-        keeper.settings().config_path(),
-        "git_author:\n  name: Ada King\n  email: ada@example.com\n",
-    )
-    .unwrap();
-    std::fs::write(
-        keeper.settings().secrets_path(),
-        "github_token: ghp_second\n",
-    )
-    .unwrap();
-
-    Annexed::of(boxed.clone(), keeper.settings())
-        .started(&keeper.devices())
-        .await;
-
-    assert_eq!(kept.config().git_author().name(), Some("Ada King"));
-    assert_eq!(kept.secrets().github_token(), Some("ghp_second"));
+    assert!(
+        kept.config().authors().is_empty(),
+        "and no Author of its own"
+    );
+    assert_eq!(kept.secrets().author_token("work"), None, "nor its token");
 }
 
 /// An Annex whose service never answers is a line on its row with what the
@@ -1832,7 +1811,7 @@ async fn an_annex_that_never_answers_is_a_line_on_its_row() {
     let annex = made_annex().await;
     let keeper = Verkstead::asking().await;
 
-    Annexed::of(Arc::new(Boxed::of(&annex, KEEPER_AT)), keeper.settings())
+    Annexed::of(Arc::new(Boxed::of(&annex, KEEPER_AT)))
         .started(&keeper.devices())
         .await;
 
@@ -1849,7 +1828,7 @@ async fn an_annex_that_never_answers_is_a_line_on_its_row() {
     };
 
     let devices = keeper.devices().waiting(PATIENCE);
-    Annexed::of(Arc::new(failing), keeper.settings())
+    Annexed::of(Arc::new(failing))
         .waiting(Duration::from_secs(1))
         .started(&devices)
         .await;
@@ -1886,7 +1865,7 @@ async fn an_annex_never_linked_that_never_answers_is_said_beside_this_device() {
     };
 
     let devices = keeper.devices().waiting(PATIENCE);
-    let came_up = Annexed::of(Arc::new(failing), keeper.settings())
+    let came_up = Annexed::of(Arc::new(failing))
         .waiting(Duration::from_secs(1))
         .up(&devices)
         .await;
@@ -1918,7 +1897,7 @@ async fn no_box_is_booted_where_none_was_made() {
         ..Boxed::of(&annex, KEEPER_AT)
     });
 
-    let annexed = Annexed::of(boxed.clone(), keeper.settings());
+    let annexed = Annexed::of(boxed.clone());
     annexed.started(&keeper.devices()).await;
     annexed.stopped().await;
 
@@ -1934,7 +1913,7 @@ async fn the_stop_terminates_the_box_the_start_booted() {
     let keeper = Verkstead::asking().await;
     let boxed = Arc::new(Boxed::of(&annex, KEEPER_AT));
 
-    let annexed = Annexed::of(boxed.clone(), keeper.settings());
+    let annexed = Annexed::of(boxed.clone());
     annexed.started(&keeper.devices()).await;
 
     annexed.stopped().await;

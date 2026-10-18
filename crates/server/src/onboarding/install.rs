@@ -988,7 +988,7 @@ fn work(
 
             (Some(making), _) => {
                 run.running(unit);
-                made(run, making, annexing, settings)
+                made(run, making, annexing)
             }
 
             (None, How::Raised) => {
@@ -1110,12 +1110,7 @@ fn opened(
 ///
 /// What it failed with is the row's reason as it stands, every cause under it
 /// said: a download that stopped part way is worth saying why.
-fn made(
-    run: &Arc<Run>,
-    making: Making,
-    annexing: Option<&Annexing>,
-    settings: &Settings,
-) -> Progress {
+fn made(run: &Arc<Run>, making: Making, annexing: Option<&Annexing>) -> Progress {
     let Some(annexing) = annexing else {
         return Progress::Failed(NO_ANNEX.to_owned());
     };
@@ -1133,7 +1128,7 @@ fn made(
         }
 
         Making::Import => annex.make(&annex.disk().join(annex.image().file)),
-        Making::Write => written(annexing, settings, &run.hostname),
+        Making::Write => written(annexing, &run.hostname),
         Making::Rebuild => rebuilt(run, annex),
         Making::Link => linked(annexing),
 
@@ -1180,20 +1175,15 @@ fn downloading(name: &str, so_far: u64, whole: Option<u64>) -> String {
 /// box's root's and not this machine's user's. The two settings files go to
 /// the module's Data Directory before its service user exists, and the
 /// rebuild's service start is what hands them over — see [`rebuilt`].
-fn written(annexing: &Annexing, settings: &Settings, hostname: &str) -> anyhow::Result<()> {
+fn written(annexing: &Annexing, hostname: &str) -> anyhow::Result<()> {
     let Some(keeping) = annexing.keeping.as_ref() else {
         anyhow::bail!("{NO_KEEPER}");
     };
-
-    let config = settings.config();
-    let secrets = settings.secrets();
 
     let files = flake::written(
         &flake::Keeper {
             hostname,
             kept_by: &keeping.kept_by,
-            git_author: config.git_author(),
-            github_token: secrets.github_token(),
         },
         &annexing.binary,
     )?;

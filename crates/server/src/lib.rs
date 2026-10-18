@@ -2675,10 +2675,9 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
     let annexed = (platform::Platform::HERE == platform::Platform::Windows
         && annex_forward.is_some())
     .then(|| {
-        Arc::new(annex::booting::Annexed::of(
-            Arc::new(annex::wsl::Wsl::here()),
-            settings.clone(),
-        ))
+        Arc::new(annex::booting::Annexed::of(Arc::new(
+            annex::wsl::Wsl::here(),
+        )))
     });
 
     // And this device's cluster as something to *do* things to rather than to
