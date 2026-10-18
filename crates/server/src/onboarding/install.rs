@@ -81,7 +81,7 @@ use verkstead_render::{Dependency, Distro, InstallState, RunPhase, RunView};
 
 use super::{Machine, SHELL};
 use crate::annex::flake::{self, Binary};
-use crate::annex::{Backend, Inside, Keeping, Probed, image};
+use crate::annex::{Backend, Inside, Keeping, Probed, image, pinning};
 use crate::platform::Platform;
 use crate::remote::{Elevate, Raised};
 use crate::settings::Settings;
@@ -356,12 +356,8 @@ const NO_BOOT: &str = "The distro is made, but this Verkstead can't start it. It
 /// distro taken away under the run.
 const NOT_THERE: &str = "The Verkstead distro wasn't there to start. Press Next to make it again.";
 
-/// How many of a rebuild's last lines a failed one leaves as the row's reason.
-const TAIL: usize = 12;
-
-/// Where the files the box is made of go in it — see
+/// Where the Annex's settings files go in the box — see
 /// [`crate::annex::flake::Written`].
-const NIXOS: &str = "/etc/nixos";
 const STATE: &str = crate::annex::DATA_DIR;
 
 /// How often the marker is glanced at while a dialog is up — see [`STARTED`].
@@ -1190,24 +1186,14 @@ fn written(annexing: &Annexing, hostname: &str) -> anyhow::Result<()> {
 
     let annex = annexing.annex.as_ref();
 
-    annex.write(&format!("{NIXOS}/flake.nix"), files.flake.as_bytes(), 0o644)?;
-    annex.write(
-        &format!("{NIXOS}/configuration.nix"),
-        files.configuration.as_bytes(),
-        0o644,
+    pinning::put(
+        annex,
+        &flake::System {
+            flake: files.flake,
+            configuration: files.configuration,
+        },
+        &annexing.binary,
     )?;
-
-    if let Binary::Copied(binary) = &annexing.binary {
-        let bytes = std::fs::read(binary).map_err(|error| {
-            anyhow::anyhow!(
-                "Verkstead couldn't read {}, which {} names: {error}",
-                binary.display(),
-                flake::ANNEX_BINARY,
-            )
-        })?;
-
-        annex.write(&format!("{NIXOS}/{}", flake::COPIED_BINARY), &bytes, 0o755)?;
-    }
 
     annex.write(
         &format!("{STATE}/config.yaml"),
@@ -1224,55 +1210,18 @@ fn written(annexing: &Annexing, hostname: &str) -> anyhow::Result<()> {
 }
 
 /// The box rebuilt onto what [`written`] put in it, each line it prints moving
-/// the status line on, and the box then said to be made.
-///
-/// **Flakes said on the command line**, because the configuration that turns
-/// them on is the one being switched to: the image's own `nix` may not have
-/// them on for this first rebuild.
+/// the status line on, and the box then said to be made — see
+/// [`pinning::rebuilt`], which the re-pin at the Keeper's start rebuilds with
+/// too.
 ///
 /// **And the Data Directory handed to the service user** once the rebuild has
 /// made one: systemd hands over a `StateDirectory` it finds owned by somebody
 /// else when the service starts, and this says so outright rather than
 /// leaving `secrets.yaml` to that.
 ///
-/// A rebuild that failed leaves its last lines as the reason — what `nix` says
-/// about a build that failed is at the end, and it is what anybody would look
-/// for.
+/// A rebuild that failed leaves its last lines as the reason.
 fn rebuilt(run: &Arc<Run>, annex: &dyn Backend) -> anyhow::Result<()> {
-    let flake = format!("{NIXOS}#{}", flake::CONFIGURATION);
-    let mut tail = std::collections::VecDeque::with_capacity(TAIL);
-
-    let status = annex.follow(
-        Inside::Root,
-        &[
-            "NIX_CONFIG=experimental-features = nix-command flakes",
-            "nixos-rebuild",
-            "switch",
-            "--flake",
-            &flake,
-        ],
-        &mut |line| {
-            let line = line.trim();
-
-            if line.is_empty() {
-                return;
-            }
-
-            run.installing(line);
-
-            if tail.len() == TAIL {
-                tail.pop_front();
-            }
-            tail.push_back(line.to_owned());
-        },
-    )?;
-
-    if !status.success() {
-        match tail.is_empty() {
-            true => anyhow::bail!("nixos-rebuild failed and said nothing."),
-            false => anyhow::bail!("{}", Vec::from(tail).join("\n")),
-        }
-    }
+    pinning::rebuilt(annex, &mut |line| run.installing(line))?;
 
     let handed = annex.run(Inside::Root, &["chown", "-R", "verkstead:verkstead", STATE])?;
 
@@ -1489,7 +1438,7 @@ fn annexing(machine: &Machine, plan: &mut Plan) {
                 }));
         }
 
-        Probed::NoDistro => {
+        Probed::NoDistro | Probed::Unread => {
             const STEPS: &[(Making, How, &str)] = &[
                 (Making::Download, How::AsTheUser, "Downloading NixOS-WSL…"),
                 (

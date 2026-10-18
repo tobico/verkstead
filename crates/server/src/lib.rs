@@ -2675,9 +2675,10 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
     let annexed = (platform::Platform::HERE == platform::Platform::Windows
         && annex_forward.is_some())
     .then(|| {
-        Arc::new(annex::booting::Annexed::of(Arc::new(
-            annex::wsl::Wsl::here(),
-        )))
+        Arc::new(
+            annex::booting::Annexed::of(Arc::new(annex::wsl::Wsl::here()), settings.clone())
+                .running(annex::flake::Binary::from_env()),
+        )
     });
 
     // And this device's cluster as something to *do* things to rather than to
@@ -2724,7 +2725,11 @@ pub async fn run(config: Config, started_by: StartedBy) -> Result<()> {
     .forwarding_for_the_annex(annex_pointing.clone())
     // And the port this start bound its peer listener on, which an Annex it
     // makes is told to dial it at — see [`device::Devices::keeping`].
-    .peering_on(peer.address().port());
+    .peering_on(peer.address().port())
+    // And the pages to tell when the list moves with nobody pressing anything,
+    // which is this start forgetting an Annex whose box has gone — see
+    // [`device::Devices::forget_annex`].
+    .nudging(nudges.clone());
 
     let devices = match &annexed {
         Some(annexed) => devices.keeping_an_annex(annexed.clone()),

@@ -20,7 +20,8 @@
 //! at all. The release tag still supplies the module.
 //!
 //! Nothing here touches the box: what puts these files in it is the wizard's
-//! install run, through [`super::Backend::run`].
+//! install run, through [`super::Backend::run`], and the re-pin at the
+//! Keeper's start — see [`super::pinning`].
 
 use std::path::PathBuf;
 
@@ -50,6 +51,25 @@ pub const REPOS: &str = "/srv/repos";
 
 /// The Keeper's own version, which the box is pinned to.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// The directory of the box the flake, its lock, its configuration and a
+/// development build's binary are in.
+pub const NIXOS: &str = "/etc/nixos";
+
+/// Where the flake is in the box, which is where the release it is pinned to
+/// is read back from — see [`pinned`].
+pub const IN_THE_BOX: &str = "/etc/nixos/flake.nix";
+
+/// And its configuration, and the lock its first rebuild wrote beside it.
+pub const CONFIGURATION_IN_THE_BOX: &str = "/etc/nixos/configuration.nix";
+pub const LOCK_IN_THE_BOX: &str = "/etc/nixos/flake.lock";
+
+/// And where a development build's binary is copied to — see
+/// [`Binary::Copied`].
+pub const COPIED_IN_THE_BOX: &str = "/etc/nixos/verkstead";
+
+/// What the `verkstead` input's url is up to the tag — see [`pinned`].
+const RELEASE_URL: &str = "github:tobico/verkstead/v";
 
 /// The system the box is, and the release asset built for it.
 const SYSTEM: &str = "x86_64-linux";
@@ -113,8 +133,38 @@ pub struct Written {
     pub secrets: String,
 }
 
+/// The two `.nix` files alone, which are what a re-pin writes again — see
+/// [`super::pinning`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct System {
+    /// `/etc/nixos/flake.nix`.
+    pub flake: String,
+
+    /// `/etc/nixos/configuration.nix`.
+    pub configuration: String,
+}
+
 /// The files that make `keeper`'s Annex, running `binary`.
 pub fn written(keeper: &Keeper, binary: &Binary) -> std::io::Result<Written> {
+    let System {
+        flake,
+        configuration,
+    } = system(keeper.hostname, binary);
+
+    let config = Config::of_an_annex(keeper.kept_by.clone()).text()?;
+    let secrets = Secrets::default().text()?;
+
+    Ok(Written {
+        flake,
+        configuration,
+        config,
+        secrets,
+    })
+}
+
+/// The flake that pins the box to this Keeper's release running `binary`, and
+/// the configuration that names it after `hostname`.
+pub fn system(hostname: &str, binary: &Binary) -> System {
     let (binary_input, binary) = match binary {
         Binary::Released => (
             format!(
@@ -145,7 +195,7 @@ pub fn written(keeper: &Keeper, binary: &Binary) -> std::io::Result<Written> {
     let configuration = filled(
         CONFIGURATION_NIX,
         &[
-            ("hostName", &host_name(keeper.hostname)),
+            ("hostName", &host_name(hostname)),
             ("listen", &format!("127.0.0.1:{ANNEX_WORKBENCH_PORT}")),
             ("peerListen", &format!("0.0.0.0:{ANNEX_PEER_PORT}")),
             ("repos", REPOS),
@@ -153,15 +203,49 @@ pub fn written(keeper: &Keeper, binary: &Binary) -> std::io::Result<Written> {
         ],
     );
 
-    let config = Config::of_an_annex(keeper.kept_by.clone()).text()?;
-    let secrets = Secrets::default().text()?;
-
-    Ok(Written {
+    System {
         flake,
         configuration,
-        config,
-        secrets,
-    })
+    }
+}
+
+/// The inputs that are Verkstead's in a flake [`system`] wrote for `binary`:
+/// the release's module, and its binary where the flake fetches one. These are
+/// what a re-pin moves in the lock, and nothing else.
+pub fn verksteads(binary: &Binary) -> &'static [&'static str] {
+    match binary {
+        Binary::Released => &["verkstead", "verkstead-binary"],
+        Binary::Copied(_) => &["verkstead"],
+    }
+}
+
+/// The inputs **Update** moves in a flake [`system`] wrote for `binary`: both
+/// nixpkgs, and the Verkstead inputs with them — every input but `nixos-wsl`,
+/// which is pinned at the tag [`NIXOS_WSL`] names and moves with a release.
+pub fn updated(binary: &Binary) -> &'static [&'static str] {
+    match binary {
+        Binary::Released => &[
+            "nixpkgs",
+            "nixpkgs-unstable",
+            "verkstead",
+            "verkstead-binary",
+        ],
+        Binary::Copied(_) => &["nixpkgs", "nixpkgs-unstable", "verkstead"],
+    }
+}
+
+/// The release a flake this module wrote pins the box to: its `verkstead`
+/// input's tag, without the `v` — `0.42.0`, say — or `None` in a flake that
+/// names no release.
+///
+/// What the box was last rebuilt onto rather than what this Keeper is: a
+/// Keeper updated since reads its old release here until the box is pinned
+/// again.
+pub fn pinned(flake: &str) -> Option<String> {
+    let (_, after) = flake.split_once(RELEASE_URL)?;
+    let tag = &after[..after.find('"')?];
+
+    (!tag.is_empty()).then(|| tag.to_owned())
 }
 
 /// The stable channel the repository's own flake pins nixpkgs to:
@@ -285,6 +369,23 @@ mod tests {
         assert!(!unfilled(&flake), "{flake}");
     }
 
+    /// What a written flake pins is read back off it, which is the version
+    /// the Components row draws.
+    #[test]
+    fn the_release_pinned_is_read_back_off_the_written_flake() {
+        for binary in [Binary::Released, Binary::Copied("/tmp/verkstead".into())] {
+            let flake = written_for("winvm", &binary).flake;
+
+            assert_eq!(pinned(&flake).as_deref(), Some(VERSION), "{binary:?}");
+        }
+
+        assert_eq!(pinned("{ inputs = { }; }"), None);
+        assert_eq!(
+            pinned("verkstead.url = \"github:tobico/verkstead/v0.9.1\";"),
+            Some("0.9.1".to_owned())
+        );
+    }
+
     #[test]
     fn a_copied_binary_writes_no_binary_input() {
         let flake = written_for("winvm", &Binary::Copied("/tmp/verkstead".into())).flake;
@@ -296,6 +397,37 @@ mod tests {
             flake.contains(&format!("\"github:tobico/verkstead/v{VERSION}\"")),
             "the release tag still supplies the module: {flake}"
         );
+    }
+
+    /// Update moves every input the written flake declares but `nixos-wsl`,
+    /// for either binary — so an input a later template adds is one it moves
+    /// too, or this says so.
+    #[test]
+    fn update_moves_every_input_but_nixos_wsl() {
+        for binary in [Binary::Released, Binary::Copied("/tmp/verkstead".into())] {
+            let flake = written_for("winvm", &binary).flake;
+
+            let (_, inputs) = flake.split_once("inputs = {").unwrap();
+            let (inputs, _) = inputs.split_once("\n  };").unwrap();
+
+            // An input is a line at the block's own depth that names one.
+            let mut declared: Vec<&str> = inputs
+                .lines()
+                .filter(|line| line.starts_with("    ") && !line.starts_with("     "))
+                .filter_map(|line| {
+                    let name = line.trim().split(['.', ' ']).next()?;
+                    name.starts_with(|c: char| c.is_ascii_alphabetic())
+                        .then_some(name)
+                })
+                .filter(|name| *name != "nixos-wsl")
+                .collect();
+            declared.sort_unstable();
+
+            let mut moved = updated(&binary).to_vec();
+            moved.sort_unstable();
+
+            assert_eq!(moved, declared, "{binary:?}: {flake}");
+        }
     }
 
     #[test]

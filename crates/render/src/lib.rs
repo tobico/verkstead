@@ -21,6 +21,7 @@
 
 mod answering;
 mod browsing;
+mod components;
 mod conversations;
 mod device;
 mod files;
@@ -41,6 +42,7 @@ mod view;
 
 pub use answering::{Locked, Submitted};
 pub use browsing::{DirectoryEntry, DirectoryListing, EntryKind};
+pub use components::{AnnexComponent, AnnexState, ComponentsView};
 pub use conversations::{
     AbandonedRepo, AbandonedRoadmap, Adopted, AdoptedStage, AdoptionView, AgentOutputEvent,
     AgentSession, AnswerAttached, AnswerAttachmentRemoved, Attached, AttachedServerView,

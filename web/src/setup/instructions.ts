@@ -299,10 +299,14 @@ const WSL_ELSEWHERE: Instruction = {
   note: "WSL is part of Windows. There's nothing to install on this machine.",
 };
 
-/// And on a machine where WSL is on and its restart is still to come, whichever
-/// tab is open: what is left is that machine's restart, and no command.
+/// What is left on a machine where WSL is on and its restart is still to come,
+/// which the Components pane says of its row in these same words.
+export const WSL_RESTART_OWED = "Restart Windows to finish turning WSL on";
+
+/// And the WSL row's hint on such a machine, whichever tab is open: that
+/// machine's restart, and no command.
 const WSL_RESTART: Instruction = {
-  note: "Restart Windows to finish turning WSL on, then come back to this step.",
+  note: `${WSL_RESTART_OWED}, then come back to this step.`,
 };
 
 /// The nine tabs' own answers.

@@ -180,7 +180,11 @@ committed *after* the tag, so a tag's own tree names the previous release,
 where a flake input pointing at the asset locks its hash itself. **The Annex
 runs the release its Keeper runs**, and a Keeper that finds the Annex pinned
 to another version re-pins and rebuilds at its own start, before it boots
-the Annex; nixpkgs and NixOS-WSL move only on **Update**.
+the Annex; nixpkgs moves only on **Update**. **NixOS-WSL moves with the
+Keeper's release** rather than on Update: it is pinned at a release tag,
+which no flake update moves, and its image and module are proven together,
+so a release that bumps the pin is what moves it, and the re-pin at start is
+what writes it into the box.
 
 **A development build names its binary instead.** It reports the version of
 the last release and is not it, so `VERKSTEAD_ANNEX_BINARY` on the Keeper
@@ -210,11 +214,14 @@ was rejected again for ADR-0014's reasons.
 own and has no device select, so nothing in the UI reaches an Annex's; its
 Keeper copies in, at every boot, everything that is about the work rather
 than the machine — the Instructions, the MCP servers with their header
-values, the at-once limit and Cleanup. **Not its Authors**: the Annex is a
-linked Member, so the Keeper's reach it as mirrors over the one list, token
-copies included (ADR-0025), and a copy written in as well would be one Author
-at home on two devices. It holds none of its own, and with one mirror a Repo
-registered there is that mirror's. An MCP
+values, the at-once limit, Cleanup, the comments Wrapping ignores, how a
+conflict is resolved, and whether the record is shared on Done — a
+Conversation in the Annex wraps and settles there, so those last three are
+about its work too. **Not its Authors**: the Annex is a linked Member, so the
+Keeper's reach it as mirrors over the one list, token copies included
+(ADR-0025), and a copy written in as well would be one Author at home on two
+devices. It holds none of its own, and with one mirror a Repo registered
+there is that mirror's. An MCP
 server's header names are in `config.yaml` and their values in
 `secrets.yaml`, so both files are copied from: a server copied without its
 values is one declared in the Annex and refused by its far end. What stays the Annex's is what
@@ -231,7 +238,8 @@ progress bar. A machine whose virtualization is off says so on the row.
 
 **Components** is a new settings card, and the Annex's row is its first: the
 status (running or stopped, version, disk use), **Install** for a machine
-that skipped the wizard row, and **Update**. Update moves nixpkgs too, and
+that skipped the wizard row, and **Update**. Update moves both nixpkgs
+inputs too, and
 is refused while a session runs in the Annex, naming the Conversation — a
 rebuild restarts the Annex's server, and every session in it with it. There
 is no Stop, no Start and no Remove: a distro removed by hand

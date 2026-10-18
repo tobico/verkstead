@@ -132,8 +132,9 @@ const WHY: Record<Dependency, string> = {
 /// What a row that cannot be had here says, in place of a box.
 ///
 /// The WSL row's alone: a firmware with virtualization off is nothing a press
-/// here can change, so the row says what is wrong and where it is put right.
-const BARRED: Record<Barred, string> = {
+/// here can change, so the row says what is wrong and where it is put right —
+/// and the Components pane says it of its row in the same words.
+export const BARRED: Record<Barred, string> = {
   Virtualization:
     "Virtualization is off in this PC's firmware settings, so WSL can't run. " +
     "Turn it on there, then restart.",
@@ -474,7 +475,7 @@ function touched(
 /// Whether a row is one this machine has not got — which is what carries a
 /// checkbox, and what the objective is not met by. A row part of the way there
 /// is one of these too; a row that cannot be had here is not, and has no box.
-function absent(state: DependencyState): boolean {
+export function absent(state: DependencyState): boolean {
   return state.state === "Absent" || state.state === "Owed";
 }
 
@@ -541,7 +542,7 @@ function Choosing(props: {
 /// No rows on it. What the run has made of each of them is what the screen
 /// after this one is about, and a list of seven moving under a progress bar
 /// would be two accounts of the same thing.
-function Installing(props: {
+export function Installing(props: {
   run: RunView;
   stopping: boolean;
   cancel: () => void;
@@ -597,7 +598,7 @@ function Installing(props: {
 
 /// The hint screen: the rows Verkstead could not install here, what to run for
 /// each of them, and the press that is held until they are detected.
-function Hints(props: {
+export function Hints(props: {
   reading: OnboardingView;
   rows: DependencyView[];
   detected: number;

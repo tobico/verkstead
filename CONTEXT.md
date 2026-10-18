@@ -2199,9 +2199,10 @@ on the Keeper while the Annex is still coming up, and its rows read
 *unreachable* until it answers. It is reached through the **Annex Forward**,
 and it has no settings of its own: what is about the work rather than the
 machine — the Instructions, the MCP servers and their header values, the
-at-once limit, Cleanup — is copied in from its Keeper at every boot. **Its
-Authors are not copied**: it holds none of its own, and the Keeper's reach it
-as mirrors over the one list, token copies and all, the way they reach any
+at-once limit, Cleanup, the ignored comments, the conflict resolution and
+sharing on Done — is copied in from its Keeper at every boot. **Its Authors
+are not copied**: it holds none of its own, and the Keeper's reach it as
+mirrors over the one list, token copies and all, the way they reach any
 member — so with one, a Repo there is that one's.
 **And it never enters Onboarding Mode**: a kept Annex is told so in its
 config and skips the verdict, its objective being met by the mirrors its
@@ -2553,8 +2554,9 @@ added later will live, and today the one row that is there: the **Annex**,
 reading *Linux development (WSL)* on a Windows machine (ADR-0024). The row
 carries its status — running or stopped, the release it runs, the disk it
 takes — **Install** where there is none, which is the wizard's own install run
-started from here, and **Update**, which moves nixpkgs and NixOS-WSL as well
-as re-pinning Verkstead, and is **refused while a session runs in the Annex**,
+started from here, and **Update**, which moves both nixpkgs inputs — NixOS-WSL
+moves with Verkstead's own release, through the re-pin at the Keeper's start —
+and is **refused while a session runs in the Annex**,
 naming the Conversation: a rebuild restarts the Annex's server and every
 session with it. There is no Stop, no Start and no Remove. A distro removed
 by hand is forgotten at the Keeper's next start, and the row reads not

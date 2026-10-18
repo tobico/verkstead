@@ -1,0 +1,102 @@
+/* What this machine has installed beyond the wizard's checks — see
+   `Components.tsx`. The card is `SettingsCard`'s; the pane is a list of rows
+   set the way the Devices list on the Remote access pane is, because a
+   component is drawn the way a device is: a name, a word beside it, and a quiet
+   line of facts under it. */
+
+.componentsCard {
+  /* The look is `SettingsCard.module.css`'s; this names the card. */
+  min-width: 0;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin: 0.85rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.component {
+  min-width: 0;
+}
+
+/* The name and its word on one line, and Install or Update at its end where
+   there is one — set as the Devices list sets a row's press across from its
+   name. */
+.head {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+/* Install and Update, drawn as the Devices list's Add is: an outline in the
+   accent, this being the press that *does*. */
+.press {
+  flex: none;
+  margin-inline-start: auto;
+  padding: 0.3rem 0.7rem;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--accent);
+  background: none;
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.press:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+@media (hover: hover) {
+  .press:not(:disabled):hover {
+    border-color: var(--accent);
+  }
+}
+
+/* The wizard's install and hint screens, drawn in this pane while Install is
+   going or has something left to say — see `Dependencies.tsx`, whose own
+   styles they bring. */
+.screen {
+  margin-top: 0.85rem;
+}
+
+.name {
+  margin: 0;
+  font-size: 0.95rem;
+  overflow-wrap: anywhere;
+}
+
+/* *running*, *stopped*, *not installed*: a fact about the row, set quietly
+   beside the name the way *this device* is on a device's row. */
+.state {
+  margin-inline-start: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+}
+
+/* The release and the disk: exact strings, read the way an address is. */
+.facts {
+  margin: 0.25rem 0 0;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+}
+
+/* What the box said when it would not come up, drawn as the Devices row draws
+   the same line. */
+.trouble {
+  display: block;
+  margin: 0.5rem 0 0;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid var(--edge);
+  border-inline-start: 3px solid var(--stopped);
+  border-radius: 0.6rem;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}

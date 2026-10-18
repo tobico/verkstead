@@ -571,3 +571,19 @@
     border-color: var(--accent-deep);
   }
 }
+
+/* And the row that is pressed whole — this device's own Annex's, which opens
+   the Components pane. The surface every pressable card is: a fill under the
+   pointer, and a pointer. */
+.opens {
+  margin: -0.4rem;
+  padding: 0.4rem;
+  border-radius: 0.6rem;
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .opens:hover {
+    background: var(--card);
+  }
+}

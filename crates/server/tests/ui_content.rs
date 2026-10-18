@@ -36,6 +36,8 @@ use verkstead_schema::{
     Answer, Liveness, Question, QuestionOption, QuestionSet, RepoDiff, Response, SetCreated,
     Subquestion,
 };
+#[cfg(unix)]
+use verkstead_server::annex;
 use verkstead_server::device::reading::Reading;
 use verkstead_server::device::{Device, Devices};
 use verkstead_server::discovery::{Browse, Found, Probe};
@@ -3770,6 +3772,30 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         &a_stated_machine(&get(&kept, "/api/ui/devices").await),
     );
 
+    // And the Components section, which is three answers (ADR-0024): a machine
+    // that cannot have an Annex, which draws no card; a Keeper with no box,
+    // which reads *not installed*; and one whose box was booted at this start,
+    // which reads the release its flake pins and the disk it takes — and here,
+    // the link having found nobody, the line its Devices row carries too.
+    let (_dir, ordinary) = devices_app(Platform::Linux, None).await;
+    write(
+        "components-absent.json",
+        &get(&ordinary, "/api/ui/components").await,
+    );
+
+    let (_dir, nothing) = a_components_app(StatedBox::probing(annex::Probed::NoWsl)).await;
+    write(
+        "components-not-installed.json",
+        &get(&nothing, "/api/ui/components").await,
+    );
+
+    let (_dir, booted) =
+        a_components_app(StatedBox::probing(annex::Probed::Present { running: true })).await;
+    write(
+        "components-booted.json",
+        &get(&booted, "/api/ui/components").await,
+    );
+
     // And a fourth, with three joins asked for and none of them a link: the
     // section draws a pending row apiece under the members, and the three ways
     // such a row is drawn — still waiting, run out, and refused by the far end
@@ -4019,6 +4045,155 @@ async fn an_annexed_devices_app(
     }
 
     (dir, router_answering_devices(pool, devices))
+}
+
+/// A Windows Keeper's devices router, keeping an Annex whose box is `boxed` —
+/// booted and linked at this start where it probes as made, the way a Keeper's
+/// start does, so the reading holds what that boot read off it.
+///
+/// The link finds nobody, `boxed` having no Data Directory in it, so a booted
+/// box leaves the line its Devices row carries: the shape the row is drawn from
+/// with every field filled in.
+#[cfg(unix)]
+async fn a_components_app(boxed: StatedBox) -> (tempfile::TempDir, Router) {
+    let dir = tempfile::tempdir().unwrap();
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    let reading = Reading::stated(
+        Tailscale::running(vec!["verkstead-no-such-tailscale".to_owned()], WORKBENCH),
+        Platform::Windows,
+        None,
+        vec!["192.168.1.24".parse().unwrap()],
+    );
+
+    let annexed = std::sync::Arc::new(
+        annex::booting::Annexed::of(
+            std::sync::Arc::new(boxed),
+            verkstead_server::settings::Settings::in_data_dir(dir.path()),
+        )
+        .waiting(std::time::Duration::from_millis(10)),
+    );
+
+    let device = Device::stated(dir.path(), A_DEVICE).unwrap();
+    let devices = Devices::of(
+        device,
+        reading,
+        Members::recorded(pool.clone()),
+        Joins::recorded(pool.clone()),
+    )
+    .browsing(Browse::heard_nothing())
+    .probing(Probe::asked_nothing())
+    .keeping_an_annex(annexed.clone());
+
+    annexed.started(&devices).await;
+
+    (dir, router_answering_devices(pool, devices))
+}
+
+/// An Annex's box that says what it is told: its probe, a disk image of twelve
+/// gigabytes, and a flake pinning a release that is not this build's. Nothing
+/// else is in it, so a link reads no Data Directory and its service is failed.
+#[cfg(unix)]
+#[derive(Debug)]
+struct StatedBox(annex::Probed);
+
+#[cfg(unix)]
+impl StatedBox {
+    fn probing(probed: annex::Probed) -> StatedBox {
+        StatedBox(probed)
+    }
+}
+
+#[cfg(unix)]
+impl annex::Backend for StatedBox {
+    fn probe(&self) -> annex::Probed {
+        self.0
+    }
+
+    fn turning_on(&self) -> &'static [annex::Step] {
+        &[]
+    }
+
+    fn image(&self) -> annex::Image {
+        unreachable!("a stated box is never made")
+    }
+
+    fn disk(&self) -> &Path {
+        Path::new("nowhere")
+    }
+
+    fn taken(&self) -> Option<u64> {
+        matches!(self.0, annex::Probed::Present { .. }).then_some(12_884_901_888)
+    }
+
+    fn make(&self, _: &Path) -> anyhow::Result<()> {
+        unreachable!("a stated box is never made")
+    }
+
+    fn made(&self) -> anyhow::Result<()> {
+        unreachable!("a stated box is never made")
+    }
+
+    fn opening(&self, _: u16) -> Option<String> {
+        None
+    }
+
+    fn boot(&self) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    fn terminate(&self) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    fn networking(&self) -> annex::Networking {
+        annex::Networking::Nat
+    }
+
+    fn run(&self, _: annex::Inside, argv: &[&str]) -> anyhow::Result<std::process::Output> {
+        #[cfg(unix)]
+        let status = std::os::unix::process::ExitStatusExt::from_raw(0);
+        #[cfg(windows)]
+        let status = std::os::windows::process::ExitStatusExt::from_raw(0);
+
+        let said: &str = match argv[0] {
+            "systemctl" => "failed",
+            _ => "",
+        };
+
+        Ok(std::process::Output {
+            status,
+            stdout: said.as_bytes().to_vec(),
+            stderr: Vec::new(),
+        })
+    }
+
+    fn follow(
+        &self,
+        _: annex::Inside,
+        _: &[&str],
+        _: &mut dyn FnMut(&str),
+    ) -> anyhow::Result<std::process::ExitStatus> {
+        unreachable!("nothing is followed in a stated box")
+    }
+
+    fn write(&self, _: &str, _: &[u8], _: u32) -> anyhow::Result<()> {
+        anyhow::bail!("nothing is written in a stated box")
+    }
+
+    fn read(&self, path: &str) -> anyhow::Result<Vec<u8>> {
+        if path == annex::flake::IN_THE_BOX {
+            return Ok(b"verkstead.url = \"github:tobico/verkstead/v0.9.1\";\n".to_vec());
+        }
+
+        anyhow::bail!("there is no {path} in a stated box")
+    }
+
+    fn addresses(&self, _: annex::Networking, _: u16) -> anyhow::Result<annex::Addresses> {
+        anyhow::bail!("a stated box has no addresses")
+    }
 }
 
 /// And the ids those two are written down under, for the reason this device's

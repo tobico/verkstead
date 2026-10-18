@@ -21,6 +21,7 @@ use std::process::{ExitStatus, Output};
 pub mod booting;
 pub mod flake;
 pub mod image;
+pub mod pinning;
 pub mod wsl;
 
 /// The port an Annex's **Peer Listener** binds, never the Keeper's 8423.
@@ -65,14 +66,25 @@ pub enum Probed {
     /// rather than one to boot. See [`Backend::made`].
     NoDistro,
 
+    /// What runs boxes is there and could not be asked: `wsl.exe` is on the
+    /// machine and would not run, or listed no box while the box's disk image
+    /// is still on the Keeper's disk. Nothing is known about the box, which is
+    /// what keeps it apart from [`Probed::NoWsl`] and [`Probed::NoDistro`]: a
+    /// Keeper's start that finds either of those forgets its Annex, and one
+    /// that finds this forgets nothing — see [`booting::Annexed::up`].
+    ///
+    /// Drawn as [`Probed::NoDistro`] is everywhere else, which is what it read
+    /// as before it was told apart.
+    Unread,
+
     /// The box is there, and was made to the end.
+    ///
+    /// **Read without starting it**, which is why where its network is is not
+    /// here: that is asked of the box from inside, and asking a stopped one
+    /// anything boots it. See [`Backend::networking`], asked once it is up.
     Present {
         /// Whether it is up at this moment.
         running: bool,
-
-        /// Where its network is, which is what says where the pair dial each
-        /// other.
-        networking: Networking,
     },
 }
 
@@ -167,6 +179,11 @@ pub trait Backend: std::fmt::Debug + Send + Sync {
     /// its image downloaded into.
     fn disk(&self) -> &Path;
 
+    /// How much of the Keeper's disk the box takes: the size of its disk
+    /// image, read off the Keeper's own filesystem and never from inside — or
+    /// nothing where there is no image there to read.
+    fn taken(&self) -> Option<u64>;
+
     /// Import `image` as the box, its disk in [`Backend::disk`]. A box that is
     /// already there is left as it is, which is what a run picked up after a
     /// Keeper stopped part way through it finds.
@@ -187,6 +204,11 @@ pub trait Backend: std::fmt::Debug + Send + Sync {
 
     /// Stop the box.
     fn terminate(&self) -> anyhow::Result<()>;
+
+    /// Where its network is, read off the running box, which is what says
+    /// where the pair dial each other — asked once it is booted, never of a
+    /// box that is stopped, which asking would start.
+    fn networking(&self) -> Networking;
 
     /// Run `argv` inside the box as `who`, to its end. A command that ran and
     /// failed is an `Ok` with its status; an `Err` is one that could not be run.
@@ -241,6 +263,10 @@ impl Backend for Probing {
         Path::new("nowhere")
     }
 
+    fn taken(&self) -> Option<u64> {
+        None
+    }
+
     fn make(&self, _: &Path) -> anyhow::Result<()> {
         anyhow::bail!("a probed box is never made")
     }
@@ -259,6 +285,10 @@ impl Backend for Probing {
 
     fn terminate(&self) -> anyhow::Result<()> {
         anyhow::bail!("a probed box is never terminated")
+    }
+
+    fn networking(&self) -> Networking {
+        Networking::Nat
     }
 
     fn run(&self, _: Inside, _: &[&str]) -> anyhow::Result<Output> {

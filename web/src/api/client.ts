@@ -42,6 +42,7 @@ import type {
   CompanionMode,
   CompanionModeChosen,
   CompanionRemoved,
+  ComponentsView,
   Confirming,
   ConversationArchived,
   ConversationClosed,
@@ -1981,6 +1982,37 @@ export function loadRemote(): Promise<RemoteView> {
 /// workbench is where the pane reads it.
 export function loadDevices(): Promise<DevicesView> {
   return get<DevicesView>("/api/ui/devices");
+}
+
+/// What this machine has installed beyond what the wizard checks: the Annex's
+/// row on a Windows Keeper, and `annex: null` everywhere else — which is what
+/// says the settings page draws no Components card.
+///
+/// Read off the machine on every ask and booting nothing: the state is WSL's
+/// own list, the version the one held since the Keeper booted the box, and the
+/// disk a file's size on this machine.
+export function loadComponents(): Promise<ComponentsView> {
+  return get<ComponentsView>("/api/ui/components");
+}
+
+/// **Install** on the Components pane's Annex row: the wizard's install run
+/// for the WSL row alone, taken after the wizard is over.
+///
+/// Answered with the wizard's reading, the run on it, as [`startInstall`] is —
+/// the pane draws the wizard's own install and hint screens off it — and
+/// refused while any run is going.
+export function installAnnex(): Promise<OnboardingView> {
+  return post<OnboardingView>("/api/ui/components/install");
+}
+
+/// **Update** on the Components pane's Annex row: every input of the box but
+/// NixOS-WSL moved, and the box rebuilt and linked again in the background.
+///
+/// Answered with the Components reading, the row reading *updating* — and
+/// refused while a session runs in the Annex, the line naming the
+/// Conversation.
+export function updateAnnex(): Promise<ComponentsView> {
+  return post<ComponentsView>("/api/ui/components/update");
 }
 
 /// What this device is forwarding: every port of a member's terminal held on

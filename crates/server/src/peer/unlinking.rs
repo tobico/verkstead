@@ -108,7 +108,8 @@ pub(crate) async fn dropped(
     // pair's membership is the Keeper's, so it leaves with whichever of the two
     // is told it has left, and nobody else's word drops one end of it
     // (ADR-0024, *The Keeper's Join*). A Keeper forgetting its Annex is a path
-    // that is not this one.
+    // that is not this one, though it ends here on every other member — see
+    // [`crate::device::Devices::forget_annex`].
     let pair = match dropping.members.rows().await {
         Ok(rows) => rows
             .into_iter()

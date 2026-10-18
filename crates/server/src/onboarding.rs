@@ -1209,6 +1209,33 @@ impl Onboarding {
             return Err(Refusal::Over);
         }
 
+        self.run(settings, ticked, devices).await
+    }
+
+    /// Start the wizard's run for the WSL row alone, from the Components pane
+    /// (ADR-0024: *Install from the pane is the wizard's run*).
+    ///
+    /// **Taken whether or not the wizard is the page there is**, which is the
+    /// whole of how it differs from [`Onboarding::install`]: this is a machine
+    /// that skipped the row at setup, and the press is the settings page's.
+    /// Everything else is that press's — the same plan, the same units, and the
+    /// same [`install::Installer`], so a press while any run is going is
+    /// refused as [`Refusal::Going`] and there is still one run at a time.
+    pub(crate) async fn annex(
+        &self,
+        settings: &Settings,
+        devices: Option<&crate::device::Devices>,
+    ) -> Result<(), Refusal> {
+        self.run(settings, vec![Dependency::Wsl], devices).await
+    }
+
+    /// Start a run over `ticked`, whoever pressed for it.
+    async fn run(
+        &self,
+        settings: &Settings,
+        ticked: Vec<Dependency>,
+        devices: Option<&crate::device::Devices>,
+    ) -> Result<(), Refusal> {
         let keeping = devices.map(crate::device::Devices::keeping);
 
         // The run is a thread of its own rather than a task, so the boot and
@@ -1596,7 +1623,9 @@ fn annexed(probed: annex::Probed) -> DependencyState {
         annex::Probed::NeedsRestart => DependencyState::Owed {
             owed: Owed::Restart,
         },
-        annex::Probed::NoDistro => DependencyState::Owed { owed: Owed::Annex },
+        annex::Probed::NoDistro | annex::Probed::Unread => {
+            DependencyState::Owed { owed: Owed::Annex }
+        }
         annex::Probed::VirtualizationOff => DependencyState::Refused {
             barred: Barred::Virtualization,
         },
@@ -2678,10 +2707,7 @@ echo {token}
 
         for running in [false, true] {
             assert_eq!(
-                reads(annex::Probed::Present {
-                    running,
-                    networking: annex::Networking::Nat,
-                }),
+                reads(annex::Probed::Present { running }),
                 DependencyState::Present {
                     at: None,
                     target: None,
@@ -3523,5 +3549,42 @@ echo {token}
             !onboarding.wizarding(),
             "and a press is answered the way the reading is: there is no wizard here",
         );
+    }
+
+    /// The Components pane's press is the wizard's run for the WSL row, taken
+    /// once the wizard is over, where the wizard's own press is not — and
+    /// refused beside a run that is going, the way the wizard's is.
+    #[tokio::test]
+    async fn the_components_press_is_taken_after_the_wizard_is_over() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+
+        let onboarding = Onboarding::probing(
+            Machine::stated(
+                Platform::Linux,
+                OsString::new(),
+                OsString::new(),
+                None,
+                None,
+                &Environment::default(),
+            ),
+            None,
+        );
+
+        onboarding.finished();
+
+        assert_eq!(
+            onboarding
+                .install(&settings, vec![Dependency::Git], None)
+                .await,
+            Err(Refusal::Over),
+        );
+        assert_eq!(onboarding.annex(&settings, None).await, Ok(()));
+
+        let (run, rows) = onboarding.installer.reading().expect("the press's run");
+
+        assert_eq!(rows.len(), 1, "the WSL row alone: {rows:?}");
+        assert_eq!(rows[0].0, Dependency::Wsl);
+        assert_eq!(run.phase, verkstead_render::RunPhase::Done);
     }
 }

@@ -439,6 +439,9 @@ export function RemoteCard(props: {
 export function RemotePane(props: {
   /// The way back to the settings, which is the pane this one was entered from.
   back: () => void;
+  /// And the way to the Components pane, which a press on this device's own
+  /// Annex's row opens — the settings page's to say, where it has one.
+  components?: () => void;
 }): JSX.Element {
   const queries = useQueryClient();
   const remote = useRemote();
@@ -602,7 +605,7 @@ export function RemotePane(props: {
                   Tailscale at all still has an identity of its own, and a list
                   that vanished on one would be a cluster feature that appeared
                   to need a tailnet. */}
-              <Devices />
+              <Devices components={props.components} />
             </div>
           )}
         </Match>
@@ -727,7 +730,10 @@ function TheKey(): JSX.Element {
 /// the Repos pane keeps it above its list: the card names the device it is
 /// about, and one card over a list is one thing on the page at a time. The
 /// device a press asked about is held here and given to it.
-function Devices(): JSX.Element {
+function Devices(props: {
+  /// What a press on this device's own Annex's row does — see [`List`].
+  components?: () => void;
+}): JSX.Element {
   const devices = useDevices();
 
   // The device a press on Unlink asked about, while the card asking is up — or
@@ -767,7 +773,12 @@ function Devices(): JSX.Element {
         </Match>
         <Match when={devices.data}>
           {(here) => (
-            <List of={here()} unlink={setAsking} unlinking={drop.isPending} />
+            <List
+              of={here()}
+              unlink={setAsking}
+              unlinking={drop.isPending}
+              components={props.components}
+            />
           )}
         </Match>
       </Choose>
@@ -884,6 +895,9 @@ function List(props: {
   /// while it is: the list is about to be read again and a second press would
   /// be about the list before it.
   unlinking: boolean;
+  /// What a press on this device's own Annex's row does: open the Components
+  /// pane, where the box is kept. An Annex of another device's has none.
+  components?: () => void;
 }): JSX.Element {
   return (
     <ul class={styles.list}>
@@ -901,6 +915,11 @@ function List(props: {
             unreachable={!member.reachable}
             trouble={member.trouble}
             keeper={keeperOf(props.of, member.identity)}
+            open={
+              member.identity.kept_by === props.of.this.device
+                ? props.components
+                : undefined
+            }
             unlink={
               unlinkable(props.of, member.identity)
                 ? () => props.unlink(member.identity)
@@ -956,6 +975,10 @@ function unlinkable(list: DevicesView, of: DeviceIdentity): boolean {
 /// one's and works exactly as one — the machine that is never coming back is
 /// most of what an Unlink is for, and a press that greyed itself out on the one
 /// row somebody needs it on would be the feature refusing its own case.
+///
+/// **And this device's own Annex's row is pressed whole**, opening the
+/// Components pane where the box is kept. On any other device the same row has
+/// no press: Components is the Keeper's.
 function Row(props: {
   of: DeviceIdentity;
   here?: boolean;
@@ -966,6 +989,9 @@ function Row(props: {
   trouble?: string | null;
   /// Whose Annex this is, where it is one — see [`keeperOf`].
   keeper?: string | null;
+  /// What pressing the row itself does, where it opens something: this
+  /// device's own Annex's row opens the Components pane.
+  open?: () => void;
   /// What a press asks about, where this row has one to press.
   unlink?: () => void;
   /// And whether one is already going through.
@@ -974,7 +1000,20 @@ function Row(props: {
   return (
     <li
       class={styles.device}
-      classList={{ [styles.unreachable!]: props.unreachable }}
+      classList={{
+        [styles.unreachable!]: props.unreachable,
+        [styles.opens!]: props.open !== undefined,
+      }}
+      role={props.open ? "button" : undefined}
+      tabindex={props.open ? 0 : undefined}
+      onClick={() => props.open?.()}
+      onKeyDown={(event) => {
+        // What a button would have done for nothing: Enter and Space press it.
+        if (props.open && (event.key === "Enter" || event.key === " ")) {
+          event.preventDefault();
+          props.open();
+        }
+      }}
     >
       <Icon of={osIcon(props.of.os)} label={props.of.os} class={styles.os} />
 

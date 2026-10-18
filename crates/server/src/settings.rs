@@ -903,6 +903,19 @@ impl Secrets {
         }
     }
 
+    /// And these secrets with every MCP server's header values as `keeper`'s
+    /// are — the half of [`Config::working_as`] that is secret, handed to an
+    /// Annex at every start. A server's values arrive with its declaration,
+    /// which without them is one its far end refuses. The session account's
+    /// password stands, being the machine's own, and so do the Authors'
+    /// tokens: the copies of the Keeper's arrive with its mirrors (ADR-0025).
+    pub fn working_as(&self, keeper: &Secrets) -> Secrets {
+        Secrets {
+            mcp_headers: keeper.mcp_headers.clone(),
+            ..self.clone()
+        }
+    }
+
     /// The whole of `secrets.yaml` as these secrets write it: an empty text
     /// where nothing is set — see [`Settings::save_secrets`].
     ///
@@ -1583,6 +1596,36 @@ impl Config {
 
         self.kept_by = Some(keeper.clone());
         true
+    }
+
+    /// The same config with everything about the work rather than the machine
+    /// as `keeper` says it — what a Keeper hands its Annex at every start, so a
+    /// change on the Keeper reaches the Annex's sessions at its next (see
+    /// [`crate::annex::booting`]).
+    ///
+    /// **The Keeper's values, not a merge** (ADR-0024, *The Annex has no
+    /// settings of its own*): the Instructions, the MCP servers with their
+    /// header names, how much runs at once, the Cleanup, the comments Wrapping
+    /// ignores, how a conflict is resolved and whether the record is shared on
+    /// Done — each one as the Keeper's file has it, so a server the Keeper no
+    /// longer declares is gone here too. Everything about the Annex's own
+    /// machine stands as it was: its sandbox binds, `session_path`,
+    /// `languages` and `kept_by`.
+    ///
+    /// **And not the Authors**: the Annex is a linked Member, so the Keeper's
+    /// reach it as mirrors over the one list (ADR-0025), and a copy here too
+    /// would be one Author at home on two devices.
+    pub fn working_as(&self, keeper: &Config) -> Config {
+        Config {
+            cleanup: keeper.cleanup.clone(),
+            at_once: keeper.at_once.clone(),
+            conflict_resolution: keeper.conflict_resolution,
+            share_on_done: keeper.share_on_done,
+            ignored_comments: keeper.ignored_comments.clone(),
+            mcp_servers: keeper.mcp_servers.clone(),
+            instructions: keeper.instructions.clone(),
+            ..self.clone()
+        }
     }
 
     /// The same config with the keys the settings page never drew as they

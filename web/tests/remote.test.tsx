@@ -881,6 +881,44 @@ one on the LAN",
     expect(screen.queryAllByText(/^annex/).length, "and one mark").toBe(1);
   });
 
+  /// On its Keeper the Annex's row is a press, and the press opens the
+  /// Components pane — the settings page's to say, handed in.
+  it("opens the Components pane from the Annex's row on its Keeper", async () => {
+    const components = vi.fn();
+    theMachine(SERVING, KEEPING);
+    mounting(() => <RemotePane back={vi.fn()} components={components} />);
+
+    const mark = await waitFor(() => screen.getByText("annex of this device"));
+    const annex = mark.closest("li")!;
+
+    expect(annex.getAttribute("role")).toBe("button");
+    fireEvent.click(annex);
+    expect(components).toHaveBeenCalledOnce();
+
+    fireEvent.keyDown(annex, { key: "Enter" });
+    expect(components).toHaveBeenCalledTimes(2);
+
+    expect(
+      theRowOf("laptop").getAttribute("role"),
+      "an ordinary member's row is no press",
+    ).toBeNull();
+  });
+
+  /// And on any other device the same row has no press: Components is the
+  /// Keeper's.
+  it("gives the Annex's row no press on another device", async () => {
+    const components = vi.fn();
+    theMachine(SERVING, BESIDE_AN_ANNEX);
+    mounting(() => <RemotePane back={vi.fn()} components={components} />);
+
+    const mark = await waitFor(() => screen.getByText("annex of laptop"));
+    const annex = mark.closest("li")!;
+
+    expect(annex.getAttribute("role")).toBeNull();
+    fireEvent.click(annex);
+    expect(components).not.toHaveBeenCalled();
+  });
+
   /// An Annex whose box would not come up at this start carries why under its
   /// row, which reads *unreachable* beside it.
   it("draws why an Annex would not come up under its row", async () => {
