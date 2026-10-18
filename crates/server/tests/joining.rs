@@ -272,8 +272,8 @@ impl Verkstead {
         )
     }
 
-    /// Its settings files, which a Keeper hands its Annex's git author and
-    /// GitHub token out of.
+    /// Its settings files, which a Keeper hands its Annex its settings about
+    /// the work out of.
     fn settings(&self) -> Settings {
         Settings::in_data_dir(self.dir.path())
     }
