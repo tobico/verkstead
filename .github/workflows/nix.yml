@@ -8,12 +8,27 @@
 # push trigger.
 name: Nix
 
-# Pushes to `main` only. This is the slow path — see the timing note on the
-# flake check step — and holding every branch's feedback behind it would cost
-# more than it buys. Landing on `main` is where it earns its place.
+# Pushes to `main`, and a pull request only where it changes what the VM test
+# leans on. This is the slow path — see the timing note on the flake check step
+# — and holding every branch's feedback behind it would cost more than it buys.
+#
+# The pull requests that do pay it are the ones that have broken `main` before:
+# the VM test posts whole request bodies the way the viewer does, so a field
+# added to one of `crates/render`'s wire shapes makes that body
+# undeserializable, and the module check fails with nothing but curl's exit 22
+# to say why. It happened on PRs #140, #154 and #253, each seen only once it
+# had landed. The rest is the flake itself, the module and its test, and this
+# file.
 on:
   push:
     branches: [main]
+  pull_request:
+    paths:
+      - crates/render/**
+      - nix/**
+      - flake.nix
+      - flake.lock
+      - .github/workflows/nix.yml
 
 # Nothing here writes anything back; the default token would otherwise carry
 # write access to the repository's contents.
@@ -66,8 +81,9 @@ jobs:
       # store — 178 derivations built here, ~1000 substituted from
       # cache.nixos.org — ran green in 8 minutes on 2026-08-08, of which the VM
       # itself was 23 seconds; the rest is rust. That is affordable on `main`
-      # alone. A later stage that makes this slower, or that wants it on
-      # branches too, has a number here to beat before adding a cache.
+      # and the few pull requests the paths above let in. A later stage that
+      # makes this slower, or that wants it on every branch, has a number here
+      # to beat before adding a cache.
       - name: Flake check
         run: nix flake check --print-build-logs
 
